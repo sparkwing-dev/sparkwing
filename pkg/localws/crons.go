@@ -34,128 +34,6 @@ const cronPinDir = "crons"
 // safety: the launch persists a trigger and may start a consumer, so it needs longer than a read.
 const cronRunTimeout = 60 * time.Second
 
-// safety: mirrors [crontimer.State] so the dashboard's wire contract does not move when that struct does.
-type cronTimerStateDTO struct {
-	Installed bool   `json:"installed"`
-	Foreign   bool   `json:"foreign"`
-	Enabled   bool   `json:"enabled"`
-	Stale     bool   `json:"stale"`
-	Path      string `json:"path"`
-	Binary    string `json:"binary"`
-	Detail    string `json:"detail"`
-}
-
-type cronTickDTO struct {
-	// safety: empty until this home has recorded a tick.
-	At      string `json:"at"`
-	Host    string `json:"host"`
-	Version string `json:"version"`
-	Error   string `json:"error"`
-}
-
-type cronHealthDTO struct {
-	Timer         cronTimerStateDTO `json:"timer"`
-	LastTick      cronTickDTO       `json:"last_tick"`
-	TickStale     bool              `json:"tick_stale"`
-	Schedules     int               `json:"schedules"`
-	Armed         int               `json:"armed"`
-	Paused        int               `json:"paused"`
-	Undeclared    int               `json:"undeclared"`
-	Locked        int               `json:"locked"`
-	Following     int               `json:"following"`
-	Ahead         int               `json:"ahead"`
-	MissingBinary int               `json:"missing_binary"`
-	StaleOverride int               `json:"stale_override"`
-	Detail        string            `json:"detail"`
-	Remedy        string            `json:"remedy"`
-}
-
-type cronScheduleDTO struct {
-	ID string `json:"id"`
-	// safety: the wire's "name" stays the display name the dashboard already
-	// renders, and the entry's own name rides beside it.
-	Name         string            `json:"name"`
-	ScheduleName string            `json:"schedule_name"`
-	RepoPath     string            `json:"repo_path"`
-	Pipeline     string            `json:"pipeline"`
-	Where        string            `json:"where"`
-	Cron         string            `json:"cron"`
-	TZ           string            `json:"tz"`
-	Overlap      string            `json:"overlap"`
-	CatchUpNS    int64             `json:"catch_up_ns"`
-	Args         map[string]string `json:"args"`
-	Lock         cronLockDTO       `json:"lock"`
-	Override     cronOverrideDTO   `json:"override"`
-	Effective    cronEffectiveDTO  `json:"effective"`
-	Paused       bool              `json:"paused"`
-	Declared     bool              `json:"declared"`
-	State        string            `json:"state"`
-	StateDetail  string            `json:"state_detail"`
-	ArmedAt      string            `json:"armed_at"`
-	UpdatedAt    string            `json:"updated_at"`
-	LastFiredAt  *string           `json:"last_fired_at"`
-	LastRunID    string            `json:"last_run_id"`
-	LastOutcome  string            `json:"last_outcome"`
-	NextDueAt    *string           `json:"next_due_at"`
-}
-
-// safety: state is one of crons.LockFollows, LockPinned, LockAhead, LockDirty
-// or LockMissing, and the other three are empty while a schedule follows the
-// checkout.
-type cronLockDTO struct {
-	Ref    string `json:"ref"`
-	Binary string `json:"binary"`
-	Digest string `json:"digest"`
-	State  string `json:"state"`
-}
-
-type cronOverrideDTO struct {
-	Fields []string `json:"fields"`
-	Stale  bool     `json:"stale"`
-	SetAt  string   `json:"set_at"`
-}
-
-type cronEffectiveDTO struct {
-	Cron      string            `json:"cron"`
-	TZ        string            `json:"tz"`
-	Overlap   string            `json:"overlap"`
-	CatchUpNS int64             `json:"catch_up_ns"`
-	Args      map[string]string `json:"args"`
-}
-
-type cronFireDTO struct {
-	ID         string            `json:"id"`
-	ScheduleID string            `json:"schedule_id"`
-	DueAt      string            `json:"due_at"`
-	DecidedAt  string            `json:"decided_at"`
-	Outcome    string            `json:"outcome"`
-	RunID      string            `json:"run_id"`
-	Detail     string            `json:"detail"`
-	Args       map[string]string `json:"args"`
-	// safety: empty when the fire launched nothing or its run has since been pruned.
-	RunStatus string `json:"run_status"`
-}
-
-type cronsOverviewDTO struct {
-	Health    cronHealthDTO     `json:"health"`
-	Schedules []cronScheduleDTO `json:"schedules"`
-}
-
-type cronDetailDTO struct {
-	Schedule cronScheduleDTO `json:"schedule"`
-	Fires    []cronFireDTO   `json:"fires"`
-	Upcoming []string        `json:"upcoming"`
-}
-
-type cronScheduleEnvelope struct {
-	Schedule cronScheduleDTO `json:"schedule"`
-}
-
-type cronRunEnvelope struct {
-	RunID    string          `json:"run_id"`
-	Schedule cronScheduleDTO `json:"schedule"`
-}
-
 type cronsAPI struct {
 	store    *store.Store
 	paths    orchestrator.Paths
@@ -190,9 +68,9 @@ func (a *cronsAPI) overview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "list cron schedules: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	out := cronsOverviewDTO{Health: cronHealth(health), Schedules: make([]cronScheduleDTO, 0, len(rows))}
+	out := crons.OverviewView{Health: crons.NewHealthView(health), Schedules: make([]crons.ScheduleView, 0, len(rows))}
 	for _, row := range rows {
-		out.Schedules = append(out.Schedules, cronSchedule(row))
+		out.Schedules = append(out.Schedules, crons.NewScheduleView(row))
 	}
 	writeJSON(w, out)
 }
@@ -219,16 +97,16 @@ func (a *cronsAPI) detail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read upcoming instants: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	out := cronDetailDTO{
-		Schedule: cronSchedule(row),
-		Fires:    make([]cronFireDTO, 0, len(fires)),
+	out := crons.DetailView{
+		Schedule: crons.NewScheduleView(row),
+		Fires:    make([]crons.FireView, 0, len(fires)),
 		Upcoming: make([]string, 0, len(upcoming)),
 	}
 	for _, fire := range fires {
-		out.Fires = append(out.Fires, cronFire(ctx, a.store, fire))
+		out.Fires = append(out.Fires, crons.NewFireView(fire, cronRunStatus(ctx, a.store, fire.RunID)))
 	}
 	for _, at := range upcoming {
-		out.Upcoming = append(out.Upcoming, rfc3339(at))
+		out.Upcoming = append(out.Upcoming, crons.RFC3339(at))
 	}
 	writeJSON(w, out)
 }
@@ -267,7 +145,7 @@ func (a *cronsAPI) setPaused(w http.ResponseWriter, r *http.Request, paused bool
 	if !ok {
 		return
 	}
-	writeJSON(w, cronScheduleEnvelope{Schedule: cronSchedule(row)})
+	writeJSON(w, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
 func (a *cronsAPI) runNow(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +169,7 @@ func (a *cronsAPI) runNow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, cronRunEnvelope{RunID: runID, Schedule: cronSchedule(row)})
+	writeJSON(w, crons.RunEnvelope{RunID: runID, Schedule: crons.NewScheduleView(row)})
 }
 
 // safety: the dashboard never ticks and never launches in process, so this service carries
@@ -393,108 +271,6 @@ func dashboardTimerHost() crontimer.Host {
 	}
 }
 
-func cronHealth(h crons.Health) cronHealthDTO {
-	return cronHealthDTO{
-		Timer: cronTimerStateDTO{
-			Installed: h.Timer.Installed,
-			Foreign:   h.Timer.Foreign,
-			Enabled:   h.Timer.Enabled,
-			Stale:     h.Timer.Stale,
-			Path:      h.Timer.Path,
-			Binary:    h.Timer.Binary,
-			Detail:    h.Timer.Detail,
-		},
-		LastTick: cronTickDTO{
-			At:      rfc3339(h.LastTick.At),
-			Host:    h.LastTick.Host,
-			Version: h.LastTick.Version,
-			Error:   h.LastTick.Error,
-		},
-		TickStale:     h.TickStale,
-		Schedules:     h.Schedules,
-		Armed:         h.Armed,
-		Paused:        h.Paused,
-		Undeclared:    h.Undeclared,
-		Locked:        h.Locked,
-		Following:     h.Following,
-		Ahead:         h.Ahead,
-		MissingBinary: h.MissingBinary,
-		StaleOverride: h.StaleOverride,
-		Detail:        h.Detail,
-		Remedy:        h.Remedy,
-	}
-}
-
-func cronSchedule(row crons.Row) cronScheduleDTO {
-	override := cronOverrideDTO{Fields: row.OverrideFields, Stale: row.OverrideStale}
-	if override.Fields == nil {
-		override.Fields = []string{}
-	}
-	if row.Override != nil {
-		override.SetAt = rfc3339(row.Override.SetAt)
-	}
-	return cronScheduleDTO{
-		ID:           row.ID,
-		Name:         row.Display,
-		ScheduleName: row.ScheduleName,
-		RepoPath:     row.RepoPath,
-		Pipeline:     row.Pipeline,
-		Where:        row.Where,
-		Cron:         row.Cron,
-		TZ:           row.TZ,
-		Overlap:      row.Overlap,
-		CatchUpNS:    int64(row.CatchUp),
-		Args:         cronArgs(row.Args),
-		Lock: cronLockDTO{
-			Ref:    row.Lock.Ref,
-			Binary: row.Lock.Binary,
-			Digest: row.Lock.Digest,
-			State:  row.Lock.State,
-		},
-		Override: override,
-		Effective: cronEffectiveDTO{
-			Cron:      row.Effective.Cron,
-			TZ:        row.Effective.TZ,
-			Overlap:   row.Effective.Overlap,
-			CatchUpNS: int64(row.Effective.CatchUp),
-			Args:      cronArgs(row.Effective.Args),
-		},
-		Paused:      row.Paused,
-		Declared:    row.Declared,
-		State:       row.State,
-		StateDetail: row.StateDetail,
-		ArmedAt:     rfc3339(row.ArmedAt),
-		UpdatedAt:   rfc3339(row.UpdatedAt),
-		LastFiredAt: rfc3339Ptr(row.LastFiredAt),
-		LastRunID:   row.LastRunID,
-		LastOutcome: row.LastOutcome,
-		NextDueAt:   rfc3339Ptr(row.NextDueAt),
-	}
-}
-
-// safety: the dashboard reads these maps directly, so a schedule with no
-// arguments serves an empty object rather than a null it would have to guard.
-func cronArgs(args map[string]string) map[string]string {
-	if args == nil {
-		return map[string]string{}
-	}
-	return args
-}
-
-func cronFire(ctx context.Context, st *store.Store, fire store.CronFire) cronFireDTO {
-	return cronFireDTO{
-		ID:         fire.ID,
-		ScheduleID: fire.ScheduleID,
-		DueAt:      rfc3339(fire.DueAt),
-		DecidedAt:  rfc3339(fire.DecidedAt),
-		Outcome:    fire.Outcome,
-		RunID:      fire.RunID,
-		Detail:     fire.Detail,
-		Args:       cronArgs(fire.Args),
-		RunStatus:  cronRunStatus(ctx, st, fire.RunID),
-	}
-}
-
 // safety: a run the store no longer holds reads as no status, not an error; the fire is still history.
 func cronRunStatus(ctx context.Context, st *store.Store, runID string) string {
 	if runID == "" || st == nil {
@@ -507,17 +283,3 @@ func cronRunStatus(ctx context.Context, st *store.Store, runID string) string {
 	return run.Status
 }
 
-func rfc3339(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
-func rfc3339Ptr(t *time.Time) *string {
-	if t == nil || t.IsZero() {
-		return nil
-	}
-	s := rfc3339(*t)
-	return &s
-}

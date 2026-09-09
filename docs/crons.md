@@ -1,8 +1,10 @@
-# Local crons
+# Crons
 
 Sparkwing runs a pipeline on a cadence from the machine you arm, with no
-controller, no cluster, and no resident process of its own. A repository
-declares the cadence; one host evaluates it.
+cluster and no resident process of its own. A repository declares the
+cadence; one host evaluates it. A repository can also declare a cadence for
+a controller to evaluate, which the same commands push and inspect with
+`--profile`; see [Controller schedules](#controller-schedules).
 
 ## A schedule
 
@@ -345,6 +347,80 @@ checkout has moved past, and how many overrides were set against a declaration
 that has since changed. None of those makes the host unhealthy, and every one
 of them is answered by re-running `sparkwing crons install`, which is the
 sentence status prints when any is non-zero.
+
+## Controller schedules
+
+An entry declared `where: controller` fires from a controller, not from any
+host. A host arms nothing for it; it pushes it:
+
+```bash
+sparkwing crons install --profile prod --repo ~/code/my-app
+```
+
+The push reads the repository's controller entries, resolves the checkout's
+git origin, branch and HEAD, seeds the controller's git cache with that
+commit, and sends the whole set. Entries declared `where: local` are reported
+as this host's, and the same command with no `--profile` arms them here.
+
+The repository needs a git origin, because the cluster clones the pipeline
+source at each fire rather than reading a checkout. A seed that fails is a
+warning: the trigger loop fetches the commit itself when it finds the cache
+short.
+
+### Pinned by commit, or following the branch
+
+By default every fire clones the commit the push resolved, so a branch that
+moves afterwards does not change what runs unattended. `--follow` clones the
+tip of the branch at each fire instead. Re-running the push is the explicit
+update, and it moves the pin. `crons lock` and `crons unlock` are host verbs
+and have no controller form: the pin moves with the push.
+
+A pushed row records the clone URL as its repository, so its display name is
+`<owner>/<name>/<pipeline>[/<entry>]` rather than a directory name. The state
+detail reads `pinned <sha>`, or `branch tip` for a schedule that follows the
+branch.
+
+### One evaluator per store
+
+The controller evaluates the pushed schedules once a minute from a loop of its
+own. The minute is claimed in the runs store, so several controllers sharing
+one store still resolve each due instant exactly once, and a controller that
+dies mid-tick releases its claim within ninety seconds. Nothing on the
+controller reads a working tree, so a pushed schedule never drifts: its
+declaration is what the last push carried.
+
+### What a fire becomes
+
+A due instant writes the same three things an operator's
+`sparkwing pipeline trigger` writes: the trigger row, the pending run row, and
+the dispatch. The trigger carries the trigger source `schedule`, the
+schedule's effective arguments, the repository URL, the branch and the pinned
+commit, and the schedule's id under `_SPARKWING_CRON_SCHEDULE`. The cluster's
+trigger loop claims it, clones the repository at that commit, and runs the
+pipeline.
+
+Each launch carries an idempotency key of `<schedule id>@<due instant>`, so a
+second evaluation of one minute reaches the run the first started rather than
+starting a second.
+
+### Inspecting
+
+Every verb but `tick` takes `--profile NAME` and reads the controller instead
+of this host:
+
+```bash
+sparkwing crons list --profile prod
+sparkwing crons show --profile prod my-org/my-app/nightly
+sparkwing crons status --profile prod
+sparkwing crons pause --profile prod my-org/my-app/nightly
+sparkwing crons run --profile prod my-org/my-app/nightly
+sparkwing crons uninstall --profile prod --repo ~/code/my-app
+```
+
+`crons status --profile` reports the controller's loop in place of an OS
+timer, along with when it last ticked and what that tick reported. The
+dashboard reads the same routes through its controller proxy, so a browser
+session with `runs.read` sees the controller's schedules beside its runs.
 
 ## Related
 

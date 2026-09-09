@@ -4084,7 +4084,13 @@ path as ` + "`sparkwing run --sw-detached`" + `.
 Arming pins by default: install compiles the pipeline and keeps that binary, so
 a checkout updated afterwards does not change what runs unattended. Re-run
 install to move the pin, ` + "`crons unlock`" + ` to follow the checkout again,
-and ` + "`crons set`" + ` to override a declared cadence on this host alone.`,
+and ` + "`crons set`" + ` to override a declared cadence on this host alone.
+
+--profile NAME points every verb but tick at a controller instead of this host.
+` + "`crons install --profile`" + ` pushes the repo's ` + "`where: controller`" + `
+entries to it, pinned at HEAD unless --follow; the controller evaluates them
+from a loop of its own, one evaluator per store, and each fire becomes a
+trigger the cluster clones and runs.`,
 	SubcommandOrder: []string{
 		"install", "uninstall", "disarm", "lock", "unlock", "set", "reset",
 		"status", "list", "show", "next", "pause", "resume", "run", "tick",
@@ -4093,6 +4099,7 @@ and ` + "`crons set`" + ` to override a declared cadence on this host alone.`,
 		{"Arm this repo's schedules on this host", "sparkwing crons install"},
 		{"See what is armed and when it next fires", "sparkwing crons list"},
 		{"Check the timer and the last tick", "sparkwing crons status"},
+		{"Push this repo's controller schedules", "sparkwing crons install --profile prod"},
 	},
 }
 
@@ -4122,8 +4129,15 @@ declaring a cadence undeclared, and re-bases this host's overrides onto the new
 declaration. Pause state, cursor, fire history and the override values survive.
 
 Arming is per host. Another machine reading the same repo stays idle until it
-is armed too, so two hosts never race for the same instant.`,
+is armed too, so two hosts never race for the same instant.
+
+--profile NAME pushes the repo's "where: controller" entries to that
+controller instead, and reports the "where: local" ones as this host's. The
+push needs a git origin, because the cluster clones the source at each fire; it
+pins every fire to the checkout's HEAD unless --follow, which clones the branch
+tip. Re-running the push is the explicit update, and it moves the pin.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Arm every registered repo instead of one", Group: "Input"},
 		{Name: "only", Argument: "NAMES", Desc: "Arm only these pipelines or pipeline/name entries (comma-separated or repeatable)", Group: "Filter"},
@@ -4139,6 +4153,8 @@ is armed too, so two hosts never race for the same instant.`,
 		{"Arm two entries only", "sparkwing crons install --only nightly,sweep/quick"},
 		{"Arm without pinning", "sparkwing crons install --follow"},
 		{"Arm every registered repo", "sparkwing crons install --fleet"},
+		{"Push the controller entries to a cluster", "sparkwing crons install --profile prod"},
+		{"Push them following the branch tip", "sparkwing crons install --profile prod --follow"},
 	},
 }
 
@@ -4149,8 +4165,12 @@ var cmdCronsUninstall = Command{
 from this home. When no schedule remains armed anywhere, the OS timer goes
 too: the timer exists to serve armed schedules and nothing else.
 
---fleet disarms every schedule this home holds.`,
+--fleet disarms every schedule this home holds.
+
+--profile NAME deletes the repo's schedules from that controller instead,
+naming the repo by its git origin.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Disarm every schedule this home holds", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
@@ -4158,6 +4178,7 @@ too: the timer exists to serve armed schedules and nothing else.
 	Examples: []Example{
 		{"Disarm the current repo", "sparkwing crons uninstall"},
 		{"Disarm everything on this host", "sparkwing crons uninstall --fleet"},
+		{"Remove this repo from a controller", "sparkwing crons uninstall --profile prod"},
 	},
 }
 
@@ -4173,6 +4194,7 @@ To stop a schedule without losing its history, pause it instead.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4194,6 +4216,7 @@ pipeline runs from the checkout or from PATH are outside it.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4211,6 +4234,7 @@ the repo's declaration again.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4237,6 +4261,7 @@ value side by side.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "cron", Argument: "EXPR", Desc: "Cron expression to run instead of the declared one", Group: "Input"},
 		{Name: "tz", Argument: "ZONE", Desc: "Zone the expression is read in, such as America/Denver or local", Group: "Input"},
 		{Name: "overlap", Argument: "POLICY", Desc: "What a due instant does while the previous run is going: skip|queue", Group: "Input"},
@@ -4260,6 +4285,7 @@ pause state, the cursor and the fire history are untouched.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4277,13 +4303,18 @@ reported, and how many schedules are armed, paused, and undeclared.
 
 Exits non-zero when schedules are armed and the timer is not running, runs
 another binary, or has not ticked in the last few minutes, so a check script
-can read the exit code. A host with nothing armed is healthy.`,
+can read the exit code. A host with nothing armed is healthy.
+
+--profile NAME reads a controller's scheduler instead: its counts, when its
+loop last ticked, and what that tick reported.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
 		{"Read the host's scheduler health", "sparkwing crons status"},
 		{"Machine-readable", "sparkwing crons status -o json"},
+		{"Read a controller's scheduler", "sparkwing crons status --profile prod"},
 	},
 }
 
@@ -4297,6 +4328,7 @@ fired, that fire's outcome, and whether it is armed, paused, or undeclared.
 Schedules the repo no longer declares are hidden behind a count; --all shows
 them. They keep their history and never fire.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "all", Desc: "Include schedules the repo no longer declares", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "sw-now", Argument: "RFC3339", Desc: "Read the relative times as of this instant", Group: "Behavior", Hidden: true},
@@ -4304,6 +4336,7 @@ them. They keep their history and never fire.`,
 	Examples: []Example{
 		{"What is armed here", "sparkwing crons list"},
 		{"Include withdrawn schedules", "sparkwing crons list --all"},
+		{"What a controller evaluates", "sparkwing crons list --profile prod"},
 		{"Machine-readable (NDJSON)", "sparkwing crons list -o json"},
 	},
 }
@@ -4322,6 +4355,7 @@ unique across this host's schedules.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "fires", Argument: "N", Desc: "How many recent fires to show", Default: "10", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
@@ -4344,6 +4378,7 @@ like -- a day-of-week field, a DST boundary, a zone that is not yours.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name; omit for every armed schedule"},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "count", Argument: "N", Desc: "How many instants to show", Default: "5", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "sw-now", Argument: "RFC3339", Desc: "Walk forward from this instant instead of now", Group: "Behavior", Hidden: true},
@@ -4364,6 +4399,7 @@ passed while it was paused.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4379,6 +4415,7 @@ var cmdCronsResume = Command{
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4399,6 +4436,7 @@ instants, so the next one still fires on time.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{

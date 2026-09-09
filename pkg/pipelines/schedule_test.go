@@ -166,34 +166,60 @@ func TestScheduleTriggers_ValidationErrors(t *testing.T) {
 		block string
 		want  []string
 	}{
-		{"empty cron", "      schedule:\n        cron: \"\"\n        where: local",
-			[]string{"on.schedule.cron is required"}},
-		{"malformed cron", "      schedule:\n        cron: \"0 3 * *\"\n        where: local",
-			[]string{"on.schedule.cron"}},
-		{"missing where", `      schedule: "0 3 * * *"`,
-			[]string{"on.schedule.where is required", "where it fires", `"local"`, `"controller"`, "entry per side"}},
-		{"bad where", "      schedule:\n        cron: \"0 3 * * *\"\n        where: laptop",
-			[]string{"on.schedule.where", `"laptop"`}},
-		{"unknown zone", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        tz: Mars/Olympus",
-			[]string{"on.schedule.tz"}},
-		{"bad overlap", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        overlap: wait",
-			[]string{"on.schedule.overlap"}},
-		{"unparsable catch_up", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        catch_up: soon",
-			[]string{"on.schedule.catch_up"}},
-		{"catch_up under the floor", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        catch_up: 30s",
-			[]string{"on.schedule.catch_up"}},
-		{"bad name charset", "      schedule:\n        name: Nightly_Run\n        cron: \"0 3 * * *\"\n        where: local",
-			[]string{"on.schedule.name must match"}},
-		{"overlong name", "      schedule:\n        name: " + strings.Repeat("a", 41) + "\n        cron: \"0 3 * * *\"\n        where: local",
-			[]string{"on.schedule.name must be at most 40"}},
-		{"bad arg key", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        args:\n          Dry_Run: \"1\"",
-			[]string{"on.schedule.args", `"Dry_Run"`}},
-		{"unnamed entries in a list",
+		{
+			"empty cron", "      schedule:\n        cron: \"\"\n        where: local",
+			[]string{"on.schedule.cron is required"},
+		},
+		{
+			"malformed cron", "      schedule:\n        cron: \"0 3 * *\"\n        where: local",
+			[]string{"on.schedule.cron"},
+		},
+		{
+			"missing where", `      schedule: "0 3 * * *"`,
+			[]string{"on.schedule.where is required", "where it fires", `"local"`, `"controller"`, "entry per side"},
+		},
+		{
+			"bad where", "      schedule:\n        cron: \"0 3 * * *\"\n        where: laptop",
+			[]string{"on.schedule.where", `"laptop"`},
+		},
+		{
+			"unknown zone", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        tz: Mars/Olympus",
+			[]string{"on.schedule.tz"},
+		},
+		{
+			"bad overlap", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        overlap: wait",
+			[]string{"on.schedule.overlap"},
+		},
+		{
+			"unparsable catch_up", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        catch_up: soon",
+			[]string{"on.schedule.catch_up"},
+		},
+		{
+			"catch_up under the floor", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        catch_up: 30s",
+			[]string{"on.schedule.catch_up"},
+		},
+		{
+			"bad name charset", "      schedule:\n        name: Nightly_Run\n        cron: \"0 3 * * *\"\n        where: local",
+			[]string{"on.schedule.name must match"},
+		},
+		{
+			"overlong name", "      schedule:\n        name: " + strings.Repeat("a", 41) + "\n        cron: \"0 3 * * *\"\n        where: local",
+			[]string{"on.schedule.name must be at most 40"},
+		},
+		{
+			"bad arg key", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        args:\n          Dry_Run: \"1\"",
+			[]string{"on.schedule.args", `"Dry_Run"`},
+		},
+		{
+			"unnamed entries in a list",
 			"      schedule:\n        - cron: \"0 3 * * *\"\n          where: local\n        - cron: \"0 4 * * *\"\n          where: controller",
-			[]string{"on.schedule[0].name is required"}},
-		{"duplicate names",
+			[]string{"on.schedule[0].name is required"},
+		},
+		{
+			"duplicate names",
 			"      schedule:\n        - name: host\n          cron: \"0 3 * * *\"\n          where: local\n        - name: host\n          cron: \"0 4 * * *\"\n          where: controller",
-			[]string{`schedule "host"`, "duplicate schedule name"}},
+			[]string{`schedule "host"`, "duplicate schedule name"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			msg := parseScheduleError(t,

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -254,10 +255,10 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
 	}
 	if sub.ScheduleID != "" {
-		triggerEnv[orchestrator.CronScheduleKey] = sub.ScheduleID
+		triggerEnv[crons.ScheduleEnvKey] = sub.ScheduleID
 	}
 	if sub.PinnedBinary != "" {
-		triggerEnv[orchestrator.CronBinaryKey] = sub.PinnedBinary
+		triggerEnv[crons.PinnedBinaryEnvKey] = sub.PinnedBinary
 	}
 	var userName string
 	if u, uerr := user.Current(); uerr == nil {

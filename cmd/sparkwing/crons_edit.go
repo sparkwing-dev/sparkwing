@@ -23,6 +23,7 @@ type cronsDisarmReport struct {
 func runCronsDisarm(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsDisarm.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsDisarm, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -36,6 +37,9 @@ func runCronsDisarm(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsDisarm.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsDisarmProfile(*on, fs.Arg(0), format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -66,6 +70,7 @@ func runCronsDisarm(args []string) error {
 func runCronsLock(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsLock.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsLock, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -79,6 +84,9 @@ func runCronsLock(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsLock.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return cronsRemotePinError("lock")
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -100,6 +108,7 @@ func runCronsLock(args []string) error {
 func runCronsUnlock(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsUnlock.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsUnlock, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -113,6 +122,9 @@ func runCronsUnlock(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUnlock.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return cronsRemotePinError("unlock")
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -139,6 +151,7 @@ func runCronsSet(args []string) error {
 	catchUp := fs.String("catch-up", "", "how late a due instant may still fire, such as 6h")
 	argsFlag := fs.StringArray("arg", nil, "argument the launch passes, k=v (repeatable; replaces the declared set)")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsSet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -181,6 +194,9 @@ func runCronsSet(args []string) error {
 		PrintHelp(cmdCronsSet, os.Stderr)
 		return errors.New("crons set: name at least one of --cron, --tz, --overlap, --catch-up or --arg")
 	}
+	if *on != "" {
+		return runCronsSetProfile(*on, fs.Arg(0), format, cronsOverrideRequest(fields))
+	}
 
 	session, release, err := openCrons("")
 	if err != nil {
@@ -203,6 +219,7 @@ func runCronsSet(args []string) error {
 func runCronsReset(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsReset.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsReset, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -216,6 +233,9 @@ func runCronsReset(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsReset.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsResetProfile(*on, fs.Arg(0), format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {

@@ -177,7 +177,7 @@ func assertNamedCronSchemaShape(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	for table, columns := range map[string]string{
-		"cron_schedules": `schedule_name, where_, args, locked_ref, locked_binary, locked_digest,
+		"cron_schedules": `schedule_name, where_, git_branch, args, locked_ref, locked_binary, locked_digest,
                            override_cron, override_tz, override_overlap, override_catch_up_ns,
                            override_args, override_base, override_set_at`,
 		"cron_fires": `args`,

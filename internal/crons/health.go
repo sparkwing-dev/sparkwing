@@ -69,29 +69,7 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 	}
 	health := Health{Schedules: len(rows)}
 	for _, r := range rows {
-		switch r.State {
-		case StateArmed:
-			health.Armed++
-		case StatePaused:
-			health.Paused++
-		case StateUndeclared:
-			health.Undeclared++
-		}
-		switch r.Lock.State {
-		case LockFollows:
-			health.Following++
-		case LockAhead:
-			health.Locked++
-			health.Ahead++
-		case LockMissing:
-			health.Locked++
-			health.MissingBinary++
-		default:
-			health.Locked++
-		}
-		if r.OverrideStale {
-			health.StaleOverride++
-		}
+		health.count(r)
 	}
 
 	tick, err := s.Store.GetCronTick(ctx)
@@ -113,6 +91,32 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 	health.Detail = health.describe(now)
 	health.Remedy = health.remedy()
 	return health, nil
+}
+
+func (h *Health) count(r Row) {
+	switch r.State {
+	case StateArmed:
+		h.Armed++
+	case StatePaused:
+		h.Paused++
+	case StateUndeclared:
+		h.Undeclared++
+	}
+	switch r.Lock.State {
+	case LockFollows:
+		h.Following++
+	case LockAhead:
+		h.Locked++
+		h.Ahead++
+	case LockMissing:
+		h.Locked++
+		h.MissingBinary++
+	default:
+		h.Locked++
+	}
+	if r.OverrideStale {
+		h.StaleOverride++
+	}
 }
 
 // safety: every drift here is answered by the same explicit act, because

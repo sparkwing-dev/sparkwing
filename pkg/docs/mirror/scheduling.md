@@ -325,9 +325,13 @@ and the run schedules onto a runner by the same label rules as any other
 run. Another host reading the same repository stays idle until it is
 armed too.
 
-A controller does not evaluate `where: controller` entries yet, so a
-cluster cadence has to come from an external timer that calls
-`sparkwing pipeline trigger <pipeline> --profile <profile>`.
+A controller evaluates `where: controller` entries once they are pushed
+to it. `sparkwing crons install --profile <profile>` reads the repository's
+controller entries, resolves the checkout's origin, branch and HEAD, and
+sends them; the controller ticks every minute, and each due instant
+becomes a trigger the cluster clones and runs. One evaluator runs per
+store, so several controllers sharing one still fire each instant once.
+See the [crons page](crons.md#controller-schedules).
 
 ## Worked examples
 

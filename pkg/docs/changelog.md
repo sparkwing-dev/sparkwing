@@ -45,14 +45,40 @@ code change to unlock.
   [crons.md](docs/crons.md) and the [migration
   note](docs/migrations/_unreleased.md#armed-schedules-are-pinned).
 
+- **controller:** A controller evaluates the `where: controller` schedules
+  pushed to it. `PUT /api/v1/crons/repos` (runs.write) upserts one
+  repository's schedules against its clone URL and withdraws the ones the push
+  no longer carries, pinned at a commit or following a branch tip;
+  `GET /api/v1/crons` and `GET /api/v1/crons/{id}` (runs.read) serve the same
+  JSON shape the local dashboard already reads, and
+  `POST /api/v1/crons/{id}/pause|resume|run|disarm`, `PUT` and
+  `DELETE /api/v1/crons/{id}/override` and `DELETE /api/v1/crons/repos`
+  (runs.write) drive one. The controller ticks every minute under a lease held
+  in the runs store, so several controllers sharing one store resolve each due
+  instant exactly once, and each fire writes the trigger, the pending run and
+  the dispatch an operator's `pipeline trigger` writes, keyed
+  `<schedule id>@<due instant>` so a repeated tick reaches the first run. The
+  dashboard proxies every route at the same scope. See
+  [crons.md](docs/crons.md#controller-schedules).
+
+- **cli:** Every `sparkwing crons` verb but `tick` takes `--profile NAME` and
+  acts on that profile's controller instead of this host, rendering with the
+  same renderer as the local path. `crons install --profile` reads the repo's
+  `where: controller` entries, requires a git origin, resolves HEAD and the
+  branch, seeds the controller's git cache with that commit, and pushes them;
+  `--follow` clones the branch tip at each fire instead of pinning.
+  `crons uninstall --profile` removes them, and `crons status --profile`
+  reports the controller's loop and its last tick.
+
 - **store:** The runs store advances to schema 33, which keeps several
   schedules for one pipeline and pins what they run. `cron_schedules` gains a
   schedule name (`default` for the lone schedule of a pipeline), where the
   schedule fires, the arguments its launch passes, the commit, pipeline binary
   and cache digest it is locked to, and this host's override of the declared
-  cadence alongside the declaration that override was set against. Its unique
-  key widens from `(repo_path, pipeline)` to include the name, and `cron_fires`
-  records the arguments each launch was given. The migration is additive -- it
+  cadence alongside the declaration that override was set against, plus the
+  branch a controller schedule was pushed from. Its unique key widens from
+  `(repo_path, pipeline)` to include the name, and `cron_fires` records the
+  arguments each launch was given. The migration is additive -- it
   declares no schema requirement and every column it adds carries a default --
   so a binary built before it keeps opening and writing the same database. See
   the [migration

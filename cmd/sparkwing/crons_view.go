@@ -22,6 +22,7 @@ import (
 func runCronsStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsStatus.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -31,6 +32,9 @@ func runCronsStatus(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsStatus.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsStatusProfile(*on, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -128,6 +132,7 @@ func runCronsList(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsList.Path, flag.ContinueOnError)
 	all := fs.Bool("all", false, "include schedules the repo no longer declares")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	nowFlag := cronsNowFlag(fs)
 	if err := parseAndCheck(cmdCronsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -138,6 +143,9 @@ func runCronsList(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsList.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsListProfile(*on, format, *all)
 	}
 	session, release, err := openCrons(*nowFlag)
 	if err != nil {
@@ -229,6 +237,7 @@ func runCronsShow(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsShow.Path, flag.ContinueOnError)
 	fires := fs.Int("fires", 10, "how many recent fires to show")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsShow, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -242,6 +251,9 @@ func runCronsShow(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsShow.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsShowProfile(*on, fs.Arg(0), format, *fires)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -360,6 +372,7 @@ func runCronsNext(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsNext.Path, flag.ContinueOnError)
 	count := fs.Int("count", 5, "how many instants to show")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	nowFlag := cronsNowFlag(fs)
 	if err := parseAndCheck(cmdCronsNext, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -376,6 +389,9 @@ func runCronsNext(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsNext.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsNextProfile(*on, fs.Arg(0), format, *count)
 	}
 	session, release, err := openCrons(*nowFlag)
 	if err != nil {

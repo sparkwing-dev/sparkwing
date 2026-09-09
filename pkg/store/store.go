@@ -1435,6 +1435,8 @@ const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
     catch_up_ns   INTEGER NOT NULL,
     -- local | controller
     where_        TEXT NOT NULL DEFAULT 'local',
+    -- branch a controller schedule was pushed from; empty for a local one.
+    git_branch    TEXT NOT NULL DEFAULT '',
     -- JSON object of CLI argument name to value, passed to the scheduled run.
     args          TEXT NOT NULL DEFAULT '{}',
     -- commit the schedule is pinned to; empty means it follows the checkout.
@@ -1479,6 +1481,7 @@ var cronSchedulesTablePostgres = strings.NewReplacer(
 var cronScheduleNamedCols = map[string]string{
 	"schedule_name":        "TEXT NOT NULL DEFAULT 'default'",
 	"where_":               "TEXT NOT NULL DEFAULT 'local'",
+	"git_branch":           "TEXT NOT NULL DEFAULT ''",
 	"args":                 "TEXT NOT NULL DEFAULT '{}'",
 	"locked_ref":           "TEXT NOT NULL DEFAULT ''",
 	"locked_binary":        "TEXT NOT NULL DEFAULT ''",
@@ -1935,6 +1938,9 @@ func applyNamedCronsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 				return err
 			}
 		}
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "cron_schedules", cronScheduleNamedCols); err != nil {
+		return err
 	}
 	return ensureColumnsSQLite(ctx, tx, "cron_fires", cronFireArgsCols)
 }

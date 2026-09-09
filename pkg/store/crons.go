@@ -67,6 +67,9 @@ type CronSchedule struct {
 	CatchUp time.Duration `json:"catch_up"`
 	// Where is CronWhereLocal or CronWhereController.
 	Where string `json:"where"`
+	// GitBranch is the branch a controller schedule was pushed from,
+	// empty for one a host arms from a working tree.
+	GitBranch string `json:"git_branch,omitempty"`
 	// Args are the CLI arguments the scheduled launch passes, keyed by
 	// flag name.
 	Args map[string]string `json:"args,omitempty"`
@@ -103,6 +106,7 @@ type CronDeclaration struct {
 	Overlap      string            `json:"overlap"`
 	CatchUp      time.Duration     `json:"catch_up"`
 	Where        string            `json:"where"`
+	GitBranch    string            `json:"git_branch,omitempty"`
 	Args         map[string]string `json:"args,omitempty"`
 	LockedRef    string            `json:"locked_ref,omitempty"`
 	LockedBinary string            `json:"locked_binary,omitempty"`
@@ -143,6 +147,7 @@ func (s CronSchedule) Declaration() CronDeclaration {
 		Overlap:      s.Overlap,
 		CatchUp:      s.CatchUp,
 		Where:        s.Where,
+		GitBranch:    s.GitBranch,
 		Args:         s.Args,
 		LockedRef:    s.LockedRef,
 		LockedBinary: s.LockedBinary,
@@ -207,7 +212,7 @@ const (
 )
 
 const cronScheduleInsertColumns = `id, repo_path, pipeline, schedule_name, cron, tz, overlap, catch_up_ns,
-       where_, args, locked_ref, locked_binary, locked_digest, paused, declared,
+       where_, git_branch, args, locked_ref, locked_binary, locked_digest, paused, declared,
        armed_at, armed_by, updated_at, cursor_at, last_fired_at, last_run_id, last_outcome, next_due_at`
 
 const cronScheduleOverrideColumns = `override_cron, override_tz, override_overlap, override_catch_up_ns,
@@ -278,7 +283,7 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 INSERT INTO cron_schedules (`+cronScheduleInsertColumns+`)
 VALUES (`+cronScheduleInsertPlaceholders+`)`,
 			id, sched.RepoPath, sched.Pipeline, sched.Name, sched.Cron, sched.TZ, sched.Overlap,
-			int64(sched.CatchUp), sched.Where, args,
+			int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
 			sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
 			boolToInt(sched.Paused), 1,
 			armedAt.UnixNano(), sched.ArmedBy, now.UnixNano(), now.UnixNano(),
@@ -289,11 +294,11 @@ VALUES (`+cronScheduleInsertPlaceholders+`)`,
 		}
 	} else if _, err := tx.ExecContext(ctx, `
 UPDATE cron_schedules
-   SET cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, args = ?,
+   SET cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, git_branch = ?, args = ?,
        locked_ref = ?, locked_binary = ?, locked_digest = ?, declared = 1,
        updated_at = ?, next_due_at = ?
  WHERE id = ?`,
-		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp), sched.Where, args,
+		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
 		sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
 		now.UnixNano(), nullNanos(sched.NextDueAt), id,
 	); err != nil {
@@ -702,7 +707,7 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	var overrideCron, overrideTZ, overrideOverlap, overrideArgs, overrideBase sql.NullString
 	if err := scan(
 		&sched.ID, &sched.RepoPath, &sched.Pipeline, &sched.Name,
-		&sched.Cron, &sched.TZ, &sched.Overlap, &catchUpNS, &sched.Where, &args,
+		&sched.Cron, &sched.TZ, &sched.Overlap, &catchUpNS, &sched.Where, &sched.GitBranch, &args,
 		&sched.LockedRef, &sched.LockedBinary, &sched.LockedDigest,
 		&paused, &declared,
 		&armedNS, &sched.ArmedBy, &updatedNS, &cursorNS,

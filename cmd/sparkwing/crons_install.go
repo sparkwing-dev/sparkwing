@@ -53,6 +53,7 @@ func runCronsInstall(args []string) error {
 	only := fs.StringSlice("only", nil, "arm only these pipelines or pipeline/name entries")
 	follow := fs.Bool("follow", false, "arm without pinning, so each fire compiles the checkout")
 	noProve := fs.Bool("no-prove", false, "arm without compiling the pipelines first, which also pins nothing")
+	on := addCronsProfileFlag(fs)
 	noTimer := fs.Bool("no-timer", false, "arm without installing the OS timer")
 	if err := fs.MarkHidden("no-timer"); err != nil {
 		return err
@@ -70,6 +71,9 @@ func runCronsInstall(args []string) error {
 	if *fleet && len(*only) > 0 {
 		return errors.New("crons install: --only names entries of one repo; drop --fleet or drop --only")
 	}
+	if *on != "" && *fleet {
+		return fmt.Errorf("crons install: %w", errCronsProfileAndFleet)
+	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsInstall.Path)
 	if err != nil {
 		return err
@@ -78,6 +82,9 @@ func runCronsInstall(args []string) error {
 	roots, err := cronsTargetRoots(*repo, *fleet)
 	if err != nil {
 		return fmt.Errorf("crons install: %w", err)
+	}
+	if *on != "" {
+		return runCronsInstallProfile(*on, roots[0], *only, *follow, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -254,6 +261,7 @@ func runCronsUninstall(args []string) error {
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "disarm every registered repo")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsUninstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -263,9 +271,19 @@ func runCronsUninstall(args []string) error {
 	if *fleet && *repo != "" {
 		return errors.New("crons uninstall: --fleet disarms every registered repo; drop --repo or drop --fleet")
 	}
+	if *on != "" && *fleet {
+		return fmt.Errorf("crons uninstall: %w", errCronsProfileAndFleet)
+	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUninstall.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		roots, rerr := cronsTargetRoots(*repo, false)
+		if rerr != nil {
+			return fmt.Errorf("crons uninstall: %w", rerr)
+		}
+		return runCronsUninstallProfile(*on, roots[0], format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {

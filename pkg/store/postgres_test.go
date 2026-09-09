@@ -214,7 +214,7 @@ func TestSchemaV33PostgresFreshAndV32UpgradeShape(t *testing.T) {
 		}
 		statements := []string{`DROP INDEX idx_cron_schedules_repo_pipeline_name`}
 		for _, column := range []string{
-			"schedule_name", "where_", "args", "locked_ref", "locked_binary", "locked_digest",
+			"schedule_name", "where_", "git_branch", "args", "locked_ref", "locked_binary", "locked_digest",
 			"override_cron", "override_tz", "override_overlap", "override_catch_up_ns",
 			"override_args", "override_base", "override_set_at",
 		} {
@@ -252,7 +252,7 @@ func assertPostgresNamedCronShape(t *testing.T, st *store.Store) {
 	ctx := context.Background()
 	for table, columns := range map[string][]string{
 		"cron_schedules": {
-			"schedule_name", "where_", "args", "locked_ref", "locked_binary", "locked_digest",
+			"schedule_name", "where_", "git_branch", "args", "locked_ref", "locked_binary", "locked_digest",
 			"override_cron", "override_tz", "override_overlap", "override_catch_up_ns",
 			"override_args", "override_base", "override_set_at",
 		},

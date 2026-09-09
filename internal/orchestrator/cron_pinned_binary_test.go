@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -42,7 +43,7 @@ func TestDispatchLocalTrigger_RunsThePinnedBinaryInsteadOfCompiling(t *testing.T
 	err := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID:         "run-pinned",
 		Pipeline:   "nightly",
-		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, CronBinaryKey: pinned},
+		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
 	}, "", repoDir, cache, logger, nil)
 	if err != nil {
 		t.Fatalf("dispatch the pinned binary: %v", err)
@@ -67,7 +68,7 @@ func TestDispatchLocalTrigger_FailsWhenThePinnedBinaryIsGone(t *testing.T) {
 	err := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID:         "run-missing",
 		Pipeline:   "nightly",
-		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, CronBinaryKey: missing},
+		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: missing},
 	}, "", repoDir, cache, logger, nil)
 	if err == nil {
 		t.Fatal("a pin whose binary is gone dispatched anyway")
@@ -92,7 +93,7 @@ func TestDispatchLocalTrigger_RefusesAPinThatIsNotExecutable(t *testing.T) {
 	err := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID:         "run-not-executable",
 		Pipeline:   "nightly",
-		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, CronBinaryKey: pinned},
+		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
 	}, "", repoDir, cache, logger, nil)
 	if err == nil {
 		t.Fatal("a pin that is not executable dispatched anyway")

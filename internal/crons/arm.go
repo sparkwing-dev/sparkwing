@@ -520,8 +520,15 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 	sort.Strings(roots)
 
 	now := s.now()
-	report := RefreshReport{Repos: len(roots)}
+	var report RefreshReport
 	for _, root := range roots {
+		if PushedRepo(root) {
+			// safety: a pushed repository's declaration is what the push
+			// carried, and this process holds no checkout of it to read.
+			report.Locked += len(byRepo[root])
+			continue
+		}
+		report.Repos++
 		declared, derr := DeclaredSchedules(root)
 		if derr != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", root, derr))
@@ -534,7 +541,7 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 			}
 		}
 		for _, sched := range byRepo[root] {
-			if sched.LockedBinary != "" {
+			if sched.LockedBinary != "" || Pushed(sched) {
 				report.Locked++
 				continue
 			}

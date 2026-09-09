@@ -30,6 +30,12 @@ a checkout updated afterwards does not change what runs unattended. Re-run
 install to move the pin, `crons unlock` to follow the checkout again,
 and `crons set` to override a declared cadence on this host alone.
 
+--profile NAME points every verb but tick at a controller instead of this host.
+`crons install --profile` pushes the repo's `where: controller`
+entries to it, pinned at HEAD unless --follow; the controller evaluates them
+from a loop of its own, one evaluator per store, and each fire becomes a
+trigger the cluster clones and runs.
+
 ### Subcommands
 
 - `install` -- Arm a repo's declared schedules on this host and install the OS timer
@@ -59,6 +65,9 @@ sparkwing crons list
 
 # Check the timer and the last tick
 sparkwing crons status
+
+# Push this repo's controller schedules
+sparkwing crons install --profile prod
 ```
 
 ## `sparkwing crons disarm`
@@ -79,6 +88,7 @@ To stop a schedule without losing its history, pause it instead.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -117,10 +127,17 @@ declaration. Pause state, cursor, fire history and the override values survive.
 Arming is per host. Another machine reading the same repo stays idle until it
 is armed too, so two hosts never race for the same instant.
 
+--profile NAME pushes the repo's "where: controller" entries to that
+controller instead, and reports the "where: local" ones as this host's. The
+push needs a git origin, because the cluster clones the source at each fire; it
+pins every fire to the checkout's HEAD unless --follow, which clones the branch
+tip. Re-running the push is the explicit update, and it moves the pin.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Arm every registered repo instead of one |
 | `--only NAMES` | Arm only these pipelines or pipeline/name entries (comma-separated or repeatable) |
@@ -145,6 +162,12 @@ sparkwing crons install --follow
 
 # Arm every registered repo
 sparkwing crons install --fleet
+
+# Push the controller entries to a cluster
+sparkwing crons install --profile prod
+
+# Push them following the branch tip
+sparkwing crons install --profile prod --follow
 ```
 
 ## `sparkwing crons list`
@@ -162,6 +185,7 @@ them. They keep their history and never fire.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--all` | Include schedules the repo no longer declares |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -173,6 +197,9 @@ sparkwing crons list
 
 # Include withdrawn schedules
 sparkwing crons list --all
+
+# What a controller evaluates
+sparkwing crons list --profile prod
 
 # Machine-readable (NDJSON)
 sparkwing crons list -o json
@@ -198,6 +225,7 @@ pipeline runs from the checkout or from PATH are outside it.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -226,6 +254,7 @@ like -- a day-of-week field, a DST boundary, a zone that is not yours.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--count N` | How many instants to show (default: 5) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -255,6 +284,7 @@ passed while it was paused.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -279,6 +309,7 @@ pause state, the cursor and the fire history are untouched.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -302,6 +333,7 @@ Resumes at the next due instant. The instants that passed while the schedule was
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -330,6 +362,7 @@ instants, so the next one still fires on time.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -364,6 +397,7 @@ value side by side.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--cron EXPR` | Cron expression to run instead of the declared one |
 | `--tz ZONE` | Zone the expression is read in, such as America/Denver or local |
 | `--overlap POLICY` | What a due instant does while the previous run is going: skip\|queue |
@@ -404,6 +438,7 @@ unique across this host's schedules.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--fires N` | How many recent fires to show (default: 10) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -430,10 +465,14 @@ Exits non-zero when schedules are armed and the timer is not running, runs
 another binary, or has not ticked in the last few minutes, so a check script
 can read the exit code. A host with nothing armed is healthy.
 
+--profile NAME reads a controller's scheduler instead: its counts, when its
+loop last ticked, and what that tick reported.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -444,6 +483,9 @@ sparkwing crons status
 
 # Machine-readable
 sparkwing crons status -o json
+
+# Read a controller's scheduler
+sparkwing crons status --profile prod
 ```
 
 ## `sparkwing crons tick`
@@ -491,10 +533,14 @@ too: the timer exists to serve armed schedules and nothing else.
 
 --fleet disarms every schedule this home holds.
 
+--profile NAME deletes the repo's schedules from that controller instead,
+naming the repo by its git origin.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Disarm every schedule this home holds |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
@@ -507,6 +553,9 @@ sparkwing crons uninstall
 
 # Disarm everything on this host
 sparkwing crons uninstall --fleet
+
+# Remove this repo from a controller
+sparkwing crons uninstall --profile prod
 ```
 
 ## `sparkwing crons unlock`
@@ -525,6 +574,7 @@ the repo's declaration again.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples

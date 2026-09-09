@@ -60,11 +60,49 @@ func DisplayName(s store.CronSchedule) string {
 }
 
 func displayName(repoPath, pipeline, name string) string {
-	base := filepath.Base(repoPath) + "/" + pipeline
+	base := repoLabel(repoPath) + "/" + pipeline
 	if name == "" || name == store.CronScheduleDefaultName {
 		return base
 	}
 	return base + "/" + name
+}
+
+// safety: a controller row's repo_path is a clone URL, whose base name alone
+// ("sparkwing") collides across owners, so the owner rides in the label. The
+// scp form git@host:owner/name spells the owner after a colon rather than a
+// slash, so the label reads the same for both spellings of one repository.
+func repoLabel(repoPath string) string {
+	if !PushedRepo(repoPath) {
+		return filepath.Base(repoPath)
+	}
+	trimmed := strings.TrimSuffix(strings.TrimRight(repoPath, "/"), ".git")
+	if colon := strings.LastIndex(trimmed, ":"); colon >= 0 {
+		if rest := trimmed[colon+1:]; !strings.HasPrefix(rest, "//") && strings.Contains(rest, "/") {
+			trimmed = rest
+		}
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 2 {
+		return trimmed
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+}
+
+// PushedRepo reports whether a stored repo_path names a repository pushed to a
+// controller rather than a checkout on this machine.
+func PushedRepo(repoPath string) bool {
+	for _, scheme := range []string{"https://", "http://", "ssh://", "git://"} {
+		if strings.HasPrefix(repoPath, scheme) {
+			return true
+		}
+	}
+	return strings.HasPrefix(repoPath, "git@")
+}
+
+// Pushed reports whether a schedule was pushed to a controller, so its
+// declaration is what the push carried and no working tree answers for it.
+func Pushed(s store.CronSchedule) bool {
+	return s.Where == store.CronWhereController || PushedRepo(s.RepoPath)
 }
 
 // Declared is one entry of a repository's on.schedule.
@@ -149,9 +187,11 @@ type Launcher interface {
 
 // Service evaluates schedules against one home's runs store.
 //
-// LockPath must be set before [Service.Tick] is called: the tick takes an
-// exclusive lock on it so two timers, or a timer and a hand-run tick, cannot
-// resolve the same due instant twice.
+// Set LockPath before [Service.Tick] on a host whose timer calls it: the tick
+// takes an exclusive lock on that file so two timers, or a timer and a hand-run
+// tick, cannot resolve the same due instant twice. Leave it empty in a caller
+// that already holds exclusion of its own, such as a controller ticking under
+// [store.Store.RunCronTickLeased].
 type Service struct {
 	Store    *store.Store
 	Launcher Launcher
@@ -165,6 +205,7 @@ type Service struct {
 	Version string
 
 	// LockPath is the file the tick locks, conventionally <home>/crons.lock.
+	// Empty means the caller leases exclusion elsewhere.
 	LockPath string
 
 	// PinRoot holds the pipeline binary each locked schedule runs,
@@ -262,7 +303,7 @@ func newRow(ctx context.Context, s store.CronSchedule, ck checkouts) Row {
 		Display:        DisplayName(s),
 		ScheduleName:   scheduleEntryName(s),
 		State:          stateOf(s),
-		StateDetail:    lockDetail(lock),
+		StateDetail:    stateDetail(s, lock),
 		Lock:           lock,
 		Effective:      s.Effective(),
 		OverrideFields: overrideFields(s),
@@ -291,6 +332,14 @@ func scheduleEntryName(s store.CronSchedule) string {
 
 func lockOf(ctx context.Context, s store.CronSchedule, ck checkouts) Lock {
 	lock := Lock{Ref: s.LockedRef, Binary: s.LockedBinary, Digest: s.LockedDigest, State: LockFollows}
+	if Pushed(s) {
+		// safety: the controller clones what it was pushed, so the pin is the
+		// ref alone and there is no working tree to compare it against.
+		if s.LockedRef != "" {
+			lock.State = LockPinned
+		}
+		return lock
+	}
 	if s.LockedBinary == "" {
 		return lock
 	}
@@ -310,6 +359,18 @@ func lockOf(ctx context.Context, s store.CronSchedule, ck checkouts) Lock {
 		lock.State = LockDirty
 	}
 	return lock
+}
+
+// safety: a pushed schedule has no checkout to be ahead of, so its detail says
+// which commit the controller clones rather than how a working tree compares.
+func stateDetail(s store.CronSchedule, l Lock) string {
+	if !Pushed(s) {
+		return lockDetail(l)
+	}
+	if l.Ref == "" {
+		return "branch tip"
+	}
+	return "pinned " + l.ShortRef()
 }
 
 func lockDetail(l Lock) string {
@@ -642,3 +703,15 @@ func (s *Service) pinnedBinaryReady(sched store.CronSchedule) error {
 	}
 	return nil
 }
+
+// ScheduleEnvKey carries the id of the cron schedule that launched a run, so
+// one run traces back to the cadence that asked for it. The cron_fires table is
+// the authoritative join; this key answers the question from the run's own row,
+// which is where an operator reading `runs get` starts.
+const ScheduleEnvKey = "_SPARKWING_CRON_SCHEDULE"
+
+// PinnedBinaryEnvKey carries the pipeline binary a locked cron schedule pinned
+// at arming time. The consumer execs that file instead of compiling the
+// checkout, so a checkout updated between arming and three in the morning
+// cannot change what the unattended run executes.
+const PinnedBinaryEnvKey = "_SPARKWING_CRON_BINARY"

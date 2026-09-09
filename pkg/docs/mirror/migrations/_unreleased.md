@@ -83,6 +83,8 @@ side that fires it.
   unique key widens to `(repo_path, pipeline, schedule_name)`, which arrives
   as `idx_cron_schedules_repo_pipeline_name`: SQLite rebuilds the table to
   widen it, Postgres drops the old constraint and creates the index.
+  `cron_schedules` also gains `git_branch`, the branch a schedule pushed to a
+  controller was read from, empty for one a host armed from a working tree.
   `cron_fires` gains `args`, the arguments the launch was given.
 - **Migration:** None to perform. The migration is additive: it declares no
   schema requirement, and every column it adds carries a default, so a binary

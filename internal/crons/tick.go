@@ -44,9 +44,10 @@ type Decision struct {
 
 // Tick is the per-minute entry point the OS timer calls.
 //
-// It takes an exclusive lock on [Service.LockPath], republishes what the armed
-// repositories declare, evaluates every declared unpaused schedule against its
-// cursor, and resolves each due instant: a launch, a skip when the schedule's
+// It takes an exclusive lock on [Service.LockPath] -- unless that is empty,
+// which says the caller holds exclusion of its own -- republishes what the
+// armed repositories declare, evaluates every declared unpaused schedule
+// against its cursor, and resolves each due instant: a launch, a skip when the schedule's
 // previous run is still active and its policy is skip, or a miss when the
 // instant fell outside the catch-up window. Every outcome moves the cursor, so
 // no instant is ever considered twice. Paused and undeclared rows fire
@@ -57,11 +58,15 @@ type Decision struct {
 // the tick. dryRun evaluates and reports without launching anything or writing
 // anything.
 func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
-	unlock, err := lockTick(s.LockPath)
-	if err != nil {
-		return TickReport{}, err
+	// safety: an empty LockPath is a caller that already holds exclusion of its
+	// own, such as the controller's store lease, not a caller that forgot one.
+	if s.LockPath != "" {
+		unlock, err := lockTick(s.LockPath)
+		if err != nil {
+			return TickReport{}, err
+		}
+		defer unlock()
 	}
-	defer unlock()
 
 	now := s.now()
 	report := TickReport{At: now}
