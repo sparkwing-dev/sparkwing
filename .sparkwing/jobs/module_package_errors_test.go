@@ -56,3 +56,11 @@ func TestModulePackageDiscoveryPreservesCommandContext(t *testing.T) {
 		t.Fatalf("discovery error = %v, want cancellation", err)
 	}
 }
+
+func TestModulePackageDiscoveryKeepsExcludedDependenciesOutOfLint(t *testing.T) {
+	root := lintFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"), "package\n")
+	if err := runGolangciLint(context.Background()); err != nil {
+		t.Fatalf("excluded dependency changed lint verdict: %v", err)
+	}
+}
