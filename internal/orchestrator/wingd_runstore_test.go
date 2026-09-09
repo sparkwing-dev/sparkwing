@@ -424,6 +424,10 @@ func blockTheStoreOpen(t *testing.T, home string) *sql.Tx {
 }
 
 func TestHeldRunStoreBoundsAnOpenThatCannotMigrate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits for the store terminal-check deadline")
+	}
+
 	home := t.TempDir()
 	createStore(t, home)
 	tx := blockTheStoreOpen(t, home)
@@ -487,6 +491,10 @@ func TestHeldRunStoreBoundsAnOpenThatCannotMigrate(t *testing.T) {
 }
 
 func TestFinalizeGivesUpInsideTheDrainWindow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits for the finalization drain deadline")
+	}
+
 	home := t.TempDir()
 	createStore(t, home)
 	runs, err := NewHeldRunStore(home)

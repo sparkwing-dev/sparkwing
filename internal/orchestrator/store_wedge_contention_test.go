@@ -94,6 +94,10 @@ func startShmLockChild(t *testing.T, shmPath string) {
 }
 
 func TestStoreWedgeGuard_TerminalOnRealWALShmContention(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits for the real SQLite contention budget")
+	}
+
 	t.Setenv(StoreWedgeBudgetEnvVar, "5s")
 	t.Setenv(store.BusyTimeoutEnvVar, "2000")
 
