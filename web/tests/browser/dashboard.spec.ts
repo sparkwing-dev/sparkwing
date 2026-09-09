@@ -52,6 +52,134 @@ const finishedDetail = {
   ],
 };
 
+function isoFromNow(ms: number): string {
+  return new Date(Date.now() + ms).toISOString();
+}
+
+const armedCron = {
+  id: "crn_0123456789ab",
+  name: "dotfiles/nightly-vault-sweep",
+  repo_path: "/home/me/code/dotfiles",
+  pipeline: "nightly-vault-sweep",
+  cron: "0 3 * * *",
+  tz: "America/Denver",
+  overlap: "skip",
+  catch_up_ns: 3_600_000_000_000,
+  paused: false,
+  declared: true,
+  state: "armed",
+  armed_at: isoFromNow(-4 * 3_600_000),
+  updated_at: isoFromNow(-60_000),
+  last_fired_at: isoFromNow(-9 * 3_600_000),
+  last_run_id: "run_abc",
+  last_outcome: "fired",
+  next_due_at: isoFromNow(4 * 3_600_000),
+};
+
+const pausedCron = {
+  ...armedCron,
+  id: "crn_ffeeddccbbaa",
+  name: "sparkwing/weekly-bench",
+  repo_path: "/home/me/code/sparkwing",
+  pipeline: "weekly-bench",
+  cron: "0 4 * * 0",
+  paused: true,
+  state: "paused",
+  last_outcome: "skipped_overlap",
+  last_run_id: "",
+  last_fired_at: null,
+};
+
+const undeclaredCron = {
+  ...armedCron,
+  id: "crn_aabbccddeeff",
+  name: "dotfiles/retired-sweep",
+  pipeline: "retired-sweep",
+  declared: false,
+  state: "undeclared",
+  next_due_at: null,
+};
+
+const healthyCronTimer = {
+  installed: true,
+  foreign: false,
+  enabled: true,
+  stale: false,
+  path: "/home/me/.config/systemd/user/sparkwing-crons.timer",
+  binary: "/home/me/.local/bin/sparkwing",
+  detail: "timer enabled; last tick 12s ago",
+};
+
+const healthyCronHealth = {
+  timer: healthyCronTimer,
+  last_tick: {
+    at: isoFromNow(-12_000),
+    host: "wsl",
+    version: "v0.42.0",
+    error: "",
+  },
+  tick_stale: false,
+  schedules: 3,
+  armed: 1,
+  paused: 1,
+  undeclared: 1,
+  detail: "1 schedule armed on this host",
+};
+
+const cronsOverview = {
+  health: healthyCronHealth,
+  schedules: [armedCron, pausedCron, undeclaredCron],
+};
+
+const noCronsOverview = {
+  health: {
+    timer: {
+      installed: false,
+      foreign: false,
+      enabled: false,
+      stale: false,
+      path: "",
+      binary: "",
+      detail: "no timer installed",
+    },
+    last_tick: { at: "", host: "", version: "", error: "" },
+    tick_stale: false,
+    schedules: 0,
+    armed: 0,
+    paused: 0,
+    undeclared: 0,
+    detail: "no schedules armed on this host",
+  },
+  schedules: [],
+};
+
+const cronDetail = {
+  schedule: armedCron,
+  fires: [
+    {
+      id: "crf_02",
+      schedule_id: armedCron.id,
+      due_at: isoFromNow(-9 * 3_600_000),
+      decided_at: isoFromNow(-9 * 3_600_000 + 800),
+      outcome: "fired",
+      run_id: "run_abc",
+      detail: "",
+      run_status: "passed",
+    },
+    {
+      id: "crf_01",
+      schedule_id: armedCron.id,
+      due_at: isoFromNow(-33 * 3_600_000),
+      decided_at: isoFromNow(-33 * 3_600_000 + 600),
+      outcome: "skipped_overlap",
+      run_id: "",
+      detail: "previous run still holding admission",
+      run_status: "",
+    },
+  ],
+  upcoming: [isoFromNow(4 * 3_600_000), isoFromNow(28 * 3_600_000)],
+};
+
 type MockAPIOptions = {
   runs?: Record<string, unknown>[];
   details?: Record<string, Record<string, unknown>>;
@@ -62,6 +190,9 @@ type MockAPIOptions = {
   onEventStream?: (route: Route) => Promise<void>;
   onLogStream?: (route: Route) => Promise<void>;
   onRequest?: (route: Route) => void;
+  crons?: Record<string, unknown> | (() => Record<string, unknown>);
+  cronDetail?: Record<string, unknown>;
+  onCronAction?: (id: string, action: string) => void;
 };
 
 const pageErrors = new WeakMap<Page, Error[]>();
@@ -138,6 +269,40 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     if (request.method() === "GET" && path === "/api/v1/pipelines") {
       await route.fulfill({ json: { pipelines: {} } });
+      return;
+    }
+    const readCrons = () =>
+      (typeof options.crons === "function" ? options.crons() : options.crons) ??
+      noCronsOverview;
+    if (request.method() === "GET" && path === "/api/v1/crons") {
+      await route.fulfill({ json: readCrons() });
+      return;
+    }
+    const cronActionMatch = path.match(
+      /^\/api\/v1\/crons\/([^/]+)\/(pause|resume|run)$/,
+    );
+    if (request.method() === "POST" && cronActionMatch) {
+      const [, scheduleID, action] = cronActionMatch;
+      options.onCronAction?.(scheduleID, action);
+      const schedules = (readCrons().schedules ??
+        []) as Record<string, unknown>[];
+      const schedule =
+        schedules.find((row) => row.id === scheduleID) ?? schedules[0] ?? {};
+      await route.fulfill({
+        json:
+          action === "run"
+            ? { run_id: "run_now", schedule }
+            : { schedule },
+      });
+      return;
+    }
+    const cronDetailMatch = path.match(/^\/api\/v1\/crons\/([^/]+)$/);
+    if (request.method() === "GET" && cronDetailMatch) {
+      await route.fulfill(
+        options.cronDetail
+          ? { json: options.cronDetail }
+          : { status: 404, body: "unknown schedule" },
+      );
       return;
     }
     if (request.method() === "GET" && path.endsWith("/attempts")) {
@@ -920,6 +1085,7 @@ test("keeps every public dashboard navigation target routable", async ({
   const routes = [
     ["Home", "Overview"],
     ["Queue", "Admission queue"],
+    ["Crons", "Crons"],
     ["Capacity", "Capacity"],
     ["Fleet", "Fleet"],
     ["Analytics (preview)", "Analytics"],
@@ -1034,4 +1200,108 @@ test("sends cancel and retry actions for an active run", async ({ page }) => {
       requests.some((url) => url.endsWith(`/runs/${runningRun.id}/retry`)),
     )
     .toBe(true);
+});
+
+test("renders the crons overview with its health banner", async ({ page }) => {
+  await installMockAPI(page, { crons: cronsOverview });
+  await page.goto("/crons");
+
+  await expect(
+    page.getByRole("heading", { name: "Crons", exact: true, level: 1 }),
+  ).toBeVisible();
+  const banner = page.getByRole("region", { name: "Cron health" });
+  await expect(
+    banner.getByText("1 schedule armed on this host", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    banner.getByText("/home/me/.config/systemd/user/sparkwing-crons.timer"),
+  ).toBeVisible();
+
+  await expect(page.locator("[data-schedule-id]")).toHaveCount(2);
+  await expect(
+    page.locator(`[data-schedule-id="${armedCron.id}"]`).getByText(/^in \d+h/),
+  ).toBeVisible();
+
+  const toggle = page.getByRole("button", { name: /show undeclared \(1\)/ });
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  await expect(page.locator("[data-schedule-id]")).toHaveCount(3);
+});
+
+test("warns when the cron tick has gone stale", async ({ page }) => {
+  await installMockAPI(page, {
+    crons: {
+      health: { ...healthyCronHealth, tick_stale: true },
+      schedules: [armedCron],
+    },
+  });
+  await page.goto("/crons");
+
+  const banner = page.getByRole("region", { name: "Cron health" });
+  await expect(banner.getByText(/Cron ticks have stopped/)).toBeVisible();
+  await expect(banner.getByText(/sparkwing crons install/)).toBeVisible();
+});
+
+test("pauses a schedule and flips the row it acted on", async ({ page }) => {
+  const posted: string[] = [];
+  let paused = false;
+  await installMockAPI(page, {
+    crons: () => ({
+      health: healthyCronHealth,
+      schedules: [
+        paused ? { ...armedCron, paused: true, state: "paused" } : armedCron,
+      ],
+    }),
+    onCronAction: (id, action) => {
+      posted.push(`${id}/${action}`);
+      if (action === "pause") paused = true;
+    },
+  });
+  await page.goto("/crons");
+
+  const row = page.locator(`[data-schedule-id="${armedCron.id}"]`);
+  await row.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(() => posted).toContain(`${armedCron.id}/pause`);
+  await expect(
+    row.getByRole("button", { name: "Resume", exact: true }),
+  ).toBeVisible();
+  await expect(row.getByText("paused", { exact: true })).toBeVisible();
+});
+
+test("deep-links a schedule and links its fires back to runs", async ({
+  page,
+}) => {
+  await installMockAPI(page, { crons: cronsOverview, cronDetail });
+  await page.goto(`/crons?schedule=${armedCron.id}`);
+
+  const pane = page.getByRole("region", { name: "Schedule detail" });
+  await expect(pane.getByText(armedCron.name, { exact: true })).toBeVisible();
+  await expect(pane.getByText("skip if running", { exact: true })).toBeVisible();
+  await expect(pane.getByText("1h", { exact: true })).toBeVisible();
+  await expect(
+    pane.getByText("previous run still holding admission"),
+  ).toBeVisible();
+  await expect(pane.getByText("passed", { exact: true })).toBeVisible();
+  await expect(
+    pane.getByRole("link", { name: "run_abc", exact: true }).first(),
+  ).toHaveAttribute("href", "/runs?run=run_abc");
+});
+
+test("explains how to declare a schedule when the host has none", async ({
+  page,
+}) => {
+  await installMockAPI(page);
+  await page.goto("/crons");
+
+  await expect(
+    page.getByRole("heading", { name: "Crons", exact: true, level: 1 }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("No schedules are armed on this host.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("on: schedule:", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("sparkwing crons install", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("[data-schedule-id]")).toHaveCount(0);
 });
