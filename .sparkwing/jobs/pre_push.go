@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
 
@@ -46,6 +47,8 @@ func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
 	}
 	return nil
 }
+
+const prePushTimeout = 30 * time.Minute
 
 type PrePush struct {
 	sparkwing.Base
@@ -90,7 +93,7 @@ func (PrePush) Examples() []sparkwing.Example {
 }
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run)
+	sparkwing.Job(plan, rc.Pipeline, p.run).Timeout(prePushTimeout)
 	return nil
 }
 

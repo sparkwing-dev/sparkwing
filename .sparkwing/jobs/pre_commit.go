@@ -11,10 +11,13 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+const preCommitTimeout = 40 * time.Minute
 
 type PreCommit struct{ sparkwing.Base }
 
@@ -34,7 +37,7 @@ func (PreCommit) Examples() []sparkwing.Example {
 
 func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(float64(preCommitCPUReservation(runtime.NumCPU()))))
-	sparkwing.Job(plan, rc.Pipeline, p)
+	sparkwing.Job(plan, rc.Pipeline, p).Timeout(preCommitTimeout)
 	return nil
 }
 

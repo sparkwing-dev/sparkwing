@@ -83,12 +83,12 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gateContracts := sparkwing.Job(plan, "gate-contracts", &checkContractsJob{RepoDir: repoDir})
 	gateContracts.Needs(clean)
 
-	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
+	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{}).Timeout(preCommitTimeout)
 	gatePreCommit.Needs(clean, gateContracts)
 
 	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
 		return (&PrePush{AllowReleaseLineSelfReplace: true}).run(ctx)
-	})
+	}).Timeout(prePushTimeout)
 	gatePrePush.Needs(clean, gatePreCommit)
 
 	gateTemplates := sparkwing.Job(plan, "gate-template-verify", func(ctx context.Context) error {
