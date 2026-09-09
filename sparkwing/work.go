@@ -300,7 +300,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 // compute.
 //
 // The returned *SpawnSpec accepts .Needs to declare which Steps must
-// complete before the spawn fires, and .Get(ctx) for typed output.
+// complete before the spawn fires.
 //
 // Accepts the same argument shapes as sparkwing.Job's third arg
 // (Workable struct or func(ctx) error closure).
@@ -406,11 +406,8 @@ func validateSpawnEach(items, fn any) {
 	}
 }
 
-// CoerceSpawnEachJob normalizes the second-return of a JobSpawnEach
-// per-item callback into a Workable. Mirrors coerceJobArg for the
-// fan-out case so closure-form jobs work uniformly without an
-// explicit wrapper. Exported so the orchestrator's template
-// materializer can apply the same shape rules at dispatch time.
+// CoerceSpawnEachJob converts a JobSpawnEach callback result into a Workable.
+// It accepts Workable values and func(context.Context) error closures.
 func CoerceSpawnEachJob(v any) (Workable, error) {
 	switch j := v.(type) {
 	case Workable:
@@ -433,14 +430,8 @@ func coerceSpawnEachJob(v any) Workable {
 	return job
 }
 
-// WorkStep is one unit of work inside a [Work]. Steps are not Jobs;
-// they run inside the Job's runner process and share its filesystem,
-// environment, and ctx. Returned by [Step]; modifier methods
-// ([WorkStep.Needs], [WorkStep.SkipIf], [WorkStep.Risk],
-// [WorkStep.DryRun], [WorkStep.SafeWithoutDryRun]) chain off it.
-// Plan-layer modifiers (Retry, Timeout, OnFailure, Cache, Requires,
-// BeforeRun / AfterRun) are deliberately absent here -- promote to a
-// Job via [JobSpawn] if you need them.
+// WorkStep is one unit of work inside a [Work]. Steps share the Job runner's
+// process, filesystem, environment, and context. Register them with [Step].
 type WorkStep struct {
 	id              string
 	fn              func(ctx context.Context) (any, error)
@@ -675,8 +666,6 @@ func (g *StepGroup) Members() []*WorkStep {
 //	    sw.Step(w, "vet",     j.vet).Needs(fetch),
 //	)
 //	return sw.Step(w, "deploy", j.deploy).Needs(checks), nil
-//
-// The mirror of sparkwing.GroupJobs at the Work layer.
 func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup {
 	if w == nil {
 		panic("sparkwing: GroupSteps: w must be non-nil")

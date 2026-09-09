@@ -27,21 +27,21 @@ import (
 //	)
 func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error) {
 	var zero Out
-	cfg := awaitConfig{}
+	configuration := awaitConfig{}
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(&configuration)
 	}
-	aw := pipelineAwaiterFromContext(ctx)
-	if aw == nil {
+	awaiter := pipelineAwaiterFromContext(ctx)
+	if awaiter == nil {
 		return zero, errors.New("sparkwing: RunAndAwait: no awaiter installed in context (called outside the orchestrator?)")
 	}
-	resolved, err := aw.Await(ctx, AwaitRequest{
+	resolved, err := awaiter.Await(ctx, AwaitRequest{
 		Pipeline: pipeline,
 		NodeID:   nodeID,
-		Args:     cfg.args,
-		Timeout:  cfg.timeout,
-		Repo:     cfg.repo,
-		Branch:   cfg.branch,
+		Args:     configuration.args,
+		Timeout:  configuration.timeout,
+		Repo:     configuration.repo,
+		Branch:   configuration.branch,
 	})
 	if err != nil {
 		return zero, fmt.Errorf("RunAndAwait(%s/%s): %w", pipeline, nodeID, err)
@@ -49,11 +49,11 @@ func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts
 	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
 		return zero, nil
 	}
-	var out Out
-	if err := json.Unmarshal(resolved.Data, &out); err != nil {
+	var output Out
+	if err := json.Unmarshal(resolved.Data, &output); err != nil {
 		return zero, fmt.Errorf("RunAndAwait(%s/%s): unmarshal from run %s: %w", pipeline, nodeID, resolved.RunID, err)
 	}
-	return out, nil
+	return output, nil
 }
 
 // WithFreshInputs flattens a typed Inputs struct into the underlying

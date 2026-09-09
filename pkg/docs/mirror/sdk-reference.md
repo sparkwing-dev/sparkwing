@@ -1973,7 +1973,7 @@ type Workable interface {
 }
 ```
 
-- `func CoerceSpawnEachJob(v any) (Workable, error)` -- CoerceSpawnEachJob normalizes the second-return of a JobSpawnEach per-item callback into a Workable.
+- `func CoerceSpawnEachJob(v any) (Workable, error)` -- CoerceSpawnEachJob converts a JobSpawnEach callback result into a Workable.
 
 ## Constants
 
