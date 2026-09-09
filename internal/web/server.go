@@ -26,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/docsweb"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -605,6 +606,7 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	out := streamhttp.NewWriter(w, 30*time.Second)
 	w.WriteHeader(http.StatusOK)
 
 	format := negotiateLogFormat(r)
@@ -613,7 +615,7 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		for {
 			n, err := body.Read(buf)
 			if n > 0 {
-				if _, werr := w.Write(buf[:n]); werr != nil {
+				if _, werr := out.Write(buf[:n]); werr != nil {
 					return
 				}
 				flusher.Flush()
@@ -624,7 +626,7 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		}
 	}
 
-	streamPrettySSE(body, w, flusher, format)
+	streamPrettySSE(body, out, flusher, format)
 }
 
 func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID string) {
@@ -650,9 +652,10 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	out := streamhttp.NewWriter(w, 30*time.Second)
 	w.WriteHeader(http.StatusOK)
 
-	_, _ = w.Write([]byte(": open\n\n"))
+	_, _ = out.Write([]byte(": open\n\n"))
 	flusher.Flush()
 
 	ctx := r.Context()
@@ -676,7 +679,7 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 		}
 		events = api.PublicEvents(events)
 		for _, ev := range events {
-			if !writeEventSSE(w, ev) {
+			if !writeEventSSE(out, ev) {
 				return
 			}
 			afterSeq = ev.Seq
@@ -687,13 +690,13 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 		}
 
 		if terminal && len(events) == 0 {
-			_, _ = w.Write([]byte("event: stream_end\ndata: {}\n\n"))
+			_, _ = out.Write([]byte("event: stream_end\ndata: {}\n\n"))
 			flusher.Flush()
 			return
 		}
 
 		if time.Since(lastHB) >= heartbeatEvery {
-			if _, werr := w.Write([]byte(": keepalive\n\n")); werr != nil {
+			if _, werr := out.Write([]byte(": keepalive\n\n")); werr != nil {
 				return
 			}
 			flusher.Flush()

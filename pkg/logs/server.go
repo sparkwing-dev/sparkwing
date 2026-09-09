@@ -25,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -1058,8 +1059,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	out := streamhttp.NewWriter(w, 30*time.Second)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, ": open")
+	fmt.Fprintln(out, ": open")
 	flusher.Flush()
 
 	ticker := time.NewTicker(200 * time.Millisecond)
@@ -1074,7 +1076,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
-			if _, err := fmt.Fprintln(w, ": keepalive"); err != nil {
+			if _, err := fmt.Fprintln(out, ": keepalive"); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -1094,7 +1096,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				parts := splitKeepPartial(pending[name] + string(buf))
 				pending[name] = parts.trailing
 				for _, line := range parts.complete {
-					if _, err := fmt.Fprintf(w, "data: %s\n\n", sseEscape(line)); err != nil {
+					if _, err := fmt.Fprintf(out, "data: %s\n\n", sseEscape(line)); err != nil {
 						return
 					}
 					wrote = true
@@ -1411,4 +1413,8 @@ func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }
