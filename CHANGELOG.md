@@ -22,6 +22,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.47.0] - 2026-09-09
 ### Added
 
 - **dashboard:** The DAG tab is shown for every run. A run that ended before
