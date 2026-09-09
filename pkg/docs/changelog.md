@@ -91,7 +91,8 @@ unlock.
   while individual writes retain a timeout
 - **web:** Read-only local consoles reject log append and deletion requests
 - **telemetry:** Initialization preserves the configured logger and log level
-  when OTLP logging is disabled
+  when OTLP logging is disabled, and still returns when no logger was
+  configured
 - **sdk:** Fileset hashes distinguish file boundaries and permissions, and
   report unreadable inputs. Existing hash-derived image tags change once.
 - **cli:** Interrupting a run while it prepares the pipeline binary stops the
