@@ -83,6 +83,19 @@ type Server struct {
 	routeProbeOnce sync.Once
 	routeProbeMux  *http.ServeMux
 	routeProbePub  *http.ServeMux
+
+	localExecution bool
+}
+
+// WithLocalExecution marks this server as a host's own admission daemon or
+// loopback controller, the only place a node executed in the caller's own
+// process can report itself. It is what lets the execution-attempt routes
+// accept an attempt with executor kind "local", which carries no claim
+// identity; a cluster controller leaves it unset, so a runs.write caller
+// cannot forge attribution or ordinals on a node it never ran.
+func (s *Server) WithLocalExecution() *Server {
+	s.localExecution = true
+	return s
 }
 
 // WithAssistedRunScope restricts executor preparation and offers to one

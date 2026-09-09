@@ -3079,6 +3079,10 @@ paths:
                 failure_reason:
                   type: string
                   enum: [unknown, oom_killed, timeout, no_progress_timeout, verify, queue_timeout, logs_auth, logs_dropped]
+                executor_kind:
+                  type: string
+                  enum: [local]
+                  description: Closes an attempt opened for a node its dispatcher ran in its own process, which carries no claim identity. Only a host's own admission daemon or loopback controller accepts it.
       responses:
         "204": {description: Attempt finished. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -3102,9 +3106,10 @@ paths:
       tags: [nodes]
       summary: Start one exact node execution attempt.
       description: |
-        Opens the next attempt-ledger entry under the caller's live claim fence.
-        Repeating the same exact start is idempotent; another identity or
-        ordinal conflicts.
+        Opens the next attempt-ledger entry under the caller's live claim fence,
+        or, with `executor_kind: local`, for a node the calling process runs
+        itself with no claim behind it. Repeating the same exact start is
+        idempotent; another identity or ordinal conflicts.
       requestBody:
         required: true
         content:
@@ -3119,6 +3124,14 @@ paths:
                 reservation_id: {type: string}
                 claim_generation: {type: integer, format: int64, minimum: 1}
                 attempt_ordinal: {type: integer, minimum: 1}
+                executor_kind:
+                  type: string
+                  enum: [local]
+                  description: Opens the attempt for a node its dispatcher runs in its own process. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
+                executor_id:
+                  type: string
+                  maxLength: 128
+                  description: The host a locally executed node ran on. It is the attempt's executor id and its display name.
       responses:
         "204": {description: Attempt started. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}

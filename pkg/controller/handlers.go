@@ -1506,6 +1506,12 @@ func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *stor
 	writeJSON(w, http.StatusOK, nodeForClaimResponse(n))
 }
 
+// safety: only a host's own daemon can vouch for a node run in the caller's
+// process, so every other controller refuses the shape outright rather than
+// letting a runs.write caller invent one.
+var errLocalExecutionUnsupported = errors.New(
+	"local execution attempts are accepted only by a host's own admission daemon")
+
 func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *http.Request) {
 	var body store.ExecutionStart
 	if err := decodeJSON(r, &body); err != nil {
@@ -1513,8 +1519,17 @@ func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *h
 		return
 	}
 	_, triggerClaim := store.TriggerClaimFenceFromContext(r.Context())
-	if body.AttemptOrdinal < 1 || (!triggerClaim && (body.HolderID == "" || body.ClaimGeneration < 1)) {
+	local := body.ExecutorKind == store.ExecutorKindLocal
+	if local && !s.localExecution {
+		writeError(w, http.StatusBadRequest, errLocalExecutionUnsupported)
+		return
+	}
+	if body.AttemptOrdinal < 1 || (!triggerClaim && !local && (body.HolderID == "" || body.ClaimGeneration < 1)) {
 		writeError(w, http.StatusBadRequest, errors.New("attempt_ordinal and an exact execution identity are required"))
+		return
+	}
+	if local && body.ExecutorID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("a local execution attempt requires executor_id"))
 		return
 	}
 	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body)
@@ -1536,7 +1551,12 @@ func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http
 		return
 	}
 	_, triggerClaim := store.TriggerClaimFenceFromContext(r.Context())
-	if body.AttemptOrdinal < 1 || body.Outcome == "" || (!triggerClaim && (body.HolderID == "" || body.ClaimGeneration < 1)) {
+	local := body.ExecutorKind == store.ExecutorKindLocal
+	if local && !s.localExecution {
+		writeError(w, http.StatusBadRequest, errLocalExecutionUnsupported)
+		return
+	}
+	if body.AttemptOrdinal < 1 || body.Outcome == "" || (!triggerClaim && !local && (body.HolderID == "" || body.ClaimGeneration < 1)) {
 		writeError(w, http.StatusBadRequest, errors.New("attempt_ordinal, outcome, and an exact execution identity are required"))
 		return
 	}

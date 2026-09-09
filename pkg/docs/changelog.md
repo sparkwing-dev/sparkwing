@@ -29,6 +29,19 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A node the local orchestrator runs itself is attributed to
+  the host it ran on. The dashboard reported "Location unknown / Executor
+  unknown / Attempt unsequenced" for laptop runs, because an execution attempt
+  was opened only behind an executor claim. A foreground run, a detached
+  consumer run and a cron fire now record an attempt carrying executor kind
+  `local`, the host name, location `local`, and the node's attempt ordinal and
+  outcome. An attempt with no claim behind it is best-effort -- a state backend
+  that refuses it leaves the node running, unattributed -- and spends none of
+  the node's retry budget. The execution-start and execution-finish routes
+  accept `executor_kind: local` with `executor_id` naming the host, and only
+  from a host's own admission daemon or loopback controller
+  (`controller.Server.WithLocalExecution`); a cluster controller refuses the
+  shape, so no `runs.write` caller can attribute a node it never ran.
 - **orchestrator:** Run local jobs whose `WhenRunner` labels match the current OS or architecture
 
 - **local execution:** macOS admission reads available memory from VM page

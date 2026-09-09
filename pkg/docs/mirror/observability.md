@@ -58,7 +58,9 @@ For nodes where the pod disappears entirely (node failure, eviction),
 the controller's heartbeat sweep catches the missed lease and marks the
 node `agent_lost`.
 
-An assisted executor records `execution_attempts` on the node. Each entry has
+An assisted executor records `execution_attempts` on the node, and so does the
+local orchestrator for a node it runs itself: those entries carry executor kind
+`local`, location `local`, and the host name as the executor. Each entry has
 the global attempt ordinal, source or retry run, executor
 name and kind, controller-owned location, timestamps, outcome, failure reason,
 and retry link. Missing legacy attribution remains unknown. Node read responses

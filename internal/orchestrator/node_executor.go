@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
@@ -32,6 +33,30 @@ type executionStartAcknowledger interface {
 	AcknowledgeNodeExecutionStart(context.Context, string, string, store.ExecutionStart) error
 	FinishNodeExecutionAttempt(context.Context, string, string, store.ExecutionAttemptFinish) error
 }
+
+type localExecutionKey struct{}
+
+// safety: a node the local orchestrator runs itself -- in the dispatcher, or
+// in the child process it spawns -- has no claim to attribute its execution
+// attempt to, so the process that decided to run it here says so instead.
+func withLocalExecution(ctx context.Context) context.Context {
+	return context.WithValue(ctx, localExecutionKey{}, true)
+}
+
+func localExecutionMarked(ctx context.Context) bool {
+	marked, _ := ctx.Value(localExecutionKey{}).(bool)
+	return marked
+}
+
+// safety: an unreadable or blank host name must still yield one stable
+// executor id, or every attempt reports a different executor.
+var localExecutorHost = sync.OnceValue(func() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		return "localhost"
+	}
+	return strings.TrimSpace(host)
+})
 
 type NodeExecutor struct {
 	backends Backends
@@ -311,6 +336,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	var claimFence store.NodeClaimFence
 	var triggerFence store.TriggerClaimFence
 	var attemptRecorder executionStartAcknowledger
+	var localExecutor string
 	if _, claimed := nodeClaimHolder(ctx); claimed {
 		var ok bool
 		claimFence, ok = store.NodeClaimFenceFromContext(ctx)
@@ -321,14 +347,29 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		if !ok {
 			return nil, errors.New("claimed node backend does not support execution-attempt acknowledgement")
 		}
-	} else if fence, triggerOwned := store.TriggerClaimFenceFromContext(ctx); triggerOwned {
-		triggerFence = fence
-		var ok bool
-		attemptRecorder, ok = r.backends.State.(executionStartAcknowledger)
-		if !ok {
-			return nil, errors.New("trigger-owned node backend does not support execution-attempt acknowledgement")
+	} else {
+		fence, triggerOwned := store.TriggerClaimFenceFromContext(ctx)
+		if triggerOwned {
+			triggerFence = fence
+		}
+		if r.backends.LocalCoordination || localExecutionMarked(ctx) {
+			localExecutor = localExecutorHost()
+		}
+		if triggerOwned || localExecutor != "" {
+			recorder, ok := r.backends.State.(executionStartAcknowledger)
+			if !ok && triggerOwned {
+				return nil, errors.New("trigger-owned node backend does not support execution-attempt acknowledgement")
+			}
+			if !ok {
+				return nil, errors.New("locally executed node backend does not support execution-attempt acknowledgement")
+			}
+			attemptRecorder = recorder
 		}
 	}
+	// safety: a trigger-owned attempt is metered and fenced by the claim it
+	// runs under; only an attempt with no claim at all is this process's own
+	// to sequence and to give up on.
+	localOnly := localExecutor != "" && triggerFence.ClaimGeneration == 0
 	consumed := 0
 	stored, err := r.backends.State.GetNode(ctx, runID, node.ID())
 	if err == nil {
@@ -336,6 +377,11 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		if consumed >= invocationBudget {
 			return nil, fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), invocationBudget)
 		}
+	} else if localOnly && errors.Is(err, store.ErrNotFound) {
+		// safety: with no node row there is nothing to sequence an attempt
+		// against, so the node runs unattributed rather than failing.
+		localExecutor = ""
+		attemptRecorder = nil
 	} else if attemptRecorder != nil || !errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("read execution attempt budget: %w", err)
 	}
@@ -421,11 +467,27 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 					AttemptOrdinal:  ordinal,
 				}
 			}
-			if err := attemptRecorder.AcknowledgeNodeExecutionStart(attemptCtx, runID, node.ID(), start); err != nil {
-				for i := len(cancels) - 1; i >= 0; i-- {
-					cancels[i]()
+			if localExecutor != "" {
+				if localOnly {
+					start = store.ExecutionStart{AttemptOrdinal: ordinal}
 				}
-				return nil, fmt.Errorf("acknowledge execution attempt %d: %w", ordinal, err)
+				start.ExecutorKind = store.ExecutorKindLocal
+				start.ExecutorID = localExecutor
+			}
+			if err := attemptRecorder.AcknowledgeNodeExecutionStart(attemptCtx, runID, node.ID(), start); err != nil {
+				// safety: an unclaimed local attempt is attribution, not a
+				// fence, and the state backend may predate it, so the node runs
+				// on unattributed rather than failing over a display record.
+				if localOnly {
+					sparkwing.Debug(nodeCtx, "local execution attempt %d not recorded: %v", ordinal, err)
+					localExecutor = ""
+					attemptRecorder = nil
+				} else {
+					for i := len(cancels) - 1; i >= 0; i-- {
+						cancels[i]()
+					}
+					return nil, fmt.Errorf("acknowledge execution attempt %d: %w", ordinal, err)
+				}
 			}
 		}
 		out, aerr := runJobBody(attemptCtx, node)
@@ -494,8 +556,17 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 				finish.ReservationID = ""
 				finish.ClaimGeneration = triggerFence.ClaimGeneration
 			}
+			if localOnly {
+				finish = store.ExecutionAttemptFinish{
+					AttemptOrdinal: ordinal, Outcome: outcome, FailureReason: failureReason,
+					ExecutorKind: store.ExecutorKindLocal,
+				}
+			}
 			if err := attemptRecorder.FinishNodeExecutionAttempt(context.WithoutCancel(ctx), runID, node.ID(), finish); err != nil {
-				return nil, fmt.Errorf("finish execution attempt %d: %w", ordinal, err)
+				if !localOnly {
+					return nil, fmt.Errorf("finish execution attempt %d: %w", ordinal, err)
+				}
+				sparkwing.Debug(nodeCtx, "local execution attempt %d not closed: %v", ordinal, err)
 			}
 		}
 		if logFlushErr != nil {

@@ -40,6 +40,12 @@ const (
 	executorLocationCoordinator = "coordinator"
 )
 
+// ExecutorKindLocal is the executor kind of a node its dispatcher runs in
+// its own process. No executor membership is enrolled for it: the process
+// that built the plan runs the node body, so the execution attempt is
+// attributed to the host it ran on rather than to a claimed executor.
+const ExecutorKindLocal = "local"
+
 // ExecutorResource is a CPU and memory capacity or charge.
 type ExecutorResource struct {
 	Cores       float64 `json:"cores" yaml:"cores"`

@@ -14,6 +14,14 @@ type ExecutionStart struct {
 	ReservationID   string `json:"reservation_id,omitempty"`
 	ClaimGeneration int64  `json:"claim_generation"`
 	AttemptOrdinal  int    `json:"attempt_ordinal"`
+	// ExecutorKind is [ExecutorKindLocal] when the dispatcher runs the node
+	// in its own process, which has no claim identity to carry. Every other
+	// value is ignored: a claimed attempt takes its attribution from the
+	// executor that won the node.
+	ExecutorKind string `json:"executor_kind,omitempty"`
+	// ExecutorID names the host the node ran on, and is required alongside a
+	// local ExecutorKind.
+	ExecutorID string `json:"executor_id,omitempty"`
 }
 
 type ExecutionAttemptFinish struct {
@@ -24,6 +32,9 @@ type ExecutionAttemptFinish struct {
 	AttemptOrdinal  int    `json:"attempt_ordinal"`
 	Outcome         string `json:"outcome"`
 	FailureReason   string `json:"failure_reason,omitempty"`
+	// ExecutorKind closes the attempt [ExecutionStart] opened with the same
+	// kind, and must be [ExecutorKindLocal] for a locally executed node.
+	ExecutorKind string `json:"executor_kind,omitempty"`
 }
 
 type ExecutionAttempt struct {
@@ -62,7 +73,10 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 		if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 			return ErrLockHeld
 		}
-		return s.acknowledgeTriggerExecutionStart(ctx, runID, nodeID, triggerFence, start.AttemptOrdinal)
+		return s.acknowledgeTriggerExecutionStart(ctx, runID, nodeID, triggerFence, start)
+	}
+	if start.ExecutorKind == ExecutorKindLocal {
+		return s.startLocalNodeExecutionAttempt(ctx, runID, nodeID, start.ExecutorID, start.AttemptOrdinal)
 	}
 	if start.HolderID == "" || start.ClaimGeneration < 1 || start.AttemptOrdinal < 1 {
 		return ErrLockHeld
@@ -161,9 +175,17 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return tx.Commit()
 }
 
-func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int) error {
+func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, start ExecutionStart) error {
+	ordinal := start.AttemptOrdinal
 	if ordinal < 1 || fence.ClaimGeneration < 1 {
 		return ErrLockHeld
+	}
+	localExecutor := ""
+	if start.ExecutorKind == ExecutorKindLocal {
+		if start.ExecutorID == "" || len(start.ExecutorID) > maxLocalExecutorIDLen {
+			return ErrLockHeld
+		}
+		localExecutor = start.ExecutorID
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -196,6 +218,10 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 	if location != "local" && location != "cloud" {
 		location = "unknown"
 	}
+	kind, executorName := "", ""
+	if localExecutor != "" {
+		kind, executorName, location = ExecutorKindLocal, localExecutor, executorLocationLocal
+	}
 	holder := "trigger:" + coordinatorID
 	var priorRun, priorCoordinator, priorKind, priorName, priorExecutor, priorLocation, priorHolder string
 	var priorGeneration int64
@@ -207,7 +233,7 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 		&priorKind, &priorName, &priorExecutor, &priorLocation, &priorHolder)
 	if err == nil {
 		if priorRun == runID && priorGeneration == fence.ClaimGeneration &&
-			priorCoordinator == coordinatorID && priorKind == "" && priorName == "" &&
+			priorCoordinator == coordinatorID && priorKind == kind && priorName == executorName &&
 			priorExecutor == coordinatorID && priorLocation == location &&
 			priorHolder == holder && consumed == ordinal {
 			return tx.Commit()
@@ -225,9 +251,9 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
     (lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, ?, ?, '', ?)`,
+VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
 		root, runID, nodeID, ordinal, fence.ClaimGeneration, coordinatorID,
-		coordinatorID, location, holder, now.UnixNano()); err != nil {
+		kind, executorName, coordinatorID, location, holder, now.UnixNano()); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
@@ -243,7 +269,7 @@ VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, ?, ?, '', ?)`,
 		}
 		return ErrLockHeld
 	}
-	event := executionAttributionEventFields("", "", location)
+	event := executionAttributionEventFields(kind, executorName, location)
 	event["attempt"] = ordinal
 	event["claim_generation"] = fence.ClaimGeneration
 	payload, _ := json.Marshal(event)
@@ -259,6 +285,9 @@ func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID st
 			return ErrLockHeld
 		}
 		return s.finishTriggerExecutionAttempt(ctx, runID, nodeID, triggerFence, finish)
+	}
+	if finish.ExecutorKind == ExecutorKindLocal {
+		return s.finishLocalNodeExecutionAttempt(ctx, runID, nodeID, finish)
 	}
 	now := time.Now().UnixNano()
 	tx, err := s.beginTx(ctx)
@@ -338,7 +367,7 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 	err = tx.QueryRowContext(ctx, `SELECT finished_at, outcome, failure_reason
   FROM node_execution_attempts
  WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempt_ordinal = ?
-   AND coordinator_id = ? AND executor_kind = '' AND executor_id = ? AND holder_id = ?`+s.forUpdate(),
+   AND coordinator_id = ? AND executor_id = ? AND holder_id = ?`+s.forUpdate(),
 		runID, nodeID, fence.ClaimGeneration, finish.AttemptOrdinal,
 		coordinatorID, coordinatorID, "trigger:"+coordinatorID).Scan(
 		&finished, &outcome, &failureReason)
@@ -374,6 +403,186 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 		"outcome": finish.Outcome, "failure_reason": finish.FailureReason,
 	})
 	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", payload, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// safety: an in-process dispatcher's attempts must be distinguishable from
+// the trigger-owned ones a coordinator opens for a remote executor, because
+// only the holder identity tells the two finish paths apart.
+const localAttemptHolderPrefix = "local:"
+
+// safety: the id is written to two columns and read back on every finish, so
+// an unbounded one from the wire would be stored unbounded.
+const maxLocalExecutorIDLen = 128
+
+func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeID, executorID string, ordinal int) (err error) {
+	if ordinal < 1 || executorID == "" || len(executorID) > maxLocalExecutorIDLen {
+		return ErrLockHeld
+	}
+	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
+		return ErrLockHeld
+	}
+	var generation int64
+	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
+		generation = fence.ClaimGeneration
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+		return err
+	}
+	var root, status, outcome, claimed string
+	if err := tx.QueryRowContext(ctx, `SELECT retry_root_run_id, status, outcome,
+       COALESCE(claimed_by, '') FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(),
+		runID, nodeID).Scan(&root, &status, &outcome, &claimed); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return notFound("node", runID+"/"+nodeID)
+		}
+		return err
+	}
+	if status == nodeStatusDone || outcome != "" || claimed != "" {
+		return ErrLockHeld
+	}
+	if root == "" {
+		root = runID
+	}
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	holder := localAttemptHolderPrefix + coordinatorID
+	var priorRun, priorCoordinator, priorKind, priorName, priorExecutor, priorLocation, priorHolder string
+	var priorGeneration int64
+	err = tx.QueryRowContext(ctx, `SELECT run_id, claim_generation, coordinator_id,
+       executor_kind, executor_name, executor_id, executor_location, holder_id
+  FROM node_execution_attempts
+ WHERE lineage_root_run_id = ? AND node_id = ? AND attempt_ordinal = ?`,
+		root, nodeID, ordinal).Scan(&priorRun, &priorGeneration, &priorCoordinator,
+		&priorKind, &priorName, &priorExecutor, &priorLocation, &priorHolder)
+	if err == nil {
+		if priorRun == runID && priorGeneration == generation && priorCoordinator == coordinatorID &&
+			priorKind == ExecutorKindLocal && priorName == executorID && priorExecutor == executorID &&
+			priorLocation == executorLocationLocal && priorHolder == holder {
+			return tx.Commit()
+		}
+		return ErrLockHeld
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var recorded int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(attempt_ordinal), 0)
+  FROM node_execution_attempts WHERE lineage_root_run_id = ? AND node_id = ?`,
+		root, nodeID).Scan(&recorded); err != nil {
+		return err
+	}
+	// safety: the caller numbers its own attempts against the node's retry
+	// budget, which can already be part spent, so a new attempt only has to
+	// come after every attempt recorded -- not immediately after it.
+	if ordinal <= recorded {
+		return ErrLockHeld
+	}
+	now := time.Now()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO node_execution_attempts
+    (lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
+     coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
+     holder_id, reservation_id, started_at)
+VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
+		root, runID, nodeID, ordinal, generation, coordinatorID,
+		ExecutorKindLocal, executorID, executorID, executorLocationLocal,
+		holder, now.UnixNano()); err != nil {
+		return err
+	}
+	// safety: a local attempt records where the node ran, and must not spend
+	// the retry budget the claimed paths meter with attempts_consumed: a
+	// bounced node's replacement process would find that budget gone.
+	res, err := tx.ExecContext(ctx, `UPDATE nodes
+   SET execution_started_at = COALESCE(execution_started_at, ?)
+ WHERE run_id = ? AND node_id = ?`, now.UnixNano(), runID, nodeID)
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrLockHeld
+	}
+	event := executionAttributionEventFields(ExecutorKindLocal, executorID, executorLocationLocal)
+	event["attempt"] = ordinal
+	event["claim_generation"] = generation
+	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_started", event, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish ExecutionAttemptFinish) (err error) {
+	if finish.AttemptOrdinal < 1 {
+		return ErrLockHeld
+	}
+	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
+		return ErrLockHeld
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+		return err
+	}
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var finished sql.NullInt64
+	var outcome, failureReason string
+	err = tx.QueryRowContext(ctx, `SELECT finished_at, outcome, failure_reason
+  FROM node_execution_attempts
+ WHERE run_id = ? AND node_id = ? AND attempt_ordinal = ?
+   AND coordinator_id = ? AND executor_kind = ? AND holder_id = ?`+s.forUpdate(),
+		runID, nodeID, finish.AttemptOrdinal, coordinatorID, ExecutorKindLocal,
+		localAttemptHolderPrefix+coordinatorID).Scan(&finished, &outcome, &failureReason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrLockHeld
+	}
+	if err != nil {
+		return err
+	}
+	if finished.Valid {
+		if outcome == finish.Outcome && failureReason == finish.FailureReason {
+			return tx.Commit()
+		}
+		return ErrLockHeld
+	}
+	now := time.Now()
+	res, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
+   SET finished_at = ?, outcome = ?, failure_reason = ?
+ WHERE run_id = ? AND node_id = ? AND attempt_ordinal = ?
+   AND executor_kind = ? AND holder_id = ? AND finished_at IS NULL`,
+		now.UnixNano(), finish.Outcome, finish.FailureReason,
+		runID, nodeID, finish.AttemptOrdinal, ExecutorKindLocal,
+		localAttemptHolderPrefix+coordinatorID)
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrLockHeld
+	}
+	event := map[string]any{
+		"attempt": finish.AttemptOrdinal, "outcome": finish.Outcome,
+		"failure_reason": finish.FailureReason,
+	}
+	if _, err := appendEventTx(ctx, tx, runID, nodeID, "execution_attempt_finished", event, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -431,7 +640,8 @@ func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID
   FROM node_execution_attempts a
   JOIN triggers t ON t.id = a.run_id
 	WHERE a.run_id = ? AND a.node_id = ? AND a.attempt_ordinal = ?
-	  AND a.claim_generation = ? AND a.executor_kind = '' AND a.finished_at IS NULL
+	  AND a.claim_generation = ? AND a.holder_id = 'trigger:' || a.coordinator_id
+	  AND a.finished_at IS NULL
 	  AND t.claim_principal = ? AND t.claim_token_prefix = ?
 	  AND t.claim_seq = ? AND `+triggerClaimLiveSQL("t."), runID, nodeID, ordinal,
 		fence.ClaimGeneration, fence.Claimant.Principal, fence.Claimant.TokenPrefix,

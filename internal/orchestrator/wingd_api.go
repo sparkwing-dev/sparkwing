@@ -318,6 +318,7 @@ func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator)
 		WithArtifactStore(a.artifact).
 		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).
+		WithLocalExecution().
 		Handler()
 }
 

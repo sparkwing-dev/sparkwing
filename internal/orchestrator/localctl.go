@@ -61,6 +61,7 @@ func startLoopbackController(
 	srvHandler := controller.New(st, logger).
 		WithArtifactStore(art).
 		WithAuthenticator(controller.NewAuthenticator(st, loopbackAuthCacheTTL)).
+		WithLocalExecution().
 		Handler()
 
 	url, srv, err := serveLoopback(srvHandler, runID, logger)

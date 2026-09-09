@@ -659,3 +659,63 @@ type getNodeErrorState struct {
 func (s getNodeErrorState) GetNode(context.Context, string, string) (*store.Node, error) {
 	return nil, errors.New("read failed")
 }
+
+func TestTriggerOwnedNodeRecordsLocalAttribution(t *testing.T) {
+	paths := PathsAt(t.TempDir())
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "run-local-attribution", Pipeline: "test", Status: "pending", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := st.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{
+		Claimant: identity, ClaimGeneration: trigger.ClaimSeq,
+	})
+	if err := st.CreateRun(ctx, store.Run{ID: trigger.ID, Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: trigger.ID, NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil })
+	if _, err := NewNodeExecutor(LocalBackends(paths, st, nil)).executeNodeInProcess(ctx, trigger.ID, node, nil); err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := st.ListNodeExecutionAttempts(context.Background(), trigger.ID, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(attempts))
+	}
+	got := attempts[0]
+	if got.ExecutorKind != store.ExecutorKindLocal || got.ExecutorLocation != "local" ||
+		got.ExecutorName != localExecutorHost() {
+		t.Fatalf("attribution = kind %q location %q name %q, want this host running locally",
+			got.ExecutorKind, got.ExecutorLocation, got.ExecutorName)
+	}
+	if got.Outcome != string(sparkwing.Success) {
+		t.Fatalf("outcome = %q, want success", got.Outcome)
+	}
+	stored, err := st.GetNode(context.Background(), trigger.ID, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AttemptsConsumed != 1 {
+		t.Fatalf("attempts_consumed = %d, want 1; a trigger-owned attempt is still metered", stored.AttemptsConsumed)
+	}
+}
