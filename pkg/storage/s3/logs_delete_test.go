@@ -2,11 +2,12 @@ package s3
 
 import (
 	"context"
+	"strings"
+	"testing"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"strings"
-	"testing"
 )
 
 type deniedDeleteAPI struct{ API }

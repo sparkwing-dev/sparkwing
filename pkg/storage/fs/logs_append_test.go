@@ -3,9 +3,10 @@ package fs
 import (
 	"bytes"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 func TestAppendKeepsRecordsSeparateAcrossStores(t *testing.T) {
