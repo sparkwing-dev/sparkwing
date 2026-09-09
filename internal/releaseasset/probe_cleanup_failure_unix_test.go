@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os/exec"
 	"runtime"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -43,10 +44,18 @@ func TestProbeCleanupFailureStillWaitsForCommand(t *testing.T) {
 		t.Fatal("command leader did not exit")
 	}
 	inspectionError := errors.New("fixture descendant inspection failed")
-	group.SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, inspectionError })
+	terminationError := errors.New("fixture termination inspection failed")
+	inspections := 0
+	group.SetDescendantProbe(func(int, bool, bool) (bool, error) {
+		inspections++
+		if inspections == 1 {
+			return false, inspectionError
+		}
+		return false, terminationError
+	})
 	err = finishProbeProcess(ctx, command, group, command.WaitDelay)
-	if !errors.Is(err, inspectionError) || !errors.Is(err, procgroup.ErrCleanup) {
-		t.Fatalf("probe error = %v, want inspection and cleanup causes", err)
+	if !errors.Is(err, inspectionError) || !errors.Is(err, terminationError) || !errors.Is(err, procgroup.ErrCleanup) {
+		t.Fatalf("probe error = %v, want finish and termination inspection causes", err)
 	}
 	if command.ProcessState == nil {
 		t.Error("probe returned without waiting for its command")
@@ -117,5 +126,57 @@ func TestProbeNonzeroExitPreservesWaitResult(t *testing.T) {
 	}
 	if command.ProcessState == nil {
 		t.Fatal("probe returned without waiting for the failed command")
+	}
+}
+
+func TestTerminalProbeDisposalPreservesDelayedObserverFailure(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "/bin/sleep", "30")
+	command.WaitDelay = 100 * time.Millisecond
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	observing := make(chan struct{})
+	releaseObserver := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseObserver) }) }
+	finished := make(chan struct{})
+	var disposalError error
+	go func() {
+		disposalError = disposeProbeProcess(command, func() error {
+			close(observing)
+			<-releaseObserver
+			return syscall.EIO
+		})
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		release()
+		<-finished
+	})
+	select {
+	case <-observing:
+	case <-finished:
+		t.Fatal("terminal disposal skipped the leader observer")
+	case <-ctx.Done():
+		t.Fatal("terminal disposal did not reach the leader observer")
+	}
+	release()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("terminal disposal did not finish after observer completion")
+	}
+	if !errors.Is(disposalError, syscall.EIO) {
+		t.Errorf("disposal error = %v, want observer I/O failure", disposalError)
+	}
+	var exitError *exec.ExitError
+	if !errors.As(disposalError, &exitError) {
+		t.Errorf("disposal error = %v, want native command exit failure", disposalError)
+	}
+	if command.ProcessState == nil {
+		t.Error("terminal disposal returned without waiting for the command")
 	}
 }
