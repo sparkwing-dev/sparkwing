@@ -48,6 +48,10 @@ unlock.
   when OTLP logging is disabled
 - **sdk:** Fileset hashes distinguish file boundaries and permissions, and
   report unreadable inputs. Existing hash-derived image tags change once.
+- **cli:** Interrupting a run while it prepares the pipeline binary stops the
+  toolchain. `go build` and the compilers and linker it spawned end with the
+  CLI instead of compiling on without it. Where a platform cannot own a
+  process group, cancellation reaches the `go` process alone.
 
 ### Removed
 
