@@ -24,6 +24,9 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **dashboard:** The DAG tab is shown for every run. A run that ended before
+  its pipeline planned any nodes gets an empty canvas that says so and carries
+  the run's error, instead of no tab at all.
 - **dashboard:** A Crons tab lists this host's armed pipeline schedules with a
   health banner for the OS timer and the last tick, and a detail pane carrying
   a schedule's recent fires -- each with the status of the run it launched --
@@ -40,7 +43,7 @@ code change to unlock.
   instants pruned to the newest 200 per schedule. The migration is additive
   -- it declares no schema requirement and alters no existing table -- so a
   binary built before it keeps opening and writing the same database. See
-  the [migration note](docs/migrations/_unreleased.md#scheduled-pipelines-and-runs-store-schema-32).
+  the [migration note](docs/migrations/v0.47.0.md#scheduled-pipelines-and-runs-store-schema-32).
 
 - **cli:** `sparkwing crons` runs a pipeline's declared `on.schedule` cadence
   from the machine you arm. `crons install` records a repository's schedules
@@ -75,16 +78,22 @@ code change to unlock.
   `*pipelines.ScheduleTrigger`: read `t.Schedule.Cron` where you read
   `t.Schedule`, and test `t.Schedule != nil` where you tested `!= ""`. See
   the [migration
-  guide](docs/migrations/_unreleased.md#onschedule-takes-a-mapping).
-
-### Changed
+  guide](docs/migrations/v0.47.0.md#onschedule-takes-a-mapping).
 
 - **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
   Key errors, panics, empty keys, and expired resolution deadlines fail
   before dispatch. Return `NoCache, nil` to bypass memoization explicitly.
   Input helpers propagate filesystem and Git failures; `inputs.Compose`
   propagates errors and explicit bypasses. See the
-  [migration guide](docs/migrations/_unreleased.md#cache-key-callbacks-return-errors).
+  [migration guide](docs/migrations/v0.47.0.md#cache-key-callbacks-return-errors).
+
+### Fixed
+
+- **consumer:** A detached run whose pipeline process exits before planning
+  now records the last lines the process wrote to stderr in the run's error,
+  so "child exec: exit status 1" names its reason (an admission daemon of
+  another build, a missing toolchain) where a person reads it.
+
 
 ## [v0.46.0] - 2026-09-09
 ### Changed
