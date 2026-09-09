@@ -164,12 +164,16 @@ func (s *LogStore) DeleteRun(ctx context.Context, runID string) error {
 		for _, k := range keys[start:end] {
 			objs = append(objs, s3types.ObjectIdentifier{Key: aws.String(k)})
 		}
-		_, err := s.Client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		out, err := s.Client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 			Bucket: aws.String(s.Bucket),
 			Delete: &s3types.Delete{Objects: objs, Quiet: aws.Bool(true)},
 		})
 		if err != nil {
 			return fmt.Errorf("s3 logs delete-run %s: %w", runID, err)
+		}
+		if len(out.Errors) > 0 {
+			failure := out.Errors[0]
+			return fmt.Errorf("s3 logs delete-run %s: %d object(s) failed; %s: %s (%s)", runID, len(out.Errors), aws.ToString(failure.Key), aws.ToString(failure.Code), aws.ToString(failure.Message))
 		}
 	}
 	return nil

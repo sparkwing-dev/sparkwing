@@ -3,12 +3,15 @@ package otelutil
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -171,5 +174,63 @@ func TestInitPreservesConfiguredLogging(t *testing.T) {
 	slog.Debug("after-init")
 	if !strings.Contains(output.String(), `"level":"DEBUG","msg":"after-init"`) {
 		t.Fatalf("configured JSON/debug handler lost: %q", output.String())
+	}
+}
+
+type startupLogHandler struct {
+	slog.Handler
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (h *startupLogHandler) Handle(ctx context.Context, rec slog.Record) error {
+	if rec.Message == "otel: logs enabled (OTLP + slog bridge)" {
+		h.once.Do(func() { close(h.ready) })
+	}
+	return h.Handler.Handle(ctx, rec)
+}
+
+func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"} {
+		t.Setenv(key, "")
+	}
+	var mu sync.Mutex
+	var exported []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		exported = append(exported, body...)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", server.URL)
+	old := slog.Default()
+	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+	handler := &startupLogHandler{Handler: slog.NewTextHandler(io.Discard, nil), ready: make(chan struct{})}
+	slog.SetDefault(slog.New(handler))
+	telemetry := Init(t.Context(), Config{ServiceName: "shutdown-test"})
+	t.Cleanup(func() {
+		select {
+		case <-handler.ready:
+		case <-time.After(time.Second):
+			t.Error("log initialization did not finish")
+		}
+		if err := telemetry.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	slog.Info("last-before-shutdown")
+	if err := telemetry.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !bytes.Contains(exported, []byte("last-before-shutdown")) {
+		t.Error("shutdown lost the final OTLP log")
 	}
 }

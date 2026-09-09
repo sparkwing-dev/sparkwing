@@ -154,6 +154,47 @@ if [ ! -f "$fixture/pkg/docs/mirror/index.md" ]; then
   echo "check-changelog-test: sync-docs did not anchor on its own location" >&2
   exit 1
 fi
+
+stamp="$fixture/sync-stamp"
+touch -t 200001010000 "$stamp"
+for path in "$fixture/pkg/docs/mirror" "$fixture/pkg/docs/mirror/index.md" "$fixture/pkg/docs/changelog.md"; do
+  touch -r "$stamp" "$path"
+done
+/bin/bash "$fixture/bin/sync-docs.sh" >/dev/null
+for path in "$fixture/pkg/docs/mirror" "$fixture/pkg/docs/mirror/index.md" "$fixture/pkg/docs/changelog.md"; do
+  if [[ "$path" -nt "$stamp" || "$stamp" -nt "$path" ]]; then
+    echo "check-changelog-test: unchanged sync rewrote $path" >&2
+    exit 1
+  fi
+done
+
+printf 'updated docs\n' > "$fixture/docs/index.md"
+mkdir -p "$fixture/docs/nested"
+printf 'new page\n' > "$fixture/docs/nested/new.md"
+printf 'stale page\n' > "$fixture/pkg/docs/mirror/stale.md"
+/bin/bash "$fixture/bin/sync-docs.sh" >/dev/null
+if ! diff -rq "$fixture/docs" "$fixture/pkg/docs/mirror"; then
+  echo "check-changelog-test: sync did not update, add, and remove mirror pages" >&2
+  exit 1
+fi
+if [[ "$fixture/pkg/docs/changelog.md" -nt "$stamp" ]]; then
+  echo "check-changelog-test: docs update rewrote the unchanged changelog" >&2
+  exit 1
+fi
+
+touch -r "$stamp" "$fixture/pkg/docs/mirror/index.md"
+printf '\n- Another change.\n' >> "$fixture/CHANGELOG.md"
+/bin/bash "$fixture/bin/sync-docs.sh" >/dev/null
+if ! cmp -s "$fixture/CHANGELOG.md" "$fixture/pkg/docs/changelog.md"; then
+  echo "check-changelog-test: sync did not update the changelog" >&2
+  exit 1
+fi
+if [[ "$fixture/pkg/docs/mirror/index.md" -nt "$stamp" ]]; then
+  echo "check-changelog-test: changelog update rewrote the unchanged docs" >&2
+  exit 1
+fi
+/bin/bash "$fixture/bin/sync-docs.sh" --check >/dev/null
+
 # Parallel landings all add bullets under [Unreleased]. The union merge driver
 # in .gitattributes has to resolve that without a conflict, and has to keep the
 # embedded mirror byte-identical to the source it is copied from.
