@@ -129,6 +129,8 @@ func IsDirty(ctx context.Context, repoDir string) (bool, error) {
 // ignored files; without, falls back to a filesystem walk with a
 // small skip list. .dockerignore is honored in both modes.
 //
+// Paths, file permissions, and contents contribute to the hash. Unreadable
+// inputs return an error; tracked files absent from disk are omitted.
 // File contents are read from disk (not from the git blob) so
 // staged-but-not-committed changes are reflected in the hash --
 // content addressing keys off the tree the build will actually see.
@@ -162,12 +164,22 @@ func FilesetHash(ctx context.Context, repoDir string) (string, error) {
 		base = "."
 	}
 	for _, f := range keep {
-		data, err := os.ReadFile(filepath.Join(base, f))
-		if err != nil {
+		path := filepath.Join(base, f)
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
 			continue
 		}
-		h.Write([]byte(f))
-		h.Write([]byte{0})
+		if err != nil {
+			return "", fmt.Errorf("fileset hash %s: %w", f, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("fileset hash %s: %w", f, err)
+		}
+		fmt.Fprintf(h, "%d\x00%s\x00%d\x00%d\x00", len(f), f, info.Mode().Perm(), len(data))
 		h.Write(data)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))[:12], nil

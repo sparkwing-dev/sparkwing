@@ -497,3 +497,74 @@ func TestPushTagRejectsEmpty(t *testing.T) {
 		t.Fatalf("PushTag(\"\") = nil, want error")
 	}
 }
+
+func TestFilesetHashFramesFileContents(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	writeFile(t, first, "a", "")
+	writeFile(t, first, "b", "c")
+	writeFile(t, second, "a", "b\x00c")
+	a, err := FilesetHash(t.Context(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := FilesetHash(t.Context(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatalf("different file sets collided: %s", a)
+	}
+}
+func TestFilesetHashIncludesPermissions(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "run.sh", "echo hello")
+	a, err := FilesetHash(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := FilesetHash(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatalf("executable bit did not change hash: %s", a)
+	}
+}
+func TestFilesetHashRejectsUnreadableFiles(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read files without permission")
+	}
+	dir := withRepo(t)
+	writeFile(t, dir, "private", "secret")
+	if err := os.Chmod(filepath.Join(dir, "private"), 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := FilesetHash(t.Context(), dir)
+	if err == nil {
+		t.Fatal("accepted unreadable build input")
+	}
+}
+func TestFilesetHashOmitsDeletedTrackedFiles(t *testing.T) {
+	dir := withRepo(t)
+	writeFile(t, dir, "keep", "content")
+	writeFile(t, dir, "deleted", "gone")
+	runIn(t, dir, "git", "add", ".")
+	if err := os.Remove(filepath.Join(dir, "deleted")); err != nil {
+		t.Fatal(err)
+	}
+	a, err := FilesetHash(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runIn(t, dir, "git", "rm", "--cached", "deleted")
+	b, err := FilesetHash(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Fatalf("index changed hash of identical context: %s != %s", a, b)
+	}
+}
