@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
@@ -509,25 +510,23 @@ func writeSelfModuleSums(ctx context.Context, repoDir, version string) error {
 }
 
 func selfModuleSums(ctx context.Context, repoDir, version string) (string, string, error) {
-	temporaryFile, err := os.CreateTemp("", "sparkwing-release-module-*.zip")
-	if err != nil {
-		return "", "", err
-	}
-	temporaryPath := temporaryFile.Name()
-	defer func() { _ = os.Remove(temporaryPath) }()
-	defer func() { _ = temporaryFile.Close() }()
-
 	moduleZip, err := createSelfModuleZip(ctx, repoDir, version)
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := temporaryFile.Write(moduleZip); err != nil {
+	archive, err := zip.NewReader(bytes.NewReader(moduleZip), int64(len(moduleZip)))
+	if err != nil {
 		return "", "", err
 	}
-	if err := temporaryFile.Close(); err != nil {
-		return "", "", err
+	names := make([]string, 0, len(archive.File))
+	files := make(map[string]*zip.File, len(archive.File))
+	for _, file := range archive.File {
+		names = append(names, file.Name)
+		files[file.Name] = file
 	}
-	zipHash, err := dirhash.HashZip(temporaryPath, dirhash.Hash1)
+	zipHash, err := dirhash.Hash1(names, func(name string) (io.ReadCloser, error) {
+		return files[name].Open()
+	})
 	if err != nil {
 		return "", "", err
 	}

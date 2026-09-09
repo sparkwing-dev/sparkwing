@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,12 +45,16 @@ func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
 	})
 }
 
-func withReleaseScanDirectory(run func(string) error) error {
+func withReleaseScanDirectory(run func(string) error) (resultErr error) {
 	directory, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
 	if err != nil {
 		return fmt.Errorf("create release vulnerability scan directory: %w", err)
 	}
-	defer os.RemoveAll(directory)
+	defer func() {
+		if err := os.RemoveAll(directory); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove release vulnerability scan directory: %w", err))
+		}
+	}()
 	return run(directory)
 }
 

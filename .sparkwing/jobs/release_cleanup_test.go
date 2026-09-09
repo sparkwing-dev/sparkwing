@@ -21,7 +21,7 @@ func TestSelfModuleSumsNeedsNoTemporaryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive := filepath.Join(root, "module.zip")
-	if err := os.WriteFile(archive, data, 0600); err != nil {
+	if err := os.WriteFile(archive, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	want, err := dirhash.HashZip(archive, dirhash.Hash1)
@@ -41,7 +41,7 @@ func TestSelfModuleSumsNeedsNoTemporaryFile(t *testing.T) {
 func TestReleaseScanDirectoryPreservesWorkAndCleanupErrors(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Join(root, "temporary")
-	if err := os.Mkdir(parent, 0700); err != nil {
+	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("TMPDIR", parent)
@@ -53,7 +53,7 @@ func TestReleaseScanDirectoryPreservesWorkAndCleanupErrors(t *testing.T) {
 		if err := os.Remove(parent); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(parent, nil, 0600); err != nil {
+		if err := os.WriteFile(parent, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		return workErr
