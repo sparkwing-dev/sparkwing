@@ -27,3 +27,19 @@ func TestSaveLintCachePreservesDirectoryInspectionFailure(t *testing.T) {
 		t.Fatalf("save error = %v, want ENOTDIR", err)
 	}
 }
+
+func TestSaveLintCacheRejectsDanglingCacheSymlink(t *testing.T) {
+	useWorkDir(t, t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	cache := sparkwing.ToolCacheDir("golangci-lint")
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing-cache", cache); err != nil {
+		t.Fatal(err)
+	}
+	_, err := sparkwing.SaveLintCache(context.Background(), "http://unused.invalid", "")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("save error = %v, want missing symlink target", err)
+	}
+}

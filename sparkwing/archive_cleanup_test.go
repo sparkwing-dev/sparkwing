@@ -61,3 +61,42 @@ func TestExtractionPreservesRequiredMutationFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractionRestoresChildModesBeforeRestrictiveParent(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory search permissions")
+	}
+	destination := t.TempDir()
+	parent := filepath.Join(destination, "parent")
+	t.Cleanup(func() {
+		if err := os.Chmod(parent, 0o700); err != nil {
+			t.Error(err)
+		}
+	})
+	var archive bytes.Buffer
+	writer := tar.NewWriter(&archive)
+	for _, header := range []*tar.Header{
+		{Name: "parent/child", Typeflag: tar.TypeDir, Mode: 0o500},
+		{Name: "parent", Typeflag: tar.TypeDir, Mode: 0},
+	} {
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractTarInRoot(tar.NewReader(&archive), destination, tarExtractPolicy{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(parent, "child"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o500 {
+		t.Fatalf("child mode = %o, want 500", info.Mode().Perm())
+	}
+}
