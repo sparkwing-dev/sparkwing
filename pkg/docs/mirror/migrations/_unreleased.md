@@ -1,9 +1,7 @@
 # Migrating to the next release
 
-Staging ground for the breaking changes sitting in `[Unreleased]`. The
-pre-release manicuring agent moves these sections into
-`docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
-CHANGELOG links here.
+This guide covers breaking changes listed under `[Unreleased]`. At release,
+move the sections into the versioned migration guide and update changelog links.
 
 ## Executor registration and contribution budgets
 
@@ -210,9 +208,6 @@ CHANGELOG links here.
   metric response `metrics` with `points`. Stop sending the removed
   cancellation and step-skip reason fields. Treat the removed component fields
   as unavailable rather than reconstructing private controller identities.
-- **Why:** A public schema must not promise internal identities or fields the
-  handler never accepted or returned. Generated clients otherwise depend on a
-  contract the controller cannot safely satisfy.
 
 ## (Breaking) Two refusals became warnings, and those runs leave `sparkwing runs`
 
@@ -306,7 +301,7 @@ CHANGELOG links here.
 
   ```bash
   SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
-    sparkwing runs submit deploy
+    sparkwing run deploy --sw-detached
   ```
 
   The credential filter still applies to what the list names, so a value that
@@ -318,9 +313,6 @@ CHANGELOG links here.
   Resubmit any run that was queued when a consumer was interrupted: its
   snapshot is gone and the requeued dispatch now fails instead of running with
   the consumer's environment.
-- **Why:** A queued run is a file on disk that outlives the shell that made it.
-  It should not be a copy of every credential that shell happened to export,
-  and losing the snapshot should narrow what a run can reach, not widen it.
 
 ## (Breaking) Clone hosts in inward-only name spaces are refused
 
@@ -438,9 +430,6 @@ CHANGELOG links here.
   migration, because the pre-21 rows are exactly the replayable ids the change
   removes. On PostgreSQL the column drop takes an ACCESS EXCLUSIVE lock on
   `sessions` inside the migration transaction, so run it when the table is idle.
-- **Why:** A copy of the state database, its WAL, or a backup handed the reader
-  a working dashboard session. Storing only the digest, and deriving the CSRF
-  token, means a database reader holds nothing it can replay.
 
 ## The dashboard refuses an unauthenticated remote bind
 
@@ -459,8 +448,6 @@ CHANGELOG links here.
   the API on its own origin, which is also what the new `connect-src 'self'`
   policy allows. The chart no longer renders the flag and `web.apiUrl` is gone
   from `values.yaml`; leaving it set in your own values file does nothing.
-- **Why:** An unauthenticated dashboard holding a service token hands the
-  controller to every caller that can reach the port.
 
 ## The dashboard refuses an insecure-cookie remote bind
 
@@ -477,8 +464,6 @@ CHANGELOG links here.
   the plain-HTTP publication by adding `--allow-insecure-cookies-remote`. The
   chart renders both the flag and the variable whenever
   `ingress.allowInsecure` is on, so a chart-managed deployment needs no change.
-- **Why:** A cookie without `Secure` travels in clear text, and the bind
-  address is the only evidence the process has that nobody else is listening.
 
 ## Cache reads require the bearer token
 
@@ -497,9 +482,6 @@ CHANGELOG links here.
   `Authorization: Bearer <token>`. A cache deliberately left open keeps
   `--allow-unauthenticated` (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`), which
   logs a warning at startup.
-- **Why:** The cache holds the deploy key, mirrored private source, and
-  uncommitted working-tree snapshots. Reaching its Service proves nothing about
-  the caller.
 
 ## Cache Service and NetworkPolicy defaults
 
@@ -566,8 +548,6 @@ CHANGELOG links here.
   local default. If a hook needs shared storage, reinstall it with
   `sparkwing pipeline hooks install --profile NAME`. Existing hook files do not
   change until reinstalled.
-- **Why:** A local Git action should not require an intermittently available
-  controller unless the repository owner opts into that dependency.
 
 ## Pipeline name charset
 
@@ -606,9 +586,6 @@ CHANGELOG links here.
   Then update every caller of the old name: `sparkwing run <name>` in CI jobs,
   scripts, and schedules. Re-run `sparkwing pipeline hooks install` so the
   generated git hooks invoke the renamed pipeline.
-- **Why:** The name reaches generated git hook scripts, argv, log lines, and
-  file paths. A cloned repository could otherwise hand shell execution to
-  anyone who ran the documented hooks install command.
 
 ## Node claims bind to the claiming token
 
@@ -642,11 +619,6 @@ CHANGELOG links here.
   `runs.read` as well if their pipelines resolve cross-pipeline references.
   Claims taken before the upgrade carry no token prefix, so a runner in flight
   during the upgrade loses its lease and the node is requeued.
-- **Why:** Every laptop agent and pool replica holds a runner token, and the
-  documented Helm deployment gives every replica the same one. A token scoped
-  to claim work should not read another repository's deploy credentials, force
-  a node to run before its dependencies finish, or pick how long its own
-  authorization lasts.
 
 ## Dashboard proxy allow-list
 
@@ -670,8 +642,6 @@ CHANGELOG links here.
   accounts keep `admin` until an operator replaces them. Callers of
   `store.CreateUser` and `store.CreateFirstUser` pass the account's scopes as
   a new `[]string` argument before `now`.
-- **Why:** A dashboard login was an admin bearer, so any account that could
-  sign in could read every secret and mint tokens.
 
 ## Secret input hash migration
 
@@ -690,7 +660,6 @@ CHANGELOG links here.
   refuse the upgraded SQL store; object storage has no equivalent schema gate.
   A custom `storage.StateStore` should call `store.ValidateRunInvocation` from
   `CreateRun` and return `store.ErrSecretInputHash` unchanged.
-- **Why:** A deterministic digest is not a safe commitment to a secret value.
 
 ## Dispatch snapshot credentials
 
@@ -709,8 +678,6 @@ CHANGELOG links here.
   `admin` token, or have it read the run's own environment instead. Export a
   credential a rerun needs into the debug shell yourself; the banner names the
   keys the snapshot dropped.
-- **Why:** A read-only token could otherwise lift the runner's admin bearer out
-  of a snapshot.
 
 ## Kubernetes acceptance testing
 
@@ -726,9 +693,6 @@ CHANGELOG links here.
 - **Migration:** Rename `SPARKWING_KIND_E2E_*` variables to
   `SPARKWING_K8S_E2E_*`, remove `SPARKWING_KIND_E2E_PROVISION`, and invoke
   `sparkwing run k8s-e2e` only when the designated test cluster is active.
-- **Why:** Acceptance evidence should come from the Kubernetes environment the
-  product will use, without requiring a memory-heavy local cluster or spending
-  cluster capacity on every source change.
 
 ## Runner ServiceAccount tokens and RBAC
 
@@ -762,9 +726,6 @@ CHANGELOG links here.
   `controller.PoolConfig.WarmerServiceAccount`. On EKS or GKE, a
   trust policy scoped to the old shared account must name the new `-cache` and
   `-logs` accounts before the upgrade.
-- **Why:** Pipeline authors are expected to run code on runners. They are not
-  expected to read the key that decrypts every stored secret or the HMAC that
-  authenticates every webhook.
 
 ## Logs service quotas and bounded search
 
@@ -799,9 +760,6 @@ CHANGELOG links here.
   negative value stops the service at startup instead of quietly restoring the
   default, so check any `SPARKWING_LOGS_*` you already set (`7d` and `64MiB`
   are not accepted; use `168h` and `67108864`).
-- **Why:** Every runner holds a token that may append, and one chatty pipeline
-  could fill the volume for every other run or pin the service on a whole-store
-  scan.
 
 ## Restricted pod security and the published-dashboard guard
 
@@ -863,9 +821,6 @@ CHANGELOG links here.
   `store.FindTriggerByWebhookReplay` resolves a refused delivery to the trigger
   it collided with. `controller.ParseGitHubWebhookConfig` is the parser for the
   environment document, moved out of the controller binary.
-- **Why:** A secret shared by every repository proves only that some holder
-  signed the body, and a replay key the sender picks and nothing signs is not a
-  replay key at all.
 
 ## Service discovery and trigger submission take a closer look
 
@@ -893,12 +848,6 @@ CHANGELOG links here.
   `trigger.source: github` to drive commit statuses needs an `admin`
   token or the webhook. A dashboard or export that asked for more than
   1000 runs, triggers, or events in one request pages instead.
-- **Why:** The announcement names internal cache and logs URLs, the
-  repository URL becomes a clone target on every runner, the trigger
-  environment is served whole to every `triggers.read` principal and is
-  where a local retry reads the repository directory it trusts, and a
-  single unbounded list request loads every run row with its plan and args
-  blobs.
 
 ## Token prefixes are unique
 
@@ -927,5 +876,26 @@ CHANGELOG links here.
   then delete the revoked duplicates, keep the one live row, and upgrade. The
   controller cannot open the database until the prefix is unique, so run the
   query against the file with `sqlite3` or against the server with `psql`.
-- **Why:** Revoke and rotate are the operator's emergency tools, and neither
-  should touch a token other than the one named.
+
+## Cache-key callbacks return errors
+
+`CacheKeyFn` now returns `(CacheKey, error)`. Add `nil` to successful
+returns, and propagate failures from key inputs:
+
+```go
+node.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+    key, err := inputs.RepoFiles()(ctx)
+    if err != nil {
+        return "", err
+    }
+    return sparkwing.Key("example-build", key), nil
+})
+```
+
+Return `sparkwing.NoCache, nil` for an explicit bypass. Replace empty-key
+bypasses with that sentinel; errors, panics, empty keys, and expired
+resolution deadlines now fail the node before dispatch.
+
+The `inputs` helpers return the same two-result callbacks. Update direct
+calls to check their errors. `inputs.Compose` propagates an input error
+and stops at an explicit `NoCache`; it rejects empty input keys.

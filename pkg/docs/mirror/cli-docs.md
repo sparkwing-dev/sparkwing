@@ -8,20 +8,16 @@ Every `sparkwing docs` command, flag, and argument, generated from the CLI's own
 
 Embedded user docs (offline)
 
-The sparkwing docs are shipped inside the binary. `sparkwing docs read --topic getting-started` returns the
-raw markdown to stdout; `sparkwing docs all` dumps every
-doc in one shot for an agent that wants the full corpus in
-context. The docs match the binary version exactly -- no risk of
-the website explaining a flag your CLI doesn't have.
+The docs ship inside this binary and match its version.
+Start with docs search --query <question> for a page of short snippets,
+then docs read --topic <slug> --section <start_line> for one selected hit.
+Docs list pages through topic metadata; --query narrows that index.
+JSON indexes end with a typed page summary and continuation cursor.
 
-Discovery: `sparkwing docs list -o json` returns slug + title +
-summary for every topic. `sparkwing docs search --query pull_request`
-returns the matching sections -- topic, heading, line range -- so a
-narrow question does not cost a whole page.
-
-When one page leaves you a lookup short, `sparkwing docs guides`
-lists task-sized sets of topics; `sparkwing docs read --guide authoring`
-returns the whole set in one call.
+Selected reads return JSON document records when piped. Explicit
+--output plain prints the original Markdown. Use --web and --version
+on list/read when comparing another published version.
+Guides group related topics; all is an explicit exhaustive export.
 
 ### Subcommands
 
@@ -37,10 +33,10 @@ returns the whole set in one call.
 ### Examples
 
 ```sh
-# List all topics (table)
+# List topic metadata
 sparkwing docs list
 
-# List all topics (agent-readable)
+# List topic metadata (agent-readable)
 sparkwing docs list -o json
 
 # Read one topic
@@ -48,9 +44,6 @@ sparkwing docs read --topic pipelines
 
 # Read one topic at a specific version (online)
 sparkwing docs read --topic pipelines --version v0.3.0 --web
-
-# Slurp the whole corpus into context
-sparkwing docs all
 
 # Find docs that mention warm pool
 sparkwing docs search --query "warm pool"
@@ -81,7 +74,7 @@ Reads every embedded document, one JSON record per page when piped.
 ### Examples
 
 ```sh
-# Slurp every doc into context
+# Explicit exhaustive document export
 sparkwing docs all
 ```
 
@@ -188,15 +181,19 @@ sparkwing docs guides -o json
 
 Enumerate every doc topic
 
-Walks the docs corpus and prints one row per topic with its
-slug, first-H1 title, and first-paragraph summary. By default reads
-the binary's embedded copy (hermetic, version-locked); pass --web
-to fetch from sparkwing.dev for another version.
+List topic metadata in lexical slug order, at most 40 rows by default.
+--query matches words in slugs, titles and summaries before pagination.
+JSON ends with a kind:page record; continue with --cursor and the same
+filters. --limit 0 emits every match. Bodies belong to docs read.
+The embedded copy matches this binary; --web reads another version.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `-q, --query TEXT` | Match words in slug, title and summary |
+| `--limit N` | Maximum records; 0 returns every remaining match (default: 40) |
+| `--cursor CURSOR` | Continue after next_cursor with the same filters and binary version |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--version vX.Y.Z` | Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version. |
@@ -212,7 +209,7 @@ sparkwing docs list
 sparkwing docs list -o json
 
 # Slug-per-line for shell loops
-sparkwing docs list -o plain
+sparkwing docs list --limit 0 -o plain
 
 # List the v0.3.0 corpus from sparkwing.dev
 sparkwing docs list --web --version v0.3.0
@@ -371,7 +368,9 @@ sparkwing docs migrations read --version v0.5.0 --web
 
 Read one document
 
-Reads the named topic. Piped output is one JSON document record;
+Reads the named topic, or one embedded section selected by its start_line
+from docs search (--section). Section selection requires --topic and
+cannot combine with --guide or --web. Piped output is one JSON document record;
 --output plain prints raw Markdown. The slug is
 the filename under /docs/ minus .md (run `sparkwing docs list` to
 see them all). Subdirs use slash-separated paths (e.g.
@@ -385,6 +384,7 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 
 | Flag | Description |
 |---|---|
+| `--section START_LINE` | Read one embedded section returned by search |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
 | `--topic NAME` | Doc slug (e.g. getting-started, pipelines, mcp) |
 | `--guide NAME` | Read a task-sized set of topics instead of one (`sparkwing docs guides`) |
@@ -415,23 +415,22 @@ sparkwing docs read --topic pipelines --version latest --web
 
 Find the section that answers a question
 
-Returns the doc sections containing every space-separated
-token in --query (case-insensitive), best first: a heading hit outranks
-a body hit, and a shorter section outranks a longer one holding the same
-match. Each result names its topic, heading, and line range.
+Find matching sections, ranked before pagination. Every query word must
+match; heading matches rank ahead of body matches. The default page has
+20 hits with topic, heading, line range and a short snippet, never bodies.
+JSON ends with a kind:page record; --cursor continues the same query.
+--limit 0 returns all matches. Use the same binary for continuation.
 
-Sections rather than whole topics because the reference pages run to
-tens of thousands of tokens, and the question is usually narrow -- what
-a `pull_request` trigger looks like, what fields `ApprovalConfig` has.
-Add --body to print the matching sections in full.
-
---topics restores the old behavior, listing whole matching topics in the
-same shape as `sparkwing docs list`.
+Read one hit with docs read --topic <slug> --section <start_line>.
+--body explicitly includes full bodies for this page. --topics lists
+matching topic metadata instead of sections.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--limit N` | Maximum records; 0 returns every remaining match (default: 20) |
+| `--cursor CURSOR` | Continue after next_cursor with the same filters and binary version |
 | `-q, --query TEXT` | Search terms (every token must match) (required) |
 | `--body` | Print each matching section in full instead of a snippet |
 | `--topics` | List whole matching topics instead of sections |
@@ -446,10 +445,10 @@ sparkwing docs search --query pull_request
 # Read the matching sections in full
 sparkwing docs search -q ApprovalConfig --body
 
-# JSON for agents (topic, heading, line range, body)
+# Compact snippets for agents
 sparkwing docs search -q approval -o json
 
-# Whole topics, as before
+# Matching topic metadata
 sparkwing docs search -q "warm pool" --topics
 ```
 

@@ -305,6 +305,7 @@ Lists every managed hook file under .git/hooks/ along with the pipelines it invo
 
 | Flag | Description |
 |---|---|
+| `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints hook names. |
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 
 ### Examples

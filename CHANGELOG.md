@@ -23,6 +23,35 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
+  Key errors, panics, empty keys, and expired resolution deadlines fail
+  before dispatch. Return `NoCache, nil` to bypass memoization explicitly.
+  Input helpers propagate filesystem and Git failures; `inputs.Compose`
+  propagates errors and explicit bypasses. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-key-callbacks-return-errors).
+
+## [v0.46.0] - 2026-09-09
+### Changed
+
+- **cli (Breaking):** Dashboard and consumer lifecycle commands emit compact
+  JSON when piped. `pipeline hooks status` emits hook records and a summary.
+  `--output pretty` keeps the readable report; plain mode prints a service
+  state or hook names. Status exit codes are unchanged. See the
+  [migration guide](docs/migrations/v0.46.0.md#lifecycle-output).
+
+- **cli (Breaking):** Discovery and report commands default to compact JSON when piped.
+  Explicit `--output pretty|json|plain` wins over terminal detection. Help,
+  docs, agent cards and completion scripts carry typed text records in JSON.
+  Use `completion --shell SHELL --output plain` when sourcing a script, and
+  `commands --format markdown --output plain` to export Markdown. Cache
+  reports expose fields directly and report failures only on stderr.
+  See the [migration guide](docs/migrations/v0.46.0.md#discovery-and-report-output)
+  and the [CLI output reference](docs/cli.md#output).
+- **cli (Breaking):** Command and documentation indexes now default to bounded pages, with native query filters and a typed continuation record. Documentation search returns snippets unless bodies are requested; selected sections are readable with `docs read --topic <slug> --section <start_line>`. Use `--limit 0` for exhaustive indexes. See the [migration guide](docs/migrations/v0.46.0.md#bounded-discovery).
+
+
 ### Added
 
 - **runtime + cli:** Every step command a run starts is recorded in a ledger
@@ -90,25 +119,8 @@ code change to unlock.
   the same reasons as before. See the [migration
   guide](docs/migrations/v0.46.0.md#runs-submit-becomes-run---sw-detached).
 
-### Changed
-
-- **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
-  Key errors, panics, empty keys, and expired resolution deadlines fail
-  before dispatch. Return `NoCache, nil` to bypass memoization explicitly.
-  Input helpers propagate filesystem and Git failures; `inputs.Compose`
-  propagates errors and explicit bypasses. See the
-  [migration guide](docs/migrations/v0.46.0.md#cache-key-callbacks-return-errors).
-
 ## [v0.45.0] - 2026-09-08
 ### Changed
-
-- **cli (Breaking):** Discovery and report commands default to compact JSON when piped
-  Explicit `--output pretty|json|plain` wins over terminal detection. Help,
-  docs, agent cards and completion scripts carry typed text records in JSON.
-  Use `completion --shell SHELL --output plain` when sourcing a script, and
-  `commands --format markdown --output plain` to export Markdown. Cache
-  reports expose fields directly and report failures only on stderr.
-  See [CLI output migration](docs/cli.md#output).
 
 - **cli:** the pretty run renderer no longer colors node names red, orange,
   or yellow. Those hues mark failures, retries, and approval prompts, so a

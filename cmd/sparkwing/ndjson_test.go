@@ -61,6 +61,9 @@ func TestCommandsJSONHonorsPathFilter(t *testing.T) {
 		t.Fatal("--path docs -o json returned no records")
 	}
 	for _, c := range records {
+		if c.Path == "" {
+			continue
+		}
 		if !strings.HasPrefix(c.Path, "sparkwing docs") {
 			t.Errorf("--path docs leaked %q", c.Path)
 		}

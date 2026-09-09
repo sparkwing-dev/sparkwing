@@ -281,6 +281,12 @@ sparkwing runs consumer start    # keep one up deliberately
 sparkwing runs consumer stop     # queued runs stay queued
 ```
 
+Consumer lifecycle commands emit one compact JSON status record when piped:
+`service`, `state`, `home`, `log`, and `pid` when known. `--output plain`
+prints only `running` or `stopped`. `--output pretty` requests the terminal
+layout. A stopped status exits 1; stopping an absent consumer exits 0.
+
+
 Recovery is automatic in both directions. Work queued while no consumer
 is resident runs as soon as one comes back. A run whose consumer was
 killed mid-dispatch stops having its claim renewed, and the next
