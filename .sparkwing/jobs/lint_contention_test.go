@@ -30,7 +30,7 @@ func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
 
 	withBudget := lintCommandFor(true)
 	if !strings.Contains(withBudget, "--allow-parallel-runners") {
-		t.Fatalf("lint kept the serializing lock while holding a budget, so the budget buys nothing: %s", withBudget)
+		t.Fatalf("lint kept the serializing lock while holding a budget: %s", withBudget)
 	}
 	if strings.Contains(withBudget, "--allow-serial-runners") {
 		t.Fatalf("lint passed both runner flags: %s", withBudget)
@@ -98,8 +98,8 @@ func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
 func TestDescribeLintFailureOnAnExpiredWaitReportsTheWaitNotACause(t *testing.T) {
 	got := describeLintFailure(expiredContext(t), 7*time.Second, errors.New("command failed (exit 1)"))
 
-	if !strings.Contains(got, "could not run") {
-		t.Fatalf("expired wait did not report could-not-run: %s", got)
+	if !strings.Contains(got, "no result before the deadline") {
+		t.Fatalf("expired wait did not report the deadline: %s", got)
 	}
 	if !strings.Contains(got, "7s") {
 		t.Fatalf("expired wait did not report how long it actually waited: %s", got)
@@ -107,7 +107,7 @@ func TestDescribeLintFailureOnAnExpiredWaitReportsTheWaitNotACause(t *testing.T)
 	if strings.Contains(got, lintLockWait.String()) {
 		t.Fatalf("expired wait quoted the bound rather than the wait it measured: %s", got)
 	}
-	if strings.Contains(got, "That is contention") {
+	if strings.Contains(got, "lock") {
 		t.Fatalf("expired wait asserted a cause it never observed: %s", got)
 	}
 	if strings.Contains(got, "exit 1") {
@@ -124,11 +124,8 @@ func TestDescribeLintFailureNamesContentionFromTheLinterOwnMessage(t *testing.T)
 
 	got := describeLintFailure(context.Background(), time.Second, err)
 
-	if !strings.Contains(got, "could not run") {
-		t.Fatalf("contention signature did not report could-not-run: %s", got)
-	}
-	if !strings.Contains(got, "contention") {
-		t.Fatalf("contention signature did not name contention as the cause: %s", got)
+	if !strings.Contains(got, "another process holds the machine-wide lock") {
+		t.Fatalf("contention diagnostic lost the observed lock: %s", got)
 	}
 }
 
@@ -141,7 +138,7 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 
 	got := describeLintFailure(context.Background(), time.Second, err)
 
-	if strings.Contains(got, "could not run") {
+	if strings.Contains(got, "machine-wide lock") {
 		t.Fatalf("a genuine finding was excused as contention: %s", got)
 	}
 	if !strings.Contains(got, "golangci-lint:") {

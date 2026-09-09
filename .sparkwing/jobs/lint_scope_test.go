@@ -54,7 +54,7 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 			ctx := context.Background()
 
 			if err := runGolangciLint(ctx); err != nil {
-				t.Fatalf("clean fixture must pass lint, or the red below proves nothing: %v", err)
+				t.Fatalf("clean fixture must pass lint: %v", err)
 			}
 
 			bad := filepath.Join(root, dir, "negative_control.go")
@@ -63,7 +63,7 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 
 			err := runGolangciLint(ctx)
 			if err == nil {
-				t.Fatalf("lint passed a finding in %s/, so the step never opened it", dir)
+				t.Fatalf("lint passed a finding in %s/", dir)
 			}
 			if !strings.Contains(err.Error(), "ineffectual assignment") {
 				t.Errorf("lint failed in %s/ for some reason other than the planted finding: %v", dir, err)
@@ -81,7 +81,7 @@ func TestLintStillCoversThePipelineModule(t *testing.T) {
 	gitAddAll(t, root)
 
 	if err := runGolangciLint(ctx); err == nil {
-		t.Fatal("lint passed a finding in .sparkwing/, the one module it used to cover")
+		t.Fatal("lint passed a finding in .sparkwing/")
 	}
 }
 
@@ -109,8 +109,8 @@ func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 		t.Fatal("lint ran without a baseline it could resolve")
 	}
 	got := err.Error()
-	if !strings.Contains(got, "could not run") {
-		t.Errorf("a missing baseline did not report could-not-run: %s", got)
+	if !strings.Contains(got, "cannot resolve baseline") {
+		t.Errorf("a missing baseline did not report resolution failure: %s", got)
 	}
 	if !strings.Contains(got, gateBaselineRef) {
 		t.Errorf("a missing baseline did not name the ref that went missing: %s", got)

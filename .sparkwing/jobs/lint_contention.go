@@ -69,7 +69,7 @@ func runGolangciLint(ctx context.Context) error {
 
 	directories, err := committedModuleDirs(ctx)
 	if err != nil {
-		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
+		return fmt.Errorf("golangci-lint: list modules: %w", err)
 	}
 	baseline, err := resolveLintBaseline(ctx)
 	if err != nil {
@@ -153,9 +153,7 @@ func resolveLintBaseline(ctx context.Context) (string, error) {
 		String()
 	sha = strings.TrimSpace(sha)
 	if err != nil || sha == "" {
-		return "", fmt.Errorf("golangci-lint: could not run -- .golangci.yml baselines findings against "+
-			"%s and this checkout cannot resolve it, so the linter would report every standing "+
-			"finding in the tree against this change. Run `%s`", gateBaselineRef, fetchBaselineHint())
+		return "", fmt.Errorf("golangci-lint: cannot resolve baseline %s; run `%s`", gateBaselineRef, fetchBaselineHint())
 	}
 	if len(sha) > 12 {
 		sha = sha[:12]
@@ -174,13 +172,10 @@ func fetchBaselineHint() string {
 func describeLintFailure(ctx context.Context, waited time.Duration, err error) string {
 	var execErr *sparkwing.ExecError
 	if errors.As(err, &execErr) && strings.Contains(execErr.Stdout+execErr.Stderr, golangciContention) {
-		return "golangci-lint: could not run -- another golangci-lint holds the box-wide " +
-			"lock. That is contention, not a finding in this tree."
+		return "golangci-lint: another process holds the machine-wide lock"
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("golangci-lint: could not run -- no result after %s. Most often "+
-			"that is the box-wide golangci-lint lock held by another run; either way "+
-			"nothing was learned about this tree.", waited.Round(time.Second))
+		return fmt.Sprintf("golangci-lint: no result before the deadline after %s", waited.Round(time.Second))
 	}
 	return fmt.Sprintf("golangci-lint: %v", err)
 }

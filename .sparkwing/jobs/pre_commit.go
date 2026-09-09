@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -463,15 +462,11 @@ func moduleHasNoPackages(ctx context.Context, directory string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	command := exec.CommandContext(ctx, "go", "list", "./...")
-	command.Dir = filepath.Join(root, directory)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
+	output, err := sparkwing.Exec(ctx, "go", "list", "./...").Dir(filepath.Join(root, directory)).Capture()
 	if err != nil {
-		return false, fmt.Errorf("list packages in %s: %w: %s", directory, errors.Join(err, ctx.Err()), strings.TrimSpace(stderr.String()))
+		return false, fmt.Errorf("list packages in %s: %w", directory, errors.Join(err, ctx.Err()))
 	}
-	return strings.TrimSpace(string(output)) == "", nil
+	return strings.TrimSpace(output.Stdout) == "", nil
 }
 
 var trackerIDPattern = regexp.MustCompile(`\b(IMP|SDK|LOCAL|RUN|ORG|REG|TOD)-[0-9]+\b`)
