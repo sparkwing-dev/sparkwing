@@ -12,6 +12,7 @@ Format conventions live in [../changelog-style.md](../changelog-style.md).
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.47.0](v0.47.0.md) | 2026-09-09 | `on.schedule` takes a mapping (cron, tz, overlap, catch_up) and `pipelines.Triggers.Schedule` becomes `*ScheduleTrigger`; `CacheKeyFn` returns an error; the runs store advances to schema 32 additively for `sparkwing crons`. |
 | [v0.41.0](v0.41.0.md) | 2026-09-04 | Fleet authority and compatibility advance the runs store from schema 23 to 31; controller, execution, and local-process trust boundaries tighten. |
 | [v0.46.0](v0.46.0.md) | 2026-09-08 | `sparkwing runs submit` becomes `sparkwing run <pipeline> --sw-detached`; discovery, report, and lifecycle commands emit compact JSON when piped, so scripts add `--output plain` or `--output pretty`. |
 | [v0.37.3](v0.37.3.md) | 2026-08-30 | Login-required dashboards require a controller session backend and enforce same-origin CSRF and live session revocation. |

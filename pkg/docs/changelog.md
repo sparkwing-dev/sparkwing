@@ -43,7 +43,7 @@ code change to unlock.
   instants pruned to the newest 200 per schedule. The migration is additive
   -- it declares no schema requirement and alters no existing table -- so a
   binary built before it keeps opening and writing the same database. See
-  the [migration note](docs/migrations/_unreleased.md#scheduled-pipelines-and-runs-store-schema-32).
+  the [migration note](docs/migrations/v0.47.0.md#scheduled-pipelines-and-runs-store-schema-32).
 
 - **cli:** `sparkwing crons` runs a pipeline's declared `on.schedule` cadence
   from the machine you arm. `crons install` records a repository's schedules
@@ -78,16 +78,14 @@ code change to unlock.
   `*pipelines.ScheduleTrigger`: read `t.Schedule.Cron` where you read
   `t.Schedule`, and test `t.Schedule != nil` where you tested `!= ""`. See
   the [migration
-  guide](docs/migrations/_unreleased.md#onschedule-takes-a-mapping).
-
-### Changed
+  guide](docs/migrations/v0.47.0.md#onschedule-takes-a-mapping).
 
 - **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
   Key errors, panics, empty keys, and expired resolution deadlines fail
   before dispatch. Return `NoCache, nil` to bypass memoization explicitly.
   Input helpers propagate filesystem and Git failures; `inputs.Compose`
   propagates errors and explicit bypasses. See the
-  [migration guide](docs/migrations/_unreleased.md#cache-key-callbacks-return-errors).
+  [migration guide](docs/migrations/v0.47.0.md#cache-key-callbacks-return-errors).
 
 ### Fixed
 
