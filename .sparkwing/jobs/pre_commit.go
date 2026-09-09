@@ -357,12 +357,7 @@ func runBuild(ctx context.Context) error {
 }
 
 func runTest(ctx context.Context) error {
-	return withGoTestScratch(func(testRoot string) error {
-		return forEachGoModuleEnv(
-			ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset,
-			map[string]string{"TMPDIR": testRoot},
-		)
-	})
+	return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset)
 }
 
 func withGoTestScratch(run func(string) error) error {
@@ -379,10 +374,6 @@ func withGoTestScratch(run func(string) error) error {
 }
 
 func forEachGoModule(ctx context.Context, label, cmd string, unset []string) error {
-	return forEachGoModuleEnv(ctx, label, cmd, unset, nil)
-}
-
-func forEachGoModuleEnv(ctx context.Context, label, cmd string, unset []string, env map[string]string) error {
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
@@ -399,11 +390,7 @@ func forEachGoModuleEnv(ctx context.Context, label, cmd string, unset []string, 
 		}
 		command := strings.TrimSuffix(cmd, "./...") + strings.Join(packages, " ")
 		script := withoutInherited(fmt.Sprintf("cd %q && %s", dir, command), unset)
-		run := sparkwing.Bash(ctx, script)
-		for name, value := range env {
-			run.Env(name, value)
-		}
-		if _, err := run.Run(); err != nil {
+		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", dir, err))
 		}
 	}

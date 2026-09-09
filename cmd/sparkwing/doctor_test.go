@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -277,4 +279,23 @@ func TestDiagnose_DryRunChangesNothing(t *testing.T) {
 			t.Fatalf("dry-run changed the run: status = %v, want running", orphan)
 		}
 	})
+}
+
+func TestRenderPartialDoctorWritesTheReportItReachedOnASpentBudget(t *testing.T) {
+	report := doctorReport{Daemon: opsview.DoctorDaemon{State: opsview.ReachUnreachable}}
+	var out bytes.Buffer
+	err := renderPartialDoctor(&out, report, "plain", fmt.Errorf("doctor: %w", context.DeadlineExceeded))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("render error = %v, want the deadline error", err)
+	}
+	if got := out.String(); !strings.Contains(got, "daemon\tunreachable") {
+		t.Fatalf("a spent budget swallowed the report doctor did reach:\n%s", got)
+	}
+}
+
+func TestRunDoctor_RejectsANonPositiveTimeout(t *testing.T) {
+	err := runDoctor([]string{"--timeout", "0s", "--dry-run", "--home", t.TempDir(), "-o", "plain"})
+	if err == nil || !strings.Contains(err.Error(), "--timeout must be positive") {
+		t.Fatalf("runDoctor with --timeout 0s = %v, want a positive-timeout error", err)
+	}
 }

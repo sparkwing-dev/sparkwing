@@ -7,7 +7,7 @@ usage() {
 usage: bash bin/sync-docs.sh [--check]
 
   (no flags)  copy docs/ -> pkg/docs/mirror/ and CHANGELOG.md ->
-              pkg/docs/changelog.md, replacing whatever is there
+              pkg/docs/changelog.md, leaving identical copies untouched
   --check     report drift and exit non-zero; write nothing
   -h, --help  this message
 EOF
@@ -67,10 +67,14 @@ $changelog_drift"
   exit 0
 fi
 
-rm -rf "$DST"
-cp -r "$SRC" "$DST"
+if ! diff -rq "$SRC" "$DST" >/dev/null 2>&1; then
+  rm -rf "$DST"
+  cp -r "$SRC" "$DST"
+fi
 
-cp "$CHANGELOG_SRC" "$CHANGELOG_DST"
+if ! cmp -s "$CHANGELOG_SRC" "$CHANGELOG_DST"; then
+  cp "$CHANGELOG_SRC" "$CHANGELOG_DST"
+fi
 
 echo "synced $SRC -> $DST"
 echo "synced $CHANGELOG_SRC -> $CHANGELOG_DST"

@@ -101,3 +101,75 @@ func TestImageRolloutDoesNotAdvertiseUnusedProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestImageRolloutRejectsBlankValues(t *testing.T) {
+	for _, tc := range []struct{ image, tag, flag string }{
+		{"runner", "", "--tag"}, {"runner", " \t", "--tag"}, {"", "v1", "--image"}, {" \t", "v1", "--image"},
+	} {
+		t.Run(tc.flag+tc.image+tc.tag, func(t *testing.T) {
+			repo := t.TempDir()
+			writeRepoFile(t, filepath.Join(repo, "sparkwing", "kustomization.yaml"), "images:\n  - name: runner\n    newTag: old\n")
+			err := runImageRollout([]string{"--image", tc.image, "--tag", tc.tag, "--gitops-repo", repo, "--dry-run"})
+			if err == nil || !strings.Contains(err.Error(), tc.flag+" must not be blank") {
+				t.Fatalf("error = %v, want blank %s rejection", err, tc.flag)
+			}
+		})
+	}
+}
+
+func TestGitCommitAndPushPreservesUnrelatedStagedChanges(t *testing.T) {
+	for _, changed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "rollout changed", false: "rollout unchanged"}[changed], func(t *testing.T) {
+			t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+			t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+			repo, remote := t.TempDir(), t.TempDir()
+			git := func(args ...string) string {
+				t.Helper()
+				out, err := runGit(repo, args...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.TrimSpace(out)
+			}
+			git("init", "-b", "main")
+			git("config", "user.name", "Rollout Test")
+			git("config", "user.email", "rollout@example.invalid")
+			git("config", "commit.gpgsign", "false")
+			git("config", "core.hooksPath", t.TempDir())
+			git("init", "--bare", remote)
+			git("remote", "add", "origin", remote)
+			kust := filepath.Join(repo, "sparkwing", "kustomization.yaml")
+			writeRepoFile(t, kust, "images: []\n")
+			writeRepoFile(t, filepath.Join(repo, "unrelated.txt"), "initial\n")
+			git("add", ".")
+			git("commit", "-m", "initial")
+			git("push", "-u", "origin", "main")
+			prior := git("rev-parse", "HEAD")
+			writeRepoFile(t, filepath.Join(repo, "unrelated.txt"), "operator staged change\n")
+			git("add", "unrelated.txt")
+			if changed {
+				writeRepoFile(t, kust, "images: [{name: runner, newTag: v2}]\n")
+			}
+			_, committed, err := gitCommitAndPush(repo, kust, "chore: bump runner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if committed != changed {
+				t.Errorf("committed = %v, want %v", committed, changed)
+			}
+			if got := git("show", "HEAD:unrelated.txt"); got != "initial" {
+				t.Errorf("rollout committed unrelated content: %q", got)
+			}
+			if got := git("diff", "--cached", "--name-only"); got != "unrelated.txt" {
+				t.Errorf("remaining staged paths = %q", got)
+			}
+			if changed {
+				if got := git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"); got != "sparkwing/kustomization.yaml" {
+					t.Errorf("rollout changed paths = %q", got)
+				}
+			} else if got := git("rev-parse", "HEAD"); got != prior {
+				t.Errorf("unchanged rollout made a commit: %s", got)
+			}
+		})
+	}
+}

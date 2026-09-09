@@ -1437,8 +1437,13 @@ environment reads there are idiomatic and never flagged.
 The rule set (see --rules for each rule's charter):
   plan-io              I/O (shell, exec, file, http) in Plan()
   plan-runtime-branch  os.Getenv / runtime.GOOS / IsLocal branching in Plan()
-  runner-label         blank runner labels; Inline + Requires on one job
+  runner-label         blank Requires/Prefers/WhenRunner labels; Inline +
+                       Requires on one job
   unused-ref           a RefTo result discarded into _ or a bare statement
+  group-cache-shared   Memoize on a fan-out or group, whose members then
+                       share one cache entry
+  dynamic-group-inert  a JobGroup setter on a JobFanOutDynamic result, which
+                       has no members to apply it to
   guard-misuse         pipeline guards that can never be satisfied together
 
 With no target it sweeps every pipeline in .sparkwing/sparkwing.yaml
@@ -1781,17 +1786,26 @@ version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
 
 Standalone stores are listed with run counts and the oldest run's age.
-Inspect their records before deleting a store directory.`,
+Inspect their records before deleting a store directory.
+
+--timeout bounds the daemon and local-state checks, each taking a slice of it,
+so a daemon that accepts connections and answers nothing is reported as wedged
+rather than spending the whole budget. Recovering a wedged daemon means
+stopping the process holding its socket; a restart needs a handshake it will
+not answer. When the budget runs out mid-sweep, doctor prints what it reached
+alongside the error.`,
 	Flags: []FlagSpec{
 		{Name: "dry-run", Desc: "Report what would be repaired without changing anything", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+		{Name: "timeout", Argument: "DURATION", Desc: "Budget for the daemon and local-state checks; each takes a slice of it", Default: "10s", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Diagnose and repair now", "sparkwing doctor"},
 		{"Report without changing anything", "sparkwing doctor --dry-run"},
 		{"Agent-readable report", "sparkwing doctor -o json"},
+		{"Answer quickly on a machine that is already stuck", "sparkwing doctor --timeout 3s"},
 	},
 }
 
@@ -1996,7 +2010,7 @@ scope arrays, suitable for piping into jq.`,
 	Examples: []Example{
 		{"List all active tokens", "sparkwing cluster tokens list --profile prod"},
 		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked --profile prod"},
-		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal==\"agent:fictional-runner\") | .scopes'"},
+		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq 'select(.principal==\"agent:fictional-runner\") | .scopes'"},
 	},
 }
 
@@ -2155,7 +2169,7 @@ shell piping:
 		{Name: "finished-before", Argument: "DATE", Desc: "Only runs whose FinishedAt <= this (excludes still-running)", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Maximum runs to show", Default: "20", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (or JSON array of ids with -o json)", Group: "Output"},
+		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (JSON strings with -o json)", Group: "Output"},
 		{Name: "by-pipeline", Desc: "Pivot into one row per pipeline with a status sparkline of the last N runs", Group: "Output"},
 		{Name: "sparkline", Argument: "N", Desc: "Sparkline length when --by-pipeline is set", Default: "30", Group: "Output"},
 		{Name: "style", Argument: "STYLE", Desc: "Sparkline glyph style: ascii|block|dot", Default: "ascii", Group: "Output"},
@@ -2488,7 +2502,7 @@ infrastructure error.`,
 		{Name: "wait", Desc: "Block until at least one match appears", Group: "Output"},
 		{Name: "find-timeout", Argument: "DURATION", Desc: "Give up (nonzero exit) after this long when --wait is set", Default: "2m", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (or a JSON array of ids with -o json)", Group: "Output"},
+		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (JSON strings with -o json)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode). Omit to search the local SQLite store.", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},

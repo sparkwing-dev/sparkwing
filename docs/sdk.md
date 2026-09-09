@@ -121,9 +121,6 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 
 ```
 ToolCacheDir(tool) string              // cache dir for an external tool, scoped to this worktree
-AcquireLintSlot(tool) (*LintSlot, err) // lease a canonical path so worktrees can share one cache
-slot.Configure(cmd, cacheVar)          // point a command at the lease (dir + PWD + cache)
-slot.ConfigureIn(cmd, rel, cacheVar)   // the same, for one module of a multi-module repo
 ```
 
 A tool that keys its cache on file content alone - golangci-lint among
@@ -142,59 +139,20 @@ sparkwing.Bash(ctx, "golangci-lint run ./...").
 The path derives from `WorkDir()`. Runs in one worktree share a cache;
 each worktree has its own cache.
 
-#### Lint slots: giving worktrees the same absolute path
-
-`AcquireLintSlot` leases a fixed path and its associated cache. The path
-is a symlink to the worktree holding the exclusive lease, so cached
-filenames resolve under that worktree.
-
-```go
-slot, err := sparkwing.AcquireLintSlot("golangci-lint")
-if err != nil {
-    return err
-}
-defer slot.Release()
-
-cmd := sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...")
-_, err = slot.Configure(cmd, "GOLANGCI_LINT_CACHE").Run()
-```
-
-Use `Configure` instead of setting the directory yourself. It sets
-`PWD` as well: Go's `os.Getwd` prefers
-`$PWD` when it names the same directory as `.`, so a bare change of
-directory resolves the symlink, the linter sees the worktree's own
-path, and the slot silently stops working.
-
-A repo with more than one Go module takes one lease and lints each
-module in turn through `ConfigureIn`, which is `Configure` for a
-subdirectory of the leased tree:
-
-```go
-for _, mod := range []string{"", "tools"} {
-    cmd := sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...")
-    if _, err := slot.ConfigureIn(cmd, mod, "GOLANGCI_LINT_CACHE").Run(); err != nil {
-        return err
-    }
-}
-```
-
-A `rel` that climbs out of the lease is ignored in favour of the slot
-root, because a command run outside the canonical path writes the
-worktree's own absolute paths into the shared cache.
-
-When every slot is busy, or the platform cannot create a symlink,
-`AcquireLintSlot` returns the worktree's own path and its private
-`ToolCacheDir`. Check the returned error; `Canonical` reports whether
-the result uses a slot. `SPARKWING_LINT_SLOTS` sets the pool size
-(default 4).
-
-Slots are for worktrees that move. A fixed-workdir runner already has a
-stable path, so it wants `ToolCacheDir` with `RestoreLintCache`
-instead. `SaveLintCache` and `RestoreLintCache` always operate on
+`SaveLintCache` and `RestoreLintCache` operate on
 `ToolCacheDir("golangci-lint")` for the current `WorkDir()` and take no
-directory argument, so they do nothing for a run that lints through a
-slot: the restore seeds the private per-worktree cache the slot run
-never reads, and the save finds that cache empty.
+directory argument, so a fixed-workdir runner seeds the same cache it
+lints with.
+
+Each worktree keeps its own cache, and pays a cold first lint for it.
+A stored issue carries the absolute path of the tree that produced it,
+so a cache shared between worktrees replays paths that belong to
+another tree. Lending the run a stable alias path resolves those paths
+and breaks the report instead: git resolves the alias to the real
+worktree and calls that the repository root, so every replayed finding
+sits outside the diff and a baseline such as golangci-lint's
+`new-from-merge-base` drops it -- a tree with eight findings lints
+clean in three seconds.
 
 Running two lint jobs at once is a different problem, and a scoped
 cache does not touch it. golangci-lint takes its parallel-runner lock

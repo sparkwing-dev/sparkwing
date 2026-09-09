@@ -136,14 +136,12 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	}
 
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "" {
-		go func() {
-			logCtx, logCancel := context.WithTimeout(ctx, 5*time.Second)
-			defer logCancel()
-			logExporter, err := otlploghttp.New(logCtx)
-			if err != nil {
-				log.Printf("warning: otel OTLP log exporter failed: %v", err)
-				return
-			}
+		logCtx, logCancel := context.WithTimeout(ctx, 5*time.Second)
+		logExporter, err := otlploghttp.New(logCtx)
+		logCancel()
+		if err != nil {
+			log.Printf("warning: otel OTLP log exporter failed: %v", err)
+		} else {
 			lp := sdklog.NewLoggerProvider(
 				sdklog.WithResource(res),
 				sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
@@ -151,17 +149,16 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 			t.shutdowns = append(t.shutdowns, lp.Shutdown)
 
 			otelHandler := otelslog.NewHandler(cfg.ServiceName, otelslog.WithLoggerProvider(lp))
-			existing := slog.Default().Handler()
 			combined := &multiSlogHandler{handlers: []slog.Handler{
-				&traceContextHandler{inner: existing},
+				&traceContextHandler{inner: configuredHandler()},
 				otelHandler,
 			}}
 			slog.SetDefault(slog.New(combined))
 			log.Printf("otel: logs enabled (OTLP + slog bridge)")
-		}()
+		}
 	} else {
 		slog.SetDefault(slog.New(&traceContextHandler{
-			inner: slog.Default().Handler(),
+			inner: configuredHandler(),
 		}))
 	}
 
@@ -177,6 +174,22 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	log.Printf("otel: metrics enabled (prometheus /metrics)")
 
 	return t
+}
+
+// Go's built-in slog handler writes through log.Default, and slog.SetDefault
+// points log.Default at whatever handler wraps it, so wrapping the built-in
+// handler deadlocks on the first log.Printf. Its identity is captured before
+// any caller can replace it.
+var builtinHandler = slog.Default().Handler()
+
+// configuredHandler keeps a handler the caller installed and otherwise returns
+// a fresh text handler that the built-in one can be swapped for safely.
+func configuredHandler() slog.Handler {
+	h := slog.Default().Handler()
+	if h == builtinHandler {
+		return slog.NewTextHandler(os.Stderr, nil)
+	}
+	return h
 }
 
 func resolveSampler() sdktrace.Sampler {
