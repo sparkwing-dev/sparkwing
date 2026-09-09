@@ -933,7 +933,7 @@ func writeLogsFromEnvelope(paths Paths, runID string, opts LogsOpts, out io.Writ
 	}
 	defer f.Close()
 
-	data, err := io.ReadAll(f)
+	data, err := readLocalLog(f, opts)
 	if err != nil {
 		return err
 	}
@@ -1123,7 +1123,7 @@ func writeFile(path string, opts LogsOpts, out io.Writer) error {
 		}
 		return nil
 	}
-	data, err := io.ReadAll(f)
+	data, err := readLocalLog(f, opts)
 	if err != nil {
 		return err
 	}

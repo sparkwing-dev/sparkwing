@@ -30,6 +30,8 @@ code change to unlock.
 - **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
 - **cache:** Keep registry responses with different Accept headers in separate cache entries
 - **docs:** Keep hash-leading list continuations in their list items
+- **Runs logs:** Short, unfiltered local tails read from the end of the log
+  instead of loading its full history. Output and filter ordering are unchanged.
 
 ## [v0.47.0] - 2026-09-09
 ### Added
