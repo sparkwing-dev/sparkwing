@@ -86,8 +86,7 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 		defer release()
 	}
 
-	// A detached launch takes no home flag: SPARKWING_HOME selects the home, and
-	// --sw-isolated-home is refused above.
+	// safety: a detached launch takes no home flag; SPARKWING_HOME selects it.
 	paths, err := submitPaths("")
 	if err != nil {
 		return err
@@ -557,8 +556,6 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; " +
 			"set SPARKWING_NO_UPDATE=1 in this shell instead, which the submission environment snapshot carries, " +
 			"or run it in the foreground"},
-		{"--sw-isolated-home", wf.isolatedHome != "", "the resident consumer executes against this home's store and daemon, " +
-			"so a home of the run's own would not be the one it uses; run it in the foreground with `sparkwing run --sw-isolated-home`"},
 		{"--sw-fleet", wf.fleet, "enrolled helpers execute under the lifetime of the coordinating foreground process, " +
 			"which a detached run does not have; run it in the foreground with `sparkwing run --sw-fleet`"},
 	}

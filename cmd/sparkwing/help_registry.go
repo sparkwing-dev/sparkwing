@@ -1565,9 +1565,9 @@ unresolved until the consumer launches the run, so 'front' means
 ahead of the queue the run actually joins.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---profile, --sw-fleet, --sw-isolated-home, and the other
-run-shaping --sw- flags) is refused with the reason instead of
-ignored; run those in the foreground.
+--profile, --sw-fleet, and the other run-shaping --sw- flags)
+is refused with the reason instead of ignored; run those in
+the foreground.
 
 PIPELINE resolves against the checkout you are standing in (or
 --sw-cd PATH) first, then the repo registry, and the chosen

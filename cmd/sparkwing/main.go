@@ -142,13 +142,6 @@ func dispatchRun(args []string) error {
 	if err := refuseDetachedOnlyFlags(flags); err != nil {
 		return err
 	}
-	// safety: before the toolchain re-exec and the daemon pre-warm, because both
-	// resolve this machine's home from the environment this call rewrites.
-	if flags.isolatedHome != "" {
-		if err := applyIsolatedHome(flags.isolatedHome); err != nil {
-			return err
-		}
-	}
 	if flags.profile != "" {
 		if _, profileErr := resolveProfileFlag(flags.profile); profileErr != nil {
 			return profileErr

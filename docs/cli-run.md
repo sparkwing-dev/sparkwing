@@ -64,9 +64,9 @@ unresolved until the consumer launches the run, so 'front' means
 ahead of the queue the run actually joins.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
---profile, --sw-fleet, --sw-isolated-home, and the other
-run-shaping --sw- flags) is refused with the reason instead of
-ignored; run those in the foreground.
+--profile, --sw-fleet, and the other run-shaping --sw- flags)
+is refused with the reason instead of ignored; run those in
+the foreground.
 
 PIPELINE resolves against the checkout you are standing in (or
 --sw-cd PATH) first, then the repo registry, and the chosen
@@ -110,7 +110,6 @@ is running and exits after five idle minutes; see
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--sw-isolated-home DIR` | Keep this run's state and config under DIR, so it hosts an admission daemon from the sparkwing you invoked instead of joining the machine's |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 

@@ -265,6 +265,16 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** `run --sw-isolated-home DIR`
+  A run given a home of its own hosts an admission daemon of its own, so it is
+  arbitrated by nobody, absent from `sparkwing queue` and the dashboard, and
+  contending on the operating system with every other run on the box. The one
+  case it served, a pipeline binary whose runs-store schema is newer than the
+  sparkwing hosting the machine's daemon, is now an admission refusal that
+  names how to identify the daemon's build, both versions, and the upgrade that
+  resolves it. `SPARKWING_HOME` keeps its meaning as deliberate isolation. See
+  [isolated home removed](docs/migrations/_unreleased.md#isolated-home-removed).
+
 - **cli (Breaking):** The `dashboard` command group is replaced by `serve`
   Use `sparkwing serve start`, `serve status`, and `serve kill` for the local
   dashboard and API. The retired noun fails without starting or stopping a
