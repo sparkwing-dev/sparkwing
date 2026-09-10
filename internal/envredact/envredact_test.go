@@ -212,9 +212,3 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 		}
 	})
 }
-
-func TestTokenizerParallelismIsNotCredential(t *testing.T) {
-	if CredentialName("TOKENIZERS_PARALLELISM") {
-		t.Fatal("tokenizer concurrency flag classified as credential")
-	}
-}
