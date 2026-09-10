@@ -44,7 +44,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Runs a contract preflight (the embedded documentation mirror, and a named set of documentation, help, registry, and environment-variable contract checks, each of which must report a pass) before the pre-commit, pre-push and template-verify gates (the last exhaustive: the release proof never reuses a recorded one), validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version, regenerates the public API snapshots, and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
+	return "Refuses a source branch origin does not have, or that origin has moved ahead of, then runs a contract preflight (the embedded documentation mirror, and a named set of documentation, help, registry, and environment-variable contract checks, each of which must report a pass) before the pre-commit, pre-push and template-verify gates (the last exhaustive: the release proof never reuses a recorded one), validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version, regenerates the public API snapshots, and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -80,12 +80,16 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
+	published := sparkwing.Job(plan, "check-branch-published", &checkBranchPublishedJob{
+		RepoDir: repoDir,
+	})
+
 	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
 		RepoDir: repoDir,
 	})
 
 	gateContracts := sparkwing.Job(plan, "gate-contracts", &checkContractsJob{RepoDir: repoDir})
-	gateContracts.Needs(clean, validate, gateLineage)
+	gateContracts.Needs(clean, validate, published, gateLineage)
 
 	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
 	gatePreCommit.Needs(clean, gateContracts)
@@ -947,6 +951,24 @@ func (j *pushTagJob) dryRun(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "dry-run: would push branch %s + tag %s to origin", branch, version)
 	return nil
+}
+
+type checkBranchPublishedJob struct {
+	sparkwing.Base
+	RepoDir string
+}
+
+func (j *checkBranchPublishedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+	return nil, nil
+}
+
+func (j *checkBranchPublishedJob) run(ctx context.Context) error {
+	branch, err := currentBranch(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: detect current branch: %w", err)
+	}
+	return ensureBranchContainsRemote(ctx, j.RepoDir, branch)
 }
 
 func currentBranch(ctx context.Context, repoDir string) (string, error) {

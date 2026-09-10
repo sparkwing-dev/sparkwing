@@ -88,6 +88,13 @@ unlock.
   A repository the survey could not read was counted among those whose gates
   fire
 
+### Docs
+
+- **migrations:** The v0.48.1 migration guide moved from
+  `docs/migrations/compact-run-output.md` to `docs/migrations/v0.48.1.md`, so it
+  is named like every other release guide and reachable at the stable
+  `/docs/migration-guide/v0.48.1` path. The old slug no longer resolves
+
 ### Fixed
 
 - **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
@@ -220,7 +227,7 @@ unlock.
 - **cli (Breaking):** Piped foreground runs now emit a compact NDJSON summary
   instead of every log event. Node progress and failure details are bounded;
   stored logs stay complete. Add `--sw-verbose` for the full live event stream.
-  See [compact run output migration](docs/migrations/compact-run-output.md).
+  See [compact run output migration](docs/migrations/v0.48.1.md#compact-foreground-run-output).
 
 ### Fixed
 
@@ -943,7 +950,7 @@ unlock.
   including the ones `SPARKWING_ALLOW_UNADMITTED=1` produces, are invisible to
   `sparkwing runs`, `sparkwing jobs`, and the dashboard, which is what the block says;
   see the [migration
-  guide](docs/migrations/v0.41.0.md#two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
+  guide](docs/migrations/v0.41.0.md#breaking-two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
   Their start record and `sparkwing runs status` carry `standalone` and
   `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`, `floor`, `forced`),
   and `sparkwing doctor` lists each standalone store with its run count and the oldest
@@ -1903,7 +1910,7 @@ unlock.
   handlers rather than by a wrapper that ran before authentication.
   `sparkwing-controller --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus
   `/metrics` to its own listener, off the API listener and any ingress in front of it.
-  See [the migration note](docs/migrations/v0.41.0.md).
+  See [the migration note](docs/migrations/v0.41.0.md#public-controller-schema-cuts).
 
 - **sdk:** `git.Clone` now authenticates to the git cache named by `SPARKWING_GITCACHE`
   or `SPARKWING_GITCACHE_URL`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
@@ -5941,7 +5948,7 @@ breaking changes and upgrade steps.
 - **run:** local runs annotate their box-slot holder lock file with a `run=<runID>` line
   once the run id exists, so a wedged holder is traced to its run by reading the file.
   The lock file layout is now a documented, versioned contract -- see
-  [docs/box-slot-lockfile-contract.md](docs/box-slot-lockfile-contract.md).
+  [the box-slot lockfile contract](https://github.com/sparkwing-dev/sparkwing/blob/c36b7b22014b/docs/box-slot-lockfile-contract.md).
 
 - **store:** `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` overrides the SQLite `busy_timeout`
   (default 30000 ms) for both read-write and read-only opens. A set-but-invalid value
@@ -5956,7 +5963,7 @@ breaking changes and upgrade steps.
   with every signal re-verified against the same lock file, pid, and flock so a recycled
   pid is never killed. Reads only the filesystem and flock state, so it works while
   `state.db` is wedged. See
-  [docs/box-slot-lockfile-contract.md](docs/box-slot-lockfile-contract.md).
+  [the box-slot lockfile contract](https://github.com/sparkwing-dev/sparkwing/blob/c36b7b22014b/docs/box-slot-lockfile-contract.md).
 
 - **run:** a run queued for a box slot now names its blocker: while waiting, it probes
   for stalled holders about every 30 seconds and prints the pid and evidence, pointing
