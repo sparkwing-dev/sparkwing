@@ -71,17 +71,21 @@ func TestDocsRouteRejectsAnUnknownSlug(t *testing.T) {
 func TestDocsRouteInheritsTheDashboardsAuthPosture(t *testing.T) {
 	opts := HandlerOptions{RequireLogin: true, ControllerURL: "http://127.0.0.1:1"}
 
-	rec := getPath(t, opts, "/docs")
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("unauthenticated GET /docs status %d, want 303 to the login page; got %s",
-			rec.Code, head(rec.Body.String()))
-	}
-	if loc := rec.Header().Get("Location"); loc != "/login?next=%2Fdocs" {
-		t.Errorf("unauthenticated GET /docs redirected to %q, want the login page", loc)
-	}
-
-	if open := getPath(t, HandlerOptions{}, "/docs"); open.Code != http.StatusOK {
-		t.Errorf("GET /docs on a login-free dashboard status %d, want 200", open.Code)
+	for target, want := range map[string]string{
+		"/docs":  "/login?next=%2Fdocs",
+		"/docs/": "/login?next=%2Fdocs%2F",
+	} {
+		rec := getPath(t, opts, target)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("unauthenticated GET %s status %d, want 303 to the login page; got %s",
+				target, rec.Code, head(rec.Body.String()))
+		}
+		if loc := rec.Header().Get("Location"); loc != want {
+			t.Errorf("unauthenticated GET %s redirected to %q, want %q", target, loc, want)
+		}
+		if open := getPath(t, HandlerOptions{}, target); open.Code != http.StatusOK {
+			t.Errorf("GET %s on a login-free dashboard status %d, want 200", target, open.Code)
+		}
 	}
 }
 
