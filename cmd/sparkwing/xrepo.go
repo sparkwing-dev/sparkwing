@@ -42,7 +42,7 @@ func runXrepo(args []string) error {
 }
 
 func runXrepoList(args []string) error {
-	fs := flag.NewFlagSet("repo list", flag.ExitOnError)
+	fs := flag.NewFlagSet("repo list", flag.ContinueOnError)
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	pipelines := fs.Bool("pipelines", true,
 		"include pipeline names (set --pipelines=false to skip the per-repo describe call)")
@@ -105,7 +105,7 @@ func runXrepoList(args []string) error {
 }
 
 func runXrepoAdd(args []string) error {
-	fs := flag.NewFlagSet("repo add", flag.ExitOnError)
+	fs := flag.NewFlagSet("repo add", flag.ContinueOnError)
 	if err := parseAndCheck(cmdConfigureXrepoAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -128,7 +128,7 @@ func runXrepoAdd(args []string) error {
 }
 
 func runXrepoRemove(args []string) error {
-	fs := flag.NewFlagSet("repo remove", flag.ExitOnError)
+	fs := flag.NewFlagSet("repo remove", flag.ContinueOnError)
 	if err := parseAndCheck(cmdConfigureXrepoRemove, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -148,7 +148,7 @@ func runXrepoRemove(args []string) error {
 }
 
 func runXrepoPrune(args []string) error {
-	fs := flag.NewFlagSet("repo prune", flag.ExitOnError)
+	fs := flag.NewFlagSet("repo prune", flag.ContinueOnError)
 	if err := parseAndCheck(cmdConfigureXrepoPrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

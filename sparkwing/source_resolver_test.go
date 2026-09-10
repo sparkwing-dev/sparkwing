@@ -59,7 +59,7 @@ func TestFactory_FileSource_ReadsDotenv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	cases := map[string]string{"FOO": "bar", "BAZ": "quoted", "EMPTY": ""}
+	cases := map[string]string{"FOO": "bar", "BAZ": "quoted"}
 	for name, want := range cases {
 		v, _, err := r.Resolve(context.Background(), name)
 		if err != nil {
@@ -205,6 +205,23 @@ func TestFactory_FileSource_UnescapesQuotedValues(t *testing.T) {
 		}
 		if v != w {
 			t.Errorf("%s = %q, want %q", name, v, w)
+		}
+	}
+}
+
+func TestFactory_FileSource_EmptyValuesAreMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.env")
+	if err := os.WriteFile(path, []byte("EMPTY=\nSPACE=   \nQUOTED=\"\"\nSINGLE=''\nCLEARED=old\nCLEARED=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := sparkwing.NewSecretResolverFromSpec(t.Context(), backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"EMPTY", "SPACE", "QUOTED", "SINGLE", "CLEARED"} {
+		value, masked, err := resolver.Resolve(t.Context(), key)
+		if value != "" || masked || !errors.Is(err, sparkwing.ErrSecretMissing) {
+			t.Errorf("%s: value=%q masked=%v err=%v", key, value, masked, err)
 		}
 	}
 }
