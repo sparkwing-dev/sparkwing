@@ -98,6 +98,12 @@ func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
 		return dashboardPaths{}, err
 	}
 	home = abs
+	// safety: every caller that reaches the home through these paths writes a
+	// pid, a log, or a state record into it, so the directory is created
+	// private here rather than left at whatever umask the first writer meets.
+	if err := fssecure.EnsureDir(home); err != nil {
+		return dashboardPaths{}, fmt.Errorf("mkdir %s: %w", home, err)
+	}
 	return dashboardPaths{
 		home: home,
 		pid:  filepath.Join(home, dashboardPIDFile),
