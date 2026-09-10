@@ -20,6 +20,63 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **install (Breaking):** `install/install.sh` is the public CLI installer, the
+  script `https://sparkwing.dev/install.sh` serves. The runner service
+  installer it displaced now lives at `install/service-install.sh`, unchanged.
+  See [installer paths](docs/migrations/_unreleased.md#installer-paths).
+
+### Security
+
+- **install:** The public installer refuses a release it cannot authenticate.
+  It downloads the asset, `SHA256SUMS`, and both detached signatures, verifies
+  the ed25519 signature over `SHA256SUMS` against a public key built into the
+  script, verifies the asset's digest against its `SHA256SUMS` line, verifies
+  the asset's own signature against the same key, and then requires the binary
+  to report the release tag it was fetched under, which is what catches a
+  signed release republished under another tag. A missing, malformed,
+  wrongly-keyed or mismatched signature installs nothing. The built-in key is
+  the one in `internal/releaseauth.TrustedPublicKeys`, which the release
+  pipeline refuses to sign without, and a test fails when the two copies drift
+  apart. An installer older than a key rotation refuses the new release and
+  says to re-fetch the script.
+
+  Verifying an ed25519 signature needs `openssl pkeyutl -rawin`, which arrived
+  in OpenSSL 3.0; macOS ships LibreSSL and older distributions ship 1.1.1. The
+  script probes each openssl it can find with a known signature and names the
+  missing capability when none can verify one, rather than reporting a tool gap
+  as tampering.
+
+- **release:** Every release publishes the installer as `install.sh` with an
+  `install.sh.sig` beside the binaries, signed by the key that signs
+  `SHA256SUMS`, so a site serving the script can check it against the tag it
+  came from.
+
+### Docs
+
+- **getting-started:** The hand-placed download recipe no longer offers
+  `SHA256SUMS` on its own as verification. That file travels from the same
+  origin as the binary, so comparing them shows only that the transfer
+  finished. The section names the signatures the release publishes and the
+  OpenSSL the installer needs
+- **gates:** This repository's own local gates are three tiers under new
+  names. `sparkwing run pre-commit` is source policy only -- gofmt, the
+  configured formatters, tracker IDs, em dashes, comments, tracked binaries,
+  the docs mirror, changelog links, and home resolution -- and finishes in
+  about two seconds, which is what lets the git pre-commit hook run on every
+  commit. The broad check that vets, builds, tests and lints every committed
+  module and exercises the dashboard is now `sparkwing run gate`, and the git
+  pre-push hook runs it. The release-boundary checks (race, chaos,
+  vulnerabilities, dependency freshness, public interfaces, Terraform) are now
+  `sparkwing run pre-release`, which the release pipeline runs and no hook
+  fires; the `push-checks` alias for them is removed. Nothing an adopter runs
+  changes: these are pipeline names in this repository's `.sparkwing/`, not
+  CLI or SDK surface. The hosted `Canonical / pre-commit` and
+  `Canonical / pre-push` checks are now `Canonical / gate` and
+  `Canonical / pre-release`, and the release DAG's `gate-pre-commit` and
+  `gate-pre-push` nodes are `gate-broad` and `gate-pre-release`.
+
 ## [v0.49.0] - 2026-09-10
 Five surfaces are cut here, each with a section in [the migration
 guide](docs/migrations/v0.49.0.md): `update` owns CLI and SDK updates,

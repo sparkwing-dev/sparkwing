@@ -14,6 +14,24 @@ launcher when testing isolated tool state.
 
 ## Checks
 
+- **The three local tiers:** `pre-commit` judges the staged change against
+  this repo's source policy and nothing else, which is what keeps it near two
+  seconds; the git pre-commit hook runs it. `gate` is the broad check, and the
+  git pre-push hook runs it. `pre-release` is the release-boundary tier, which
+  the release pipeline runs and no git hook fires; hosted CI runs `gate` and
+  `pre-release` on every pull request and every push to main.
+  `sparkwing pipeline hooks install` arms the two hooks in a checkout and
+  `sparkwing pipeline hooks status` is the proof they fire; a definition alone
+  proves nothing.
+- **Why vet, build, test and lint are not in the commit tier:** the house
+  standard puts all four in the pre-commit chain, and this repo runs them one
+  tier later on purpose. Its suite takes 6 to 12 minutes through the shared
+  admission daemon, and a hook that long is a hook everyone passes
+  `--no-verify`. Measured on a 16-core Linux host: the commit tier is 1.3 s
+  warm and 3.8 s on a typical commit, and a scoped `go vet` alone was 5.4 s on
+  a cold vet cache. All four still run under an enforced blocking hook, at the
+  push, where a landing already pays for them once, and on every hosted pull
+  request.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
@@ -23,7 +41,7 @@ launcher when testing isolated tool state.
   daemon coverage. It skips the process-per-node binary fixtures, scaffolded
   headless module, and tests that exercise sustained contention or real
   timeout windows. Run without `-short` when changing those boundaries. The
-  normal `test` and `pre-commit` pipelines retain those tests.
+  normal `test` and `gate` pipelines retain those tests.
 - **Goroutine leaks:** every package with tests carries a `leak_test.go` whose
   `TestMain` hands the suite to `internal/testleak`, so a package fails when a
   goroutine outlives its tests. A new test package needs that file too; copy an
@@ -32,7 +50,7 @@ launcher when testing isolated tool state.
   helper process a test spawns by re-executing the test binary runs without the
   check, so a goroutine such a helper leaves behind fails nothing; the check
   covers the suite, not the children it starts.
-- **Go result caching:** ordinary `test` and `pre-commit` checks preserve the
+- **Go result caching:** ordinary `test` and `gate` checks preserve the
   caller's temporary-directory settings so Go can reuse passing results.
   Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred
   removal. Forced race and Postgres runs retain their per-run scratch roots.
@@ -51,7 +69,7 @@ launcher when testing isolated tool state.
   observed at two to four times those figures, so the suggested budgets sit
   well above the measurement.
 
-- **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
+- **Normal broad check:** `sparkwing run gate` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
   mirrors, and source policy. It also runs `go test -race` on the packages
@@ -60,7 +78,7 @@ launcher when testing isolated tool state.
   seen its own package, and runs `store-postgres` when that change touches
   `pkg/store`. Unit and ESLint run in parallel; the production build then
   feeds the browser suite.
-- **Gating beside other agents:** one gate at a time. The machine's admission
+- **Gating beside other agents:** one broad `gate` at a time. The machine's admission
   daemon serializes concurrent agents, and `sparkwing run` is how a check
   reaches it; a bare `go test ./...` or `golangci-lint run` outside a run is
   load the daemon cannot see and every queued run pays for. `sparkwing queue
@@ -86,7 +104,7 @@ launcher when testing isolated tool state.
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
   not the caller's. Drop an error only through a helper that logs why.
-- **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
+- **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
   the change touches those boundaries. `sparkwing run security-scan` runs gosec,
@@ -164,7 +182,7 @@ launcher when testing isolated tool state.
   `sparkwing-store-postgres-*` directory under `TMPDIR`. No Docker. A failing suite prints the tail of the server log,
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
-  fails the step. `pre-push` runs it after the race gate, under a
+  fails the step. `pre-release` runs it after the race gate, under a
   thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
   the first run downloads the Postgres binaries.
 

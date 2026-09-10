@@ -277,6 +277,11 @@ jobs:
           sha256sum sparkwing-* > SHA256SUMS
           ls -la
 
+      # sparkwing.dev serves this script, so it ships as a signed asset of the
+      # tag it was built from and the site can check what it publishes.
+      - name: Stage the public installer
+        run: cp install/install.sh dist/install.sh
+
       - name: Sign and verify immutable release assets
         env:
           SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
@@ -285,6 +290,7 @@ jobs:
           go run ./cmd/verify-release --dist dist
           go run ./cmd/verify-release --dist dist --verify
           test -f dist/SHA256SUMS.sig
+          test -f dist/install.sh.sig
           ls dist/sparkwing-*.sig >/dev/null
 
       - name: Verify release asset schema parity

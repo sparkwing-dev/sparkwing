@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   sparkwing-runner LaunchAgent template.
-  Installed by install/install.sh -- do not edit directly.
+  Installed by install/service-install.sh -- do not edit directly.
 
   Substitution variables filled in by the installer:
     __BINARY_PATH__   -- absolute path to sparkwing-runner

@@ -47,7 +47,10 @@ func run(args []string) error {
 	return process(*dist, privateKey, publicKey, *verify)
 }
 
-const imageDigestsAsset = "image-digests.json"
+const (
+	imageDigestsAsset = "image-digests.json"
+	installerAsset    = "install.sh"
+)
 
 func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey, verify bool) error {
 	if err := validateReleaseAssets(dist); err != nil {
@@ -64,6 +67,13 @@ func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.Publi
 	}
 	sort.Strings(assets)
 	paths := append([]string{manifestPath}, assets...)
+	// The public installer ships as a signed asset so the site can serve the
+	// script this repository verified instead of a copy nothing checks.
+	installer := filepath.Join(dist, installerAsset)
+	if _, err := os.Stat(installer); err != nil {
+		return fmt.Errorf("release is missing %s: %w", installerAsset, err)
+	}
+	paths = append(paths, installer)
 	digests := filepath.Join(dist, imageDigestsAsset)
 	// safety: a release that skipped image publication carries no listing, so sign it when present rather than require it.
 	switch _, err := os.Stat(digests); {
