@@ -1157,7 +1157,7 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(binsDir, hash)
 
 	switch r.Method {
-	case http.MethodGet:
+	case http.MethodGet, http.MethodHead:
 		f, digest, err := openBinForRead(hash, path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -1177,6 +1177,9 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		info, _ := f.Stat()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		if r.Method == http.MethodHead {
+			return
+		}
 		if _, err := io.Copy(w, f); err != nil {
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin copy %s: %v", hash, err)
@@ -1233,8 +1236,21 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusCreated)
 
+	case http.MethodDelete:
+		mu := binKeyLock(hash)
+		mu.Lock()
+		defer mu.Unlock()
+		for _, target := range []string{path, binMetaPath(hash)} {
+			// #nosec G703 -- each path is built from the pattern-validated hash
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				http.Error(w, "delete error", http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
 	default:
-		http.Error(w, "GET or PUT only", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", "GET, HEAD, PUT, DELETE")
+		http.Error(w, "GET, HEAD, PUT or DELETE only", http.StatusMethodNotAllowed)
 	}
 }
 
