@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -110,6 +111,24 @@ func TestDocsRouteAnswersTheTrailingSlashSpelling(t *testing.T) {
 		if slashed != canonical {
 			t.Errorf("GET %s and its slash-free spelling returned different bytes (%d against %d)",
 				target, len(slashed), len(canonical))
+		}
+	}
+}
+
+func TestDocsRouteRefusesAPathBelowIt(t *testing.T) {
+	// safety: the shell carries a fresh CSP nonce per response, so two copies of it
+	// are never byte-equal and only the normalized text tells them apart.
+	nonce := regexp.MustCompile(`nonce="[^"]*"`)
+	normalize := func(body string) string { return nonce.ReplaceAllString(body, "") }
+	shell := normalize(getPath(t, HandlerOptions{}, "/").Body.String())
+
+	for _, target := range []string{"/docs/getting-started", "/docs/a/b"} {
+		rec := getPath(t, HandlerOptions{}, target)
+		if normalize(rec.Body.String()) == shell {
+			t.Errorf("GET %s returned the app shell, a 200 carrying no documentation", target)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s status %d, want 404; doc pages are addressed by ?p=", target, rec.Code)
 		}
 	}
 }

@@ -237,6 +237,9 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	docsHandler := docsweb.Handler()
 	authedMux.Handle("GET /docs", docsHandler)
 	authedMux.Handle("GET /docs/{$}", docsHandler)
+	// safety: the catch-all would answer /docs/anything with the app shell, a 200
+	// carrying no documentation. Pages are addressed by ?p=, so nothing lives here.
+	authedMux.Handle("GET /docs/{rest...}", http.NotFoundHandler())
 
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
 
@@ -394,7 +397,6 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 		}
 
 		if info, err := fs.Stat(bundleFS, p); err == nil && !info.IsDir() {
-			w.Header().Add("Vary", "Accept-Encoding")
 			if serveBundleAsset(w, r, bundleFS, p, assets) {
 				return
 			}

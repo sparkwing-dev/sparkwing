@@ -80,8 +80,11 @@ unlock.
   which puts every dashboard page under the 512,000-byte page-weight ceiling. Each
   bundle file is encoded once per process and every later request writes the stored
   bytes. A client that does not offer gzip, and any request carrying a `Range`
-  header, receives the same bytes it received before. Event streams are never
-  encoded: the handlers that serve them do not reach the encoding path.
+  header, receives the same body it received before. Event streams are never
+  encoded: the handlers that serve them do not reach the encoding path. Two
+  response headers change for anyone caching in front of the dashboard: every
+  bundle file and page now carries `Vary: Accept-Encoding`, and an encoded
+  response carries no `Accept-Ranges`.
 
 - **cli (Breaking):** `update` owns CLI and SDK updates
   Use `update --cli` (the default) or `update --sdk`; `version update` is
@@ -123,7 +126,8 @@ unlock.
   shell. Go's `ServeMux` matched the existing `GET /docs` pattern on that exact path
   only, so the trailing-slash spelling -- reachable by typing it, or through any
   proxy that normalizes to it -- fell through to the catch-all and answered 200 with
-  a page carrying no documentation.
+  a page carrying no documentation. A path below the route -- `/docs/anything` --
+  now answers 404 for the same reason; doc pages are addressed by `?p=<slug>`.
 
 - **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
   reads. It was parsed, validated and documented, and no code path read it.

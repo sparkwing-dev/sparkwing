@@ -116,6 +116,10 @@ func TestBundleAssetsStayUnencodedForAClientThatDoesNotAcceptGzip(t *testing.T) 
 			if got := rec.Header().Get("Content-Encoding"); got != "" {
 				t.Fatalf("Content-Encoding %q, want none", got)
 			}
+			if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+				t.Errorf("Vary %q on the unencoded response does not name Accept-Encoding, so a cache "+
+					"holding this body may hand it to a client that asked for gzip", rec.Header().Get("Vary"))
+			}
 			if !bytes.Equal(rec.Body.Bytes(), compressibleChunk()) {
 				t.Error("the unencoded response does not match the file in the bundle")
 			}
@@ -133,6 +137,9 @@ func TestRangeRequestsAreServedUnencoded(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Encoding"); got != "" {
 		t.Fatalf("Content-Encoding %q on a ranged response, want none", got)
+	}
+	if !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
+		t.Errorf("Vary %q on a ranged response does not name Accept-Encoding", rec.Header().Get("Vary"))
 	}
 	if got, want := rec.Body.Bytes(), compressibleChunk()[:10]; !bytes.Equal(got, want) {
 		t.Errorf("ranged body %q, want %q", got, want)

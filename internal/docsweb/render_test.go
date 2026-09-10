@@ -275,10 +275,12 @@ func TestShippedPagesKeepEveryTableRow(t *testing.T) {
 	}
 }
 
-// safety: this mirrors flushTable's own rule -- pipe lines outside a fence group
-// into blocks, and a block whose second line is a separator loses it to the header.
+// safety: this walks fences and comments the way run does, so a table the
+// renderer never sees is not counted. Its separator rule calls the renderer's own
+// isTableSeparator, so a defect in that predicate passes here and is caught by the
+// fixture tests instead.
 func expectedTableRows(source string) int {
-	rows, block, inCode := 0, []string{}, false
+	rows, block, inCode, inComment := 0, []string{}, false, false
 	flush := func() {
 		if len(block) == 0 {
 			return
@@ -291,12 +293,25 @@ func expectedTableRows(source string) int {
 	}
 	for _, line := range strings.Split(source, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if inComment {
+			if strings.Contains(trimmed, "-->") {
+				inComment = false
+			}
+			continue
+		}
 		if strings.HasPrefix(trimmed, "```") {
 			flush()
 			inCode = !inCode
 			continue
 		}
 		if inCode {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "<!--") {
+			flush()
+			if !strings.Contains(trimmed, "-->") {
+				inComment = true
+			}
 			continue
 		}
 		if strings.HasPrefix(trimmed, "|") {

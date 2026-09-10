@@ -16,8 +16,8 @@ import (
 // encoding saves, so small bodies go out as they are.
 const minGzipBytes = 1024
 
-// perf: the embedded bundle is fixed for the life of the process, so each file's
-// encoding is computed once and every later request writes the stored bytes.
+// safety: entries never expire, so the bundle behind them must not change for the
+// life of the process. HandlerFromOptionsWithBundle is the seam that promises it.
 type gzipCache struct {
 	entries sync.Map
 }
@@ -101,13 +101,13 @@ func encodingQuality(params string) float64 {
 }
 
 // perf: media, fonts and archives arrive compressed, so encoding them again
-// spends processor time to add bytes. An event stream is refused outright
-// because the encoder buffers, and a buffered event stream is not a live one.
+// spends processor time to add bytes.
 func compressibleType(contentType string) bool {
 	base := strings.ToLower(strings.TrimSpace(contentType))
 	if semicolon := strings.IndexByte(base, ';'); semicolon >= 0 {
 		base = strings.TrimSpace(base[:semicolon])
 	}
+	// safety: the encoder buffers, and a buffered event stream is not a live one.
 	if base == "text/event-stream" {
 		return false
 	}
@@ -126,9 +126,11 @@ func compressibleType(contentType string) bool {
 	return false
 }
 
-// safety: a false return must leave the response untouched, because the caller
-// then hands the same request to its own file server.
+// safety: a false return leaves the body untouched for the caller's own file
+// server, but Vary is set either way, because a cache that saw only one encoding
+// would otherwise serve it to a client that asked for the other.
 func serveBundleAsset(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, name string, cache *gzipCache) bool {
+	w.Header().Add("Vary", "Accept-Encoding")
 	// safety: a byte range names an offset in the identity representation, which
 	// the encoded body does not share, so a ranged request stays unencoded.
 	if r.Header.Get("Range") != "" || !acceptsGzip(r) {
