@@ -185,7 +185,8 @@ Health problems to expect from `GET /health`:
 | Problem text | What it means |
 |--------------|---------------|
 | `repo <hash>: recovery reclone ran N times in 24h -- persistent fetch failure; ...` | The mirror keeps failing to fetch and reclones are papering over it. Read the `recovery reclone:` log line for the git error, fix the cause (often a conflicting ref -- `git remote prune origin`, or delete the conflicting ref inside `/data/repos/<hash>.git`), then let the background loop resume. |
-| `repo <hash>: <friendly fetch error>` | The most recent background fetch failed (SSH, DNS, timeout, fork exhaustion). Unchanged behavior. |
+| `repo <hash>: <friendly fetch error>` | The most recent background fetch failed (SSH, DNS, timeout, fork exhaustion). |
+| `repo <hash>: clone failed: ...` / `auto-clone failed: ...` | A mirror that was missing could not be cloned. The repo is on the clone cooldown until it expires or the repo is re-registered; seeding via `POST /sync/seed` also works when upstream is unreachable. |
 
 An operator who wants the old per-request behavior back can set
 `FETCH_FRESH_WINDOW` and/or `RECLONE_COOLDOWN` to a negative duration

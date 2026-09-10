@@ -60,11 +60,12 @@ unlock.
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **cache:** A gitcache repository whose mirror is missing is cloned at most
-  once per `RECLONE_COOLDOWN`
+  once per `RECLONE_COOLDOWN`.
   A recovery reclone deletes the mirror before cloning, so a reclone that failed
   left every later `/archive` or `/git/<name>` request re-downloading the whole
   repository. A successful fetch or clone clears the cooldown, and so does
-  re-registering the repo.
+  re-registering the repo. `GET /health` now reports a failed clone alongside
+  the fetch failures it already reported.
 - **logs:** Concurrent filesystem appends keep each record and its newline together
 - **logs:** S3 log deletion reports per-object failures
 - **sdk:** Backend overlays preserve the inherited controller name

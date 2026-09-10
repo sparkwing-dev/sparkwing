@@ -618,7 +618,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 				"mirror is missing and cloning is on cooldown for another %s -- a clone already ran for this repo and the mirror is still absent.\n"+
 					"last error: %s\n"+
 					"This needs an operator: the mirror was either never cloned successfully or removed by a recovery reclone, which deletes it before it clones. "+
-					"Cloning on every archive request costs a full download each time. Fix the git error above, then retry.",
+					"Cloning on every archive request costs a full download each time. Fix the git error above, then re-register the repo to clear the cooldown, or wait for it to expire.",
 				left, last), http.StatusBadGateway)
 			return
 		}
@@ -2371,8 +2371,9 @@ func resolveGitRepo(name string) (string, error) {
 	if !bgFetch.allowClone(stateKey(hash)) {
 		return "", fmt.Errorf(
 			"repo %q registered but not cloned -- cloning is on cooldown for another %s after a failed attempt (%s); "+
-				"fix that error, then re-register the repo to clear the cooldown",
-			name, bgFetch.cloneCooldownRemaining(stateKey(hash)), bgFetch.lastErrorFor(stateKey(hash)),
+				"fix that error and re-register the repo to clear the cooldown, "+
+				"or seed manually via POST /sync/seed?repo=%s&sha=<commit>",
+			name, bgFetch.cloneCooldownRemaining(stateKey(hash)), bgFetch.lastErrorFor(stateKey(hash)), repoURL,
 		)
 	}
 	// #nosec G706 -- the repository name is pattern-validated and its URL was validated at registration
