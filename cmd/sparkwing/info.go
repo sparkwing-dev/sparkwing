@@ -283,8 +283,9 @@ const agentBlockBody = "- `sparkwing commands --query <task>` -- bounded command
 	"  narrow, `<path> --help` for one verb, `-o json` for structured metadata\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline. The machine's admission daemon serializes you\n" +
-	"  against the other agents sharing it, so gate through it, one gate at a time. A bare\n" +
-	"  `go test ./...` or lint outside a run is load it cannot see and every queued run pays for\n" +
+	"  against the other agents sharing it, so gate through it, one gate at a time, and put a\n" +
+	"  check you want admitted into a pipeline; a bare `go test ./...` or lint outside a run is\n" +
+	"  load the daemon cannot see and every queued run pays for\n" +
 	"- `sparkwing queue list` -- running and queued work with expected start and finish;\n" +
 	"  `sparkwing queue priority --run <id> --set front` re-ranks a queued run\n" +
 	"- `sparkwing docs search -q <symbol-or-key>` -- 20 ranked snippets; read a hit with\n" +

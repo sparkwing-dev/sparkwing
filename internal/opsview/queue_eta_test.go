@@ -12,7 +12,7 @@ import (
 )
 
 func etaFixtureNow() time.Time {
-	return time.Date(2026, 9, 10, 9, 0, 0, 0, time.Local)
+	return time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
 }
 
 // etaFixture carries one measured and one unmeasured row on each side, so a
@@ -152,7 +152,7 @@ func TestRenderQueueAt_PrettyDatesAFinishPastMidnight(t *testing.T) {
 	qs := etaFixture()
 	qs.Holders[0].ExpectedDurationMS = 20 * 60 * 60 * 1000
 	var buf bytes.Buffer
-	now := time.Date(2026, 9, 10, 23, 0, 0, 0, time.Local)
+	now := time.Date(2026, 9, 10, 23, 0, 0, 0, time.UTC)
 	if err := opsview.RenderQueueAt(&buf, qs, "pretty", now); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}

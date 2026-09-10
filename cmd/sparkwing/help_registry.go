@@ -498,6 +498,7 @@ var cmdQueue = Command{
 	Path:     "sparkwing queue",
 	Synopsis: "Inspect local admission holders, connections, and waiters",
 	Description: queueListingDescription + `
+
 'sparkwing queue' and 'sparkwing queue list' print the same listing.`,
 	SubcommandOrder:    []string{"list", "exec", "priority"},
 	SubcommandOptional: true,
@@ -516,6 +517,7 @@ var cmdQueueList = Command{
 	Path:     "sparkwing queue list",
 	Synopsis: "List running and queued work with expected start and finish",
 	Description: queueListingDescription + `
+
 This is the same output as 'sparkwing queue'.`,
 	Flags:      queueListingFlags,
 	GroupOrder: []string{"Output", "System", "Other"},

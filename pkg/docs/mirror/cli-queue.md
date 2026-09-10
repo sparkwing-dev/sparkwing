@@ -42,6 +42,7 @@ reports the connection failure and exits 4; its queue state is unknown.
 
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.
+
 'sparkwing queue' and 'sparkwing queue list' print the same listing.
 
 ### Subcommands
@@ -151,6 +152,7 @@ reports the connection failure and exits 4; its queue state is unknown.
 
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.
+
 This is the same output as 'sparkwing queue'.
 
 ### Flags

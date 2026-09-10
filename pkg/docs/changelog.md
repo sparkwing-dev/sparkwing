@@ -51,7 +51,9 @@ unlock.
   snapshot and each clock time as RFC3339. `-o plain` gains an
   `unmeasured-waiters` record, two trailing columns on a holder record
   (humanized remaining, RFC3339 finish) and one on a waiter record (RFC3339
-  finish); every existing column keeps its position.
+  finish); every existing column keeps its position. The listing's errors now
+  carry the path that was invoked, so `queue list` reports
+  `sparkwing queue list: ...` where it used to report `queue: ...`.
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --

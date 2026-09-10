@@ -145,8 +145,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 		if h.ConnectionOnly {
 			kind = "connected"
 		}
-		remaining := holderRemainingMS(h)
-		word := holderEstimateWord(h)
+		remaining, word := holderSchedule(h)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind,
 			h.RunID, orDash(h.ParticipantID), queueDisplayRunID(h.RunID, h.DisplayRunID),
 			orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
@@ -155,13 +154,14 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 			fmtEstimate(remaining, word), fmtFinishStamp(now, remaining, word))
 	}
 	for _, wt := range qs.Waiters {
+		finish, word := waiterSchedule(wt)
 		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			wt.Position, wt.RunID, orDash(wt.ParticipantID),
 			queueDisplayRunID(wt.RunID, wt.DisplayRunID),
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
 			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason), wt.Priority,
-			fmtFinishStamp(now, waiterFinishMS(wt), waiterEstimateWord(wt)))
+			fmtFinishStamp(now, finish, word))
 	}
 	for _, r := range qs.Runners {
 		fmt.Fprintf(w, "runner\t%s\t%.3f\t%d\t%d\n", r.Name, r.Cores, r.MemoryBytes, r.QueueDepth)
@@ -250,8 +250,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		if h.Contended {
 			run += " (contended)"
 		}
-		remaining := holderRemainingMS(h)
-		word := holderEstimateWord(h)
+		remaining, word := holderSchedule(h)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
 			orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS),
 			fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word), fmtHolderCost(h),
@@ -262,14 +261,16 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Connected (no resources held)")
 		tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED")
+		fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tREMAINING\tFINISH")
 		for _, h := range connections {
 			run := queueDisplayRunID(h.RunID, h.DisplayRunID)
 			if h.Parent != "" {
 				run = "  " + run + " (attached)"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
-				orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS))
+			remaining, word := holderSchedule(h)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
+				orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS),
+				fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word))
 		}
 		_ = tw.Flush()
 	}
@@ -283,10 +284,11 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	}
 	for _, wt := range qs.Waiters {
 		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
+		finish, word := waiterSchedule(wt)
 		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
 			orDash(wt.CostSource), fmtWaiterStart(wt),
-			fmtFinishClock(now, waiterFinishMS(wt), waiterEstimateWord(wt)),
+			fmtFinishClock(now, finish, word),
 			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
@@ -670,30 +672,36 @@ const (
 	estimateUnknown    = "unknown"
 )
 
-func holderRemainingMS(h wingwire.Holder) *int64 {
+// holderSchedule is how long a running row has left, or the word naming the
+// measurement that would have produced it. Exactly one of the two is set, so
+// no caller can print a word beside a number that contradicts it.
+func holderSchedule(h wingwire.Holder) (*int64, string) {
 	if h.ExpectedDurationMS <= 0 {
-		return nil
+		return nil, estimateUnmeasured
 	}
 	remaining := h.ExpectedDurationMS - h.ElapsedMS
 	if remaining <= 0 {
-		return nil
+		return nil, estimatePastP50
 	}
-	return &remaining
+	return &remaining, ""
 }
 
-func holderEstimateWord(h wingwire.Holder) string {
-	if h.ExpectedDurationMS <= 0 {
-		return estimateUnmeasured
+// waiterSchedule is when a queued row is expected to finish, or the word
+// naming the measurement that would have produced it. A finish at or before
+// the snapshot is refused: the daemon does not produce one, and printing a
+// finish already in the past would be worse than saying nothing.
+func waiterSchedule(wt wingwire.Waiter) (*int64, string) {
+	if wt.ExpectedDurationMS <= 0 {
+		return nil, estimateUnmeasured
 	}
-	return estimatePastP50
-}
-
-func waiterFinishMS(wt wingwire.Waiter) *int64 {
-	if wt.ExpectedStartMS == nil || wt.ExpectedDurationMS <= 0 {
-		return nil
+	if wt.ExpectedStartMS == nil {
+		return nil, estimateUnknown
 	}
 	finish := *wt.ExpectedStartMS + wt.ExpectedDurationMS
-	return &finish
+	if finish <= 0 {
+		return nil, estimateUnknown
+	}
+	return &finish, ""
 }
 
 func unmeasuredWaiters(qs wingwire.QueueState) int {
@@ -713,15 +721,6 @@ func fmtWaiterStart(wt wingwire.Waiter) string {
 		return estimateUnknown
 	}
 	return fmtETA(wt.ExpectedStartMS)
-}
-
-// waiterEstimateWord separates a queued row with no profile of its own from
-// one whose start the daemon could not project.
-func waiterEstimateWord(wt wingwire.Waiter) string {
-	if wt.ExpectedDurationMS <= 0 {
-		return estimateUnmeasured
-	}
-	return estimateUnknown
 }
 
 func fmtEstimate(ms *int64, word string) string {
@@ -801,7 +800,7 @@ type queueStateView struct {
 func queueStateViewOf(qs wingwire.QueueState, now time.Time) queueStateView {
 	view := queueStateView{QueueState: qs, UnmeasuredWaiters: unmeasuredWaiters(qs)}
 	for _, h := range qs.Holders {
-		remaining := holderRemainingMS(h)
+		remaining, _ := holderSchedule(h)
 		view.Holders = append(view.Holders, holderView{
 			Holder:              h,
 			ExpectedRemainingMS: remaining,
@@ -810,7 +809,7 @@ func queueStateViewOf(qs wingwire.QueueState, now time.Time) queueStateView {
 		})
 	}
 	for _, wt := range qs.Waiters {
-		finish := waiterFinishMS(wt)
+		finish, _ := waiterSchedule(wt)
 		view.Waiters = append(view.Waiters, waiterView{
 			Waiter:           wt,
 			ExpectedStartAt:  fmtRFC3339(now, wt.ExpectedStartMS),
