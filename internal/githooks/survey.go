@@ -50,10 +50,7 @@ type RepoGates struct {
 }
 
 func (r RepoGates) NotFiring() []string {
-	if len(r.Shadowed) == 0 {
-		return r.Missing
-	}
-	return sortedCopy(append(append([]string(nil), r.Shadowed...), r.Missing...))
+	return sortedCopy(slices.Concat(r.Shadowed, r.Missing))
 }
 
 var BlockingHooks = []string{"pre-commit", "pre-push"}
@@ -72,19 +69,35 @@ func (r RepoGates) Fires() []string {
 	return out
 }
 
-// Gated reports whether a commit in this repository can be refused: a blocking
-// hook is declared, git runs it from this repository, and no declared blocking
-// hook is missing, shadowed or borrowed.
+// DeclaresBlocking reports whether any pipeline here asks for a hook that can
+// refuse work.
+func (r RepoGates) DeclaresBlocking() bool {
+	return slices.ContainsFunc(r.Declared, func(n string) bool {
+		return slices.Contains(BlockingHooks, n)
+	})
+}
+
+// RunsBlockingGate reports whether a declared blocking hook fires out of this
+// repository's own hook directory.
+func (r RepoGates) RunsBlockingGate() bool {
+	return slices.ContainsFunc(r.Fires(), func(n string) bool {
+		return slices.Contains(BlockingHooks, n)
+	})
+}
+
+// Gated reports whether this repository runs a gate of its own: a blocking hook
+// is declared, git runs it from here, and no declared blocking hook is missing,
+// shadowed or borrowed.
 func (r RepoGates) Gated() bool {
 	if r.State == GateBroken {
 		return false
 	}
-	for _, name := range append(r.NotFiring(), r.Borrowed...) {
+	for _, name := range slices.Concat(r.NotFiring(), r.Borrowed) {
 		if slices.Contains(BlockingHooks, name) {
 			return false
 		}
 	}
-	return containsBlocking(r.Declared)
+	return r.RunsBlockingGate()
 }
 
 func (r RepoGates) Summary() string {
@@ -92,7 +105,7 @@ func (r RepoGates) Summary() string {
 		return fmt.Sprintf("%s: %s", r.Repo, r.ConfigError)
 	}
 	var parts []string
-	if !containsBlocking(r.Declared) {
+	if !r.DeclaresBlocking() {
 		parts = append(parts, undeclaredGateSummary(r.Fires()))
 	}
 	if len(r.Borrowed) > 0 {
@@ -115,9 +128,9 @@ func (r RepoGates) Summary() string {
 func undeclaredGateSummary(fires []string) string {
 	blocking := strings.Join(BlockingHooks, " or ")
 	if len(fires) == 0 {
-		return fmt.Sprintf("no pipeline declares %s, so nothing here can refuse a commit", blocking)
+		return fmt.Sprintf("no pipeline declares %s, so nothing here refuses a commit or a push", blocking)
 	}
-	return fmt.Sprintf("%s fires, but no pipeline declares %s, so nothing here can refuse a commit",
+	return fmt.Sprintf("%s fires, but no pipeline declares %s, so nothing here refuses a commit or a push",
 		strings.Join(fires, ", "), blocking)
 }
 
@@ -128,7 +141,7 @@ func (r RepoGates) Remedy() string {
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
 	}
-	if !containsBlocking(r.Declared) {
+	if !r.DeclaresBlocking() {
 		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
 	}
 	return fmt.Sprintf("sparkwing pipeline hooks install --repo %s", r.Repo)
@@ -138,7 +151,7 @@ func Survey(git Git, repoRoot string, declared []string) RepoGates {
 	row := RepoGates{Repo: repoRoot, Declared: sortedCopy(declared), State: GateUndeclared}
 	hooksDir, err := Dir(repoRoot)
 	if err != nil {
-		return row
+		return Broken(repoRoot, err)
 	}
 	row.HooksDir = hooksDir
 	row.Installed = Gates(hooksDir)

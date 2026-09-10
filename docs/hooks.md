@@ -268,16 +268,16 @@ Each repository gets one state:
 | `borrowed` | git runs a gate for a declared hook out of another repository's hook directory |
 | `undeclared` | no pipeline asks for a hook, so there is nothing to arm |
 
-Two questions live in that table, and only one of them is the one an operator
-scans for. The state says what git does with the hooks a repository declares; a
-commit is refused only where a declared `pre-commit` or `pre-push` is among
-them. A repository that declares nothing, or declares only `post-commit`, is
-counted ungated: its hooks fire and none of them can refuse a commit. The
-pretty STATE column prints `no-gate` rather than `armed` for that repository,
-the FIRING column names the hooks that do run, and the `state` field of
-`-o json` keeps the values above unchanged. The remedy there is a declared
-gate, not an install: an install writes the hooks the pipelines ask for, and
-that repository asks for none.
+The state answers what git does with the hooks a repository declares. Whether
+the repository runs a gate is a second question, and it is the one an operator
+scans for: work is refused only where a declared `pre-commit` or `pre-push`
+fires from that repository. A repository that declares neither -- because it
+declares no hook at all, or only `post-commit` -- is counted among the ones
+accepting ungated work. The pretty STATE column prints `no-gate` rather than
+`armed` for it, the FIRING column names the declared hooks that do run, and the
+`state` field of `-o json` and `-o plain` keeps the values above unchanged.
+The remedy there is a declared gate, not an install: an install writes the
+hooks the pipelines ask for, and that repository asks for none.
 
 Each declared hook lands in exactly one of `firing`, `borrowed`, `shadowed` and
 `missing`, so a hook is never reported as both installed and missing. The

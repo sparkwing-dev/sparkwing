@@ -139,10 +139,13 @@ func TestSurvey_ArmedWhenTheOverridePointsAtTheGatesThemselves(t *testing.T) {
 	}
 }
 
-func TestSurvey_MissingCheckoutReportsUndeclaredRatherThanPanicking(t *testing.T) {
+func TestSurvey_MissingCheckoutReportsBrokenRatherThanPanicking(t *testing.T) {
 	got := githooks.Survey(stubGit("", ""), filepath.Join(t.TempDir(), "absent"), []string{"pre-commit"})
-	if got.State != githooks.GateUndeclared {
-		t.Errorf("State = %s, want %s", got.State, githooks.GateUndeclared)
+	if got.State != githooks.GateBroken {
+		t.Errorf("State = %s, want %s", got.State, githooks.GateBroken)
+	}
+	if got.ConfigError == "" {
+		t.Error("ConfigError is empty, want the reason the hook directory could not be resolved")
 	}
 }
 
@@ -410,8 +413,8 @@ func TestSurvey_FiresDropsAHookThatOnlyRunsOutOfAnotherRepo(t *testing.T) {
 
 func TestRepoGatesSummary_SaysNothingCanRefuseACommitWhenNoGateIsDeclared(t *testing.T) {
 	row := githooks.RepoGates{Repo: "/code/toolbox", State: githooks.GateUndeclared}
-	if !strings.Contains(row.Summary(), "nothing here can refuse a commit") {
-		t.Errorf("Summary = %q, want it to say a commit here cannot be refused", row.Summary())
+	if !strings.Contains(row.Summary(), "nothing here refuses a commit or a push") {
+		t.Errorf("Summary = %q, want it to say nothing here refuses work", row.Summary())
 	}
 }
 
@@ -423,8 +426,8 @@ func TestRepoGatesSummary_SaysSoWhenTheOnlyDeclaredHookIsANotifier(t *testing.T)
 		State:    githooks.GateArmed,
 	}
 	got := row.Summary()
-	if !strings.Contains(got, "nothing here can refuse a commit") {
-		t.Errorf("Summary = %q, want it to say a commit here cannot be refused", got)
+	if !strings.Contains(got, "nothing here refuses a commit or a push") {
+		t.Errorf("Summary = %q, want it to say nothing here refuses work", got)
 	}
 	if !strings.Contains(got, "post-commit") {
 		t.Errorf("Summary = %q, want it to name the hook that does fire", got)
@@ -436,5 +439,38 @@ func TestRepoGatesRemedy_AsksForAGateDeclarationRatherThanAnInstall(t *testing.T
 	got := row.Remedy()
 	if !strings.Contains(got, "declare a pre_commit trigger") {
 		t.Errorf("Remedy = %q, want it to ask for a declared gate: an install writes nothing here", got)
+	}
+}
+
+func TestSurvey_GatedWhenTheOnlyDeclaredBlockingHookIsPrePush(t *testing.T) {
+	repo, hooks := checkout(t, "pre-push")
+	got := githooks.Survey(stubGit(hooks, ""), repo, []string{"pre-push"})
+	if !got.Gated() {
+		t.Error("Gated() = false, want true: a pre-push hook refuses a push")
+	}
+	if strings.Contains(got.Summary(), "no pipeline declares") {
+		t.Errorf("Summary = %q, want it not to claim the repo declares no blocking hook", got.Summary())
+	}
+}
+
+func TestSurvey_UngatedRepoRunningACommitGateIsNotCalledGateless(t *testing.T) {
+	repo, hooks := checkout(t, "pre-commit")
+	got := githooks.Survey(stubGit(hooks, ""), repo, []string{"pre-commit", "pre-push"})
+	if got.Gated() {
+		t.Error("Gated() = true, want false: the declared pre-push is not installed")
+	}
+	if !got.RunsBlockingGate() {
+		t.Error("RunsBlockingGate() = false, want true: the declared pre-commit fires here")
+	}
+}
+
+func TestSurvey_AnUnreadableHookDirectoryIsBrokenRatherThanGated(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "not-a-checkout")
+	got := githooks.Survey(stubGit("", ""), missing, []string{"pre-commit"})
+	if got.State != githooks.GateBroken {
+		t.Errorf("State = %s, want %s", got.State, githooks.GateBroken)
+	}
+	if got.Gated() {
+		t.Error("Gated() = true, want false: the survey never read this repository")
 	}
 }

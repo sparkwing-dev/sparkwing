@@ -44,15 +44,19 @@ unlock.
 
 ### Changed
 
-- **cli:** `pipeline hooks survey`, `doctor`, and the `hooks install --fleet`
-  summary count a repository as gated only where a declared `pre-commit` or
-  `pre-push` runs from that repository. A repository that declares no hook, or
-  only `post-commit`, was counted gated and is now listed among the ones
-  accepting ungated commits, with the remedy naming the trigger to declare
-  rather than an install that would write nothing. The `state` field of
+- **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
+  where a declared `pre-commit` or `pre-push` runs from that repository, which
+  is the rule `hooks install --fleet` already applied. A repository that
+  declares no hook, or only `post-commit`, was counted gated and is now listed
+  among the ones accepting ungated work, with the remedy naming the trigger to
+  declare rather than an install that would write nothing. The `state` field of
   `-o json` and `-o plain` keeps its existing values; the pretty STATE column
   reads `no-gate` in place of `armed` for such a repository and a new FIRING
   column names the declared hooks that do run
+- **cli:** `pipeline hooks survey` reports a repository whose hook directory it
+  cannot resolve as `broken` with the error, instead of `undeclared` and gated.
+  A repository the survey could not read was counted among those whose gates
+  fire
 
 ### Fixed
 

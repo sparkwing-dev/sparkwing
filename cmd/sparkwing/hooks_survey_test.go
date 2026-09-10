@@ -122,8 +122,11 @@ func TestRenderHooksSurvey_DoesNotCallARepoArmedWhenNothingCanRefuseACommit(t *t
 	if strings.Contains(row, "armed") {
 		t.Errorf("row = %q, want it not to read armed: a post-commit notifier refuses nothing", row)
 	}
-	if !strings.Contains(row, "post-commit") {
-		t.Errorf("row = %q, want it to name the hook that does fire", row)
+	if got := strings.Count(row, "post-commit"); got != 2 {
+		t.Errorf("row = %q names post-commit %d times, want 2: DECLARED and FIRING both carry it", row, got)
+	}
+	if !strings.Contains(row, "no-gate") {
+		t.Errorf("row = %q, want the STATE column to read no-gate", row)
 	}
 }
 

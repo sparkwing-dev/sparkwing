@@ -951,7 +951,7 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 	var ungated, lapsed []githooks.RepoGates
 	for _, r := range rows {
 		switch {
-		case !r.Gated():
+		case !r.RunsBlockingGate():
 			ungated = append(ungated, r)
 		case len(r.NotFiring()) > 0 || len(r.Borrowed) > 0:
 			lapsed = append(lapsed, r)
@@ -982,9 +982,9 @@ func writeSurveyRemedies(w io.Writer, rows []githooks.RepoGates) {
 	}
 }
 
-// The STATE column answers "can a commit here be refused", which the raw state
-// does not: a repo whose declared hooks all fire is armed even when the only
-// one it declares is a notifier that refuses nothing.
+// The STATE column answers "does this repository run a gate", which the raw
+// state does not: a repo whose declared hooks all fire is armed even when the
+// only one it declares is a notifier that refuses nothing.
 func gateWord(r githooks.RepoGates) string {
 	if r.State == githooks.GateArmed && !r.Gated() {
 		return "no-gate"

@@ -300,7 +300,7 @@ Reports declared hooks for every registered repository as armed, shadowed,
 uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
 selects another location. The STATE column reads no-gate where every declared
 hook fires and none of them is pre-commit or pre-push, because nothing there
-can refuse a commit.
+refuses a commit or a push.
 
 Coverage includes registered repositories and configured fallback paths.
 Register other checkouts before expecting them in the report. An unreadable

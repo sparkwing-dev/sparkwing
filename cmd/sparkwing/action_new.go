@@ -326,8 +326,6 @@ var triggerBlocks = map[string]string{
 
 var triggerEventNames = []string{"pull_request", "push", "schedule", "pre_commit", "pre_push", "post_commit", "manual"}
 
-var gateEvents = []string{"pre_commit", "pre_push"}
-
 var hookEvents = []string{"pre_commit", "pre_push", "post_commit"}
 
 const manualTrigger = "manual"
@@ -498,10 +496,11 @@ func gateArmingHint(events []string) (string, bool) {
 	if !declaresHook {
 		return "", false
 	}
-	for _, event := range gateEvents {
-		if slices.Contains(events, event) {
-			return "declared, not armed: nothing here can refuse a commit until `sparkwing pipeline hooks install` writes the hook", true
-		}
+	if slices.Contains(events, "pre_commit") {
+		return "declared, not armed: nothing here refuses a commit until `sparkwing pipeline hooks install` writes the hook", true
+	}
+	if slices.Contains(events, "pre_push") {
+		return "declared, not armed: nothing here refuses a push until `sparkwing pipeline hooks install` writes the hook", true
 	}
 	return "declared, not armed: arm it in this checkout with `sparkwing pipeline hooks install`", true
 }
