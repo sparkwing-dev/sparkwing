@@ -97,3 +97,28 @@ func TestPutIfAbsent_MapsPreconditionFailed(t *testing.T) {
 		t.Fatalf("second PutIfAbsent: err = %v, want ErrPreconditionFailed", err)
 	}
 }
+
+type firstFailureAPI struct {
+	API
+	calls atomic.Int32
+}
+
+func (a *firstFailureAPI) PutObject(ctx context.Context, in *s3.PutObjectInput, opts ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	if a.calls.Add(1) == 1 {
+		return nil, errors.New("transient transport failure")
+	}
+	return a.API.PutObject(ctx, in, opts...)
+}
+func TestConditionalWritesSupportedRetriesTransientFailure(t *testing.T) {
+	api, closeServer := fakeS3(t)
+	defer closeServer()
+	flaky := &firstFailureAPI{API: api}
+	store := NewArtifactStore(testBucket, "cache", flaky)
+	if _, err := store.ConditionalWritesSupported(t.Context()); err == nil {
+		t.Fatal("expected initial failure")
+	}
+	supported, err := store.ConditionalWritesSupported(t.Context())
+	if err != nil || !supported {
+		t.Fatalf("transient failure latched: supported=%v err=%v puts=%d", supported, err, flaky.calls.Load())
+	}
+}
