@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
 )
 
 type ChangelogIssue struct {
