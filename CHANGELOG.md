@@ -31,13 +31,16 @@ unlock.
   network. `-o plain` emits the block names one per line, and `-o json` the
   usual NDJSON. `sparks inflate` with no `--module` now names the verb.
 
-- **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb.
-  Both resolve the project's `sparkwing.yaml` from the working directory -- the
-  default storage profile for a `runs` read, and the whole project section of
-  `info` -- so invoking them from outside a checkout silently reported on
-  whichever project the shell happened to sit in. `info --for-agent` describes
-  the repository it re-anchored to. Commands that declare the flag now parse and
-  apply it in one place, so its semantics are identical everywhere.
+- **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb
+  that takes `--profile`. Both resolve the project's `sparkwing.yaml` from the
+  working directory -- the default storage profile for a `runs` read, and the
+  whole project section of `info` -- so invoking them from outside a checkout
+  silently reported on whichever project the shell happened to sit in.
+  `info --for-agent` describes the repository it re-anchored to. The `runs`
+  verbs that read no project config (`errors` and the `consumer` trio) do not
+  take the flag, because it would do nothing there. Commands that declare the
+  flag now parse and apply it in one place, so its semantics are identical
+  everywhere.
 - **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
 - **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
 

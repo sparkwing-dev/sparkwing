@@ -10,9 +10,9 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// safety: pinned so adding or dropping -C on a verb is a deliberate edit. Membership is a
-// judgement call, not a derived rule: every verb that resolves a storage profile reads the
-// project config from the working directory, and most of those are not worth re-anchoring.
+// safety: pinned so adding or dropping -C on a verb is a deliberate edit. Membership beyond
+// the runs family is a judgement call: 67 verbs resolve a storage profile from the working
+// directory, and most are not worth re-anchoring.
 var chdirCommands = []string{
 	"sparkwing examples scaffold",
 	"sparkwing info",
@@ -30,10 +30,6 @@ var chdirCommands = []string{
 	"sparkwing runs approvals list",
 	"sparkwing runs bounce",
 	"sparkwing runs cancel",
-	"sparkwing runs consumer start",
-	"sparkwing runs consumer status",
-	"sparkwing runs consumer stop",
-	"sparkwing runs errors",
 	"sparkwing runs failures",
 	"sparkwing runs find",
 	"sparkwing runs get",
@@ -70,17 +66,17 @@ func TestChdirFlagCoverageIsPinned(t *testing.T) {
 	}
 }
 
-func TestEveryRunsVerbOffersChdir(t *testing.T) {
-	declared := map[string]bool{}
-	for _, path := range chdirCommands {
-		declared[path] = true
-	}
+func TestRunsVerbsOfferChdirExactlyWhenTheyResolveAProfile(t *testing.T) {
 	for _, cmd := range allCommands {
-		if !strings.HasPrefix(cmd.Path, "sparkwing runs ") || len(cmd.Flags) == 0 {
+		if !strings.HasPrefix(cmd.Path, "sparkwing runs ") {
 			continue
 		}
-		if !declared[cmd.Path] {
-			t.Errorf("%s reads a profile resolved from the working directory but offers no -C/--sw-cd", cmd.Path)
+		flags := cmd.declaredFlags()
+		switch {
+		case flags["profile"] && !flags["sw-cd"]:
+			t.Errorf("%s resolves a profile from the working directory but offers no -C/--sw-cd", cmd.Path)
+		case !flags["profile"] && flags["sw-cd"]:
+			t.Errorf("%s offers -C/--sw-cd but resolves nothing from the working directory", cmd.Path)
 		}
 	}
 }

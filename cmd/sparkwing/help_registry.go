@@ -2290,7 +2290,6 @@ var cmdJobsErrors = Command{
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2667,7 +2666,6 @@ before it acknowledges a run.`,
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "idle", Argument: "DUR", Desc: "Exit after this long with no work (default 5m)", Group: "System"},
 		{Name: "claim-lease", Argument: "DUR", Desc: "Lease stamped on each claimed run, renewed while it executes (default 3m)", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Start one for the default home", "sparkwing runs consumer start"},
@@ -2683,7 +2681,6 @@ when no consumer is running, so it composes in shell conditions.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Check for a resident consumer", "sparkwing runs consumer status"},
@@ -2701,7 +2698,6 @@ To cancel a queued run instead, use 'sparkwing runs cancel'.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Stop the resident consumer", "sparkwing runs consumer stop"},

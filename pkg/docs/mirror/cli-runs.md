@@ -335,7 +335,6 @@ before it acknowledges a run.
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--idle DUR` | Exit after this long with no work (default 5m) |
 | `--claim-lease DUR` | Lease stamped on each claimed run, renewed while it executes (default 3m) |
-| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -360,7 +359,6 @@ when no consumer is running, so it composes in shell conditions.
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
-| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -385,7 +383,6 @@ To cancel a queued run instead, use 'sparkwing runs cancel'.
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
-| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -406,7 +403,6 @@ Reads the local run store and prints each failed node's error chain.
 |---|---|
 | `--run RUN_ID` | Run identifier (required) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
-| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
