@@ -131,8 +131,8 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 400*time.Millisecond {
-		t.Fatalf("pause timeout took %v, want at most 400ms", elapsed)
+	if elapsed, budget := time.Since(started), timingBudget(400*time.Millisecond); elapsed > budget {
+		t.Fatalf("pause timeout took %v, over its %s budget", elapsed, budget)
 	}
 	if res.Status != "success" {
 		t.Fatalf("status = %q, want success (timeout releases and run continues)", res.Status)
