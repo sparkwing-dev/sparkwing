@@ -60,7 +60,7 @@ Update shell scripts, shortcuts, and runbooks to use these commands:
 | --- | --- |
 | `sparkwing dashboard start` | `sparkwing serve start` |
 | `sparkwing dashboard status` | `sparkwing serve status` |
-| `sparkwing dashboard kill` | `sparkwing serve kill` |
+| `sparkwing dashboard kill` | `sparkwing serve stop` |
 | `sparkwing dashboard stop` | `sparkwing serve stop` |
 
 The retired `dashboard` command fails with a replacement instruction and
