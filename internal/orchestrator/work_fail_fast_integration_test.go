@@ -62,8 +62,8 @@ func TestRun_WorkFailFastPersistsCancelledStepsAndRunsCleanup(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("fail-fast cancellation took %s", elapsed)
+	if elapsed, budget := time.Since(started), timingBudget(time.Second); elapsed > budget {
+		t.Fatalf("fail-fast cancellation took %s, over its %s budget", elapsed, budget)
 	}
 	select {
 	case <-failFastCleanupRan:

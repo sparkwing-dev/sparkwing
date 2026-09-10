@@ -9,7 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
-func resolveEffectiveCacheSpec(_ string) (*backends.Spec, storeurl.ProfileLookup) {
+// resolveBinaryCacheSpec resolves the backend that serves pipeline
+// binaries under bin/<hash>: the active profile's cache surface, or its
+// binaries sub-spec when it declares one.
+func resolveBinaryCacheSpec() (*backends.Spec, storeurl.ProfileLookup) {
 	name := os.Getenv("SPARKWING_PROFILE")
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -30,8 +33,8 @@ func resolveEffectiveCacheSpec(_ string) (*backends.Spec, storeurl.ProfileLookup
 		return nil, nil
 	}
 	lookup := controllerLookup(p)
-	if cache := p.Surfaces().Cache; cache != nil {
-		return cache, lookup
+	if bin := p.Surfaces().BinaryCache(); bin != nil {
+		return bin, lookup
 	}
 	if p.ControllerURL() != "" {
 		return &backends.Spec{Type: backends.TypeController, Controller: p.Name}, lookup

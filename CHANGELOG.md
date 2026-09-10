@@ -69,6 +69,8 @@ unlock.
 
 ### Fixed
 
+- **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
+  reads. It was parsed, validated and documented, and no code path read it.
 - **cache:** Concurrent binary downloads use independent staging files and
   remove them when publication fails; uploads publish digests before blobs
 - **cache:** Binary storage supports existence checks and deletion, and streams

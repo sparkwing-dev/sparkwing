@@ -148,6 +148,13 @@ profiles:
         prefix: "${PIPELINE_NAME}/"
 ```
 
+A pipeline compile reads `bin/<hash>` from the sub-spec when one is
+declared and from the cache surface otherwise. Nothing in a profile writes
+that destination: populate it out of band, with the publish command's
+explicit artifact-store URL or with whatever pushes binaries in your
+environment. Only one level is read: a `binaries` block inside a
+`binaries` block is ignored.
+
 ## Migrating from `backends.yaml`
 
 For the before/after of moving `backends.yaml` `defaults:` and
