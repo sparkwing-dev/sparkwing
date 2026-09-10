@@ -18,10 +18,20 @@ launcher when testing isolated tool state.
   this repo's source policy and nothing else, which is what keeps it near two
   seconds; the git pre-commit hook runs it. `gate` is the broad check, and the
   git pre-push hook runs it. `pre-release` is the release-boundary tier, which
-  the release pipeline and the hosted release lane run and no git hook fires.
+  the release pipeline runs and no git hook fires; hosted CI runs `gate` and
+  `pre-release` on every pull request and every push to main.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` is the proof they fire; a definition alone
   proves nothing.
+- **Why vet, build, test and lint are not in the commit tier:** the house
+  standard puts all four in the pre-commit chain, and this repo runs them one
+  tier later on purpose. Its suite takes 6 to 12 minutes through the shared
+  admission daemon, and a hook that long is a hook everyone passes
+  `--no-verify`. Measured on a 16-core Linux host: the commit tier is 1.3 s
+  warm and 3.8 s on a typical commit, and a scoped `go vet` alone was 5.4 s on
+  a cold vet cache. All four still run under an enforced blocking hook, at the
+  push, where a landing already pays for them once, and on every hosted pull
+  request.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
@@ -68,7 +78,7 @@ launcher when testing isolated tool state.
   seen its own package, and runs `store-postgres` when that change touches
   `pkg/store`. Unit and ESLint run in parallel; the production build then
   feeds the browser suite.
-- **Gating beside other agents:** one gate at a time. The machine's admission
+- **Gating beside other agents:** one broad `gate` at a time. The machine's admission
   daemon serializes concurrent agents, and `sparkwing run` is how a check
   reaches it; a bare `go test ./...` or `golangci-lint run` outside a run is
   load the daemon cannot see and every queued run pays for. `sparkwing queue

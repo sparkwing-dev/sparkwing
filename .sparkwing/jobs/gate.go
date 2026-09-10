@@ -182,7 +182,7 @@ var homeRules = []homeRule{
 
 func checkHomeResolution(ctx context.Context) error {
 	root := regexCheckRoot()
-	files, err := sparkwing.Bash(ctx, `git ls-files -- '*.go'`).Lines()
+	files, err := listNames(ctx, `ls-files -z -- '*.go'`)
 	if err != nil {
 		return fmt.Errorf("list the tracked Go files: %w", err)
 	}
@@ -257,12 +257,7 @@ func runFormatters(ctx context.Context) error {
 	if len(files) == 0 {
 		return nil
 	}
-	quoted := make([]string, 0, len(files))
-	for _, f := range files {
-		quoted = append(quoted, fmt.Sprintf("%q", f))
-	}
-
-	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff "+strings.Join(quoted, " ")).Capture()
+	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff "+shellQuoteAll(files)).Capture()
 	if runErr == nil {
 		return nil
 	}
@@ -275,18 +270,22 @@ func runFormatters(ctx context.Context) error {
 }
 
 func changeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {
-	staged, err := listNames(ctx, `git diff --cached --name-only --diff-filter=ACMR`)
+	staged, err := listNames(ctx, `diff --cached -z --name-only --diff-filter=ACMR`)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the staged change: %w", err)
 	}
-	if files := keep(staged); len(files) > 0 {
+	// safety: branching on the filtered set would send a commit that stages
+	// only documentation down the origin/main path, which widens the scope on a
+	// long branch and hard-fails a checkout that cannot resolve the baseline.
+	if len(staged) > 0 {
+		files := keep(staged)
 		return files, fmt.Sprintf("%d staged %s", len(files), noun), nil
 	}
 	base, err := resolveGateBase(ctx)
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "git diff --name-only --diff-filter=ACMR "+base)
+	changed, err := listNames(ctx, "diff -z --name-only --diff-filter=ACMR "+base)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the change since %s: %w", base, err)
 	}
@@ -309,8 +308,37 @@ func resolveGateBase(ctx context.Context) (string, error) {
 	return sha, nil
 }
 
-func listNames(ctx context.Context, cmd string) ([]string, error) {
-	return sparkwing.Bash(ctx, cmd).Lines()
+// safety: %q is Go quoting. It leaves $ and backticks untouched, and the
+// result lands inside the double quotes bash expands, so a staged filename
+// would run a command inside the gate that judges it.
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
+func shellQuoteAll(paths []string) string {
+	quoted := make([]string, 0, len(paths))
+	for _, p := range paths {
+		quoted = append(quoted, shellQuote(p))
+	}
+	return strings.Join(quoted, " ")
+}
+
+// safety: git quotes a path holding a non-ASCII byte unless core.quotePath is
+// off, and a quoted name matches no suffix and stats to nothing, so the file
+// drops out of every scoped step and the step passes without judging it. -z
+// also carries a name holding a newline, which no line-split can.
+func listNames(ctx context.Context, args string) ([]string, error) {
+	out, err := sparkwing.Bash(ctx, "git -c core.quotePath=false "+args).String()
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, name := range strings.Split(out, "\x00") {
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 func existingGoFiles(all []string) []string {
@@ -536,7 +564,7 @@ func checkTrackerIDs(ctx context.Context) error {
 
 func regexCheckFiles(ctx context.Context) ([]string, string, error) {
 	if os.Getenv("SPARKWING_REGEX_SWEEP_ALL") != "" {
-		all, err := listNames(ctx, "git ls-files")
+		all, err := listNames(ctx, "ls-files -z")
 		if err != nil {
 			return nil, "", fmt.Errorf("list the tracked files: %w", err)
 		}
@@ -581,7 +609,7 @@ func executableFormat(head []byte) string {
 }
 
 func checkTrackedBinaries(ctx context.Context) error {
-	files, err := sparkwing.Bash(ctx, `git ls-files`).Lines()
+	files, err := listNames(ctx, "ls-files -z")
 	if err != nil {
 		return err
 	}

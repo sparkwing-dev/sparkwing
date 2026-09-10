@@ -149,10 +149,10 @@ func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
 	plan := releasePlan(t)
 
 	if !ancestors(t, plan, "gate-broad")["gate-contracts"] {
-		t.Error("gate-pre-commit must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
+		t.Error("gate-broad must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
 	}
 	if ancestors(t, plan, "gate-contracts")["gate-broad"] {
-		t.Error("gate-contracts must not depend on gate-pre-commit, directly or transitively: that puts it back behind the suite it exists to precede")
+		t.Error("gate-contracts must not depend on gate-broad, directly or transitively: that puts it back behind the suite it exists to precede")
 	}
 	if ancestors(t, plan, "gate-contracts")["gate-pre-release"] || ancestors(t, plan, "gate-contracts")["gate-template-verify"] {
 		t.Error("gate-contracts must not depend on the expensive gates")

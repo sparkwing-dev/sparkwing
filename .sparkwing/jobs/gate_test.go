@@ -929,3 +929,59 @@ func TestTrackerIDPatternKeepsTheOtherPrefixesUppercaseOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestScopedStepsRefuseToLetAFilenameRunACommand(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	witness := filepath.Join(t.TempDir(), "executed")
+	name := "internal/hostile$(touch " + witness + ").go"
+	writeGoFile(t, filepath.Join(root, name), "package internal\n\nfunc  Hostile( ) int { return 1 }\n")
+	gitAddAll(t, root)
+
+	// safety: the step is expected to refuse the file, which is unformatted;
+	// what must not happen is the shell running the name.
+	_ = runGofmtOnTheChange(context.Background())
+
+	if _, err := os.Stat(witness); err == nil {
+		t.Fatal("a staged filename ran a command inside the gate")
+	}
+}
+
+func TestScopedStepsSeeAFileGitWouldQuote(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	writeGoFile(t, filepath.Join(root, "internal", "caf\u00e9.go"), "package internal\n\nfunc  Cafe( ) int { return 1 }\n")
+	gitAddAll(t, root)
+
+	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != "internal/caf\u00e9.go" {
+		t.Fatalf("staged Go files = %v, want the one file whose name git quotes", files)
+	}
+	if err := runGofmtOnTheChange(context.Background()); err == nil {
+		t.Error("gofmt passed an unformatted file, so the quoted name never reached it")
+	}
+}
+
+func TestScopedStepsStayOnTheCommitWhenItStagesNoFileOfTheirKind(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	writeGoFile(t, filepath.Join(root, "NOTES.md"), "a documentation-only commit\n")
+	gitAddAll(t, root)
+
+	files, scope, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	if err != nil {
+		t.Fatalf("a commit that stages no Go file fell through to the baseline: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("staged Go files = %v, want none", files)
+	}
+	if !strings.Contains(scope, "staged") {
+		t.Errorf("scope = %q, want the staged change; this fixture has no origin/main to fall back to", scope)
+	}
+}

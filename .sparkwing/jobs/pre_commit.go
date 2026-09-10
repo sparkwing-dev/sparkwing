@@ -2,8 +2,6 @@ package jobs
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -20,7 +18,7 @@ func (PreCommit) ShortHelp() string {
 
 func (PreCommit) Help() string {
 	return "Judges the staged change against this repository's source policy and nothing else: " +
-		"gofmt over the tree, the configured formatters (gofumpt + goimports) over the staged Go files, " +
+		"gofmt and the configured formatters (gofumpt + goimports) over the staged Go files, " +
 		"no em dashes and no internal tracker IDs in the staged files, no disallowed comments in the " +
 		"staged change (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), no tracked " +
 		"ELF, Mach-O or PE executable, an embedded pkg/docs/ mirror that matches docs/ and CHANGELOG.md, " +
@@ -85,11 +83,7 @@ func runGofmtOnTheChange(ctx context.Context) error {
 	if len(files) == 0 {
 		return nil
 	}
-	quoted := make([]string, 0, len(files))
-	for _, f := range files {
-		quoted = append(quoted, fmt.Sprintf("%q", f))
-	}
-	return sparkwing.Bash(ctx, "gofmt -l "+strings.Join(quoted, " ")).MustBeEmpty("files need formatting")
+	return sparkwing.Bash(ctx, "gofmt -l "+shellQuoteAll(files)).MustBeEmpty("files need formatting")
 }
 
 func init() {
