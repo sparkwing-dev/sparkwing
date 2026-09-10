@@ -34,23 +34,33 @@ func (PreCommit) Examples() []sparkwing.Example {
 }
 
 func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Resources(sparkwing.Cores(float64(preCommitCPUReservation(runtime.NumCPU()))))
+	plan.Resources(sparkwing.Cores(preCommitCoreReservation(runtime.NumCPU())))
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
 }
 
-func preCommitCPUReservation(cpuCount int) int {
-	if cpuCount < 2 {
+// perf: admission charges sustained CPU, measured on a 16-core Linux host over
+// 20 uncontended runs at p95 3.9 cores, maximum 4.4. Half the machine was
+// double that, so a second gate never fit. A pin also survives an edit to this
+// file, which resets the plan hash and would otherwise re-charge a cold start.
+func preCommitCoreReservation(cpuCount int) float64 {
+	if cpuCount < 4 {
 		return 1
 	}
-	return (cpuCount + 1) / 2
+	return float64(cpuCount)/4 + 0.5
+}
+
+// perf: bounds a Go step's burst to under half the machine, so one gate cannot
+// saturate a box another gate is sharing.
+func goStepParallelism(cpuCount int) int {
+	if parallelism := (cpuCount - 1) / 2; parallelism > 1 {
+		return parallelism
+	}
+	return 1
 }
 
 func boundedGoCommand(cpuCount int, verb, args string) string {
-	parallelism := preCommitCPUReservation(cpuCount) - 1
-	if parallelism < 1 {
-		parallelism = 1
-	}
+	parallelism := goStepParallelism(cpuCount)
 	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", parallelism, verb, parallelism, args)
 }
 

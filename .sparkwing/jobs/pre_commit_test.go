@@ -38,9 +38,29 @@ func TestPreCommitReservesAndBoundsItsCPU(t *testing.T) {
 	}
 
 	hints := plan.ResourceHints()
-	wantCores := float64(preCommitCPUReservation(runtime.NumCPU()))
+	wantCores := preCommitCoreReservation(runtime.NumCPU())
 	if hints == nil || hints.Cores != wantCores {
-		t.Fatalf("reserved cores = %#v, want %.0f", hints, wantCores)
+		t.Fatalf("reserved cores = %#v, want %v", hints, wantCores)
+	}
+	for _, tc := range []struct {
+		cpus  int
+		cores float64
+	}{{1, 1}, {2, 1}, {3, 1}, {4, 1.5}, {8, 2.5}, {16, 4.5}, {32, 8.5}} {
+		if got := preCommitCoreReservation(tc.cpus); got != tc.cores {
+			t.Errorf("preCommitCoreReservation(%d) = %v, want %v", tc.cpus, got, tc.cores)
+		}
+	}
+	// safety: two gates must fit under the daemon's DefaultHeadroomFraction,
+	// which a reservation near half the box prevented.
+	for _, cpus := range []int{4, 8, 16, 32} {
+		if got, machine := preCommitCoreReservation(cpus), float64(cpus); 2*got > 0.8*machine {
+			t.Errorf("reservation %v on %d cores leaves no room for a second gate", got, cpus)
+		}
+	}
+	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
+		if got := goStepParallelism(tc.cpus); got != tc.parallelism {
+			t.Errorf("goStepParallelism(%d) = %d, want %d", tc.cpus, got, tc.parallelism)
+		}
 	}
 	if got := boundedGoCommand(14, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
 		t.Fatalf("bounded command = %q", got)
