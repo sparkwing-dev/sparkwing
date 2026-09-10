@@ -687,17 +687,22 @@ sparkwing pipeline sparks add --source example.com/fictional/sparks --version "^
 List the blocks a spark library offers
 
 Reads a library's spark.json and prints one row per block it
-declares: the name to pass to 'sparks inflate --module', its
-stability, and what it does. 'sparks list' shows the libraries
-this repo already declares; catalog shows what is inside one.
+declares, with its stability and what it does. 'sparks list'
+shows the libraries this repo already declares; catalog shows
+what is inside one.
+
+A monorepo library declares 'modules', each independently
+tagged, and each row's name is what 'sparks inflate --module'
+takes. A single-module library declares 'packages' instead, and
+those are import packages rather than modules; inflate that
+library by its own module path.
 
 Without --library the catalog reads sparks-core. A library the
 repo declares in .sparkwing/sparks.yaml is read at the version
 declared there; any other resolves to latest. --path reads a
 checkout on disk and never touches the network.
 
--o plain prints one block name per line, which is what
-'sparks inflate --module' takes.
+-o plain prints one block name per line.
 
 ### Flags
 

@@ -30,8 +30,45 @@ func TestSparksCatalogListsModulesFromALocalLibrary(t *testing.T) {
 			t.Errorf("catalog output is missing %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "inflate --module") {
-		t.Errorf("catalog output does not say how to inflate a block:\n%s", out)
+	want := "edit one: sparkwing pipeline sparks inflate --module github.com/acme/my-sparks/docker"
+	if !strings.Contains(out, want) {
+		t.Errorf("catalog must name the module inflate resolves, not a bare path:\n%s", out)
+	}
+}
+
+func TestSparksCatalogDoesNotOfferPackagesToInflate(t *testing.T) {
+	dir := writeSparkFixture(t, map[string]string{"spark.json": `{
+  "name": "one-module-lib",
+  "description": "a single Go module with several packages",
+  "author": "tester",
+  "packages": [
+    {"path": "docker", "description": "docker helpers"},
+    {"path": "kube", "description": "kube helpers"}
+  ]
+}`})
+
+	var err error
+	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "pretty"}) })
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if strings.Contains(out, "inflate --module docker") || strings.Contains(out, "inflate --module kube") {
+		t.Errorf("a packages[] entry is not a module, so it cannot be inflated by name:\n%s", out)
+	}
+	if !strings.Contains(out, "one Go module") {
+		t.Errorf("catalog does not say these rows are packages inside one module:\n%s", out)
+	}
+}
+
+func TestSparksCatalogErrorsCarryTheCatalogVerb(t *testing.T) {
+	dir := t.TempDir()
+
+	err := runSparksCatalog([]string{"--path", dir})
+	if err == nil {
+		t.Fatal("expected a directory with no spark.json to fail")
+	}
+	if !strings.Contains(err.Error(), "spark catalog") {
+		t.Errorf("error names the wrong verb: %v", err)
 	}
 }
 
@@ -44,8 +81,30 @@ func TestSparksCatalogPlainFeedsInflate(t *testing.T) {
 		t.Fatalf("catalog: %v", err)
 	}
 	got := strings.Fields(out)
-	if len(got) != 2 || got[0] != "docker" || got[1] != "kube" {
-		t.Errorf("plain output = %q, want the two block names one per line", out)
+	want := []string{"github.com/acme/my-sparks/docker", "github.com/acme/my-sparks/kube"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("plain output = %q, want %q -- the values `inflate --module` resolves", out, want)
+	}
+}
+
+func TestSparksCatalogNamesAPackagesLibraryByItsGoModule(t *testing.T) {
+	dir := writeSparkFixture(t, map[string]string{
+		"spark.json": `{
+  "name": "one-module-lib",
+  "description": "a single Go module with several packages",
+  "author": "tester",
+  "packages": [{"path": "docker", "description": "docker helpers"}]
+}`,
+		"go.mod": "module github.com/acme/one-module-lib\n\ngo 1.26.0\n",
+	})
+
+	var err error
+	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "pretty"}) })
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if !strings.Contains(out, "inflate --module github.com/acme/one-module-lib") {
+		t.Errorf("catalog does not name the library's own module:\n%s", out)
 	}
 }
 

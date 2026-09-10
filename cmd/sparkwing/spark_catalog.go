@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	flag "github.com/spf13/pflag"
+	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
@@ -71,7 +73,7 @@ func runSparksCatalog(args []string) error {
 			source = sparksCoreModule
 		}
 		version := declaredSparkVersion(sparkwingDir, source)
-		moduleDir, resolved, derr := sparks.DownloadModule(context.Background(), sparkwingDir, source, version)
+		moduleDir, resolved, derr := sparks.DownloadModule(context.Background(), downloadDir(sparkwingDir), source, version)
 		if derr != nil {
 			return fmt.Errorf("spark catalog: %w", derr)
 		}
@@ -79,7 +81,7 @@ func runSparksCatalog(args []string) error {
 		target = moduleDir
 	}
 
-	manifest, manifestPath, err := readSparkManifest(target)
+	manifest, libDir, manifestPath, err := readSparkManifest(target)
 	if err != nil {
 		return err
 	}
@@ -87,6 +89,8 @@ func runSparksCatalog(args []string) error {
 	if problem != "" {
 		return fmt.Errorf("spark catalog: %s: %s", manifestPath, problem)
 	}
+
+	libModule := libraryModulePath(source, libDir, entries)
 
 	summary := sparkCatalogSummary{
 		Kind:        "summary",
@@ -116,29 +120,71 @@ func runSparksCatalog(args []string) error {
 		return ndjson.Write(os.Stdout, blocks)
 	case "plain":
 		for _, b := range blocks {
-			fmt.Println(b.Name)
+			fmt.Println(inflateTarget(b, libModule))
 		}
 		return nil
 	default:
-		printSparkCatalog(summary, field, blocks)
+		printSparkCatalog(summary, field, libModule, blocks)
 		return nil
 	}
 }
 
-func readSparkManifest(target string) (*sparkManifest, string, error) {
-	_, manifestPath, err := resolveSparkJSONPath(target)
+// safety: the catalog is a discovery verb, so it has to answer before a project exists;
+// go mod download only needs a directory it can run in.
+func downloadDir(sparkwingDir string) string {
+	if info, err := os.Stat(sparkwingDir); err == nil && info.IsDir() {
+		return sparkwingDir
+	}
+	return os.TempDir()
+}
+
+func inflateTarget(b sparkCatalogBlock, libModule string) string {
+	if b.Module != "" {
+		return b.Module
+	}
+	if libModule != "" {
+		return libModule
+	}
+	return b.Name
+}
+
+func libraryModulePath(source, libDir string, entries []sparkManifestEntry) string {
+	if source != "" {
+		if trimmed, _, ok := strings.Cut(source, "@"); ok && trimmed != "" {
+			return trimmed
+		}
+		return source
+	}
+	for _, e := range entries {
+		if e.Module != "" {
+			return path.Dir(e.Module)
+		}
+	}
+	return modulePathFromGoMod(filepath.Join(libDir, "go.mod"))
+}
+
+func modulePathFromGoMod(goModPath string) string {
+	raw, err := os.ReadFile(goModPath)
 	if err != nil {
-		return nil, "", err
+		return ""
+	}
+	return modfile.ModulePath(raw)
+}
+
+func readSparkManifest(target string) (*sparkManifest, string, string, error) {
+	libDir, manifestPath, err := resolveSparkJSONPath("spark catalog", target)
+	if err != nil {
+		return nil, "", "", err
 	}
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("spark catalog: read %s: %w", manifestPath, err)
+		return nil, "", "", fmt.Errorf("spark catalog: read %s: %w", manifestPath, err)
 	}
 	var m sparkManifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, "", fmt.Errorf("spark catalog: %s: invalid JSON: %w", manifestPath, err)
+		return nil, "", "", fmt.Errorf("spark catalog: %s: invalid JSON: %w", manifestPath, err)
 	}
-	return &m, manifestPath, nil
+	return &m, libDir, manifestPath, nil
 }
 
 func declaredSparkVersion(sparkwingDir, source string) string {
@@ -154,7 +200,7 @@ func declaredSparkVersion(sparkwingDir, source string) string {
 	return "latest"
 }
 
-func printSparkCatalog(summary sparkCatalogSummary, field string, blocks []sparkCatalogBlock) {
+func printSparkCatalog(summary sparkCatalogSummary, field, libModule string, blocks []sparkCatalogBlock) {
 	title := summary.Library
 	if title == "" {
 		title = summary.Source
@@ -170,10 +216,6 @@ func printSparkCatalog(summary sparkCatalogSummary, field string, blocks []spark
 		fmt.Printf("%s\n", summary.Source)
 	}
 	fmt.Println()
-	if len(blocks) == 0 {
-		fmt.Printf("this library declares no %s.\n", field)
-		return
-	}
 	nameWidth, stabilityWidth := 0, 0
 	for _, b := range blocks {
 		nameWidth = max(nameWidth, len(b.Name))
@@ -183,15 +225,18 @@ func printSparkCatalog(summary sparkCatalogSummary, field string, blocks []spark
 		fmt.Printf("  %-*s  %-*s  %s\n", nameWidth, b.Name, stabilityWidth, b.Stability, b.Description)
 	}
 	fmt.Println()
-	fmt.Printf("import path: %s\n", importPathHint(blocks))
-	fmt.Printf("edit one here: sparkwing pipeline sparks inflate --module %s\n", blocks[0].Name)
-}
 
-func importPathHint(blocks []sparkCatalogBlock) string {
-	for _, b := range blocks {
-		if b.Module != "" {
-			return path.Dir(b.Module) + "/<name>"
-		}
+	if libModule != "" {
+		fmt.Printf("import: %s/<name>\n", libModule)
 	}
-	return "the library's own module path"
+	if field == "modules" {
+		fmt.Printf("edit one: sparkwing pipeline sparks inflate --module %s\n", inflateTarget(blocks[0], libModule))
+		return
+	}
+	if libModule != "" {
+		fmt.Printf("these are packages inside one Go module; edit the library: "+
+			"sparkwing pipeline sparks inflate --module %s\n", libModule)
+		return
+	}
+	fmt.Println("these are packages inside one Go module; inflate the library by its module path.")
 }
