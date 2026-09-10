@@ -97,8 +97,9 @@ func TestRenderQueueAt_PrettyShowsRemainingAndFinish(t *testing.T) {
 	if !strings.Contains(waiter, "09:03:30") {
 		t.Fatalf("measured waiter omits its 09:03:30 finish: %q", waiter)
 	}
-	if unmeasured := lineWith(t, out, "wait-unmeasured"); !strings.Contains(unmeasured, "unmeasured") {
-		t.Fatalf("waiter with no profile must say unmeasured: %q", unmeasured)
+	unmeasuredWaiter := lineWith(t, out, "wait-unmeasured")
+	if !strings.Contains(unmeasuredWaiter, "unmeasured  unmeasured") {
+		t.Fatalf("waiter with no profile must say unmeasured for both start and finish: %q", unmeasuredWaiter)
 	}
 }
 

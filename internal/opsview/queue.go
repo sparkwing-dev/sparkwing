@@ -285,7 +285,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
 		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
-			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
+			orDash(wt.CostSource), fmtWaiterStart(wt),
 			fmtFinishClock(now, waiterFinishMS(wt), estimateUnmeasured),
 			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
@@ -700,6 +700,16 @@ func unmeasuredWaiters(qs wingwire.QueueState) int {
 		}
 	}
 	return n
+}
+
+// fmtWaiterStart reads "unmeasured" where the plain record's ETA column keeps
+// its established "-", so the two cells a queued row shows for one missing
+// profile agree with each other.
+func fmtWaiterStart(wt wingwire.Waiter) string {
+	if wt.ExpectedStartMS == nil {
+		return estimateUnmeasured
+	}
+	return fmtETA(wt.ExpectedStartMS)
 }
 
 func fmtEstimate(ms *int64, word string) string {
