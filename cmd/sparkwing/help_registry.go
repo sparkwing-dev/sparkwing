@@ -130,6 +130,9 @@ toolchain is on PATH, a curated list of next-step commands, and
 the docs URL. When a project declares a git hook that is not
 firing, repairing it is the first next step.
 
+If the pipeline catalog cannot be read, JSON reports project.pipelines_error.
+Pipeline counts are unavailable when that field is present.
+
 Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).`,
@@ -1331,7 +1334,7 @@ listings. --short sets its description.`,
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
 		{Name: "template", Argument: "SHAPE", Desc: "DAG to scaffold: minimal (1 node) | build-test-deploy (3) | ci-pr-check (3) | release (3) | scheduled-report (5)", Default: "minimal", Group: "Scaffold"},
-		{Name: "on", Argument: "EVENT", Desc: "Trigger(s) to declare: pull_request | push | schedule | manual (repeatable or comma-separated)", Default: "the shape's own", Group: "Scaffold"},
+		{Name: "on", Argument: "EVENT", Desc: "Trigger(s) to declare: pull_request | push | schedule | pre_commit | pre_push | post_commit | manual (repeatable or comma-separated)", Default: "the shape's own", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
 		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line", Group: "Scaffold"},
 	},
@@ -2828,7 +2831,9 @@ var cmdHooksSurvey = Command{
 	Synopsis: "Report effective gates for registered repositories",
 	Description: `Reports declared hooks for every registered repository as armed, shadowed,
 uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
-selects another location.
+selects another location. The STATE column reads no-gate where every declared
+hook fires and none of them is pre-commit or pre-push, because nothing there
+refuses a commit or a push.
 
 Coverage includes registered repositories and configured fallback paths.
 Register other checkouts before expecting them in the report. An unreadable

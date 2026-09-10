@@ -129,8 +129,10 @@ func (h *nodeSpawnHandler) runnerMismatch(ctx context.Context, child *sparkwing.
 func (h *nodeSpawnHandler) markChildCancelled(ctx context.Context, childID string) {
 	const reason = "cancelled: run failing"
 	writeCtx := context.WithoutCancel(ctx)
-	_ = h.backends.State.FinishNode(writeCtx, h.runID, childID, string(sparkwing.Cancelled), reason, nil)
-	_ = h.backends.State.AppendEvent(writeCtx, h.runID, childID, "node_cancelled", []byte(reason))
+	if err := h.backends.State.FinishNode(writeCtx, h.runID, childID, string(sparkwing.Cancelled), reason, nil); err != nil {
+		noteLostStateWrite(writeCtx, "finish node", h.runID, err)
+	}
+	noteEvent(writeCtx, h.backends.State, h.runID, childID, "node_cancelled", []byte(reason))
 }
 
 func nodeProcessPipelineRequires(pipeline string, logger *slog.Logger) []string {

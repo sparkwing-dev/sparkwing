@@ -22,6 +22,16 @@ unlock.
 
 ### Added
 
+- **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
+  the upstream output is absent. `TryGet` exists for the bootstrap run of a
+  compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
+  a pipeline's first run, and `Get` panics there. It still panics on a
+  cancelled or expired context, and on output that does not fit `T`. Misses are
+  logged at warn naming the pipeline and node, because the SDK cannot tell an
+  unreachable store from a genuine absence and reports both as absence. `Get`
+  is unchanged.
+- **development:** Repository-owned candidate install hook for Xwing rebuilds
+  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -34,9 +44,49 @@ unlock.
   checks, defaulting to the 10 seconds doctor always used. Each check takes a
   slice of it, so one unanswering daemon leaves the rest of the report its
   budget, and a sweep that runs out prints what it reached alongside the error
+- **cli:** `pipeline new --on` accepts `pre_commit`, `pre_push`, and
+  `post_commit`, so a scaffolded gate declares the git hook that runs it. The
+  scaffold declares the trigger and never writes the hook: it prints the
+  `sparkwing pipeline hooks install` command instead, because arming a gate the
+  pipeline has not passed turns every commit in the checkout into a failure
+
+### Changed
+
+- **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
+  where a declared `pre-commit` or `pre-push` runs from that repository, which
+  is the rule `hooks install --fleet` already applied. A repository that
+  declares no hook, or only `post-commit`, was counted gated and is now listed
+  among the ones accepting ungated work, with the remedy naming the trigger to
+  declare rather than an install that would write nothing. The `state` field of
+  `-o json` and `-o plain` keeps its existing values; the pretty STATE column
+  reads `no-gate` in place of `armed` for such a repository and a new FIRING
+  column names the declared hooks that do run
+- **cli:** `pipeline hooks survey` reports a repository whose hook directory it
+  cannot resolve as `broken` with the error, instead of `undeclared` and gated.
+  A repository the survey could not read was counted among those whose gates
+  fire
 
 ### Fixed
 
+- **cli:** `pipeline hooks survey` no longer closes with `every declared gate
+  fires` while a row reports a hook that does not; a repository that runs its
+  commit gate and is missing a `post-commit` notifier is now counted and named
+  separately from one that refuses nothing
+- **cli:** Cross-repository configuration commands report invalid flags
+- **cli:** User creation accepts complete piped passphrases, including spaces
+- **cli:** `info` reports unavailable pipeline catalogs instead of silently
+  displaying zero pipelines
+- **sdk:** Invalid dynamic expansion batches leave the plan unchanged
+- **secrets:** Empty filesystem values report missing secrets, matching the
+  environment backend
+
+- **admission:** A guarded command whose daemon restarted mid-run is
+  acknowledged when it completes. The guard sweep chose which client to
+  acknowledge before it probed the process table, so a client that reattached
+  inside that window was never acknowledged: `sparkwing queue exec` waited ten
+  seconds and reported "release admission: guard completion acknowledgement
+  timed out" for a command that had succeeded. The same staleness could
+  finalize a reattached run as abandoned.
 - **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
   accepts connections and answers nothing -- and the commands that recover it,
   instead of reporting a raw socket read timeout the operator has to interpret
@@ -62,7 +112,8 @@ unlock.
   while individual writes retain a timeout
 - **web:** Read-only local consoles reject log append and deletion requests
 - **telemetry:** Initialization preserves the configured logger and log level
-  when OTLP logging is disabled
+  when OTLP logging is disabled, and still returns when no logger was
+  configured
 - **sdk:** Fileset hashes distinguish file boundaries and permissions, and
   report unreadable inputs. Existing hash-derived image tags change once.
 - **cli:** Interrupting a run while it prepares the pipeline binary stops the

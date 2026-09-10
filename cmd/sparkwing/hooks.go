@@ -947,29 +947,49 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "REPO\tSTATE\tDECLARED\tNOT FIRING\tBORROWED")
-	ungated := 0
+	fmt.Fprintln(tw, "REPO\tSTATE\tDECLARED\tFIRING\tNOT FIRING\tBORROWED")
+	var ungated, lapsed []githooks.RepoGates
 	for _, r := range rows {
-		if !r.Gated() {
-			ungated++
+		switch {
+		case !r.RunsBlockingGate():
+			ungated = append(ungated, r)
+		case len(r.NotFiring()) > 0 || len(r.Borrowed) > 0:
+			lapsed = append(lapsed, r)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", filepath.Base(r.Repo), r.State,
-			joinOrDash(r.Declared), joinOrDash(r.NotFiring()), joinOrDash(r.Borrowed))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", filepath.Base(r.Repo), gateWord(r),
+			joinOrDash(r.Declared), joinOrDash(r.Fires()), joinOrDash(r.NotFiring()), joinOrDash(r.Borrowed))
 	}
 	_ = tw.Flush()
-	if ungated == 0 {
+	if len(ungated) == 0 && len(lapsed) == 0 {
 		fmt.Fprintf(w, "\n%d repo(s), every declared gate fires\n", len(rows))
 		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks fire --fleet` is what a commit says")
 		return nil
 	}
-	fmt.Fprintf(w, "\n%d of %d repo(s) do not run a gate of their own:\n", ungated, len(rows))
-	for _, r := range rows {
-		if r.Gated() {
-			continue
-		}
-		fmt.Fprintf(w, "  %s\n    %s\n", r.Summary(), r.Remedy())
+	if len(ungated) > 0 {
+		fmt.Fprintf(w, "\n%d of %d repo(s) do not run a gate of their own:\n", len(ungated), len(rows))
+		writeSurveyRemedies(w, ungated)
+	}
+	if len(lapsed) > 0 {
+		fmt.Fprintf(w, "\n%d of %d repo(s) refuse a commit but declare a hook that does not fire:\n", len(lapsed), len(rows))
+		writeSurveyRemedies(w, lapsed)
 	}
 	return nil
+}
+
+func writeSurveyRemedies(w io.Writer, rows []githooks.RepoGates) {
+	for _, r := range rows {
+		fmt.Fprintf(w, "  %s\n    %s\n", r.Summary(), r.Remedy())
+	}
+}
+
+// The STATE column answers "does this repository run a gate", which the raw
+// state does not: a repo whose declared hooks all fire is armed even when the
+// only one it declares is a notifier that refuses nothing.
+func gateWord(r githooks.RepoGates) string {
+	if r.State == githooks.GateArmed && !r.Gated() {
+		return "no-gate"
+	}
+	return string(r.State)
 }
 
 func joinOrDash(names []string) string {

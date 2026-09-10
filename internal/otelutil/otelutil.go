@@ -149,9 +149,8 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 			t.shutdowns = append(t.shutdowns, lp.Shutdown)
 
 			otelHandler := otelslog.NewHandler(cfg.ServiceName, otelslog.WithLoggerProvider(lp))
-			existing := slog.Default().Handler()
 			combined := &multiSlogHandler{handlers: []slog.Handler{
-				&traceContextHandler{inner: existing},
+				&traceContextHandler{inner: configuredHandler()},
 				otelHandler,
 			}}
 			slog.SetDefault(slog.New(combined))
@@ -159,7 +158,7 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		}
 	} else {
 		slog.SetDefault(slog.New(&traceContextHandler{
-			inner: slog.Default().Handler(),
+			inner: configuredHandler(),
 		}))
 	}
 
@@ -175,6 +174,22 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	log.Printf("otel: metrics enabled (prometheus /metrics)")
 
 	return t
+}
+
+// Go's built-in slog handler writes through log.Default, and slog.SetDefault
+// points log.Default at whatever handler wraps it, so wrapping the built-in
+// handler deadlocks on the first log.Printf. Its identity is captured before
+// any caller can replace it.
+var builtinHandler = slog.Default().Handler()
+
+// configuredHandler keeps a handler the caller installed and otherwise returns
+// a fresh text handler that the built-in one can be swapped for safely.
+func configuredHandler() slog.Handler {
+	h := slog.Default().Handler()
+	if h == builtinHandler {
+		return slog.NewTextHandler(os.Stderr, nil)
+	}
+	return h
 }
 
 func resolveSampler() sdktrace.Sampler {

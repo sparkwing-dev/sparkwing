@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -62,8 +64,8 @@ func runUsersAdd(args []string) error {
 			fmt.Fprintln(os.Stderr)
 			password = string(buf)
 		} else {
-			var line string
-			if _, err := fmt.Fscanln(os.Stdin, &line); err != nil {
+			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
 				return fmt.Errorf("read password: %w", err)
 			}
 			password = strings.TrimRight(line, "\r\n")

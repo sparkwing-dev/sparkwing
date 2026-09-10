@@ -223,13 +223,17 @@ func (p *Plan) insertChild(child *JobNode) error {
 func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	seen := make(map[string]bool, len(children))
 	for _, child := range children {
 		if child == nil {
 			return fmt.Errorf("JobFanOutDynamic(%s): nil child node", source.id)
 		}
-		if _, exists := p.byID[child.id]; exists {
+		if _, exists := p.byID[child.id]; exists || seen[child.id] {
 			return fmt.Errorf("JobFanOutDynamic(%s): duplicate id %q", source.id, child.id)
 		}
+		seen[child.id] = true
+	}
+	for _, child := range children {
 		child.addNeed(source.id)
 		p.byID[child.id] = child
 		p.nodes = append(p.nodes, child)

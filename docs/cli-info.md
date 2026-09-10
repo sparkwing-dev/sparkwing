@@ -15,6 +15,9 @@ toolchain is on PATH, a curated list of next-step commands, and
 the docs URL. When a project declares a git hook that is not
 firing, repairing it is the first next step.
 
+If the pipeline catalog cannot be read, JSON reports project.pipelines_error.
+Pipeline counts are unavailable when that field is present.
+
 Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).
