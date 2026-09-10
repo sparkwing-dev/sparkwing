@@ -51,12 +51,14 @@ State backends correspond to deployment modes. See
 
 - `sqlite` -- laptop-local (Mode 1).
 - `s3`, `gcs`, `azure-blob` -- per-run NDJSON state on a shared bucket
-  (Mode 2). Cache reservation, triggers, approvals, and debug pauses
-  coordinate over object-store CAS where the bucket enforces write
-  preconditions (S3 today; `gcs`/`azure-blob` recognized but not yet
-  implemented). Where it does not, cache reservation degrades to
-  last-write-wins, while triggers, approvals, and debug pauses report
-  not-supported and need Mode 3.
+  (Mode 2). Cache reservation, approvals, and debug pauses coordinate
+  over object-store CAS where the bucket enforces write preconditions
+  (S3 today; `gcs`/`azure-blob` recognized but not yet implemented).
+  Where it does not, cache reservation degrades to last-write-wins,
+  while approvals and debug pauses report not-supported and need
+  Mode 3. Pipeline triggers report not-supported here whatever the
+  bucket does: the backend enqueues a trigger and has no path that
+  claims one, so `sparkwing.RunAndAwait` refuses instead of waiting.
 - `postgres` -- shared database for cross-runner coordination
   (Mode 3). Triggers, approvals, debug pauses all work.
 - `controller` -- runners talk to a hosted controller over HTTP

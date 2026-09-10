@@ -8,16 +8,17 @@ and what infrastructure you have to host.
 | Mode | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
 | --- | --- | --- | --- | --- | --- |
 | Local | none | -- | -- | -- | filesystem |
-| Shared object storage | object store | yes (read-only) | with CAS¹ | with CAS¹ | bucket IAM |
+| Shared object storage | object store | yes (read-only) | with CAS¹ | approvals + pauses, with CAS¹ | bucket IAM |
 | Postgres + object storage | object store + Postgres | yes | yes | yes | DB roles + bucket IAM |
 | Hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
 
-¹ Mode 2 coordinates cross-runner caching, triggers, approvals, and
-debug pauses over object-store conditional-write CAS where the bucket
+¹ Mode 2 coordinates cross-runner caching, approvals, and debug
+pauses over object-store conditional-write CAS where the bucket
 enforces write preconditions (S3 today). Where it does not, cache
-reservation degrades to last-write-wins, while triggers, approvals,
-and debug pauses report not-supported and need Mode 3. See
-[Mode 2](#mode-2-shared-object-storage).
+reservation degrades to last-write-wins, while approvals and debug
+pauses report not-supported and need Mode 3. Pipeline triggers report
+not-supported under Mode 2 whatever the bucket does, and need Mode 3.
+See [Mode 2](#mode-2-shared-object-storage).
 
 Pick the lowest row that meets your requirements. The selection lives in
 the profile you run under -- each profile in
@@ -51,12 +52,18 @@ For: a small team that wants cross-runner visibility (laptops, CI,
 GitHub Actions) without hosting a database.
 
 Where the bucket enforces write preconditions, Mode 2 coordinates
-across runners with no database -- cache reservation, pipeline
-triggers, approvals, and debug pauses all work. Each is an
-object-store record mutated under compare-and-swap (S3
+across runners with no database -- cache reservation, approvals, and
+debug pauses all work. Each is an object-store record mutated under
+compare-and-swap (S3
 `If-None-Match` / `If-Match`); a contended `.Memoize()` key elects one
 leader and the rest coalesce onto its output, the same
 exactly-one-runs shape as Mode 3.
+
+Pipeline triggers are the exception, and CAS does not change it. The
+object-store backend enqueues a trigger and has no path that claims
+one, so `sparkwing.RunAndAwait` refuses with a not-supported error
+naming Mode 3 rather than waiting on a run that nothing starts. Run
+pipelines that spawn other pipelines under Mode 3 or Mode 4.
 
 S3 is the object store that enforces these preconditions today. The
 `gcs` and `azure-blob` state types are recognized in configuration
@@ -65,8 +72,8 @@ precondition headers and silently ignore them; a runner probes the
 endpoint once and, when it finds the guarantee missing, falls back to
 last-write-wins -- cache reservation degrades to "every runner
 computes and uploads to the same content-addressed key" (safe by
-construction), and triggers, approvals, and debug pauses report
-not-supported, so reach for Mode 3 when you need them.
+construction), and approvals and debug pauses report not-supported,
+so reach for Mode 3 when you need them.
 
 Tradeoff: coordination over one object is slower at the tail than a
 database row lock. A heavily-contended key serializes its acquires

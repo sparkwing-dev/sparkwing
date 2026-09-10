@@ -171,6 +171,24 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** `sparkwing.RunAndAwait` refuses under an object-store state
+  backend (Mode 2) instead of waiting forever. That backend enqueues the child's
+  trigger and has no path that claims one, so the spawned run never started and
+  the parent waited on it until its own timeout. The error wraps
+  `storage.ErrNotSupported` and names Mode 3, and the backend refuses the enqueue
+  itself, so a node running in its own process gets the same answer.
+- **cli:** `run --sw-detached` hosts the admission daemon from the launching
+  binary. The consumer's child resolved a host with `exec.LookPath("sparkwing")`
+  and reached the installed binary instead, so a detached run launched from a
+  development or release-candidate build failed admission with a build mismatch.
+  The pre-warm carries the same guard the foreground path uses, so a launch such
+  as `--explain` that never reaches admission does not start a daemon.
+- **cli:** A resolved module overlay whose checksum file never materialized is
+  repaired on the next resolve. A failed materialization left
+  `.sparkwing/.resolved.mod` on disk with no `.resolved.sum`, and an unchanged
+  overlay took the fast path and never tried again, so compiling the pipeline
+  needed a manual `go mod download`. A Go workspace still skips materialization,
+  because modules resolve from `go.work` there rather than from the overlay.
 - **web:** `/docs/` serves the embedded documentation instead of the dashboard app
   shell. Go's `ServeMux` matched the existing `GET /docs` pattern on that exact path
   only, so the trailing-slash spelling -- reachable by typing it, or through any

@@ -134,6 +134,8 @@ func runRunsConsumerStop(args []string) error {
 	return writeServiceStatus(os.Stdout, serviceStatus{Service: "consumer", State: "stopped", PID: pid, Home: layout.Home, Log: layout.Log}, mode, fmt.Sprintf("trigger consumer stopped (pid %d)\nqueued runs stay queued; the next `sparkwing run <pipeline> --sw-detached` starts a consumer again\n", pid))
 }
 
+var ensureTriggerConsumerFn = ensureTriggerConsumer
+
 func ensureTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	running, err := orchestrator.ConsumerRunning(home)
 	if err != nil {

@@ -127,8 +127,15 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 		}
 	}
 
+	// safety: the consumer's child resolves a daemon host from PATH, which is a
+	// different build whenever the launcher is not the installed sparkwing, so
+	// this hosts one from the launching binary first the way a foreground run does.
+	if runNeedsDaemon(wf, passthrough) {
+		ensureRunDaemonFn()
+	}
+
 	//nolint:contextcheck // The resident consumer lifecycle predates a context-aware process-table API.
-	if cerr := ensureTriggerConsumer(paths.Root, idle, claimLease); cerr != nil {
+	if cerr := ensureTriggerConsumerFn(paths.Root, idle, claimLease); cerr != nil {
 		return fmt.Errorf("run %s is persisted but no consumer could be started to execute it: %w\n"+
 			"Start one with `sparkwing runs consumer start`; the run is queued and will execute when it comes up",
 			result.RunID, cerr)
