@@ -2,10 +2,11 @@ package logpretty
 
 import (
 	"bytes"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestDefaultRendererHonorsColorPolicy(t *testing.T) {

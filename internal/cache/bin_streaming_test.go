@@ -42,6 +42,7 @@ func (r *observedBinUpload) Read(p []byte) (int, error) {
 	}
 	return 0, io.EOF
 }
+
 func TestBinaryUploadStreamsBeforeReadingTheWholeBody(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		old := binsDir

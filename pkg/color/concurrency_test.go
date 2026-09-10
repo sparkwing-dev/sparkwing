@@ -1,9 +1,10 @@
 package color_test
 
 import (
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 func TestConcurrentColorOverrideAndOutput(t *testing.T) {
