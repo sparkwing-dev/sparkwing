@@ -304,6 +304,9 @@ func tailFileFrom(path string, byteOffset int64, n int) string {
 	if err != nil {
 		return "startup log unavailable"
 	}
+	if byteOffset > info.Size() {
+		byteOffset = 0
+	}
 	lines, _, err := dashboardLogTail(context.Background(), f, info.Size(), max(int64(0), byteOffset), n, false)
 	if err != nil {
 		return err.Error()

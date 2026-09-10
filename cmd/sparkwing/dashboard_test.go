@@ -121,6 +121,20 @@ func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 	}
 }
 
+func TestTailFileFrom_TruncatedLogRetainsNewFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dashboard.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat("old\n", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offset := fileSize(path)
+	if err := os.WriteFile(path, []byte("new instance failed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tailFileFrom(path, offset, 40); got != "new instance failed" {
+		t.Fatalf("truncated log lost startup failure: %q", got)
+	}
+}
+
 func TestResolveDashboardPaths_Precedence(t *testing.T) {
 	env := t.TempDir()
 	explicit := t.TempDir()
