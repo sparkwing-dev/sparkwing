@@ -7,7 +7,7 @@ trap 'rm -rf "$CASE_ROOT"' EXIT
 
 SRC="$CASE_ROOT/install"
 mkdir -p "$SRC"
-cp "$ROOT/install/install.sh" "$SRC/install.sh"
+cp "$ROOT/install/service-install.sh" "$SRC/install.sh"
 cp -R "$ROOT/install/macos" "$SRC/macos"
 cp -R "$ROOT/install/linux" "$SRC/linux"
 

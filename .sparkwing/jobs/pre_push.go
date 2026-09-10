@@ -195,10 +195,10 @@ func (prePush *PrePush) run(jobContext context.Context) error {
 	} else {
 		sparkwing.Info(jobContext, "service installer config guard: passed")
 	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/cli-install-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("CLI installer release verification: %v", err))
+	if _, err := sparkwing.Bash(jobContext, "bash bin/release-install-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("public installer release verification: %v", err))
 	} else {
-		sparkwing.Info(jobContext, "CLI installer release verification: passed")
+		sparkwing.Info(jobContext, "public installer release verification: passed")
 	}
 
 	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell.sh").Run(); err != nil {

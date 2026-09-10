@@ -11,11 +11,10 @@ import (
 	"testing"
 )
 
-const installerPath = "../../install/cli-install.sh"
+const installerPath = "../../install/install.sh"
 
 var (
-	installerKeyBlock = regexp.MustCompile(`(?s)TRUSTED_PUBLIC_KEYS=\((.*?)\n\)`)
-	installerKeyLine  = regexp.MustCompile(`"([^"]+)"`)
+	installerKeyBlock = regexp.MustCompile(`(?s)TRUSTED_PUBLIC_KEYS="(.*?)"`)
 	installerPrefix   = regexp.MustCompile(`ED25519_SPKI_BASE64_PREFIX="([^"]+)"`)
 )
 
@@ -32,11 +31,13 @@ func installerTrustedKeys(t *testing.T) []string {
 	t.Helper()
 	block := installerKeyBlock.FindStringSubmatch(readInstaller(t))
 	if block == nil {
-		t.Fatalf("%s has no TRUSTED_PUBLIC_KEYS array; the installer trust root moved", installerPath)
+		t.Fatalf("%s has no TRUSTED_PUBLIC_KEYS value; the installer trust root moved", installerPath)
 	}
 	var keys []string
-	for _, match := range installerKeyLine.FindAllStringSubmatch(block[1], -1) {
-		keys = append(keys, match[1])
+	for _, line := range strings.Split(block[1], "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			keys = append(keys, trimmed)
+		}
 	}
 	return keys
 }

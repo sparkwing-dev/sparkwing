@@ -36,19 +36,23 @@ curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/s
 Keep to one location: `sparkwing doctor` reports competing copies on
 PATH, and a second copy shadows the first.
 
-A hand-placed download is unverified. `SHA256SUMS` reaches you from the
-same origin as the binary, so comparing the two proves the transfer
-finished and nothing else. Every release also publishes `SHA256SUMS.sig`
-and one `.sig` per asset, signed with the key that `sparkwing update`
-carries. `install/cli-install.sh` in the sparkwing repository performs
-the whole check and installs nothing it cannot verify:
+The install script checks what it downloads. It verifies the ed25519
+signature over `SHA256SUMS`, then the asset's digest against its line in
+that file, then the asset's own signature, all against a public key
+built into the script, and installs nothing that fails. It needs OpenSSL
+3.0 or newer; on macOS run `brew install openssl@3`, because the system
+`openssl` is LibreSSL and cannot verify an ed25519 signature.
 
-```bash
-bash install/cli-install.sh --version vX.Y.Z
-```
+A hand-placed download skips every one of those checks. `SHA256SUMS`
+reaches you from the same origin as the binary, so comparing the two
+proves the transfer finished and nothing else. The check that carries a
+guarantee is `SHA256SUMS.sig`, published beside it with one `.sig` per
+asset and signed with the key `sparkwing update` carries.
 
-To check a download by hand, verify the signature over `SHA256SUMS`
-against that key before you trust any digest in it.
+Each release publishes the install script itself as `install.sh` with an
+`install.sh.sig` under the same tag, so a copy taken from anywhere can be
+checked before it runs. The trusted keys are
+`internal/releaseauth.TrustedPublicKeys` in the sparkwing repository.
 
 Or, if Go is on PATH, build from source:
 
