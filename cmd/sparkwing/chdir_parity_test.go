@@ -10,11 +10,9 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// chdirCommands is the full set of command paths that offer -C/--sw-cd, pinned
-// so that adding or dropping the flag on any verb is a deliberate edit rather
-// than a side effect. Membership is a judgement call, not a derived rule: every
-// verb that resolves a storage profile reads the project's sparkwing.yaml from
-// the working directory, and most of those are not worth re-anchoring.
+// safety: pinned so adding or dropping -C on a verb is a deliberate edit. Membership is a
+// judgement call, not a derived rule: every verb that resolves a storage profile reads the
+// project config from the working directory, and most of those are not worth re-anchoring.
 var chdirCommands = []string{
 	"sparkwing examples scaffold",
 	"sparkwing info",
