@@ -44,7 +44,7 @@ func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 	if err != nil {
 		return fmt.Errorf("read installed binary for rollback: %w", err)
 	}
-	backup, err := writeInstallTemp(dir, ".sparkwing-rollback-*", oldBody, 0o755)
+	backup, err := writeInstallTemp(dir, ".sparkwing-rollback-*", oldBody, current.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("stage rollback binary: %w", err)
 	}

@@ -97,7 +97,7 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "sparkwing")
 	old := []byte("old binary")
-	if err := os.WriteFile(target, old, 0o755); err != nil {
+	if err := os.WriteFile(target, old, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	asset := testVerifiedAsset([]byte("signed binary"))
@@ -133,6 +133,13 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	}
 	if string(got) != string(old) {
 		t.Fatalf("installed bytes = %q, want restored %q", got, old)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("restored mode=%o, want700", info.Mode().Perm())
 	}
 	if syncCalls != 2 {
 		t.Fatalf("directory sync calls = %d, want failed install plus restored rollback", syncCalls)
