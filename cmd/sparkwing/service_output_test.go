@@ -15,8 +15,8 @@ func TestServiceOutputStoppedRoutes(t *testing.T) {
 		service string
 		code    int
 	}{
-		{[]string{"dashboard", "status"}, "dashboard", 1},
-		{[]string{"dashboard", "kill"}, "dashboard", 0},
+		{[]string{"serve", "status"}, "dashboard", 1},
+		{[]string{"serve", "kill"}, "dashboard", 0},
 		{[]string{"runs", "consumer", "status"}, "consumer", 1},
 		{[]string{"runs", "consumer", "stop"}, "consumer", 0},
 	} {
@@ -58,7 +58,7 @@ func TestServiceOutputRunningDashboard(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "dashboard.pid"), fmt.Appendf(nil, "%d", os.Getpid()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := outputContractCommand(t, "dashboard", "status", "--home", home)
+	cmd := outputContractCommand(t, "serve", "status", "--home", home)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestServiceOutputRunningDashboard(t *testing.T) {
 }
 
 func TestServiceOutputRejectsModesBeforeStart(t *testing.T) {
-	for _, args := range [][]string{{"dashboard", "start"}, {"runs", "consumer", "start"}} {
+	for _, args := range [][]string{{"serve", "start"}, {"runs", "consumer", "start"}} {
 		for _, flag := range [][]string{{"--output="}, {"-o=jsonl"}, {"--output"}} {
 			cmd := outputContractCommand(t, append(append([]string{}, args...), flag...)...)
 			var stderr bytes.Buffer

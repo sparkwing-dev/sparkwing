@@ -1890,6 +1890,11 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		}
 		heartbeat := time.NewTicker(30 * time.Second)
 		defer heartbeat.Stop()
+		awaitObs := childAwaitObserver{startedAt: startedAt}
+		awaitTimeout := func(cause error) error {
+			awaitObs.admissionOff = admissionPauseActive()
+			return fmt.Errorf("waiting for child %s: %w (%s)", childRunID, cause, awaitObs.evidence())
+		}
 		lastStatus := "pending"
 		for {
 			updateTimeoutForAdmission(parentCtx)
@@ -1904,24 +1909,31 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				// starts it, so a queued or still-compiling child must not
 				// count toward the wedge budget.
 				if errors.Is(err, store.ErrNotFound) {
+					awaitObs.observeMissing()
 					wedge.success()
-				} else if terminal := wedge.fail(fmt.Sprintf("waiting for child run %s", childRunID), err); terminal != nil {
-					emitChildFinish("failed", terminal.Error())
-					return nil, terminal
+				} else {
+					awaitObs.observeError(err)
+					if terminal := wedge.fail(fmt.Sprintf("waiting for child run %s", childRunID), err); terminal != nil {
+						emitChildFinish("failed", terminal.Error())
+						return nil, terminal
+					}
 				}
 			} else {
 				wedge.success()
+				awaitObs.observeStatus(run.Status)
 				lastStatus = run.Status
 				switch run.Status {
 				case "success":
 					updateTimeoutForAdmission(parentCtx)
 					if err := pollCtx.Err(); err != nil {
-						emitChildFinish("timeout", err.Error())
-						return nil, fmt.Errorf("waiting for child %s: %w", childRunID, err)
+						timeoutErr := awaitTimeout(err)
+						emitChildFinish("timeout", timeoutErr.Error())
+						return nil, timeoutErr
 					}
 					if deadline, ok := pollCtx.Deadline(); ok && time.Now().After(deadline) {
-						emitChildFinish("timeout", context.DeadlineExceeded.Error())
-						return nil, fmt.Errorf("waiting for child %s: %w", childRunID, context.DeadlineExceeded)
+						timeoutErr := awaitTimeout(context.DeadlineExceeded)
+						emitChildFinish("timeout", timeoutErr.Error())
+						return nil, timeoutErr
 					}
 					emitChildFinish("success", "")
 					if req.NodeID == "" {
@@ -1948,8 +1960,9 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			select {
 			case <-pollCtx.Done():
 				updateTimeoutForAdmission(parentCtx)
-				emitChildFinish("timeout", pollCtx.Err().Error())
-				return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
+				timeoutErr := awaitTimeout(pollCtx.Err())
+				emitChildFinish("timeout", timeoutErr.Error())
+				return nil, timeoutErr
 			case <-heartbeat.C:
 				sparkwing.Info(ctx,
 					"still waiting on child %s [%s] (status=%s, elapsed=%s)",

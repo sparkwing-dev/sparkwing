@@ -38,7 +38,7 @@ For: a developer working on pipelines on their own laptop.
 Tradeoff: nobody else can see what you ran.
 
 No configuration needed. `sparkwing run hello` and
-`sparkwing dashboard start` work out of the box.
+`sparkwing serve start` work out of the box.
 
 ## Mode 2: Shared object storage
 

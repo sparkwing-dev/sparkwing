@@ -14,7 +14,7 @@ import (
 )
 
 // VersionInfo is the body of GET /api/v1/version: the running
-// dashboard's own identity, used by `sparkwing dashboard start` to
+// dashboard's own identity, used by `sparkwing serve start` to
 // handshake a resident dashboard before deciding to replace it. The
 // endpoint is unauthenticated by design -- it exposes no state, only
 // the binary's own version and the schema it understands, which a

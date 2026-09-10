@@ -50,6 +50,9 @@ function CronsRoute() {
   const router = useRouter();
   const selected = searchParams.get("schedule");
   const [overview, setOverview] = useState<CronsOverview | null>(null);
+  const [histories, setHistories] = useState<Record<string, CronFire[] | null>>(
+    {},
+  );
   const [detail, setDetail] = useState<CronDetail | null>(null);
   const [detailMissing, setDetailMissing] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -74,10 +77,31 @@ function CronsRoute() {
     setDetailMissing(next === null);
   }, []);
 
+  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
-    setOverview(await getCrons());
-    setLoaded(true);
-    await refreshDetail(selectedRef.current);
+    if (refreshing.current) return;
+    refreshing.current = true;
+    try {
+      const next = await getCrons();
+      setOverview(next);
+      setLoaded(true);
+      await refreshDetail(selectedRef.current);
+      const schedules = next?.schedules ?? [];
+      for (let i = 0; i < schedules.length; i += 6) {
+        const batch = await Promise.all(
+          schedules.slice(i, i + 6).map(async (schedule) => {
+            const detail = await getCron(schedule.id);
+            return [schedule.id, detail?.fires ?? null] as const;
+          }),
+        );
+        setHistories((current) => ({
+          ...current,
+          ...Object.fromEntries(batch),
+        }));
+      }
+    } finally {
+      refreshing.current = false;
+    }
   }, [refreshDetail]);
 
   useEffect(() => {
@@ -138,7 +162,7 @@ function CronsRoute() {
   const rows = showUndeclared ? [...listed, ...undeclared] : listed;
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto p-6 w-full">
       <Header overview={overview} />
       {!loaded ? (
         <Skeleton />
@@ -146,18 +170,47 @@ function CronsRoute() {
         <div className="flex flex-col gap-5">
           <HealthBannerCard overview={overview} />
           {schedules.length === 0 ? (
-            <EmptyState />
+            <>
+              <EmptyState />
+              {selected && (
+                <DetailPane
+                  detail={detail}
+                  missing={detailMissing}
+                  now={now}
+                  onClose={() => select(null)}
+                />
+              )}
+            </>
           ) : (
-            <div className="flex flex-col lg:flex-row gap-5 items-start">
+            <div className="flex flex-col gap-5 items-start">
               <div className="flex-1 min-w-0 w-full flex flex-col gap-2">
-                <ScheduleTable
+                <ScheduleCards
                   rows={rows}
+                  histories={histories}
+                  detail={
+                    selected ? (
+                      <DetailPane
+                        detail={detail}
+                        missing={detailMissing}
+                        now={now}
+                        onClose={() => select(null)}
+                      />
+                    ) : null
+                  }
                   now={now}
                   selected={selected}
                   busyID={busyID}
                   onSelect={select}
                   onAct={act}
                 />
+                {selected && !rows.some((s) => s.id === selected) && (
+                  <DetailPane
+                    detail={detail}
+                    missing={detailMissing}
+                    now={now}
+                    onClose={() => select(null)}
+                  />
+                )}
                 {undeclared.length > 0 && (
                   <div>
                     <button
@@ -170,16 +223,6 @@ function CronsRoute() {
                   </div>
                 )}
               </div>
-              {selected && (
-                <div className="w-full lg:w-[26rem] lg:shrink-0">
-                  <DetailPane
-                    detail={detail}
-                    missing={detailMissing}
-                    now={now}
-                    onClose={() => select(null)}
-                  />
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -229,9 +272,13 @@ function HealthBannerCard({ overview }: { overview: CronsOverview | null }) {
     >
       <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-1.5 ${dot}`} />
       <div className="min-w-0">
-        <div className="text-sm text-[var(--foreground)]">{banner.headline}</div>
+        <div className="text-sm text-[var(--foreground)]">
+          {banner.headline}
+        </div>
         {banner.remedy && (
-          <div className="text-xs text-[var(--muted)] mt-1">{banner.remedy}</div>
+          <div className="text-xs text-[var(--muted)] mt-1">
+            {banner.remedy}
+          </div>
         )}
         <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[11px] font-mono text-[var(--muted)]">
           <dt>timer</dt>
@@ -258,8 +305,10 @@ function HealthBannerCard({ overview }: { overview: CronsOverview | null }) {
   );
 }
 
-function ScheduleTable({
+function ScheduleCards({
   rows,
+  histories,
+  detail,
   now,
   selected,
   busyID,
@@ -267,6 +316,8 @@ function ScheduleTable({
   onAct,
 }: {
   rows: CronSchedule[];
+  histories: Record<string, CronFire[] | null>;
+  detail: React.ReactNode;
   now: number;
   selected: string | null;
   busyID: string | null;
@@ -274,155 +325,183 @@ function ScheduleTable({
   onAct: (s: CronSchedule, kind: "pause" | "resume" | "run") => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-[var(--muted)] bg-[var(--surface)]">
-            <Th>Name</Th>
-            <Th hideSm>Cron</Th>
-            <Th hideSm>TZ</Th>
-            <Th>Next</Th>
-            <Th>Last</Th>
-            <Th>Outcome</Th>
-            <Th>State</Th>
-            <Th>Lock</Th>
-            <Th right>Actions</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td
-                colSpan={9}
-                className="px-3 py-3 text-[var(--muted)] text-center bg-[var(--surface)]"
-              >
-                Every schedule on this host is hidden.
-              </td>
-            </tr>
-          ) : (
-            rows.map((s) => (
-              <ScheduleRow
-                key={s.id}
-                s={s}
-                now={now}
-                selected={s.id === selected}
+    <div className="space-y-2">
+      {rows.length === 0 && (
+        <div className="text-sm text-[var(--muted)]">
+          Every schedule on this host is hidden.
+        </div>
+      )}
+      {rows.map((s) => (
+        <div
+          key={s.id}
+          data-schedule-id={s.id}
+          className="rounded-lg border border-[var(--border)] bg-[var(--surface)]"
+        >
+          <div className="flex items-center gap-3 px-3 py-2.5 flex-wrap">
+            <button
+              type="button"
+              aria-expanded={selected === s.id}
+              onClick={() => onSelect(selected === s.id ? null : s.id)}
+              className="flex items-center gap-3 text-left flex-1 min-w-48 hover:text-violet-200"
+            >
+              <span className="w-4 text-xs text-[var(--muted)]">
+                {selected === s.id ? "−" : "+"}
+              </span>
+              <span className="min-w-0">
+                <span className="block font-mono text-sm text-violet-300 break-all">
+                  {s.name}
+                </span>
+                <span className="block font-mono text-[10px] text-[var(--muted)] break-all">
+                  {s.repo_path}
+                </span>
+              </span>
+            </button>
+            <Pill tone={stateTone(s.state)} label={s.state} />
+            <FireHistory
+              fires={histories[s.id]}
+              onSelect={() => onSelect(s.id)}
+            />
+            <span className="text-xs text-[var(--muted)] font-mono">
+              {s.last_fired_at ? fmtAgo(s.last_fired_at) : "never"}
+            </span>
+            <RowButton
+              label="Details"
+              busy={false}
+              onClick={() => onSelect(selected === s.id ? null : s.id)}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 pb-3 text-xs text-[var(--muted)]">
+            <span className="font-mono">
+              {s.effective?.cron || s.cron} · {s.effective?.tz || s.tz}
+            </span>
+            <OverridePill s={s} />
+            <span>
+              Next{" "}
+              {s.next_due_at ? (
+                <Tooltip content={fmtFullDate(s.next_due_at)}>
+                  <span>{fmtUntil(s.next_due_at, now)}</span>
+                </Tooltip>
+              ) : (
+                "-"
+              )}
+            </span>
+            <Pill
+              tone={outcomeTone(s.last_outcome)}
+              label={outcomeLabel(s.last_outcome)}
+            />
+            <LockCell s={s} />
+            <div className="flex gap-1.5 ml-auto">
+              <RowButton
+                label={s.paused ? "Resume" : "Pause"}
                 busy={busyID === s.id}
-                onSelect={onSelect}
-                onAct={onAct}
+                onClick={() => onAct(s, s.paused ? "resume" : "pause")}
               />
-            ))
+              <RowButton
+                label="Run now"
+                busy={busyID === s.id}
+                onClick={() => onAct(s, "run")}
+              />
+            </div>
+          </div>
+          {selected === s.id && (
+            <div className="border-t border-[var(--border)] p-3">{detail}</div>
           )}
-        </tbody>
-      </table>
+        </div>
+      ))}
     </div>
   );
 }
 
-function ScheduleRow({
-  s,
-  now,
-  selected,
-  busy,
+function fireColor(fire: CronFire): string {
+  switch (fire.run_status || fire.outcome) {
+    case "complete":
+    case "success":
+      return "bg-green-400";
+    case "failed":
+      return "bg-red-400";
+    case "claimed":
+    case "running":
+      return "bg-indigo-400 animate-pulse";
+    case "pending":
+    case "paused":
+      return "bg-yellow-400 animate-pulse";
+    case "missed":
+    case "skipped_overlap":
+    case "cancelled":
+      return "bg-amber-400";
+    default:
+      return "bg-slate-500";
+  }
+}
+
+function FireHistory({
+  fires,
   onSelect,
-  onAct,
 }: {
-  s: CronSchedule;
-  now: number;
-  selected: boolean;
-  busy: boolean;
-  onSelect: (id: string | null) => void;
-  onAct: (s: CronSchedule, kind: "pause" | "resume" | "run") => void;
+  fires: CronFire[] | null | undefined;
+  onSelect: () => void;
 }) {
+  if (!fires)
+    return (
+      <span className="text-xs text-[var(--muted)]">
+        {fires === null ? "History unavailable" : "Loading history…"}
+      </span>
+    );
+  if (!fires.length)
+    return <span className="text-xs text-[var(--muted)]">No fires yet</span>;
+  const recent = [...fires]
+    .sort((a, b) => Date.parse(b.due_at) - Date.parse(a.due_at))
+    .slice(0, 30)
+    .reverse();
   return (
-    <tr
-      data-schedule-id={s.id}
-      onClick={() => onSelect(selected ? null : s.id)}
-      className={`border-t border-[var(--border)] cursor-pointer align-top ${
-        selected ? "bg-[var(--surface-raised)]" : "bg-[var(--surface)]"
-      }`}
+    <div
+      aria-label="Recent cron fires, oldest to newest"
+      className="flex items-center gap-0.5"
     >
-      <Td>
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-xs text-[var(--foreground)]">
-            {s.name}
-          </span>
-          {s.schedule_name && s.schedule_name !== "default" && (
-            <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-[var(--surface-raised)] text-[var(--muted)]">
-              {s.schedule_name}
-            </span>
-          )}
-        </div>
-        <div className="font-mono text-[10px] text-[var(--muted)] truncate max-w-[16rem]">
-          {s.repo_path}
-        </div>
-      </Td>
-      <Td hideSm mono muted>
-        <div className="flex items-center gap-1.5">
-          <span>{s.effective?.cron || s.cron}</span>
-          <OverridePill s={s} />
-        </div>
-      </Td>
-      <Td hideSm mono muted>
-        {s.effective?.tz || s.tz}
-      </Td>
-      <Td mono>
-        {s.next_due_at ? (
-          <Tooltip content={fmtFullDate(s.next_due_at)}>
-            <span
-              className={`cursor-default ${
-                s.state === "armed" ? "" : "text-[var(--muted)]"
-              }`}
-            >
-              {fmtUntil(s.next_due_at, now)}
-            </span>
+      {Array.from({ length: 30 - recent.length }, (_, i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          className="block w-1.5 h-3 rounded-sm bg-[var(--border)]"
+        />
+      ))}
+      {recent.map((fire) => {
+        const label = `${fire.run_status || outcomeLabel(fire.outcome)} · ${fmtFullDate(fire.due_at)}`;
+        const className = `block w-2 h-6 rounded-sm transition-transform hover:scale-y-125 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-300 ${fireColor(fire)}`;
+        return (
+          <Tooltip
+            key={fire.id}
+            content={
+              <div className="font-mono space-y-1">
+                <div>{fire.run_id || "No run launched"}</div>
+                <div>Status: {fire.run_status || "unknown"}</div>
+                <div>Outcome: {outcomeLabel(fire.outcome)}</div>
+                <div>Due: {fmtFullDate(fire.due_at)}</div>
+                <div>Decided: {fmtFullDate(fire.decided_at)}</div>
+                {fire.detail && <div>{fire.detail}</div>}
+              </div>
+            }
+          >
+            {fire.run_id ? (
+              <Link
+                href={`/runs?run=${encodeURIComponent(fire.run_id)}`}
+                aria-label={label}
+                data-fire-id={fire.id}
+                className={className}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={onSelect}
+                aria-label={label}
+                data-fire-id={fire.id}
+                className={className}
+              />
+            )}
           </Tooltip>
-        ) : (
-          <span className="text-[var(--muted)]">-</span>
-        )}
-      </Td>
-      <Td mono>
-        {s.last_fired_at ? (
-          <Tooltip content={fmtFullDate(s.last_fired_at)}>
-            <span className="cursor-default">{fmtAgo(s.last_fired_at)}</span>
-          </Tooltip>
-        ) : (
-          <span className="text-[var(--muted)]">never</span>
-        )}
-        {s.last_run_id && (
-          <div>
-            <RunLink id={s.last_run_id} />
-          </div>
-        )}
-      </Td>
-      <Td>
-        <Pill tone={outcomeTone(s.last_outcome)} label={outcomeLabel(s.last_outcome)} />
-      </Td>
-      <Td>
-        <Pill tone={stateTone(s.state)} label={s.state} />
-      </Td>
-      <Td>
-        <LockCell s={s} />
-      </Td>
-      <Td right>
-        <div className="inline-flex items-center gap-1.5">
-          <RowButton
-            label={s.paused ? "Resume" : "Pause"}
-            busy={busy}
-            onClick={() => onAct(s, s.paused ? "resume" : "pause")}
-          />
-          <RowButton
-            label="Run now"
-            busy={busy}
-            onClick={() => onAct(s, "run")}
-          />
-          <RowButton
-            label="Details"
-            busy={false}
-            onClick={() => onSelect(selected ? null : s.id)}
-          />
-        </div>
-      </Td>
-    </tr>
+        );
+      })}
+    </div>
   );
 }
 
@@ -563,9 +642,7 @@ function DetailPane({
             {detail.upcoming.map((at) => (
               <li key={at} className="font-mono text-xs">
                 {fmtDateTime(at)}{" "}
-                <span className="text-[var(--muted)]">
-                  {fmtUntil(at, now)}
-                </span>
+                <span className="text-[var(--muted)]">{fmtUntil(at, now)}</span>
               </li>
             ))}
           </ul>
@@ -615,7 +692,10 @@ function CadenceTable({ s }: { s: CronSchedule }) {
                   {r.overridden ? (
                     <span className="text-amber-400">{r.effective}</span>
                   ) : (
-                    <span className="text-[var(--muted)]" title="same as declared">
+                    <span
+                      className="text-[var(--muted)]"
+                      title="same as declared"
+                    >
                       -
                     </span>
                   )}
@@ -628,7 +708,9 @@ function CadenceTable({ s }: { s: CronSchedule }) {
       {fields.length > 0 && (
         <div className="text-[11px] text-[var(--muted)] mt-1">
           {`This host overrides ${fields.join(", ")}`}
-          {s.override?.set_at ? `, set ${fmtDateTime(s.override.set_at)}.` : "."}
+          {s.override?.set_at
+            ? `, set ${fmtDateTime(s.override.set_at)}.`
+            : "."}
         </div>
       )}
       {s.override?.stale && (
@@ -699,7 +781,10 @@ function FiresTable({ fires }: { fires: CronFire[] }) {
                 {fmtDateTime(f.decided_at)}
               </Td>
               <Td>
-                <Pill tone={outcomeTone(f.outcome)} label={outcomeLabel(f.outcome)} />
+                <Pill
+                  tone={outcomeTone(f.outcome)}
+                  label={outcomeLabel(f.outcome)}
+                />
               </Td>
               <Td mono muted>
                 {fmtArgs(f.args)}
@@ -845,10 +930,10 @@ function EmptyState() {
           No schedules are armed on this host.
         </div>
         <div className="text-xs text-[var(--muted)] mt-1">
-          Declare <code className="font-mono">on: schedule:</code> in a repo&apos;s{" "}
-          <code className="font-mono">sparkwing.yaml</code>, then run{" "}
-          <code className="font-mono">sparkwing crons install</code> in that repo
-          to arm it here.
+          Declare <code className="font-mono">on: schedule:</code> in a
+          repo&apos;s <code className="font-mono">sparkwing.yaml</code>, then
+          run <code className="font-mono">sparkwing crons install</code> in that
+          repo to arm it here.
         </div>
       </div>
     </div>

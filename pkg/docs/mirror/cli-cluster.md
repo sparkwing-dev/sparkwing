@@ -14,7 +14,7 @@ Configure profiles with 'sparkwing configure profiles'.
 
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
-local dashboard with 'sparkwing dashboard'.
+local dashboard with 'sparkwing serve'.
 
 ### Subcommands
 
@@ -665,7 +665,7 @@ controller and executes each claimed trigger in-process on this host.
 Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
-or against a local 'sparkwing dashboard start' via --profile local.
+or against a local 'sparkwing serve start' via --profile local.
 
 ### Flags
 

@@ -306,10 +306,27 @@ var triggerBlocks = map[string]string{
         cron: "0 9 * * *"
         where: local
 `,
+	"pre_commit": `      # Fires from this checkout's git pre-commit hook and can refuse
+      # the commit. Scoped to fast local checks. Arm it with
+      # ` + "`sparkwing pipeline hooks install`" + `.
+      pre_commit: {}
+`,
+	"pre_push": `      # Fires from this checkout's git pre-push hook and can refuse the
+      # push. Scoped to heavier checks like a full test suite. Arm it
+      # with ` + "`sparkwing pipeline hooks install`" + `.
+      pre_push: {}
+`,
+	"post_commit": `      # Fires from this checkout's git post-commit hook, after the
+      # commit is recorded, so it never refuses one. Arm it with
+      # ` + "`sparkwing pipeline hooks install`" + `.
+      post_commit: {}
+`,
 	"manual": "",
 }
 
-var triggerEventNames = []string{"pull_request", "push", "schedule", "manual"}
+var triggerEventNames = []string{"pull_request", "push", "schedule", "pre_commit", "pre_push", "post_commit", "manual"}
+
+var hookEvents = []string{"pre_commit", "pre_push", "post_commit"}
 
 const manualTrigger = "manual"
 
@@ -422,6 +439,9 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 		if slices.Contains(events, "push") || slices.Contains(events, "pull_request") {
 			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))
 		}
+		if hint, ok := gateArmingHint(events); ok {
+			fmt.Printf("    %s\n", color.Dim(hint))
+		}
 	}
 	tidy := tidySkeleton(sparkwingDir)
 	switch {
@@ -456,10 +476,33 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	}
 	tips = append(tips,
 		InfoNextStep{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
-		InfoNextStep{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
+		InfoNextStep{Command: "sparkwing serve start", Purpose: "see runs in local dashboard"},
 	)
 	printAlignedSteps(tips)
 	return nil
+}
+
+// gateArmingHint reports what a scaffolded git-hook trigger still needs. The
+// scaffold declares the hook and never writes it, because arming a gate the
+// pipeline has not passed turns every commit in the checkout into a failure.
+func gateArmingHint(events []string) (string, bool) {
+	declaresHook := false
+	for _, event := range hookEvents {
+		if slices.Contains(events, event) {
+			declaresHook = true
+			break
+		}
+	}
+	if !declaresHook {
+		return "", false
+	}
+	if slices.Contains(events, "pre_commit") {
+		return "declared, not armed: nothing here refuses a commit until `sparkwing pipeline hooks install` writes the hook", true
+	}
+	if slices.Contains(events, "pre_push") {
+		return "declared, not armed: nothing here refuses a push until `sparkwing pipeline hooks install` writes the hook", true
+	}
+	return "declared, not armed: arm it in this checkout with `sparkwing pipeline hooks install`", true
 }
 
 const minimalTemplate = `package jobs
