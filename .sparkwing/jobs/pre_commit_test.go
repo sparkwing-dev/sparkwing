@@ -493,6 +493,9 @@ func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing
 const (
 	emDash    = "\u2014"
 	trackerID = "TOD" + "-42"
+	// safety: split so the sweep under test does not match this file itself.
+	bitwingKey      = "BW" + "-123"
+	lowerBitwingKey = "bw" + "-456"
 )
 
 func gitCommitAll(t *testing.T, dir, message string) {
@@ -529,6 +532,8 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 	}{
 		{"em dash", "package internal\n\n// Note " + emDash + " here.\nfunc Bad() int { return 3 }\n", checkEmDashes},
 		{"tracker id", "package internal\n\n// See " + trackerID + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
+		{"bitwing key", "package internal\n\n// See " + bitwingKey + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
+		{"lowercase bitwing key", "package internal\n\n// See " + lowerBitwingKey + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
