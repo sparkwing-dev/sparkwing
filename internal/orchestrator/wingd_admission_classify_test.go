@@ -85,8 +85,8 @@ func TestDaemonStoreSchemaSkewRefusesADaemonBehindTheStore(t *testing.T) {
 			t.Fatalf("skew error = %q, want it to name %q", err, want)
 		}
 	}
-	if !strings.Contains(err.Error(), "respawns the same build") {
-		t.Fatalf("skew error = %q, want it to say a daemon restart does not resolve this", err)
+	if !strings.Contains(err.Error(), "upgrade it with `sparkwing update`, then `sparkwing daemon restart`") {
+		t.Fatalf("skew error = %q, want the restart offered only after the upgrade that changes the binary", err)
 	}
 }
 
@@ -134,11 +134,7 @@ func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
 	}
 	want := ErrDaemonStoreSchemaTooOld.Error() + ": daemon v0.38.2 does not understand runs-store requirement(s) " +
 		known[0] + ", which this binary (v0.39.0) stamps into the store they share. " +
-		"Install a sparkwing that understands schema 27, or set " + wingdclient.HostBinEnv +
-		" to a binary that does and stop the daemon so the next run brings it up. " +
-		"To leave this machine's daemon where it is, give the run a home of its own and start it from " +
-		"a sparkwing that understands schema 27: " + isolatedHomeCommand() + ". " +
-		"`sparkwing daemon restart` respawns the same build"
+		daemonUpgradeRemedy(27)
 	if got := err.Error(); got != want {
 		t.Fatalf("skew error =\n%s\nwant\n%s", got, want)
 	}
@@ -176,42 +172,31 @@ func TestNodeAdmissionFailureSeparatesTheClaimFromTheDaemonsOwnKeys(t *testing.T
 	}
 }
 
-func withInvokedPipeline(t *testing.T, name string) {
-	t.Helper()
-	prev := invokedPipeline.Load()
-	recordInvokedPipeline(name)
-	t.Cleanup(func() { invokedPipeline.Store(prev) })
-}
-
-func TestIsolatedHomeCommandNamesTheInvokedPipeline(t *testing.T) {
-	withInvokedPipeline(t, "pre-commit")
-	want := `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`
-	if got := isolatedHomeCommand(); got != want {
-		t.Fatalf("isolated-home command = %q, want %q", got, want)
-	}
-}
-
-func TestIsolatedHomeCommandFallsBackToAPlaceholderPipeline(t *testing.T) {
-	withInvokedPipeline(t, "")
-	want := `sparkwing run <pipeline> --sw-isolated-home "$(mktemp -d)"`
-	if got := isolatedHomeCommand(); got != want {
-		t.Fatalf("isolated-home command = %q, want %q", got, want)
-	}
-}
-
-func TestStoreSchemaSkewOffersTheIsolatedHomeCommand(t *testing.T) {
-	withInvokedPipeline(t, "pre-commit")
+func TestStoreSchemaSkewNamesTheDaemonHostAndTheUpgrade(t *testing.T) {
+	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
 	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, nil, 26)
-	if !strings.Contains(err.Error(), isolatedHomeCommand()) {
-		t.Fatalf("skew error = %q, want the isolated-home command", err)
+	for _, want := range []string{
+		"daemon v0.38.2 understands runs-store schema 17",
+		"this binary is v0.39.0 at schema 26",
+		"The daemon runs from /opt/sparkwing/bin/sparkwing ($" + wingdclient.HostBinEnv + ")",
+		"upgrade it with `sparkwing update`, then `sparkwing daemon restart`",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("skew error = %q, want it to contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "home of its own") || strings.Contains(err.Error(), "isolated-home") {
+		t.Errorf("skew error = %q, want no isolated-home remedy", err)
 	}
 }
 
-func TestTerminalCheckRefusalOffersTheIsolatedHomeCommand(t *testing.T) {
-	withInvokedPipeline(t, "pre-commit")
+func TestTerminalCheckRefusalNamesTheUpgrade(t *testing.T) {
+	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
 	err := admissionFailure(semaphoreClaims("deploy-lock"),
 		&wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: terminalCheckKey})
-	if !strings.Contains(err.Error(), isolatedHomeCommand()) {
-		t.Fatalf("terminal-check refusal = %q, want the isolated-home command", err)
+	for _, want := range []string{"sparkwing daemon status", "upgrade it with `sparkwing update`"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("terminal-check refusal = %q, want it to contain %q", err, want)
+		}
 	}
 }

@@ -152,3 +152,46 @@ daemon is admitted without the guard, runs the command to completion, and then
 exits non-zero naming the operation the daemon no longer serves: it sends
 `guard_complete` only once the command has finished. The work is done and the
 exit code says otherwise, so replace the call rather than relying on it.
+
+## Isolated home removed
+
+`sparkwing run --sw-isolated-home DIR` is gone. It pointed one run's state and
+config at DIR, so the run hosted an admission daemon of its own instead of
+joining the machine's. A run that leaves the machine's daemon is arbitrated by
+nobody: it does not appear in `sparkwing queue` or the dashboard, and several
+such runs contend on the operating system instead of queueing.
+
+The flag existed for one case, a pipeline binary whose runs-store schema is
+newer than the sparkwing hosting the machine's daemon. Admission now refuses
+that case with a message naming the binary the daemon runs from, the daemon's
+version, this binary's version, and the upgrade:
+
+```
+local admission: the admission daemon cannot read this runs store: daemon
+v0.48.1 understands runs-store schema 33, this binary is v0.49.0 at schema 34,
+and the store both share is migrated to the newer one. The daemon runs from
+/home/you/.local/bin/sparkwing (the `sparkwing` on PATH); upgrade it with
+`sparkwing update`, then `sparkwing daemon restart`, or point
+SPARKWING_WINGD_BIN at a binary that understands schema 34 and restart the
+daemon.
+```
+
+Before:
+
+```sh
+sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"
+```
+
+After:
+
+```sh
+sparkwing update && sparkwing daemon restart
+sparkwing run pre-commit
+```
+
+`SPARKWING_HOME` still gives a command a home of its own, and keeps that
+meaning: deliberate isolation for work that must not touch the operational
+runs store, such as the release preview in `DELIVERY.md`. It carries the same
+consequence the flag did, so a run started under it is outside the machine's
+admission ledger.
+

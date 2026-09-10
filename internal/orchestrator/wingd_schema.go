@@ -53,16 +53,26 @@ func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema int, 
 		describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema), selfSchema)
 }
 
-// safety: `sparkwing daemon restart` respawns the installed build, so both
-// machine-wide remedies replace a daemon other repositories share. The
-// isolated home leaves it alone, and only from a sparkwing new enough for the
-// store, which is why the command says so.
 func storeSchemaRemedy(diagnosis string, selfSchema int) error {
-	return fmt.Errorf("%w: %s. "+
-		"Install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon so the next run brings it up. "+
-		"To leave this machine's daemon where it is, give the run a home of its own and start it from a sparkwing that understands schema %d: %s. "+
-		"`sparkwing daemon restart` respawns the same build",
-		ErrDaemonStoreSchemaTooOld, diagnosis, selfSchema, wingdclient.HostBinEnv, selfSchema, isolatedHomeCommand())
+	return fmt.Errorf("%w: %s. %s", ErrDaemonStoreSchemaTooOld, diagnosis, daemonUpgradeRemedy(selfSchema))
+}
+
+// safety: `sparkwing update` replaces the binary the daemon respawns from, and
+// only the restart swaps the daemon every repository on this machine shares,
+// so naming one without the other leaves the operator on the old daemon.
+func daemonUpgradeRemedy(selfSchema int) string {
+	bin, fromEnv, ok := wingdclient.ResolveHostBin()
+	if !ok {
+		return fmt.Sprintf("No sparkwing on this machine hosts the daemon; install one that understands schema %d with `%s`",
+			selfSchema, installAdvice)
+	}
+	source := "the `sparkwing` on PATH"
+	if fromEnv {
+		source = "$" + wingdclient.HostBinEnv
+	}
+	return fmt.Sprintf("The daemon runs from %s (%s); upgrade it with `sparkwing update`, then `sparkwing daemon restart`, "+
+		"or point %s at a binary that understands schema %d and restart the daemon",
+		bin, source, wingdclient.HostBinEnv, selfSchema)
 }
 
 func describeVersion(v string) string {

@@ -180,8 +180,8 @@ refused with the reason rather than silently ignored: `--sw-index`
 (the index binding is a live path the launching process holds open),
 `--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
 `--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
-`--sw-local-only`, `--sw-secrets`, `--sw-no-update`, `--sw-isolated-home`,
-`--sw-fleet`, and `--profile`. Run those in the foreground with
+`--sw-local-only`, `--sw-secrets`, `--sw-no-update`, `--sw-fleet`, and
+`--profile`. Run those in the foreground with
 `sparkwing run`. Everything else after the pipeline name is passed to the
 pipeline as its own arguments.
 

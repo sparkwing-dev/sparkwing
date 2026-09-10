@@ -10,8 +10,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func TestParseRunFlags_Only(t *testing.T) {
@@ -197,82 +195,6 @@ func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_IsolatedHome(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"space-separated", []string{"--sw-isolated-home", "/tmp/fictional-gate"}, "/tmp/fictional-gate"},
-		{"equals-form", []string{"--sw-isolated-home=/tmp/fictional-gate"}, "/tmp/fictional-gate"},
-		{"empty-trailing-flag-falls-through", []string{"--sw-isolated-home"}, ""},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			flags, passthroughArgs := parseRunFlags(testCase.args)
-			if flags.isolatedHome != testCase.want {
-				t.Errorf("isolatedHome = %q, want %q", flags.isolatedHome, testCase.want)
-			}
-			if testCase.want == "" && !slices.Contains(passthroughArgs, "--sw-isolated-home") {
-				t.Errorf("incomplete --sw-isolated-home should pass through; got passthrough=%v", passthroughArgs)
-			}
-			if testCase.want != "" && len(passthroughArgs) != 0 {
-				t.Errorf("passthrough should be empty, got %v", passthroughArgs)
-			}
-		})
-	}
-}
-
-func TestApplyIsolatedHomeMovesStateAndConfigResolution(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	root := filepath.Join(t.TempDir(), "gate")
-
-	if err := applyIsolatedHome(root); err != nil {
-		t.Fatalf("applyIsolatedHome(%s): %v", root, err)
-	}
-
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		t.Fatalf("DefaultPaths: %v", err)
-	}
-	if p.Root != root {
-		t.Errorf("state home = %q, want %q", p.Root, root)
-	}
-	config, err := fssecure.ConfigDir()
-	if err != nil {
-		t.Fatalf("ConfigDir: %v", err)
-	}
-	if want := filepath.Join(root, "config", "sparkwing"); config != want {
-		t.Errorf("config dir = %q, want %q", config, want)
-	}
-	for _, dir := range []string{root, isolatedHomeConfigDir(root)} {
-		info, statErr := os.Stat(dir)
-		if statErr != nil {
-			t.Fatalf("stat %s: %v", dir, statErr)
-		}
-		if perm := info.Mode().Perm(); perm&0o077 != 0 {
-			t.Errorf("%s mode = %04o, want no group or other access", dir, perm)
-		}
-	}
-}
-
-func TestApplyIsolatedHomeReportsADirectoryItCannotPrepare(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	file := filepath.Join(t.TempDir(), "not-a-dir")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
-		t.Fatalf("write %s: %v", file, err)
-	}
-	err := applyIsolatedHome(file)
-	if err == nil {
-		t.Fatal("applyIsolatedHome accepted a path that is a file")
-	}
-	if !strings.Contains(err.Error(), "--sw-isolated-home") {
-		t.Errorf("error = %q, want it to name the flag", err)
-	}
-}
-
 func TestParseRunFlags_SeparatorPreservesPipelineArguments(t *testing.T) {
 	want := []string{"--", "--sw-priority", "back", "--sw-no-cache", "--sw-mystery", "--profile", "fictional"}
 	args := append([]string{"--sw-priority=front"}, want...)
@@ -290,14 +212,10 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 		t.Run(unknown, func(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", "")
 			t.Setenv("XDG_CONFIG_HOME", "")
-			home := filepath.Join(t.TempDir(), "home")
 			missing := filepath.Join(t.TempDir(), "missing")
-			err := dispatchRun([]string{"fictional", "--sw-isolated-home", home, "--sw-cd", missing, unknown})
+			err := dispatchRun([]string{"fictional", "--sw-cd", missing, unknown})
 			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unknown runner flag %q", unknown)) {
 				t.Errorf("dispatch error = %v, want unknown runner flag %q", err, unknown)
-			}
-			if _, err := os.Stat(home); !os.IsNotExist(err) {
-				t.Errorf("isolated home stat = %v, want no directory", err)
 			}
 			if os.Getenv("SPARKWING_HOME") != "" || os.Getenv("XDG_CONFIG_HOME") != "" {
 				t.Error("rejected runner flag changed the environment")

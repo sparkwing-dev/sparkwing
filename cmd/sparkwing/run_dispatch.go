@@ -17,7 +17,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -74,8 +73,6 @@ type runFlags struct {
 
 	runHandleFile string
 
-	isolatedHome string
-
 	detached           bool
 	idempotencyKey     string
 	requestID          string
@@ -110,30 +107,6 @@ func validatePriorityFlag(v string) (string, error) {
 	}
 	return "", fmt.Errorf("--sw-priority %q: expected an integer, %q, or %q",
 		v, wingwire.PriorityFront, wingwire.PriorityBack)
-}
-
-func isolatedHomeConfigDir(root string) string { return filepath.Join(root, "config") }
-
-// safety: daemon startup and toolchain replacement read the parent environment.
-func applyIsolatedHome(dir string) error {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
-	}
-	if err := fssecure.EnsureDir(abs); err != nil {
-		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
-	}
-	config := isolatedHomeConfigDir(abs)
-	if err := fssecure.EnsureDir(config); err != nil {
-		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
-	}
-	if err := os.Setenv("SPARKWING_HOME", abs); err != nil {
-		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
-	}
-	if err := os.Setenv("XDG_CONFIG_HOME", config); err != nil {
-		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
-	}
-	return nil
 }
 
 func collectPipelineArgs(passthrough []string) map[string]string {
@@ -355,17 +328,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case strings.HasPrefix(argument, "--sw-run-handle-file="):
 			flags.runHandleFile = strings.TrimPrefix(argument, "--sw-run-handle-file=")
-			argumentIndex++
-		case argument == "--sw-isolated-home":
-			if argumentIndex+1 < len(args) {
-				flags.isolatedHome = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-isolated-home="):
-			flags.isolatedHome = strings.TrimPrefix(argument, "--sw-isolated-home=")
 			argumentIndex++
 		case argument == "--sw-detached":
 			flags.detached = true

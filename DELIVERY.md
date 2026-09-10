@@ -59,14 +59,19 @@ this file is a menu and checklist, not a command that every change must run.
   `sparkwing queue priority --run <id> --set front` re-ranks a queued run.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
-  machine's admission daemon, admission refuses the run. Give the gate a home
-  of its own instead of replacing the daemon every other repository shares:
-  `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`, run from a
-  sparkwing built from this checkout, which points that run's state and config
-  at the directory and hosts a daemon there from that binary. That schema
-  mismatch is the only case for an isolated home: the run leaves the machine's
-  admission ledger and the dashboard, so several isolated gates contend on the
-  OS instead of queueing.
+  machine's admission daemon, admission refuses the run. The refusal names the
+  binary the daemon runs from, both versions, and the upgrade: install the
+  newer sparkwing with `sparkwing update` or `SKIP_WEB_BUILD=1 bash
+  bin/install.sh` from this checkout, then `sparkwing daemon restart` so the
+  next run reaches a daemon that reads the store. Every run then keeps its
+  place in `sparkwing queue` and the dashboard.
+- **Running against a home of your own:** `SPARKWING_HOME=DIR` points one
+  command's state and config at DIR, which is deliberate isolation for work
+  that must not touch the operational runs store, such as the release preview
+  below. A run started that way is arbitrated by whatever daemon lives in that
+  home rather than the machine's, so it is invisible to `sparkwing queue` and
+  the dashboard and contends with every other run on the OS. It is not a way
+  around a full queue.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
