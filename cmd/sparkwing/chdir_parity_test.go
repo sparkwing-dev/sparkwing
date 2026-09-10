@@ -11,7 +11,7 @@ import (
 )
 
 // safety: pinned so adding or dropping -C on a verb is a deliberate edit. Membership beyond
-// the runs family is a judgement call: 67 verbs resolve a storage profile from the working
+// the runs family is a judgement call: many verbs resolve a storage profile from the working
 // directory, and most are not worth re-anchoring.
 var chdirCommands = []string{
 	"sparkwing examples scaffold",

@@ -26,10 +26,12 @@ unlock.
   It reads the library's `spark.json` and prints one row per declared block --
   the name `sparks inflate --module` takes, its stability, and what it does --
   so a module no longer has to be known by name before it can be inflated.
-  Without `--library` it reads sparks-core, at the version the repo declares
-  when it declares one; `--path` reads a checkout on disk without touching the
-  network. `-o plain` emits the block names one per line, and `-o json` the
-  usual NDJSON. `sparks inflate` with no `--module` now names the verb.
+  A `packages[]` library is one Go module, so its rows are import packages and
+  the output says to inflate the library itself instead. Without `--library` it
+  reads sparks-core, at the version the repo declares when it declares one;
+  `--path` reads a checkout on disk without touching the network. `-o plain`
+  emits the block names one per line, and `-o json` the usual NDJSON.
+  `sparks inflate` with no `--module` now names the verb.
 
 - **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb
   that takes `--profile`. Both resolve the project's `sparkwing.yaml` from the
@@ -38,9 +40,12 @@ unlock.
   silently reported on whichever project the shell happened to sit in.
   `info --for-agent` describes the repository it re-anchored to. The `runs`
   verbs that read no project config (`errors` and the `consumer` trio) do not
-  take the flag, because it would do nothing there. Commands that declare the
-  flag now parse and apply it in one place, so its semantics are identical
-  everywhere.
+  take the flag, because it would do nothing there. Every command that declares
+  the flag except `run`, `pipeline run` and `pipeline lint` now parses and
+  applies it in one place; those three keep their own parsers and their own
+  wording for a directory that does not exist. `pipeline new` and
+  `examples scaffold` moved onto the shared path, so their `--sw-cd` failure
+  now carries the full command name and is reported before `--name`.
 - **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
 - **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
 
@@ -94,10 +99,11 @@ unlock.
 ### Changed
 
 - **cache:** A cache directory sparkwing cannot create now names `SPARKWING_HOME`.
-  The failing path already came from the standard library; the missing half was
-  the lever. Every cache path hangs off the sparkwing home, so the message points
-  at the one environment variable that moves it instead of leaving the reader to
-  look for a cache-specific override.
+  The message points at the one environment variable that moves the cache root
+  instead of leaving the reader to look for a cache-specific override, which
+  does not exist. A destination outside the sparkwing home -- the pipeline binary
+  a runner writes beside a checkout, for one -- reports the bare failure, because
+  `SPARKWING_HOME` does not move it.
 
 - **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
   that accepts the encoding. Measured over a served listener, the heaviest page
