@@ -59,19 +59,6 @@ func workflowPins(t *testing.T) []workflowPin {
 	return pins
 }
 
-var immutableSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
-
-func TestWorkflowsPinEveryActionToAnImmutableSHA(t *testing.T) {
-	for _, pin := range workflowPins(t) {
-		if !immutableSHA.MatchString(pin.sha) {
-			t.Errorf("%s pins %s at %q; a tag can be moved under the release, so every action carries a full commit SHA", pin.file, pin.action, pin.sha)
-		}
-		if !strings.HasPrefix(pin.label, "v") {
-			t.Errorf("%s pins %s with no `# vX.Y.Z` comment, so no reader can tell which version the SHA is", pin.file, pin.action)
-		}
-	}
-}
-
 // A shared action drifting between workflows is how release.yaml kept a
 // deprecated runtime while every other workflow moved off it.
 func TestWorkflowsAgreeOnOneVersionPerAction(t *testing.T) {

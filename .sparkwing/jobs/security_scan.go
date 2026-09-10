@@ -233,8 +233,8 @@ func (p *SecurityScan) npmAudit(ctx context.Context) error {
 	return nil
 }
 
-// npmAuditProofTarget names where this dependency set's pass is recorded.
-// Either half being empty means the run neither reuses nor records a proof.
+// safety: either half coming back empty means this run neither reuses nor
+// records a proof, and audits from scratch.
 func npmAuditProofTarget(ctx context.Context) (dir, digest string) {
 	dir, err := npmAuditProofDir()
 	if err != nil {

@@ -329,11 +329,15 @@ func sweepableFiles(all []string) []string {
 	return out
 }
 
-// The changelog style and link rules also run in the lint pipeline, which no
-// commit passes through. A dead documentation link reaches an adopter through
-// the published changelog, so the check belongs where a commit is judged.
+// safety: these rules also run in the lint pipeline, which no commit passes
+// through. A dead documentation link reaches an adopter through the published
+// changelog, so the check belongs where a commit is judged.
 func checkChangelogLinks(ctx context.Context) error {
-	return CheckChangelogLint(ctx, sparkwing.WorkDir())
+	if err := CheckChangelogLint(ctx, sparkwing.WorkDir()); err != nil {
+		return fmt.Errorf("a released changelog entry may be edited to repair a link: restore the document, "+
+			"or repoint at a github.com/sparkwing-dev/sparkwing/blob/<commit-or-tag>/ permalink that still carries it: %w", err)
+	}
+	return nil
 }
 
 func checkDocsMirror(ctx context.Context) error {

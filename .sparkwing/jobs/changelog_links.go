@@ -11,9 +11,8 @@ import (
 
 const deadDocLinkCategory = "dead-docs-link"
 
-// docLinkRe matches a Markdown link whose target is a repository-relative
-// documentation path. CHANGELOG.md sits at the repository root, so those
-// targets start at `docs/`.
+// safety: CHANGELOG.md sits at the repository root, so a repo-relative doc
+// target always starts at docs/.
 var docLinkRe = regexp.MustCompile(`\]\((docs/[^)\s]+)\)`)
 
 var headingRe = regexp.MustCompile(`^#{1,6}\s+(.+)$`)

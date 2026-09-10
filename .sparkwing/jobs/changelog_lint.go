@@ -540,11 +540,10 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 
 func normalizeHeadingName(s string) string { return s }
 
-// unguidedBreakingEntries names every released (Breaking) entry that shipped
-// with no migration guide. Editing a published changelog cannot make that
-// untrue, so the exception is listed rather than forgiven by a version cutoff:
-// a cutoff hides whatever sits below it, and this list has to be enlarged on
-// purpose. The key is the release and the opening words of the entry.
+// safety: these released entries shipped with no migration guide and editing a
+// published changelog cannot undo that. A version cutoff would forgive whatever
+// sits below it; this list has to be enlarged on purpose. Reflowing a listed
+// entry's opening words re-arms the failure, which is the loud direction.
 var unguidedBreakingEntries = map[string]string{
 	"v0.40.0": "Revoking a token, rotating one, or deleting a user",
 }
@@ -554,13 +553,22 @@ func shippedWithoutGuide(version, body string) bool {
 	return ok && strings.Contains(body, opening)
 }
 
-// pinnedMigrationLinkRe matches a migration link that names the guide as it
-// stood at a published tag. Releases before the guide was split into
-// docs/migrations/vX.Y.Z.md point at _unreleased.md this way, and the permalink
-// still resolves to the sections that release actually shipped, which the file
-// in the current tree no longer describes.
+// safety: a permalink pinned to the release tag resolves to the sections that
+// release shipped, which _unreleased.md in the current tree no longer describes.
 var pinnedMigrationLinkRe = regexp.MustCompile(
-	`\(https://github\.com/sparkwing-dev/sparkwing/blob/(v[^/]+)/docs/migrations/[^)]+\)`)
+	`\]\(https://github\.com/sparkwing-dev/sparkwing/blob/(v\d+\.\d+\.\d+)/docs/migrations/[^)/]+\.md#[^)/]+\)`)
+
+// safety: the pin has to name this section's own release. A permalink to some
+// other tag documents a different set of changes and would satisfy the check
+// while telling an adopter the wrong thing.
+func pinnedToOwnRelease(version, body string) bool {
+	for _, m := range pinnedMigrationLinkRe.FindAllStringSubmatch(body, -1) {
+		if m[1] == version {
+			return true
+		}
+	}
+	return false
+}
 
 func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []ChangelogIssue {
 	var issues []ChangelogIssue
@@ -571,7 +579,7 @@ func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []Changelo
 		}
 		linkMatches := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
 		if len(linkMatches) == 0 {
-			if isUnreleased || pinnedMigrationLinkRe.MatchString(e.body) ||
+			if isUnreleased || pinnedToOwnRelease(s.version, e.body) ||
 				shippedWithoutGuide(s.version, e.body) {
 				continue
 			}

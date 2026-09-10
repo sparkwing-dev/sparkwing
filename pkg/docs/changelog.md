@@ -66,6 +66,13 @@ unlock.
   A repository the survey could not read was counted among those whose gates
   fire
 
+### Docs
+
+- **migrations:** The v0.48.1 migration guide moved from
+  `docs/migrations/compact-run-output.md` to `docs/migrations/v0.48.1.md`, so it
+  is named like every other release guide and reachable at the stable
+  `/docs/migration-guide/v0.48.1` path. The old slug no longer resolves
+
 ### Fixed
 
 - **cli:** `pipeline hooks survey` no longer closes with `every declared gate

@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -53,8 +54,8 @@ func TestNpmAuditSeparatesAnUnreachableRegistryFromAnAdvisory(t *testing.T) {
 }
 
 func TestNpmAuditFailsOnAnAdvisoryTheReportDoesNotName(t *testing.T) {
-	// npm counts vulnerabilities in metadata and names them per package; a
-	// report that counts one and names none must still fail the gate.
+	// safety: npm counts vulnerabilities in metadata and names them per package;
+	// a report that counts one and names none must still fail the gate.
 	counted := `{"auditReportVersion":2,"vulnerabilities":{},"metadata":{"vulnerabilities":{"high":0,"critical":2,"total":2}}}`
 	verdict, err := readNpmAuditReport(counted)
 	if err != nil {
@@ -208,10 +209,9 @@ func TestNpmAuditDigestTracksTheDependencySet(t *testing.T) {
 }
 
 func TestNpmAuditReadsTheFailurePayloadNpmActuallyWrites(t *testing.T) {
-	// Captured from `npm audit --json` against an unreachable registry: the
-	// reason lands in the top-level message, the error object is blank, and
-	// there is no report version. Read as a report, this payload names zero
-	// advisories and would pass the gate.
+	// safety: captured from a real unreachable registry. The reason lands in the
+	// top-level message, the error object is blank, and no report version is
+	// present, so read as a report it names zero advisories and would pass.
 	real := `{
   "message": "request to http://registry.invalid.test/-/npm/v1/security/audits/quick failed, reason: getaddrinfo ENOTFOUND registry.invalid.test",
   "error": {
@@ -240,5 +240,71 @@ func TestNpmAuditReadsTheFailurePayloadNpmActuallyWrites(t *testing.T) {
 func TestNpmAuditRefusesAPayloadThatIsNotAnAuditAnswer(t *testing.T) {
 	if _, err := readNpmAuditReport(`{"ok":true}`); err == nil {
 		t.Error("a payload with no report version and no error passed as a clean audit")
+	}
+}
+
+func stubNpmAuditRunner(t *testing.T, answers ...func() (string, error)) *int {
+	t.Helper()
+	calls := 0
+	prev := npmAuditRunner
+	npmAuditRunner = func(context.Context) (string, error) {
+		i := calls
+		calls++
+		if i >= len(answers) {
+			i = len(answers) - 1
+		}
+		return answers[i]()
+	}
+	t.Cleanup(func() { npmAuditRunner = prev })
+	return &calls
+}
+
+func unreachableRegistry() (string, error) {
+	return `{"error":{"code":"ETIMEDOUT","summary":"request to https://registry.npmjs.org failed"}}`, nil
+}
+
+func cleanReport() (string, error) {
+	return `{"auditReportVersion":2,"vulnerabilities":{},"metadata":{"vulnerabilities":{"high":0,"critical":0,"total":0}}}`, nil
+}
+
+func TestRunNpmAudit_RetriesATransientRegistryAndAcceptsALaterAnswer(t *testing.T) {
+	calls := stubNpmAuditRunner(t, unreachableRegistry, unreachableRegistry, cleanReport)
+	verdict, err := runNpmAudit(t.Context())
+	if err != nil {
+		t.Fatalf("runNpmAudit: %v", err)
+	}
+	if !verdict.Answered || len(verdict.Advisories) != 0 {
+		t.Errorf("verdict = %+v, want an answered verdict naming no advisory", verdict)
+	}
+	if *calls != 3 {
+		t.Errorf("ran npm %d time(s), want 3: two transient failures then an answer", *calls)
+	}
+}
+
+func TestRunNpmAudit_StopsAtTheAttemptCeilingAndReportsUnavailable(t *testing.T) {
+	calls := stubNpmAuditRunner(t, unreachableRegistry)
+	_, err := runNpmAudit(t.Context())
+	if !errors.Is(err, errNpmRegistryUnavailable) {
+		t.Fatalf("err = %v, want it to name the registry as unavailable rather than an advisory", err)
+	}
+	if *calls != npmAuditAttempts {
+		t.Errorf("ran npm %d time(s), want the ceiling of %d", *calls, npmAuditAttempts)
+	}
+}
+
+func TestRunNpmAudit_DoesNotRetryAnAdvisory(t *testing.T) {
+	advisory := func() (string, error) {
+		return `{"auditReportVersion":2,"vulnerabilities":{"left-pad":{"severity":"critical","via":["CVE-0000"]}},"metadata":{"vulnerabilities":{"high":0,"critical":1,"total":1}}}`, nil
+	}
+	calls := stubNpmAuditRunner(t, advisory)
+	verdict, err := runNpmAudit(t.Context())
+	if err != nil {
+		t.Fatalf("runNpmAudit: %v", err)
+	}
+	if _, outcomeErr := npmAuditOutcome(verdict); outcomeErr == nil {
+		t.Fatal("an advisory passed the gate")
+	}
+	if *calls != 1 {
+		t.Errorf("ran npm %d time(s), want 1: an advisory is an answer, not a transient failure", *calls)
 	}
 }
