@@ -71,6 +71,7 @@ preserved as the dashboard renders them.
 | `--step STEP_ID` | Step identifier (annotates the step instead of the node) |
 | `-m, --message TEXT` | Annotation text (required) |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -100,6 +101,7 @@ implies step-scope and limits to the matching step.
 | `--steps` | Include per-step annotations |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -149,6 +151,7 @@ or was already resolved (409).
 | `--node ID` | Node ID of the approval gate (required) |
 | `--comment STR` | Optional note recorded on the approval |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -176,6 +179,7 @@ their ContinueOnError / Optional settings.
 | `--node ID` | Node ID of the approval gate (required) |
 | `--comment STR` | Optional note recorded on the approval |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -202,6 +206,7 @@ run, both pending and resolved.
 | `--run RUN_ID` | Restrict to one run's approvals |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -248,6 +253,7 @@ again is allowed -- one request is one restart.
 | `--node NODE_ID` | Job id to bounce |
 | `--profile NAME` | Profile name for remote runs; omit for local runs |
 | `--home DIR` | Sparkwing home holding the run (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -278,6 +284,7 @@ from stdin, one per line.
 | `--run RUN_ID` | Run id to cancel (repeatable; use --run - to read ids from stdin) |
 | `--profile NAME` | Profile name for remote runs; omit for local runs |
 | `--home DIR` | Sparkwing home for local daemon and queued-run storage (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -428,6 +435,7 @@ systemic failure surfaces as one row with a count.
 | `--group-by KEY` | Cluster by: step \| node |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -474,6 +482,7 @@ infrastructure error.
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `-q, --quiet` | Print only run ids, one per line (JSON strings with -o json) |
 | `--profile NAME` | Profile name (cluster mode). Omit to search the local SQLite store. |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -503,6 +512,7 @@ instead of the summary 'status' command renders.
 |---|---|
 | `--run RUN_ID` | Run identifier (required) |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -547,6 +557,7 @@ Exit code 0 even when there are no matches.
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 | `-q, --quiet` | Print only the unique matching run ids |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -576,6 +587,7 @@ tails for new runs, reprinting whenever a newer run ID appears.
 | `-w, --watch` | Tail for new runs |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -633,6 +645,7 @@ shell piping:
 | `--sparkline N` | Sparkline length when --by-pipeline is set (default: 30) |
 | `--style STYLE` | Sparkline glyph style: ascii\|block\|dot (default: ascii) |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -708,6 +721,7 @@ controller, and any profile that declares its own logs surface.
 | `-f, --follow` | Tail the log(s) until the run terminates |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name (omit for local-only reads) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -760,6 +774,7 @@ Use --dry-run first to confirm the matching runs.
 | `--run RUN_ID` | Run id to prune (repeatable; use --run - to read ids from stdin) |
 | `--dry-run` | List matching runs without deleting |
 | `--profile NAME` | Profile name for remote runs; omit for local runs |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -798,6 +813,7 @@ controller's receipt endpoint and uses the controller's configured rate.
 | `--run RUN_ID` | Run identifier (required) |
 | `-o, --output FORMAT` | Output format: json (default) |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -844,6 +860,7 @@ only when at least one id failed.
 | `--all` | Rerun all: re-execute every node from scratch |
 | `--profile NAME` | Profile name for remote runs; omit for local runs |
 | `--home PATH` | Sparkwing home holding local runs (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -892,6 +909,7 @@ pinned rows, samples, and demand floors.
 | `--yes` | Confirm --reset --all |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -953,6 +971,7 @@ while returning zero. For a blocking wait, use 'runs wait'.
 | `--steps` | Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too. |
 | `--exit-zero` | Return exit code 0 even when the run failed/cancelled |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -987,6 +1006,7 @@ and approval state together. Use --output json for structured output.
 | `--run RUN_ID` | Run identifier (required) |
 | `-o, --output FORMAT` | Output format: pretty\|json (default: pretty on TTY, json when piped) |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -1017,6 +1037,7 @@ emits start/end offsets in milliseconds per row.
 | `--width N` | Bar width in characters (default: 60) |
 | `-o, --output FORMAT` | Output format: pretty\|json (default: pretty on TTY, json when piped) |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -1046,6 +1067,7 @@ the profile's controller.
 | `--run RUN_ID` | Root run identifier (required) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -1100,6 +1122,7 @@ json emits the raw response.
 | `--id TRIGGER_ID` | Trigger / run identifier (the value 'pipeline trigger' prints) (required) |
 | `-o, --output FORMAT` | Output format: json emits the raw response |
 | `--profile NAME` | Profile name (required) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -1138,6 +1161,7 @@ an older entry is not reported.
 | `-q, --quiet` | Print only trigger ids, newline-separated |
 | `-o, --output FORMAT` | Output format: json emits the raw triggers array |
 | `--profile NAME` | Profile name (required) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -1175,6 +1199,7 @@ Use 'runs find --wait' to find the run before waiting for its outcome.
 | `--poll DURATION` | Poll interval (default: 3s) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name (cluster mode). Omit to poll the local SQLite store. |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 

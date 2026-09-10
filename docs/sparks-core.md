@@ -25,7 +25,8 @@ failure). They do not panic.
 ## Block modules
 
 Each block is its own Go module; `spark.json` at the repo root is the full
-list:
+list, and `sparkwing pipeline sparks catalog` prints it from the version you
+resolve (`-o plain` emits the names `sparks inflate --module` takes):
 
 | Package | Purpose |
 |---------|---------|

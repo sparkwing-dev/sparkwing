@@ -67,6 +67,33 @@ func parseDigestHeader(value string) ([]byte, error) {
 	return nil, fmt.Errorf("%w: response carried no sha-256 digest", ErrDigest)
 }
 
+func mkdirCache(dir string) error {
+	err := os.MkdirAll(dir, 0o755)
+	if err == nil {
+		return nil
+	}
+	if !underSparkwingHome(dir) {
+		return err
+	}
+	return fmt.Errorf("%w\n  sparkwing holds this cache under its home directory."+
+		" Set SPARKWING_HOME to a writable directory to place it elsewhere"+
+		" (default: ~/.sparkwing)", err)
+}
+
+// safety: callers hand bincache a destination it does not choose, and some of those
+// sit in the consumer's own checkout, where SPARKWING_HOME moves nothing.
+func underSparkwingHome(dir string) bool {
+	home, err := paths.DefaultPaths()
+	if err != nil || home.Root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(home.Root, dir)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
@@ -96,7 +123,7 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(dest), ".fetch-*")
@@ -310,7 +337,7 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 
 	cloneURL := strings.TrimRight(gcURL, "/") + "/git/" + name
 	workTree := filepath.Join(parentDir, name)
-	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+	if err := mkdirCache(parentDir); err != nil {
 		return "", err
 	}
 	if err := os.RemoveAll(workTree); err != nil {
@@ -349,7 +376,7 @@ func fetchExactSHA(ctx context.Context, gcURL, cloneURL, token, sha, dest string
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	if err := mkdirCache(dest); err != nil {
 		return err
 	}
 	runIn := func(args ...string) ([]byte, error) {
@@ -852,7 +879,7 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
 		)
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
 

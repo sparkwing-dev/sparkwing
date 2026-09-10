@@ -54,7 +54,7 @@ func Vendor(ctx context.Context, sparkwingDir, modulePath string) (*VendorResult
 		version = "latest"
 	}
 
-	srcDir, resolvedVer, err := downloadModule(ctx, sparkwingDir, modulePath, version)
+	srcDir, resolvedVer, err := DownloadModule(ctx, sparkwingDir, modulePath, version)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,11 @@ type modDownloadJSON struct {
 	Error   string
 }
 
-func downloadModule(ctx context.Context, sparkwingDir, modulePath, version string) (dir, resolved string, err error) {
+// DownloadModule resolves modulePath@version through the Go module proxy and
+// returns the module cache directory holding it and the version the proxy
+// picked. It runs `go mod download` with sparkwingDir as the working directory,
+// so the pipeline module's own proxy and private settings apply.
+func DownloadModule(ctx context.Context, sparkwingDir, modulePath, version string) (dir, resolved string, err error) {
 	cmd := exec.CommandContext(ctx, goBin(), "mod", "download", "-json", modulePath+"@"+version)
 	cmd.Dir = sparkwingDir
 	cmd.Env = os.Environ()

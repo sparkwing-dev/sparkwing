@@ -64,7 +64,7 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 	}
 	defer rc.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
 	// safety: concurrent fetches must verify and publish their own staging file.

@@ -33,6 +33,7 @@ type FlagSpec struct {
 	Group    string
 
 	Required      bool
+	RequiredHint  string
 	RequiredWhen  string
 	RequiresFlags []string
 	ConflictsWith []string
@@ -124,6 +125,9 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	if fs.Lookup("help") == nil {
 		fs.BoolP("help", "h", false, helpFlag.Desc)
 	}
+	if cmd.declaredFlags()["sw-cd"] && fs.Lookup("sw-cd") == nil {
+		fs.StringP("sw-cd", "C", "", chdirFlagUsage)
+	}
 	if err := fs.Parse(args); err != nil {
 		if strings.Contains(err.Error(), "needs an argument") && (strings.Contains(err.Error(), "output") || strings.Contains(err.Error(), "-o")) {
 			return fmt.Errorf("%s: --output requires pretty|json|plain", cmd.Path)
@@ -154,6 +158,11 @@ func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	if !hasOutput && fs.Changed("output") {
 		return fmt.Errorf("%s: --output is not supported", cmd.Path)
 	}
+	if f := fs.Lookup("sw-cd"); f != nil {
+		if err := applyChdir(f.Value.String()); err != nil {
+			return fmt.Errorf("%s: %w", cmd.Path, err)
+		}
+	}
 	if err := checkRetiredWhereFlags(args, cmd.declaredFlags()); err != nil {
 		return err
 	}
@@ -167,6 +176,9 @@ func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 		}
 		changed := fs.Changed(spec.Name)
 		if spec.Required && !changed {
+			if spec.RequiredHint != "" {
+				return fmt.Errorf("%s: --%s is required\n  %s", cmd.Path, spec.Name, spec.RequiredHint)
+			}
 			return fmt.Errorf("%s: --%s is required", cmd.Path, spec.Name)
 		}
 		if !changed {

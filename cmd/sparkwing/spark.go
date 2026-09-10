@@ -32,9 +32,11 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (list|lint|resolve|update|add|remove|warmup|inflate)")
+		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|warmup|inflate)")
 	}
 	switch args[0] {
+	case "catalog":
+		return runSparksCatalog(args[1:])
 	case "list", "ls":
 		return runSparksList(args[1:])
 	case "lint":
@@ -218,7 +220,7 @@ func runSparksLint(args []string) error {
 		}
 		target = rest[0]
 	}
-	libDir, manifestPath, err := resolveSparkJSONPath(target)
+	libDir, manifestPath, err := resolveSparkJSONPath("spark lint", target)
 	if err != nil {
 		return err
 	}
@@ -386,15 +388,15 @@ func pluralS(n int) string {
 	return "s"
 }
 
-func resolveSparkJSONPath(target string) (libDir, manifestPath string, err error) {
+func resolveSparkJSONPath(verb, target string) (libDir, manifestPath string, err error) {
 	info, err := os.Stat(target)
 	if err != nil {
-		return "", "", fmt.Errorf("spark lint: %s: %w", target, err)
+		return "", "", fmt.Errorf("%s: %s: %w", verb, target, err)
 	}
 	if info.IsDir() {
 		manifestPath = filepath.Join(target, "spark.json")
 		if _, err := os.Stat(manifestPath); err != nil {
-			return "", "", fmt.Errorf("spark lint: %s has no spark.json", target)
+			return "", "", fmt.Errorf("%s: %s has no spark.json", verb, target)
 		}
 		return target, manifestPath, nil
 	}
