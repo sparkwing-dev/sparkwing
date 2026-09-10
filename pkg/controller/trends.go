@@ -81,6 +81,11 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 		runs = append(runs, rr)
 	}
 
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	cachedIDs := map[string]bool{}
 	if len(runs) > 0 {
 		cq := `SELECT run_id, outcome FROM nodes WHERE run_id IN (` + placeholders(len(runs)) + `)`
@@ -89,26 +94,34 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 			cargs = append(cargs, rr.id)
 		}
 		nrows, err := s.store.DB().QueryContext(r.Context(), cq, cargs...)
-		if err == nil {
-			byRun := map[string][]string{}
-			for nrows.Next() {
-				var runID, outcome string
-				if nrows.Scan(&runID, &outcome) == nil {
-					byRun[runID] = append(byRun[runID], outcome)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		defer nrows.Close()
+		byRun := map[string][]string{}
+		for nrows.Next() {
+			var runID, outcome string
+			if err := nrows.Scan(&runID, &outcome); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			byRun[runID] = append(byRun[runID], outcome)
+		}
+		if err := nrows.Err(); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		for id, outcomes := range byRun {
+			allCached := len(outcomes) > 0
+			for _, o := range outcomes {
+				if o != "cached" && o != "satisfied" {
+					allCached = false
+					break
 				}
 			}
-			_ = nrows.Close()
-			for id, outcomes := range byRun {
-				allCached := len(outcomes) > 0
-				for _, o := range outcomes {
-					if o != "cached" && o != "satisfied" {
-						allCached = false
-						break
-					}
-				}
-				if allCached {
-					cachedIDs[id] = true
-				}
+			if allCached {
+				cachedIDs[id] = true
 			}
 		}
 	}
