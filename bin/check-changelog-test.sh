@@ -56,6 +56,11 @@ check_surface internal/runners/k8s/k8s.go 1
 check_surface internal/runners/k8s/k8s_test.go 0
 check_surface internal/orchestrator/dispatch.go 0
 check_surface internal/configref/configref.go 0
+check_surface pkg/docs/mirror/guide.md 0
+check_surface pkg/docs/changelog.md 0
+check_surface pkg/docs/docs.go 1
+# git rm prunes the directory those cases emptied, and the mirror sync below writes into it.
+mkdir -p "$fixture/pkg/docs"
 check_surface charts/vendor_test.go 0
 check_surface charts/testdata/values.yaml 0
 

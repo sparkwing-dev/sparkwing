@@ -33,8 +33,6 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
-- **development:** Repository-owned candidate install hook for Xwing rebuilds
-  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -54,9 +52,6 @@ unlock.
   pipeline has not passed turns every commit in the checkout into a failure
 
 ### Changed
-
-- **development (Breaking):** Use `.xwing-env.yaml` for repository candidate declarations
-  See [manifest migration](docs/migrations/project-env-yaml.md#project-manifests-use-yaml).
 
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
