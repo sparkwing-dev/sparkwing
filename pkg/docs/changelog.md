@@ -22,6 +22,8 @@ unlock.
 
 ### Added
 
+- **development:** Repository-owned candidate install hook for Xwing rebuilds
+  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -58,6 +60,13 @@ unlock.
   fires` while a row reports a hook that does not; a repository that runs its
   commit gate and is missing a `post-commit` notifier is now counted and named
   separately from one that refuses nothing
+- **cli:** Cross-repository configuration commands report invalid flags
+- **cli:** User creation accepts complete piped passphrases, including spaces
+- **cli:** `info` reports unavailable pipeline catalogs instead of silently
+  displaying zero pipelines
+- **sdk:** Invalid dynamic expansion batches leave the plan unchanged
+- **secrets:** Empty filesystem values report missing secrets, matching the
+  environment backend
 
 - **admission:** A guarded command whose daemon restarted mid-run is
   acknowledged when it completes. The guard sweep chose which client to
