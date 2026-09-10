@@ -76,7 +76,7 @@ unlock.
 
 - **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
   that accepts the encoding. Measured over a served listener, the heaviest page
-  falls from 1,475,205 bytes to 459,504 and the lightest from 732,498 to 251,670,
+  falls from 1,475,205 bytes to 459,505 and the lightest from 732,498 to 251,669,
   which puts every dashboard page under the 512,000-byte page-weight ceiling. Each
   bundle file is encoded once per process and every later request writes the stored
   bytes. A client that does not offer gzip, and any request carrying a `Range`
