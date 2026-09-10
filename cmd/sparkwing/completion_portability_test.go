@@ -15,13 +15,14 @@ func TestBashCompletionWithoutMapfile(t *testing.T) {
 		{"flag", "sparkwing --p", "1", "--profile"},
 		{"verb", "sparkwing r", "1", "run"},
 		{"leaf flags", "sparkwing leaf ''", "2", "--profile"},
+		{"no rows", "sparkwing empty ''", "2", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script := "enable -n mapfile\n" + renderBash() + `
+			script := "set -u\nenable -n mapfile\n" + renderBash() + `
 sparkwing() {
  case "$1" in
- _complete-verbs) if [[ "$2" != leaf ]]; then printf '%s\n' run; fi ;;
- _complete-flags) printf '%s\n' --profile ;;
+ _complete-verbs) if [[ "${2-}" != leaf && "${2-}" != empty ]]; then printf '%s\n' run; fi ;;
+ _complete-flags) if [[ "${2-}" != empty ]]; then printf '%s\n' --profile; fi ;;
  esac
 }
 ` + "COMP_WORDS=(" + tc.words + ")\nCOMP_CWORD=" + tc.index + "\n_sparkwing_complete\nprintf '%s\n' \"${COMPREPLY[@]}\"\n"

@@ -380,7 +380,7 @@ _sparkwing_complete() {
 
     # Flag completion: current word starts with '-'.
     if [[ "$cur" == -* ]]; then
-        local -a out
+        local -a out=()
         while IFS= read -r line; do out+=("$line"); done < <(sparkwing _complete-flags "${swpath[@]}" 2>/dev/null | cut -f1)
         COMPREPLY=( $(compgen -W "${out[*]}" -- "$cur") )
         return
@@ -406,7 +406,7 @@ _sparkwing_complete() {
     # this depth. Empty path -> top-level subcommands. Value completion
     # for specific flags (above: --profile, --pipeline) happens before this
     # block.
-    local -a kids
+    local -a kids=()
     while IFS= read -r line; do kids+=("$line"); done < <(sparkwing _complete-verbs "${swpath[@]}" 2>/dev/null | cut -f1)
     if (( ${#kids[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${kids[*]}" -- "$cur") )
@@ -418,7 +418,7 @@ _sparkwing_complete() {
     # provides this UX automatically; pure bash on Git Bash doesn't,
     # so we replicate it here. Filtering by "$cur" is a no-op when
     # empty, but keeps things tidy if the user typed a partial flag.
-    local -a leafFlags
+    local -a leafFlags=()
     while IFS= read -r line; do leafFlags+=("$line"); done < <(sparkwing _complete-flags "${swpath[@]}" 2>/dev/null | cut -f1)
     if (( ${#leafFlags[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${leafFlags[*]}" -- "$cur") )
