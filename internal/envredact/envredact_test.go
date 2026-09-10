@@ -22,6 +22,8 @@ func TestCredentialName(t *testing.T) {
 		{"SERVICE_PRIVATE_KEY", true},
 		{"CLIENT_CERT", true},
 		{"NODE_EXTRA_CA_PEM", true},
+		{"PEMBROKE_ROAD", true},
+		{"TOKENIZERS_PARALLELISM", false},
 		{"BASIC_AUTH", true},
 		{"GOOGLE_APPLICATION_CREDENTIALS", true},
 		{"npm_token", true},
@@ -209,4 +211,10 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestTokenizerParallelismIsNotCredential(t *testing.T) {
+	if CredentialName("TOKENIZERS_PARALLELISM") {
+		t.Fatal("tokenizer concurrency flag classified as credential")
+	}
 }
