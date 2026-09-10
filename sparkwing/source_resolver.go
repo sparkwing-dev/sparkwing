@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -151,40 +151,17 @@ func (f *fileResolver) load() {
 	out := map[string]string{}
 	sc := bufio.NewScanner(raw)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		key, value, err := dotenv.ParseLine(sc.Text())
+		if err != nil || key == "" {
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq <= 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:eq])
-		out[key] = unquoteDotenvValue(strings.TrimSpace(line[eq+1:]))
+		out[key] = value
 	}
 	if err := sc.Err(); err != nil {
 		f.err = fmt.Errorf("secrets backend filesystem %s: scan: %w", f.spec.Path, err)
 		return
 	}
 	f.cache = out
-}
-
-// safety: the CLI's secrets writer emits Go-quoted values, so a double-quoted
-// token has to be decoded rather than merely stripped of its quotes.
-func unquoteDotenvValue(val string) string {
-	if len(val) < 2 {
-		return val
-	}
-	switch {
-	case val[0] == '"' && val[len(val)-1] == '"':
-		if unquoted, err := strconv.Unquote(val); err == nil {
-			return unquoted
-		}
-		return val[1 : len(val)-1]
-	case val[0] == '\'' && val[len(val)-1] == '\'':
-		return val[1 : len(val)-1]
-	}
-	return val
 }
 
 type envResolver struct {

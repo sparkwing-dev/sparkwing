@@ -113,3 +113,10 @@ func TestInfoReportsInvalidPipelineConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestParseInfoVersionPreservesPrerelease(t *testing.T) {
+	got := parseInfoVersion("v1.2.3-rc1")
+	if got.Semver != "v1.2.3-rc1" || got.IsRelease || got.BuildType != "prerelease" {
+		t.Fatalf("prerelease=%+v", got)
+	}
+}

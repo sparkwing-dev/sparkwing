@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -104,40 +104,18 @@ func parseDotenvFile(path string) (map[string]string, error) {
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		key, value, err := dotenv.ParseLine(sc.Text())
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", path, lineNo, err)
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq <= 0 {
-			return nil, fmt.Errorf("%s:%d: malformed line, want KEY=VALUE", path, lineNo)
+		if key != "" {
+			out[key] = value
 		}
-		key := strings.TrimSpace(line[:eq])
-		out[key] = unquoteDotenvValue(strings.TrimSpace(line[eq+1:]))
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return out, nil
-}
-
-func unquoteDotenvValue(val string) string {
-	if len(val) < 2 {
-		return val
-	}
-	switch {
-	case val[0] == '"' && val[len(val)-1] == '"':
-		if unquoted, err := strconv.Unquote(val); err == nil {
-			return unquoted
-		}
-		// hack: a hand-written file can hold quoting this cannot decode, such
-		// as a Windows path, and its literal text serves its author better than
-		// an error that hides every other entry in the file.
-		return val[1 : len(val)-1]
-	case val[0] == '\'' && val[len(val)-1] == '\'':
-		return val[1 : len(val)-1]
-	}
-	return val
 }
 
 func WriteDotenvEntry(path, name, value string) error {

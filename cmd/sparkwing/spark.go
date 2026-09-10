@@ -32,7 +32,7 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (list|lint|resolve|update|add|remove|warmup|vendor)")
+		return errors.New("spark: subcommand required (list|lint|resolve|update|add|remove|warmup|inflate)")
 	}
 	switch args[0] {
 	case "list", "ls":
@@ -663,13 +663,13 @@ func runSparksInflate(args []string) error {
 		return err
 	}
 	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark vendor: unexpected positional %q (use --module)", rest[0])
+		return fmt.Errorf("spark inflate: unexpected positional %q (use --module)", rest[0])
 	}
 	module := strings.TrimSpace(*moduleFlag)
 	if module == "" {
-		return errors.New("spark vendor: --module is required (e.g. --module templates)")
+		return errors.New("spark inflate: --module is required (e.g. --module templates)")
 	}
-	format, err := resolveOutputFormat(*outFmt, "spark vendor")
+	format, err := resolveOutputFormat(*outFmt, "spark inflate")
 	if err != nil {
 		return err
 	}

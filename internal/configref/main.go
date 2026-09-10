@@ -38,9 +38,9 @@ func main() {
 	b.WriteString("<!-- GENERATED from the sparkwing.yaml schema structs (pkg/pipelines, pkg/projectconfig) by internal/configref. Do not edit by hand; regenerate with `bash bin/gen-config-docs.sh`. -->\n")
 	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
 	b.WriteString("# Config reference\n\n")
-	b.WriteString("The complete `.sparkwing/sparkwing.yaml` schema, generated from the " +
-		"Go structs the strict config parser enforces. **Any key not listed here is " +
-		"rejected at load.** `Required` reflects whether the field may be omitted.\n\n")
+	b.WriteString("Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from " +
+		"the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. " +
+		"See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.\n\n")
 
 	section(&b, "Top level", structFields(cf, "Config"))
 	section(&b, "`defaults`", structFields(cf, "Defaults"))

@@ -14,12 +14,12 @@ import (
 const signingKeyEnv = "SPARKWING_UPDATE_SIGNING_KEY"
 
 func main() {
-	genkey := flag.Bool("genkey", false, "generate an ed25519 keypair and print the public (hex) and private (base64) keys")
-	verify := flag.Bool("verify", false, "verify -sig over -in against -pub (hex public key); no private key needed")
+	genkey := flag.Bool("genkey", false, "generate an ed25519 keypair and print the public and private keys in base64")
+	verify := flag.Bool("verify", false, "verify -sig over -in against -pub (base64 or hex public key); no private key needed")
 	in := flag.String("in", "", "path to the file to sign or verify (e.g. dist/SHA256SUMS)")
 	out := flag.String("out", "", "path to write the detached signature to (e.g. dist/SHA256SUMS.sig)")
 	sig := flag.String("sig", "", "path to the detached signature to verify (with -verify)")
-	pub := flag.String("pub", "", "hex ed25519 public key to verify against (with -verify)")
+	pub := flag.String("pub", "", "base64 or hex ed25519 public key to verify against (with -verify)")
 	flag.Parse()
 
 	if *genkey {
@@ -68,8 +68,8 @@ func runGenKey(w *os.File) error {
 	}
 	fmt.Fprintln(w, "ed25519 keypair generated.")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "PUBLIC KEY (hex) -- paste into sparkwingUpdatePubKeyHex in cmd/sparkwing/update.go:")
-	fmt.Fprintln(w, "  "+hex.EncodeToString(pub))
+	fmt.Fprintln(w, "PUBLIC KEY (base64) -- add to internal/releaseauth.TrustedPublicKeys:")
+	fmt.Fprintln(w, "  "+base64.StdEncoding.EncodeToString(pub))
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "PRIVATE KEY (base64) -- store as the GitHub Actions secret %s:\n", signingKeyEnv)
 	fmt.Fprintln(w, "  "+base64.StdEncoding.EncodeToString(priv))
@@ -97,10 +97,13 @@ func loadSigningKey(b64 string) (ed25519.PrivateKey, error) {
 	}
 }
 
-func verifyFile(pubHex, inPath, sigPath string) error {
-	pub, err := hex.DecodeString(pubHex)
-	if err != nil {
-		return fmt.Errorf("decode public key hex: %w", err)
+func verifyFile(encodedPublicKey, inPath, sigPath string) error {
+	pub, err := base64.StdEncoding.DecodeString(encodedPublicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		pub, err = hex.DecodeString(encodedPublicKey)
+		if err != nil {
+			return fmt.Errorf("decode public key (base64 or hex): %w", err)
+		}
 	}
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("public key is %d bytes; want %d", len(pub), ed25519.PublicKeySize)
@@ -124,8 +127,7 @@ func verifyFile(pubHex, inPath, sigPath string) error {
 		return fmt.Errorf("read %s: %w", sigPath, err)
 	}
 	if !ed25519.Verify(ed25519.PublicKey(pub), msg, sig) {
-		return fmt.Errorf("signature over %s does not verify against the embedded public key: "+
-			"the SPARKWING_UPDATE_SIGNING_KEY secret does not match sparkwingUpdatePubKeyHex", inPath)
+		return fmt.Errorf("signature over %s does not verify against the supplied public key", inPath)
 	}
 	return nil
 }

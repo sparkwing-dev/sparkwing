@@ -117,7 +117,11 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 		return nil
 	}
 
-	if hold := resolveVersionHold(); hold.Value != "" && exceedsHold(resolved, hold.Value) {
+	hold := resolveVersionHold()
+	if hold.Error != "" {
+		return fmt.Errorf("update refused: %s", hold.Error)
+	}
+	if hold.Value != "" && exceedsHold(resolved, hold.Value) {
 		if !overrideHold {
 			return holdRefusal(resolved, hold)
 		}

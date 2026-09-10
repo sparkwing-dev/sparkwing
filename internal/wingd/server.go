@@ -605,7 +605,7 @@ func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	return r
 }
 
-func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wingwire.CostSource) (wingwire.HostResources, bool) {
+func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wingwire.CostSource) wingwire.HostResources {
 	if costSource != wingwire.CostSourcePin {
 		if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
 			r.Cores = maxCores
@@ -614,7 +614,7 @@ func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wing
 			r.MemoryBytes = int64(maxMem)
 		}
 	}
-	return r, false
+	return r
 }
 
 func strictCoreCostSource(costSource wingwire.CostSource) bool {
@@ -777,11 +777,10 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
 		return
 	}
-	pinClamped := false
 	if req.SemaphoresOnly {
 		charged = wingwire.HostResources{}
 	} else {
-		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
+		charged = d.clampHostChargeLocked(charged, req.CostSource)
 	}
 	req.OwnerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
 	// safety: an operator re-rank outranks the priority the plan carried, and
@@ -966,10 +965,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.touchLocked()
 	d.mu.Unlock()
 	d.flush(deliveries, snap)
-	if pinClamped {
-		d.cfg.logf("admission: run %s pinned %.1f cores exceeds grantable %.1f; running alone",
-			req.RunID, req.Resources.Cores, charged.Cores)
-	}
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
@@ -1210,7 +1205,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
-	c.ownerRunID = req.OwnerRunID
+	c.ownerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo

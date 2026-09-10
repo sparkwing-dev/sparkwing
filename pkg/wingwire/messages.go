@@ -371,14 +371,6 @@ type DrainAck struct {
 	HoldersRemaining int `json:"holders_remaining"`
 }
 
-// ResourceState is one capacity row in a [QueueState]: a host resource
-// dimension ("cores", "memory") or a semaphore name, with its total
-// capacity and the amount currently held. For the host dimensions it also
-// carries the live headroom arithmetic -- the reserved margin, the
-// measured non-sparkwing load, and what remains grantable right now --
-// so the queue view can explain a wait that free capacity alone cannot.
-// These headroom fields are zero for semaphore rows and for older daemons
-// that predate them.
 // Values for [ResourceState.ExternalSource].
 const (
 	// ExternalMeasured marks an External figure that came from a live host
@@ -391,6 +383,14 @@ const (
 	ExternalUnmeasured = "unmeasured"
 )
 
+// ResourceState is one capacity row in a [QueueState]: a host resource
+// dimension ("cores", "memory") or a semaphore name, with its total
+// capacity and the amount currently held. For the host dimensions it also
+// carries the live headroom arithmetic -- the reserved margin, the
+// measured non-sparkwing load, and what remains grantable right now --
+// so the queue view can explain a wait that free capacity alone cannot.
+// These headroom fields are zero for semaphore rows and for older daemons
+// that predate them.
 type ResourceState struct {
 	Key      string  `json:"key"`
 	Capacity float64 `json:"capacity"`

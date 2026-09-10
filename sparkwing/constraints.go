@@ -57,7 +57,7 @@ func (requiredConstraint) applyTo(m *fieldMeta) error {
 func (requiredConstraint) isConstraint() {}
 
 // Required marks the field as unconditionally required: the resolution
-// chain errors if no source (explicit flag, profile default-args,
+// chain errors if no source (explicit flag,
 // Default, or Computed) provides a value. Equivalent to
 // RequiredWhen(Always()) but reads more naturally for the common case.
 func Required() Constraint { return requiredConstraint{} }
@@ -101,7 +101,7 @@ func (c defaultConstraint) applyTo(m *fieldMeta) error {
 func (defaultConstraint) isConstraint() {}
 
 // Default supplies a literal fallback used when no higher-priority
-// source (explicit flag, profile default-args) provides a value. The
+// source (explicit flag) provides a value. The
 // value's type must match the struct field's type; mismatches are
 // caught at schema-build time. Use [Computed] for defaults that
 // depend on other args.

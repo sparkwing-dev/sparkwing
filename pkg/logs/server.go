@@ -1098,7 +1098,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			wrote := false
 			for _, name := range names {
 				data, readErr := readLogFile(root, filepath.Join(runID, name))
-				if readErr != nil || int64(len(data)) <= offsets[name] {
+				if readErr != nil {
+					continue
+				}
+				if int64(len(data)) < offsets[name] {
+					offsets[name] = 0
+					pending[name] = ""
+				}
+				if int64(len(data)) == offsets[name] {
 					continue
 				}
 				buf := data[offsets[name]:]

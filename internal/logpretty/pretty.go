@@ -37,7 +37,7 @@ func NewPrettyRenderer() *PrettyRenderer {
 	return &PrettyRenderer{
 		w:         os.Stdout,
 		errW:      os.Stderr,
-		useColor:  os.Getenv("NO_COLOR") == "",
+		useColor:  color.Enabled(),
 		nodeStart: map[string]time.Time{},
 		nodeSlot:  map[string]int{},
 	}

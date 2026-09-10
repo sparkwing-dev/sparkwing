@@ -154,3 +154,30 @@ func TestSubLeaseFromAnUnrelatedRunKeepsNoOwner(t *testing.T) {
 		t.Fatalf("sub-lease owner = %q, want none; a token from another run proved ownership", got)
 	}
 }
+
+func TestChildAttachValidatesOwnerProof(t *testing.T) {
+	for _, owner := range []string{"parent-run", "foreign-run", "../malformed"} {
+		t.Run(owner, func(t *testing.T) {
+			d := handlerDaemon(t, 4)
+			parent, peer := handlerConn(t, d)
+			grant := mustGrantFrame(t, callAndRead(t, peer, func() {
+				d.handleAdmission(parent, &wingwire.AdmissionRequest{RunID: "parent-run", Resources: wingwire.HostResources{Cores: 1}})
+			}))
+			foreign, foreignPeer := handlerConn(t, d)
+			callAndRead(t, foreignPeer, func() {
+				d.handleAdmission(foreign, &wingwire.AdmissionRequest{RunID: "foreign-run", Resources: wingwire.HostResources{Cores: 1}})
+			})
+			child, childPeer := handlerConn(t, d)
+			callAndRead(t, childPeer, func() {
+				d.handleAdmission(child, &wingwire.AdmissionRequest{RunID: "child-run", ParentLeaseToken: grant.LeaseToken, OwnerRunID: owner, OwnerLeaseToken: grant.LeaseToken})
+			})
+			want := ""
+			if owner == "parent-run" {
+				want = owner
+			}
+			if child.ownerRunID != want {
+				t.Fatalf("owner=%q, want%q", child.ownerRunID, want)
+			}
+		})
+	}
+}

@@ -24,7 +24,7 @@ type Options struct {
 
 	Version string
 }
-func Run(ctx context.Context, opts Options) error
+func Run(ctx context.Context, opts Options) (retErr error)
 type VersionInfo struct {
 	Version string
 	Schema  int

@@ -217,3 +217,20 @@ func TestDiscover_NotFoundReturnsNilNilNil(t *testing.T) {
 		t.Fatalf("want empty path + nil cfg, got path=%q cfg=%#v", path, cfg)
 	}
 }
+
+func TestWriteSparksSectionPreservesCommentOnlyFile(t *testing.T) {
+	path := writeYAML(t, t.TempDir(), projectconfig.Filename, "# keep this note\n# and this note\n")
+	if err := projectconfig.WriteSparksSection(path, []sparks.Library{{Name: "example", Source: "github.com/example/sparks", Version: "latest"}}); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "# keep this note") || !strings.Contains(string(body), "# and this note") {
+		t.Fatalf("lost comments: %s", body)
+	}
+	if _, err := projectconfig.Load(path); err != nil {
+		t.Fatalf("result is invalid config: %v", err)
+	}
+}

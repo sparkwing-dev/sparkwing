@@ -153,7 +153,7 @@ func checkFile(path string) ([]violation, error) {
 			if d.Name != nil && d.Name.IsExported() {
 				mark(allowed, d.Doc)
 			}
-			if d.Name != nil && strings.HasPrefix(d.Name.Name, "Example") && d.Body != nil {
+			if strings.HasSuffix(path, "_test.go") && d.Name != nil && strings.HasPrefix(d.Name.Name, "Example") && d.Body != nil {
 				bodyStart := d.Body.Lbrace
 				bodyEnd := d.Body.Rbrace
 				for _, cg := range f.Comments {

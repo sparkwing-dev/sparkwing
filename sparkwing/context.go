@@ -272,6 +272,9 @@ func Error(ctx context.Context, format string, args ...any) {
 //	    }), nil
 //	}
 func Annotate(ctx context.Context, msg string) {
+	if NodeFromContext(ctx) == "" {
+		return
+	}
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",
@@ -313,6 +316,9 @@ const EventNodeAnnotation = "node_annotation"
 //	    }), nil
 //	}
 func Summary(ctx context.Context, markdown string) {
+	if NodeFromContext(ctx) == "" {
+		return
+	}
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),
 		Level: "info",

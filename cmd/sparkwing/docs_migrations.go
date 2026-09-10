@@ -145,6 +145,12 @@ func runDocsMigrationsBetween(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("docs migrations between: unexpected positional %q (use --from/--to)", fs.Arg(0))
 	}
+	if *from != "" && !semver.IsValid(*from) {
+		return fmt.Errorf("docs migrations between: --from %q is not a valid version (use vX.Y.Z)", *from)
+	}
+	if *to != "" && !semver.IsValid(*to) {
+		return fmt.Errorf("docs migrations between: --to %q is not a valid version (use vX.Y.Z)", *to)
+	}
 	if *from != "" && *to != "" && semver.Compare(*from, *to) > 0 {
 		fmt.Fprintf(os.Stderr, "%s: --from (%s) is newer than --to (%s); did you swap the args?\n",
 			color.Dim("warning"), *from, *to)
