@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
 )
 
 type ChangelogIssue struct {
@@ -41,7 +42,10 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 		}
 		return fmt.Errorf("read CHANGELOG.md: %w", err)
 	}
-	issues := LintChangelog(string(body), migrationsFS(repoRoot))
+	issues := mergeIssues(
+		LintChangelog(string(body), migrationsFS(repoRoot)),
+		LintChangelogDocLinks(string(body), os.DirFS(repoRoot)),
+	)
 	if len(issues) == 0 {
 		return nil
 	}
@@ -537,6 +541,28 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 
 func normalizeHeadingName(s string) string { return s }
 
+// unguidedBreakingEntries names every released (Breaking) entry that shipped
+// with no migration guide. Editing a published changelog cannot make that
+// untrue, so the exception is listed rather than forgiven by a version cutoff:
+// a cutoff hides whatever sits below it, and this list has to be enlarged on
+// purpose. The key is the release and the opening words of the entry.
+var unguidedBreakingEntries = map[string]string{
+	"v0.40.0": "Revoking a token, rotating one, or deleting a user",
+}
+
+func shippedWithoutGuide(version, body string) bool {
+	opening, ok := unguidedBreakingEntries[version]
+	return ok && strings.Contains(body, opening)
+}
+
+// pinnedMigrationLinkRe matches a migration link that names the guide as it
+// stood at a published tag. Releases before the guide was split into
+// docs/migrations/vX.Y.Z.md point at _unreleased.md this way, and the permalink
+// still resolves to the sections that release actually shipped, which the file
+// in the current tree no longer describes.
+var pinnedMigrationLinkRe = regexp.MustCompile(
+	`\(https://github\.com/sparkwing-dev/sparkwing/blob/(v[^/]+)/docs/migrations/[^)]+\)`)
+
 func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []ChangelogIssue {
 	var issues []ChangelogIssue
 	isUnreleased := strings.EqualFold(s.version, "Unreleased")
@@ -546,7 +572,8 @@ func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []Changelo
 		}
 		linkMatches := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
 		if len(linkMatches) == 0 {
-			if isUnreleased {
+			if isUnreleased || pinnedMigrationLinkRe.MatchString(e.body) ||
+				shippedWithoutGuide(s.version, e.body) {
 				continue
 			}
 			issues = append(issues, ChangelogIssue{

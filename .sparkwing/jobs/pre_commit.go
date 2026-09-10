@@ -66,6 +66,7 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
+	sparkwing.Step(w, "changelog-links", checkChangelogLinks)
 	sparkwing.Step(w, "comments", checkComments)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
 	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit)
@@ -326,6 +327,13 @@ func sweepableFiles(all []string) []string {
 		out = append(out, f)
 	}
 	return out
+}
+
+// The changelog style and link rules also run in the lint pipeline, which no
+// commit passes through. A dead documentation link reaches an adopter through
+// the published changelog, so the check belongs where a commit is judged.
+func checkChangelogLinks(ctx context.Context) error {
+	return CheckChangelogLint(ctx, sparkwing.WorkDir())
 }
 
 func checkDocsMirror(ctx context.Context) error {

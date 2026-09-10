@@ -76,8 +76,8 @@ this file is a menu and checklist, not a command that every change must run.
   so an unreachable registry fails as its own error rather than as an advisory
   and an unchanged dependency set is still re-asked daily. Run the local
   pipeline when a change touches an HTTP handler, auth, file paths built from
-  input, subprocess arguments, or a dependency. Verify dashboard changes against real local state
-  with `bash bin/dev-start.sh` (dashboard backend on :4343, `next dev` on :3100)
+  input, subprocess arguments, or a dependency. Verify dashboard changes
+  against real local state with `bash bin/dev-start.sh` (dashboard backend on :4343, `next dev` on :3100)
   and stop it with `bash bin/dev-stop.sh`; the browser gate uses deterministic
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
