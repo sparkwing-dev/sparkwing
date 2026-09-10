@@ -67,8 +67,7 @@ func runXrepoList(args []string) error {
 	for _, e := range entries {
 		row := rowOut{Path: e.Path, Status: e.Status, Worktree: e.Worktree}
 		if *pipelines && e.Status == "ok" {
-			repos.InvalidateCache()
-			if pipes, perr := repoListPipelines(e.Path); perr == nil {
+			if pipes, perr := repos.PipelineNamesForRepo(e.Path); perr == nil {
 				sort.Strings(pipes)
 				row.Pipelines = pipes
 			}
@@ -175,9 +174,4 @@ func entryWord(n int) string {
 		return "entry"
 	}
 	return "entries"
-}
-
-func repoListPipelines(absPath string) ([]string, error) {
-	_, _ = repos.ResolveRepoForPipeline("__sparkwing_repo_list_probe__")
-	return repos.PipelineNamesForRepo(absPath)
 }

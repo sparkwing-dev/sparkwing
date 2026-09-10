@@ -1225,6 +1225,7 @@ metadata, and prints a grouped aligned table.
 --all includes entries marked 'hidden: true'. By default they're
 omitted.`,
 	Flags: []FlagSpec{
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "all", Desc: "Include entries marked hidden", Group: "Output"},
 	},
@@ -1245,6 +1246,7 @@ frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.`,
 	Flags: []FlagSpec{
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
@@ -1266,6 +1268,7 @@ in prose so direct hits surface first.
 -o json emits {name, kind, group, ..., score} records sorted by
 score descending; agents should prefer -o json for consumption.`,
 	Flags: []FlagSpec{
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "Target"},
 		{Name: "query", Argument: "TEXT", Desc: "Search query (one or more tokens, all must hit some field)", Required: true, Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},

@@ -92,6 +92,9 @@ func TestVerifyFile_MatchAndMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := verifyFile(base64.StdEncoding.EncodeToString(pub), in, sig); err != nil {
+		t.Fatalf("base64 trust-set key failed to verify: %v", err)
+	}
 	if err := verifyFile(hex.EncodeToString(pub), in, sig); err != nil {
 		t.Fatalf("matching key failed to verify: %v", err)
 	}

@@ -498,7 +498,7 @@ func TestClampHostChargeLocked_CapsMemoryLikeCores(t *testing.T) {
 		machineMemory: 16 << 30,
 	}
 
-	got, _ := d.clampHostChargeLocked(
+	got := d.clampHostChargeLocked(
 		wingwire.HostResources{Cores: 20, MemoryBytes: 32 << 30}, wingwire.CostSourceFloor)
 	if got.Cores != 7.2 {
 		t.Errorf("cores = %v, want the grantable 7.2", got.Cores)
@@ -508,7 +508,7 @@ func TestClampHostChargeLocked_CapsMemoryLikeCores(t *testing.T) {
 		t.Errorf("memory = %d, want the grantable %d", got.MemoryBytes, want)
 	}
 
-	pinned, _ := d.clampHostChargeLocked(
+	pinned := d.clampHostChargeLocked(
 		wingwire.HostResources{Cores: 20, MemoryBytes: 32 << 30}, wingwire.CostSourcePin)
 	if pinned.Cores != 20 || pinned.MemoryBytes != 32<<30 {
 		t.Errorf("pin clamped to %+v, want it left hard", pinned)

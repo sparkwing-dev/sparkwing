@@ -87,7 +87,8 @@ Required fields per type:
 - `s3`, `gcs`, `azure-blob` -- `bucket` (plus optional `prefix`)
 - `postgres`, `mysql` -- exactly one of `url` or `url_source` (the
   latter names a secret in the resolved source)
-- `controller`, `stdout`, `sqlite` -- no required fields
+- `controller` requires `controller: <profile-name>` or `url:`. A profile with a sibling `controller:` block inherits that profile name.
+- `stdout`, `sqlite` -- no required fields
 
 Recognized backend types that aren't implemented in the current
 build surface a clear error at run start ("type X is recognized but
@@ -146,6 +147,13 @@ profiles:
         bucket: sparkwing-binaries
         prefix: "${PIPELINE_NAME}/"
 ```
+
+A pipeline compile reads `bin/<hash>` from the sub-spec when one is
+declared and from the cache surface otherwise. Nothing in a profile writes
+that destination: populate it out of band, with the publish command's
+explicit artifact-store URL or with whatever pushes binaries in your
+environment. Only one level is read: a `binaries` block inside a
+`binaries` block is ignored.
 
 ## Migrating from `backends.yaml`
 

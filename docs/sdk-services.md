@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/services`
 
-Package services is the sparkwing SDK's sidecar-container helper: spin up postgres/redis/etc.
+Package services is the sparkwing SDK's sidecar-container helper: start sidecars for a function, wait for readiness, and clean up services whose startup succeeded on return, error, panic, or context cancellation.
 
 Import as `swservices "github.com/sparkwing-dev/sparkwing/sparkwing/services"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
@@ -14,7 +14,7 @@ Import as `swservices "github.com/sparkwing-dev/sparkwing/sparkwing/services"`. 
 
 ### type Service
 
-Service describes a sidecar container to spin up via `docker run -d --network=host`.
+Service describes a sidecar container started with docker run -d.
 
 ```
 type Service struct {

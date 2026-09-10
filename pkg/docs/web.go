@@ -27,8 +27,8 @@ const DefaultBaseURL = "https://sparkwing.dev"
 // the default.
 const BaseURLEnvVar = "SPARKWING_DOCS_BASE_URL"
 
-// IndexTTL is the freshness window for *.json index files
-// (versions.json and per-version index.json). Per-version markdown
+// IndexTTL is the freshness window for index files and unversioned markdown.
+// Per-version markdown
 // content is cached indefinitely because versioned tags are
 // immutable -- once v0.3.0/pipelines.md is published, it never
 // changes.
@@ -160,7 +160,11 @@ func (c *WebClient) Doc(ctx context.Context, version, slug string) (string, erro
 		return "", err
 	}
 	p := webDocPath(version, clean)
-	body, err := c.fetch(ctx, p, fetchOpts{})
+	opts := fetchOpts{}
+	if version == "" || version == LatestAlias {
+		opts.ttl = IndexTTL
+	}
+	body, err := c.fetch(ctx, p, opts)
 	if err != nil {
 		return "", err
 	}
@@ -472,7 +476,10 @@ func (c *WebClient) ClearCache() (int, error) {
 	if err != nil {
 		return removed, err
 	}
-	_ = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, _ error) error {
+	err = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
 		if !info.IsDir() || p == c.CacheDir {
 			return nil
 		}
@@ -483,7 +490,7 @@ func (c *WebClient) ClearCache() (int, error) {
 		_ = root.Remove(rel)
 		return nil
 	})
-	return removed, nil
+	return removed, err
 }
 
 // CacheStats summarizes what's currently stored under CacheDir.

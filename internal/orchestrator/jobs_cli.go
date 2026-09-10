@@ -844,6 +844,10 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	}
 	defer func() { _ = closer.Close() }()
 
+	if _, err := b.GetRun(ctx, runID); err != nil {
+		return err
+	}
+
 	st := localStore(b)
 	if st == nil || !logsUnderPaths(ctx, b) {
 		if opts.Tree {

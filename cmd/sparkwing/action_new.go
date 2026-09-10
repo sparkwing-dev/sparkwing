@@ -139,7 +139,7 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 		return err
 	}
 	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden, ""); err != nil {
-		return err
+		return errors.Join(err, os.Remove(file))
 	}
 	if err := finishScaffold(sparkwingDir, file, name, bootstrapped, ""); err != nil {
 		return err
@@ -412,7 +412,7 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 		return err
 	}
 	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden, trigger); err != nil {
-		return err
+		return errors.Join(err, os.Remove(file))
 	}
 	return finishScaffold(sparkwingDir, file, name, bootstrapped, trigger)
 }

@@ -57,7 +57,7 @@ function extractRows(nodes: Node[]): {
   const ends = withStart.map((n) =>
     n.finished_at ? new Date(n.finished_at).getTime() : now,
   );
-  const totalMs = Math.max(...ends) - zero;
+  const totalMs = Math.max(1, Math.max(...ends) - zero);
   const rows: Row[] = withStart.map((n) => {
     const s = new Date(n.started_at!).getTime();
     const e = n.finished_at ? new Date(n.finished_at).getTime() : now;

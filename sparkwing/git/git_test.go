@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -576,5 +577,88 @@ func TestFilesetHashOmitsDeletedTrackedFiles(t *testing.T) {
 	}
 	if a != b {
 		t.Fatalf("index changed hash of identical context: %s != %s", a, b)
+	}
+}
+
+func TestFilesetHashRejectsGitFailure(t *testing.T) {
+	dir := withRepo(t)
+	writeFile(t, dir, ".gitignore", "ignored\n")
+	writeFile(t, dir, "ignored", "secret")
+	commitIn(t, dir, "fixture")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "index"), []byte("broken index"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FilesetHash(t.Context(), dir); err == nil {
+		t.Fatal("git failure silently changed to filesystem hashing")
+	}
+}
+
+func TestFilesetHashInSubdirectoryHonorsGitignore(t *testing.T) {
+	dir := withRepo(t)
+	writeFile(t, dir, ".gitignore", "ignored\n")
+	writeFile(t, dir, "sub/keep", "keep")
+	writeFile(t, dir, "sub/ignored", "one")
+	sub := filepath.Join(dir, "sub")
+	first, err := FilesetHash(t.Context(), sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "sub/ignored", "two")
+	second, err := FilesetHash(t.Context(), sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("subdirectory hashing included a gitignored input")
+	}
+}
+
+func TestPushTagRetriesExistingLocalTag(t *testing.T) {
+	for _, different := range []bool{false, true} {
+		t.Run(fmt.Sprint(different), func(t *testing.T) {
+			dir := withRepo(t)
+			remote := filepath.Join(t.TempDir(), "origin.git")
+			runIn(t, "", "git", "init", "--bare", remote)
+			runIn(t, dir, "git", "remote", "add", "origin", remote)
+			writeFile(t, dir, "a", "first")
+			commitIn(t, dir, "first")
+			runIn(t, dir, "git", "tag", "-a", "v1.0.0", "-m", "first attempt")
+			if different {
+				writeFile(t, dir, "a", "second")
+				commitIn(t, dir, "second")
+			}
+			err := PushTag(t.Context(), dir, "v1.0.0", "retry")
+			if different {
+				if !errors.Is(err, ErrTagAlreadyExists) {
+					t.Fatalf("different local tag: %v", err)
+				}
+				exists, e := TagExistsOnRemote(t.Context(), dir, "v1.0.0")
+				if e != nil || exists {
+					t.Fatalf("published different local tag: %v %v", exists, e)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("local tag retry failed: %v", err)
+			}
+			exists, err := TagExistsOnRemote(t.Context(), dir, "v1.0.0")
+			if err != nil || !exists {
+				t.Fatalf("retry did not push: %v %v", exists, err)
+			}
+		})
+	}
+}
+
+func TestGitHelpersDisableTerminalPrompts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git shell alias uses POSIX shell")
+	}
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	got, err := runGit(t.Context(), t.TempDir(), "-c", `alias.check-prompt=!printf '%s' "$GIT_TERMINAL_PROMPT"`, "check-prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "0" {
+		t.Fatalf("git prompt setting = %q, want 0", got)
 	}
 }

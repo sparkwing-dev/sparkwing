@@ -561,3 +561,17 @@ func TestScopedAdds_StagedIgnoresUntrackedFiles(t *testing.T) {
 		t.Errorf("the staged diff reported %v; an untracked file the commit does not carry is charged to it", added)
 	}
 }
+
+func TestCheckFileRejectsExampleOutputInProduction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "example.go")
+	if err := os.WriteFile(path, []byte("package widget\nfunc ExampleAnything() {\n // Output: this is production narration\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations, err := checkFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("violations=%v, want production Output comment rejected", violations)
+	}
+}

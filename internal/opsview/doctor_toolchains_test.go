@@ -12,7 +12,7 @@ func TestDiagnoseToolchains_ListsEveryStoredRelease(t *testing.T) {
 	p := paths.PathsAt(t.TempDir())
 	for version, body := range map[string]string{
 		"v0.40.0": "forty",
-		"v0.39.0": "thirty-nine",
+		"v0.9.0":  "nine",
 	} {
 		if err := os.MkdirAll(p.ToolchainDir(version), 0o755); err != nil {
 			t.Fatal(err)
@@ -31,7 +31,7 @@ func TestDiagnoseToolchains_ListsEveryStoredRelease(t *testing.T) {
 	if len(report.Toolchains) != 2 {
 		t.Fatalf("toolchains = %+v, want the two directories holding a binary", report.Toolchains)
 	}
-	if report.Toolchains[0].Version != "v0.39.0" || report.Toolchains[1].Version != "v0.40.0" {
+	if report.Toolchains[0].Version != "v0.9.0" || report.Toolchains[1].Version != "v0.40.0" {
 		t.Fatalf("toolchains are not ordered by version: %+v", report.Toolchains)
 	}
 	if report.Toolchains[1].Bytes != int64(len("forty")) {
@@ -43,7 +43,7 @@ func TestDiagnoseToolchains_ListsEveryStoredRelease(t *testing.T) {
 
 	var out strings.Builder
 	renderToolchains(&out, report)
-	for _, want := range []string{"toolchain store", "v0.39.0", "v0.40.0", p.ToolchainBinary("v0.40.0")} {
+	for _, want := range []string{"toolchain store", "v0.9.0", "v0.40.0", p.ToolchainBinary("v0.40.0")} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("rendered store %q does not contain %q", out.String(), want)
 		}

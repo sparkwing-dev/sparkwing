@@ -77,6 +77,7 @@ hidden flag shouldn't surprise you.
 
 | Flag | Description |
 |---|---|
+| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `--name NAME` | Pipeline name to describe (required) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
@@ -106,6 +107,7 @@ score descending; agents should prefer -o json for consumption.
 
 | Flag | Description |
 |---|---|
+| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `--query TEXT` | Search query (one or more tokens, all must hit some field) (required) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
@@ -425,6 +427,7 @@ omitted.
 
 | Flag | Description |
 |---|---|
+| `-C, --sw-cd DIR` | Operate as if started in this directory |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--all` | Include entries marked hidden |
 

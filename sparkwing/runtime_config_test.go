@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -74,4 +75,24 @@ func TestSetGit_AttachesPopulatedGit(t *testing.T) {
 	if got.ShortSHA() != "abc123def456" {
 		t.Errorf("ShortSHA = %q", got.ShortSHA())
 	}
+}
+
+func TestWorkDirConcurrentUpdate(t *testing.T) {
+	before := CurrentRuntime().WorkDir
+	t.Cleanup(func() { SetWorkDir(before) })
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			SetWorkDir("first")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_ = WorkDir()
+		}
+	}()
+	wg.Wait()
 }

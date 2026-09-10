@@ -441,3 +441,17 @@ func TestGateArmingHint_QuietWhenNoGitHookIsDeclared(t *testing.T) {
 		t.Errorf("hint = %q, want none: neither trigger installs a git hook", got)
 	}
 }
+
+func TestScaffoldRollsBackJobWhenConfigCannotBeUpdated(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "jobs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := scaffoldGoFromTemplate(dir, "sample", false, "", minimalTemplate, false, "")
+	if err == nil {
+		t.Fatal("missing config returned success")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "jobs", "sample.go")); !os.IsNotExist(statErr) {
+		t.Fatalf("orphan job remains: %v", statErr)
+	}
+}

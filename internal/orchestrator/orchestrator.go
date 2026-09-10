@@ -3770,7 +3770,7 @@ func materializeSpawnEachTemplate(spec *sparkwing.SpawnGenSpec) (id string, job 
 
 func newRunID() string {
 	ts := time.Now().UTC().Format("20060102-150405")
-	var suffix [2]byte
+	var suffix [16]byte
 	_, _ = rand.Read(suffix[:])
 	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }

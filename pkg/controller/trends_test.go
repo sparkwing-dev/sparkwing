@@ -255,3 +255,39 @@ func TestTrends_PipelineFilter(t *testing.T) {
 		t.Errorf("alpha total=%d want 2 (filtered payload=%+v)", total, body)
 	}
 }
+
+func TestTrendsRejectsCachedQueryFailures(t *testing.T) {
+	for _, failure := range []string{"query", "scan", "iteration"} {
+		t.Run(failure, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			if err := st.CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.DB().ExecContext(t.Context(), "ALTER TABLE nodes RENAME TO original_nodes"); err != nil {
+				t.Fatal(err)
+			}
+			var query string
+			switch failure {
+			case "scan":
+				query = `CREATE VIEW nodes AS SELECT 'run' AS run_id, NULL AS outcome`
+			case "iteration":
+				query = `CREATE VIEW nodes AS SELECT 'run' AS run_id, 'cached' AS outcome UNION ALL SELECT 'run', abs(-9223372036854775808)`
+			}
+			if query != "" {
+				if _, err := st.DB().ExecContext(t.Context(), query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			output := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/trends", nil)
+			controller.New(st, nil).Handler().ServeHTTP(output, request)
+			if output.Code != http.StatusInternalServerError {
+				t.Fatalf("%s failure returned status=%d body=%s", failure, output.Code, output.Body.String())
+			}
+		})
+	}
+}

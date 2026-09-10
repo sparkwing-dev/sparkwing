@@ -69,3 +69,13 @@ func TestSummary_CarriesStepFromContext(t *testing.T) {
 		t.Errorf("JobID = %q, want %q", r.JobID, "deploy")
 	}
 }
+
+func TestAnnotationsRequireNodeContext(t *testing.T) {
+	rec := &recordingEmitter{}
+	ctx := sparkwingruntime.WithLogger(context.Background(), rec)
+	sparkwing.Annotate(ctx, "annotation")
+	sparkwing.Summary(ctx, "summary")
+	if len(rec.records) != 0 {
+		t.Fatalf("node-less context emitted %d persistent records", len(rec.records))
+	}
+}

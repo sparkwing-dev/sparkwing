@@ -13,7 +13,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
 - [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs builds cache keys from files, environment variables, and constants.
 - [`sparkwing/planguard`](sdk-planguard.md) -- Package planguard implements the Plan() purity sentinel.
-- [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: spin up postgres/redis/etc.
+- [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: start sidecars for a function, wait for readiness, and clean up services whose startup succeeded on return, error, panic, or context cancellation.
 
 ## Functions
 
@@ -308,14 +308,14 @@ type Constraint interface {
 - `func Bind(argName string) Constraint` -- Bind ties this struct field to a schema-bearing YAML arg key.
 - `func Computed(fn any) Constraint` -- Computed defines a default that depends on other (already-resolved) args.
 - `func Custom(fn any) Constraint` -- Custom is the escape hatch for validators that don't fit the declarative vocabulary.
-- `func Default(v any) Constraint` -- Default supplies a literal fallback used when no higher-priority source (explicit flag, profile default-args) provides a value.
+- `func Default(v any) Constraint` -- Default supplies a literal fallback used when no higher-priority source (explicit flag) provides a value.
 - `func DependsOn(names ...string) Constraint` -- DependsOn declares an explicit ordering edge: the framework resolves the named args before this one.
 - `func Max(v any) Constraint` -- Max sets an upper bound; mirror of Min.
 - `func Min(v any) Constraint` -- Min sets a lower bound on the field's resolved value.
 - `func OneOf(values ...any) Constraint` -- OneOf restricts the field's resolved value to the supplied set.
 - `func Positive() Constraint` -- Positive is sugar for Min(1).
 - `func Range(min, max any) Constraint` -- Range is sugar for Min(min)+Max(max).
-- `func Required() Constraint` -- Required marks the field as unconditionally required: the resolution chain errors if no source (explicit flag, profile default-args, Default, or Computed) provides a value.
+- `func Required() Constraint` -- Required marks the field as unconditionally required: the resolution chain errors if no source (explicit flag, Default, or Computed) provides a value.
 - `func RequiredWhen(p Predicate) Constraint` -- RequiredWhen marks the field required only when the predicate evaluates true at resolution time.
 
 ### type ConsumeEdge
@@ -1116,7 +1116,7 @@ var Remote Predicate = remotePredicate{}
 - `func ArgEq(name string, value any) Predicate` -- ArgEq holds when the named arg's resolved value equals value.
 - `func ArgIn(name string, values ...any) Predicate` -- ArgIn holds when the named arg's resolved value matches any of the supplied values.
 - `func ArgNeq(name string, value any) Predicate` -- ArgNeq holds when the named arg has a resolved value AND that value is not equal to value.
-- `func ArgSet(name string) Predicate` -- ArgSet holds when some source (explicit flag, profile default-args, schema default, or computed) has populated the named arg.
+- `func ArgSet(name string) Predicate` -- ArgSet holds when some source (explicit flag, schema default, or computed) has populated the named arg.
 - `func ArgUnset(name string) Predicate` -- ArgUnset holds when no source has populated the named arg -- it has no resolved value at all.
 - `func Not(p Predicate) Predicate` -- Not inverts the nested predicate.
 - `func Or(preds ...Predicate) Predicate` -- Or holds when any nested predicate holds.
@@ -1129,8 +1129,7 @@ PredicateContext is the evaluation environment for a Predicate.
 ```
 type PredicateContext interface {
     // Arg returns the resolved value of the named arg and true when
-    // some source provided a value (explicit flag, profile
-    // default-args, computed, or a constraint Default). Returns
+    // some source provided a value (explicit flag, computed, or a constraint Default). Returns
     // (nil, false) when the arg has no resolved value at all -- this
     // is the signal [ArgUnset] looks for.
     Arg(name string) (value any, ok bool)

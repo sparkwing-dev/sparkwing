@@ -77,6 +77,41 @@ unlock.
 
 ### Fixed
 
+- **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
+  reads. It was parsed, validated and documented, and no code path read it.
+- **cache:** Concurrent binary downloads use independent staging files and
+  remove them when publication fails; uploads publish digests before blobs
+- **cache:** Binary storage supports existence checks and deletion, and streams
+  uploads to disk while distinguishing bad input from filesystem failures
+- **storage:** Transient S3 capability-probe failures can be retried
+- **store:** Retention uses finish time and reports only deleted runs; duplicate
+  trigger IDs retain their own errors instead of being labeled idempotency conflicts
+- **orchestrator:** Shared 128-bit random run identifiers avoid clock collisions;
+  failed expansion lookups retain the generator's panic diagnostic
+- **admission:** Child attachments validate owner proofs, terminated descendants
+  do not hold cleanup open, and failed local-console setup closes supplied listeners
+- **sdk:** Concurrent work-directory reads are synchronized, persistent notes
+  stay scoped to nodes, and callers cannot mutate the released protocol table
+- **git:** Input-discovery failures remain visible, tag-push retries preserve
+  existing targets, and network helpers disable Git's terminal credential prompts
+- **secrets:** Readers share dotenv decoding while preserving hash-prefixed
+  values; logged SCP URLs redact usernames and tokenizer settings remain available
+- **cli:** Completion retains descriptions and supports older Bash, including
+  empty results under `nounset`; cross-repository listing describes each repo once
+- **cli:** Version holds are normalized, orientation stays local and preserves
+  prereleases, and unsupported local toolchains report why they cannot run
+- **cli:** Missing runs differ from empty results, config help avoids secret
+  inspection, and invalid worker counts fail before execution
+- **cli:** Failed scaffolds remove their new source file, install and rollback
+  preserve permissions, and manifest verification accepts trust-set public keys
+- **docs:** Mutable web pages expire, pruning failures are reported, and source
+  selectors, migration bounds, directory flags and command errors match their behavior
+- **logs:** Observed file shrinkage resets stream offsets, color overrides are
+  synchronized, and default renderers honor the shared color policy
+- **web:** Zero-duration waterfalls stay finite; capped overview history is
+  labeled, and failed trend queries no longer produce successful partial results
+
+
 - **orchestrator:** A child-await timeout names what the parent observed.
   The error carries the poll count, the last child status read, how long the
   parent waited, and the first and last store error it retried past, on both

@@ -20,6 +20,7 @@ const versionHoldEnv = "SPARKWING_VERSION_HOLD"
 type versionHold struct {
 	Value  string `json:"value"`
 	Source string `json:"source"`
+	Error  string `json:"error,omitempty"`
 }
 
 func resolveVersionHold() versionHold {
@@ -30,7 +31,16 @@ func resolveVersionHold() versionHold {
 	hold := sharedtoolchain.ResolveHold(sharedtoolchain.Hold{
 		Value: os.Getenv(versionHoldEnv), Source: versionHoldEnv,
 	}, path)
-	return versionHold{Value: hold.Value, Source: hold.Source}
+	report := versionHold{Value: hold.Value, Source: hold.Source}
+	if report.Value != "" {
+		normalized, err := normalizeHold(report.Value)
+		if err != nil {
+			report.Error = fmt.Sprintf("invalid version hold %q (%s)", report.Value, report.Source)
+		} else {
+			report.Value = normalized
+		}
+	}
+	return report
 }
 
 func versionHoldPath() (string, error) {
@@ -125,6 +135,9 @@ func runVersionHold(args []string) error {
 		return nil
 	default:
 		hold := resolveVersionHold()
+		if hold.Error != "" {
+			return errors.New(hold.Error)
+		}
 		if hold.Value == "" {
 			fmt.Println(color.Dim("no version hold set (CLI upgrades are unrestricted)"))
 			return nil

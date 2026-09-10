@@ -24,7 +24,7 @@ import (
 const ExitNotStarted = -1
 
 // WorkDir returns the pipeline working directory (the repo root).
-func WorkDir() string { return runtime.WorkDir }
+func WorkDir() string { return CurrentRuntime().WorkDir }
 
 // ExecResult is the structured result of a command invocation.
 type ExecResult struct {

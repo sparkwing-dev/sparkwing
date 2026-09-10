@@ -33,8 +33,7 @@ type ResolveInputs struct {
 // resolution / validation failure so the operator gets a complete
 // picture of what's missing or wrong.
 //
-// Resolution order per field: explicit flag value -> profile
-// default-args -> Computed (with already-resolved args) -> Default.
+// Resolution order per field: explicit flag value -> Computed (with already-resolved args) -> Default.
 // Validators (OneOf / Min / Max / Custom) fire after all fields
 // resolve; RequiredWhen and group constraints fire last because they
 // can reference any other field's resolved state.

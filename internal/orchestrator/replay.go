@@ -100,9 +100,14 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 	}
 
 	target := plan.Job(nodeID)
+	var generatorErr error
 	if target == nil {
 		for _, exp := range plan.Expansions() {
-			children := invokeGeneratorForPod(ctx, exp)
+			children, err := invokeGeneratorForPod(ctx, exp)
+			if err != nil {
+				generatorErr = errors.Join(generatorErr, err)
+				continue
+			}
 			for _, c := range children {
 				if c.ID() == nodeID {
 					target = c
@@ -115,7 +120,7 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 		}
 	}
 	if target == nil {
-		return runner.Result{}, fmt.Errorf("node %q not found in plan for %s", nodeID, run.Pipeline)
+		return runner.Result{}, errors.Join(fmt.Errorf("node %q not found in plan for %s", nodeID, run.Pipeline), generatorErr)
 	}
 
 	currentType := fmt.Sprintf("%T", target.Job())

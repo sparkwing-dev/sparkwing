@@ -105,6 +105,10 @@ func listLocalAnnotations(ctx context.Context, paths orchestrator.Paths, runID, 
 	}
 	defer done()
 
+	if _, err := st.GetRun(ctx, runID); err != nil {
+		return nil, err
+	}
+
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -151,6 +155,10 @@ func listRemoteAnnotations(ctx context.Context, profileName, runID, nodeFilter, 
 		return nil, err
 	}
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+	if _, err := c.GetRun(ctx, runID); err != nil {
+		return nil, err
+	}
+
 	var out []annotationEntry
 	if stepFilter == "" {
 		nodes, err := c.ListNodes(ctx, runID)

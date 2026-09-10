@@ -126,6 +126,7 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 	}
 	identity := updateReadInstalled()
 	current := identity.Version
+
 	currentBin, err := os.Executable()
 	if err != nil {
 		return result, fmt.Errorf("locate current binary: %w", err)
@@ -145,7 +146,11 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 	if !verified {
 		fmt.Fprintf(os.Stderr, "update: %s; replacement will use verified release assets\n", provenanceReason)
 	}
-	if hold := resolveVersionHold(); hold.Value != "" && exceedsHold(resolved, hold.Value) {
+	hold := resolveVersionHold()
+	if hold.Error != "" {
+		return result, fmt.Errorf("update refused: %s", hold.Error)
+	}
+	if hold.Value != "" && exceedsHold(resolved, hold.Value) {
 		if !overrideHold {
 			return result, holdRefusal(resolved, hold)
 		}
