@@ -81,6 +81,12 @@ unlock.
 
 ### Changed
 
+- **cache:** A cache directory sparkwing cannot create now names `SPARKWING_HOME`.
+  The failing path already came from the standard library; the missing half was
+  the lever. Every cache path hangs off the sparkwing home, so the message points
+  at the one environment variable that moves it instead of leaving the reader to
+  look for a cache-specific override.
+
 - **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
   that accepts the encoding. Measured over a served listener, the heaviest page
   falls from 1,475,205 bytes to 459,505 and the lightest from 732,498 to 251,669,
