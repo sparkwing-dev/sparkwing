@@ -99,8 +99,9 @@ func (r Ref[T]) Get(ctx context.Context) T {
 //
 // ok is false for a genuine absence: an in-run node that has not
 // completed, a run that stored no output, and a cross-pipeline resolver
-// failure marked with ErrRefAbsent. Every miss is logged at warn naming
-// the pipeline and node.
+// failure marked with ErrRefAbsent. A store cannot tell a misspelled
+// pipeline name from one that has never run, so both are misses, and
+// every miss is logged at warn naming the pipeline and node.
 //
 // One input divides the two accessors: a cross-pipeline run that stored
 // empty or null output. Get renders that as the zero T and carries on;
@@ -119,10 +120,14 @@ func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 	var zero T
 	out, present, err := r.resolve(ctx)
 	if err != nil {
-		if !errors.Is(err, ErrRefAbsent) || ctxEnded(err) {
+		// safety: a resolver whose store read the cancellation interrupted can
+		// still report an absence, and a step torn down mid-read must not take
+		// its bootstrap branch. The step's own context settles that, whatever
+		// the resolver returned.
+		if !errors.Is(err, ErrRefAbsent) || ctx.Err() != nil {
 			panic(err.Error())
 		}
-		Warn(ctx, "Ref.TryGet: %s is absent, treating it as a miss: %v", r.describe(), err)
+		Warn(ctx, "Ref.TryGet: %s is absent, treating it as a miss: %v", r.describe(), errors.Unwrap(err))
 		return zero, false
 	}
 	if !present {
@@ -134,29 +139,27 @@ func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 
 // ErrRefAbsent marks a resolver failure as a genuine absence rather than
 // a store the resolver could not reach: no run of the pipeline matched,
-// or the run that matched stored no output for the node. Ref.TryGet
-// reports an error carrying it as a miss and panics on every other
-// resolver failure, so an unreachable store does not read as a
-// pipeline's first run.
+// or the run that matched holds no such node. Ref.TryGet reports an
+// error carrying it as a miss and panics on every other resolver
+// failure, so an unreachable store does not read as a pipeline's first
+// run.
 //
 // A PipelineResolver reading a store of its own wraps it on the absence
-// path:
+// path, and %.0w keeps the marker out of the message:
 //
-//	run, err := myStore.GetLatestRun(ctx, pipeline, maxAge)
-//	if errors.Is(err, myStore.ErrNotFound) {
-//	    return nil, fmt.Errorf("no matching run for pipeline %q: %w", pipeline, sparkwing.ErrRefAbsent)
+//	run, err := st.GetLatestRun(ctx, pipeline, maxAge)
+//	if errors.Is(err, mystore.ErrNotFound) {
+//	    return nil, fmt.Errorf("no matching run for pipeline %q%.0w", pipeline, sparkwing.ErrRefAbsent)
 //	}
 //
 // Every failure a resolver leaves unmarked is treated as unreachable.
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 
-// ctxEnded reports a failure that is the step being torn down rather
-// than an upstream output being absent, which a resolver can mark as an
-// absence when its store read is what the cancellation interrupted.
-// Treating it as a miss would send a step down its bootstrap branch on a
-// dead context.
-func ctxEnded(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+// absentInRun names an upstream sibling that has not completed. The
+// marker prints nothing, so the warn log unwraps this error and shows
+// what it names.
+func absentInRun(nodeID string) error {
+	return fmt.Errorf("node %q has not completed%.0w", nodeID, ErrRefAbsent)
 }
 
 func (r Ref[T]) describe() string {
@@ -184,7 +187,7 @@ func (r Ref[T]) getInRun(ctx context.Context) (T, bool, error) {
 	}
 	data, ok := jsonResolve(r.NodeID)
 	if !ok {
-		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get: node %q has not completed: %w", out, r.NodeID, ErrRefAbsent)
+		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get: %w", out, absentInRun(r.NodeID))
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		var zero T

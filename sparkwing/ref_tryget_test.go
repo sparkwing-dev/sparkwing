@@ -10,7 +10,7 @@ import (
 )
 
 func TestRefTryGet_CrossPipelineBootstrapReturnsFalse(t *testing.T) {
-	r := &stubResolver{err: fmt.Errorf("get node build/artifact output: not found: %w", ErrRefAbsent)}
+	r := &stubResolver{err: fmt.Errorf("get node build/artifact output: not found%.0w", ErrRefAbsent)}
 	ctx := context.WithValue(context.Background(), keyPipelineResolver, r)
 
 	got, ok := RefToLastRun[buildOut]("build", "artifact").TryGet(ctx)
@@ -150,7 +150,7 @@ func (r *refWarnRecorder) warned(t *testing.T, want ...string) {
 
 func TestRefTryGet_LogsEveryMissNamingThePipelineAndNode(t *testing.T) {
 	rec := &refWarnRecorder{}
-	res := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q (maxAge=24h0m0s): %w", "build", ErrRefAbsent)}
+	res := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q (maxAge=24h0m0s)%.0w", "build", ErrRefAbsent)}
 	ctx := context.WithValue(context.WithValue(context.Background(), keyPipelineResolver, res), keyLogger, Logger(rec))
 
 	if _, ok := RefToLastRun[buildOut]("build", "artifact").TryGet(ctx); ok {
@@ -170,14 +170,17 @@ func TestRefTryGet_LogsAStoredEmptyOutputAsAMiss(t *testing.T) {
 	rec.warned(t, "build/artifact", "stored no output")
 }
 
+// A resolver whose store read the cancellation interrupted can still report an
+// absence; the step is being torn down either way.
 func TestRefTryGet_PanicsWhenTheStepsContextEnded(t *testing.T) {
-	res := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q: %w: %w", "build", context.Canceled, ErrRefAbsent)}
-	ctx := context.WithValue(context.Background(), keyPipelineResolver, res)
+	res := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q%.0w", "build", ErrRefAbsent)}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), keyPipelineResolver, res))
+	cancel()
 
 	defer func() {
 		msg, _ := recover().(string)
-		if !strings.Contains(msg, "build") {
-			t.Fatalf("a cancelled step should panic naming the ref, got %q", msg)
+		if !strings.Contains(msg, "no matching run") {
+			t.Fatalf("a cancelled step should panic naming the failure, got %q", msg)
 		}
 	}()
 	_, _ = RefToLastRun[buildOut]("build", "artifact").TryGet(ctx)
@@ -201,19 +204,6 @@ func TestRefTryGet_CrossPipelineUnreachableStorePanics(t *testing.T) {
 	t.Fatal("a store the resolver could not reach was reported as an absent prior run")
 }
 
-func TestRefTryGet_CrossPipelineMarkedAbsenceReturnsFalse(t *testing.T) {
-	r := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q (maxAge=0s): %w", "build", ErrRefAbsent)}
-	ctx := context.WithValue(context.Background(), keyPipelineResolver, r)
-
-	got, ok := RefToLastRun[buildOut]("build", "artifact").TryGet(ctx)
-	if ok {
-		t.Fatal("expected ok=false for a marked absence")
-	}
-	if got.Digest != "" || got.Tag != "" {
-		t.Fatalf("expected the zero value, got %+v", got)
-	}
-}
-
 // Get panics either way, so the sentinel does not change which failures a
 // pipeline author can handle through it.
 func TestRefGet_CrossPipelineMarkedAbsenceStillPanics(t *testing.T) {
@@ -223,7 +213,7 @@ func TestRefGet_CrossPipelineMarkedAbsenceStillPanics(t *testing.T) {
 			t.Fatalf("unexpected panic value: %q", msg)
 		}
 	}()
-	r := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q (maxAge=0s): %w", "build", ErrRefAbsent)}
+	r := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q (maxAge=0s)%.0w", "build", ErrRefAbsent)}
 	ctx := context.WithValue(context.Background(), keyPipelineResolver, r)
 
 	RefToLastRun[buildOut]("build", "artifact").Get(ctx)

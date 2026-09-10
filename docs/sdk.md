@@ -601,14 +601,16 @@ if !ok {
 `ok` is false for a genuine absence: the upstream node has not
 completed, the run that was found stored no output, or a cross-pipeline
 resolver reported `sparkwing.ErrRefAbsent`; the value is the zero `T`.
-Every miss is logged at warn naming the pipeline and node.
+Every miss is logged at warn naming the pipeline and node, because a
+store cannot tell a misspelled pipeline name from one that has never
+run, and a silent bootstrap branch would hide the typo forever.
 
 A resolver marks an absence by wrapping `sparkwing.ErrRefAbsent`. The
 orchestrator's resolver marks a pipeline with no successful run inside
-`MaxAge` and a run that holds no output for the node. A failure it
-leaves unmarked -- a store it could not reach -- panics instead, so an
-outage crashes the step rather than sending a compare-to-last-run
-pipeline down its bootstrap branch for as long as the outage lasts.
+`MaxAge` and a run that holds no such node. A failure it leaves
+unmarked -- a store it could not reach -- panics instead, so an outage
+crashes the step rather than sending a compare-to-last-run pipeline
+down its bootstrap branch for as long as the outage lasts.
 
 One input divides the two accessors: a cross-pipeline run that stored
 empty or null output. `Get` renders that as the zero `T` and carries on;

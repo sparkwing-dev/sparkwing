@@ -1992,7 +1992,7 @@ func repoSuffix(repo string) string {
 func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
 	return newPipelineRefResolver(s.backends.State, s.runID,
 		func(ctx context.Context, _ string, err error) {
-			sparkwing.Warn(ctx, "pipeline_ref audit event failed: %v", err)
+			sparkwing.Warn(ctx, "pipeline_ref audit event append failed: %v", err)
 		})
 }
 

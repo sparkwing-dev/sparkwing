@@ -58,9 +58,9 @@ unlock.
   an in-run node that has not completed, a run that stored no output, or a
   cross-pipeline resolver that wrapped the new `sparkwing.ErrRefAbsent`. The
   orchestrator's resolver marks a pipeline with no successful run inside
-  `MaxAge` and a run holding no output for the node; every other resolver
-  failure panics, so a store it could not reach crashes the step instead of
-  reading as a pipeline's first run. `TryGet` still panics on a cancelled or
+  `MaxAge` and a run that holds no such node; every other resolver failure
+  panics, so a store it could not reach crashes the step instead of reading as
+  a pipeline's first run. `TryGet` still panics on a cancelled or
   expired context and on output that does not fit `T`. Misses are logged at
   warn naming the pipeline and node. `Get` is unchanged.
 - **cli:** `queue list` is the canonical name for the admission listing, and
@@ -175,6 +175,13 @@ unlock.
 
 ### Fixed
 
+- **storage:** An object-store state backend reports a run lookup it could not
+  read instead of an empty history. `GetLatestRun` listed the bucket, skipped
+  every record whose read failed, and returned `store.ErrNotFound`, so a bucket
+  that lists but will not serve was indistinguishable from a pipeline that has
+  never run -- and `Ref[T].TryGet` reads that as the bootstrap case. A scan that
+  matched nothing and could not read a record now returns the first read
+  failure; a scan that did find a match still returns it.
 - **orchestrator:** `sparkwing.RunAndAwait` refuses under an object-store state
   backend (Mode 2) instead of waiting forever. That backend enqueues the child's
   trigger and has no path that claims one, so the spawned run never started and

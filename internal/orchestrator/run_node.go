@@ -205,7 +205,7 @@ func RunNodeOnce(
 
 	ctx = sparkwingruntime.WithPipelineResolver(ctx, newPipelineRefResolver(stateClient, runID,
 		func(_ context.Context, node string, err error) {
-			logger.Warn("pipeline_ref audit event failed",
+			logger.Warn("pipeline_ref audit event append failed",
 				"run_id", runID, "node", node, "err", err)
 		}))
 

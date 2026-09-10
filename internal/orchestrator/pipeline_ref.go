@@ -27,7 +27,7 @@ func newPipelineRefResolver(
 	state pipelineRefState,
 	consumerRunID string,
 	warnAudit func(ctx context.Context, node string, err error),
-) sparkwing.PipelineResolver {
+) sparkwing.PipelineResolverFunc {
 	return sparkwing.PipelineResolverFunc(func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
 		run, err := state.GetLatestRun(ctx, pipeline, []string{"success"}, maxAge)
 		if err != nil {
@@ -46,7 +46,7 @@ func newPipelineRefResolver(
 				"source_finished": run.FinishedAt,
 			})
 			if mErr != nil {
-				warnAudit(ctx, currentNode, mErr)
+				warnAudit(ctx, currentNode, fmt.Errorf("marshal payload: %w", mErr))
 			} else if evErr := state.AppendEvent(ctx, consumerRunID, currentNode,
 				"pipeline_ref_resolved", payload); evErr != nil {
 				warnAudit(ctx, currentNode, evErr)
@@ -59,10 +59,11 @@ func newPipelineRefResolver(
 // absentIfNotFound marks a store miss as the absence Ref.TryGet reports
 // rather than panics on. Every other failure stays unmarked, so a store
 // the resolver could not reach crashes the step instead of reading as a
-// pipeline's first run.
+// pipeline's first run. %.0w marks without adding the marker's words to
+// a message the caller already reads.
 func absentIfNotFound(err error) error {
 	if errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("%w: %w", err, sparkwing.ErrRefAbsent)
+		return fmt.Errorf("%w%.0w", err, sparkwing.ErrRefAbsent)
 	}
 	return err
 }
