@@ -29,6 +29,8 @@
 // same-major implementations that may otherwise ignore one another's fields.
 package wingwire
 
+import "slices"
+
 import (
 	"encoding/json"
 	"fmt"
@@ -105,7 +107,7 @@ var releasedProtocolFloors = ProtocolFloors{
 // ReleasedProtocolFloors returns the release-to-major table this build
 // shipped with, whose newest row is [ProtocolMajor].
 func ReleasedProtocolFloors() ProtocolFloors {
-	return releasedProtocolFloors
+	return slices.Clone(releasedProtocolFloors)
 }
 
 // MinVersionSpeaking returns the lowest released SDK version whose clients
