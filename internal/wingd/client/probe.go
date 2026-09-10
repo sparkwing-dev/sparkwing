@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -51,6 +53,32 @@ type DaemonInfo struct {
 	Draining bool
 }
 
+// probeDeadline bounds one probe exchange. A probe holds no lease and has no
+// reconnect path, so it reads under its own ceiling as well as the caller's,
+// whichever falls first. It reports whether its own ceiling is the binding
+// one, which is what separates a daemon that answers nothing from a caller
+// who ran out of budget.
+func probeDeadline(ctx context.Context) (deadline time.Time, ownCeiling bool) {
+	own := time.Now().Add(probeTimeout)
+	if callers, ok := ctx.Deadline(); ok && callers.Before(own) {
+		return callers, false
+	}
+	return own, true
+}
+
+// probeFault names a daemon that took the connection and then said nothing.
+// A read timeout on its own reads like a flaky link, which sends an operator
+// after the wrong fault: the socket is held and the process behind it has to
+// be stopped before anything can serve this home again. The claim is made
+// only against the probe's own ceiling, because a caller who allowed less
+// than that has learned nothing about the daemon.
+func probeFault(sock, verb string, ownCeiling bool, err error) error {
+	if ownCeiling && errors.Is(err, os.ErrDeadlineExceeded) {
+		return fmt.Errorf("%w at %s: %w", ErrDaemonWedged, sock, err)
+	}
+	return fmt.Errorf("wingd/client: %s %s: %w", verb, sock, err)
+}
+
 func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 	nc, err := dial(ctx, sock, probeTimeout)
 	if err != nil {
@@ -62,12 +90,12 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 	defer func() { _ = nc.Close() }()
 	// safety: bound reads because a probe has no lease or reconnect path if the
 	// daemon accepts but never responds.
-	deadline := time.Now().Add(probeTimeout)
+	deadline, ownCeiling := probeDeadline(ctx)
 	_ = nc.SetDeadline(deadline)
 	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
 	ack, err := cl.handshake("")
 	if err != nil {
-		return DaemonInfo{}, fmt.Errorf("wingd/client: probe %s: %w", sock, err)
+		return DaemonInfo{}, probeFault(sock, "probe", ownCeiling, err)
 	}
 	native := ack.NativeProtocolMajor
 	if native == 0 {
@@ -97,15 +125,12 @@ func ProbeQueue(ctx context.Context, sock string) (wingwire.QueueState, error) {
 		return wingwire.QueueState{}, ErrNoDaemon
 	}
 	defer func() { _ = nc.Close() }()
-	deadline := time.Now().Add(probeTimeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
+	deadline, ownCeiling := probeDeadline(ctx)
 	_ = nc.SetDeadline(deadline)
 	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
 	ack, err := cl.handshake("")
 	if err != nil {
-		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: %w", sock, err)
+		return wingwire.QueueState{}, probeFault(sock, "queue probe", ownCeiling, err)
 	}
 	if ack.ProtocolMajor != wingd.ProtocolMajor {
 		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: protocol %d is incompatible with %d", sock, ack.ProtocolMajor, wingd.ProtocolMajor)
@@ -115,7 +140,7 @@ func ProbeQueue(ctx context.Context, sock string) (wingwire.QueueState, error) {
 		return wingwire.QueueState{}, terminal
 	}
 	if transient != nil {
-		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: %w", sock, transient)
+		return wingwire.QueueState{}, probeFault(sock, "queue probe", ownCeiling, transient)
 	}
 	return qs, nil
 }

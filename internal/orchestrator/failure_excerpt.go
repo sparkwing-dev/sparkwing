@@ -151,7 +151,7 @@ func appendFailureExcerptEvent(ctx context.Context, state StateBackend, runID, n
 	if merr != nil {
 		return
 	}
-	_ = state.AppendEvent(ctx, runID, nodeID, nodeFailureExcerptEvent, payload)
+	noteEvent(ctx, state, runID, nodeID, nodeFailureExcerptEvent, payload)
 }
 
 type eventLister interface {

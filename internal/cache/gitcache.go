@@ -581,7 +581,7 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSONBody(w, r, resp)
 }
 
 func handleArchive(w http.ResponseWriter, r *http.Request) {
@@ -758,7 +758,7 @@ func handleRepos(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(repos)
+	writeJSONBody(w, r, repos)
 }
 
 func sshHint(output string) string {
@@ -1512,7 +1512,7 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 	// #nosec G706 -- %q escapes control characters in the caller-supplied path
 	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"path": artifactPath, "size": n})
+	writeJSONBody(w, r, map[string]any{"path": artifactPath, "size": n})
 }
 
 func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
@@ -1585,7 +1585,7 @@ func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 	_, err := os.Stat(jobDir)
 	if os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]string{})
+		writeJSONBody(w, r, []string{})
 		return
 	}
 
@@ -1608,7 +1608,7 @@ func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(files)
+	writeJSONBody(w, r, files)
 }
 
 func contains(s []string, v string) bool {
@@ -1651,7 +1651,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Printf("describe: upload %s (incremental from %s, %d bytes)", id, short(base), size)
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "size": size})
+			writeJSONBody(w, r, map[string]any{"id": id, "size": size})
 			return
 		}
 	}
@@ -1665,7 +1665,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("describe: upload %s (%d bytes)", id, len(data))
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "size": len(data)})
+	writeJSONBody(w, r, map[string]any{"id": id, "size": len(data)})
 }
 
 func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int, error) {
@@ -1828,7 +1828,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
+		writeJSONBody(w, r, map[string]any{"ancestor": "", "found": false})
 		return
 	}
 
@@ -1845,13 +1845,13 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	if ancestor != "" {
 		log.Printf("sync negotiate: found common ancestor %s for %s", short(ancestor), hash)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": ancestor, "found": true})
+		writeJSONBody(w, r, map[string]any{"ancestor": ancestor, "found": true})
 		return
 	}
 
 	log.Printf("sync negotiate: no common ancestor for %s (%d commits checked)", hash, len(req.Commits))
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
+	writeJSONBody(w, r, map[string]any{"ancestor": "", "found": false})
 }
 
 // safety: one batch process bounds the forks a single request can cost, whatever the commit count.
@@ -1986,7 +1986,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	// #nosec G706 -- the repository hash and the commit are pattern-validated
 	log.Printf("seed: %s seeded %s (%d bytes)", hash, short(sha), size)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
+	writeJSONBody(w, r, map[string]any{"ok": true, "size": size})
 }
 
 type workspaceRef struct {
@@ -2194,7 +2194,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": false})
+			writeJSONBody(w, r, map[string]any{"name": name, "hash": hash, "cloned": false})
 			return
 		}
 		enableSHAFetch(bareRepo)
@@ -2208,7 +2208,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 	log.Printf("git register: %s → %s (%s)", name, sourceurl.Redact(repoURL), hash)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": true})
+	writeJSONBody(w, r, map[string]any{"name": name, "hash": hash, "cloned": true})
 }
 
 func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
@@ -2254,7 +2254,7 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	bgFetch.markFetched(stateKey(hash))
 	log.Printf("eager refresh: %s ok", hash)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "hash": hash})
+	writeJSONBody(w, r, map[string]any{"ok": true, "hash": hash})
 }
 
 func autoRegisterRepos() {
@@ -2471,5 +2471,13 @@ func cleanOldArchives(repoHash string) {
 		}
 		_ = os.Remove(filepath.Join(archDir, matching[oldest].name))
 		matching = append(matching[:oldest], matching[oldest+1:]...)
+	}
+}
+
+// safety: the status line is already on the wire, so a body that will not
+// encode can only be reported here.
+func writeJSONBody(w http.ResponseWriter, r *http.Request, body any) {
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("sparkwing-cache: %s response body not written: %v", r.URL.Path, err)
 	}
 }

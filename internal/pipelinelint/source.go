@@ -44,6 +44,7 @@ type analysis struct {
 	file     string
 	typeName string
 	imports  map[string]string
+	builders map[string]string
 	findings []Finding
 }
 
@@ -63,6 +64,7 @@ func (a *analysis) run(body *ast.BlockStmt) {
 	if body == nil {
 		return
 	}
+	a.collectBuilders(body)
 	ast.Inspect(body, func(n ast.Node) bool {
 		if _, ok := n.(*ast.FuncLit); ok {
 			return false
@@ -78,6 +80,28 @@ func (a *analysis) run(body *ast.BlockStmt) {
 		case *ast.ExprStmt:
 			a.checkExprStmt(node)
 		}
+		return true
+	})
+}
+
+// collectBuilders records which SDK constructor each local variable holds, so
+// a chain split across statements is checked like a single expression.
+func (a *analysis) collectBuilders(body *ast.BlockStmt) {
+	a.builders = map[string]string{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+			return true
+		}
+		id, ok := as.Lhs[0].(*ast.Ident)
+		if !ok || id.Name == "_" {
+			return true
+		}
+		root, _, _ := a.unwindChain(as.Rhs[0])
+		if root == nil || !a.isJobConstructor(root) {
+			return true
+		}
+		a.builders[id.Name] = selectorOf(root.Fun).Sel.Name
 		return true
 	})
 }
@@ -187,17 +211,31 @@ func (a *analysis) checkExprStmt(es *ast.ExprStmt) {
 }
 
 func (a *analysis) checkChain(expr ast.Expr) {
-	root, methods := unwindChain(expr)
-	if root == nil || !a.isJobConstructor(root) {
+	root, base, methods := a.unwindChain(expr)
+	constructor := ""
+	switch {
+	case root != nil && a.isJobConstructor(root):
+		constructor = selectorOf(root.Fun).Sel.Name
+	case base != nil:
+		constructor = a.builders[base.Name]
+	}
+	if constructor == "" {
+		return
+	}
+	if constructor == "JobFanOutDynamic" {
+		a.checkDynamicGroup(methods)
 		return
 	}
 	inline := false
-	var labelCalls []*ast.CallExpr
+	var labelCalls, placementCalls []*ast.CallExpr
 	for _, m := range methods {
 		switch methodName(m) {
 		case "Inline":
 			inline = true
 		case "Requires", "Prefers":
+			labelCalls = append(labelCalls, m)
+			placementCalls = append(placementCalls, m)
+		case "WhenRunner":
 			labelCalls = append(labelCalls, m)
 		}
 	}
@@ -205,24 +243,44 @@ func (a *analysis) checkChain(expr ast.Expr) {
 		for _, arg := range lc.Args {
 			if lit, ok := stringLit(arg); ok && strings.TrimSpace(lit) == "" {
 				a.add(RuleRunnerLabel, lc.Pos(),
-					methodName(lc)+" was given a blank runner label, which matches no runner; drop it or supply a real label.")
+					methodName(lc)+" was given a blank runner label: an empty string is dropped and a "+
+						"whitespace label matches no runner, so the term either vanishes or can never be "+
+						"satisfied. Drop it or supply a real label.")
 			}
 		}
 	}
-	if inline && len(labelCalls) > 0 {
-		a.add(RuleRunnerLabel, labelCalls[0].Pos(),
-			"job is Inline() (in-process) yet declares "+methodName(labelCalls[0])+"; a runner label can never be honored on an inline job.")
+	if inline && len(placementCalls) > 0 {
+		a.add(RuleRunnerLabel, placementCalls[0].Pos(),
+			"job is Inline() (in-process) yet declares "+methodName(placementCalls[0])+"; a runner label can never be honored on an inline job.")
 	}
-	a.checkGroupCache(root, methods)
+	a.checkGroupCache(constructor, methods)
 }
 
-func (a *analysis) checkGroupCache(root *ast.CallExpr, methods []*ast.CallExpr) {
-	sel := selectorOf(root.Fun)
-	if sel == nil {
-		return
+// groupReaders are the JobGroup methods that read the group rather than
+// configure its members, so they mean the same thing on a dynamic group.
+var groupReaders = map[string]struct{}{
+	"Name": {}, "Members": {}, "Dynamic": {}, "Ready": {}, "Err": {},
+}
+
+func (a *analysis) checkDynamicGroup(methods []*ast.CallExpr) {
+	for _, m := range methods {
+		name := methodName(m)
+		if _, read := groupReaders[name]; read || name == "" {
+			continue
+		}
+		msg := name + "() on a JobFanOutDynamic group is dropped: every JobGroup setter applies to the " +
+			"members present when it is called, and a dynamic group has none until its source completes. " +
+			"Configure the generated jobs from the value the fan-out callback returns."
+		if name == "Requires" || name == "Prefers" || name == "WhenRunner" {
+			msg += " That Workable can declare its own labels through the " + name + "Provider interface."
+		}
+		a.add(RuleDynamicGroupInert, m.Pos(), msg)
 	}
-	switch sel.Sel.Name {
-	case "JobFanOut", "JobFanOutDynamic", "GroupJobs":
+}
+
+func (a *analysis) checkGroupCache(constructor string, methods []*ast.CallExpr) {
+	switch constructor {
+	case "JobFanOut", "GroupJobs":
 	default:
 		return
 	}
@@ -231,7 +289,7 @@ func (a *analysis) checkGroupCache(root *ast.CallExpr, methods []*ast.CallExpr) 
 			continue
 		}
 		a.add(RuleGroupCacheShared, m.Pos(),
-			"Memoize() here applies one key to every member of "+sel.Sel.Name+
+			"Memoize() here applies one key to every member of "+constructor+
 				", so the members share a cache entry and replay each other's results; "+
 				"key them individually by ranging over the group's Members().")
 	}
@@ -247,7 +305,7 @@ func (a *analysis) isJobConstructor(call *ast.CallExpr) bool {
 		return false
 	}
 	switch sel.Sel.Name {
-	case "Job", "JobFanOut", "JobApproval", "GroupJobs":
+	case "Job", "JobFanOut", "JobFanOutDynamic", "JobApproval", "GroupJobs":
 		return true
 	}
 	return false
@@ -337,22 +395,32 @@ func selectorOf(fun ast.Expr) *ast.SelectorExpr {
 	return nil
 }
 
-func unwindChain(expr ast.Expr) (root *ast.CallExpr, methods []*ast.CallExpr) {
+// unwindChain walks a builder chain back to its start. It returns the rooting
+// call for a chain written in one expression, or the identifier a chain
+// continues from when the base is a variable rather than a package qualifier.
+func (a *analysis) unwindChain(expr ast.Expr) (root *ast.CallExpr, base *ast.Ident, methods []*ast.CallExpr) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
 	for {
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok {
-			return call, methods
+			return call, nil, methods
 		}
-		inner, ok := sel.X.(*ast.CallExpr)
-		if !ok {
-			return call, methods
+		switch inner := sel.X.(type) {
+		case *ast.CallExpr:
+			methods = append([]*ast.CallExpr{call}, methods...)
+			call = inner
+		case *ast.Ident:
+			if _, pkg := a.imports[inner.Name]; pkg {
+				return call, nil, methods
+			}
+			methods = append([]*ast.CallExpr{call}, methods...)
+			return nil, inner, methods
+		default:
+			return call, nil, methods
 		}
-		methods = append([]*ast.CallExpr{call}, methods...)
-		call = inner
 	}
 }
 

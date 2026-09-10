@@ -14,6 +14,12 @@ var ErrNoDaemon = errors.New("wingd/client: no daemon running")
 
 var ErrDaemonUnreachable = errors.New("wingd/client: could not reach the admission daemon")
 
+// ErrDaemonWedged is a daemon that took the connection and then answered
+// nothing before the caller's budget ran out. It is distinct from unreachable
+// because the socket is held: no successor can bind it, no admission is being
+// arbitrated behind it, and a drain that needs a handshake cannot replace it.
+var ErrDaemonWedged = errors.New("wingd/client: the daemon accepted the connection and did not answer")
+
 func dialMeansAbsent(err error) bool {
 	if err == nil {
 		return false

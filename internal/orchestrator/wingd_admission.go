@@ -624,7 +624,7 @@ func appendAdmissionEvent(ctx context.Context, backends Backends, runID, partici
 	if backends.State == nil {
 		return
 	}
-	_ = backends.State.AppendEvent(ctx, runID, participantID, kind, payload)
+	noteEvent(ctx, backends.State, runID, participantID, kind, payload)
 }
 
 func (la *LocalAdmission) reportStillQueued(displayID string, q wingwire.Queued, waited time.Duration) {

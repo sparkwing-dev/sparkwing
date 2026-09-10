@@ -68,7 +68,7 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 				"position":     q.Position,
 				"queue_length": q.QueueLength,
 			})
-			_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_wait", payload)
+			noteEvent(ctx, r.backends.State, req.RunID, node.ID(), "concurrency_wait", payload)
 		}
 		if cancelCombined != nil {
 			if q.Key == key && combinedSemTimer == nil {
@@ -83,7 +83,9 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 		}
 		if detail := fmt.Sprintf("queued in %s: %d ahead", key, max(0, q.Position-1)); detail != lastDetail {
 			lastDetail = detail
-			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, node.ID(), detail)
+			if err := r.backends.State.UpdateNodeActivity(ctx, req.RunID, node.ID(), detail); err != nil {
+				noteLostStateWrite(ctx, "update node activity", req.RunID, err)
+			}
 			r.emitConcWaitLog(ctx, req, detail)
 		}
 	}
@@ -111,8 +113,10 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 			r.markFailed(ctx, req.RunID, node.ID(), context.Canceled)
 			return runner.Result{Outcome: sparkwing.Cancelled}
 		}
-		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_promoted", nil)
-		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, node.ID(), "")
+		noteEvent(ctx, r.backends.State, req.RunID, node.ID(), "concurrency_promoted", nil)
+		if err := r.backends.State.UpdateNodeActivity(ctx, req.RunID, node.ID(), ""); err != nil {
+			noteLostStateWrite(ctx, "update node activity", req.RunID, err)
+		}
 	}
 
 	execCtx, cancelExec := context.WithCancel(ctx)
@@ -140,8 +144,10 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 	output, err := r.executeNodeWithAdmission(runCtx, req)
 	if ev := evicted.Load(); ev != nil {
 		serr := fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)
-		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "node_superseded", []byte(serr.Error()))
-		_ = r.backends.State.FinishNode(ctx, req.RunID, node.ID(), string(sparkwing.Superseded), serr.Error(), nil)
+		noteEvent(ctx, r.backends.State, req.RunID, node.ID(), "node_superseded", []byte(serr.Error()))
+		if err := r.backends.State.FinishNode(ctx, req.RunID, node.ID(), string(sparkwing.Superseded), serr.Error(), nil); err != nil {
+			noteLostStateWrite(ctx, "finish node", req.RunID, err)
+		}
 		return runner.Result{Outcome: sparkwing.Superseded, Err: serr}
 	}
 	if err != nil {
@@ -159,9 +165,11 @@ func (r *NodeExecutor) failedDaemonAcquire(ctx, acquireCtx context.Context, req 
 			"key":           key,
 			"queue_timeout": queueTimeout.String(),
 		})
-		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_queue_timeout", payload)
-		_ = r.backends.State.FinishNodeWithReason(ctx, req.RunID, node.ID(),
-			string(sparkwing.Failed), terr.Error(), nil, store.FailureQueueTimeout, nil)
+		noteEvent(ctx, r.backends.State, req.RunID, node.ID(), "concurrency_queue_timeout", payload)
+		if ferr := r.backends.State.FinishNodeWithReason(ctx, req.RunID, node.ID(),
+			string(sparkwing.Failed), terr.Error(), nil, store.FailureQueueTimeout, nil); ferr != nil {
+			noteLostStateWrite(ctx, "finish node", req.RunID, ferr)
+		}
 		return runner.Result{Outcome: sparkwing.Failed, Err: terr}
 	}
 	if ctx.Err() != nil {

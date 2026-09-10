@@ -265,7 +265,7 @@ func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, pa
 			"new_capacity":      parameters.capacity,
 			"note":              resp.DriftNote,
 		})
-		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_drift", payload)
+		noteEvent(ctx, r.backends.State, req.RunID, node.ID(), "concurrency_drift", payload)
 		slog.Default().Warn("concurrency drift", "key", parameters.key, "prev", resp.PreviousCapacity, "new", parameters.capacity)
 	}
 
@@ -362,9 +362,11 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, pa
 		"origin_run_id":  originRun,
 		"origin_node_id": originNode,
 	})
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "cache_hit", payload)
+	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "cache_hit", payload)
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), originRun, originNode)
-	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Cached), "", output)
+	if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Cached), "", output); err != nil {
+		noteLostStateWrite(ctx, "finish node", req.RunID, err)
+	}
 
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
@@ -385,8 +387,10 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, pa
 
 func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Request) runner.Result {
 	_ = r.backends.State.StartNode(ctx, req.RunID, req.Node.ID())
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_skipped_concurrent", nil)
-	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.SkippedConcurrent), "", nil)
+	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "node_skipped_concurrent", nil)
+	if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.SkippedConcurrent), "", nil); err != nil {
+		noteLostStateWrite(ctx, "finish node", req.RunID, err)
+	}
 
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
@@ -432,14 +436,16 @@ func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, para
 	output, err := r.executeNodeWithAdmission(execCtx, req)
 	if reason := wedgeAbort.Load(); reason != nil {
 		werr := errors.New(*reason)
-		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_store_wedged", []byte(werr.Error()))
+		noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "node_store_wedged", []byte(werr.Error()))
 		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Failed))
 		return runner.Result{Outcome: sparkwing.Failed, Err: werr}
 	}
 	if superseded.Load() {
 		err := fmt.Errorf("concurrency key %q: holder superseded by newer arrival", parameters.key)
-		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_superseded", []byte(err.Error()))
-		_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil)
+		noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "node_superseded", []byte(err.Error()))
+		if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil); err != nil {
+			noteLostStateWrite(ctx, "finish node", req.RunID, err)
+		}
 		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Superseded))
 		return runner.Result{Outcome: sparkwing.Superseded, Err: err}
 	}
@@ -566,11 +572,13 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, para
 		"leader_run_id":  leaderRun,
 		"leader_node_id": leaderNode,
 	})
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload)
+	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "concurrency_wait", payload)
 
 	lastDetail := concWaitDetail(parameters.key, initial, leaderRun, leaderNode)
 	if lastDetail != "" {
-		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), lastDetail)
+		if err := r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), lastDetail); err != nil {
+			noteLostStateWrite(ctx, "update node activity", req.RunID, err)
+		}
 		r.emitConcWaitLog(ctx, req, lastDetail)
 	}
 	queueRefresh := initial.Kind == store.AcquireQueued
@@ -645,7 +653,9 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, para
 			if queueRefresh {
 				if d := concQueuedDetail(parameters.key, res.Position, res.Holders); d != lastDetail {
 					lastDetail = d
-					_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), d)
+					if err := r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), d); err != nil {
+						noteLostStateWrite(ctx, "update node activity", req.RunID, err)
+					}
 					r.emitConcWaitLog(ctx, req, d)
 				}
 			}
@@ -658,8 +668,10 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, para
 			return r.inheritLeaderOutcome(ctx, req, parameters, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome, res.LeaderFailureReason)
 		case store.WaiterCancelled:
 			err := fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", parameters.key)
-			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_cancelled", nil)
-			_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil)
+			noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "concurrency_cancelled", nil)
+			if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil); err != nil {
+				noteLostStateWrite(ctx, "finish node", req.RunID, err)
+			}
 			return runner.Result{Outcome: sparkwing.Superseded, Err: err}
 		}
 	}
@@ -686,8 +698,10 @@ func (r *NodeExecutor) runPromotedSlot(ctx context.Context, req runner.Request, 
 		r.markFailed(ctx, req.RunID, req.Node.ID(), context.Canceled)
 		return runner.Result{Outcome: sparkwing.Cancelled}
 	}
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
-	_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
+	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
+	if err := r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), ""); err != nil {
+		noteLostStateWrite(ctx, "update node activity", req.RunID, err)
+	}
 
 	handedOff = true
 	return r.runHeldSlot(ctx, req, parameters, holderID, wedgeBudget)
@@ -703,9 +717,11 @@ func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request,
 		"key":           parameters.key,
 		"queue_timeout": parameters.queueTimeout.String(),
 	})
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_queue_timeout", payload)
-	_ = r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(),
-		string(sparkwing.Failed), err.Error(), nil, store.FailureQueueTimeout, nil)
+	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "concurrency_queue_timeout", payload)
+	if ferr := r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(),
+		string(sparkwing.Failed), err.Error(), nil, store.FailureQueueTimeout, nil); ferr != nil {
+		noteLostStateWrite(ctx, "finish node", req.RunID, ferr)
+	}
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
@@ -738,14 +754,18 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 		"leader_node_id": leaderNodeID,
 		"leader_outcome": leaderOutcome,
 	})
-	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "coalesced", payload)
+	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "coalesced", payload)
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), leaderRunID, leaderNodeID)
 
 	outcome := followerOutcomeFromLeader(leaderOutcome)
 	if outcome == sparkwing.Failed {
-		_ = r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(), string(outcome), "", output, leaderFailureReason, nil)
+		if err := r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(), string(outcome), "", output, leaderFailureReason, nil); err != nil {
+			noteLostStateWrite(ctx, "finish node", req.RunID, err)
+		}
 	} else {
-		_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output)
+		if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output); err != nil {
+			noteLostStateWrite(ctx, "finish node", req.RunID, err)
+		}
 	}
 
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
