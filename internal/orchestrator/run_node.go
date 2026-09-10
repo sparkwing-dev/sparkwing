@@ -203,34 +203,11 @@ func RunNodeOnce(
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, sec)
 	}
 
-	ctx = sparkwingruntime.WithPipelineResolver(ctx, sparkwing.PipelineResolverFunc(
-		func(innerCtx context.Context, pipeline, refNode string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
-			run, err := stateClient.GetLatestRun(innerCtx, pipeline, []string{"success"}, maxAge)
-			if err != nil {
-				return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, err)
-			}
-			data, err := stateClient.GetNodeOutput(innerCtx, run.ID, refNode)
-			if err != nil {
-				return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, refNode, err)
-			}
-			currentNode := sparkwing.NodeFromContext(innerCtx)
-			if currentNode != "" {
-				payload, _ := json.Marshal(map[string]any{
-					"pipeline":        pipeline,
-					"node_id":         refNode,
-					"source_run_id":   run.ID,
-					"max_age_seconds": int64(maxAge.Seconds()),
-					"source_finished": run.FinishedAt,
-				})
-				if evErr := stateClient.AppendEvent(innerCtx, runID, currentNode,
-					"pipeline_ref_resolved", payload); evErr != nil {
-					logger.Warn("pipeline_ref audit event append failed",
-						"run_id", runID, "node", currentNode, "err", evErr)
-				}
-			}
-			return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: data}, nil
-		},
-	))
+	ctx = sparkwingruntime.WithPipelineResolver(ctx, newPipelineRefResolver(stateClient, runID,
+		func(_ context.Context, node string, err error) {
+			logger.Warn("pipeline_ref audit event failed",
+				"run_id", runID, "node", node, "err", err)
+		}))
 
 	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
 		func(innerCtx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {

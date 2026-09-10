@@ -54,11 +54,15 @@ unlock.
 - **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
   the upstream output is absent. `TryGet` exists for the bootstrap run of a
   compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
-  a pipeline's first run, and `Get` panics there. It still panics on a
-  cancelled or expired context, and on output that does not fit `T`. Misses are
-  logged at warn naming the pipeline and node, because the SDK cannot tell an
-  unreachable store from a genuine absence and reports both as absence. `Get`
-  is unchanged.
+  a pipeline's first run, and `Get` panics there. A miss is a genuine absence:
+  an in-run node that has not completed, a run that stored no output, or a
+  cross-pipeline resolver that wrapped the new `sparkwing.ErrRefAbsent`. The
+  orchestrator's resolver marks a pipeline with no successful run inside
+  `MaxAge` and a run holding no output for the node; every other resolver
+  failure panics, so a store it could not reach crashes the step instead of
+  reading as a pipeline's first run. `TryGet` still panics on a cancelled or
+  expired context and on output that does not fit `T`. Misses are logged at
+  warn naming the pipeline and node. `Get` is unchanged.
 - **cli:** `queue list` is the canonical name for the admission listing, and
   bare `queue` runs the same code. Running rows gain the expected remaining
   time and the clock time the run is expected to finish; queued rows gain the

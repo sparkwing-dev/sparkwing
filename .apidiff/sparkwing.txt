@@ -165,6 +165,7 @@ type EnvVarDocer interface {
 }
 var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
+var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 var ErrSecretMissing = errors.New("sparkwing: secret not found")
 func Error(ctx context.Context, format string, args ...any)
 const EventNodeAnnotation = "node_annotation"
@@ -886,8 +887,6 @@ func (p orPredicate) String() string
 func (p profilePredicate) Eval(ctx PredicateContext) bool
 func (p profilePredicate) String() string
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
-func (m *refMiss) Error() string
-func (m *refMiss) Unwrap() error
 func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error)
 func (remotePredicate) Eval(ctx PredicateContext) bool
 func (remotePredicate) String() string

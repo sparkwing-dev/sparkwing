@@ -97,17 +97,10 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // exists for: RefToLastRun has no successful run to read on a
 // pipeline's first run, and Get panics there.
 //
-// ok is false when the upstream node has not completed, when the run
-// that was found stored no output, and on any cross-pipeline resolver
-// failure. The SDK cannot tell an unreachable store from a genuine
-// absence -- a resolver returns a bare error -- and reports both as
-// absence. For the compare-to-last-run shape this errs toward doing the
-// whole job; a step that uses TryGet to SKIP work turns a store outage
-// into a silent skip, so read the warn log before relying on that shape.
-// Every miss is logged at warn naming the pipeline and node, because
-// "no matching run" is also what a misspelled pipeline name and an
-// unreachable store produce, and a silent bootstrap branch would hide
-// either forever.
+// ok is false for a genuine absence: an in-run node that has not
+// completed, a run that stored no output, and a cross-pipeline resolver
+// failure marked with ErrRefAbsent. Every miss is logged at warn naming
+// the pipeline and node.
 //
 // One input divides the two accessors: a cross-pipeline run that stored
 // empty or null output. Get renders that as the zero T and carries on;
@@ -116,18 +109,20 @@ func (r Ref[T]) Get(ctx context.Context) T {
 //
 // TryGet panics for the failures a pipeline author cannot handle at
 // runtime: no resolver in context, which happens only outside a
-// dispatched step; stored output that does not fit T; and a cancelled or
+// dispatched step; stored output that does not fit T; a cancelled or
 // expired context, which is the step being torn down rather than an
-// upstream that is absent. Use Get when a missing output is itself a
-// programmer mistake.
+// upstream that is absent; and a resolver failure that carries no
+// absence marker, so a store the resolver could not reach crashes the
+// step instead of sending it down its bootstrap branch. Use Get when a
+// missing output is itself a programmer mistake.
 func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 	var zero T
 	out, present, err := r.resolve(ctx)
 	if err != nil {
-		if !errors.As(err, new(*refMiss)) || ctxEnded(err) {
+		if !errors.Is(err, ErrRefAbsent) || ctxEnded(err) {
 			panic(err.Error())
 		}
-		Warn(ctx, "Ref.TryGet: %s is absent, treating it as a miss: %v", r.describe(), errors.Unwrap(err))
+		Warn(ctx, "Ref.TryGet: %s is absent, treating it as a miss: %v", r.describe(), err)
 		return zero, false
 	}
 	if !present {
@@ -137,26 +132,32 @@ func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 	return out, true
 }
 
+// ErrRefAbsent marks a resolver failure as a genuine absence rather than
+// a store the resolver could not reach: no run of the pipeline matched,
+// or the run that matched stored no output for the node. Ref.TryGet
+// reports an error carrying it as a miss and panics on every other
+// resolver failure, so an unreachable store does not read as a
+// pipeline's first run.
+//
+// A PipelineResolver reading a store of its own wraps it on the absence
+// path:
+//
+//	run, err := myStore.GetLatestRun(ctx, pipeline, maxAge)
+//	if errors.Is(err, myStore.ErrNotFound) {
+//	    return nil, fmt.Errorf("no matching run for pipeline %q: %w", pipeline, sparkwing.ErrRefAbsent)
+//	}
+//
+// Every failure a resolver leaves unmarked is treated as unreachable.
+var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
+
 // ctxEnded reports a failure that is the step being torn down rather
-// than an upstream output being absent. A resolver flattens every store
-// failure into one error, so this is the one case the SDK can still tell
-// apart, and treating it as a miss would send a step down its bootstrap
-// branch on a dead context.
+// than an upstream output being absent, which a resolver can mark as an
+// absence when its store read is what the cancellation interrupted.
+// Treating it as a miss would send a step down its bootstrap branch on a
+// dead context.
 func ctxEnded(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
-
-// refMiss marks a resolution failure TryGet reports rather than panics
-// on. The in-run case is an upstream that has not completed; the
-// cross-pipeline case is any resolver failure, because a resolver
-// returns a bare error the SDK cannot classify.
-type refMiss struct{ err error }
-
-func (m *refMiss) Error() string { return m.err.Error() }
-
-// Unwrap keeps the cause reachable, so a caller and a later, narrower
-// classification can both still see what the resolver actually returned.
-func (m *refMiss) Unwrap() error { return m.err }
 
 func (r Ref[T]) describe() string {
 	if r.Pipeline != "" {
@@ -183,7 +184,7 @@ func (r Ref[T]) getInRun(ctx context.Context) (T, bool, error) {
 	}
 	data, ok := jsonResolve(r.NodeID)
 	if !ok {
-		return out, false, &refMiss{fmt.Errorf("sparkwing: Ref[%T].Get: node %q has not completed", out, r.NodeID)}
+		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get: node %q has not completed: %w", out, r.NodeID, ErrRefAbsent)
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		var zero T
@@ -202,8 +203,8 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 	}
 	resolved, err := resolver.resolve(ctx, r.Pipeline, r.NodeID, r.MaxAge)
 	if err != nil {
-		return out, false, &refMiss{fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
-			out, r.Pipeline, r.NodeID, err)}
+		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
+			out, r.Pipeline, r.NodeID, err)
 	}
 	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
 		return out, false, nil
