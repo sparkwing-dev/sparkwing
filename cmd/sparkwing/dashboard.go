@@ -295,22 +295,27 @@ func fileSize(path string) int64 {
 }
 
 func tailFileFrom(path string, byteOffset int64, n int) string {
-	b, err := os.ReadFile(path)
+	f, err := fssecure.OpenPrivateConfig(path)
 	if err != nil {
-		return ""
+		return "startup log unavailable"
 	}
-	if byteOffset > 0 && byteOffset <= int64(len(b)) {
-		b = b[byteOffset:]
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "startup log unavailable"
 	}
-	trimmed := strings.TrimRight(string(b), "\n")
-	if trimmed == "" {
-		return ""
+	lines, _, err := dashboardLogTail(context.Background(), f, info.Size(), max(int64(0), byteOffset), n, false)
+	if err != nil {
+		return err.Error()
 	}
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	text := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line.Truncated {
+			line.Text += " [line truncated]"
+		}
+		text = append(text, line.Text)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(text, "\n")
 }
 
 func probeDashboardVersion(home, addr string) (localws.VersionInfo, bool) {

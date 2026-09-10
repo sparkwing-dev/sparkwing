@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -58,7 +59,7 @@ func TestServeLogsBoundsRecordsAndPreservesPlain(t *testing.T) {
 func TestServeLogsFollowEmitsAppendsAndCancels(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, dashboardLogFile)
-	if err := os.WriteFile(path, []byte("first\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("first\npar"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := outputContractCommand(t, "serve", "logs", "--home", home, "--follow", "-o", "json")
@@ -76,13 +77,13 @@ func TestServeLogsFollowEmitsAppendsAndCancels(t *testing.T) {
 		}
 	}()
 	scanner := bufio.NewScanner(stdout)
-	for _, want := range []string{"first", "second"} {
-		if want == "second" {
+	for _, want := range []string{"first", "partial"} {
+		if want == "partial" {
 			f, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 			if e != nil {
 				t.Fatal(e)
 			}
-			_, e = f.WriteString("second\n")
+			_, e = f.WriteString("tial\n")
 			f.Close()
 			if e != nil {
 				t.Fatal(e)
@@ -103,6 +104,34 @@ func TestServeLogsFollowEmitsAppendsAndCancels(t *testing.T) {
 	}
 	if err = command.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServeLogTailUsesCapturedSnapshot(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err = f.WriteString("before\npar"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.WriteString("tial\nafter\n"); err != nil {
+		t.Fatal(err)
+	}
+	lines, pending, err := dashboardLogTail(context.Background(), f, info.Size(), 0, 40, true)
+	if err != nil || len(lines) != 1 || lines[0].Text != "before" || pending.Text != "par" {
+		t.Fatalf("snapshot included later bytes or split partial: %+v %+v %v", lines, pending, err)
+	}
+	if _, err = f.WriteString(strings.Repeat("x", 2<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if tail := tailFileFrom(f.Name(), info.Size(), 40); len(tail) > 17*1024 || !strings.Contains(tail, "truncated") {
+		t.Fatalf("startup failure tail was not bounded and marked: bytes=%d", len(tail))
 	}
 }
 

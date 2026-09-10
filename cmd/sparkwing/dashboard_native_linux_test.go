@@ -79,6 +79,21 @@ func TestServeNativeLifecyclePreservesRunningArtifactAndOptions(t *testing.T) {
 	if observed.API != second.API || observed.URL != second.URL || observed.Bind != second.Bind {
 		t.Fatalf("status endpoint drift: %+v", observed)
 	}
+	for _, addr := range []string{"127.0.0.1:notaport", "127.0.0.1:65536"} {
+		if _, _, e := run("restart", "--addr", addr); e == nil {
+			t.Fatalf("restart accepted invalid address %s", addr)
+		}
+		retained, stderr, e := run("status")
+		if e != nil || retained.PID != first.PID || retained.Readiness != "ready" {
+			t.Fatalf("invalid restart changed service: %+v %v %s", retained, e, stderr)
+		}
+	}
+	if _, _, e := run("restart", "--log-store", "invalid-scheme://fixture"); e == nil {
+		t.Fatal("restart accepted invalid storage scheme")
+	}
+	if retained, _, e := run("status"); e != nil || retained.PID != first.PID || retained.Readiness != "ready" {
+		t.Fatalf("invalid storage restart changed service: %+v %v", retained, e)
+	}
 	third, stderr, err := run("restart")
 	if err != nil {
 		t.Fatalf("restart: %v %s", err, stderr)
@@ -113,7 +128,11 @@ func TestServeNativeLifecyclePreservesRunningArtifactAndOptions(t *testing.T) {
 	if e == nil || blocked.Outcome != "failed" || blocked.State != "stopped" {
 		t.Fatalf("occupied port: %+v %v", blocked, e)
 	}
-	failed, _, e := run("start", "--addr", "127.0.0.1:0", "--log-store", "invalid-scheme://fixture")
+	blockedStore := filepath.Join(root, "blocked-store")
+	if e = os.WriteFile(blockedStore, []byte("not a directory"), 0o600); e != nil {
+		t.Fatal(e)
+	}
+	failed, _, e := run("start", "--addr", "127.0.0.1:0", "--log-store", "fs://"+filepath.Join(blockedStore, "child"))
 	if e == nil || failed.Outcome != "failed" || failed.State != "stopped" {
 		t.Fatalf("early exit: %+v %v", failed, e)
 	}

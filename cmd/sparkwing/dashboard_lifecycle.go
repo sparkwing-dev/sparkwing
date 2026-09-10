@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -90,6 +92,17 @@ func runDashboardLaunch(args []string, restart bool) error {
 	if restart && out.State == "running" {
 		o = mergeDashboardOptions(record.Options, o, fs)
 		o.Home = dp.home
+	}
+	if _, err = net.ResolveTCPAddr("tcp", o.Addr); err != nil {
+		return fmt.Errorf("invalid --addr: %w", err)
+	}
+	for _, store := range []struct {
+		flag, value string
+		artifact    bool
+	}{{"log-store", o.LogStore, false}, {"artifact-store", o.ArtifactStore, true}} {
+		if err = validateDashboardStoreURL(store.value, store.artifact); err != nil {
+			return fmt.Errorf("--%s: %w", store.flag, err)
+		}
 	}
 	if !o.AllowRemote && !localws.LoopbackBind(o.Addr) {
 		return fmt.Errorf("--addr %s is not loopback; pass --allow-remote to accept unauthenticated remote access", o.Addr)
@@ -190,6 +203,38 @@ func runDashboardLaunch(args []string, restart bool) error {
 		result.Outcome = "restarted"
 	}
 	return renderDashboard(result, mode)
+}
+
+func validateDashboardStoreURL(raw string, artifact bool) error {
+	if raw == "" {
+		return nil
+	}
+	// Opening a backend may create directories or load credentials, so preflight checks syntax only.
+	scheme, rest, found := strings.Cut(raw, "://")
+	if !found {
+		return errors.New("storage URL requires scheme://")
+	}
+	switch scheme {
+	case "fs":
+		if strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "~") {
+			return nil
+		}
+		return errors.New("filesystem storage requires an absolute path")
+	case "s3":
+		u, err := neturl.Parse(raw)
+		if err == nil && u.Host != "" {
+			return nil
+		}
+		return errors.New("S3 storage requires a valid bucket URL")
+	case "http", "https":
+		if artifact {
+			u, err := neturl.Parse(raw)
+			if err == nil && u.Host != "" {
+				return nil
+			}
+		}
+	}
+	return errors.New("unsupported storage URL; use fs or s3 for logs, or fs, s3, http or https for artifacts")
 }
 
 func dashboardOptionArgs(o dashboardOptions) []string {

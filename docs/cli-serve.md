@@ -41,7 +41,7 @@ sparkwing serve stop
 
 Read a bounded dashboard log tail
 
-Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 skips history. --follow waits for appended lines until interrupted; log rotation requires restarting the command. Lines larger than 16 KiB are marked truncated.
+Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 skips history. --follow waits for appended lines until interrupted; log rotation requires restarting the command. Lines larger than 16 KiB are marked truncated. A requested history exceeding the byte window reports an error. Follow retains incomplete lines until a newline arrives.
 
 ### Flags
 
@@ -63,7 +63,7 @@ sparkwing serve logs
 
 Replace an owned dashboard and wait for readiness
 
-Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Unknown ownership is refused.
+Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.
 
 ### Flags
 

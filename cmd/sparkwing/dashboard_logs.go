@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -54,13 +53,6 @@ func runDashboardLogs(args []string) error {
 	if err != nil {
 		return err
 	}
-	offset := int64(0)
-	if *limit > 0 && info.Size() > 1024*1024 {
-		offset = info.Size() - 1024*1024
-		if _, err = file.Seek(offset, io.SeekStart); err != nil {
-			return err
-		}
-	}
 
 	emit := func(line dashboardLogLine) error {
 		if mode == "json" {
@@ -80,49 +72,39 @@ func runDashboardLogs(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	reader := bufio.NewReaderSize(file, 16*1024)
-	if *limit == 0 {
-		if _, err = file.Seek(0, io.SeekEnd); err != nil {
+	lines, pending, err := dashboardLogTail(ctx, file, info.Size(), 0, *limit, *follow)
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if err = emit(line); err != nil {
 			return err
-		}
-		reader.Reset(file)
-	} else {
-		lines := []dashboardLogLine{}
-		for {
-			line, e := readDashboardLogLine(reader)
-			if e != nil && !errors.Is(e, io.EOF) {
-				return e
-			}
-			if offset > 0 {
-				offset = 0
-			} else if line.Text != "" || !errors.Is(e, io.EOF) {
-				lines = append(lines, line)
-				if len(lines) > *limit {
-					lines = lines[1:]
-				}
-			}
-			if errors.Is(e, io.EOF) {
-				break
-			}
-		}
-		for _, line := range lines {
-			if err = emit(line); err != nil {
-				return err
-			}
 		}
 	}
 	if !*follow {
 		return nil
 	}
+	if _, err = file.Seek(info.Size(), io.SeekStart); err != nil {
+		return err
+	}
+	reader := bufio.NewReaderSize(file, 16*1024)
 
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		line, e := readDashboardLogLine(reader)
-		if line.Text != "" || !errors.Is(e, io.EOF) {
-			if err = emit(line); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		fragment, e := reader.ReadSlice('\n')
+		appendDashboardLog(&pending, bytes.TrimSuffix(fragment, []byte{'\n'}))
+		if e == nil {
+			if err = emit(pending); err != nil {
 				return err
 			}
+			pending = dashboardLogLine{}
+		}
+		if errors.Is(e, bufio.ErrBufferFull) {
+			continue
 		}
 		if e != nil && !errors.Is(e, io.EOF) {
 			return e
@@ -142,22 +124,58 @@ type dashboardLogLine struct {
 	Truncated bool
 }
 
-func readDashboardLogLine(reader *bufio.Reader) (dashboardLogLine, error) {
-	result := dashboardLogLine{}
-	for {
-		fragment, err := reader.ReadSlice('\n')
-		fragment = bytes.TrimSuffix(fragment, []byte("\n"))
-		remaining := 16*1024 - len(result.Text)
-		take := len(fragment)
-		if take > remaining {
-			take = remaining
-			result.Truncated = true
-		}
-		result.Text += string(fragment[:take])
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		result.Text = strings.TrimSuffix(result.Text, "\n")
-		return result, err
+func appendDashboardLog(line *dashboardLogLine, fragment []byte) {
+	remaining := 16*1024 - len(line.Text)
+	take := len(fragment)
+	if take > remaining {
+		take = remaining
+		line.Truncated = true
 	}
+	line.Text += string(fragment[:take])
+}
+
+func dashboardLogTail(ctx context.Context, file *os.File, size, minimum int64, limit int, follow bool) ([]dashboardLogLine, dashboardLogLine, error) {
+	pending := dashboardLogLine{}
+	if limit == 0 || minimum >= size {
+		return nil, pending, nil
+	}
+	start := max(minimum, size-1024*1024)
+	data, err := io.ReadAll(io.NewSectionReader(file, start, size-start))
+	if err != nil {
+		return nil, pending, err
+	}
+	if len(data) == 0 {
+		return nil, pending, nil
+	}
+	parts := bytes.Split(bytes.TrimSuffix(data, []byte{'\n'}), []byte{'\n'})
+	prefixOmitted := start > minimum
+	if prefixOmitted && len(parts) > 1 {
+		parts = parts[1:]
+		prefixOmitted = false
+		if len(parts) < limit {
+			return nil, pending, errors.New("requested log history exceeds 1 MiB; reduce --limit or inspect the log file")
+		}
+	}
+	if len(parts) > limit {
+		parts = parts[len(parts)-limit:]
+		prefixOmitted = false
+	}
+	lines := make([]dashboardLogLine, 0, len(parts))
+	for i, part := range parts {
+		if err = ctx.Err(); err != nil {
+			return nil, pending, err
+		}
+		line := dashboardLogLine{}
+		if i == 0 && prefixOmitted {
+			appendDashboardLog(&line, []byte("[earlier line bytes omitted] "))
+			line.Truncated = true
+		}
+		appendDashboardLog(&line, part)
+		if follow && i == len(parts)-1 && !bytes.HasSuffix(data, []byte{'\n'}) {
+			pending = line
+		} else {
+			lines = append(lines, line)
+		}
+	}
+	return lines, pending, nil
 }

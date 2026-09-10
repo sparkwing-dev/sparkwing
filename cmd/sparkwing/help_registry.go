@@ -1700,7 +1700,7 @@ An absent service succeeds.`,
 var cmdDashboardRestart = Command{
 	Path:        "sparkwing serve restart",
 	Synopsis:    "Replace an owned dashboard and wait for readiness",
-	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Unknown ownership is refused.",
+	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
 	Flags:       cmdDashboardStart.Flags,
 	Examples:    []Example{{"Restart with existing options", "sparkwing serve restart"}},
 }
@@ -1708,7 +1708,7 @@ var cmdDashboardRestart = Command{
 var cmdDashboardLogs = Command{
 	Path:        "sparkwing serve logs",
 	Synopsis:    "Read a bounded dashboard log tail",
-	Description: "Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 skips history. --follow waits for appended lines until interrupted; log rotation requires restarting the command. Lines larger than 16 KiB are marked truncated.",
+	Description: "Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 skips history. --follow waits for appended lines until interrupted; log rotation requires restarting the command. Lines larger than 16 KiB are marked truncated. A requested history exceeding the byte window reports an error. Follow retains incomplete lines until a newline arrives.",
 	Flags: []FlagSpec{
 		{Name: "home", Argument: "DIR", Desc: "State directory"},
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Output format"},
