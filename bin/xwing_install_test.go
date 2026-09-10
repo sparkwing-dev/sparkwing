@@ -33,6 +33,7 @@ func TestCandidateInstallUsesSelectedSourceAndPrivateDestination(t *testing.T) {
 	}
 	copyScript("xwing-install.sh")
 	copyScript("install.sh")
+	copyScript("web-build-lock.sh")
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "fixture"}, {"tag", "v0.1.0"}} {
 		cmd := exec.Command("git", append([]string{"-C", source}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -47,6 +48,12 @@ func TestCandidateInstallUsesSelectedSourceAndPrivateDestination(t *testing.T) {
 	compiler := `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$GOWORK" "$@" > "$CANDIDATE_TRACE"
+if command -v flock >/dev/null 2>&1; then
+ if flock -n "$XWING_TOOL_SOURCE/internal/web/.build-state/lock" true; then
+  echo "compiler reached an unlocked export" >&2
+  exit 27
+ fi
+fi
 if [[ "${CANDIDATE_FAIL:-}" == 1 ]]; then exit 23; fi
 out=""
 while (( $# )); do

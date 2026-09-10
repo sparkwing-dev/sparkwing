@@ -148,9 +148,12 @@ surfaces ship with matching entries.
 
 `.xwing-env.yaml` declares an optional Xwing install hook for this repository.
 Xwing supplies `XWING_TOOL_SOURCE` and `XWING_TOOL_DEST` as absolute paths.
-The hook uses the native installer with a private named destination, rebuilding
-the web bundle and preserving the native version recipe. It ignores an ambient
-`SKIP_WEB_BUILD` because a candidate must embed the selected source's assets.
+The hook uses the native installer with a private named destination and preserves
+the native version recipe. It reuses the web export only when its recorded inputs
+and every output file still match. Go-only edits keep that export. It ignores an
+ambient `SKIP_WEB_BUILD` because a candidate must validate the selected assets.
+See [frontend export reuse](docs/build-caching.md#native-frontend-exports) for
+invalidation and fallback behavior.
 Existing destination files are rejected. Xwing owns candidate selection and the
 `sparkwing` runtime profile. The hook does not install a host service or replace
 the normal executable.

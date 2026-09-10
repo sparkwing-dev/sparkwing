@@ -8,6 +8,7 @@ trap 'rm -rf "$CASE_ROOT"' EXIT
 REPO="$CASE_ROOT/repo"
 mkdir -p "$REPO/bin"
 cp "$ROOT/bin/install.sh" "$REPO/bin/install.sh"
+cp "$ROOT/bin/web-build-lock.sh" "$REPO/bin/web-build-lock.sh"
 git -C "$REPO" init -q
 git -C "$REPO" -c user.email=t@t -c user.name=t add bin/install.sh
 git -C "$REPO" -c user.email=t@t -c user.name=t \

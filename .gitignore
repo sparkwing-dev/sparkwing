@@ -40,3 +40,5 @@ internal/web/next-out/*
 # Building one internal package on its own drops its executable at the root.
 /commentcheck
 /doccheck
+
+/internal/web/.build-state/

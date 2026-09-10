@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
+
 ### Changed
 
 - **install (Breaking):** `install/install.sh` is the public CLI installer, the

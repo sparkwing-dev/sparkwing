@@ -2,6 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+reuse_web=0
+if [[ "${1:-}" == --reuse-web && $# == 1 ]]; then
+  reuse_web=1
+elif (( $# != 0 )); then
+  echo "usage: install.sh [--reuse-web]" >&2
+  exit 2
+fi
 if [ -z "${SPARKWING_INSTALL_BIN:-}" ] && [ -z "${HOME:-}" ]; then
   echo "install.sh: HOME is unset; set SPARKWING_INSTALL_BIN to choose an install directory" >&2
   exit 1
@@ -21,10 +28,18 @@ mkdir -p "$DEST"
 
 export GOPRIVATE='github.com/sparkwing-dev/*'
 
+# shellcheck source=bin/web-build-lock.sh
+source "$ROOT/bin/web-build-lock.sh"
+sparkwing_lock_web_build "$ROOT"
+
 if [ "${SKIP_WEB_BUILD:-0}" = "1" ]; then
   echo "SKIP_WEB_BUILD=1 set; using existing internal/web/next-out/ as-is"
 else
-  bash "$ROOT/bin/build-web.sh"
+  if (( reuse_web )); then
+    bash "$ROOT/bin/build-web.sh" --reuse
+  else
+    bash "$ROOT/bin/build-web.sh"
+  fi
 fi
 
 BASE="$(git -C "$ROOT" tag -l 'v0.*' | sort -V | tail -1)"

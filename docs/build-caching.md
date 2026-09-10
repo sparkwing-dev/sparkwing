@@ -284,3 +284,34 @@ once. Immutable entries carry no upstream URLs and are unaffected.
   host with an optional port; anything else is refused with a 400. The flag is
   inert when `SPARKWING_CACHE_PUBLIC_URL` is set, because that base ignores the
   request entirely
+
+
+## Native frontend exports
+
+The repository's candidate installer requests `bin/install.sh --reuse-web`.
+This calls `bin/build-web.sh --reuse`, which can reuse the existing static export
+without npm installation, Next compilation, or recopying unchanged assets.
+Ordinary calls to either script still build fresh. Both build modes use
+production settings and explicitly install development dependencies needed by
+TypeScript and PostCSS. The Next compiler cache remains available for rebuilds.
+
+Reuse is local to the checkout. A private receipt under
+`internal/web/.build-state/` records hashes of frontend source and configuration,
+including untracked files and ignored dotenv files, builder scripts, Node/npm
+identity, effective npm configuration, and relevant build environment values.
+It also records a hash of every published export file. A changed input or a
+missing, edited, or extra output file triggers a fresh build. Environment values
+are hashed, never written into the receipt. Before recording proof, inputs are
+checked again; a mismatch fails the build.
+
+Generated frontend directories are excluded only at the web root. Changes to
+frontend build inputs outside this boundary must extend the proof before reuse
+can cover them. Go source is outside the frontend proof and retains its native
+compiler cache. The normal Go build and candidate provenance checks still run.
+
+The native installer and direct frontend builder coordinate with a file lock
+through Go compilation. Hosts without `flock`, unsupported input trees, and
+custom Node preload or npm script-shell configuration build fresh without
+recording reusable proof. The receipt lives outside the embedded export.
+This is local iteration reuse; it makes no reproducibility claim about remote
+font downloads or other external build services.
