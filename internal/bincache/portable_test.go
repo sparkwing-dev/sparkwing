@@ -58,7 +58,7 @@ func TestPipelineCacheKey_ReplaceVersionIsPartOfIdentity(t *testing.T) {
 	}
 }
 
-func TestCompilePipeline_PassesTrimpath(t *testing.T) {
+func TestCompilePipeline_PassesTrimpathAndStrips(t *testing.T) {
 	log := installFakeGo(t)
 	dir := newPipelineDir(t)
 	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines")); err != nil {
@@ -68,9 +68,60 @@ func TestCompilePipeline_PassesTrimpath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read argv log: %v", err)
 	}
-	if got := strings.TrimSpace(string(raw)); !strings.Contains(got, "-trimpath") {
-		t.Fatalf("expected -trimpath in the build argv, got: %q", got)
+	got := strings.TrimSpace(string(raw))
+	for _, want := range []string{"-trimpath", "-ldflags -s -w"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %s in the build argv, got: %q", want, got)
+		}
 	}
+}
+
+// The cache stores no digest of the binary it serves, so a build flag the key
+// does not name hands every local and shared cache a stale binary that nothing
+// downstream can detect.
+func TestCompilePipeline_BuildFlagsAreNamedInTheCacheKey(t *testing.T) {
+	log := installFakeGo(t)
+	dir := newPipelineDir(t)
+	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines")); err != nil {
+		t.Fatalf("CompilePipeline: %v", err)
+	}
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	want := strings.Join(compiledFlags(t, strings.Fields(strings.TrimSpace(string(raw)))), " ")
+
+	_, parts, err := ExplainCacheKey(dir)
+	if err != nil {
+		t.Fatalf("ExplainCacheKey: %v", err)
+	}
+	for _, p := range parts {
+		if p.Detail == want {
+			return
+		}
+	}
+	t.Fatalf("no cache-key input names the build flags %q; inputs were %v", want, parts)
+}
+
+// compiledFlags returns the flags CompilePipeline passed to `go build`, minus
+// -modfile, whose target the .resolved.mod input already hashes by content.
+func compiledFlags(t *testing.T, argv []string) []string {
+	t.Helper()
+	var flags []string
+	for i, a := range argv {
+		if i == 0 && a == "build" {
+			continue
+		}
+		if a == "-o" {
+			return flags
+		}
+		if strings.HasPrefix(a, "-modfile=") {
+			continue
+		}
+		flags = append(flags, a)
+	}
+	t.Fatalf("build argv has no -o: %v", argv)
+	return nil
 }
 
 func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {

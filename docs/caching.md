@@ -183,9 +183,10 @@ source inputs change.
 ### The key
 
 The key is a fingerprint of everything that can change the compiled
-output: the Go major/minor version, `GOOS`/`GOARCH`, the contents of
-`.sparkwing/`, the contents of every local `replace` target, the
-directives of a covering `go.work`, and the resolved module overlays.
+output: the Go major/minor version, `GOOS`/`GOARCH`, the `go build` flags
+sparkwing passes, the contents of `.sparkwing/`, the contents of every
+local `replace` target, the directives of a covering `go.work`, and the
+resolved module overlays.
 
 Contents are hashed, not timestamps -- editing a file back to its
 previous bytes restores the previous key. Paths are recorded relative
@@ -202,6 +203,13 @@ Builds pass `-trimpath`, which keeps the build directory out of the
 binary. That is what lets two checkouts produce byte-identical output;
 the cost is that panics report module-relative paths rather than paths
 on your machine.
+
+Builds also pass `-ldflags "-s -w"`, which drops the symbol table and
+DWARF and takes roughly 30% off the binary and a third off its link
+time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive; a
+debugger attaching to the binary, and core-dump analysis, do not. Set
+`SPARKWING_NO_BINCACHE=1` to run the pipeline through `go run .` when you
+need those.
 
 ### Bounding the cache
 
@@ -241,8 +249,8 @@ Sparkwing records which checkouts have used each entry, and how often:
 
 ```
 MOST RECENTLY USED (2 of 2)
-  c1df5cd6-4789f450   91.8 MiB  just now   x7  ~/code/sparkwing/.sparkwing +1 more checkout(s)
-  322ecb34-31432125   91.9 MiB  2d ago     x1  ~/worktrees/feature-branch/.sparkwing
+  c1df5cd6-4789f450   71.1 MiB  just now   x7  ~/code/sparkwing/.sparkwing +1 more checkout(s)
+  322ecb34-31432125   71.2 MiB  2d ago     x1  ~/worktrees/feature-branch/.sparkwing
 ```
 
 `cache info` counts entries used by several checkouts on the `shared:` line.
@@ -256,6 +264,7 @@ input behind it with its own digest:
 INPUTS
   go toolchain      669365bbd24f  go1.26
   platform          8828cb814901  darwin/arm64
+  build flags       60dbf03edb4e  -trimpath -ldflags -s -w
   module tree       035b55fe2c64  36 files, 346.1 KiB
   replace example.com/sample/module  e68a991b153a  1439 files, 10.0 MiB (19 gitignored, excluded)
 ```

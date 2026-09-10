@@ -53,6 +53,14 @@ unlock.
 
 ### Changed
 
+- **cache:** Compiled pipeline binaries build with `-ldflags "-s -w"` beside
+  `-trimpath`, dropping the symbol table and DWARF. On linux/amd64 the binary
+  falls from 100.2 MiB to 71.1 MiB and a relink from about 3.0s to 2.0s. The
+  build flags are now an input to the pipeline cache key, so every checkout
+  recompiles once after upgrading rather than serving the unstripped binary it
+  already cached. A stripped binary cannot be attached by a debugger or read
+  from a core dump; set `SPARKWING_NO_BINCACHE=1` to run the pipeline through
+  `go run .` when that is needed
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
   is the rule `hooks install --fleet` already applied. A repository that
