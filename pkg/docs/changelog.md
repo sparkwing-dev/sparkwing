@@ -196,6 +196,14 @@ unlock.
   `ToolCacheDir("golangci-lint")`. See
   [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
 
+### Docs
+
+- **cli:** `info --for-agent` and `DELIVERY.md` say to gate through the machine's
+  admission daemon one run at a time, because that daemon is what serializes
+  concurrent agents, and name a bare `go test ./...` or lint run as load it
+  cannot see. Both point at `sparkwing queue list` for order and estimates and
+  `sparkwing queue priority` for re-ranking.
+
 ## [v0.48.1] - 2026-09-09
 ### Changed
 
