@@ -23,7 +23,62 @@ unlock.
 ### Changed
 
 - **Breaking:** Dashboard start preserves running instances; use `serve restart` for replacement and `serve stop` instead of `serve kill`. Lifecycle receipts report ownership, effective endpoints, readiness and artifact identity; `serve logs` provides bounded access.
+- **cache:** A cache directory sparkwing cannot create now names `SPARKWING_HOME`.
+  The message points at the one environment variable that moves the cache root
+  instead of leaving the reader to look for a cache-specific override, which
+  does not exist. A destination outside the sparkwing home -- the pipeline binary
+  a runner writes beside a checkout, for one -- reports the bare failure, because
+  `SPARKWING_HOME` does not move it.
 
+- **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
+  that accepts the encoding. Measured over a served listener, the heaviest page
+  falls from 1,475,205 bytes to 459,505 and the lightest from 732,498 to 251,669,
+  which puts every dashboard page under the 512,000-byte page-weight ceiling. Each
+  bundle file is encoded once per process and every later request writes the stored
+  bytes. A client that does not offer gzip, and any request carrying a `Range`
+  header, receives the same body it received before. Event streams are never
+  encoded: the handlers that serve them do not reach the encoding path. Two
+  response headers change for anyone caching in front of the dashboard: every
+  bundle file and page now carries `Vary: Accept-Encoding`, and an encoded
+  response carries no `Accept-Ranges`.
+
+- **build:** `bin/install.sh` and `bin/cross-compile.sh` build with `-trimpath`
+  and `-ldflags "-s -w"`, the flags `.github/workflows/release.yaml` already
+  passed, so a local install strips and trims the way the release does. On
+  linux/amd64 the CLI falls from 96.0 MiB to 69.0 MiB and
+  relinks in about 2.2s instead of 4.9s. `bin/cross-compile.sh` also stamps
+  `main.Version`, so its artifacts report the commit they came from instead of
+  `(devel)`
+- **cache:** Compiled pipeline binaries build with `-ldflags "-s -w"` beside
+  `-trimpath`, dropping the symbol table and DWARF. On linux/amd64 the binary
+  falls from 100.2 MiB to 71.1 MiB and a relink from about 3.0s to 2.0s. The
+  build flags are now an input to the pipeline cache key, so every checkout
+  recompiles once after upgrading rather than serving the unstripped binary it
+  already cached. A debugger attached to a stripped binary has no variable
+  names or line numbers, and a core dump cannot be symbolised; set
+  `SPARKWING_NO_BINCACHE=1` to run the pipeline through `go run .` when that is
+  needed
+- **cli (Breaking):** `update` owns CLI and SDK updates
+  Use `update --cli` (the default) or `update --sdk`; `version update` is
+  removed. Read-only `update --check` honors the target and release, emits
+  compact comparison metadata, and reports uncertain local builds instead of
+  assuming matching version labels mean matching releases. SDK updates resolve
+  the same latest published release before native Go tooling runs. See
+  [unified update](docs/migrations/_unreleased.md#unified-update).
+
+- **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
+  where a declared `pre-commit` or `pre-push` runs from that repository, which
+  is the rule `hooks install --fleet` already applied. A repository that
+  declares no hook, or only `post-commit`, was counted gated and is now listed
+  among the ones accepting ungated work, with the remedy naming the trigger to
+  declare rather than an install that would write nothing. The `state` field of
+  `-o json` and `-o plain` keeps its existing values; the pretty STATE column
+  reads `no-gate` in place of `armed` for such a repository and a new FIRING
+  column names the declared hooks that do run
+- **cli:** `pipeline hooks survey` reports a repository whose hook directory it
+  cannot resolve as `broken` with the error, instead of `undeclared` and gated.
+  A repository the survey could not read was counted among those whose gates
+  fire
 
 ### Added
 
@@ -108,65 +163,6 @@ unlock.
   scaffold declares the trigger and never writes the hook: it prints the
   `sparkwing pipeline hooks install` command instead, because arming a gate the
   pipeline has not passed turns every commit in the checkout into a failure
-
-### Changed
-
-- **cache:** A cache directory sparkwing cannot create now names `SPARKWING_HOME`.
-  The message points at the one environment variable that moves the cache root
-  instead of leaving the reader to look for a cache-specific override, which
-  does not exist. A destination outside the sparkwing home -- the pipeline binary
-  a runner writes beside a checkout, for one -- reports the bare failure, because
-  `SPARKWING_HOME` does not move it.
-
-- **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
-  that accepts the encoding. Measured over a served listener, the heaviest page
-  falls from 1,475,205 bytes to 459,505 and the lightest from 732,498 to 251,669,
-  which puts every dashboard page under the 512,000-byte page-weight ceiling. Each
-  bundle file is encoded once per process and every later request writes the stored
-  bytes. A client that does not offer gzip, and any request carrying a `Range`
-  header, receives the same body it received before. Event streams are never
-  encoded: the handlers that serve them do not reach the encoding path. Two
-  response headers change for anyone caching in front of the dashboard: every
-  bundle file and page now carries `Vary: Accept-Encoding`, and an encoded
-  response carries no `Accept-Ranges`.
-
-- **build:** `bin/install.sh` and `bin/cross-compile.sh` build with `-trimpath`
-  and `-ldflags "-s -w"`, the flags `.github/workflows/release.yaml` already
-  passed, so a local install strips and trims the way the release does. On
-  linux/amd64 the CLI falls from 96.0 MiB to 69.0 MiB and
-  relinks in about 2.2s instead of 4.9s. `bin/cross-compile.sh` also stamps
-  `main.Version`, so its artifacts report the commit they came from instead of
-  `(devel)`
-- **cache:** Compiled pipeline binaries build with `-ldflags "-s -w"` beside
-  `-trimpath`, dropping the symbol table and DWARF. On linux/amd64 the binary
-  falls from 100.2 MiB to 71.1 MiB and a relink from about 3.0s to 2.0s. The
-  build flags are now an input to the pipeline cache key, so every checkout
-  recompiles once after upgrading rather than serving the unstripped binary it
-  already cached. A debugger attached to a stripped binary has no variable
-  names or line numbers, and a core dump cannot be symbolised; set
-  `SPARKWING_NO_BINCACHE=1` to run the pipeline through `go run .` when that is
-  needed
-- **cli (Breaking):** `update` owns CLI and SDK updates
-  Use `update --cli` (the default) or `update --sdk`; `version update` is
-  removed. Read-only `update --check` honors the target and release, emits
-  compact comparison metadata, and reports uncertain local builds instead of
-  assuming matching version labels mean matching releases. SDK updates resolve
-  the same latest published release before native Go tooling runs. See
-  [unified update](docs/migrations/_unreleased.md#unified-update).
-
-- **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
-  where a declared `pre-commit` or `pre-push` runs from that repository, which
-  is the rule `hooks install --fleet` already applied. A repository that
-  declares no hook, or only `post-commit`, was counted gated and is now listed
-  among the ones accepting ungated work, with the remedy naming the trigger to
-  declare rather than an install that would write nothing. The `state` field of
-  `-o json` and `-o plain` keeps its existing values; the pretty STATE column
-  reads `no-gate` in place of `armed` for such a repository and a new FIRING
-  column names the declared hooks that do run
-- **cli:** `pipeline hooks survey` reports a repository whose hook directory it
-  cannot resolve as `broken` with the error, instead of `undeclared` and gated.
-  A repository the survey could not read was counted among those whose gates
-  fire
 
 ### Docs
 
