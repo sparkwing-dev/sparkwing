@@ -1,0 +1,9 @@
+project: sparkwing
+profiles:
+  - local
+tools:
+  sparkwing:
+    install:
+      - bash
+      - bin/xwing-install.sh
+    runtime: sparkwing
