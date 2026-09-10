@@ -52,36 +52,38 @@ func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr er
 	return nil
 }
 
-type PrePush struct {
+type PreRelease struct {
 	sparkwing.Base
 	AllowReleaseLineSelfReplace bool
 }
 
-func (PrePush) ShortHelp() string {
-	return "Check release tests, dependencies, public interfaces, and infrastructure"
+func (PreRelease) ShortHelp() string {
+	return "Release-boundary checks: race, chaos, vulnerabilities, dependencies, public interfaces, and infrastructure"
 }
 
-func (PrePush) Help() string {
+func (PreRelease) Help() string {
 	return "Run lint, race tests, Postgres tests, admission fault tests, vulnerability scans, " +
 		"dependency checks, public interface checks, Terraform checks, and workflow checks. " +
 		"Committed Go modules must use released dependencies; the pipeline module may replace " +
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
 		"The gate updates a stale Sparkwing dependency pin, regenerates interface snapshots, " +
-		"and commits those changes before the push."
+		"and commits those changes before the push. This is the release-boundary tier: the release " +
+		"pipeline and the hosted release lane run it, and nothing fires it from a git hook. The broad " +
+		"per-landing check is `gate`, and the source-policy check a commit passes is `pre-commit`."
 }
 
-func (PrePush) Examples() []sparkwing.Example {
+func (PreRelease) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Run release checks", Command: "sparkwing run pre-push"},
+		{Comment: "Run release checks", Command: "sparkwing run pre-release"},
 	}
 }
 
-func (prePush *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
-	sparkwing.Job(plan, runContext.Pipeline, prePush.run)
+func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
+	sparkwing.Job(plan, runContext.Pipeline, preRelease.run)
 	return nil
 }
 
-func (prePush *PrePush) run(jobContext context.Context) error {
+func (preRelease *PreRelease) run(jobContext context.Context) error {
 	var failures []string
 
 	if err := checkNoReplaceDirectivesInCommittedGoMods(jobContext); err != nil {
@@ -111,7 +113,7 @@ func (prePush *PrePush) run(jobContext context.Context) error {
 	}
 
 	versionOptions := VersionFreshnessOptions{
-		AllowReleaseLineSelfReplace: prePush.AllowReleaseLineSelfReplace,
+		AllowReleaseLineSelfReplace: preRelease.AllowReleaseLineSelfReplace,
 	}
 	if err := CheckVersionsFreshnessWithOptions(jobContext, sparkwing.WorkDir(), versionOptions); err != nil {
 		failures = append(failures, err.Error())
@@ -399,6 +401,5 @@ func checkNoCommittedGoWorkFiles(jobContext context.Context) error {
 }
 
 func init() {
-	sparkwing.Register("pre-push", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
-	sparkwing.Register("push-checks", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
+	sparkwing.Register("pre-release", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreRelease{} })
 }

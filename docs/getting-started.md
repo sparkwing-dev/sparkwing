@@ -291,7 +291,8 @@ The pipeline runs validation gates before tagging, including:
 - `validate-version` -- the resolved tag must be free on origin (refuses
   force-push)
 - `check-clean-tree` -- working tree must be clean
-- `gate-pre-commit` / `gate-pre-push` -- the same gate checks the git hooks run
+- `gate-broad` / `gate-pre-release` -- the broad gate the git pre-push hook
+  runs, then the release-boundary checks
 - `prepare-changelog` -- `## [Unreleased]` in CHANGELOG.md must hold at
   least one entry. The step renames that section to
   `## [vX.Y.Z] - DATE`, opens a fresh empty `## [Unreleased]` above it,

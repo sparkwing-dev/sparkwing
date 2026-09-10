@@ -91,13 +91,13 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gateContracts := sparkwing.Job(plan, "gate-contracts", &checkContractsJob{RepoDir: repoDir})
 	gateContracts.Needs(clean, validate, published, gateLineage)
 
-	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
-	gatePreCommit.Needs(clean, gateContracts)
+	gateBroad := sparkwing.Job(plan, "gate-broad", &Gate{})
+	gateBroad.Needs(clean, gateContracts)
 
-	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
-		return (&PrePush{AllowReleaseLineSelfReplace: true}).run(ctx)
+	gatePreRelease := sparkwing.Job(plan, "gate-pre-release", func(ctx context.Context) error {
+		return (&PreRelease{AllowReleaseLineSelfReplace: true}).run(ctx)
 	})
-	gatePrePush.Needs(clean, gatePreCommit)
+	gatePreRelease.Needs(clean, gateBroad)
 
 	gateTemplates := sparkwing.Job(plan, "gate-template-verify", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[TemplateVerifySummary, TemplateVerifyArgs](
@@ -107,13 +107,13 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		)
 		return err
 	}).Resources(sparkwing.Cores(0.5))
-	gateTemplates.Needs(clean, gatePreCommit, gatePrePush)
+	gateTemplates.Needs(clean, gateBroad, gatePreRelease)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	changelog.Needs(discover, gatePreCommit, gatePrePush, gateTemplates, gateLineage)
+	changelog.Needs(discover, gateBroad, gatePreRelease, gateTemplates, gateLineage)
 
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
 		RepoDir: repoDir,
@@ -137,7 +137,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, gateTemplates, changelog, pushTag)
+	bumpSelf.Needs(discover, gateBroad, gatePreRelease, gateTemplates, changelog, pushTag)
 	bumpSelf.ContinueOnError()
 
 	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{

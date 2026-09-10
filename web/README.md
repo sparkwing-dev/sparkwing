@@ -28,7 +28,7 @@ them. The suite runs
 deterministic API fixtures against OS-assigned loopback ports; it needs no
 controller, hosted secret, or Kubernetes cluster.
 
-`sparkwing run pre-commit` runs the unit and full ESLint suites in parallel,
+`sparkwing run gate` runs the unit and full ESLint suites in parallel,
 then the production build and browser smoke suite. Install the locked dashboard
 dependencies before running the local gate; hosted CI runs `npm ci` itself.
 

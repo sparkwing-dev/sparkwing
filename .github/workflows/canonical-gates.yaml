@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gate: [pre-commit, pre-push]
+        gate: [gate, pre-release]
     env:
       GOWORK: "off"
     steps:
@@ -70,7 +70,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install dashboard dependencies
-        if: matrix.gate == 'pre-commit'
+        if: matrix.gate == 'gate'
         run: npm ci --ignore-scripts --prefix web
 
       - name: Install golangci-lint
@@ -81,7 +81,7 @@ jobs:
           skip-cache: true
 
       - name: Install Terraform
-        if: matrix.gate == 'pre-push'
+        if: matrix.gate == 'pre-release'
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.14.4"
@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           command -v golangci-lint
-          if [ "${{ matrix.gate }}" = pre-push ]; then
+          if [ "${{ matrix.gate }}" = pre-release ]; then
             command -v shellcheck
             command -v terraform
           fi
@@ -100,7 +100,7 @@ jobs:
         run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
 
       - name: Stage the event change
-        if: matrix.gate == 'pre-commit'
+        if: matrix.gate == 'gate'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
@@ -120,7 +120,7 @@ jobs:
           git diff --quiet
 
       - name: Prepare the immutable release self-pin fixture
-        if: matrix.gate == 'pre-push' && inputs.release_tag != ''
+        if: matrix.gate == 'pre-release' && inputs.release_tag != ''
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -147,27 +147,27 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: bash "$RUNNER_TEMP/apply-release-test-repair.sh" "$RELEASE_TAG" "$SOURCE_SHA" "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
 
-      - name: Run canonical pre-commit
-        if: matrix.gate == 'pre-commit'
+      - name: Run canonical gate
+        if: matrix.gate == 'gate'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: |
-          "$RUNNER_TEMP/sparkwing" run pre-commit
+          "$RUNNER_TEMP/sparkwing" run gate
           if [ "${{ inputs.release_tag }}" = v0.37.2 ]; then
             git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git diff --quiet
           fi
 
-      - name: Run canonical pre-push
-        if: matrix.gate == 'pre-push'
+      - name: Run canonical pre-release
+        if: matrix.gate == 'pre-release'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
-          "$RUNNER_TEMP/sparkwing" run pre-push
+          "$RUNNER_TEMP/sparkwing" run pre-release
           if [ -n "$RELEASE_TAG" ]; then
             if [ "$RELEASE_TAG" = v0.37.2 ]; then
               git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
@@ -180,7 +180,7 @@ jobs:
           fi
 
       - name: Upload dashboard browser failure artifacts
-        if: ${{ failure() && matrix.gate == 'pre-commit' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}
+        if: ${{ failure() && matrix.gate == 'gate' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -20,6 +20,25 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **gates:** This repository's own local gates are three tiers under new
+  names. `sparkwing run pre-commit` is source policy only -- gofmt, the
+  configured formatters, tracker IDs, em dashes, comments, tracked binaries,
+  the docs mirror, changelog links, and home resolution -- and finishes in
+  about two seconds, which is what lets the git pre-commit hook run on every
+  commit. The broad check that vets, builds, tests and lints every committed
+  module and exercises the dashboard is now `sparkwing run gate`, and the git
+  pre-push hook runs it. The release-boundary checks (race, chaos,
+  vulnerabilities, dependency freshness, public interfaces, Terraform) are now
+  `sparkwing run pre-release`, which the release pipeline runs and no hook
+  fires; the `push-checks` alias for them is removed. Nothing an adopter runs
+  changes: these are pipeline names in this repository's `.sparkwing/`, not
+  CLI or SDK surface. The hosted `Canonical / pre-commit` and
+  `Canonical / pre-push` checks are now `Canonical / gate` and
+  `Canonical / pre-release`, and the release DAG's `gate-pre-commit` and
+  `gate-pre-push` nodes are `gate-broad` and `gate-pre-release`.
+
 ## [v0.49.0] - 2026-09-10
 Five surfaces are cut here, each with a section in [the migration
 guide](docs/migrations/v0.49.0.md): `update` owns CLI and SDK updates,
