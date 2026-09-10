@@ -29,6 +29,7 @@ func lockedParent(t *testing.T) string {
 
 func TestCompilePipelineNamesTheHomeOverride(t *testing.T) {
 	locked := lockedParent(t)
+	t.Setenv("SPARKWING_HOME", locked)
 	dest := filepath.Join(locked, "cache", "pipelines", "deadbeef", "pipeline")
 
 	err := CompilePipeline(context.Background(), t.TempDir(), dest)
@@ -45,7 +46,9 @@ func TestCompilePipelineNamesTheHomeOverride(t *testing.T) {
 }
 
 func TestMkdirCacheKeepsTheUnderlyingError(t *testing.T) {
-	dir := filepath.Join(lockedParent(t), "cache", "bin")
+	locked := lockedParent(t)
+	t.Setenv("SPARKWING_HOME", locked)
+	dir := filepath.Join(locked, "cache", "bin")
 
 	err := mkdirCache(dir)
 	if err == nil {
@@ -56,5 +59,18 @@ func TestMkdirCacheKeepsTheUnderlyingError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SPARKWING_HOME") {
 		t.Errorf("error names no supported way to choose another location: %v", err)
+	}
+}
+
+func TestMkdirCacheOutsideTheHomeClaimsNoOverride(t *testing.T) {
+	locked := lockedParent(t)
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+
+	err := mkdirCache(filepath.Join(locked, "checkout", ".sparkwing-runner-bin"))
+	if err == nil {
+		t.Fatal("expected mkdirCache to fail on an unwritable parent")
+	}
+	if strings.Contains(err.Error(), "SPARKWING_HOME") {
+		t.Errorf("SPARKWING_HOME does not move a path outside the home, so the error must not offer it: %v", err)
 	}
 }

@@ -68,12 +68,30 @@ func parseDigestHeader(value string) ([]byte, error) {
 }
 
 func mkdirCache(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("%w\n  sparkwing holds this cache under its home directory."+
-			" Set SPARKWING_HOME to a writable directory to place it elsewhere"+
-			" (default: ~/.sparkwing)", err)
+	err := os.MkdirAll(dir, 0o755)
+	if err == nil {
+		return nil
 	}
-	return nil
+	if !underSparkwingHome(dir) {
+		return err
+	}
+	return fmt.Errorf("%w\n  sparkwing holds this cache under its home directory."+
+		" Set SPARKWING_HOME to a writable directory to place it elsewhere"+
+		" (default: ~/.sparkwing)", err)
+}
+
+// safety: callers hand bincache a destination it does not choose, and some of those
+// sit in the consumer's own checkout, where SPARKWING_HOME moves nothing.
+func underSparkwingHome(dir string) bool {
+	home, err := paths.DefaultPaths()
+	if err != nil || home.Root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(home.Root, dir)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
