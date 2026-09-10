@@ -1,12 +1,14 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
@@ -19,10 +21,19 @@ func head(body string) string {
 	return strconv.Quote(body)
 }
 
+// safety: the real bundle is gitignored, so a fresh checkout serves the same
+// missing-bundle notice for the shell and for every miss; comparing against it
+// makes "this is not the shell" true of the shell and passes whatever it asks.
+func fixtureBundle() fs.FS {
+	shell := []byte("<!doctype html><title>Sparkwing</title><div id=\"app\">dashboard shell</div>")
+	return fstest.MapFS{"index.html": &fstest.MapFile{Data: shell}}
+}
+
 func getPath(t *testing.T, opts HandlerOptions, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	HandlerFromOptions(opts).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	HandlerFromOptionsWithBundle(opts, fixtureBundle()).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
 	return rec
 }
 
