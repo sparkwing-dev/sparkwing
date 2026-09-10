@@ -2,6 +2,7 @@
 package toolchain
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -79,25 +80,31 @@ type Hold struct {
 }
 
 // ResolveHold gives an explicit environment setting precedence over the config file.
-func ResolveHold(environment Hold, configPath string) Hold {
+func ResolveHold(environment Hold, configPath string) (Hold, error) {
 	if value := strings.TrimSpace(environment.Value); value != "" {
-		return Hold{Value: value, Source: environment.Source}
+		return Hold{Value: value, Source: environment.Source}, nil
 	}
-	body, err := os.ReadFile(configPath)
+	body, err := readHoldFile(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return Hold{}, nil
+	}
 	if err != nil {
-		return Hold{}
+		return Hold{Source: configPath}, fmt.Errorf("read operator hold: %w", err)
 	}
 	value := strings.TrimSpace(string(body))
 	if value == "" {
-		return Hold{}
+		return Hold{}, nil
 	}
-	return Hold{Value: value, Source: configPath}
+	return Hold{Value: value, Source: configPath}, nil
 }
 
 // ResolveHoldStrict distinguishes an invalid configured ceiling from the
 // absence of one so unattended updaters can fail closed.
 func ResolveHoldStrict(environment Hold, configPath string) (Hold, error) {
-	hold := ResolveHold(environment, configPath)
+	hold, err := ResolveHold(environment, configPath)
+	if err != nil {
+		return hold, err
+	}
 	if hold.Value == "" {
 		return hold, nil
 	}

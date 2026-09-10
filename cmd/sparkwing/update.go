@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
@@ -30,7 +31,7 @@ const (
 )
 
 var (
-	updateFetchLatest     = fetchLatestRelease
+	updateFetchLatest     = fetchLatestReleaseContext
 	updateDownloadInstall = downloadAndInstall
 	updateBaseURL         = defaultUpdateAssetBase
 	updateVerifyKey       ed25519.PublicKey
@@ -120,24 +121,29 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 
 func updateBinary(version string, force, overrideHold bool) (updateReceipt, error) {
 	result := updateReceipt{Kind: "update", Tool: "sparkwing", Target: "cli", Strategy: "release"}
-	resolved, err := resolveUpdateVersion(version, false)
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
+	resolved, err := resolveUpdateVersion(ctx, version, false)
 	if err != nil {
 		return result, err
 	}
 	identity := updateReadInstalled()
 	current := identity.Version
 
-	currentBin, err := os.Executable()
-	if err != nil {
-		return result, fmt.Errorf("locate current binary: %w", err)
+	currentBin := identity.Path
+	if currentBin == "" || !filepath.IsAbs(currentBin) {
+		return result, errors.New("update: installed destination could not be established")
 	}
-	currentBin, err = filepath.EvalSymlinks(currentBin)
-	if err != nil {
-		return result, fmt.Errorf("resolve current binary: %w", err)
+	currentFile, err := os.Lstat(currentBin)
+	if err != nil || !currentFile.Mode().IsRegular() {
+		return result, errors.New("update: installed destination must be an existing regular file")
 	}
-	identity.Path = currentBin
 	result.Before = identity
-	verified, local, provenanceReason := installedReleaseProvenance(identity)
+	hold := resolveVersionHold()
+	if hold.Error != "" {
+		return result, fmt.Errorf("update refused: %s", hold.Error)
+	}
+	verified, local, provenanceReason := installedReleaseProvenance(ctx, identity)
 	if resolved == current && verified {
 		result.Status = "current"
 		result.After = result.Before
@@ -145,10 +151,6 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 	}
 	if !verified {
 		fmt.Fprintf(os.Stderr, "update: %s; replacement will use verified release assets\n", provenanceReason)
-	}
-	hold := resolveVersionHold()
-	if hold.Error != "" {
-		return result, fmt.Errorf("update refused: %s", hold.Error)
 	}
 	if hold.Value != "" && exceedsHold(resolved, hold.Value) {
 		if !overrideHold {
@@ -168,13 +170,14 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 	case downgradeRebaseline:
 		fmt.Fprintf(os.Stderr, "update: installed %s is an unpublished build; re-baselining to the published %s\n", current, resolved)
 	}
-	fmt.Fprintf(os.Stderr, "updating sparkwing: %s -> %s\n", current, resolved)
+	fmt.Fprintf(os.Stderr, "updating sparkwing: %s -> %s\n", updateIdentityLabel(identity), resolved)
 	installed, err := updateDownloadInstall(resolved, currentBin)
 	if err != nil {
 		return result, fmt.Errorf("update: verified release install failed: %w", err)
 	}
 	result.Status = "updated"
-	result.After = updateIdentity{Version: installed.version, Path: installed.path}
+	result.After = installedArtifactIdentity(installed.path)
+	result.ResolvedRelease = resolved
 	result.Digest = installed.digest
 	reportOtherInstalls(os.Stderr, currentBin)
 	return result, nil
@@ -355,6 +358,8 @@ func sha256OfFile(path string) (string, error) {
 
 func updateSDK(version string) (updateReceipt, error) {
 	result := updateReceipt{Kind: "update", Tool: "sparkwing", Target: "sdk", Strategy: "release"}
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return result, err
@@ -364,7 +369,7 @@ func updateSDK(version string) (updateReceipt, error) {
 		return result, err
 	}
 	result.Before = before.Identity
-	resolved, err := resolveUpdateVersion(version, false)
+	resolved, err := resolveUpdateVersion(ctx, version, false)
 	if err != nil {
 		return result, err
 	}
@@ -388,11 +393,12 @@ func updateSDK(version string) (updateReceipt, error) {
 	if err != nil {
 		return result, fmt.Errorf("read updated SDK pin: %w", err)
 	}
+	if after.Identity.Version != resolved {
+		return result, fmt.Errorf("SDK files changed but the resulting pin is %q, expected %s", after.Identity.Version, resolved)
+	}
 	result.After = after.Identity
+	result.ResolvedRelease = resolved
 	result.Replacement = after.Replacement
 	result.Status = "updated"
-	if before.Identity.Version == after.Identity.Version {
-		result.Status = "current"
-	}
 	return result, nil
 }

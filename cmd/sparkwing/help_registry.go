@@ -291,9 +291,10 @@ fetch -- bounded by ~3s, fail-soft when offline), and the
 .sparkwing/go.mod SDK pin + any sparks-* libraries declared
 alongside it.
 
-Behind-by-version is computed via semver compare for both the
-CLI itself and the SDK pin so an agent reading -o json can
-trigger an upgrade without parsing prose.
+CLI comparison uses the same read-only release metadata and provenance
+checks as 'sparkwing update --check', within one ~3s network budget.
+cli_status and cli_reason distinguish a verified comparison from a local
+build or missing metadata. SDK pins retain their semver comparison.
 
 --offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then

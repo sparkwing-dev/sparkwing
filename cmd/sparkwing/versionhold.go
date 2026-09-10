@@ -24,14 +24,21 @@ type versionHold struct {
 }
 
 func resolveVersionHold() versionHold {
-	path, err := versionHoldPath()
-	if err != nil {
-		return versionHold{}
+	environment := sharedtoolchain.Hold{Value: os.Getenv(versionHoldEnv), Source: versionHoldEnv}
+	path := ""
+	if strings.TrimSpace(environment.Value) == "" {
+		var err error
+		path, err = versionHoldPath()
+		if err != nil {
+			return versionHold{Source: "version-hold configuration", Error: fmt.Sprintf("resolve operator hold: %v", err)}
+		}
 	}
-	hold := sharedtoolchain.ResolveHold(sharedtoolchain.Hold{
-		Value: os.Getenv(versionHoldEnv), Source: versionHoldEnv,
-	}, path)
+	hold, readErr := sharedtoolchain.ResolveHold(environment, path)
 	report := versionHold{Value: hold.Value, Source: hold.Source}
+	if readErr != nil {
+		report.Error = readErr.Error()
+		return report
+	}
 	if report.Value != "" {
 		normalized, err := normalizeHold(report.Value)
 		if err != nil {

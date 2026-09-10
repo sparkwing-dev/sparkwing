@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	gobuildinfo "debug/buildinfo"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,7 @@ type updateIdentity struct {
 }
 
 type updateCheckReport struct {
+	localBuild    bool
 	Kind          string         `json:"kind"`
 	Tool          string         `json:"tool"`
 	Target        string         `json:"target"`
@@ -36,15 +39,73 @@ type updateCheckReport struct {
 }
 
 type updateReceipt struct {
-	Kind        string         `json:"kind"`
-	Tool        string         `json:"tool"`
-	Target      string         `json:"target"`
-	Strategy    string         `json:"strategy"`
-	Status      string         `json:"status"`
-	Before      updateIdentity `json:"before"`
-	After       updateIdentity `json:"after"`
-	Digest      string         `json:"sha256,omitempty"`
-	Replacement string         `json:"sdk_replace,omitempty"`
+	Kind            string         `json:"kind"`
+	Tool            string         `json:"tool"`
+	Target          string         `json:"target"`
+	Strategy        string         `json:"strategy"`
+	Status          string         `json:"status"`
+	Before          updateIdentity `json:"before"`
+	After           updateIdentity `json:"after"`
+	Digest          string         `json:"sha256,omitempty"`
+	Replacement     string         `json:"sdk_replace,omitempty"`
+	ResolvedRelease string         `json:"resolved_release,omitempty"`
+}
+
+func installedArtifactIdentity(path string) updateIdentity {
+	identity := updateIdentity{Path: path}
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() {
+		return identity
+	}
+	file, err := openUpdateInput(path)
+	if err != nil {
+		return identity
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
+		return identity
+	}
+	info, err := gobuildinfo.Read(file)
+	if err != nil {
+		return identity
+	}
+	version := info.Main.Version
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			identity.Revision = setting.Value
+		case "vcs.modified":
+			if setting.Value == "true" || setting.Value == "false" {
+				dirty := setting.Value == "true"
+				identity.Dirty = &dirty
+			}
+		case "-ldflags":
+			if !strings.Contains(setting.Value, "main.Version") {
+				continue
+			}
+			version = ""
+			if strings.ContainsAny(setting.Value, "'\"\\") {
+				continue
+			}
+			fields := strings.Fields(setting.Value)
+			for i, field := range fields {
+				assignment := ""
+				if field == "-X" && i+1 < len(fields) {
+					assignment = fields[i+1]
+				} else if strings.HasPrefix(field, "-X=") {
+					assignment = strings.TrimPrefix(field, "-X=")
+				}
+				if strings.HasPrefix(assignment, "main.Version=") {
+					version = strings.TrimPrefix(assignment, "main.Version=")
+				}
+			}
+		}
+	}
+	if semver.IsValid(version) {
+		identity.Version = version
+	}
+	return identity
 }
 
 var (
@@ -52,6 +113,8 @@ var (
 	updateLookupRelease  = lookupUpdateRelease
 	updateLookupRevision = lookupUpdateRevision
 	updateReadInstalled  = readInstalledUpdateIdentity
+	updateReadInvoking   = readInvokingUpdateIdentity
+	updateDestination    = resolveUpdateDestination
 )
 
 func updateIdentityFromVersion(version, path string) updateIdentity {
@@ -68,7 +131,7 @@ func updateIdentityFromVersion(version, path string) updateIdentity {
 	return id
 }
 
-func readInstalledUpdateIdentity() updateIdentity {
+func readInvokingUpdateIdentity() updateIdentity {
 	path, err := os.Executable()
 	if err != nil {
 		path = ""
@@ -92,17 +155,37 @@ func readInstalledUpdateIdentity() updateIdentity {
 	return id
 }
 
-func installedReleaseProvenance(identity updateIdentity) (verified, local bool, reason string) {
+func resolveUpdateDestination() (string, error) {
+	path, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path, err
+	}
+	return resolved, nil
+}
+
+func readInstalledUpdateIdentity() updateIdentity {
+	path, err := updateDestination()
+	if err != nil {
+		return updateIdentity{Path: path}
+	}
+	return installedArtifactIdentity(path)
+}
+
+func installedReleaseProvenance(ctx context.Context, identity updateIdentity) (verified, local bool, reason string) {
 	if !semver.IsValid(identity.Version) {
 		return false, false, "installed version is unknown or cannot be compared"
 	}
 	if identity.Dirty != nil && *identity.Dirty || !isResolvableModuleVersion(identity.Version) {
 		return false, true, "local CLI build cannot be compared as a published release"
 	}
-	if identity.Revision == "" || identity.Dirty == nil {
+	if !validUpdateRevision(identity.Revision) || identity.Dirty == nil {
 		return false, false, "installed CLI release provenance is unavailable"
 	}
-	revision, err := updateLookupRevision(identity.Version)
+	revision, err := updateLookupRevision(ctx, identity.Version)
 	if err != nil {
 		return false, false, err.Error()
 	}
@@ -112,11 +195,11 @@ func installedReleaseProvenance(identity updateIdentity) (verified, local bool, 
 	return true, false, ""
 }
 
-func resolveUpdateVersion(requested string, check bool) (string, error) {
+func resolveUpdateVersion(ctx context.Context, requested string, check bool) (string, error) {
 	version := requested
 	if version == "" {
 		var err error
-		version, err = updateFetchLatest()
+		version, err = updateFetchLatest(ctx)
 		if err != nil {
 			return "", fmt.Errorf("update: fetch latest published release: %w", err)
 		}
@@ -125,16 +208,16 @@ func resolveUpdateVersion(requested string, check bool) (string, error) {
 		return "", errors.New("update: release metadata did not name a canonical release tag")
 	}
 	if check {
-		if err := updateLookupRelease(version); err != nil {
+		if err := updateLookupRelease(ctx, version); err != nil {
 			return "", err
 		}
 	}
 	return version, nil
 }
 
-func updateMetadata(path string, value any) error {
+func updateMetadata(ctx context.Context, path string, value any) error {
 	client := &http.Client{Timeout: versionFetchTimeout}
-	request, err := http.NewRequest(http.MethodGet, updateReleaseAPI+path, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, updateReleaseAPI+path, nil)
 	if err != nil {
 		return err
 	}
@@ -153,12 +236,12 @@ func updateMetadata(path string, value any) error {
 	return nil
 }
 
-func lookupUpdateRelease(version string) error {
+func lookupUpdateRelease(ctx context.Context, version string) error {
 	var release struct {
 		Tag   string `json:"tag_name"`
 		Draft *bool  `json:"draft"`
 	}
-	if err := updateMetadata("/releases/tags/"+neturl.PathEscape(version), &release); err != nil {
+	if err := updateMetadata(ctx, "/releases/tags/"+neturl.PathEscape(version), &release); err != nil {
 		return err
 	}
 	if release.Tag != version || release.Draft == nil || *release.Draft {
@@ -167,14 +250,14 @@ func lookupUpdateRelease(version string) error {
 	return nil
 }
 
-func lookupUpdateRevision(version string) (string, error) {
+func lookupUpdateRevision(ctx context.Context, version string) (string, error) {
 	var ref struct {
 		Object struct {
 			Type string `json:"type"`
 			SHA  string `json:"sha"`
 		} `json:"object"`
 	}
-	if err := updateMetadata("/git/ref/tags/"+neturl.PathEscape(version), &ref); err != nil {
+	if err := updateMetadata(ctx, "/git/ref/tags/"+neturl.PathEscape(version), &ref); err != nil {
 		return "", err
 	}
 	for i := 0; i < 3; i++ {
@@ -188,7 +271,7 @@ func lookupUpdateRevision(version string) (string, error) {
 			return "", errors.New("release tag does not reference a commit")
 		}
 		sha := ref.Object.SHA
-		if err := updateMetadata("/git/tags/"+sha, &ref); err != nil {
+		if err := updateMetadata(ctx, "/git/tags/"+sha, &ref); err != nil {
 			return "", err
 		}
 	}
@@ -214,7 +297,7 @@ type sdkUpdateIdentity struct {
 
 func readSDKUpdateIdentity(dir string) (sdkUpdateIdentity, error) {
 	path := filepath.Join(dir, "go.mod")
-	body, err := os.ReadFile(path)
+	body, err := readUpdateModule(path)
 	if err != nil {
 		return sdkUpdateIdentity{}, fmt.Errorf("read SDK module: %w", err)
 	}
@@ -241,50 +324,72 @@ func readSDKUpdateIdentity(dir string) (sdkUpdateIdentity, error) {
 }
 
 func runUpdateCheck(target, requested string, force, overrideHold bool, mode string) error {
+	return finishUpdateCheck(gatherUpdateCheck(target, requested, force, overrideHold), mode)
+}
+
+func gatherUpdateCheck(target, requested string, force, overrideHold bool) updateCheckReport {
+	return gatherUpdateCheckForIdentity(target, requested, force, overrideHold, nil)
+}
+
+func gatherUpdateCheckForIdentity(target, requested string, force, overrideHold bool, identity *updateIdentity) updateCheckReport {
 	report := updateCheckReport{Kind: "update_check", Tool: "sparkwing", Target: target, Strategy: "release", Status: "unknown"}
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
 	if target == "sdk" {
 		dir, err := findSparkwingDir()
 		if err != nil {
 			report.Reason = "no pipeline SDK module found"
-			return finishUpdateCheck(report, mode)
+			return report
 		}
+		report.Installed.Path = filepath.Join(dir, "go.mod")
 		sdk, err := readSDKUpdateIdentity(dir)
 		if err != nil {
-			report.Reason = "cannot read a valid pipeline SDK module"
-			return finishUpdateCheck(report, mode)
+			report.Reason = sdkInspectionReason(err)
+			return report
 		}
 		report.Installed = sdk.Identity
 		if sdk.Replacement != "" {
 			report.Reason = "SDK replacement prevents release identity comparison"
-			return finishUpdateCheck(report, mode)
+			return report
 		}
 	} else {
-		report.Installed = updateReadInstalled()
+		if identity != nil {
+			report.Installed = *identity
+		} else {
+			report.Installed = updateReadInstalled()
+		}
 	}
-	version, err := resolveUpdateVersion(requested, true)
+	version, err := resolveUpdateVersion(ctx, requested, true)
 	if err != nil {
 		report.Reason = err.Error()
-		return finishUpdateCheck(report, mode)
+		return report
 	}
 	report.Available.Version = version
 	if target == "cli" {
-		if hold := resolveVersionHold(); hold.Value != "" && exceedsHold(version, hold.Value) && !overrideHold && report.Installed.Version != version {
-			report.BlockedReason = fmt.Sprintf("operator CLI version hold %s prevents this target", hold.Value)
+		hold := resolveVersionHold()
+		if hold.Error != "" {
+			report.BlockedReason = hold.Error
+			report.Reason = "operator CLI version hold could not be established"
+			return report
 		}
-		if report.BlockedReason == "" && classifyDowngrade(report.Installed.Version, version) == downgradeNeedsForce && !force {
-			report.BlockedReason = "CLI downgrade requires --force"
+		if hold.Error == "" && hold.Value != "" && exceedsHold(version, hold.Value) && !overrideHold {
+			report.BlockedReason = fmt.Sprintf("operator CLI version hold %s prevents this target", hold.Value)
 		}
 	}
 	current := report.Installed.Version
 	if !semver.IsValid(current) {
 		report.Reason = "installed version is unknown or cannot be compared"
-		return finishUpdateCheck(report, mode)
+		return report
 	}
 	if target == "cli" {
-		verified, _, reason := installedReleaseProvenance(report.Installed)
+		verified, local, reason := installedReleaseProvenance(ctx, report.Installed)
+		report.localBuild = local
+		if !local && report.BlockedReason == "" && classifyDowngrade(current, version) == downgradeNeedsForce && !force {
+			report.BlockedReason = "CLI downgrade requires --force"
+		}
 		if !verified {
 			report.Reason = reason
-			return finishUpdateCheck(report, mode)
+			return report
 		}
 	}
 	switch semver.Compare(current, version) {
@@ -304,7 +409,27 @@ func runUpdateCheck(target, requested string, force, overrideHold bool, mode str
 		report.Available.Revision = report.Installed.Revision
 		report.Status = "current"
 	}
-	return finishUpdateCheck(report, mode)
+	if report.Status == "current" {
+		report.BlockedReason = ""
+	}
+	return report
+}
+
+func sdkInspectionReason(err error) string {
+	switch {
+	case errors.Is(err, errUpdateModuleType):
+		return "SDK module is not a regular file; inspect the reported path"
+	case errors.Is(err, errUpdateModuleSize):
+		return "SDK module exceeds the 1 MiB inspection limit; inspect the reported path"
+	case errors.Is(err, errUpdateModuleChanged):
+		return "SDK module changed during inspection; retry after edits finish"
+	case errors.Is(err, os.ErrNotExist):
+		return "SDK module file is missing at the reported path"
+	case errors.Is(err, os.ErrPermission):
+		return "SDK module cannot be read; check permissions at the reported path"
+	default:
+		return "SDK module could not be parsed or read; inspect the reported path"
+	}
 }
 
 func finishUpdateCheck(report updateCheckReport, mode string) error {
@@ -340,6 +465,9 @@ func writeUpdateCheck(w io.Writer, report updateCheckReport, mode string) error 
 		return err
 	}
 	fmt.Fprintf(w, "sparkwing %s update check\n  installed: %s\n  available: %s\n  status:    %s\n", report.Target, updateIdentityLabel(report.Installed), updateIdentityLabel(report.Available), report.Status)
+	if report.Installed.Path != "" {
+		fmt.Fprintf(w, "  path:      %s\n", report.Installed.Path)
+	}
 	if report.Reason != "" {
 		fmt.Fprintf(w, "  reason:    %s\n", report.Reason)
 	}
@@ -366,6 +494,9 @@ func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
 	}
 	if result.Replacement != "" {
 		fmt.Fprintf(w, "  replace:   %s\n", result.Replacement)
+	}
+	if result.ResolvedRelease != "" && result.After.Version == "" {
+		fmt.Fprintf(w, "  release:   %s\n", result.ResolvedRelease)
 	}
 	return nil
 }

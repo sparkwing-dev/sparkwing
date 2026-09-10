@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -17,7 +18,7 @@ func TestUpdateDoesNotExecuteUnverifiedFallback(t *testing.T) {
 	Version = "v0.27.0"
 
 	t.Run("latest lookup failure", func(t *testing.T) {
-		updateFetchLatest = func() (string, error) { return "", errors.New("lookup denied") }
+		updateFetchLatest = func(context.Context) (string, error) { return "", errors.New("lookup denied") }
 		if err := runUpdateBinary("", false, false); err == nil {
 			t.Fatal("runUpdateBinary() succeeded")
 		}

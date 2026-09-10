@@ -32,10 +32,24 @@ means `current` or `ahead`, 1 means `update_available`, and 2 means `unknown`,
 `diverged`, or lookup failure. Plain checks print the status word.
 
 Successful updates emit a compact `update` receipt with `before` and `after`
-identities. Progress goes to stderr. JSON is the pipe default, pretty output
+identities. CLI artifact metadata is read without executing the new binary;
+`resolved_release` retains the verified release label when embedded version
+metadata cannot be established. Progress goes to stderr. JSON is the pipe default, pretty output
 is the terminal default, and `--output pretty|json|plain` overrides it.
 Plain updates print the resulting version. The rich `version` report and
-`version hold` remain available.
+`version hold` remain available. The version card keeps its layout and adds
+`cli_status` / `cli_reason` to its JSON report. Its CLI verdict uses the same
+comparison facts as `update --check`; `--offline` reports `not_checked` without
+network access. The entire metadata lookup chain shares one three-second budget.
+The version card describes the invoking process. Update checks and receipts
+inspect the destination on disk, which may already contain a replacement build.
+SDK module inspection accepts regular files up to 1 MiB and reports unsafe or
+oversized inputs as unknown.
+SDK receipts report `updated` whenever native `go get` and `go mod tidy` ran,
+even if the SDK pin stayed the same, because other dependency files can change.
+Unreadable, unsafe, or oversized operator-hold files now report an error and
+refuse updates instead of appearing unset. A missing file still means no hold;
+a nonempty environment hold keeps precedence without requiring a home path.
 
 ## Serve command
 

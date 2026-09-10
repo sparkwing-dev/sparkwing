@@ -48,11 +48,11 @@ func TestResolveHoldPrefersEnvironment(t *testing.T) {
 	if err := os.WriteFile(path, []byte("v0.15\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := ResolveHold(Hold{Source: "SPARKWING_TEST_VERSION_HOLD"}, path); got.Value != "v0.15" || got.Source != path {
-		t.Fatalf("file hold = %+v", got)
+	if got, err := ResolveHold(Hold{Source: "SPARKWING_TEST_VERSION_HOLD"}, path); err != nil || got.Value != "v0.15" || got.Source != path {
+		t.Fatalf("file hold = %+v, %v", got, err)
 	}
-	if got := ResolveHold(Hold{Value: "v0.10", Source: "SPARKWING_TEST_VERSION_HOLD"}, path); got.Value != "v0.10" || got.Source != "SPARKWING_TEST_VERSION_HOLD" {
-		t.Fatalf("environment hold = %+v", got)
+	if got, err := ResolveHold(Hold{Value: "v0.10", Source: "SPARKWING_TEST_VERSION_HOLD"}, path); err != nil || got.Value != "v0.10" || got.Source != "SPARKWING_TEST_VERSION_HOLD" {
+		t.Fatalf("environment hold = %+v, %v", got, err)
 	}
 }
 
