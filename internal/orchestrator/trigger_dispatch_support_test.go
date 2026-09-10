@@ -32,6 +32,31 @@ func TestRunAndAwaitRefusesAnObjectStoreStateBackend(t *testing.T) {
 	}
 }
 
+// TestCheckTriggerDispatchSeesThroughTheLocalMirror pins the ordinary Mode 2
+// shape: a profile leaves mirror_local on, so the object-store backend arrives
+// wrapped and an unwrapped type test would let the await through.
+func TestCheckTriggerDispatchSeesThroughTheLocalMirror(t *testing.T) {
+	wrapped := Backends{State: newMirrorStateBackend(s3StateAdapter{}, nil, nil)}
+	if err := wrapped.checkTriggerDispatch(); !errors.Is(err, ErrTriggersUnsupported) {
+		t.Errorf("a mirrored object-store backend was not refused: %v", err)
+	}
+}
+
+// TestObjectStoreEnqueueRefusesTriggers covers the node that runs in its own
+// process, which reaches this backend through the loopback shim rather than
+// through the awaiter's guard.
+func TestObjectStoreEnqueueRefusesTriggers(t *testing.T) {
+	var state StateBackend = s3StateAdapter{}
+	if _, err := state.EnqueueTrigger(context.Background(),
+		"child", nil, "parent", "node", "", "await-pipeline", "", "", ""); !errors.Is(err, ErrTriggersUnsupported) {
+		t.Errorf("EnqueueTrigger did not refuse: %v", err)
+	}
+	if _, err := enqueueTriggerWithEnv(context.Background(), state,
+		"child", nil, "parent", "node", "", "await-pipeline", "", "", "", nil); !errors.Is(err, ErrTriggersUnsupported) {
+		t.Errorf("EnqueueTriggerWithEnv did not refuse: %v", err)
+	}
+}
+
 // TestCheckTriggerDispatchAllowsTheDispatchingBackends keeps the refusal narrow:
 // the local store claims triggers itself, and a hosted controller claims them on
 // its own side while leaving LocalCoordination false.

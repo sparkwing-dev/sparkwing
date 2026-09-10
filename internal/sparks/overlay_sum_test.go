@@ -3,6 +3,7 @@ package sparks
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -189,8 +190,12 @@ func TestWriteOverlayRepairsSumAfterFailedMaterialization(t *testing.T) {
 	}
 	t.Setenv("GOPROXY", proxy)
 
-	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+	changed, err := WriteOverlay(context.Background(), dir, resolved)
+	if err != nil {
 		t.Fatalf("second WriteOverlay: %v", err)
+	}
+	if changed {
+		t.Fatal("the second call rewrote the overlay, so it never reached the repair path")
 	}
 	sum, err := os.ReadFile(filepath.Join(dir, OverlaySumfileName))
 	if err != nil {
@@ -201,5 +206,76 @@ func TestWriteOverlayRepairsSumAfterFailedMaterialization(t *testing.T) {
 	}
 	if err := buildWithOverlay(t, dir); err != nil {
 		t.Errorf("overlay does not build without a manual go mod download: %v", err)
+	}
+}
+
+func countingGoBin(t *testing.T) (bin, counter string) {
+	t.Helper()
+	real, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not available")
+	}
+	dir := t.TempDir()
+	counter = filepath.Join(dir, "invocations")
+	bin = filepath.Join(dir, "go")
+	script := "#!/bin/sh\necho x >> " + counter + "\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, counter
+}
+
+func countLines(t *testing.T, path string) int {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Count(string(raw), "\n")
+}
+
+// TestWriteOverlayDoesNotRedownloadAReplacedModuleSet pins the cost of the
+// repair. A module set satisfied entirely by replace directives downloads
+// nothing and writes no checksums, and an absent sum would read as a
+// materialization that never ran and repeat on every resolve.
+func TestWriteOverlayDoesNotRedownloadAReplacedModuleSet(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	bin, counter := countingGoBin(t)
+	t.Setenv("SPARKS_GO_BIN", bin)
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOMODCACHE", writableTempDir(t))
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "local", "go.mod"), "module example.com/local\n\ngo 1.26.0\n")
+	writeFile(t, filepath.Join(dir, "local", "local.go"), "package local\n\nfunc V() string { return \"local\" }\n")
+	writeFile(t, filepath.Join(dir, "go.mod"),
+		"module consumer.example\n\ngo 1.26.0\n\nrequire example.com/local v1.0.0\n\nreplace example.com/local => ./local\n")
+	writeFile(t, filepath.Join(dir, "use.go"), "package consumer\n\nimport _ \"example.com/local\"\n")
+
+	resolved := map[string]string{"example.com/local": "v1.0.0"}
+	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+		t.Fatalf("first WriteOverlay: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, OverlaySumfileName)); err != nil {
+		t.Fatalf("a successful materialization left no sum: %v", err)
+	}
+	first := countLines(t, counter)
+	if first == 0 {
+		t.Fatal("no go invocation, so materializeSum never ran")
+	}
+
+	if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+		t.Fatalf("second WriteOverlay: %v", err)
+	}
+	if got := countLines(t, counter); got != first {
+		t.Errorf("the second resolve ran %d more go invocation(s); a replaced module set must not re-download", got-first)
 	}
 }

@@ -194,12 +194,28 @@ var ErrTriggersUnsupported = fmt.Errorf(
 
 // safety: fails closed on the one backend proven to have no claim path rather
 // than on LocalCoordination, which a hosted controller also leaves false while
-// dispatching child triggers on its own side.
+// dispatching child triggers on its own side. The local mirror wraps the
+// object-store backend on the ordinary Mode 2 run, so the test unwraps first.
 func (b Backends) checkTriggerDispatch() error {
-	if _, objectStore := b.State.(s3StateAdapter); objectStore {
+	if _, objectStore := canonicalState(b.State).(s3StateAdapter); objectStore {
 		return ErrTriggersUnsupported
 	}
 	return nil
+}
+
+// safety: the refusal lives on the enqueue as well as on the awaiter's early
+// guard, because a node running in its own process reaches this backend through
+// the loopback shim and never passes that guard.
+func (s3StateAdapter) EnqueueTrigger(
+	context.Context, string, map[string]string, string, string, string, string, string, string, string,
+) (string, error) {
+	return "", ErrTriggersUnsupported
+}
+
+func (s3StateAdapter) EnqueueTriggerWithEnv(
+	context.Context, string, map[string]string, string, string, string, string, string, string, string, map[string]string,
+) (string, error) {
+	return "", ErrTriggersUnsupported
 }
 
 func (s3StateAdapter) ListNodes(context.Context, string) ([]*store.Node, error) {

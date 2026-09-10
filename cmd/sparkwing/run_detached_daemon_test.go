@@ -83,3 +83,34 @@ func TestRunDetachedPreWarmsTheDaemonBeforeStartingTheConsumer(t *testing.T) {
 		t.Fatalf("daemon pre-warms = %d, want 1", warmed)
 	}
 }
+
+// TestRunDetachedDoesNotPreWarmForALaunchThatSkipsAdmission keeps the pre-warm
+// on the same guard the foreground path uses. `--explain` reaches a detached
+// launch intact and never touches admission, so hosting a daemon for it can
+// drain and replace this machine's daemon for nothing.
+func TestRunDetachedDoesNotPreWarmForALaunchThatSkipsAdmission(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the detached-consumer contract is exercised on POSIX process semantics")
+	}
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_REPOS", filepath.Join(home, "repos.yaml"))
+	t.Setenv("SPARKWING_NO_UPDATE", "1")
+
+	repoDir := detachedDaemonRepo(t)
+
+	warmed := 0
+	prevWarm, prevConsumer := ensureRunDaemonFn, ensureTriggerConsumerFn
+	t.Cleanup(func() { ensureRunDaemonFn, ensureTriggerConsumerFn = prevWarm, prevConsumer })
+	ensureRunDaemonFn = func() { warmed++ }
+	ensureTriggerConsumerFn = func(string, time.Duration, time.Duration) error { return nil }
+
+	err := runDetached(context.Background(), "warmfixture",
+		runFlags{detached: true, changeDir: repoDir, outputFormat: "json"}, []string{"--explain"})
+	if err != nil {
+		t.Fatalf("runDetached: %v", err)
+	}
+	if warmed != 0 {
+		t.Errorf("daemon pre-warms = %d, want 0 for a launch that never reaches admission", warmed)
+	}
+}
