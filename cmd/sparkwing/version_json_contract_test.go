@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -43,5 +45,35 @@ func TestVersionJSONKeepsTheFieldTheToolchainSwitchReads(t *testing.T) {
 	}
 	if strings.TrimSpace(out) == "" {
 		t.Error("version -o json wrote nothing to stdout")
+	}
+}
+
+// The installer at install/install.sh cannot import this package, so it matches
+// a literal substring of `version -o json --offline` to prove the asset it just
+// verified is the release its tag names. Nothing else holds those two ends
+// together: an installer probing a field the CLI does not print refuses every
+// genuine release, and its own staged-release suite cannot see that.
+func TestVersionJSONCarriesTheFieldTheInstallerProbes(t *testing.T) {
+	const installerPath = "../../install/install.sh"
+	const probe = `*"\"installed\":\"$VERSION\""*)`
+
+	installer, err := os.ReadFile(installerPath)
+	if err != nil {
+		t.Fatalf("read installer: %v", err)
+	}
+	if !strings.Contains(string(installer), probe) {
+		t.Fatalf("%s no longer matches %s against the installed release; "+
+			"pin the field it reads now", installerPath, probe)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runVersion([]string{"-o", "json", "--offline"}); err != nil {
+			t.Fatalf("`sparkwing version -o json --offline`: %v", err)
+		}
+	})
+	want := fmt.Sprintf("%q:%q", "installed", installedVersion())
+	if !strings.Contains(out, want) {
+		t.Fatalf("version -o json does not carry %s, so %s refuses every release: %q",
+			want, installerPath, out)
 	}
 }

@@ -1,5 +1,5 @@
 # sparkwing-runner systemd user service template.
-# Installed by install/install.sh -- do not edit directly.
+# Installed by install/service-install.sh -- do not edit directly.
 #
 # This is a USER unit, installed at ~/.config/systemd/user/sparkwing-runner.service.
 # Start with:

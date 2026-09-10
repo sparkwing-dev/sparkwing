@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+
+
+
+
+
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+
+log()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
+warn() { printf "\033[33m==>\033[0m %s\n" "$*" >&2; }
+err()  { printf "\033[31m==>\033[0m %s\n" "$*" >&2; exit 1; }
+
+ask() {
+  local prompt="$1"
+  local default="${2:-}"
+  local answer
+  if [ -n "$default" ]; then
+    read -p "$prompt [$default]: " answer || true
+    echo "${answer:-$default}"
+  else
+    read -p "$prompt: " answer || true
+    echo "$answer"
+  fi
+}
+
+ask_secret() {
+  local prompt="$1"
+  local answer
+  read -s -p "$prompt: " answer || true
+  echo
+  echo "$answer"
+}
+
+# safety: every value below lands in a double-quoted YAML scalar, so a quote, backslash or control character could close the quote and inject config
+reject_unsafe_value() {
+  local label="$1"
+  local value="$2"
+  if [ "$value" != "$(printf '%s' "$value" | LC_ALL=C tr -d '"\\[:cntrl:]')" ]; then
+    err "$label contains a double quote, backslash, newline or control character. Remove it and re-run: the value is written into the runner config as a quoted YAML string."
+  fi
+}
+
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin) echo "macos" ;;
+    Linux)  echo "linux" ;;
+    MINGW*|MSYS*|CYGWIN*)
+      err "This service installer is for Linux and macOS.
+
+Run the native Windows agent manually under your service manager:
+
+  sparkwing-runner.exe agent --config %USERPROFILE%\\.config\\sparkwing\\agent.yaml
+
+Or run this installer inside WSL when systemd user services are enabled." ;;
+    *) err "unsupported platform: $(uname -s). Supported: Darwin (macOS), Linux." ;;
+  esac
+}
+
+
+NON_INTERACTIVE=false
+if [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]]; then
+  NON_INTERACTIVE=true
+fi
+
+BINARY_PATH="$(command -v sparkwing-runner || true)"
+if [ -z "$BINARY_PATH" ]; then
+  err "sparkwing-runner binary not found on PATH.
+
+Install it with one of:
+  go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
+  (then ensure \$GOPATH/bin or ~/go/bin is on your PATH)
+
+Or build from source and place the binary on your PATH."
+fi
+log "found binary: $BINARY_PATH"
+
+PLATFORM="$(detect_platform)"
+log "detected platform: $PLATFORM"
+
+if ! command -v docker >/dev/null 2>&1; then
+  warn "docker not found on PATH. Most sparkwing jobs need Docker -- install Docker Desktop / colima / rancher-desktop before running real work."
+fi
+
+
+if [ "$NON_INTERACTIVE" = false ]; then
+  log "configuring sparkwing-runner. Press enter to accept defaults."
+  echo
+fi
+
+CONTROLLER_URL="${SPARKWING_CONTROLLER:-}"
+LOGS_URL="${SPARKWING_LOGS:-}"
+GITCACHE_URL="${SPARKWING_GITCACHE_URL:-}"
+CACHE_TOKEN="${SPARKWING_CACHE_TOKEN:-}"
+API_TOKEN="${SPARKWING_API_TOKEN:-}"
+RUNNER_NAME="${RUNNER_NAME:-}"
+MAX_CONCURRENT="${MAX_CONCURRENT:-}"
+CONTRIBUTION="${SPARKWING_CONTRIBUTION:-50%,50%}"
+LOCAL_RESERVE="${SPARKWING_LOCAL_RESERVE:-}"
+
+if [ -z "$CONTROLLER_URL" ]; then
+  CONTROLLER_URL="$(ask 'Controller URL (e.g. https://controller.example.com)' '')"
+fi
+if [ -z "$LOGS_URL" ]; then
+  LOGS_URL="$(ask 'Logs service URL (e.g. https://logs.example.com)' '')"
+fi
+if [ -z "$API_TOKEN" ]; then
+  API_TOKEN="$(ask_secret 'API token (will not be echoed)')"
+fi
+if [ -z "$GITCACHE_URL" ]; then
+  GITCACHE_URL="${CONTROLLER_URL%/}/api/v1/gitcache"
+fi
+if [ -z "$API_TOKEN" ]; then
+  err "API token is required. Get one from your team's sparkwing admin."
+fi
+# safety: the token lands in a double-quoted YAML scalar, so an unfiltered value could close the quote and inject config
+if ! [[ "$API_TOKEN" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  err "API token contains unsupported characters. Allowed: letters, digits, underscore, dot, hyphen."
+fi
+if [ -z "$RUNNER_NAME" ]; then
+  DEFAULT_NAME="$(hostname -s | tr '[:upper:]' '[:lower:]')-runner"
+  RUNNER_NAME="$(ask 'Runner name (shown in dashboard)' "$DEFAULT_NAME")"
+fi
+if [ -z "$MAX_CONCURRENT" ]; then
+  MAX_CONCURRENT="$(ask 'Max concurrent jobs' '2')"
+fi
+
+reject_unsafe_value "Controller URL" "$CONTROLLER_URL"
+reject_unsafe_value "Logs service URL" "$LOGS_URL"
+reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
+reject_unsafe_value "Cache token" "$CACHE_TOKEN"
+reject_unsafe_value "Runner name" "$RUNNER_NAME"
+reject_unsafe_value "Contribution ceiling" "$CONTRIBUTION"
+reject_unsafe_value "Local reserve" "$LOCAL_RESERVE"
+
+log ""
+log "config summary:"
+log "  binary:         $BINARY_PATH"
+log "  controller:     $CONTROLLER_URL"
+log "  logs:           $LOGS_URL"
+log "  gitcache:       $GITCACHE_URL"
+log "  runner name:    $RUNNER_NAME"
+log "  max concurrent: $MAX_CONCURRENT"
+log "  contribution:   $CONTRIBUTION"
+log ""
+
+if [ "$NON_INTERACTIVE" = false ]; then
+  read -p "Install with these settings? [y/N] " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    err "aborted by user"
+  fi
+fi
+
+
+SPARKWING_HOME="${HOME}/.sparkwing"
+LOG_PATH="${SPARKWING_HOME}/runner.log"
+mkdir -p "$SPARKWING_HOME"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
+CONFIG_PATH="${CONFIG_DIR}/agent.yaml"
+mkdir -p "$CONFIG_DIR"
+# safety: create the file at mode 600 first so the token is never readable, however permissive the umask
+install -m 600 /dev/null "$CONFIG_PATH"
+cat > "$CONFIG_PATH" <<YAML
+controller: "${CONTROLLER_URL}"
+logs: "${LOGS_URL}"
+gitcache: "${GITCACHE_URL}"
+cache_token: "${CACHE_TOKEN}"
+token: "${API_TOKEN}"
+max_concurrent: ${MAX_CONCURRENT}
+holder_prefix: "${RUNNER_NAME}"
+contribution: "${CONTRIBUTION}"
+local_admission: true
+local_reserve: "${LOCAL_RESERVE}"
+YAML
+log "wrote $CONFIG_PATH (mode 600)"
+
+if [ "$PLATFORM" = "macos" ]; then
+  TEMPLATE="${SCRIPT_DIR}/macos/com.sparkwing.runner.plist.template"
+  [ -f "$TEMPLATE" ] || err "missing template: $TEMPLATE"
+
+  PLIST_DIR="${HOME}/Library/LaunchAgents"
+  PLIST_PATH="${PLIST_DIR}/com.sparkwing.runner.plist"
+  mkdir -p "$PLIST_DIR"
+
+  if launchctl list com.sparkwing.runner >/dev/null 2>&1; then
+    log "unloading existing LaunchAgent..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+  fi
+
+  sed \
+    -e "s|__BINARY_PATH__|${BINARY_PATH}|g" \
+    -e "s|__CONFIG_PATH__|${CONFIG_PATH}|g" \
+    -e "s|__HOME__|${HOME}|g" \
+    -e "s|__LOG_PATH__|${LOG_PATH}|g" \
+    "$TEMPLATE" > "$PLIST_PATH"
+
+  chmod 600 "$PLIST_PATH"
+  log "wrote $PLIST_PATH (mode 600)"
+
+  log "loading LaunchAgent..."
+  launchctl load "$PLIST_PATH"
+
+  log ""
+  log "sparkwing-runner is now running as a LaunchAgent."
+  log ""
+  log "Useful commands:"
+  log "  tail -f $LOG_PATH                                # view runner logs"
+  log "  launchctl list | grep sparkwing                  # see running state"
+  log "  launchctl unload ~/Library/LaunchAgents/com.sparkwing.runner.plist   # pause"
+  log "  launchctl load   ~/Library/LaunchAgents/com.sparkwing.runner.plist   # resume"
+  log "  rm ~/Library/LaunchAgents/com.sparkwing.runner.plist                 # uninstall (after unload)"
+
+elif [ "$PLATFORM" = "linux" ]; then
+  TEMPLATE="${SCRIPT_DIR}/linux/sparkwing-runner.service.template"
+  [ -f "$TEMPLATE" ] || err "missing template: $TEMPLATE"
+
+  UNIT_DIR="${HOME}/.config/systemd/user"
+  UNIT_PATH="${UNIT_DIR}/sparkwing-runner.service"
+  mkdir -p "$UNIT_DIR"
+
+  sed \
+    -e "s|__BINARY_PATH__|${BINARY_PATH}|g" \
+    -e "s|__CONFIG_PATH__|${CONFIG_PATH}|g" \
+    "$TEMPLATE" > "$UNIT_PATH"
+
+  log "wrote $UNIT_PATH"
+
+  log "reloading systemd user units..."
+  systemctl --user daemon-reload
+
+  log "enabling and starting sparkwing-runner..."
+  systemctl --user enable --now sparkwing-runner
+
+  log ""
+  log "sparkwing-runner is now running as a systemd user service."
+  log ""
+  log "Useful commands:"
+  log "  journalctl --user -u sparkwing-runner -f             # view runner logs"
+  log "  systemctl --user status sparkwing-runner             # see running state"
+  log "  systemctl --user stop sparkwing-runner               # pause"
+  log "  systemctl --user start sparkwing-runner              # resume"
+  log "  systemctl --user disable --now sparkwing-runner      # uninstall"
+  log "  rm ~/.config/systemd/user/sparkwing-runner.service   # remove unit file"
+  log ""
+  log "Note: if you want the runner to keep running when you log out,"
+  log "enable lingering with 'loginctl enable-linger \$USER' as root."
+fi
+
+log ""
+log "done! The runner will now contribute idle capacity to your team's controller."

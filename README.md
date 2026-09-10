@@ -19,6 +19,10 @@ the matching release binary from
 
 For a specific version: `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --version vX.Y.Z`.
 
+The script verifies the release signature over `SHA256SUMS` and over the
+binary before installing either, and installs nothing that fails. It
+needs OpenSSL 3.0 or newer.
+
 Building from source via `go install` is supported, but the Next.js
 dashboard bundle is a generated artifact and is not checked into the
 repository, so a source build will refuse to start `sparkwing serve`

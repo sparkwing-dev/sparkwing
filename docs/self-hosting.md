@@ -60,7 +60,7 @@ After a controller is running, a Linux or macOS workstation can run
 
 ```bash
 go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
-bash install/install.sh
+bash install/service-install.sh
 ```
 
 GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
@@ -99,7 +99,7 @@ RUNNER_NAME=dev-laptop \
 MAX_CONCURRENT=2 \
 SPARKWING_CONTRIBUTION='4,8gb' \
 SPARKWING_LOCAL_RESERVE='1,2gb' \
-bash install/install.sh --yes
+bash install/service-install.sh --yes
 ```
 
 `SPARKWING_CONTRIBUTION` and `SPARKWING_LOCAL_RESERVE` use the same machine
