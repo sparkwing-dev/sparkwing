@@ -340,3 +340,13 @@ func isFileModeConversion(fun ast.Expr) bool {
 	}
 	return false
 }
+
+func TestParseRepoFailsAFileItCannotParse(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "broken.go"), []byte("package x\nfunc Bad( {\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseRepo(root); err == nil {
+		t.Fatal("parseRepo returned no error for a file go/parser rejected, so the guard would judge a file it never read")
+	}
+}

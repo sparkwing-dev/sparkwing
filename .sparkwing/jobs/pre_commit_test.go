@@ -888,3 +888,20 @@ func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
 		})
 	}
 }
+
+func TestTrackerIDPatternKeepsTheOtherPrefixesUppercaseOnly(t *testing.T) {
+	refused := []string{"IMP-12", "SDK-3", "TOD-9", "BW-1", "bw-1", "Bw-1"}
+	for _, s := range refused {
+		if !trackerIDPattern.MatchString("see " + s + " for context") {
+			t.Errorf("%q was not refused", s)
+		}
+	}
+	// safety: the case-insensitive group covers BW alone; a lowercase spelling
+	// of any other prefix is ordinary prose and must stay allowed.
+	allowed := []string{"imp-12", "sdk-3", "tod-9", "run-3", "Imp-12", "BWT-789", "abw-12", "bw_12"}
+	for _, s := range allowed {
+		if trackerIDPattern.MatchString("see " + s + " for context") {
+			t.Errorf("%q was refused; the case-insensitive group leaked past BW", s)
+		}
+	}
+}

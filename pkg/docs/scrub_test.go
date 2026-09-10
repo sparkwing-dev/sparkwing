@@ -14,7 +14,7 @@ var scrubPatterns = []struct {
 	why     string
 }{
 	{
-		"ticket identifier", regexp.MustCompile(`\bBW-\d+\b`),
+		"ticket identifier", regexp.MustCompile(`(?i)\bBW-\d+\b`),
 		"a page that cites a ticket is not self-contained; a reader outside the tracker cannot follow it",
 	},
 	{

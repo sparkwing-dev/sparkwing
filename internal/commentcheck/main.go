@@ -473,8 +473,10 @@ func parseAddedLines(diff string) map[string]map[int]bool {
 	return added
 }
 
-// onlyChanged keeps the files the scoped diff touched, because an unparseable
-// file outside the scope is not something this run claimed to judge.
+// safety: an unparseable file outside the scope is not something this run
+// claimed to judge. This asks whether the diff names the file, not whether it
+// added lines: a change that only deletes lines is the one most likely to
+// break parsing.
 func onlyChanged(unread []unreadable, root string, added map[string]map[int]bool) []unreadable {
 	var out []unreadable
 	for _, u := range unread {
@@ -482,7 +484,7 @@ func onlyChanged(unread []unreadable, root string, added map[string]map[int]bool
 		if err != nil {
 			rel = u.file
 		}
-		if len(added[rel]) > 0 {
+		if _, touched := added[rel]; touched {
 			out = append(out, u)
 		}
 	}
@@ -533,13 +535,18 @@ func report(violations []violation) {
 	fmt.Print(advice)
 }
 
-// unreadableFailure explains why a file the parser rejected fails the run: such
-// a file carries no verdict, and a gate that passes it reports health it never
-// established.
+// safety: a file the parser rejected carries no verdict, and a gate that
+// passes it reports health it never established.
 func unreadableFailure(unread []unreadable) string {
 	lines := make([]string, len(unread))
 	for i, u := range unread {
-		lines[i] = fmt.Sprintf("%s: %v", u.file, u.err)
+		// safety: a go/parser error already opens with file:line:col, so naming
+		// the file again would print it twice.
+		text := u.err.Error()
+		if !strings.Contains(text, u.file) {
+			text = u.file + ": " + text
+		}
+		lines[i] = text
 	}
 	sort.Strings(lines)
 	return fmt.Sprintf("%s\n\ncommentcheck: %d file(s) could not be parsed, so this run reached no verdict on them.\n"+

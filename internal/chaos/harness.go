@@ -853,24 +853,22 @@ func (h *Harness) cleanup() {
 	}
 }
 
-// errResidentsUnsupported reports that the platform exposes no way to read a
-// process's environment, so no verdict on the isolated home is available.
+// safety: a platform with no way to read a process environment yields no
+// verdict on the isolated home, which is not the same as a clean teardown.
 var errResidentsUnsupported = errors.New("reading a process environment is unsupported on this platform")
 
-// assertHomeQuiet fails a soak that left a process holding the isolated home.
-// A daemon the CLI auto-starts detaches into its own session, so owned-group
-// and session accounting never see it; the home it was started against is the
-// one handle that still names it.
+// safety: a daemon the CLI auto-starts detaches into its own session, so
+// owned-group and session accounting never see it. The home it was started
+// against is the one handle that still names it.
 func (h *Harness) assertHomeQuiet() {
 	if violations := h.homeResidentViolations(); len(violations) > 0 {
 		h.fail("home-residents", violations, wingwire.QueueState{})
 	}
 }
 
-// homeResidentViolations names every process still holding the isolated home,
-// and names a failed inspection too, because a scan that reached no verdict is
-// not a clean teardown. It waits out the settle window first, so a process on
-// its way out is not charged as a leak.
+// safety: a failed inspection is a violation too, because a scan that reached
+// no verdict is not a clean teardown. The settle window runs first so a process
+// on its way out is not charged as a leak.
 func (h *Harness) homeResidentViolations() []string {
 	read := h.residentReader
 	if read == nil {
@@ -882,6 +880,8 @@ func (h *Harness) homeResidentViolations() []string {
 		found, err := read(h.home)
 		if errors.Is(err, errResidentsUnsupported) {
 			h.jr.Append(Event{Kind: "home-residents", Detail: "no verdict on " + runtime.GOOS})
+			h.t.Logf("chaos: no way to read a process environment on %s, so teardown reached no verdict on %s",
+				runtime.GOOS, h.home)
 			return nil
 		}
 		if err != nil {
