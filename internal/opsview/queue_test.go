@@ -281,6 +281,31 @@ func TestRenderQueue_SeparatesConnectionsFromResourceHolders(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePretty_CountsARunningPipelineOnce(t *testing.T) {
+	qs := wingwire.QueueState{Holders: []wingwire.Holder{
+		{RunID: "run-active", Pipeline: "pre-push", ConnectionOnly: true},
+		{
+			RunID:         "run-active",
+			ParticipantID: "run-active/node-host/dGVzdA",
+			DisplayRunID:  "run-active/pre-push",
+			Pipeline:      "pre-push",
+			Resources:     wingwire.HostResources{Cores: 4},
+		},
+	}}
+
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "1 holding, 1 connected, 0 queued") {
+		t.Fatalf("one running pipeline was not counted once:\n%s", out)
+	}
+	if strings.Count(out, "run-active") != 2 {
+		t.Fatalf("the pipeline was not rendered once as a holder and once as a connection:\n%s", out)
+	}
+}
+
 func TestRenderQueuePretty_ShowsCapacityChangeAndRunners(t *testing.T) {
 	qs := wingwire.QueueState{
 		CapacityChange: &wingwire.CapacityChange{FromCores: 4, ToCores: 8},

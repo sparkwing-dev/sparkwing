@@ -43,7 +43,9 @@ func sideloadRun(ctx context.Context, st *store.Store, c *client.Client, runID s
 		return fmt.Errorf("sideload run %s: %w", runID, err)
 	}
 	if remote.Status != "running" && remote.Status != "" {
-		_ = st.FinishRun(ctx, remote.ID, remote.Status, remote.Error)
+		if err := st.FinishRun(ctx, remote.ID, remote.Status, remote.Error); err != nil {
+			noteLostStateWrite(ctx, "finish run", remote.ID, err)
+		}
 	}
 	return nil
 }

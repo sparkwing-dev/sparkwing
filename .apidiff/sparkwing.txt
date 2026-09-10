@@ -1,6 +1,5 @@
 # sparkwing
 
-func AcquireLintSlot(tool string) (*LintSlot, error)
 type AfterRunFn func(ctx context.Context, err error)
 func Always() Predicate
 func And(preds ...Predicate) Predicate
@@ -384,17 +383,6 @@ func KeyFromFile(path string) KeySource
 type KeySource struct {
 }
 func LintCacheBlobKey() string
-type LintSlot struct {
-	Path string
-
-	Cache string
-
-	Canonical bool
-}
-func (s *LintSlot) Configure(c *Cmd, cacheVar string) *Cmd
-func (s *LintSlot) ConfigureIn(c *Cmd, rel, cacheVar string) *Cmd
-func (s *LintSlot) Release()
-const LintSlotsEnv = "SPARKWING_LINT_SLOTS"
 type LintWarning struct {
 	NodeID string
 	Code   string
@@ -543,6 +531,7 @@ type Ref[T any] struct {
 }
 func (r Ref[T]) Get(ctx context.Context) T
 func (r Ref[T]) Job() string
+func (r Ref[T]) TryGet(ctx context.Context) (T, bool)
 type RefOption func(*refOpts)
 type RefTarget struct {
 	Pipeline string
@@ -897,6 +886,8 @@ func (p orPredicate) String() string
 func (p profilePredicate) Eval(ctx PredicateContext) bool
 func (p profilePredicate) String() string
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
+func (m *refMiss) Error() string
+func (m *refMiss) Unwrap() error
 func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error)
 func (remotePredicate) Eval(ctx PredicateContext) bool
 func (remotePredicate) String() string

@@ -267,7 +267,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.Fleet {
 		payload := fleetSourceSnapshotPayload(opts)
 		if err := backends.State.AppendEvent(ctx, runID, "", "fleet_source_snapshot", payload); err != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("record fleet source snapshot: %v", err))
+			if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("record fleet source snapshot: %v", err)); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 	}
@@ -275,7 +277,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		handle := NewRunHandle(runID, opts.Pipeline, localRunLogDir(backends.Logs, runID), "running")
 		if err := PublishRunHandle(opts.RunHandlePath, handle); err != nil {
 			msg := fmt.Sprintf("publish run handle: %v", err)
-			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, "failed", msg)
+			if err := backends.State.FinishRun(context.WithoutCancel(ctx), runID, "failed", msg); err != nil {
+				noteLostStateWrite(context.WithoutCancel(ctx), "finish run", runID, err)
+			}
 			return nil, errors.New(msg)
 		}
 	}
@@ -299,7 +303,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err))
+		if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err)); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
@@ -327,40 +333,54 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			} else {
 				err = fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", opts.RetryPlanHash, actual)
 			}
-			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 	}
 
 	snapshot, err := marshalPlanSnapshot(plan, rc, snapMeta)
 	if err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan snapshot: %v", err))
+		if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan snapshot: %v", err)); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 	if err := backends.State.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("persist snapshot: %v", err))
+		if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("persist snapshot: %v", err)); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 	for _, n := range plan.Nodes() {
 		if err := backends.State.CreateNode(ctx, pendingStoreNode(runID, n, snapMeta.PipelineRequires)); err != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
+			if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err)); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 	}
 
 	if err := validatePlanModifiers(opts.Delegate, plan); err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 
 	if opts.StartAt != "" || opts.StopAt != "" {
 		if opts.Only != "" {
 			err := fmt.Errorf("--only is mutually exclusive with --start-at / --stop-at")
-			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 		if err := sparkwingruntime.ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 		ctx = sparkwingruntime.WithStepRange(ctx, opts.StartAt, opts.StopAt)
@@ -369,7 +389,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if opts.Only != "" {
 		skip, err := computeOnlySkip(plan, opts.Only)
 		if err != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 		onlySkip = skip
@@ -390,7 +412,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	ctx = secrets.WithMasker(ctx, masker)
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", rerr.Error())
+		if err := backends.State.FinishRun(ctx, runID, "failed", rerr.Error()); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
 		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil
 	} else if resolver != nil {
 		ctx = sparkwing.WithSecretResolver(ctx,
@@ -401,7 +425,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	pipelineSecrets, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, opts.PipelineYAML)
 	if err != nil {
-		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		if err := backends.State.FinishRun(ctx, runID, "failed", err.Error()); err != nil {
+			noteLostStateWrite(ctx, "finish run", runID, err)
+		}
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 	if pipelineSecrets != nil {
@@ -465,7 +491,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 				opts.standalone.refused = true
 			}
 			status := statusForRunError(admitErr)
-			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error())
+			if err := backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error()); err != nil {
+				noteLostStateWrite(context.WithoutCancel(ctx), "finish run", runID, err)
+			}
 			if opts.Delegate != nil {
 				attrs := map[string]any{
 					"run_id": runID,
@@ -509,7 +537,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var err error
 		fleetAuthority, r, err = fleetRuntime.start(runID, &opts, r, nil)
 		if err != nil {
-			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("start fleet coordinator: %v", err))
+			if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("start fleet coordinator: %v", err)); err != nil {
+				noteLostStateWrite(ctx, "finish run", runID, err)
+			}
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 		// safety: foreground resources outlive dispatch, durable FinishRun, and
@@ -930,7 +960,7 @@ func dispatch(
 			"stuck_nodes": stuck,
 			"stack_bytes": len(stack),
 		})
-		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_wait_timeout", summary)
+		noteEvent(ctx, backends.State, runID, "", "dispatch_wait_timeout", summary)
 		if delegate != nil {
 			delegate.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
@@ -1716,7 +1746,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 			payload, _ := json.Marshal(attrs)
 			payload = maskEventPayload(s.masker, payload)
-			_ = s.backends.State.AppendEvent(context.WithoutCancel(ctx), s.runID, currentNode, "child_run_finish", payload)
+			noteEvent(context.WithoutCancel(ctx), s.backends.State, s.runID, currentNode, "child_run_finish", payload)
 		}
 
 		if currentNode != "" {
@@ -2269,7 +2299,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
 		return
 	}
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, exp.Source.ID(), "expansion_generated",
+	noteEvent(s.ctx, s.backends.State, s.runID, exp.Source.ID(), "expansion_generated",
 		fmt.Appendf(nil, "%d children", len(children)))
 
 	expandedNodes := make([]*sparkwing.JobNode, 0, len(children)*2)
@@ -2568,7 +2598,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 				msg = fmt.Sprintf("auto-retry dispatch %d/%d after %s", ordinal, budget, wait)
 			}
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("info", msg)
-			_ = s.backends.State.AppendEvent(s.ctx, s.runID, node.ID(), "node_auto_retry",
+			noteEvent(s.ctx, s.backends.State, s.runID, node.ID(), "node_auto_retry",
 				fmt.Appendf(nil, "dispatch %d/%d", ordinal, budget))
 			if wait > 0 {
 				select {
@@ -2677,7 +2707,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 		"reason":     reason,
 		"expires_at": pause.ExpiresAt,
 	})
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_paused", payload)
+	noteEvent(s.ctx, s.backends.State, s.runID, nodeID, "node_paused", payload)
 
 	ticker := time.NewTicker(debugPausePollInterval)
 	defer ticker.Stop()
@@ -2694,7 +2724,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 		if time.Now().After(p.ExpiresAt) {
 			_ = s.backends.State.ReleaseDebugPause(s.ctx, s.runID, nodeID,
 				"orchestrator", store.PauseReleaseTimeout)
-			_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID,
+			noteEvent(s.ctx, s.backends.State, s.runID, nodeID,
 				"node_paused_timeout", nil)
 			break
 		}
@@ -2707,7 +2737,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 	}
 	// safety: "pending" is safe here; StartNode promotes it and FinishNode overwrites it.
 	_ = s.backends.State.SetNodeStatus(s.ctx, s.runID, nodeID, "pending")
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_resumed", nil)
+	noteEvent(s.ctx, s.backends.State, s.runID, nodeID, "node_resumed", nil)
 	return false
 }
 
@@ -2719,7 +2749,7 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 			res.Err = err
 			// safety: the store cannot reopen the runner's terminal row, so this
 			// in-memory correction must govern downstream scheduling.
-			_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(err.Error()))
+			noteEvent(s.ctx, s.backends.State, s.runID, nodeID, "node_failed", []byte(err.Error()))
 		}
 	}
 	if res.Err != nil {
@@ -2755,7 +2785,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	if err := s.backends.State.StartNode(s.ctx, s.runID, node.ID()); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, node.ID(), "node_started", nil)
+	noteEvent(s.ctx, s.backends.State, s.runID, node.ID(), "node_started", nil)
 	nodeStartTS := time.Now()
 	nodeLog.Emit(sparkwing.LogRecord{
 		TS:    nodeStartTS,
@@ -2783,7 +2813,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 		"message":    cfg.Message,
 		"timeout_ms": timeoutMS,
 	})
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, node.ID(), "approval_requested", reqPayload)
+	noteEvent(s.ctx, s.backends.State, s.runID, node.ID(), "approval_requested", reqPayload)
 	nodeLog.Emit(sparkwing.LogRecord{
 		TS:    time.Now(),
 		Level: "info",
@@ -3093,8 +3123,10 @@ func scaledBackoff(initial time.Duration, attempt int) time.Duration {
 
 func (s *dispatchState) markFailed(nodeID string, reason error) {
 	text := boundedFailureText(s.ctx, s.runID, nodeID, reason)
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), text, nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(text))
+	if err := s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), text, nil); err != nil {
+		noteLostStateWrite(s.ctx, "finish node", s.runID, err)
+	}
+	noteEvent(s.ctx, s.backends.State, s.runID, nodeID, "node_failed", []byte(text))
 	appendFailureExcerptEvent(s.ctx, s.backends.State, s.runID, nodeID, reason)
 	s.setOutcome(nodeID, sparkwing.Failed)
 }
@@ -3103,15 +3135,19 @@ func (s *dispatchState) markCancelled(nodeID, reason string) {
 	// safety: the common caller has just observed the run context Done, and a
 	// store write on a cancelled context never reaches the driver.
 	ctx := context.WithoutCancel(s.ctx)
-	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil)
-	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_cancelled", []byte(reason))
+	if err := s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil); err != nil {
+		noteLostStateWrite(ctx, "finish node", s.runID, err)
+	}
+	noteEvent(ctx, s.backends.State, s.runID, nodeID, "node_cancelled", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Cancelled)
 }
 
 func (s *dispatchState) markRunCancelled(nodeID string) {
 	ctx := context.WithoutCancel(s.ctx)
-	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), "cancelled: run failing", nil)
-	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_cancelled", []byte("cancelled: run failing"))
+	if err := s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), "cancelled: run failing", nil); err != nil {
+		noteLostStateWrite(ctx, "finish node", s.runID, err)
+	}
+	noteEvent(ctx, s.backends.State, s.runID, nodeID, "node_cancelled", []byte("cancelled: run failing"))
 	s.setOutcome(nodeID, sparkwing.Cancelled)
 }
 
@@ -3131,8 +3167,10 @@ func (s *dispatchState) markSkipped(nodeID, reason string) {
 	// safety: an OnFailure child whose parent was cancelled reaches this from a
 	// select that races the run context, so the write outlives a cancelled run.
 	ctx := context.WithoutCancel(s.ctx)
-	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Skipped), reason, nil)
-	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_skipped", []byte(reason))
+	if err := s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Skipped), reason, nil); err != nil {
+		noteLostStateWrite(ctx, "finish node", s.runID, err)
+	}
+	noteEvent(ctx, s.backends.State, s.runID, nodeID, "node_skipped", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Skipped)
 }
 

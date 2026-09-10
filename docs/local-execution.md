@@ -353,6 +353,16 @@ Steps do not get to daemonize by accident: a process that leaves its step
 session with `setsid` is outside the ledger's view, and that is the one
 unsupported way to outlive a run.
 
+An interrupted job is stopped, not unwound. The commands its steps started do
+end, because the job kills their sessions as described above, but nothing
+inside the step's own Go code runs: the signal does not arrive there as a
+cancelled context, so a `defer` does not fire and neither does a `select` on
+`ctx.Done()`. That is what `runs bounce` rests on -- the supervisor records the
+outcome, and the killed job writes no terminal row of its own. Teardown
+therefore belongs in the ledger rather than in a `defer`: start a resource as a
+step command so its session is reaped, or register a cleanup command for
+anything that lives outside that tree.
+
 Resources a step starts *outside* its process tree -- a container, a Kind
 cluster, a Helm release -- are core's blind spot: they live in another daemon,
 not in the session the sweep kills. A sparks library that starts one registers
@@ -1297,6 +1307,16 @@ machine:
   when the daemon answered, so their emptiness means nothing on its own.
   An unreachable daemon is never a clean bill, and the run-row repair is
   skipped there rather than risk finalizing a run that daemon is holding.
+  A daemon that accepts connections and answers nothing is reported as
+  wedged, with the socket it holds. Such a daemon arbitrates nothing and no
+  successor can bind that socket. `sparkwing daemon restart` cannot replace
+  it, because the drain needs a handshake it will not answer, so the report
+  names the commands that do: `lsof` on the socket finds the process,
+  `SIGUSR1` makes it dump its goroutines to `wingd/d.log`, and then it is
+  stopped. `--timeout` bounds the daemon and local-state checks and each
+  takes a slice of it, so an unanswering daemon leaves the rest of the
+  report its budget. It defaults to 10 seconds; a sweep that runs out
+  prints what it reached alongside the error.
   Standing problems it cannot safely repair -- repeated admission
   rejections, a daemon version skew, a contention-poisoned capacity
   profile, a daemon serving another sparkwing home at a version no

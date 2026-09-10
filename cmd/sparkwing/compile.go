@@ -17,25 +17,45 @@ import (
 )
 
 func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
-	if err := resolveSparks(context.Background(), sparkwingDir, opts); err != nil {
+	ctx, stopSignals, raiseInterrupt := interruptContext()
+	defer stopSignals()
+	err := prepareAndExec(ctx, stopSignals, sparkwingDir, args, env, opts)
+	if ctx.Err() != nil {
+		stopSignals()
+		// safety: does not return on a platform that can re-raise, so the CLI
+		// dies from the signal rather than reporting it as a failed run.
+		raiseInterrupt()
+	}
+	return err
+}
+
+func prepareAndExec(
+	ctx context.Context,
+	stopSignals func(),
+	sparkwingDir string,
+	args, env []string,
+	opts compileOptions,
+) error {
+	if err := resolveSparks(ctx, sparkwingDir, opts); err != nil {
 		return err
 	}
 
 	env = withWingdHost(env)
 
 	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
+		stopSignals()
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 
 	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
 	if err != nil {
+		stopSignals()
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
 	source := "cached"
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
 		if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
@@ -64,7 +84,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 				return compileErr
 			}
 			fmt.Fprintln(os.Stderr, color.Dim("==> populating go.sum (`go mod download`) and retrying compile..."))
-			if dlErr := runGo(sparkwingDir, []string{"mod", "download"}, env); dlErr != nil {
+			if dlErr := bincache.RunGo(ctx, sparkwingDir, []string{"mod", "download"}, env); dlErr != nil {
 				return fmt.Errorf("recovery `go mod download` failed: %w", dlErr)
 			}
 			if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath); compileErr != nil {
@@ -88,6 +108,12 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	lease.RecordUse(sparkwingDir, keyParts)
 	ensureDescribeCache(sparkwingDir, key, lease.Path())
 	env = append(env, "SPARKWING_BINARY_SOURCE="+source)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// safety: the pipeline binary drives the terminal from here, so the CLI
+	// must stop catching signals it can no longer act on for that program.
+	stopSignals()
 	if fleetExecutionEnv(env) {
 		return runExec(lease.Path(), args, sparkwingDir, env)
 	}

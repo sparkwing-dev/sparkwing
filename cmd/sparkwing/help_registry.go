@@ -130,6 +130,9 @@ toolchain is on PATH, a curated list of next-step commands, and
 the docs URL. When a project declares a git hook that is not
 firing, repairing it is the first next step.
 
+If the pipeline catalog cannot be read, JSON reports project.pipelines_error.
+Pipeline counts are unavailable when that field is present.
+
 Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).`,
@@ -1331,7 +1334,7 @@ listings. --short sets its description.`,
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
 		{Name: "template", Argument: "SHAPE", Desc: "DAG to scaffold: minimal (1 node) | build-test-deploy (3) | ci-pr-check (3) | release (3) | scheduled-report (5)", Default: "minimal", Group: "Scaffold"},
-		{Name: "on", Argument: "EVENT", Desc: "Trigger(s) to declare: pull_request | push | schedule | manual (repeatable or comma-separated)", Default: "the shape's own", Group: "Scaffold"},
+		{Name: "on", Argument: "EVENT", Desc: "Trigger(s) to declare: pull_request | push | schedule | pre_commit | pre_push | post_commit | manual (repeatable or comma-separated)", Default: "the shape's own", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
 		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line", Group: "Scaffold"},
 	},
@@ -1437,8 +1440,13 @@ environment reads there are idiomatic and never flagged.
 The rule set (see --rules for each rule's charter):
   plan-io              I/O (shell, exec, file, http) in Plan()
   plan-runtime-branch  os.Getenv / runtime.GOOS / IsLocal branching in Plan()
-  runner-label         blank runner labels; Inline + Requires on one job
+  runner-label         blank Requires/Prefers/WhenRunner labels; Inline +
+                       Requires on one job
   unused-ref           a RefTo result discarded into _ or a bare statement
+  group-cache-shared   Memoize on a fan-out or group, whose members then
+                       share one cache entry
+  dynamic-group-inert  a JobGroup setter on a JobFanOutDynamic result, which
+                       has no members to apply it to
   guard-misuse         pipeline guards that can never be satisfied together
 
 With no target it sweeps every pipeline in .sparkwing/sparkwing.yaml
@@ -1781,17 +1789,26 @@ version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
 
 Standalone stores are listed with run counts and the oldest run's age.
-Inspect their records before deleting a store directory.`,
+Inspect their records before deleting a store directory.
+
+--timeout bounds the daemon and local-state checks, each taking a slice of it,
+so a daemon that accepts connections and answers nothing is reported as wedged
+rather than spending the whole budget. Recovering a wedged daemon means
+stopping the process holding its socket; a restart needs a handshake it will
+not answer. When the budget runs out mid-sweep, doctor prints what it reached
+alongside the error.`,
 	Flags: []FlagSpec{
 		{Name: "dry-run", Desc: "Report what would be repaired without changing anything", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+		{Name: "timeout", Argument: "DURATION", Desc: "Budget for the daemon and local-state checks; each takes a slice of it", Default: "10s", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Diagnose and repair now", "sparkwing doctor"},
 		{"Report without changing anything", "sparkwing doctor --dry-run"},
 		{"Agent-readable report", "sparkwing doctor -o json"},
+		{"Answer quickly on a machine that is already stuck", "sparkwing doctor --timeout 3s"},
 	},
 }
 
@@ -1996,7 +2013,7 @@ scope arrays, suitable for piping into jq.`,
 	Examples: []Example{
 		{"List all active tokens", "sparkwing cluster tokens list --profile prod"},
 		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked --profile prod"},
-		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal==\"agent:fictional-runner\") | .scopes'"},
+		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq 'select(.principal==\"agent:fictional-runner\") | .scopes'"},
 	},
 }
 
@@ -2814,7 +2831,9 @@ var cmdHooksSurvey = Command{
 	Synopsis: "Report effective gates for registered repositories",
 	Description: `Reports declared hooks for every registered repository as armed, shadowed,
 uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
-selects another location.
+selects another location. The STATE column reads no-gate where every declared
+hook fires and none of them is pre-commit or pre-push, because nothing there
+refuses a commit or a push.
 
 Coverage includes registered repositories and configured fallback paths.
 Register other checkouts before expecting them in the report. An unreadable

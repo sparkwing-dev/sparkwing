@@ -44,13 +44,14 @@ const toolCacheRoot = "sparkwing-toolcache"
 // run can print "0 issues" and still leave path-bearing issues behind.
 // Seeding is only sound between trees at the same absolute path.
 //
-// [AcquireLintSlot] is how a worktree gets that same absolute path.
-// It lends the run a stable path that leads to the worktree, so a
-// cache can be reused between worktrees without any of the above,
-// and falls back to this directory when no slot is free. Prefer it
-// for a lint step; this function remains the right answer for a tool
-// that is not being shared and for a fixed-workdir runner, where the
-// workdir is already stable and [RestoreLintCache] seeds it.
+// Lending the run a stable alias -- a symlink every worktree lints
+// through -- does not rescue it either. git resolves the alias and
+// reports the real worktree as the repository root, so findings the
+// linter recorded under the alias sit outside the diff and a baseline
+// such as golangci-lint's new-from-merge-base drops every one: a tree
+// with eight findings lints clean. A per-worktree cache is the whole
+// answer. A fixed-workdir runner already has a stable path, and
+// [RestoreLintCache] seeds this directory for it.
 //
 // Running two lint jobs at once is a different problem, and a scoped
 // cache does not touch it. golangci-lint takes its parallel-runner

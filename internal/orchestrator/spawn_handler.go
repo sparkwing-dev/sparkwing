@@ -85,7 +85,7 @@ func admitSpawnChild(a spawnAdmission, parentNodeID, spawnID string, job sparkwi
 	if err := a.state.CreateNode(a.writeCtx, pendingStoreNode(a.runID, child, a.pipelineRequires)); err != nil {
 		return nil, fmt.Errorf("orchestrator: persist spawn child row %q: %w", childID, err)
 	}
-	_ = a.state.AppendEvent(a.writeCtx, a.runID, parentNodeID, "spawn_dispatched", []byte(childID))
+	noteEvent(a.writeCtx, a.state, a.runID, parentNodeID, "spawn_dispatched", []byte(childID))
 	return child, nil
 }
 
