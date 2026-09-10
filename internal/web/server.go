@@ -59,12 +59,12 @@ running bin/build-web.sh first produces a binary that compiles cleanly
 but serves a silent 404 on every dashboard page.
 
 To run the dashboard locally, install the sparkwing release binary and
-use the dashboard subcommand -- not "go install":
+use the serve subcommand -- not "go install":
 
   curl -L -o sparkwing \
     https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-linux-amd64
   chmod +x sparkwing && sudo mv sparkwing /usr/local/bin/sparkwing
-  sparkwing dashboard start
+  sparkwing serve start
 
 Release binaries for every platform are listed at:
 

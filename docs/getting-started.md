@@ -45,14 +45,14 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 ```
 
 This installs the `sparkwing` binary, which is the single CLI for
-both admin / inspection (`sparkwing dashboard start`,
+both admin / inspection (`sparkwing serve start`,
 `sparkwing pipeline list`) and pipeline invocation
 (`sparkwing run <pipeline>`).
 
 > **Note:** `go install` does not include the Next.js dashboard
 > bundle, which is a generated artifact and not checked into the
 > repository. A source-built binary will refuse to start
-> `sparkwing dashboard` with a clear message pointing back to the
+> `sparkwing serve` with a clear message pointing back to the
 > release binary. CLI-only commands (`run`, `pipeline`, `runs`, etc.)
 > work fine. If you want the dashboard from a source checkout, run
 > `bash bin/build-web.sh` first to generate the bundle, then
@@ -62,7 +62,7 @@ both admin / inspection (`sparkwing dashboard start`,
 
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
-embed the dashboard bundle, so `sparkwing dashboard start` runs locally
+embed the dashboard bundle, so `sparkwing serve start` runs locally
 just as it does on macOS/Linux. Download the one for your architecture,
 rename it to `sparkwing.exe`, and put it on PATH. Install
 [Git for Windows](https://git-scm.com/download/win) as well -- pipelines
@@ -77,7 +77,7 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 
 A source build does not include the Next.js dashboard bundle (it is a
 generated artifact, not checked into the repository), so
-`sparkwing dashboard start` on a source-built CLI refuses to start unless
+`sparkwing serve start` on a source-built CLI refuses to start unless
 you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
@@ -96,7 +96,7 @@ sparkwing pipeline new --name release   # single-node minimal template by defaul
 sparkwing run release
 
 # 3. (Optional) Watch runs in the browser
-sparkwing dashboard start    # detached local dashboard + API on :4343
+sparkwing serve start    # detached local dashboard + API on :4343
 ```
 
 For a build/test/deploy DAG instead of a single node, pass
@@ -125,10 +125,10 @@ copies its source into your repo. See
 
 Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
 subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
-`sparkwing dashboard start` spawns a detached local web server (`pkg/localws`,
+`sparkwing serve start` spawns a detached local web server (`pkg/localws`,
 embedded in the CLI) against the same SQLite store, exposing the dashboard
 plus the JSON / logs APIs on one port - useful when several runs are going
-in parallel and the terminal gets crowded. `sparkwing dashboard status` /
+in parallel and the terminal gets crowded. `sparkwing serve status` /
 `kill` manage its lifecycle. These commands print a compact status record when
 piped, including `service`, `state`, `pid` when known, `home`, and `log`.
 Dashboard records include `url` when known. Use `--output plain` for a single

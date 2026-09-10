@@ -377,7 +377,7 @@ func printFirstTimeCard(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, color.Bold("TIPS"))
 	tips := []InfoNextStep{
-		{Command: "sparkwing dashboard start", Purpose: "run the dashboard locally to watch runs in a browser"},
+		{Command: "sparkwing serve start", Purpose: "run the dashboard locally to watch runs in a browser"},
 		{Command: "sparkwing info", Purpose: "surveys the current repo + suggests next commands"},
 	}
 	cmpCmd, cmpNote := firstTimeCompletionHint()
@@ -667,7 +667,7 @@ func tipDashboardNotRunning() (InfoTip, bool) {
 	return InfoTip{
 		ID:      "dashboard",
 		Title:   "Local dashboard is not running",
-		Command: "sparkwing dashboard start",
+		Command: "sparkwing serve start",
 		Note:    "runs at http://127.0.0.1:4343",
 	}, true
 }
@@ -716,7 +716,7 @@ func nextStepsFor(info Info) []InfoNextStep {
 		{Command: "sparkwing pipeline new --name <name>", Purpose: "scaffold a new pipeline"},
 		{Command: "sparkwing docs read --guide authoring", Purpose: "everything needed to write a pipeline, in one call"},
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
-		{Command: "sparkwing dashboard start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
+		{Command: "sparkwing serve start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
 	}
 	if step, ok := missingHooksStep(info); ok {
 		steps = append([]InfoNextStep{step}, steps...)

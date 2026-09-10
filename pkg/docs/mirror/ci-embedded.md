@@ -126,7 +126,7 @@ After (or during) a ci-embedded run, point your local dashboard at
 the same bucket:
 
 ```sh
-sparkwing dashboard start \
+sparkwing serve start \
     --profile ci-team \
     --read-only
 ```
@@ -150,7 +150,7 @@ and have the dashboard list runs directly from
 `<artifact-store>/runs/*/state.ndjson`:
 
 ```sh
-sparkwing dashboard start \
+sparkwing serve start \
     --profile ci-team \
     --no-local-store \
     --read-only

@@ -324,7 +324,7 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	fmt.Printf("  2. sparkwing run release                   %s\n", color.Dim("# run it; replace the placeholder step with real logic"))
 	fmt.Printf("  %s\n", color.Dim("for a build/test/deploy DAG: sparkwing pipeline new --name release --template build-test-deploy"))
 	fmt.Println()
-	fmt.Printf("  %s\n", color.Dim("dashboard:    sparkwing dashboard start"))
+	fmt.Printf("  %s\n", color.Dim("dashboard:    sparkwing serve start"))
 	fmt.Printf("  %s\n", color.Dim("docs:         sparkwing docs list  (or https://sparkwing.dev/docs)"))
 	fmt.Printf("  %s\n", color.Dim("AI agents:    sparkwing info --for-agent  (current one-wake context)"))
 }

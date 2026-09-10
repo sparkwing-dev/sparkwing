@@ -476,7 +476,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	}
 	tips = append(tips,
 		InfoNextStep{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
-		InfoNextStep{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
+		InfoNextStep{Command: "sparkwing serve start", Purpose: "see runs in local dashboard"},
 	)
 	printAlignedSteps(tips)
 	return nil
