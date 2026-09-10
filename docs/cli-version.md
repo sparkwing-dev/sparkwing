@@ -6,7 +6,7 @@ Every `sparkwing version` command, flag, and argument, generated from the CLI's 
 
 ## `sparkwing version`
 
-Show + update versions (CLI, SDK, sparks)
+Inspect versions (CLI, SDK, sparks)
 
 Reports the installed CLI version + build provenance, the
 latest published release on GitHub (with a short network
@@ -14,9 +14,10 @@ fetch -- bounded by ~3s, fail-soft when offline), and the
 .sparkwing/go.mod SDK pin + any sparks-* libraries declared
 alongside it.
 
-Behind-by-version is computed via semver compare for both the
-CLI itself and the SDK pin so an agent reading -o json can
-trigger an upgrade without parsing prose.
+CLI comparison uses the same read-only release metadata and provenance
+checks as 'sparkwing update --check', within one ~3s network budget.
+cli_status and cli_reason distinguish a verified comparison from a local
+build or missing metadata. SDK pins retain their semver comparison.
 
 --offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
@@ -24,7 +25,6 @@ latest) for shell pipelines.
 
 ### Subcommands
 
-- `update` -- Self-update the CLI binary (--cli) or bump this project's SDK pin (--sdk)
 - `hold` -- Show, set, or clear the operator ceiling on CLI upgrades
 
 ### Flags
@@ -54,10 +54,10 @@ sparkwing version --offline
 sparkwing version --changelog
 
 # Update the CLI binary
-sparkwing version update --cli
+sparkwing update --cli
 
 # Bump the SDK pin in this project
-sparkwing version update --sdk
+sparkwing update --sdk
 ```
 
 ## `sparkwing version hold`
@@ -65,7 +65,7 @@ sparkwing version update --sdk
 Show, set, or clear the operator ceiling on CLI upgrades
 
 A version hold is an operator-set ceiling that the tool enforces:
-once set, 'sparkwing version update --cli' (and 'sparkwing update')
+once set, 'sparkwing update' and 'sparkwing update --cli'
 refuse to install anything beyond it, so an agent cannot perform a
 major upgrade against operator instruction.
 
@@ -104,54 +104,4 @@ sparkwing version hold --set v9.8.7
 
 # Lift the hold
 sparkwing version hold --clear
-```
-
-## `sparkwing version update`
-
-Self-update the CLI binary (--cli) or bump this project's SDK pin (--sdk)
-
-Two targets, one verb:
-
-  --cli   Replace the running sparkwing binary with the target
-          release. Resolves the version pointer from GitHub Releases,
-          downloads the binary, verifies the ed25519 signature over
-          SHA256SUMS and the signed digest, atomically installs, and
-          re-hashes the installed file against the verified digest.
-          A verification or install failure is terminal.
-
-  --sdk   Bump the SDK pin in this project's .sparkwing/go.mod via
-          'go get github.com/sparkwing-dev/sparkwing@<version>',
-          then 'go mod tidy'. Doesn't touch the running binary.
-
-Exactly one of --cli or --sdk must be set; they conflict with
-each other so a typo can't update the wrong half. --version
-applies to whichever target is selected.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--cli` | Self-update the sparkwing CLI binary |
-| `--sdk` | Bump the SDK pin in this project's .sparkwing/go.mod |
-| `--version TAG` | Target release tag (vX.Y.Z). Omit for latest. |
-| `--force` | Allow downgrading to an older release (--cli only) |
-| `--override-hold` | Cross an operator version hold (--cli only) |
-
-### Examples
-
-```sh
-# Update the CLI to latest
-sparkwing version update --cli
-
-# Pin the CLI to a specific release
-sparkwing version update --cli --version v9.8.7
-
-# Downgrade the CLI
-sparkwing version update --cli --version v9.7.6 --force
-
-# Bump the SDK in this project to latest
-sparkwing version update --sdk
-
-# Pin the SDK to a specific release
-sparkwing version update --sdk --version v9.8.7
 ```

@@ -80,7 +80,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `queue` | Local admission: holders, connections, waiters, capacity |
 | `daemon` | The local admission daemon: status / restart |
 | `profile` | Show which profile would resolve for this invocation, and why (read-only; never prints tokens) |
-| `version` | Composite CLI + SDK + sparks version card; `version update --sdk` bumps the pinned SDK |
+| `version` | Composite CLI + SDK + sparks version card; `update --sdk` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
 | `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |

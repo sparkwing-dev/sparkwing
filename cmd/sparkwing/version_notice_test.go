@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 	seedStamp(t, stamp, "test-binary", "v0.14.0")
 
 	var first bytes.Buffer
-	noteVersionTransition(&first, "version")
+	noteVersionTransition(&first, "run")
 	if !strings.Contains(first.String(), "sparkwing changed v0.14.0 -> ") {
 		t.Fatalf("first run did not emit the transition line; got %q", first.String())
 	}
@@ -68,7 +69,7 @@ func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 	}
 
 	var second bytes.Buffer
-	noteVersionTransition(&second, "version")
+	noteVersionTransition(&second, "run")
 	if second.Len() != 0 {
 		t.Fatalf("second run should be silent; got %q", second.String())
 	}
@@ -112,7 +113,7 @@ func TestNoteVersionTransition_QuietVerbsSkip(t *testing.T) {
 	_, stamp := noticeHome(t)
 	seedStamp(t, stamp, "test-binary", "v0.14.0")
 
-	for _, verb := range []string{"completion", "doctor", "_complete-verbs", "wingd", "handle-trigger"} {
+	for _, verb := range []string{"completion", "doctor", "_complete-verbs", "wingd", "handle-trigger", "update", "version"} {
 		var buf bytes.Buffer
 		noteVersionTransition(&buf, verb)
 		if buf.Len() != 0 {
@@ -128,11 +129,44 @@ func TestNoteVersionTransition_FirstEverRunSilent(t *testing.T) {
 	_, stamp := noticeHome(t)
 
 	var buf bytes.Buffer
-	noteVersionTransition(&buf, "version")
+	noteVersionTransition(&buf, "run")
 	if buf.Len() != 0 {
 		t.Fatalf("first-ever run (no stamp) should be silent; got %q", buf.String())
 	}
 	if _, err := os.Stat(stamp); err != nil {
 		t.Fatalf("first run should have written this install's stamp: %v", err)
+	}
+}
+
+func TestVersionRootRoutesDoNotWriteFreshHome(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		wantError bool
+	}{
+		{"retired update", []string{"version", "update", "--cli"}, true},
+		{"offline report", []string{"version", "--offline", "-o", "json"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("SPARKWING_HOME", filepath.Join(home, "sparkwing"))
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+			t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+			t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+			captureStdout(t, func() {
+				err := runSparkwing(tc.args)
+				if (err != nil) != tc.wantError {
+					t.Fatalf("runSparkwing(%v): %v", tc.args, err)
+				}
+			})
+			entries, err := os.ReadDir(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("read-only version route wrote home entries: %v", entries)
+			}
+		})
 	}
 }
