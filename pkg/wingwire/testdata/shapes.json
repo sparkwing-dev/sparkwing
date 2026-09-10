@@ -39,28 +39,6 @@
           "omitempty": true
         },
         {
-          "name": "guard",
-          "kind": "*struct",
-          "omitempty": true,
-          "fields": [
-            {
-              "name": "leader_pid",
-              "kind": "int",
-              "omitempty": false
-            },
-            {
-              "name": "session_id",
-              "kind": "int",
-              "omitempty": false
-            },
-            {
-              "name": "birth_token",
-              "kind": "string",
-              "omitempty": false
-            }
-          ]
-        },
-        {
           "name": "resources",
           "kind": "struct",
           "omitempty": false,
@@ -302,20 +280,6 @@
           "omitempty": true
         }
       ]
-    },
-    {
-      "type": "guard_complete",
-      "fields": [
-        {
-          "name": "lease_token",
-          "kind": "string",
-          "omitempty": false
-        }
-      ]
-    },
-    {
-      "type": "guard_complete_ack",
-      "fields": null
     },
     {
       "type": "hello",

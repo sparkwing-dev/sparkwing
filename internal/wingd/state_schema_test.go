@@ -7,12 +7,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestStateSchemaRemainsRollbackReadableWithoutGuards(t *testing.T) {
+func TestStateIsWrittenAtTheRollbackReadableSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	if err := writeStateWithGuards(path, admission.Snapshot{}, nil, nil, nil); err != nil {
+	if err := writeStateWithCancellations(path, admission.Snapshot{}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	blob, err := os.ReadFile(path)
@@ -25,26 +24,34 @@ func TestStateSchemaRemainsRollbackReadableWithoutGuards(t *testing.T) {
 	if err := json.Unmarshal(blob, &state); err != nil {
 		t.Fatal(err)
 	}
-	if state.Schema != 1 {
-		t.Fatalf("unguarded state schema = %d, want rollback-readable schema 1", state.Schema)
+	if state.Schema != stateSchema {
+		t.Fatalf("state schema = %d, want rollback-readable schema %d", state.Schema, stateSchema)
 	}
+}
 
-	guard := persistedGuard{
-		LeaseID: "lease-1",
-		RunID:   "run-1",
-		Session: wingwire.ProcessSession{LeaderPID: 37, SessionID: 37, BirthToken: "birth-37"},
+func TestStateWrittenByAGuardedDaemonStillLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	legacy := map[string]any{
+		"schema":   legacyGuardedStateSchema,
+		"snapshot": admission.Snapshot{EventSeq: 4},
+		"guards": []map[string]any{{
+			"lease_id": "lease-1",
+			"run_id":   "run-1",
+			"session":  map[string]any{"leader_pid": 37, "session_id": 37, "birth_token": "birth-37"},
+		}},
 	}
-	if err := writeStateWithGuards(path, admission.Snapshot{}, nil, nil, []persistedGuard{guard}); err != nil {
-		t.Fatal(err)
-	}
-	blob, err = os.ReadFile(path)
+	blob, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(blob, &state); err != nil {
+	if err := os.WriteFile(path, blob, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if state.Schema != stateSchema {
-		t.Fatalf("guarded state schema = %d, want %d", state.Schema, stateSchema)
+	snap, _, _, err := readStateWithCancellations(path)
+	if err != nil {
+		t.Fatalf("read a state file left by a guarded daemon: %v", err)
+	}
+	if snap.EventSeq != 4 {
+		t.Fatalf("restored event sequence = %d, want 4", snap.EventSeq)
 	}
 }

@@ -48,7 +48,6 @@ concurrency key, its holders and waiters, and registered runner capacity.
 ### Subcommands
 
 - `list` -- List running and queued work with expected start and finish
-- `exec` -- Run a command under local machine admission
 - `priority` -- Re-rank a run that is already queued for local admission
 
 ### Flags
@@ -76,42 +75,6 @@ sparkwing queue list --profile prod
 
 # Move a queued run to the front
 sparkwing queue priority --run build-123 --set front
-```
-
-## `sparkwing queue exec`
-
-Run a command under local machine admission
-
-Submits the command to the local admission daemon before starting it. While
-blocked, the command is visible in sparkwing queue. Once granted, its complete
-process tree runs under the lease; interruption or cancellation terminates and
-reaps that tree before the lease is released. Exact process-session ownership
-is available on Linux and macOS; queue exec refuses before admission on
-Windows and other Unix platforms.
-
-### Arguments
-
-- `command` (required) -- Command and arguments to execute after --
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--run-id ID` | Unique admission participant identifier (required) |
-| `--name NAME` | Short operation name shown in the queue |
-| `--repo NAME` | Repository name shown in the queue |
-| `--cores N` | CPU cores reserved while the command runs (required) |
-| `--memory-bytes N` | Memory bytes reserved while the command runs |
-| `--semaphore NAME` | Logical semaphore shared with equivalent commands |
-| `--semaphore-capacity N` | Capacity declared for --semaphore (default: 1) |
-| `--ready-file PATH` | Write queued or granted readiness to a new JSON file |
-| `--home DIR` | Sparkwing state directory |
-
-### Examples
-
-```sh
-# Serialize a bootstrap command
-sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 --semaphore bootstrap -- make prepare
 ```
 
 ## `sparkwing queue list`
