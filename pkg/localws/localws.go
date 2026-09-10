@@ -90,6 +90,7 @@ type Options struct {
 // on signal.
 func Run(ctx context.Context, opts Options) error {
 	if opts.Listener != nil {
+		defer opts.Listener.Close()
 		opts.Addr = opts.Listener.Addr().String()
 	}
 	if opts.Addr == "" {
