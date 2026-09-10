@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -65,6 +66,7 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
+	sparkwing.Step(w, "tracked-binaries", checkTrackedBinaries)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "changelog-links", checkChangelogLinks)
 	sparkwing.Step(w, "comments", checkComments)
@@ -544,4 +546,57 @@ func regexCheckRoot() string {
 
 func init() {
 	sparkwing.Register("pre-commit", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PreCommit{} })
+}
+
+// executableFormat names the executable container a file header belongs to,
+// or returns "" for anything else. Go builds of one package leave such files
+// beside the sources, and a broad add sweeps them into a commit.
+func executableFormat(head []byte) string {
+	if len(head) < 4 {
+		return ""
+	}
+	switch {
+	case bytes.HasPrefix(head, []byte{0x7f, 'E', 'L', 'F'}):
+		return "ELF"
+	case bytes.HasPrefix(head, []byte{0xfe, 0xed, 0xfa, 0xce}),
+		bytes.HasPrefix(head, []byte{0xfe, 0xed, 0xfa, 0xcf}),
+		bytes.HasPrefix(head, []byte{0xce, 0xfa, 0xed, 0xfe}),
+		bytes.HasPrefix(head, []byte{0xcf, 0xfa, 0xed, 0xfe}),
+		bytes.HasPrefix(head, []byte{0xca, 0xfe, 0xba, 0xbe}):
+		return "Mach-O"
+	case head[0] == 'M' && head[1] == 'Z':
+		return "PE"
+	}
+	return ""
+}
+
+func checkTrackedBinaries(ctx context.Context) error {
+	files, err := sparkwing.Bash(ctx, `git ls-files`).Lines()
+	if err != nil {
+		return err
+	}
+	root := regexCheckRoot()
+	var bad []string
+	head := make([]byte, 4)
+	for _, f := range files {
+		fh, err := os.Open(filepath.Join(root, f))
+		if err != nil {
+			continue
+		}
+		n, readErr := fh.Read(head)
+		_ = fh.Close()
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			continue
+		}
+		if format := executableFormat(head[:n]); format != "" {
+			bad = append(bad, fmt.Sprintf("%s (%s)", f, format))
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	for _, f := range bad {
+		sparkwing.Info(ctx, "  tracked executable: %s", f)
+	}
+	return fmt.Errorf("%d tracked executable(s); remove them from the index and ignore their names", len(bad))
 }

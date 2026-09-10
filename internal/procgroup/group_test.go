@@ -200,10 +200,6 @@ func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
 	if identity.LeaderPID != group.ID() || identity.SessionID != group.ID() || identity.BirthToken == "" {
 		t.Fatalf("session identity = %+v", identity)
 	}
-	quiescent, err := SessionQuiescent(identity)
-	if err != nil || !quiescent {
-		t.Fatalf("parked session quiescent=%v err=%v", quiescent, err)
-	}
 	empty, err := SessionEmpty(identity)
 	if err != nil || empty {
 		t.Fatalf("live parked session empty=%v err=%v", empty, err)

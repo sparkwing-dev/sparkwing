@@ -126,42 +126,6 @@ func TestStopReportsADaemonThatRefusesTheDrain(t *testing.T) {
 	}
 }
 
-func TestWatchGuardReportsARefusedGuardCompletion(t *testing.T) {
-	home := shortHome(t)
-	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
-		for {
-			msg, err := r.read()
-			if err != nil {
-				return
-			}
-			if _, ok := msg.(*wingwire.GuardComplete); !ok {
-				continue
-			}
-			line, err := wingwire.Encode(&wingwire.Unsupported{Type: string(wingwire.TypeGuardComplete)})
-			if err != nil {
-				return
-			}
-			_, _ = nc.Write(line)
-		}
-	})
-
-	cl := connectToFakeDaemon(t, home)
-	lease := &Lease{cl: cl, RunID: "r1", Token: "lease-1"}
-	if err := lease.CompleteGuard(); err != nil {
-		t.Fatalf("CompleteGuard: %v", err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- lease.WatchGuard(nil, nil, nil) }()
-	select {
-	case err := <-done:
-		if !errors.Is(err, ErrDaemonLacksOperation) {
-			t.Fatalf("WatchGuard error = %v, want ErrDaemonLacksOperation", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("WatchGuard is still waiting for an acknowledgement the daemon refused")
-	}
-}
-
 func TestSetPriorityReportsAnOlderDaemonAndHowToReplaceIt(t *testing.T) {
 	home := shortHome(t)
 	frames := make(chan int, 8)

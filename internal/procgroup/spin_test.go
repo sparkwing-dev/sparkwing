@@ -26,37 +26,6 @@ func TestBackoffPollDoublesUpToItsCap(t *testing.T) {
 	}
 }
 
-func TestCaptureSessionTableCostsOneListingForManySessions(t *testing.T) {
-	originalTable := sessionProcessTable
-	originalIdentity := sessionIdentityLookup
-	t.Cleanup(func() {
-		sessionProcessTable = originalTable
-		sessionIdentityLookup = originalIdentity
-	})
-	listings := 0
-	sessionProcessTable = func(bool) ([]Info, error) {
-		listings++
-		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
-	}
-	sessionIdentityLookup = func(int) (int, string, error) { return 81, "birth-81", nil }
-
-	table, err := CaptureSessionTable()
-	if err != nil {
-		t.Fatalf("capture session table: %v", err)
-	}
-	live, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
-	if err != nil || live {
-		t.Fatalf("live session empty=%v err=%v, want it held", live, err)
-	}
-	gone, err := table.SessionEmpty(SessionIdentity{LeaderPID: 90, SessionID: 90, BirthToken: "birth-90"})
-	if err != nil || !gone {
-		t.Fatalf("absent session empty=%v err=%v, want it empty", gone, err)
-	}
-	if listings != 1 {
-		t.Fatalf("process-table listings = %d, want 1 for the whole snapshot", listings)
-	}
-}
-
 func TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie(t *testing.T) {
 	const window = 500 * time.Millisecond
 	probes := &atomic.Int64{}
@@ -97,7 +66,7 @@ func TestWaitDescendantsEmptyStillAnswersQuickly(t *testing.T) {
 	}
 }
 
-func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
+func TestSessionEmptyAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
 	originalTable := sessionProcessTable
 	originalIdentity := sessionIdentityLookup
 	t.Cleanup(func() {
@@ -112,15 +81,11 @@ func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
 		return 0, "", nil
 	}
 
-	table, err := CaptureSessionTable()
-	if err != nil {
-		t.Fatalf("capture session table: %v", err)
-	}
-	empty, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
+	empty, err := SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
 	if err != nil || empty {
-		t.Fatalf("live guarded session empty=%v err=%v, want it held", empty, err)
+		t.Fatalf("live session empty=%v err=%v, want it held", empty, err)
 	}
-	reused, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "older-birth"})
+	reused, err := SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "older-birth"})
 	if err != nil || !reused {
 		t.Fatalf("reused leader empty=%v err=%v, want the original session gone", reused, err)
 	}

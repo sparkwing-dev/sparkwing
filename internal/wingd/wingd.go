@@ -75,10 +75,6 @@ type Config struct {
 
 	ProcSampler ProcSampler
 
-	SessionGuardInspector SessionGuardInspector
-
-	GuardInterval time.Duration
-
 	OwnedCPUSampler OwnedCPUSampler
 
 	Now func() time.Time
@@ -139,13 +135,6 @@ func (c Config) idleTimeout() time.Duration {
 		return c.IdleTimeout
 	}
 	return DefaultIdleTimeout
-}
-
-func (c Config) guardInterval() time.Duration {
-	if c.GuardInterval > 0 {
-		return c.GuardInterval
-	}
-	return defaultGuardInterval
 }
 
 func (c Config) graceWindow() time.Duration {

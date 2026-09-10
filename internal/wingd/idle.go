@@ -43,7 +43,7 @@ func (d *Daemon) idleElapsed() time.Duration {
 			return 0
 		}
 	}
-	if len(d.reattachWait) > 0 || len(d.guards) > 0 {
+	if len(d.reattachWait) > 0 {
 		return 0
 	}
 	snap := d.ledger.Snapshot()

@@ -19,9 +19,6 @@ import (
 )
 
 func runQueue(args []string) error {
-	if len(args) > 0 && args[0] == "exec" {
-		return runQueueExec(args[1:])
-	}
 	if len(args) > 0 && args[0] == "priority" {
 		return runQueuePriority(args[1:])
 	}
