@@ -20,86 +20,48 @@ unlock.
 
 ## [Unreleased]
 
-### Added
+## [v0.49.0] - 2026-09-10
+Five surfaces are cut here, each with a section in [the migration
+guide](docs/migrations/v0.49.0.md): `update` owns CLI and SDK updates,
+`serve` replaces the `dashboard` command group, and `queue exec`,
+`run --sw-isolated-home`, and the SDK's lint slots are gone.
 
-- **cli:** `pipeline sparks catalog` lists the blocks a spark library offers.
-  It reads the library's `spark.json` and prints one row per declared block --
-  the name `sparks inflate --module` takes, its stability, and what it does --
-  so a module no longer has to be known by name before it can be inflated.
-  A `packages[]` library is one Go module, so its rows are import packages and
-  the output says to inflate the library itself instead. Without `--library` it
-  reads sparks-core, at the version the repo declares when it declares one;
-  `--path` reads a checkout on disk without touching the network. `-o plain`
-  emits one row per line -- a `modules[]` row as the module path
-  `inflate --module` takes, a `packages[]` row as its package name -- and
-  `-o json` the usual NDJSON. `sparks inflate` with no `--module` now names
-  the verb.
+The whole public API change since v0.48.1, for a consumer pinning `sparkwing/`
+or `pkg/...`:
 
-- **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb
-  that takes `--profile`. Both resolve the project's `sparkwing.yaml` from the
-  working directory -- the default storage profile for a `runs` read, and the
-  whole project section of `info` -- so invoking them from outside a checkout
-  silently reported on whichever project the shell happened to sit in.
-  `info --for-agent` describes the repository it re-anchored to. The `runs`
-  verbs that read no project config (`errors` and the `consumer` trio) do not
-  take the flag, because it would do nothing there. Every command that declares
-  the flag except `run`, `pipeline run` and `pipeline lint` now parses and
-  applies it in one place; those three keep their own parsers and their own
-  wording for a directory that does not exist. `pipeline new` and
-  `examples scaffold` moved onto the shared path, so their `--sw-cd` failure
-  now carries the full command name and is reported before `--name`.
-- **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
-- **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
+**Added**
 
-- **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
-  the upstream output is absent. `TryGet` exists for the bootstrap run of a
-  compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
-  a pipeline's first run, and `Get` panics there. It still panics on a
-  cancelled or expired context, and on output that does not fit `T`. Misses are
-  logged at warn naming the pipeline and node, because the SDK cannot tell an
-  unreachable store from a genuine absence and reports both as absence. `Get`
-  is unchanged.
-- **cli:** `queue list` is the canonical name for the admission listing, and
-  bare `queue` runs the same code. Running rows gain the expected remaining
-  time and the clock time the run is expected to finish; queued rows gain the
-  expected finish beside the expected start. Both come from the run's measured
-  p50 profile and the daemon's admission simulation, and a cell without an
-  estimate names the measurement it lacks rather than carrying a guess:
-  "unmeasured" for a row with no profile, "past p50" for a run that has
-  outlived the profile it has, "unknown" for a queued row the daemon cannot
-  place behind the runs ahead of it. The header counts the queued runs with no
-  profile. In the pretty view the section that was headed "Waiting" is now
-  headed "Queued".
-  `-o json` gains `expected_remaining_ms`, `expected_finish_ms`,
-  `expected_finish_at` on running rows, `expected_start_at`,
-  `expected_finish_ms`, `expected_finish_at` on queued rows, and
-  `unmeasured_waiters` at the top level, each duration in milliseconds from the
-  snapshot and each clock time as RFC3339. `-o plain` gains an
-  `unmeasured-waiters` record, two trailing columns on a holder record
-  (humanized remaining, RFC3339 finish) and one on a waiter record (RFC3339
-  finish); every existing column keeps its position. The listing's errors now
-  carry the path that was invoked, so `queue list` reports
-  `sparkwing queue list: ...` where it used to report `queue: ...`.
-- **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
-  group has no members until its source job completes, so every `JobGroup`
-  setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
-  compiles, reads as configuration, and is dropped. Configure the generated
-  jobs from the value the fan-out callback returns.
-- **cli:** `runner-label` flags a blank label on `WhenRunner`, and every rule
-  now follows a builder chain split across statements, so a group bound to a
-  variable and configured on a later line is checked like a single expression.
-- **cli:** `sparkwing doctor --timeout` bounds the daemon and local-state
-  checks, defaulting to the 10 seconds doctor always used. Each check takes a
-  slice of it, so one unanswering daemon leaves the rest of the report its
-  budget, and a sweep that runs out prints what it reached alongside the error
-- **cli:** `pipeline new --on` accepts `pre_commit`, `pre_push`, and
-  `post_commit`, so a scaffolded gate declares the git hook that runs it. The
-  scaffold declares the trigger and never writes the hook: it prints the
-  `sparkwing pipeline hooks install` command instead, because arming a gate the
-  pipeline has not passed turns every commit in the checkout into a failure
+- `sparkwing`: `func (r Ref[T]) TryGet(ctx context.Context) (T, bool)`
+- `sparkwing`: `var ErrRefAbsent`
+- `pkg/backends`: `func (s Surfaces) BinaryCache() *Spec`
+
+**Removed**
+
+- `sparkwing`: `func AcquireLintSlot(tool string) (*LintSlot, error)`,
+  `type LintSlot`, `func (*LintSlot) Configure`, `func (*LintSlot) ConfigureIn`,
+  `func (*LintSlot) Release`, `const LintSlotsEnv`
+- `pkg/wingwire`: `type GuardComplete`, `type GuardCompleteAck`,
+  `type ProcessSession`, `const TypeGuardComplete`, `const TypeGuardCompleteAck`,
+  and the `Guard` field on `AdmissionRequest`
+
+**Changed**
+
+- `pkg/localws`: `func Run(ctx context.Context, opts Options) error` names its
+  returned error. Callers are unaffected.
+- `pkg/scaffold`: `const FallbackSDKVersion` tracks the published release a
+  scaffold pins, and moves with every release.
+
+Nothing else exported by a covered package changed. The per-package snapshots
+under `.apidiff/` are the machine-readable form of this list.
 
 ### Changed
 
+- **cli (Breaking):** `serve start` leaves a running service alone
+  `dashboard start` replaced whatever it found. `serve restart` replaces a
+  running service and `serve stop` ends one; there is no `serve kill`.
+  Lifecycle receipts name the owner, the effective endpoints, readiness, and
+  the artifact the service runs, and `serve logs` reads a bounded window of the
+  service log. See [serve command](docs/migrations/v0.49.0.md#serve-command).
 - **cache:** A cache directory sparkwing cannot create now names `SPARKWING_HOME`.
   The message points at the one environment variable that moves the cache root
   instead of leaving the reader to look for a cache-specific override, which
@@ -141,7 +103,7 @@ unlock.
   compact comparison metadata, and reports uncertain local builds instead of
   assuming matching version labels mean matching releases. SDK updates resolve
   the same latest published release before native Go tooling runs. See
-  [unified update](docs/migrations/_unreleased.md#unified-update).
+  [unified update](docs/migrations/v0.49.0.md#unified-update).
 
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
@@ -156,6 +118,90 @@ unlock.
   cannot resolve as `broken` with the error, instead of `undeclared` and gated.
   A repository the survey could not read was counted among those whose gates
   fire
+
+### Added
+
+- **development:** Declare Xwing application commands and gate-verified landing policy
+
+- **cli:** `pipeline sparks catalog` lists the blocks a spark library offers.
+  It reads the library's `spark.json` and prints one row per declared block --
+  the name `sparks inflate --module` takes, its stability, and what it does --
+  so a module no longer has to be known by name before it can be inflated.
+  A `packages[]` library is one Go module, so its rows are import packages and
+  the output says to inflate the library itself instead. Without `--library` it
+  reads sparks-core, at the version the repo declares when it declares one;
+  `--path` reads a checkout on disk without touching the network. `-o plain`
+  emits one row per line -- a `modules[]` row as the module path
+  `inflate --module` takes, a `packages[]` row as its package name -- and
+  `-o json` the usual NDJSON. `sparks inflate` with no `--module` now names
+  the verb.
+
+- **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb
+  that takes `--profile`. Both resolve the project's `sparkwing.yaml` from the
+  working directory -- the default storage profile for a `runs` read, and the
+  whole project section of `info` -- so invoking them from outside a checkout
+  silently reported on whichever project the shell happened to sit in.
+  `info --for-agent` describes the repository it re-anchored to. The `runs`
+  verbs that read no project config (`errors` and the `consumer` trio) do not
+  take the flag, because it would do nothing there. Every command that declares
+  the flag except `run`, `pipeline run` and `pipeline lint` now parses and
+  applies it in one place; those three keep their own parsers and their own
+  wording for a directory that does not exist. `pipeline new` and
+  `examples scaffold` moved onto the shared path, so their `--sw-cd` failure
+  now carries the full command name and is reported before `--name`.
+- **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
+- **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
+
+- **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
+  the upstream output is absent. `TryGet` exists for the bootstrap run of a
+  compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
+  a pipeline's first run, and `Get` panics there. A miss is a genuine absence:
+  an in-run node that has not completed, a run that stored no output, or a
+  cross-pipeline resolver that wrapped the new `sparkwing.ErrRefAbsent`. The
+  orchestrator's resolver marks a pipeline with no successful run inside
+  `MaxAge` and a run that holds no such node; every other resolver failure
+  panics, so a store it could not reach crashes the step instead of reading as
+  a pipeline's first run. `TryGet` still panics on a cancelled or
+  expired context and on output that does not fit `T`. Misses are logged at
+  warn naming the pipeline and node. `Get` is unchanged.
+- **cli:** `queue list` is the canonical name for the admission listing, and
+  bare `queue` runs the same code. Running rows gain the expected remaining
+  time and the clock time the run is expected to finish; queued rows gain the
+  expected finish beside the expected start. Both come from the run's measured
+  p50 profile and the daemon's admission simulation, and a cell without an
+  estimate names the measurement it lacks rather than carrying a guess:
+  "unmeasured" for a row with no profile, "past p50" for a run that has
+  outlived the profile it has, "unknown" for a queued row the daemon cannot
+  place behind the runs ahead of it. The header counts the queued runs with no
+  profile. In the pretty view the section that was headed "Waiting" is now
+  headed "Queued".
+  `-o json` gains `expected_remaining_ms`, `expected_finish_ms`,
+  `expected_finish_at` on running rows, `expected_start_at`,
+  `expected_finish_ms`, `expected_finish_at` on queued rows, and
+  `unmeasured_waiters` at the top level, each duration in milliseconds from the
+  snapshot and each clock time as RFC3339. `-o plain` gains an
+  `unmeasured-waiters` record, two trailing columns on a holder record
+  (humanized remaining, RFC3339 finish) and one on a waiter record (RFC3339
+  finish); every existing column keeps its position. The listing's errors now
+  carry the path that was invoked, so `queue list` reports
+  `sparkwing queue list: ...` where it used to report `queue: ...`.
+- **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
+  group has no members until its source job completes, so every `JobGroup`
+  setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
+  compiles, reads as configuration, and is dropped. Configure the generated
+  jobs from the value the fan-out callback returns.
+- **cli:** `runner-label` flags a blank label on `WhenRunner`, and every rule
+  now follows a builder chain split across statements, so a group bound to a
+  variable and configured on a later line is checked like a single expression.
+- **cli:** `sparkwing doctor --timeout` bounds the daemon and local-state
+  checks, defaulting to the 10 seconds doctor always used. Each check takes a
+  slice of it, so one unanswering daemon leaves the rest of the report its
+  budget, and a sweep that runs out prints what it reached alongside the error
+- **cli:** `pipeline new --on` accepts `pre_commit`, `pre_push`, and
+  `post_commit`, so a scaffolded gate declares the git hook that runs it. The
+  scaffold declares the trigger and never writes the hook: it prints the
+  `sparkwing pipeline hooks install` command instead, because arming a gate the
+  pipeline has not passed turns every commit in the checkout into a failure
 
 ### Docs
 
@@ -176,6 +222,13 @@ unlock.
 
 ### Fixed
 
+- **storage:** An object-store state backend reports a run lookup it could not
+  read instead of an empty history. `GetLatestRun` listed the bucket, skipped
+  every record whose read failed, and returned `store.ErrNotFound`, so a bucket
+  that lists but will not serve was indistinguishable from a pipeline that has
+  never run -- and `Ref[T].TryGet` reads that as the bootstrap case. A scan that
+  matched nothing and could not read a record now returns the first read
+  failure; a scan that did find a match still returns it.
 - **orchestrator:** `sparkwing.RunAndAwait` refuses under an object-store state
   backend (Mode 2) instead of waiting forever. That backend enqueues the child's
   trigger and has no path that claims one, so the spawned run never started and
@@ -311,12 +364,12 @@ unlock.
   sparkwing hosting the machine's daemon, is now an admission refusal that
   names how to identify the daemon's build, both versions, and the upgrade that
   resolves it. `SPARKWING_HOME` keeps its meaning as deliberate isolation. See
-  [isolated home removed](docs/migrations/_unreleased.md#isolated-home-removed).
+  [isolated home removed](docs/migrations/v0.49.0.md#isolated-home-removed).
 
 - **cli (Breaking):** The `dashboard` command group is replaced by `serve`
   Use `sparkwing serve start`, `serve status`, and `serve kill` for the local
   dashboard and API. The retired noun fails without starting or stopping a
-  service. See [serve command](docs/migrations/_unreleased.md#serve-command).
+  service. See [serve command](docs/migrations/v0.49.0.md#serve-command).
 
 - **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
   `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they
@@ -325,7 +378,7 @@ unlock.
   outside the diff and `new-from-merge-base` dropped every one -- a tree with
   eight findings linted clean in three seconds. Hand each worktree
   `ToolCacheDir("golangci-lint")`. See
-  [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
+  [lint slots removed](docs/migrations/v0.49.0.md#lint-slots-removed).
 
 - **cli + wingd (Breaking):** `sparkwing queue exec` and the daemon's
   guarded-session machinery behind it. The command admitted one bootstrap
@@ -333,7 +386,7 @@ unlock.
   it was the only sender of the `guard_complete` and `guard_complete_ack`
   messages and of `admission_request.guard`; all three leave the wire with it.
   Run work that needs admission as a pipeline. See [queue exec
-  removed](docs/migrations/_unreleased.md#queue-exec-removed).
+  removed](docs/migrations/v0.49.0.md#queue-exec-removed).
 
 ### Security
 

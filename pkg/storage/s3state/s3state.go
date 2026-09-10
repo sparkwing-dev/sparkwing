@@ -849,7 +849,11 @@ func (b *Backend) readRunRecord(ctx context.Context, runID string) (*store.Run, 
 // artifact store, reads the run envelope, and returns the
 // most-recent match. Latency scales with the number of runs in the
 // bucket; this is the deliberate tradeoff for not running a
-// database. Returns store.ErrNotFound when no run matches.
+// database. Returns store.ErrNotFound when no run matches, and the
+// first read failure of the scan when none matched and a record could
+// not be read, so a bucket that lists but will not serve is not
+// reported as an empty history. A scan that did find a match keeps it:
+// one unreadable record does not withhold the run that was read.
 func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	keys, err := b.art.List(ctx, "runs/")
 	if err != nil {
@@ -867,6 +871,7 @@ func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []
 		cutoff = time.Now().Add(-maxAge)
 	}
 	var best *store.Run
+	var readErr error
 	for _, k := range keys {
 		runID, ok := RunIDFromStateKey(k)
 		if !ok {
@@ -874,6 +879,9 @@ func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []
 		}
 		r, gerr := b.readRunRecord(ctx, runID)
 		if gerr != nil {
+			if readErr == nil && !errors.Is(gerr, store.ErrNotFound) {
+				readErr = gerr
+			}
 			continue
 		}
 		if pipeline != "" && r.Pipeline != pipeline {
@@ -890,6 +898,9 @@ func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []
 		}
 	}
 	if best == nil {
+		if readErr != nil {
+			return nil, readErr
+		}
 		return nil, store.ErrNotFound
 	}
 	return best, nil

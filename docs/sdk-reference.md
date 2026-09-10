@@ -2011,6 +2011,10 @@ var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd
 ```
 
 ```
+var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
+```
+
+```
 var ErrSecretMissing = errors.New("sparkwing: secret not found")
 ```
 

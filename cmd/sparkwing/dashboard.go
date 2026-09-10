@@ -19,9 +19,10 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/localws"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -63,8 +64,12 @@ func runDashboard(args []string) error {
 	switch args[0] {
 	case "start":
 		return runDashboardStart(args[1:])
-	case "kill", "stop":
-		return runDashboardKill(args[1:])
+	case "stop":
+		return runDashboardStop(args[1:])
+	case "restart":
+		return runDashboardRestart(args[1:])
+	case "logs":
+		return runDashboardLogs(args[1:])
 	case "status":
 		return runDashboardStatus(args[1:])
 	default:
@@ -88,9 +93,11 @@ func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
 		}
 		home = paths.Root
 	}
-	if err := fssecure.EnsureDir(home); err != nil {
-		return dashboardPaths{}, fmt.Errorf("mkdir %s: %w", home, err)
+	abs, err := filepath.Abs(home)
+	if err != nil {
+		return dashboardPaths{}, err
 	}
+	home = abs
 	return dashboardPaths{
 		home: home,
 		pid:  filepath.Join(home, dashboardPIDFile),
@@ -113,245 +120,6 @@ func readLivePID(pidPath string) (int, bool) {
 	return pid, true
 }
 
-func runDashboardStart(args []string) error {
-	fs := flag.NewFlagSet(cmdDashboardStart.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	var addr, home, logStore, artifactStore, profileName, allowOrigins string
-	var readOnly, noLocalStore, allowRemote bool
-	fs.StringVar(&addr, "addr", "127.0.0.1:4343", "bind address for the unified dashboard+api server")
-	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	fs.StringVar(&logStore, "log-store", "",
-		"pluggable log backend URL: fs:///abs/path or s3://bucket/prefix")
-	fs.StringVar(&artifactStore, "artifact-store", "",
-		"pluggable artifact backend URL: fs:///abs/path or s3://bucket/prefix")
-	fs.BoolVar(&readOnly, "read-only", false,
-		"reject writes on /api/v1/* (auth + webhooks remain open)")
-	fs.BoolVar(&noLocalStore, "no-local-store", false,
-		"skip the local SQLite store; list runs from --artifact-store instead. Requires --log-store + --artifact-store (or --profile). Powers tailing CI runs from a fresh laptop without an ingest step.")
-	fs.StringVar(&profileName, "profile", "",
-		"read the dashboard's logs + artifacts through this storage profile's surfaces")
-	fs.BoolVar(&allowRemote, "allow-remote", false,
-		"serve a non-loopback --addr; the API has no authentication, so every host that can reach it can run pipelines and read secrets")
-	fs.StringVar(&allowOrigins, "allow-origin", "",
-		"comma-separated browser origins (https://dash.example) allowed to call the API alongside loopback ones; needed when --allow-remote serves the dashboard under a name that is not the --addr host")
-	if err := parseAndCheck(cmdDashboardStart, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	mode, err := resolveOutputFormat(*output, fs.Name())
-	if err != nil {
-		return err
-	}
-
-	if !allowRemote && !localws.LoopbackBind(addr) {
-		return fmt.Errorf("--addr %s is not loopback; the dashboard API has no authentication, so pass --allow-remote to accept that risk", addr)
-	}
-
-	if err := web.VerifyBundleEmbedded(); err != nil {
-		return err
-	}
-
-	profileSupplies := false
-	if profileName != "" {
-		p, perr := resolveProfileFlag(profileName)
-		if perr != nil {
-			return perr
-		}
-		profileSupplies = p.Logs != nil && p.Cache != nil
-	}
-
-	dp, err := resolveDashboardPaths(home)
-	if err != nil {
-		return err
-	}
-
-	if pid, alive := readLivePID(dp.pid); alive {
-		mine := installedVersion()
-		if running, ok := probeDashboardVersion(dp.home, addr); ok && dashboardIsNewer(running.Version, mine) {
-			return fmt.Errorf(
-				"the running dashboard (%s, pid %d) is newer than this CLI (%s); "+
-					"it was left running. Upgrade the CLI with `sparkwing update --cli`, "+
-					"or stop it first with `sparkwing serve kill`",
-				running.Version, pid, mine)
-		}
-		fmt.Fprintf(os.Stderr, "==> draining previous dashboard (pid %d) for replacement\n", pid)
-		if err := stopSupervisor(pid, dp.pid); err != nil {
-			return fmt.Errorf("restart: %w", err)
-		}
-	}
-
-	if holder, err := portHolder(addr); err != nil {
-		return err
-	} else if holder != "" {
-		return fmt.Errorf("address %s already in use by %s; free it or pass --addr to bind elsewhere", addr, holder)
-	}
-
-	logF, err := fssecure.OpenFile(dp.log, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
-	if err != nil {
-		return fmt.Errorf("open log %s: %w", dp.log, err)
-	}
-	defer logF.Close()
-
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate own binary: %w", err)
-	}
-
-	superviseArgs := []string{
-		"__dashboard-supervise",
-		"--addr", addr,
-		"--home", dp.home,
-		"--pid", dp.pid,
-		"--version", installedVersion(),
-	}
-	if logStore != "" {
-		superviseArgs = append(superviseArgs, "--log-store", logStore)
-	}
-	if artifactStore != "" {
-		superviseArgs = append(superviseArgs, "--artifact-store", artifactStore)
-	}
-	if profileName != "" {
-		superviseArgs = append(superviseArgs, "--profile", profileName)
-	}
-	if readOnly {
-		superviseArgs = append(superviseArgs, "--read-only")
-	}
-	if allowRemote {
-		superviseArgs = append(superviseArgs, "--allow-remote")
-	}
-	if allowOrigins != "" {
-		superviseArgs = append(superviseArgs, "--allow-origin", allowOrigins)
-	}
-	if noLocalStore {
-		if (logStore == "" || artifactStore == "") && !profileSupplies {
-			return fmt.Errorf("--no-local-store requires --log-store and --artifact-store, or a --profile whose logs and cache surfaces supply them")
-		}
-		superviseArgs = append(superviseArgs, "--no-local-store")
-	}
-	logStartOffset := fileSize(dp.log)
-
-	cmd := exec.Command(self, superviseArgs...)
-	cmd.Stdin = nil
-	cmd.Stdout = logF
-	cmd.Stderr = logF
-	cmd.Env = os.Environ()
-	cmd.SysProcAttr = newDetachSysProcAttr()
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("spawn supervisor: %w", err)
-	}
-	pid := cmd.Process.Pid
-	// safety: reap the detached child in the background so an early exit
-	// is observable via exited; without a Wait it would linger as a
-	// zombie and read as still-alive for the whole startup deadline.
-	exited := make(chan struct{})
-	go func() {
-		_ = cmd.Wait()
-		close(exited)
-	}()
-
-	baseURL := "http://" + addr
-	if err := waitForListenerOrExit(addr, exited, dashboardStartTimeout); err != nil {
-		_ = signalTerminate(pid)
-		tail := tailFileFrom(dp.log, logStartOffset, 40)
-		if tail == "" {
-			tail = "(no output from the new supervisor)"
-		}
-		return fmt.Errorf("dashboard supervisor (pid %d) %s; startup log:\n%s", pid, err, tail)
-	}
-	if _, alive := readLivePID(dp.pid); !alive {
-		_ = signalTerminate(pid)
-		return fmt.Errorf("dashboard supervisor came up but never wrote %s; check %s", dp.pid, dp.log)
-	}
-	pretty := fmt.Sprintf("%s\n  dashboard:  %s\n  api:        %s/api/v1\n  home:       %s\n  log:        %s\n  pid:        %d\n%s\nstop with: sparkwing serve kill\n", bannerLine(), baseURL, baseURL, dp.home, dp.log, pid, bannerLine())
-	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "running", PID: pid, Home: dp.home, Log: dp.log, URL: baseURL, API: baseURL + "/api/v1"}, mode, pretty)
-}
-
-func runDashboardKill(args []string) error {
-	fs := flag.NewFlagSet(cmdDashboardKill.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	var home string
-	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	if err := parseAndCheck(cmdDashboardKill, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	mode, err := resolveOutputFormat(*output, fs.Name())
-	if err != nil {
-		return err
-	}
-
-	dp, err := resolveDashboardPaths(home)
-	if err != nil {
-		return err
-	}
-	pid, alive := readLivePID(dp.pid)
-	if !alive {
-		_ = os.Remove(dp.pid)
-		return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "stopped", Home: dp.home, Log: dp.log}, mode, "dashboard not running\n")
-	}
-	if err := stopSupervisor(pid, dp.pid); err != nil {
-		return err
-	}
-	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "stopped", PID: pid, Home: dp.home, Log: dp.log}, mode, fmt.Sprintf("dashboard stopped (pid %d)\n", pid))
-}
-
-func stopSupervisor(pid int, pidPath string) error {
-	if err := signalTerminate(pid); err != nil {
-		return fmt.Errorf("terminate pid %d: %w", pid, err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
-			_ = os.Remove(pidPath)
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	_ = signalKill(pid)
-	_ = os.Remove(pidPath)
-	return nil
-}
-
-func runDashboardStatus(args []string) error {
-	fs := flag.NewFlagSet(cmdDashboardStatus.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	var home string
-	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	if err := parseAndCheck(cmdDashboardStatus, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	mode, err := resolveOutputFormat(*output, fs.Name())
-	if err != nil {
-		return err
-	}
-
-	dp, err := resolveDashboardPaths(home)
-	if err != nil {
-		return err
-	}
-	pid, alive := readLivePID(dp.pid)
-	if !alive {
-		if err := writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "stopped", Home: dp.home, Log: dp.log}, mode, "dashboard not running\n"); err != nil {
-			return err
-		}
-		return exitErrorf(1, "not running")
-	}
-	baseURL := readBaseURL(dp.home)
-	label := baseURL
-	if label == "" {
-		label = "(unknown URL; dev.env missing)"
-	}
-	pretty := fmt.Sprintf("dashboard running (pid %d) at %s\n  home:  %s\n  log:   %s\n", pid, label, dp.home, dp.log)
-	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "running", PID: pid, Home: dp.home, Log: dp.log, URL: baseURL}, mode, pretty)
-}
-
 func runDashboardSupervise(args []string) error {
 	fs := flag.NewFlagSet("__dashboard-supervise", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:4343", "")
@@ -365,17 +133,13 @@ func runDashboardSupervise(args []string) error {
 	noLocalStore := fs.Bool("no-local-store", false, "")
 	profileName := fs.String("profile", "", "")
 	version := fs.String("version", "", "")
+	instance := fs.String("instance", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *home == "" || *pidPath == "" {
 		return errors.New("__dashboard-supervise: --home and --pid required")
 	}
-
-	if err := fssecure.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n")); err != nil {
-		return fmt.Errorf("write pid: %w", err)
-	}
-	defer func() { _ = os.Remove(*pidPath) }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -388,6 +152,7 @@ func runDashboardSupervise(args []string) error {
 		AllowOrigins: splitCSV(*allowOrigins),
 		NoLocalStore: *noLocalStore,
 		Version:      *version,
+		Instance:     *instance,
 	}
 	if *logStoreURL != "" {
 		ls, err := storeurl.OpenLogStore(ctx, *logStoreURL)
@@ -409,6 +174,40 @@ func runDashboardSupervise(args []string) error {
 		return err
 	}
 
+	if !opts.AllowRemote && !localws.LoopbackBind(opts.Addr) {
+		return errors.New("non-loopback dashboard requires --allow-remote")
+	}
+	listener, err := net.Listen("tcp", opts.Addr)
+	if err != nil {
+		return err
+	}
+	defer func() { dashboardCleanupError("close dashboard listener", listener.Close()) }()
+	opts.Listener = listener
+	opts.Addr = listener.Addr().String()
+	birth, err := procgroup.ProcessBirth(os.Getpid())
+	if err != nil {
+		return err
+	}
+	boot, err := dashboardBoot()
+	if err != nil {
+		return err
+	}
+	dp, err := resolveDashboardPaths(*home)
+	if err != nil {
+		return err
+	}
+	record := dashboardRecord{PID: os.Getpid(), Birth: birth, Boot: boot, Instance: *instance, Artifact: dashboardRunningArtifact(), Options: dashboardOptions{Addr: opts.Addr, LogStore: *logStoreURL, ArtifactStore: *artifactStoreURL, Profile: *profileName, AllowOrigins: *allowOrigins, ReadOnly: *readOnly, NoLocalStore: *noLocalStore, AllowRemote: *allowRemote}}
+	if record.Instance == "" {
+		record.Instance = fmt.Sprintf("%d-%s", record.PID, record.Birth)
+		opts.Instance = record.Instance
+	}
+	if err = writeDashboardRecord(dp, record); err != nil {
+		return err
+	}
+	if err = fssecure.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n")); err != nil {
+		return err
+	}
+	defer func() { dashboardCleanupError("remove dashboard state", removeDashboardRecord(dp, record)) }()
 	if err := localws.Run(ctx, opts); err != nil {
 		return fmt.Errorf("local-ws: %w", err)
 	}
@@ -496,22 +295,30 @@ func fileSize(path string) int64 {
 }
 
 func tailFileFrom(path string, byteOffset int64, n int) string {
-	b, err := os.ReadFile(path)
+	f, err := fssecure.OpenPrivateConfig(path)
 	if err != nil {
-		return ""
+		return "startup log unavailable"
 	}
-	if byteOffset > 0 && byteOffset <= int64(len(b)) {
-		b = b[byteOffset:]
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "startup log unavailable"
 	}
-	trimmed := strings.TrimRight(string(b), "\n")
-	if trimmed == "" {
-		return ""
+	if byteOffset > info.Size() {
+		byteOffset = 0
 	}
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	lines, _, err := dashboardLogTail(context.Background(), f, info.Size(), max(int64(0), byteOffset), n, false)
+	if err != nil {
+		return err.Error()
 	}
-	return strings.Join(lines, "\n")
+	text := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line.Truncated {
+			line.Text += " [line truncated]"
+		}
+		text = append(text, line.Text)
+	}
+	return strings.Join(text, "\n")
 }
 
 func probeDashboardVersion(home, addr string) (localws.VersionInfo, bool) {
@@ -610,5 +417,22 @@ func applyDashboardProfile(ctx context.Context, opts *localws.Options, profileNa
 		opts.ArtifactStore = as
 		opts.ArtifactStoreLabel = p.Cache.Type
 	}
+	return nil
+}
+
+func stopSupervisor(pid int, pidPath string) error {
+	if err := signalTerminate(pid); err != nil {
+		return fmt.Errorf("terminate pid %d: %w", pid, err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			dashboardCleanupError("remove consumer PID", os.Remove(pidPath))
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	dashboardCleanupError("stop consumer", signalKill(pid))
+	dashboardCleanupError("remove consumer PID", os.Remove(pidPath))
 	return nil
 }

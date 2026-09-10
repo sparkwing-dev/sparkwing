@@ -5,7 +5,7 @@ Running `sparkwing` executes pipelines on your laptop, each job in its own proce
 The design is small:
 
 1. Every local `sparkwing` run writes records to the SQLite store under `~/.sparkwing/`.
-2. `sparkwing serve start` spawns a detached local server (`pkg/localws`) against that store, hosting the embedded dashboard SPA, the JSON API, and the log endpoints on one port (default `http://127.0.0.1:4343`). `sparkwing serve status` and `sparkwing serve kill` manage its lifecycle.
+2. `sparkwing serve start` spawns a detached local server (`pkg/localws`) against that store, hosting the embedded dashboard SPA, the JSON API, and the log endpoints on one port (default `http://127.0.0.1:4343`). `sparkwing serve status` and `sparkwing serve stop` manage its lifecycle.
 
 No daemon, no controller pod, no queue, no cluster lifecycle commands.
 
@@ -22,12 +22,18 @@ You do not have to assemble that path yourself. Each run records the directory a
 ## Running the dashboard
 
 ```
-sparkwing serve start    # spawn detached server (replaces any running one)
-sparkwing serve status   # report liveness, print URL
-sparkwing serve kill     # stop it
+sparkwing serve start    # start only when no instance is running
+sparkwing serve status   # report owned process, URLs and readiness
+sparkwing serve stop     # stop it
 ```
 
-The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing update --cli` or `sparkwing serve kill` first.
+The CLI binary embeds the dashboard. `start` detaches a child and returns after an HTTP readiness response identifies that exact instance. A repeated `start` leaves the PID and effective options unchanged, even if the service is unhealthy or the installed binary changed. Its warning and build comparison explain the difference. Use `sparkwing serve restart` to replace the owned instance; unchanged flags retain the running options.
+
+`stop` sends TERM, waits five seconds, then forces the same owned process to exit and waits up to two more seconds. Linux uses a process handle and boot/birth identity. macOS checks boot/birth immediately before each signal; a PID-reuse race between that check and the signal remains possible. Other platforms refuse verified lifecycle actions. An old numeric PID file without the new ownership record is unknown; automatic stop and replacement refuse it. The original process must be stopped through its existing owner before a new instance can be created.
+
+`status` and mutation receipts share dashboard/API URLs, effective bind, PID, ownership, readiness, state paths and build comparison. Matching artifact SHA256 establishes a match; version labels and revisions alone do not. Running executable hashes remain unknown where the operating system cannot expose the executing artifact independently of its install path. Endpoint scope describes the bind, not verified access from another machine.
+
+Piped output is one compact JSON service record; `--output pretty|json|plain` overrides detection. Plain prints the state word. Repeated start and stop succeed; stopped status exits 1, while unknown ownership or failed readiness exits 2. `sparkwing serve logs` reads the last 40 lines from a bounded 1 MiB tail; `--limit 0` skips history and `--follow` waits for new lines. Log records are compact JSON when piped.
 
 For the bind address and the other `serve start` flags, see [cli-serve.md](cli-serve.md).
 

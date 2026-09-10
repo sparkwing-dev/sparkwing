@@ -1629,31 +1629,31 @@ var cmdDashboard = Command{
 	Synopsis: "Manage the local dashboard + API server",
 	Description: `Background lifecycle for the laptop-local dashboard.
 'start' spawns a detached server (writes PID + log under
-$SPARKWING_HOME), 'kill' stops it, 'status' reports liveness.
+$SPARKWING_HOME), 'stop' stops it, 'restart' replaces it, and 'status' reports readiness.
 
 The server is one Go process that hosts the embedded Next.js SPA,
 the JSON API, the log endpoints, and the SQLite store on the same
 port.`,
-	SubcommandOrder: []string{"start", "kill", "status"},
+	SubcommandOrder: []string{"start", "stop", "restart", "status", "logs"},
 	Examples: []Example{
 		{"Start the dashboard", "sparkwing serve start"},
 		{"Check liveness", "sparkwing serve status"},
-		{"Stop the dashboard", "sparkwing serve kill"},
+		{"Stop the dashboard", "sparkwing serve stop"},
 	},
 }
 
 var cmdDashboardStart = Command{
 	Path:     "sparkwing serve start",
-	Synopsis: "Spawn the detached dashboard server (replaces any running one)",
+	Synopsis: "Start the dashboard, preserving every running instance",
 	Description: `Detaches a child process that runs the in-process
 dashboard + API + logs server (pkg/localws). PID is written to
 $SPARKWING_HOME/dashboard.pid; stdout/stderr are appended to
 $SPARKWING_HOME/dashboard.log. Returns once the listener is
-accepting TCP connections so callers can immediately curl it.
+confirming an HTTP readiness response from that exact instance.
 
-Replaces any resident dashboard: a live server on file is drained
-and a fresh one takes its place. It refuses only when the resident
-dashboard is a newer version than this CLI.
+A running instance is left unchanged, including its effective options.
+Use serve restart for replacement. Build identity is reported separately
+from readiness; missing artifact evidence is unknown.
 
 The listener accepts loopback Host headers and rejects a browser Origin
 that is neither loopback, the --addr host, nor listed in --allow-origin.
@@ -1680,28 +1680,51 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 	},
 }
 
-var cmdDashboardKill = Command{
-	Path:     "sparkwing serve kill",
+var cmdDashboardStop = Command{
+	Path:     "sparkwing serve stop",
 	Synopsis: "Stop a running dashboard server",
-	Description: `Sends SIGTERM to the PID recorded in
-$SPARKWING_HOME/dashboard.pid, polls for exit, escalates to SIGKILL
-after 5s if necessary, and removes the PID file. No-op (exit 0)
-when nothing is running.`,
+	Description: `Verifies the persisted process birth and boot identity before stopping.
+Sends TERM, waits five seconds, then forces that owned process to exit and
+waits up to two more seconds. Linux uses a process handle; macOS repeats
+identity checks immediately before signaling. Unknown ownership is refused.
+An absent service succeeds.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Stop the dashboard", "sparkwing serve kill"},
+		{"Stop the dashboard", "sparkwing serve stop"},
 	},
+}
+
+var cmdDashboardRestart = Command{
+	Path:        "sparkwing serve restart",
+	Synopsis:    "Replace an owned dashboard and wait for readiness",
+	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
+	Flags:       cmdDashboardStart.Flags,
+	Examples:    []Example{{"Restart with existing options", "sparkwing serve restart"}},
+}
+
+var cmdDashboardLogs = Command{
+	Path:        "sparkwing serve logs",
+	Synopsis:    "Read a bounded dashboard log tail",
+	Description: "Reads the last 40 lines by default, scanning at most the final 1 MiB. --limit 0 skips history. --follow waits for appended lines until interrupted; log rotation requires restarting the command. Lines larger than 16 KiB are marked truncated. A requested history exceeding the byte window reports an error. Follow retains incomplete lines until a newline arrives.",
+	Flags: []FlagSpec{
+		{Name: "home", Argument: "DIR", Desc: "State directory"},
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Output format"},
+		{Name: "limit", Argument: "N", Default: "40", Desc: "Last N lines; 0 skips history"},
+		{Name: "follow", Desc: "Follow appended lines until interrupted"},
+	},
+	Examples: []Example{{"Read recent log lines", "sparkwing serve logs"}},
 }
 
 var cmdDashboardStatus = Command{
 	Path:     "sparkwing serve status",
 	Synopsis: "Report whether the dashboard is running",
-	Description: `Reads $SPARKWING_HOME/dashboard.pid, probes the PID
-with kill(0), and reports running state + URL. Exit code 0 when
-running, 1 when not.`,
+	Description: `Reports persisted effective options, owned process identity, dashboard/API
+URLs, readiness and artifact comparison. Stopped exits 1; unknown ownership
+or failed readiness exits 2. Matching hashes establish build equality;
+missing artifact evidence is unknown.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},

@@ -9,14 +9,13 @@ import (
 )
 
 func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
+	// serve creates the home from its own lifecycle path, and resolving the
+	// paths deliberately touches no filesystem, so the writers below are the
+	// ones this test can hold to a private mode.
 	home := filepath.Join(t.TempDir(), "home")
 	if err := os.Mkdir(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveDashboardPaths(home); err != nil {
-		t.Fatal(err)
-	}
-	assertLocalPermission(t, home, 0o700)
 
 	describe := filepath.Join(home, "cache", "describe", "schema.json")
 	writeDescribeFile(describe, []byte(`[]`))

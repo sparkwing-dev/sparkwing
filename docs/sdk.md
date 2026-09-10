@@ -598,16 +598,19 @@ if !ok {
 }
 ```
 
-`ok` is false when the upstream node has not completed, when the run
-that was found stored no output, and on any cross-pipeline resolver
-failure; the value is the zero `T`. The SDK cannot tell an unreachable
-store from a genuine absence -- a resolver returns a bare error -- and
-reports both as absence. For the compare-to-last-run shape that errs
-toward doing the whole job; a step that uses `TryGet` to *skip* work
-turns a store outage into a silent skip, so read the warn log before
-relying on that shape. Every miss is logged at warn naming the pipeline
-and node, because "no matching run" is also what a misspelled pipeline
-name and an unreachable store produce.
+`ok` is false for a genuine absence: the upstream node has not
+completed, the run that was found stored no output, or a cross-pipeline
+resolver reported `sparkwing.ErrRefAbsent`; the value is the zero `T`.
+Every miss is logged at warn naming the pipeline and node, because a
+store cannot tell a misspelled pipeline name from one that has never
+run, and a silent bootstrap branch would hide the typo forever.
+
+A resolver marks an absence by wrapping `sparkwing.ErrRefAbsent`. The
+orchestrator's resolver marks a pipeline with no successful run inside
+`MaxAge` and a run that holds no such node. A failure it leaves
+unmarked -- a store it could not reach -- panics instead, so an outage
+crashes the step rather than sending a compare-to-last-run pipeline
+down its bootstrap branch for as long as the outage lasts.
 
 One input divides the two accessors: a cross-pipeline run that stored
 empty or null output. `Get` renders that as the zero `T` and carries on;
@@ -616,10 +619,10 @@ changes which branch runs.
 
 `TryGet` panics for the failures a pipeline author cannot handle at
 runtime: no resolver in context, which happens only outside a dispatched
-step; stored output that does not fit `T`; and a cancelled or expired
+step; stored output that does not fit `T`; a cancelled or expired
 context, which is the step being torn down rather than an upstream that
-is absent. Keep `Get` where a missing output is itself a programmer
-mistake.
+is absent; and an unmarked resolver failure. Keep `Get` where a missing
+output is itself a programmer mistake.
 
 Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
 `sw.RefTo[T]`; pass plain bytes via env vars or sibling steps.

@@ -7,9 +7,9 @@ pid_web="$RUN_DIR/web.pid"
 
 if command -v sparkwing >/dev/null 2>&1; then
   echo "==> sparkwing serve: stopping"
-  sparkwing serve kill || true
+  sparkwing serve stop || true
 else
-  echo "==> sparkwing not on PATH; skipping serve kill"
+  echo "==> sparkwing not on PATH; skipping serve stop"
 fi
 
 stop_next_dev() {

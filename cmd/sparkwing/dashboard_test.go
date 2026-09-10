@@ -88,12 +88,12 @@ func TestProbeDashboardVersion_MissingEndpoint(t *testing.T) {
 func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
 	prev := "old request line 1\nold request line 2\n"
-	if err := os.WriteFile(path, []byte(prev), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(prev), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	offset := fileSize(path)
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatalf("open append: %v", err)
 	}
@@ -113,11 +113,25 @@ func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
 
 func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
-	if err := os.WriteFile(path, []byte("only old lines\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("only old lines\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if got := tailFileFrom(path, fileSize(path), 40); got != "" {
 		t.Errorf("tail = %q, want empty", got)
+	}
+}
+
+func TestTailFileFrom_TruncatedLogRetainsNewFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dashboard.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat("old\n", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	offset := fileSize(path)
+	if err := os.WriteFile(path, []byte("new instance failed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := tailFileFrom(path, offset, 40); got != "new instance failed" {
+		t.Fatalf("truncated log lost startup failure: %q", got)
 	}
 }
 

@@ -12,6 +12,7 @@ Format conventions live in [../changelog-style.md](../changelog-style.md).
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.49.0](v0.49.0.md) | 2026-09-10 | `version update` becomes `update` for both the CLI and the SDK; the `dashboard` command group becomes `serve`, whose `start` no longer replaces a running service; `sparkwing queue exec` and the daemon's guarded-session wire messages are removed; `run --sw-isolated-home` is replaced by an admission refusal that names the upgrade; and the SDK drops `AcquireLintSlot`, `LintSlot` and `SPARKWING_LINT_SLOTS` in favour of `ToolCacheDir`. |
 | [v0.48.1](v0.48.1.md) | 2026-09-09 | Piped foreground runs emit a compact NDJSON summary instead of every log event; add `--sw-verbose` for the full live stream. |
 | [v0.48.0](v0.48.0.md) | 2026-09-09 | Every `on.schedule` entry says `where` it fires and may carry `args`; `crons install` pins the compiled pipeline it arms; the runs store advances to schema 34 and refuses older binaries, so bump every pinned SDK on a machine together with `sparkwing repos update`. |
 | [v0.47.0](v0.47.0.md) | 2026-09-09 | `on.schedule` takes a mapping (cron, tz, overlap, catch_up) and `pipelines.Triggers.Schedule` becomes `*ScheduleTrigger`; `CacheKeyFn` returns an error; the runs store advances to schema 32 additively for `sparkwing crons`. |

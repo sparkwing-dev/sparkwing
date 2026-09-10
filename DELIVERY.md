@@ -3,6 +3,15 @@
 Use the smallest evidence that covers the change. A lead agent owns the decision;
 this file is a menu and checklist, not a command that every change must run.
 
+## Xwing workflows
+
+The tracked `.xwing-env.yaml` declares dependency setup, local builds, tests,
+and foreground execution. Run `xwing commands` for the available tasks.
+`xwing land` uses the existing repository gate before fast-forwarding and pushing
+main, then applies Xwing's default archive retention. Public releases remain
+separate. Stateful CLI commands use their normal configuration; use a candidate
+launcher when testing isolated tool state.
+
 ## Checks
 
 - **Cheap:** format touched Go files and run the affected package tests, for

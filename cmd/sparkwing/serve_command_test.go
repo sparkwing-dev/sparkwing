@@ -51,7 +51,7 @@ func TestServeHelpAndCommandIndexReplaceDashboard(t *testing.T) {
 			seen[path] = true
 		}
 	}
-	for _, path := range []string{"sparkwing serve", "sparkwing serve start", "sparkwing serve status", "sparkwing serve kill"} {
+	for _, path := range []string{"sparkwing serve", "sparkwing serve start", "sparkwing serve status", "sparkwing serve stop", "sparkwing serve restart", "sparkwing serve logs"} {
 		if !seen[path] {
 			t.Fatalf("index omits %s: %s", path, out)
 		}
