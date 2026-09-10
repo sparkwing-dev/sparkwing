@@ -3,9 +3,12 @@ package bincache_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,5 +119,43 @@ func TestConcurrentArtifactDownloadsHaveIndependentStaging(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(dest))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("staging files remain: %v %v", entries, err)
+	}
+}
+
+func TestFailedBinaryPublicationRemovesStaging(t *testing.T) {
+	const payload = "complete binary"
+	sum := sha256.Sum256([]byte(payload))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(sum[:]))
+		_, err := io.WriteString(w, payload)
+		if err != nil {
+			return
+		}
+	}))
+	defer server.Close()
+	for _, source := range []string{"HTTP", "artifact"} {
+		t.Run(source, func(t *testing.T) {
+			parent := t.TempDir()
+			dest := filepath.Join(parent, "binary")
+			if err := os.Mkdir(dest, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if source == "HTTP" {
+				err = bincache.TryBinary(t.Context(), server.URL, "", "key", dest)
+			} else {
+				release := make(chan struct{})
+				close(release)
+				body := &gatedDownload{reader: strings.NewReader(payload), entered: make(chan struct{}), release: release}
+				err = bincache.FetchFromArtifactStore(t.Context(), downloadStore{body: body, digest: hex.EncodeToString(sum[:])}, "key", dest)
+			}
+			if err == nil {
+				t.Fatal("published over destination directory")
+			}
+			entries, readErr := os.ReadDir(parent)
+			if readErr != nil || len(entries) != 1 || entries[0].Name() != "binary" {
+				t.Fatalf("staging remains after publication failure: %v %v", entries, readErr)
+			}
+		})
 	}
 }

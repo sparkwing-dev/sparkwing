@@ -99,7 +99,11 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, dest)
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func UploadToArtifactStore(ctx context.Context, store storage.ArtifactStore, key, src string) error {

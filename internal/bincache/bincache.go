@@ -123,7 +123,11 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, dest)
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
