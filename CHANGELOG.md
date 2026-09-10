@@ -33,6 +33,27 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
+- **cli:** `queue list` is the canonical name for the admission listing, and
+  bare `queue` runs the same code. Running rows gain the expected remaining
+  time and the clock time the run is expected to finish; queued rows gain the
+  expected finish beside the expected start. Both come from the run's measured
+  p50 profile and the daemon's admission simulation, and a cell without an
+  estimate names the measurement it lacks rather than carrying a guess:
+  "unmeasured" for a row with no profile, "past p50" for a run that has
+  outlived the profile it has, "unknown" for a queued row the daemon cannot
+  place behind the runs ahead of it. The header counts the queued runs with no
+  profile. In the pretty view the section that was headed "Waiting" is now
+  headed "Queued".
+  `-o json` gains `expected_remaining_ms`, `expected_finish_ms`,
+  `expected_finish_at` on running rows, `expected_start_at`,
+  `expected_finish_ms`, `expected_finish_at` on queued rows, and
+  `unmeasured_waiters` at the top level, each duration in milliseconds from the
+  snapshot and each clock time as RFC3339. `-o plain` gains an
+  `unmeasured-waiters` record, two trailing columns on a holder record
+  (humanized remaining, RFC3339 finish) and one on a waiter record (RFC3339
+  finish); every existing column keeps its position. The listing's errors now
+  carry the path that was invoked, so `queue list` reports
+  `sparkwing queue list: ...` where it used to report `queue: ...`.
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -74,6 +95,18 @@ unlock.
   cannot resolve as `broken` with the error, instead of `undeclared` and gated.
   A repository the survey could not read was counted among those whose gates
   fire
+
+### Docs
+
+- **migrations:** The v0.48.1 migration guide moved from
+  `docs/migrations/compact-run-output.md` to `docs/migrations/v0.48.1.md`, so it
+  is named like every other release guide and reachable at the stable
+  `/docs/migration-guide/v0.48.1` path. The old slug no longer resolves
+- **cli:** `info --for-agent` and `DELIVERY.md` say to gate through the machine's
+  admission daemon one run at a time, because that daemon is what serializes
+  concurrent agents, and name a bare `go test ./...` or lint run as load it
+  cannot see. Both point at `sparkwing queue list` for order and estimates and
+  `sparkwing queue priority` for re-ranking.
 
 ### Fixed
 
@@ -199,7 +232,7 @@ unlock.
 - **cli (Breaking):** Piped foreground runs now emit a compact NDJSON summary
   instead of every log event. Node progress and failure details are bounded;
   stored logs stay complete. Add `--sw-verbose` for the full live event stream.
-  See [compact run output migration](docs/migrations/compact-run-output.md).
+  See [compact run output migration](docs/migrations/v0.48.1.md#compact-foreground-run-output).
 
 ### Fixed
 
@@ -922,7 +955,7 @@ unlock.
   including the ones `SPARKWING_ALLOW_UNADMITTED=1` produces, are invisible to
   `sparkwing runs`, `sparkwing jobs`, and the dashboard, which is what the block says;
   see the [migration
-  guide](docs/migrations/v0.41.0.md#two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
+  guide](docs/migrations/v0.41.0.md#breaking-two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
   Their start record and `sparkwing runs status` carry `standalone` and
   `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`, `floor`, `forced`),
   and `sparkwing doctor` lists each standalone store with its run count and the oldest
@@ -1882,7 +1915,7 @@ unlock.
   handlers rather than by a wrapper that ran before authentication.
   `sparkwing-controller --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus
   `/metrics` to its own listener, off the API listener and any ingress in front of it.
-  See [the migration note](docs/migrations/v0.41.0.md).
+  See [the migration note](docs/migrations/v0.41.0.md#public-controller-schema-cuts).
 
 - **sdk:** `git.Clone` now authenticates to the git cache named by `SPARKWING_GITCACHE`
   or `SPARKWING_GITCACHE_URL`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
@@ -5920,7 +5953,7 @@ breaking changes and upgrade steps.
 - **run:** local runs annotate their box-slot holder lock file with a `run=<runID>` line
   once the run id exists, so a wedged holder is traced to its run by reading the file.
   The lock file layout is now a documented, versioned contract -- see
-  [docs/box-slot-lockfile-contract.md](docs/box-slot-lockfile-contract.md).
+  [the box-slot lockfile contract](https://github.com/sparkwing-dev/sparkwing/blob/c36b7b22014b/docs/box-slot-lockfile-contract.md).
 
 - **store:** `SPARKWING_SQLITE_BUSY_TIMEOUT_MS` overrides the SQLite `busy_timeout`
   (default 30000 ms) for both read-write and read-only opens. A set-but-invalid value
@@ -5935,7 +5968,7 @@ breaking changes and upgrade steps.
   with every signal re-verified against the same lock file, pid, and flock so a recycled
   pid is never killed. Reads only the filesystem and flock state, so it works while
   `state.db` is wedged. See
-  [docs/box-slot-lockfile-contract.md](docs/box-slot-lockfile-contract.md).
+  [the box-slot lockfile contract](https://github.com/sparkwing-dev/sparkwing/blob/c36b7b22014b/docs/box-slot-lockfile-contract.md).
 
 - **run:** a run queued for a box slot now names its blocker: while waiting, it probes
   for stalled holders about every 30 seconds and prints the pid and evidence, pointing

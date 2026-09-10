@@ -242,12 +242,13 @@ func TestRenderQueue_PlainIsOneRecordPerLine(t *testing.T) {
 		t.Fatalf("render plain: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("want 3 resources + 1 holder + 1 waiter = 5 lines, got %d:\n%s", len(lines), buf.String())
+	if len(lines) != 6 {
+		t.Fatalf("want 3 resources + 1 counter + 1 holder + 1 waiter = 6 lines, got %d:\n%s", len(lines), buf.String())
 	}
 	if !strings.HasPrefix(lines[0], "resource\t") ||
-		!strings.HasPrefix(lines[3], "holder\t") ||
-		!strings.HasPrefix(lines[4], "waiter\t") {
+		!strings.HasPrefix(lines[3], "unmeasured-waiters\t") ||
+		!strings.HasPrefix(lines[4], "holder\t") ||
+		!strings.HasPrefix(lines[5], "waiter\t") {
 		t.Fatalf("plain rows not tagged by kind:\n%s", buf.String())
 	}
 }

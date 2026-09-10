@@ -8,18 +8,34 @@ Every `sparkwing queue` command, flag, and argument, generated from the CLI's ow
 
 Inspect local admission holders, connections, and waiters
 
-Reports the local admission daemon's resource capacity, usage, and queue.
-Each holder shows its repository, age, and charge. Connected runs that hold
-no resources have separate rows. Waiters appear in admission order with
-their position, priority, cost, and blocking resource. Attached child runs
-appear under their parent. The header summarizes recent admission outcomes.
+Reports the local admission daemon's resource capacity, usage, and queue in
+two sections: running work, then queued work in admission order.
+
+A running row carries the repository, elapsed time, charge, and, from the
+run's measured p50 profile, its expected remaining time and the clock time it
+is expected to finish. A queued row carries its position, priority, cost, how
+long it has waited, the resource it waits on, and, from the daemon's
+admission simulation, when it is expected to start and finish. Attached child
+runs appear under their parent. Connected runs that hold no resources have
+separate rows.
+
+An estimate exists only where the measurements behind it do, and a cell
+without one says which measurement is missing. "unmeasured" is a row the
+daemon has no profile for. "past p50" is a run that has already outlived the
+profile it has, which no longer predicts it. "unknown" is a queued row the
+daemon cannot place, because a run ahead of it has no estimate of its own.
+None of the three is replaced by a guess. The header counts the queued runs
+with no profile, because those are the ones that starve.
+'sparkwing queue priority' re-ranks a queued run.
 
 A stalled holder includes a cancellation command:
 'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
 The queue command only reports state.
 
 Output is pretty on a terminal and JSON when piped. Select JSON explicitly
-with -o json, or tab-separated records with -o plain.
+with -o json, or tab-separated records with -o plain. JSON carries each
+estimate as milliseconds from the snapshot and as an RFC3339 clock time;
+plain carries humanized durations and RFC3339 clock times.
 
 An absent daemon reports an empty queue and exits 0. An unreachable daemon
 reports the connection failure and exits 4; its queue state is unknown.
@@ -27,8 +43,11 @@ reports the connection failure and exits 4; its queue state is unknown.
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.
 
+'sparkwing queue' and 'sparkwing queue list' print the same listing.
+
 ### Subcommands
 
+- `list` -- List running and queued work with expected start and finish
 - `exec` -- Run a command under local machine admission
 - `priority` -- Re-rank a run that is already queued for local admission
 
@@ -44,16 +63,16 @@ concurrency key, its holders and waiters, and registered runner capacity.
 
 ```sh
 # Show the current queue
-sparkwing queue
+sparkwing queue list
 
 # Agent-readable snapshot
-sparkwing queue -o json
+sparkwing queue list -o json
 
 # One record per line for shell pipelines
-sparkwing queue -o plain
+sparkwing queue list -o plain
 
 # Inspect a controller's admission state
-sparkwing queue --profile prod
+sparkwing queue list --profile prod
 
 # Move a queued run to the front
 sparkwing queue priority --run build-123 --set front
@@ -93,6 +112,68 @@ Windows and other Unix platforms.
 ```sh
 # Serialize a bootstrap command
 sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 --semaphore bootstrap -- make prepare
+```
+
+## `sparkwing queue list`
+
+List running and queued work with expected start and finish
+
+Reports the local admission daemon's resource capacity, usage, and queue in
+two sections: running work, then queued work in admission order.
+
+A running row carries the repository, elapsed time, charge, and, from the
+run's measured p50 profile, its expected remaining time and the clock time it
+is expected to finish. A queued row carries its position, priority, cost, how
+long it has waited, the resource it waits on, and, from the daemon's
+admission simulation, when it is expected to start and finish. Attached child
+runs appear under their parent. Connected runs that hold no resources have
+separate rows.
+
+An estimate exists only where the measurements behind it do, and a cell
+without one says which measurement is missing. "unmeasured" is a row the
+daemon has no profile for. "past p50" is a run that has already outlived the
+profile it has, which no longer predicts it. "unknown" is a queued row the
+daemon cannot place, because a run ahead of it has no estimate of its own.
+None of the three is replaced by a guess. The header counts the queued runs
+with no profile, because those are the ones that starve.
+'sparkwing queue priority' re-ranks a queued run.
+
+A stalled holder includes a cancellation command:
+'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
+The queue command only reports state.
+
+Output is pretty on a terminal and JSON when piped. Select JSON explicitly
+with -o json, or tab-separated records with -o plain. JSON carries each
+estimate as milliseconds from the snapshot and as an RFC3339 clock time;
+plain carries humanized durations and RFC3339 clock times.
+
+An absent daemon reports an empty queue and exits 0. An unreachable daemon
+reports the connection failure and exits 4; its queue state is unknown.
+
+With --profile NAME, the view reads that profile's controller and shows each
+concurrency key, its holders and waiters, and registered runner capacity.
+
+This is the same output as 'sparkwing queue'.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
+| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `--profile NAME` | Inspect this profile's controller instead of the local daemon |
+
+### Examples
+
+```sh
+# Show the current queue
+sparkwing queue list
+
+# Agent-readable snapshot
+sparkwing queue list -o json
+
+# One record per line for shell pipelines
+sparkwing queue list -o plain
 ```
 
 ## `sparkwing queue priority`

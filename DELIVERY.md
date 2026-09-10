@@ -51,13 +51,22 @@ this file is a menu and checklist, not a command that every change must run.
   seen its own package, and runs `store-postgres` when that change touches
   `pkg/store`. Unit and ESLint run in parallel; the production build then
   feeds the browser suite.
+- **Gating beside other agents:** one gate at a time. The machine's admission
+  daemon serializes concurrent agents, and `sparkwing run` is how a check
+  reaches it; a bare `go test ./...` or `golangci-lint run` outside a run is
+  load the daemon cannot see and every queued run pays for. `sparkwing queue
+  list` shows what is running and queued with expected start and finish, and
+  `sparkwing queue priority --run <id> --set front` re-ranks a queued run.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
   machine's admission daemon, admission refuses the run. Give the gate a home
   of its own instead of replacing the daemon every other repository shares:
   `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`, run from a
   sparkwing built from this checkout, which points that run's state and config
-  at the directory and hosts a daemon there from that binary.
+  at the directory and hosts a daemon there from that binary. That schema
+  mismatch is the only case for an isolated home: the run leaves the machine's
+  admission ledger and the dashboard, so several isolated gates contend on the
+  OS instead of queueing.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
@@ -70,10 +79,14 @@ this file is a menu and checklist, not a command that every change must run.
   it on every pull request and uploads gosec findings to code scanning. The
   release workflow runs it and hosted CodeQL against the resolved tag commit
   before any artifact build. CodeQL reports alerts; gosec, govulncheck,
-  gitleaks, and `npm audit` fail the gate. Run the local pipeline when a change
-  touches an HTTP handler, auth, file paths built from input, subprocess
-  arguments, or a dependency. Verify dashboard changes against real local state
-  with `bash bin/dev-start.sh` (dashboard backend on :4343, `next dev` on :3100)
+  gitleaks, and `npm audit` fail the gate. The npm scanner retries a registry
+  that times out or answers 5xx, and reuses a recorded pass for a day when
+  `web/package-lock.json` and `web/package.json` are byte-identical to the pass,
+  so an unreachable registry fails as its own error rather than as an advisory
+  and an unchanged dependency set is still re-asked daily. Run the local
+  pipeline when a change touches an HTTP handler, auth, file paths built from
+  input, subprocess arguments, or a dependency. Verify dashboard changes
+  against real local state with `bash bin/dev-start.sh` (dashboard backend on :4343, `next dev` on :3100)
   and stop it with `bash bin/dev-stop.sh`; the browser gate uses deterministic
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.

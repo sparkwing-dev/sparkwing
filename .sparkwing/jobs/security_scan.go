@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -37,7 +38,7 @@ func (SecurityScan) ShortHelp() string {
 }
 
 func (SecurityScan) Help() string {
-	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list, writing gitleaks.json beside the gosec reports and naming every finding (rule, file, line, fingerprint) in the job log; and `npm audit` over the dashboard's production dependencies. gosec fails this job on any high-severity, high-confidence finding, so a false positive needs a source annotation: the scan runs with -nosec-require-rules and -nosec-require-justification, so every suppression must read `#nosec GNNN -- <reason>`, naming the rules it silences and why. No -nosec-tag alternative is configured, so `grep -rn '#nosec'` lists every one. Code scanning records the SARIF but does not decide this pipeline. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
+	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list, writing gitleaks.json beside the gosec reports and naming every finding (rule, file, line, fingerprint) in the job log; and `npm audit` over the dashboard's production dependencies, which retries a registry that times out or answers 5xx, records a pass against the exact lockfile and package.json for a day so an unchanged dependency set does not pay the round trip again, and reports an unreachable registry as its own failure rather than as an advisory. gosec fails this job on any high-severity, high-confidence finding, so a false positive needs a source annotation: the scan runs with -nosec-require-rules and -nosec-require-justification, so every suppression must read `#nosec GNNN -- <reason>`, naming the rules it silences and why. No -nosec-tag alternative is configured, so `grep -rn '#nosec'` lists every one. Code scanning records the SARIF but does not decide this pipeline. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
 }
 
 func (SecurityScan) Examples() []sparkwing.Example {
@@ -209,11 +210,43 @@ func readGitleaksReport(path string) ([]gitleaksFinding, error) {
 }
 
 func (p *SecurityScan) npmAudit(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "npm --prefix web audit --omit=dev --audit-level=high").Run(); err != nil {
+	dir, digest := npmAuditProofTarget(ctx)
+	if npmAuditProofFresh(dir, digest, time.Now()) {
+		sparkwing.Info(ctx, "npm audit: reusing the pass recorded for this dependency set within the last %s", npmAuditRetention)
+		return nil
+	}
+
+	verdict, err := runNpmAudit(ctx)
+	if err != nil {
+		return err
+	}
+	record, err := npmAuditOutcome(verdict)
+	if err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "npm audit: no high or critical advisories in production dependencies")
+	if record && dir != "" && digest != "" {
+		if err := recordNpmAuditProof(dir, digest, time.Now()); err != nil {
+			sparkwing.Info(ctx, "npm audit: recording this pass failed, so the next run audits again (%v)", err)
+		}
+	}
 	return nil
+}
+
+// safety: either half coming back empty means this run neither reuses nor
+// records a proof, and audits from scratch.
+func npmAuditProofTarget(ctx context.Context) (dir, digest string) {
+	dir, err := npmAuditProofDir()
+	if err != nil {
+		sparkwing.Info(ctx, "npm audit: no proof directory, so this run audits and records nothing (%v)", err)
+		return "", ""
+	}
+	digest, err = npmAuditDigest(sparkwing.WorkDir())
+	if err != nil {
+		sparkwing.Info(ctx, "npm audit: cannot digest the dependency set, so this run audits and records nothing (%v)", err)
+		return "", ""
+	}
+	return dir, digest
 }
 
 type gosecReport struct {

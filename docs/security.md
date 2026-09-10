@@ -511,7 +511,11 @@ commit and waits for every security job before building release artifacts.
   historical generated-bundle false positive by fingerprint. No path is
   excluded.
 - **`npm audit`** over the dashboard's production dependencies at the
-  `high` threshold.
+  `high` threshold. A registry that times out or answers 5xx is retried, and
+  fails as its own error rather than as an advisory. A pass is recorded against
+  a digest of `web/package-lock.json` and `web/package.json` and reused for at
+  most a day, so an unchanged dependency set is still re-asked daily and an
+  advisory is never replayed from the record.
 
 The hosted workflow also runs CodeQL for Go and TypeScript with the
 `security-extended` query suite. CodeQL alerts remain report-only. The workflow

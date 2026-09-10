@@ -41,7 +41,10 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 		}
 		return fmt.Errorf("read CHANGELOG.md: %w", err)
 	}
-	issues := LintChangelog(string(body), migrationsFS(repoRoot))
+	issues := mergeIssues(
+		LintChangelog(string(body), migrationsFS(repoRoot)),
+		LintChangelogDocLinks(string(body), os.DirFS(repoRoot)),
+	)
 	if len(issues) == 0 {
 		return nil
 	}
@@ -537,6 +540,36 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 
 func normalizeHeadingName(s string) string { return s }
 
+// safety: these released entries shipped with no migration guide and editing a
+// published changelog cannot undo that. A version cutoff would forgive whatever
+// sits below it; this list has to be enlarged on purpose. Reflowing a listed
+// entry's opening words re-arms the failure, which is the loud direction.
+var unguidedBreakingEntries = map[string]string{
+	"v0.40.0": "Revoking a token, rotating one, or deleting a user",
+}
+
+func shippedWithoutGuide(version, body string) bool {
+	opening, ok := unguidedBreakingEntries[version]
+	return ok && strings.Contains(body, opening)
+}
+
+// safety: a permalink pinned to the release tag resolves to the sections that
+// release shipped, which _unreleased.md in the current tree no longer describes.
+var pinnedMigrationLinkRe = regexp.MustCompile(
+	`\]\(https://github\.com/sparkwing-dev/sparkwing/blob/(v\d+\.\d+\.\d+)/docs/migrations/[^)/]+\.md#[^)/]+\)`)
+
+// safety: the pin has to name this section's own release. A permalink to some
+// other tag documents a different set of changes and would satisfy the check
+// while telling an adopter the wrong thing.
+func pinnedToOwnRelease(version, body string) bool {
+	for _, m := range pinnedMigrationLinkRe.FindAllStringSubmatch(body, -1) {
+		if m[1] == version {
+			return true
+		}
+	}
+	return false
+}
+
 func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []ChangelogIssue {
 	var issues []ChangelogIssue
 	isUnreleased := strings.EqualFold(s.version, "Unreleased")
@@ -546,7 +579,8 @@ func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []Changelo
 		}
 		linkMatches := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
 		if len(linkMatches) == 0 {
-			if isUnreleased {
+			if isUnreleased || pinnedToOwnRelease(s.version, e.body) ||
+				shippedWithoutGuide(s.version, e.body) {
 				continue
 			}
 			issues = append(issues, ChangelogIssue{
@@ -615,7 +649,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 	return []ChangelogIssue{{
 		Line:     e.titleLine,
 		Category: "missing-migration-anchor",
-		Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor does not match any H2 in the file; available headings: %s",
+		Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor matches no heading in the file; available headings: %s",
 			path, anchor, formatAnchorList(headings)),
 	}}
 }
@@ -632,10 +666,11 @@ func readMigrationHeadings(migrations fs.FS, path string) ([]string, bool) {
 	var headings []string
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// safety: an anchor resolves off any heading level, so restricting this to
+	// H2 would report a link that works as broken.
 	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "## ") {
-			headings = append(headings, strings.TrimSpace(strings.TrimPrefix(line, "## ")))
+		if m := headingRe.FindStringSubmatch(scanner.Text()); m != nil {
+			headings = append(headings, strings.TrimSpace(m[1]))
 		}
 	}
 	return headings, true
