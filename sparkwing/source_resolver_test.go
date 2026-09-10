@@ -230,6 +230,8 @@ func TestDotenvSupportsExportAndComments(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.env")
 	body := `export TOKEN=example # explanation
 PLAIN=value#literal
+HASH=#s3cr3t
+EMPTY= # comment
 QUOTED="value # literal" # explanation
 SINGLE='value # literal' # explanation
 `
@@ -240,10 +242,14 @@ SINGLE='value # literal' # explanation
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"TOKEN": "example", "PLAIN": "value#literal", "QUOTED": "value # literal", "SINGLE": "value # literal"} {
+	for key, want := range map[string]string{"TOKEN": "example", "PLAIN": "value#literal", "HASH": "#s3cr3t", "QUOTED": "value # literal", "SINGLE": "value # literal"} {
 		value, _, err := resolver.Resolve(t.Context(), key)
 		if err != nil || value != want {
 			t.Errorf("%s = %q, %v; want %q", key, value, err, want)
 		}
+	}
+	value, _, err := resolver.Resolve(t.Context(), "EMPTY")
+	if value != "" || !errors.Is(err, sparkwing.ErrSecretMissing) {
+		t.Fatalf("comment-only value = %q, %v", value, err)
 	}
 }

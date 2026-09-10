@@ -22,7 +22,9 @@ func ParseLine(line string) (string, string, error) {
 		return "", "", fmt.Errorf("malformed line, want KEY=VALUE")
 	}
 	key := strings.TrimSpace(line[:eq])
-	value := strings.TrimSpace(line[eq+1:])
+	rawValue := line[eq+1:]
+	leadingSpace := strings.HasPrefix(rawValue, " ") || strings.HasPrefix(rawValue, "\t")
+	value := strings.TrimSpace(rawValue)
 	var quote byte
 	for i := 0; i < len(value); i++ {
 		ch := value[i]
@@ -36,7 +38,7 @@ func ParseLine(line string) (string, string, error) {
 			}
 		} else if i == 0 && (ch == '"' || ch == '\'') {
 			quote = ch
-		} else if ch == '#' && (i == 0 || value[i-1] == ' ' || value[i-1] == '\t') {
+		} else if ch == '#' && ((i == 0 && leadingSpace) || (i > 0 && (value[i-1] == ' ' || value[i-1] == '\t'))) {
 			value = strings.TrimSpace(value[:i])
 			break
 		}
