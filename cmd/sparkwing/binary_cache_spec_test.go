@@ -58,13 +58,11 @@ func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
 	}
 }
 
-// The negative half: with the same store wired as the plain cache surface
-// and no sub-spec, the fetch misses and the pipeline compiles locally.
-func TestCompileAndExec_CacheSurfaceAloneDoesNotServeTheSubSpecStore(t *testing.T) {
-	if os.Getenv("SPARKWING_TEST_BINARIES_CHILD") == "1" {
-		return // the child body lives in the test above
-	}
-
+// The sub-spec wins over the cache surface it sits under: the seeded store
+// is the cache surface, the sub-spec points at an empty directory, and the
+// compile must miss and build locally. Reading the cache surface instead
+// would serve the seeded binary and exit 23.
+func TestCompileAndExec_TheSubSpecOverridesTheCacheSurface(t *testing.T) {
 	pipelineDir := writeExitModule(t, "binariesplain", 17)
 	storeDir := filepath.Join(t.TempDir(), "binaries-store")
 	seedArtifactStore(t, storeDir, pipelineDir, 23)
@@ -75,16 +73,19 @@ func TestCompileAndExec_CacheSurfaceAloneDoesNotServeTheSubSpecStore(t *testing.
     secrets: { type: env }
     state:   { type: sqlite, path: %s }
     logs:    { type: filesystem, path: %s }
-    cache:   { type: filesystem, path: %s }
+    cache:
+      type: filesystem
+      path: %s
+      binaries: { type: filesystem, path: %s }
 `, filepath.Join(t.TempDir(), "state.db"), filepath.Join(t.TempDir(), "logs"),
-		filepath.Join(t.TempDir(), "empty-cache"))
+		storeDir, filepath.Join(t.TempDir(), "empty-binaries"))
 	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles.yaml: %v", err)
 	}
 
 	code := runCompileChild(t, pipelineDir, profiles, "plain-cache")
 	if code != 17 {
-		t.Fatalf("exit code %d: expected the locally compiled binary", code)
+		t.Fatalf("exit code %d: the cache surface served the binary the sub-spec was meant to override", code)
 	}
 }
 
