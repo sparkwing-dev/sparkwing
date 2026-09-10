@@ -15,17 +15,21 @@ func TestOutputContractTerminal(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode string
 		args       []string
+		code       int
 	}{
-		{"default", "", []string{"version", "--offline"}},
-		{"json", "json", []string{"version", "--offline"}},
-		{"plain", "plain", []string{"version", "--offline"}},
-		{"onboarding-json", "json", []string{"info", "--first-time"}},
-		{"help-json", "json", []string{"--help"}},
-		{"serve-default", "", []string{"serve", "kill"}},
-		{"serve-json", "json", []string{"serve", "kill"}},
-		{"serve-plain", "plain", []string{"serve", "kill"}},
-		{"consumer-default", "", []string{"runs", "consumer", "stop"}},
-		{"consumer-json", "json", []string{"runs", "consumer", "stop"}},
+		{"default", "", []string{"version", "--offline"}, 0},
+		{"json", "json", []string{"version", "--offline"}, 0},
+		{"plain", "plain", []string{"version", "--offline"}, 0},
+		{"onboarding-json", "json", []string{"info", "--first-time"}, 0},
+		{"help-json", "json", []string{"--help"}, 0},
+		{"serve-default", "", []string{"serve", "kill"}, 0},
+		{"serve-json", "json", []string{"serve", "kill"}, 0},
+		{"serve-plain", "plain", []string{"serve", "kill"}, 0},
+		{"consumer-default", "", []string{"runs", "consumer", "stop"}, 0},
+		{"consumer-json", "json", []string{"runs", "consumer", "stop"}, 0},
+		{"update-default", "", []string{"update", "--sdk", "--check"}, 2},
+		{"update-json", "json", []string{"update", "--sdk", "--check"}, 2},
+		{"update-plain", "plain", []string{"update", "--sdk", "--check"}, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mode := tc.mode
@@ -56,7 +60,7 @@ func TestOutputContractTerminal(t *testing.T) {
 			cmd.Stdout = slave
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
-			if err := cmd.Run(); err != nil {
+			if err := cmd.Run(); cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != tc.code {
 				t.Fatalf("terminal command: %v: %s", err, &stderr)
 			}
 			if err := slave.Close(); err != nil {

@@ -172,7 +172,7 @@ func runDashboardStart(args []string) error {
 		if running, ok := probeDashboardVersion(dp.home, addr); ok && dashboardIsNewer(running.Version, mine) {
 			return fmt.Errorf(
 				"the running dashboard (%s, pid %d) is newer than this CLI (%s); "+
-					"it was left running. Upgrade the CLI with `sparkwing version update --cli`, "+
+					"it was left running. Upgrade the CLI with `sparkwing update --cli`, "+
 					"or stop it first with `sparkwing serve kill`",
 				running.Version, pid, mine)
 		}

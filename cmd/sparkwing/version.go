@@ -23,6 +23,8 @@ import (
 )
 
 type VersionReport struct {
+	CLIStatus      string          `json:"cli_status"`
+	CLIReason      string          `json:"cli_reason,omitempty"`
 	CLI            InfoVersion     `json:"cli"`
 	SchemaVersion  int             `json:"schema_version"`
 	LatestRelease  string          `json:"latest_release,omitempty"`
@@ -52,11 +54,17 @@ const versionFetchTimeout = 3 * time.Second
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 func runVersion(args []string) error {
-	if len(args) > 0 && args[0] == "update" {
-		return runVersionUpdate(args[1:])
-	}
 	if len(args) > 0 && args[0] == "hold" {
 		return runVersionHold(args[1:])
+	}
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-o" || args[i] == "--output" {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(args[i], "-") {
+			return fmt.Errorf("version: unexpected positional %q", args[i])
+		}
 	}
 	fs := flag.NewFlagSet(cmdVersion.Path, flag.ContinueOnError)
 	var output string
@@ -95,18 +103,32 @@ func gatherVersionReport(offline bool) VersionReport {
 		CLI:           parseInfoVersion(installedVersion()),
 		SchemaVersion: store.ExpectedSchemaVersion(),
 	}
+	r.CLIStatus = "not_checked"
 	if !offline {
-		latest, err := fetchLatestRelease()
-		if err != nil {
-			r.LatestFetchErr = err.Error()
-		} else {
-			r.LatestRelease = latest
+		invoking := updateReadInvoking()
+		check := gatherUpdateCheckForIdentity("cli", "", false, false, &invoking)
+		r.LatestRelease = check.Available.Version
+		r.CLIStatus = check.Status
+		r.CLIReason = check.Reason
+		r.Behind = check.Status == "update_available"
+		if check.Installed.Revision != "" {
+			r.CLI.VCSRevision = check.Installed.Revision
+		}
+		if check.Installed.Dirty != nil && *check.Installed.Dirty {
+			r.CLI.IsDirty = true
+			r.CLI.IsRelease = false
+			r.CLI.BuildType = "local-dirty"
+			r.CLI.HumanLabel = "local build with uncommitted changes"
+		} else if check.localBuild {
+			r.CLI.IsRelease = false
+			r.CLI.BuildType = "local-clean"
+			r.CLI.HumanLabel = "local source build"
+		}
+		if check.Available.Version == "" {
+			r.LatestFetchErr = check.Reason
 		}
 	}
-	if r.CLI.Semver != "" && r.LatestRelease != "" {
-		r.Behind = semver.Compare(r.CLI.Semver, r.LatestRelease) < 0
-	}
-	if hold := resolveVersionHold(); hold.Value != "" {
+	if hold := resolveVersionHold(); hold.Value != "" || hold.Error != "" {
 		r.Hold = &hold
 	}
 	if proj := gatherVersionProject(r.LatestRelease); proj != nil {
@@ -125,7 +147,7 @@ func gatherVersionProject(latest string) *VersionProject {
 		return nil
 	}
 	gomodPath := filepath.Join(sparkwingDir, "go.mod")
-	body, err := os.ReadFile(gomodPath)
+	body, err := readUpdateModule(gomodPath)
 	if err != nil {
 		return &VersionProject{SparkwingDir: sparkwingDir}
 	}
@@ -166,6 +188,10 @@ func gatherVersionProject(latest string) *VersionProject {
 func fetchLatestRelease() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
 	defer cancel()
+	return fetchLatestReleaseContext(ctx)
+}
+
+func fetchLatestReleaseContext(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, versionLatestURL, nil)
 	if err != nil {
 		return "", err
@@ -242,6 +268,13 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  latest:   %s %s\n", color.Dim("unknown"), color.Dim("("+r.LatestFetchErr+")"))
 	case r.LatestRelease == "":
 		fmt.Printf("  latest:   %s\n", color.Dim("not checked (--offline)"))
+	case r.CLIStatus == "unknown" || r.CLIStatus == "diverged":
+		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Yellow("comparison unknown"))
+		if r.CLIReason != "" {
+			fmt.Printf("  compare:  %s\n", r.CLIReason)
+		}
+	case r.CLIStatus == "ahead":
+		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Dim("installed release is ahead"))
 	case r.Behind:
 		fmt.Printf(
 			"  latest:   %s %s\n",
@@ -252,9 +285,9 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Green("up to date"))
 	}
 	if r.Behind {
-		fmt.Printf("  upgrade:  %s\n", "sparkwing version update --cli")
+		fmt.Printf("  upgrade:  %s\n", "sparkwing update --cli")
 	} else {
-		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing version update --cli"))
+		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing update --cli"))
 	}
 	if r.Hold != nil && r.Hold.Error != "" {
 		fmt.Printf("  hold:     %s\n", color.Yellow(r.Hold.Error))
@@ -292,7 +325,7 @@ func printVersionTable(r VersionReport) {
 		}
 		fmt.Printf("  sdk:      %s   %s\n", p.SDKPin, label)
 		if p.SDKBehind {
-			fmt.Printf("  upgrade:  sparkwing version update --sdk\n")
+			fmt.Printf("  upgrade:  sparkwing update --sdk\n")
 		}
 	}
 	if len(p.Sparks) > 0 {

@@ -59,7 +59,7 @@ func resolveSource(ctx context.Context, f docsWebFlags) (webResolution, error) {
 		return r, fmt.Errorf(
 			"version %s not in this binary's embed (this CLI is %s). "+
 				"Rerun with --web to fetch from sparkwing.dev, or install the "+
-				"matching CLI: sparkwing version update --cli --version %s",
+				"matching CLI: sparkwing update --cli --version %s",
 			r.version, displayEmbedded(embedVer), r.version)
 	}
 
