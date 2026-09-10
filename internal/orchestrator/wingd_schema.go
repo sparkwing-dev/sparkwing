@@ -53,16 +53,29 @@ func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema int, 
 		describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema), selfSchema)
 }
 
-// safety: `sparkwing daemon restart` respawns the installed build, so both
-// machine-wide remedies replace a daemon other repositories share. The
-// isolated home leaves it alone, and only from a sparkwing new enough for the
-// store, which is why the command says so.
 func storeSchemaRemedy(diagnosis string, selfSchema int) error {
-	return fmt.Errorf("%w: %s. "+
-		"Install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon so the next run brings it up. "+
-		"To leave this machine's daemon where it is, give the run a home of its own and start it from a sparkwing that understands schema %d: %s. "+
-		"`sparkwing daemon restart` respawns the same build",
-		ErrDaemonStoreSchemaTooOld, diagnosis, selfSchema, wingdclient.HostBinEnv, selfSchema, isolatedHomeCommand())
+	return fmt.Errorf("%w: %s. %s", ErrDaemonStoreSchemaTooOld, diagnosis, daemonUpgradeRemedy(selfSchema))
+}
+
+// safety: the binary that would spawn a daemon is not always the one that did,
+// so the message points at the daemon's own report rather than asserting a
+// path, and pairs the upgrade with the restart that swaps the running daemon.
+func daemonUpgradeRemedy(selfSchema int) string {
+	upgrade := fmt.Sprintf("upgrade that binary to one that understands schema %d, with `sparkwing update` for a "+
+		"published release or this repository's `bin/install.sh` for a build newer than any release, then "+
+		"`sparkwing daemon restart`", selfSchema)
+	bin, fromEnv, ok := wingdclient.ResolveHostBin()
+	if !ok {
+		return fmt.Sprintf("`sparkwing daemon status` names the build the daemon runs; %s, or set %s to that binary "+
+			"and restart the daemon", upgrade, wingdclient.HostBinEnv)
+	}
+	source := "the `sparkwing` found on PATH"
+	if fromEnv {
+		source = "$" + wingdclient.HostBinEnv
+	}
+	return fmt.Sprintf("`sparkwing daemon status` names the build the daemon runs, and %s resolves to %s; %s, "+
+		"or point %s at a binary that understands schema %d and restart the daemon",
+		source, bin, upgrade, wingdclient.HostBinEnv, selfSchema)
 }
 
 func describeVersion(v string) string {

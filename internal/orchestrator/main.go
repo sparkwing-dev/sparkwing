@@ -74,7 +74,6 @@ func Main() {
 		os.Exit(2)
 	}
 	pipeline := args[0]
-	recordInvokedPipeline(pipeline)
 	rest := args[1:]
 
 	if len(rest) > 0 && rest[0] == "config" {
