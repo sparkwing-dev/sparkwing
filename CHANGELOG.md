@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Dashboard start preserves running instances; use `serve restart` for replacement and `serve stop` instead of `serve kill`. Lifecycle receipts report ownership, effective endpoints, readiness and artifact identity; `serve logs` provides bounded access.
+
+
 ### Added
 
 - **cli:** `pipeline sparks catalog` lists the blocks a spark library offers.

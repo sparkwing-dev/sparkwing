@@ -204,3 +204,9 @@ runs store, such as the release preview in
 [Getting started](../getting-started.md#releasing-sparkwing). It carries the
 same consequence the flag did, so a run started under it is outside the
 machine's admission ledger.
+
+## Dashboard lifecycle
+
+`serve stop` replaces `serve kill`; the old verb is removed. Repeated `serve start` preserves every known running instance. Use `serve restart` for replacement; it preserves the recorded options unless a flag overrides them. `serve logs` provides a finite 40-line tail and explicit following.
+
+Receipts add action/outcome, ownership, readiness, effective endpoints and artifact comparison. Plain is the state word across all lifecycle actions. Linux stop uses boot/birth identity and a process handle; macOS uses guarded birth checks with a remaining check-to-signal race. Other platforms refuse verified lifecycle actions. Legacy numeric PID files cannot authorize signals. Stop the legacy instance through its existing owner before starting the new supervisor. The admission daemon remains separate.
