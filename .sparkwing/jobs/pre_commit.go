@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -582,8 +583,11 @@ func checkTrackedBinaries(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
-		n, _ := fh.Read(head)
+		n, readErr := fh.Read(head)
 		_ = fh.Close()
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			continue
+		}
 		if format := executableFormat(head[:n]); format != "" {
 			bad = append(bad, fmt.Sprintf("%s (%s)", f, format))
 		}
