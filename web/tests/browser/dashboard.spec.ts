@@ -1557,3 +1557,26 @@ test("runs trigger filters persist and offer badge include and exclude", async (
   await expect(page.getByRole("button", { name: /pre-commit/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /deploy-production/ })).toHaveCount(0);
 });
+
+for (const count of [999, 1000]) {
+  test(`overview marks capped history at ${count} runs`, async ({ page }) => {
+    await installMockAPI(page, {
+      runs: Array.from({ length: count }, (_, index) => ({
+        ...finishedRun,
+        id: `run-${index}`,
+        started_at: isoFromNow(-86_400_000),
+        finished_at: isoFromNow(-86_340_000),
+      })),
+    });
+    await page.goto("/");
+    await expect(page.getByText("Loading...")).toHaveCount(0);
+    const notice = page.getByText(
+      "Metrics use the latest 1000 runs and may exclude older history.",
+    );
+    if (count === 1000) {
+      await expect(notice).toBeVisible();
+    } else {
+      await expect(notice).toHaveCount(0);
+    }
+  });
+}

@@ -88,8 +88,13 @@ type Options struct {
 // or the HTTP server returns. Installs its own SIGINT/SIGTERM handler
 // for standalone use; redundant when the parent ctx already cancels
 // on signal.
-func Run(ctx context.Context, opts Options) error {
+func Run(ctx context.Context, opts Options) (retErr error) {
 	if opts.Listener != nil {
+		defer func() {
+			if err := opts.Listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				retErr = errors.Join(retErr, err)
+			}
+		}()
 		opts.Addr = opts.Listener.Addr().String()
 	}
 	if opts.Addr == "" {

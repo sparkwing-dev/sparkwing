@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -116,5 +119,46 @@ func TestRunVersionHold_SetClearRoundTrip(t *testing.T) {
 	}
 	if h := resolveVersionHold(); h.Value != "" {
 		t.Fatalf("after clear: %+v, want empty", h)
+	}
+}
+
+func TestResolveVersionHoldNormalizesOperatorInput(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(versionHoldEnv, "0.15")
+	if hold := resolveVersionHold(); hold.Value != "v0.15" || !exceedsHold("v0.16.0", hold.Value) {
+		t.Fatalf("environment hold=%+v", hold)
+	}
+	t.Setenv(versionHoldEnv, "")
+	path, err := versionHoldPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(" 0.15.4 \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if hold := resolveVersionHold(); hold.Value != "v0.15.4" || !exceedsHold("v0.15.5", hold.Value) {
+		t.Fatalf("file hold=%+v", hold)
+	}
+}
+
+func TestInvalidVersionHoldBlocksUpdateBeforeDownload(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(versionHoldEnv, "not-a-version")
+	original := updateDownloadInstall
+	t.Cleanup(func() { updateDownloadInstall = original })
+	downloaded := false
+	updateDownloadInstall = func(string, string) (installedRelease, error) {
+		downloaded = true
+		return installedRelease{}, errors.New("unexpected download")
+	}
+	err := runUpdateBinary("v9.9.9", false, false)
+	if err == nil || !strings.Contains(err.Error(), "invalid version hold") || downloaded {
+		t.Fatalf("err=%v download=%v", err, downloaded)
+	}
+	if err := runVersionHold(nil); err == nil || !strings.Contains(err.Error(), "invalid version hold") {
+		t.Fatalf("hold inspection=%v", err)
 	}
 }

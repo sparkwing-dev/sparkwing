@@ -1297,20 +1297,9 @@ func (s *Store) readMinVersion(ctx context.Context) string {
 	return v
 }
 
-func readMinVersionTx(ctx context.Context, tx *storeTx) string {
-	var v string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyMinVersion).Scan(&v); err != nil {
-		return ""
-	}
-	return v
-}
-
-// MinBinaryVersion returns the minimum sparkwing binary version this database
-// requires -- the version stamped by the binary that last migrated it -- or
-// "" when no stamp exists (a database written before the stamp, or one last
-// migrated by a development build). It is the read-only counterpart of the
-// skew check: a repo pinned below this cannot open the database.
+// MinBinaryVersion returns the version stamp of the binary that last migrated
+// this database, or "" when no stamp exists. Open-time compatibility is checked
+// against the database's named requirements rather than this stamp.
 func (s *Store) MinBinaryVersion(ctx context.Context) string {
 	return s.readMinVersion(ctx)
 }
@@ -3686,12 +3675,13 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	return tx.Commit()
 }
 
-// PruneRunsOlderThan deletes terminal runs older than cutoff and
-// returns their ids so callers can purge log files / cache blobs.
+// PruneRunsOlderThan deletes terminal runs finished before cutoff, falling back
+// to start time when no finish time is recorded. It returns only deleted ids,
+// including on failure, so callers can purge their log files and cache blobs.
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error) {
 	rows, err := s.query(ctx,
 		`SELECT id FROM runs
-		   WHERE started_at < ?
+		   WHERE COALESCE(finished_at, started_at) < ?
 		     AND `+runTerminalIn,
 		cutoff.UnixNano())
 	if err != nil {
@@ -3701,18 +3691,21 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	var deleted []string
 	for _, id := range ids {
 		if err := s.DeleteRun(ctx, id); err != nil {
-			return ids, err
+			return deleted, err
 		}
+		deleted = append(deleted, id)
 	}
-	return ids, nil
+	return deleted, nil
 }
 
 type rowScanner interface {
@@ -5927,7 +5920,9 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		if t.WebhookDelivery != "" && strings.Contains(err.Error(), triggerWebhookDeliveryColumn) {
 			return fmt.Errorf("%w: delivery %q", ErrDuplicateWebhookDelivery, t.WebhookDelivery)
 		}
-		return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
+		if t.IdempotencyKey != "" && strings.Contains(err.Error(), "idempotency_key") {
+			return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
+		}
 	}
 	return err
 }

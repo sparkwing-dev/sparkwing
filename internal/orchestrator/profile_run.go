@@ -38,7 +38,7 @@ func fleetProfileUsesRemoteAuthority(p *profile.Profile) bool {
 		!fleetSurfaceLocal(surfaces.Logs, backends.TypeFilesystem, backends.TypeStdout) {
 		return true
 	}
-	return surfaces.Cache != nil && surfaces.Cache.Binaries != nil && !fleetSurfaceLocal(surfaces.Cache.Binaries, backends.TypeFilesystem)
+	return !fleetSurfaceLocal(surfaces.BinaryCache(), backends.TypeFilesystem)
 }
 
 func fleetSurfaceLocal(spec *backends.Spec, allowed ...string) bool {

@@ -110,6 +110,9 @@ func dispatchRun(args []string) error {
 		return fmt.Errorf("run: pipeline name must come first; got flag %q", pipelineName)
 	}
 	flags, passthrough := parseRunFlags(args[1:])
+	if flags.parseErr != nil {
+		return flags.parseErr
+	}
 	var err error
 
 	runnerArgs := passthrough

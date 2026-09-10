@@ -81,3 +81,13 @@ func TestMinVersionSpeaking_HasNoAnswerForAMajorTheTablePredates(t *testing.T) {
 		t.Fatalf("MinVersionSpeaking(%d) = %q, %v; want an empty string and false", ProtocolMajor+1, got, ok)
 	}
 }
+
+func TestReleasedProtocolFloorsReturnsCopy(t *testing.T) {
+	first := ReleasedProtocolFloors()
+	original := first[0]
+	t.Cleanup(func() { releasedProtocolFloors[0] = original })
+	first[0].MinVersion = "changed"
+	if ReleasedProtocolFloors()[0] != original {
+		t.Fatal("caller changed process-wide protocol floors")
+	}
+}

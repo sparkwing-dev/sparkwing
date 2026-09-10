@@ -1193,26 +1193,15 @@ func openBinForRead(hash, path string) (*os.File, string, error) {
 	return f, digest, nil
 }
 
-func stageBinBlob(data []byte) (string, error) {
-	tmp, err := os.CreateTemp(binsDir, "bin-*.tmp")
-	if err != nil {
-		return "", err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		_ = os.Remove(tmpPath)
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", err
-	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", err
-	}
-	return tmpPath, nil
+type binUploadWriter struct {
+	file     *os.File
+	writeErr error
+}
+
+func (w *binUploadWriter) Write(p []byte) (int, error) {
+	n, err := w.file.Write(p)
+	w.writeErr = err
+	return n, err
 }
 
 func handleBin(w http.ResponseWriter, r *http.Request) {
@@ -1225,7 +1214,7 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(binsDir, hash)
 
 	switch r.Method {
-	case http.MethodGet:
+	case http.MethodGet, http.MethodHead:
 		f, digest, err := openBinForRead(hash, path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -1245,6 +1234,9 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		info, _ := f.Stat()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		if r.Method == http.MethodHead {
+			return
+		}
 		if _, err := io.Copy(w, f); err != nil {
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin copy %s: %v", hash, err)
@@ -1252,31 +1244,49 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
-		data, err := io.ReadAll(r.Body)
+		tmpFile, err := os.CreateTemp(binsDir, "bin-*.tmp")
 		if err != nil {
-			http.Error(w, "read error", http.StatusBadRequest)
+			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
-
-		sum := sha256.Sum256(data)
-		digest := hex.EncodeToString(sum[:])
+		tmpPath := tmpFile.Name()
+		defer func() {
+			// #nosec G703 -- CreateTemp supplied the private staging path
+			if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: remove staged binary: %v", err)
+			}
+		}()
+		sum := sha256.New()
+		staged := &binUploadWriter{file: tmpFile}
+		n, err := io.Copy(io.MultiWriter(staged, sum), r.Body)
+		if err != nil {
+			tmpFile.Close()
+			if staged.writeErr != nil {
+				http.Error(w, "write error", http.StatusInternalServerError)
+			} else {
+				http.Error(w, "read error", http.StatusBadRequest)
+			}
+			return
+		}
+		if err := tmpFile.Chmod(0o755); err != nil {
+			tmpFile.Close()
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		if err := tmpFile.Close(); err != nil {
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		digest := hex.EncodeToString(sum.Sum(nil))
 		principal := writingPrincipal(r)
 
 		mu := binKeyLock(hash)
 		mu.Lock()
 		defer mu.Unlock()
 
-		tmpPath, err := stageBinBlob(data)
-		if err != nil {
-			// #nosec G706 -- the blob hash is pattern-validated
-			log.Printf("warning: bin stage %s: %v", hash, err)
-			http.Error(w, "write error", http.StatusInternalServerError)
-			return
-		}
 		// safety: record the digest before the blob so a torn write serves a mismatch the client discards.
-		meta := binMeta{SHA256: digest, Size: int64(len(data)), Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
+		meta := binMeta{SHA256: digest, Size: n, Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := writeBinMeta(hash, meta); err != nil {
-			_ = os.Remove(tmpPath)
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin meta write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
@@ -1285,7 +1295,6 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		// #nosec G703 -- the blob path is built from a pattern-validated hash
 		err = os.Rename(tmpPath, path)
 		if err != nil {
-			_ = os.Remove(tmpPath)
 			// #nosec G703 -- a pattern-validated hash; a digest with no blob would brick every later read
 			_ = os.Remove(binMetaPath(hash))
 			// #nosec G706 -- the blob hash is pattern-validated
@@ -1294,15 +1303,28 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// #nosec G706 -- the blob hash is pattern-validated
-		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, len(data), digest, principal)
+		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, n, digest, principal)
 		if err := setBinDigestHeaders(w, digest); err != nil {
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
 
+	case http.MethodDelete:
+		mu := binKeyLock(hash)
+		mu.Lock()
+		defer mu.Unlock()
+		for _, target := range []string{path, binMetaPath(hash)} {
+			// #nosec G703 -- each path is built from the pattern-validated hash
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				http.Error(w, "delete error", http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
 	default:
-		http.Error(w, "GET or PUT only", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", "GET, HEAD, PUT, DELETE")
+		http.Error(w, "GET, HEAD, PUT or DELETE only", http.StatusMethodNotAllowed)
 	}
 }
 

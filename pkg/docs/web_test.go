@@ -431,3 +431,33 @@ func TestCachePath_RefusesToEscape(t *testing.T) {
 		}
 	}
 }
+
+func TestWebClientDocExpiresOnlyMutablePaths(t *testing.T) {
+	for _, version := range []string{"", LatestAlias, "v0.3.0"} {
+		t.Run("version="+version, func(t *testing.T) {
+			var hits atomic.Int32
+			c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprintf(w, "revision %d", hits.Add(1))
+			}))
+			first, err := c.Doc(context.Background(), version, "pipelines")
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadata := fmt.Sprintf(`{"fetched_at":%q,"status":200}`, time.Now().Add(-2*IndexTTL).UTC().Format(time.RFC3339))
+			if err := os.WriteFile(c.cachePath(webDocPath(version, "pipelines"))+".meta", []byte(metadata), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			second, err := c.Doc(context.Background(), version, "pipelines")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if version == "v0.3.0" {
+				if hits.Load() != 1 || second != first {
+					t.Fatalf("immutable document refetched: %q, hits=%d", second, hits.Load())
+				}
+			} else if hits.Load() != 2 || second == first {
+				t.Fatalf("mutable document stayed stale: %q, hits=%d", second, hits.Load())
+			}
+		})
+	}
+}

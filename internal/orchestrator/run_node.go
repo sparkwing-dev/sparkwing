@@ -452,9 +452,14 @@ func RunNodeOnce(
 	))
 
 	node := plan.Job(nodeID)
+	var generatorErr error
 	if node == nil {
 		for _, exp := range plan.Expansions() {
-			children := invokeGeneratorForPod(ctx, exp)
+			children, err := invokeGeneratorForPod(ctx, exp)
+			if err != nil {
+				generatorErr = errors.Join(generatorErr, err)
+				continue
+			}
 			for _, c := range children {
 				if c.ID() == nodeID {
 					node = c
@@ -467,7 +472,7 @@ func RunNodeOnce(
 		}
 	}
 	if node == nil {
-		return runner.Result{}, fmt.Errorf("node %q not found in plan for %s (static nodes + all ExpandFrom generators exhausted)", nodeID, run.Pipeline)
+		return runner.Result{}, errors.Join(fmt.Errorf("node %q not found in plan for %s (static nodes + all ExpandFrom generators exhausted)", nodeID, run.Pipeline), generatorErr)
 	}
 
 	if admission != nil {
@@ -650,13 +655,14 @@ func coordinatedExitStatus(runID, nodeID string, res runner.Result) error {
 	return fmt.Errorf("node %s/%s failed; its terminal row carries the reason", runID, nodeID)
 }
 
-func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []*sparkwing.JobNode) {
+func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []*sparkwing.JobNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = nil
+			err = fmt.Errorf("generator from %s panicked: %v", exp.Source.ID(), r)
 		}
 	}()
-	return exp.Gen(ctx)
+	return exp.Gen(ctx), nil
 }
 
 type nodeTransports struct {

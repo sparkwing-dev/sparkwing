@@ -153,3 +153,12 @@ func TestApplyClientFilters_EmptyFilterReturnsAll(t *testing.T) {
 		t.Errorf("empty filter should return all: %+v", got)
 	}
 }
+
+func TestParseLooseDurationAcceptsUppercaseUnits(t *testing.T) {
+	for raw, want := range map[string]time.Duration{"7D": 7 * 24 * time.Hour, "2W": 14 * 24 * time.Hour, "3H": 3 * time.Hour, "5MS": 5 * time.Millisecond} {
+		got, err := ParseLooseDuration(raw)
+		if err != nil || got != want {
+			t.Errorf("%s: got %s, %v; want %s", raw, got, err, want)
+		}
+	}
+}

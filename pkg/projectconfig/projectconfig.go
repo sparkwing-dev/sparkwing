@@ -1,14 +1,13 @@
 // Package projectconfig reads the combined .sparkwing/sparkwing.yaml
 // project file:
 //
-//	profile: shared-team
+//	defaults: {profile: shared-team}
+//	profiles: { ... }
 //	pipelines: [ ... ]
-//	sources:   { ... }
-//	sparks:    [ ... ]
+//	sparks: [ ... ]
 //
 // Each section reuses its existing types, and Load normalizes and
-// validates them (stamping the map-key Name onto sources, running each
-// section's Validate). A missing file returns (nil, nil).
+// validates them. A missing file returns (nil, nil).
 package projectconfig
 
 import (
@@ -225,7 +224,7 @@ func WriteSparksSection(path string, libs []sparks.Library) error {
 		}
 	}
 	if doc.Kind == 0 {
-		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}}
+		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, HeadComment: strings.TrimSpace(string(raw))}}}
 	}
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return fmt.Errorf("%s: top-level YAML is not a mapping", path)

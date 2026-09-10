@@ -2,7 +2,7 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # Config reference
 
-The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs the strict config parser enforces. **Any key not listed here is rejected at load.** `Required` reflects whether the field may be omitted.
+Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated from the Go structs the config parser enforces. `Required` reflects whether the field may be omitted. See [storage backends](backends.md) for profiles and [spark libraries](sparks.md) for library configuration.
 
 ## Top level
 

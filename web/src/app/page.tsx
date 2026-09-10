@@ -29,6 +29,7 @@ import {
 import Tooltip from "@/components/Tooltip";
 
 const POLL_MS = 15000;
+const OVERVIEW_RUN_LIMIT = 1000;
 
 export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
@@ -41,7 +42,7 @@ export default function Home() {
   const refresh = useCallback(async () => {
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
     const [rs, ap, svc] = await Promise.all([
-      getRuns({ since: `${sinceHrs}h`, limit: 2000 }),
+      getRuns({ since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT }),
       getPendingApprovals(),
       getServiceHealth(),
     ]);
@@ -101,6 +102,11 @@ export default function Home() {
         <Panel>Loading...</Panel>
       ) : (
         <>
+          {runs.length >= OVERVIEW_RUN_LIMIT && (
+            <p role="status" className="mb-3 text-xs text-[var(--muted)]">
+              Metrics use the latest {OVERVIEW_RUN_LIMIT} runs and may exclude older history.
+            </p>
+          )}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <MetricCard metric={overview.buildTime} anchorLabel={anchorLabel} />
             <MetricCard metric={overview.deploys1d} anchorLabel={anchorLabel} />

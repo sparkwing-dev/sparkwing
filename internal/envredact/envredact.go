@@ -87,6 +87,7 @@ var credentialExact = map[string]bool{
 }
 
 var nonCredentialExact = map[string]bool{
+	"TOKENIZERS_PARALLELISM":                true,
 	"GIT_AUTHOR_NAME":                       true,
 	"GIT_AUTHOR_EMAIL":                      true,
 	"GIT_AUTHOR_DATE":                       true,
