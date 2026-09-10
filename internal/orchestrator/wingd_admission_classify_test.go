@@ -85,7 +85,7 @@ func TestDaemonStoreSchemaSkewRefusesADaemonBehindTheStore(t *testing.T) {
 			t.Fatalf("skew error = %q, want it to name %q", err, want)
 		}
 	}
-	if !strings.Contains(err.Error(), "upgrade it with `sparkwing update`, then `sparkwing daemon restart`") {
+	if !strings.Contains(err.Error(), "upgrade that binary to one that understands schema 26") {
 		t.Fatalf("skew error = %q, want the restart offered only after the upgrade that changes the binary", err)
 	}
 }
@@ -126,6 +126,7 @@ func TestDaemonStoreSchemaSkewAcceptsADaemonBehindByAdditiveMigrationsOnly(t *te
 }
 
 func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
+	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
 	known := store.KnownRequirements()
 	behind := known[1:]
 	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 26, behind, 27)
@@ -137,6 +138,24 @@ func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
 		daemonUpgradeRemedy(27)
 	if got := err.Error(); got != want {
 		t.Fatalf("skew error =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDaemonUpgradeRemedyWithoutAResolvableHostBinary(t *testing.T) {
+	t.Setenv(wingdclient.HostBinEnv, "")
+	t.Setenv("PATH", t.TempDir())
+	got := daemonUpgradeRemedy(34)
+	for _, want := range []string{
+		"`sparkwing daemon status` names the build the daemon runs",
+		"upgrade that binary to one that understands schema 34",
+		"set " + wingdclient.HostBinEnv + " to that binary and restart the daemon",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("remedy = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "resolves to") {
+		t.Errorf("remedy = %q, want no binary path when none resolves", got)
 	}
 }
 
@@ -178,8 +197,9 @@ func TestStoreSchemaSkewNamesTheDaemonHostAndTheUpgrade(t *testing.T) {
 	for _, want := range []string{
 		"daemon v0.38.2 understands runs-store schema 17",
 		"this binary is v0.39.0 at schema 26",
-		"The daemon runs from /opt/sparkwing/bin/sparkwing ($" + wingdclient.HostBinEnv + ")",
-		"upgrade it with `sparkwing update`, then `sparkwing daemon restart`",
+		"$" + wingdclient.HostBinEnv + " resolves to /opt/sparkwing/bin/sparkwing",
+		"with `sparkwing update` for a published release or this repository's `bin/install.sh`",
+		"then `sparkwing daemon restart`",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("skew error = %q, want it to contain %q", err, want)
@@ -194,7 +214,7 @@ func TestTerminalCheckRefusalNamesTheUpgrade(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
 	err := admissionFailure(semaphoreClaims("deploy-lock"),
 		&wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: terminalCheckKey})
-	for _, want := range []string{"sparkwing daemon status", "upgrade it with `sparkwing update`"} {
+	for _, want := range []string{"sparkwing daemon status", "then `sparkwing daemon restart`"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("terminal-check refusal = %q, want it to contain %q", err, want)
 		}

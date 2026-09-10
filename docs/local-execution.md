@@ -845,6 +845,15 @@ A newer *installed* sparkwing transparently replaces a running older
 daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
 SDK pin cannot churn the daemon every other repo on the box shares.
 
+`SPARKWING_HOME=DIR` points one command's state and config at DIR, and the
+daemon a run reaches is whichever one lives in its home. That is deliberate
+isolation for work that must not touch the operational runs store, a release
+preview being the standing example, and it costs what isolation costs: the run
+sits outside the machine's admission ledger, is absent from `sparkwing queue`
+and the dashboard, and contends on the operating system with every run the
+machine's daemon is arbitrating. Reach for it when a separate home is the
+point, not when the queue is full.
+
 The daemon serves two sockets in the private directory it owns, both mode
 0600, and refuses any connection whose peer uid is not its own. `d.sock`
 carries admission. `api.sock` serves the controller HTTP API over the

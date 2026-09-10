@@ -100,11 +100,19 @@ func resolveProfileFlag(name string) (*profile.Profile, error) {
 
 const migrationLinkWhereFlag = "https://sparkwing.dev/docs/migration-guide/v0.5.0#-profile-is-the-only-where-flag"
 
-var retiredWhereFlags = map[string]string{
-	"--on":         "v0.5.0 replaces --on with --profile.",
-	"--sw-on":      "v0.5.0 replaces --sw-on with --profile.",
-	"--sw-profile": "v0.5.0 removes --sw-profile; `sparkwing run` always executes locally. Use `sparkwing pipeline trigger --profile X` for remote dispatch.",
-	"--sw-target":  "--sw-target was renamed to --target in v0.5.0; same semantics.",
+type retiredFlag struct {
+	reason string
+	link   string
+}
+
+var retiredWhereFlags = map[string]retiredFlag{
+	"--on":         {"v0.5.0 replaces --on with --profile.", migrationLinkWhereFlag},
+	"--sw-on":      {"v0.5.0 replaces --sw-on with --profile.", migrationLinkWhereFlag},
+	"--sw-profile": {"v0.5.0 removes --sw-profile; `sparkwing run` always executes locally. Use `sparkwing pipeline trigger --profile X` for remote dispatch.", migrationLinkWhereFlag},
+	"--sw-target":  {"--sw-target was renamed to --target in v0.5.0; same semantics.", migrationLinkWhereFlag},
+	"--sw-isolated-home": {"--sw-isolated-home is removed; every run joins the machine's admission daemon. " +
+		"A daemon that cannot read this branch's runs store refuses the run and names the upgrade. " +
+		"SPARKWING_HOME still gives a command a home of its own, outside the machine's admission ledger.", ""},
 }
 
 func checkRetiredWhereFlags(args []string, owned map[string]bool) error {
@@ -116,8 +124,11 @@ func checkRetiredWhereFlags(args []string, owned map[string]bool) error {
 		if owned[strings.TrimPrefix(name, "--")] {
 			continue
 		}
-		if msg, ok := retiredWhereFlags[name]; ok {
-			return fmt.Errorf("unknown flag %s. %s\nSee %s", name, msg, migrationLinkWhereFlag)
+		if retired, ok := retiredWhereFlags[name]; ok {
+			if retired.link == "" {
+				return fmt.Errorf("unknown flag %s. %s", name, retired.reason)
+			}
+			return fmt.Errorf("unknown flag %s. %s\nSee %s", name, retired.reason, retired.link)
 		}
 	}
 	return nil

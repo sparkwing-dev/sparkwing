@@ -159,22 +159,31 @@ exit code says otherwise, so replace the call rather than relying on it.
 config at DIR, so the run hosted an admission daemon of its own instead of
 joining the machine's. A run that leaves the machine's daemon is arbitrated by
 nobody: it does not appear in `sparkwing queue` or the dashboard, and several
-such runs contend on the operating system instead of queueing.
+such runs contend on the operating system instead of queueing. A command that
+still passes the flag fails naming the replacement.
 
 The flag existed for one case, a pipeline binary whose runs-store schema is
 newer than the sparkwing hosting the machine's daemon. Admission now refuses
-that case with a message naming the binary the daemon runs from, the daemon's
-version, this binary's version, and the upgrade:
+that case with a message naming the daemon's version, this binary's version,
+how to identify the build the daemon runs, and the upgrade:
 
 ```
 local admission: the admission daemon cannot read this runs store: daemon
 v0.48.1 understands runs-store schema 33, this binary is v0.49.0 at schema 34,
-and the store both share is migrated to the newer one. The daemon runs from
-/home/you/.local/bin/sparkwing (the `sparkwing` on PATH); upgrade it with
-`sparkwing update`, then `sparkwing daemon restart`, or point
-SPARKWING_WINGD_BIN at a binary that understands schema 34 and restart the
-daemon.
+and the store both share is migrated to the newer one. `sparkwing daemon
+status` names the build the daemon runs, and the `sparkwing` found on PATH
+resolves to ~/.local/bin/sparkwing; upgrade that binary to one that
+understands schema 34, with `sparkwing update` for a published release or this
+repository's `bin/install.sh` for a build newer than any release, then
+`sparkwing daemon restart`, or point SPARKWING_WINGD_BIN at a binary that
+understands schema 34 and restart the daemon
 ```
+
+Which half of the upgrade applies depends on where the newer schema came from.
+`sparkwing update` installs a published release. A branch whose schema is newer
+than every release has no release to install, so build and install that branch
+instead, or point `SPARKWING_WINGD_BIN` at the binary you built and restart the
+daemon.
 
 Before:
 
@@ -185,13 +194,13 @@ sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"
 After:
 
 ```sh
-sparkwing update && sparkwing daemon restart
+sparkwing update && sparkwing daemon restart   # a published release
 sparkwing run pre-commit
 ```
 
 `SPARKWING_HOME` still gives a command a home of its own, and keeps that
 meaning: deliberate isolation for work that must not touch the operational
-runs store, such as the release preview in `DELIVERY.md`. It carries the same
-consequence the flag did, so a run started under it is outside the machine's
-admission ledger.
-
+runs store, such as the release preview in
+[Getting started](../getting-started.md#releasing-sparkwing). It carries the
+same consequence the flag did, so a run started under it is outside the
+machine's admission ledger.

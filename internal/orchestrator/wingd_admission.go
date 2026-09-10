@@ -678,7 +678,7 @@ func daemonRefusal(admErr *wingdclient.AdmissionError) error {
 		}
 		return errors.New("local admission: a concurrency group's cost exceeds its own capacity; lower the cost or raise the group's limit")
 	case terminalCheckKey:
-		return fmt.Errorf("local admission: %w; the daemon refused before any capacity decision, so run `sparkwing daemon status` to compare the daemon's runs-store schema with the store's. %s",
+		return fmt.Errorf("local admission: %w; the daemon refused before any capacity decision, so compare its runs-store schema with the store's. %s",
 			admErr, daemonUpgradeRemedy(store.ExpectedSchemaVersion()))
 	default:
 		return fmt.Errorf("local admission: %w", admErr)

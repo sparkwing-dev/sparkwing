@@ -224,6 +224,24 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 	}
 }
 
+func TestRetiredIsolatedHomeNamesItsReplacement(t *testing.T) {
+	err := checkRetiredWhereFlags([]string{"--sw-isolated-home", "/tmp/gate"}, nil)
+	if err == nil {
+		t.Fatal("--sw-isolated-home passed the retired-flag guard")
+	}
+	for _, want := range []string{"admission daemon", "SPARKWING_HOME"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("retired-flag error = %q, want it to name %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "See http") {
+		t.Errorf("retired-flag error = %q, want no migration URL while the guide is unreleased", err)
+	}
+	if err := checkRetiredWhereFlags([]string{"--sw-isolated-home=/tmp/gate"}, nil); err == nil {
+		t.Error("--sw-isolated-home=value form escaped the guard")
+	}
+}
+
 func TestDispatchRun_RetiredRunnerFlagKeepsMigrationHint(t *testing.T) {
 	err := dispatchRun([]string{"fictional", "--sw-profile", "fictional"})
 	if err == nil || !strings.Contains(err.Error(), "--profile") || strings.Contains(err.Error(), "unknown runner flag") {

@@ -86,7 +86,7 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 		defer release()
 	}
 
-	// A detached launch takes no home flag; SPARKWING_HOME selects the home.
+	// safety: a detached launch takes no home flag; SPARKWING_HOME selects it.
 	paths, err := submitPaths("")
 	if err != nil {
 		return err

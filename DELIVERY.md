@@ -59,19 +59,20 @@ this file is a menu and checklist, not a command that every change must run.
   `sparkwing queue priority --run <id> --set front` re-ranks a queued run.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
-  machine's admission daemon, admission refuses the run. The refusal names the
-  binary the daemon runs from, both versions, and the upgrade: install the
-  newer sparkwing with `sparkwing update` or `SKIP_WEB_BUILD=1 bash
-  bin/install.sh` from this checkout, then `sparkwing daemon restart` so the
-  next run reaches a daemon that reads the store. Every run then keeps its
-  place in `sparkwing queue` and the dashboard.
+  machine's admission daemon, admission refuses the run. The refusal names both
+  versions, `sparkwing daemon status` for the build the daemon runs, and the
+  upgrade. A branch schema that no release carries yet is the case here, so
+  install this checkout with `SKIP_WEB_BUILD=1 bash bin/install.sh` and run
+  `sparkwing daemon restart`; `sparkwing update` is the answer only once the
+  schema ships in a release. Either way the machine keeps one daemon and every
+  run keeps its place in `sparkwing queue` and the dashboard.
 - **Running against a home of your own:** `SPARKWING_HOME=DIR` points one
   command's state and config at DIR, which is deliberate isolation for work
-  that must not touch the operational runs store, such as the release preview
-  below. A run started that way is arbitrated by whatever daemon lives in that
-  home rather than the machine's, so it is invisible to `sparkwing queue` and
-  the dashboard and contends with every other run on the OS. It is not a way
-  around a full queue.
+  that must not touch the operational runs store, the release preview under
+  Decisions before landing being the case that needs it. A run started that way
+  is arbitrated by whatever daemon lives in that home rather than the machine's,
+  so it is invisible to `sparkwing queue` and the dashboard and contends with
+  every other run on the OS. It is not a way around a full queue.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
