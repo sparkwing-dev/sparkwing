@@ -18,6 +18,7 @@ mkdir -p "$STUB"
 cat >"$STUB/go" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >>"${ARGV_LOG:-/dev/null}"
 case " $* " in
   *" env GOPATH "*) printf '%s\n' "${FAKE_GOPATH:-}"; exit 0 ;;
 esac
@@ -121,6 +122,21 @@ fi
   || fail "racing remedy changed the source" "$CASE_ROOT/out4"
 [ "$(cat "$rival4.superseded")" = "raced destination" ] \
   || fail "racing remedy overwrote the destination" "$CASE_ROOT/out4"
+
+argvlog="$CASE_ROOT/argv.log"
+dest6="$CASE_ROOT/dest6"
+if ! run_install SPARKWING_INSTALL_BIN="$dest6" FAKE_GOPATH="$CASE_ROOT/gopath" \
+  ARGV_LOG="$argvlog" >"$CASE_ROOT/out6" 2>&1; then
+  fail "install for the build-flag check failed" "$CASE_ROOT/out6"
+fi
+buildargv="$(grep -F -- ' build ' "$argvlog" | head -n1 || true)"
+[ -n "$buildargv" ] || fail "install ran no go build" "$argvlog"
+for want in "-trimpath" "-s -w -X main.Version="; do
+  case "$buildargv" in
+    *"$want"*) ;;
+    *) fail "install build argv is missing $want: $buildargv" ;;
+  esac
+done
 
 gp1="$CASE_ROOT/gp1"
 gp2="$CASE_ROOT/gp2"

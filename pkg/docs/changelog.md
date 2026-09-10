@@ -53,6 +53,13 @@ unlock.
 
 ### Changed
 
+- **build:** `bin/install.sh` and `bin/cross-compile.sh` build with `-trimpath`
+  and `-ldflags "-s -w"`, the flags `.github/workflows/release.yaml` already
+  passed, so a local install of a commit and its released binary are
+  byte-identical. On linux/amd64 the CLI falls from 96.0 MiB to 69.0 MiB and
+  relinks in about 2.2s instead of 4.9s. `bin/cross-compile.sh` also stamps
+  `main.Version`, so its artifacts report the commit they came from instead of
+  `(devel)`
 - **cache:** Compiled pipeline binaries build with `-ldflags "-s -w"` beside
   `-trimpath`, dropping the symbol table and DWARF. On linux/amd64 the binary
   falls from 100.2 MiB to 71.1 MiB and a relink from about 3.0s to 2.0s. The
