@@ -105,7 +105,7 @@ func TestCancelLeasePromotesWhenTheTombstoneCannotBePersisted(t *testing.T) {
 		})
 	})
 
-	d.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string, []persistedGuard) error {
+	d.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string) error {
 		return errors.New("state file is read-only")
 	}
 

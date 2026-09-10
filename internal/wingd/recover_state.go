@@ -28,7 +28,7 @@ func RecoverUnreadableState(home string, now time.Time) (string, error) {
 	}
 	defer func() { _ = flockUnlock(f) }()
 
-	if _, _, _, _, err := readStateWithGuards(l.state); err == nil {
+	if _, _, _, err := readStateWithCancellations(l.state); err == nil {
 		return "", fmt.Errorf("wingd: state %s is readable; recovery refused", l.state)
 	}
 	quarantined, err := quarantineState(l.state, now)

@@ -166,8 +166,6 @@ const (
 	TypeQueued           MessageType = "queued"
 	TypeEvicted          MessageType = "evicted"
 	TypeRelease          MessageType = "release"
-	TypeGuardComplete    MessageType = "guard_complete"
-	TypeGuardCompleteAck MessageType = "guard_complete_ack"
 	TypeReattach         MessageType = "reattach"
 	TypeDrainRequest     MessageType = "drain_request"
 	TypeDrainAck         MessageType = "drain_ack"
@@ -273,8 +271,6 @@ var messageRegistry = map[MessageType]func() Message{
 	TypeQueued:           func() Message { return &Queued{} },
 	TypeEvicted:          func() Message { return &Evicted{} },
 	TypeRelease:          func() Message { return &Release{} },
-	TypeGuardComplete:    func() Message { return &GuardComplete{} },
-	TypeGuardCompleteAck: func() Message { return &GuardCompleteAck{} },
 	TypeReattach:         func() Message { return &Reattach{} },
 	TypeDrainRequest:     func() Message { return &DrainRequest{} },
 	TypeDrainAck:         func() Message { return &DrainAck{} },
