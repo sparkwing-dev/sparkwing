@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -122,4 +123,63 @@ func TestRefGet_InRunIncompleteNodePanicsWithString(t *testing.T) {
 
 	Ref[buildOut]{NodeID: "build"}.Get(ctx)
 	t.Fatal("expected a panic")
+}
+
+type refWarnRecorder struct{ lines []string }
+
+func (r *refWarnRecorder) Log(level, msg string) { r.lines = append(r.lines, level+": "+msg) }
+func (r *refWarnRecorder) Emit(rec LogRecord)    { r.lines = append(r.lines, rec.Level+": "+rec.Msg) }
+
+func (r *refWarnRecorder) warned(t *testing.T, want ...string) {
+	t.Helper()
+	var warns []string
+	for _, line := range r.lines {
+		if strings.HasPrefix(line, "warn: ") {
+			warns = append(warns, line)
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("want exactly one warn, got %v", r.lines)
+	}
+	for _, w := range want {
+		if !strings.Contains(warns[0], w) {
+			t.Errorf("warn %q is missing %q", warns[0], w)
+		}
+	}
+}
+
+func TestRefTryGet_LogsEveryMissNamingThePipelineAndNode(t *testing.T) {
+	rec := &refWarnRecorder{}
+	res := &stubResolver{err: errors.New("no matching run for pipeline \"build\" (maxAge=24h0m0s)")}
+	ctx := context.WithValue(context.WithValue(context.Background(), keyPipelineResolver, res), keyLogger, Logger(rec))
+
+	if _, ok := RefToLastRun[buildOut]("build", "artifact").TryGet(ctx); ok {
+		t.Fatal("expected a miss")
+	}
+	rec.warned(t, "build/artifact", "no matching run")
+}
+
+func TestRefTryGet_LogsAStoredEmptyOutputAsAMiss(t *testing.T) {
+	rec := &refWarnRecorder{}
+	res := &stubResolver{runID: "run-xyz", data: []byte("null")}
+	ctx := context.WithValue(context.WithValue(context.Background(), keyPipelineResolver, res), keyLogger, Logger(rec))
+
+	if _, ok := RefToLastRun[buildOut]("build", "artifact").TryGet(ctx); ok {
+		t.Fatal("expected a miss")
+	}
+	rec.warned(t, "build/artifact", "stored no output")
+}
+
+func TestRefTryGet_PanicsWhenTheStepsContextEnded(t *testing.T) {
+	res := &stubResolver{err: fmt.Errorf("no matching run for pipeline %q: %w", "build", context.Canceled)}
+	ctx := context.WithValue(context.Background(), keyPipelineResolver, res)
+
+	defer func() {
+		msg, _ := recover().(string)
+		if !strings.Contains(msg, "build") {
+			t.Fatalf("a cancelled step should panic naming the ref, got %q", msg)
+		}
+	}()
+	_, _ = RefToLastRun[buildOut]("build", "artifact").TryGet(ctx)
+	t.Fatal("a cancelled context was reported as an absent output")
 }

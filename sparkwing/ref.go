@@ -97,39 +97,66 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // exists for: RefToLastRun has no successful run to read on a
 // pipeline's first run, and Get panics there.
 //
-// ok is false when the upstream node has not completed, when no
-// successful run within MaxAge exists, and when the run that was found
-// stored no output. Every miss is logged at warn level naming the
-// pipeline and node, because "no matching run" is also what a
-// misspelled pipeline name produces and a silent bootstrap branch would
-// hide it forever.
+// ok is false when the upstream node has not completed, when the run
+// that was found stored no output, and on any cross-pipeline resolver
+// failure. The SDK cannot tell an unreachable store from a genuine
+// absence -- a resolver returns a bare error -- and reports both as
+// absence. For the compare-to-last-run shape this errs toward doing the
+// whole job; a step that uses TryGet to SKIP work turns a store outage
+// into a silent skip, so read the warn log before relying on that shape.
+// Every miss is logged at warn naming the pipeline and node, because
+// "no matching run" is also what a misspelled pipeline name and an
+// unreachable store produce, and a silent bootstrap branch would hide
+// either forever.
 //
-// TryGet still panics for the two failures a pipeline author cannot
-// handle at runtime: no resolver in context, which happens only outside
-// a dispatched step, and stored output that does not fit T. Use Get
-// when a missing output is itself a programmer mistake.
+// One input divides the two accessors: a cross-pipeline run that stored
+// empty or null output. Get renders that as the zero T and carries on;
+// TryGet reports it as a miss. Swapping one for the other on such a ref
+// changes which branch runs.
+//
+// TryGet panics for the failures a pipeline author cannot handle at
+// runtime: no resolver in context, which happens only outside a
+// dispatched step; stored output that does not fit T; and a cancelled or
+// expired context, which is the step being torn down rather than an
+// upstream that is absent. Use Get when a missing output is itself a
+// programmer mistake.
 func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 	var zero T
 	out, present, err := r.resolve(ctx)
 	if err != nil {
-		if !errors.As(err, new(*refMiss)) {
+		if !errors.As(err, new(*refMiss)) || ctxEnded(err) {
 			panic(err.Error())
 		}
-		Warn(ctx, "Ref.TryGet: %v", err)
+		Warn(ctx, "Ref.TryGet: %s is absent, treating it as a miss: %v", r.describe(), errors.Unwrap(err))
 		return zero, false
 	}
 	if !present {
-		Warn(ctx, "Ref.TryGet: %s stored no output; treating it as absent", r.describe())
+		Warn(ctx, "Ref.TryGet: %s stored no output, treating it as a miss", r.describe())
 		return zero, false
 	}
 	return out, true
 }
 
-// refMiss marks the resolution failures TryGet reports rather than
-// panics on: an upstream that has not produced an output yet.
+// ctxEnded reports a failure that is the step being torn down rather
+// than an upstream output being absent. A resolver flattens every store
+// failure into one error, so this is the one case the SDK can still tell
+// apart, and treating it as a miss would send a step down its bootstrap
+// branch on a dead context.
+func ctxEnded(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// refMiss marks a resolution failure TryGet reports rather than panics
+// on. The in-run case is an upstream that has not completed; the
+// cross-pipeline case is any resolver failure, because a resolver
+// returns a bare error the SDK cannot classify.
 type refMiss struct{ err error }
 
 func (m *refMiss) Error() string { return m.err.Error() }
+
+// Unwrap keeps the cause reachable, so a caller and a later, narrower
+// classification can both still see what the resolver actually returned.
+func (m *refMiss) Unwrap() error { return m.err }
 
 func (r Ref[T]) describe() string {
 	if r.Pipeline != "" {
@@ -138,9 +165,9 @@ func (r Ref[T]) describe() string {
 	return r.NodeID
 }
 
-// resolve reads the referenced output. present is false when nothing
-// was stored to read, which Get renders as the zero T and TryGet
-// reports as a miss.
+// resolve reads the referenced output. present is true only when a
+// stored output was read and unmarshalled; Get renders the absent case
+// as the zero T and TryGet reports it as a miss.
 func (r Ref[T]) resolve(ctx context.Context) (value T, present bool, err error) {
 	if r.Pipeline != "" {
 		return r.getCrossPipeline(ctx)
@@ -228,9 +255,9 @@ type refOpts struct {
 }
 
 // MaxAge bounds cross-pipeline ref resolution to runs whose
-// finished_at is within d. On miss, Get panics with a clear "no run
-// within X of now" message and TryGet reports the miss, rather than
-// either returning stale output.
+// finished_at is within d. On miss, Get panics naming the pipeline and
+// the age it was given, and TryGet reports the miss, rather than either
+// returning stale output.
 func MaxAge(d time.Duration) RefOption {
 	return func(o *refOpts) { o.maxAge = d }
 }
