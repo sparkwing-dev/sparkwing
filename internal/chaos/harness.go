@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -100,6 +101,7 @@ type Harness struct {
 	verSeq         int
 	stateReader    func(context.Context) (wingwire.QueueState, error)
 	processReader  func() ([]procgroup.Info, error)
+	residentReader func(string) ([]int, error)
 	processFailure func([]string)
 	guardInterval  time.Duration
 	guardFailure   sync.Once
@@ -171,6 +173,7 @@ func Run(t testing.TB, cfg Config) {
 		daemons: map[int]*daemonProcess{},
 	}
 	defer func() { _ = jr.Close() }()
+	defer h.assertHomeQuiet()
 	defer h.cleanup()
 	stopGuard := h.startProcessGuard()
 	defer stopGuard()
@@ -848,6 +851,53 @@ func (h *Harness) cleanup() {
 			h.t.Error(err)
 		}
 	}
+}
+
+// errResidentsUnsupported reports that the platform exposes no way to read a
+// process's environment, so no verdict on the isolated home is available.
+var errResidentsUnsupported = errors.New("reading a process environment is unsupported on this platform")
+
+// assertHomeQuiet fails a soak that left a process holding the isolated home.
+// A daemon the CLI auto-starts detaches into its own session, so owned-group
+// and session accounting never see it; the home it was started against is the
+// one handle that still names it.
+func (h *Harness) assertHomeQuiet() {
+	if violations := h.homeResidentViolations(); len(violations) > 0 {
+		h.fail("home-residents", violations, wingwire.QueueState{})
+	}
+}
+
+// homeResidentViolations names every process still holding the isolated home,
+// and names a failed inspection too, because a scan that reached no verdict is
+// not a clean teardown. It waits out the settle window first, so a process on
+// its way out is not charged as a leak.
+func (h *Harness) homeResidentViolations() []string {
+	read := h.residentReader
+	if read == nil {
+		read = homeResidents
+	}
+	deadline := time.Now().Add(h.processWait())
+	var pids []int
+	for {
+		found, err := read(h.home)
+		if errors.Is(err, errResidentsUnsupported) {
+			h.jr.Append(Event{Kind: "home-residents", Detail: "no verdict on " + runtime.GOOS})
+			return nil
+		}
+		if err != nil {
+			return []string{fmt.Sprintf("inspecting the processes holding chaos home %s reached no verdict: %v", h.home, err)}
+		}
+		pids = found
+		if len(pids) == 0 || !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	violations := make([]string, len(pids))
+	for i, pid := range pids {
+		violations[i] = fmt.Sprintf("process %d still holds chaos home %s after teardown", pid, h.home)
+	}
+	return violations
 }
 
 func (h *Harness) cleanupActor(a *actor) error {
