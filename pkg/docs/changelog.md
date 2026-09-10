@@ -69,6 +69,11 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A child-await timeout names what the parent observed.
+  The error carries the poll count, the last child status read, how long the
+  parent waited, and the first and last store error it retried past, on both
+  the in-process and node-process wait loops. It previously reported only
+  `context deadline exceeded`.
 - **cli:** `pipeline hooks survey` no longer closes with `every declared gate
   fires` while a row reports a hook that does not; a repository that runs its
   commit gate and is missing a `post-commit` notifier is now counted and named
