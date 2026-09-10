@@ -9,7 +9,7 @@ import (
 )
 
 func TestRetiredDashboardCommandRefusesBeforeServiceState(t *testing.T) {
-	for _, args := range [][]string{{"dashboard"}, {"dashboard", "start", "--addr", "127.0.0.1:0"}, {"dashboard", "status"}, {"dashboard", "kill"}, {"dashboard", "stop"}, {"dashboard", "--help"}, {"-o", "json", "dashboard", "start"}, {"--output=plain", "dashboard", "status"}, {"help", "dashboard"}} {
+	for _, args := range [][]string{{"dashboard"}, {"dashboard", "start", "--addr", "127.0.0.1:0"}, {"dashboard", "status"}, {"dashboard", "kill"}, {"dashboard", "stop"}, {"dashboard", "--help"}, {"-o", "json", "dashboard", "start"}, {"--output=plain", "dashboard", "status"}, {"help", "dashboard"}, {"--help", "dashboard"}, {"-h", "dashboard"}, {"-ojson", "--help", "dashboard"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cmd := outputContractCommand(t, args...)
 			var errs bytes.Buffer

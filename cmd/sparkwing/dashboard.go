@@ -43,7 +43,7 @@ func removedDashboardCommand(args []string) bool {
 				return false
 			}
 			args = args[2:]
-		case arg == "help" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2):
+		case arg == "help" || arg == "--help" || arg == "-h" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2):
 			args = args[1:]
 		default:
 			return arg == "dashboard"
