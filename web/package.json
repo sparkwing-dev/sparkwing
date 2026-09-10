@@ -11,7 +11,9 @@
     "test": "node scripts/run-tests.mjs",
     "test:browser": "npm run build && playwright test",
     "test:browser:gate": "npm run test:browser:install && playwright test",
-    "test:browser:install": "playwright install chromium"
+    "test:browser:install": "playwright install chromium",
+    "prototype": "NEXT_PUBLIC_SPARKWING_UI_PROTOTYPE=1 next dev --port 3142",
+    "prototype:preview": "node ../bin/ui-prototype-preview.mjs"
   },
   "dependencies": {
     "next": "16.3.3",

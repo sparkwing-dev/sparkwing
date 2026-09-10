@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import MarkdownBody from "@/components/MarkdownBody";
+import RunsPrototype from "./RunsPrototype";
 import PipelineOverview from "@/components/PipelineOverview";
 import {
   type FilterCtx,
@@ -198,6 +199,7 @@ function RunsRoute() {
     </div>
   );
 
+  if (process.env.NEXT_PUBLIC_SPARKWING_UI_PROTOTYPE === "1" && searchParams.has("variant")) return <Pipelines pivotTabs={pivotTabs} />;
   if (view === "pipelines") return <PipelineOverview pivotTabs={pivotTabs} />;
   if (view === "search") return <RunsSearchView pivotTabs={pivotTabs} />;
   return <Pipelines pivotTabs={pivotTabs} />;
@@ -560,6 +562,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   selectedNodeRef.current = selectedNode;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (process.env.NEXT_PUBLIC_SPARKWING_UI_PROTOTYPE === "1" && new URLSearchParams(window.location.search).has("variant")) return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
       if (
@@ -722,6 +725,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     window.addEventListener(SELECT_RUN_EVENT, handler);
     return () => window.removeEventListener(SELECT_RUN_EVENT, handler);
   }, []);
+
+  if (process.env.NEXT_PUBLIC_SPARKWING_UI_PROTOTYPE === "1" && searchParams.has("variant")) {
+    return <RunsPrototype runs={runs.filter(r => runMatchesFilter(r, filterState, pipelineMeta))} allRuns={runs} selected={selectedRun} detail={activeDetail} onSelect={selectRun} filters={filterState} />;
+  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">

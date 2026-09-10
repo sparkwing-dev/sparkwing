@@ -20,6 +20,6 @@ fi
 
 stage="$(mktemp -d "$(dirname "$XWING_TOOL_DEST")/.sparkwing-build.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-GOWORK=off SKIP_WEB_BUILD=0 SPARKWING_INSTALL_BIN="$stage" \
+NEXT_PUBLIC_SPARKWING_UI_PROTOTYPE=1 GOWORK=off SKIP_WEB_BUILD=0 SPARKWING_INSTALL_BIN="$stage" \
   SPARKWING_INSTALL_NAME=sparkwing-candidate bash "$XWING_TOOL_SOURCE/bin/install.sh"
 mv "$stage/sparkwing-candidate" "$XWING_TOOL_DEST"

@@ -41,7 +41,7 @@ export default function Nav() {
   }, []);
 
   return (
-    <div className="flex items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
+    <div className="sparkwing-nav flex items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
       <Link href="/" className="text-lg font-bold py-2">
         sparkwing
       </Link>
