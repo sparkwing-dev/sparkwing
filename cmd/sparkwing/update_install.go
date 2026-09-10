@@ -17,7 +17,11 @@ var (
 
 func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 	dir := filepath.Dir(currentBin)
-	stage, err := writeInstallTemp(dir, ".sparkwing-update-*", asset.bytes, 0o755)
+	current, err := os.Stat(currentBin)
+	if err != nil {
+		return fmt.Errorf("inspect installed binary: %w", err)
+	}
+	stage, err := writeInstallTemp(dir, ".sparkwing-update-*", asset.bytes, current.Mode().Perm())
 	if err != nil {
 		return fmt.Errorf("stage verified binary: %w", err)
 	}
