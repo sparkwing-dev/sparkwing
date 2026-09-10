@@ -52,7 +52,12 @@ func buildSubmitCLI(t *testing.T) string {
 		}
 		submitCLIDir = dir
 		bin := filepath.Join(dir, "sparkwing")
-		cmd := exec.Command("go", "build", "-o", bin, "github.com/sparkwing-dev/sparkwing/cmd/sparkwing")
+		overlay, err := seededBundleOverlay(dir)
+		if err != nil {
+			submitCLIErr = err
+			return
+		}
+		cmd := exec.Command("go", "build", "-overlay", overlay, "-o", bin, "github.com/sparkwing-dev/sparkwing/cmd/sparkwing")
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			submitCLIErr = err
@@ -64,6 +69,36 @@ func buildSubmitCLI(t *testing.T) string {
 		t.Fatalf("build sparkwing CLI: %v", submitCLIErr)
 	}
 	return submitCLIBin
+}
+
+// seededBundleOverlay writes a go build overlay that embeds a stub dashboard
+// index page. The real bundle is a gitignored artifact of bin/build-web.sh, so
+// without the stub every command this binary serves a dashboard for would pass
+// or fail on whether the developer had built one.
+func seededBundleOverlay(dir string) (string, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", errors.New("cannot resolve this test's source path")
+	}
+	root, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	index := filepath.Join(dir, "index.html")
+	if err = os.WriteFile(index, []byte("<!doctype html><title>sparkwing test bundle</title>\n"), 0o600); err != nil {
+		return "", fmt.Errorf("write stub dashboard index: %w", err)
+	}
+	document, err := json.Marshal(map[string]map[string]string{
+		"Replace": {filepath.Join(root, "internal", "web", "next-out", "index.html"): index},
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode build overlay: %w", err)
+	}
+	overlay := filepath.Join(dir, "bundle-overlay.json")
+	if err = os.WriteFile(overlay, document, 0o600); err != nil {
+		return "", fmt.Errorf("write build overlay: %w", err)
+	}
+	return overlay, nil
 }
 
 const submitFixtureSource = `package main
