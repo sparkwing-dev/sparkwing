@@ -476,9 +476,9 @@ func (c *WebClient) ClearCache() (int, error) {
 	if err != nil {
 		return removed, err
 	}
-	_ = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, walkErr error) error {
+	err = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return walkErr
 		}
 		if !info.IsDir() || p == c.CacheDir {
 			return nil
@@ -490,7 +490,7 @@ func (c *WebClient) ClearCache() (int, error) {
 		_ = root.Remove(rel)
 		return nil
 	})
-	return removed, nil
+	return removed, err
 }
 
 // CacheStats summarizes what's currently stored under CacheDir.
