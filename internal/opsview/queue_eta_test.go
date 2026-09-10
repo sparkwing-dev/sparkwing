@@ -24,7 +24,7 @@ func etaFixture() wingwire.QueueState {
 		Resources: []wingwire.ResourceState{{Key: "cores", Capacity: 16, Held: 4, Available: 12}},
 		Holders: []wingwire.Holder{
 			{
-				RunID:              "run-measured",
+				RunID:              "hold-profiled",
 				Pipeline:           "pre-commit",
 				Repo:               "sparkwing",
 				ElapsedMS:          60_000,
@@ -33,7 +33,7 @@ func etaFixture() wingwire.QueueState {
 				CostSource:         "measured",
 			},
 			{
-				RunID:     "run-unmeasured",
+				RunID:     "hold-cold",
 				Pipeline:  "lint",
 				Repo:      "overwing",
 				ElapsedMS: 30_000,
@@ -42,7 +42,7 @@ func etaFixture() wingwire.QueueState {
 		},
 		Waiters: []wingwire.Waiter{
 			{
-				RunID:              "wait-measured",
+				RunID:              "queue-profiled",
 				Pipeline:           "test",
 				Repo:               "sparkwing",
 				Position:           1,
@@ -54,7 +54,7 @@ func etaFixture() wingwire.QueueState {
 				CostSource:         "measured",
 			},
 			{
-				RunID:     "wait-unmeasured",
+				RunID:     "queue-cold",
 				Pipeline:  "docs",
 				Repo:      "bitwing",
 				Position:  2,
@@ -80,26 +80,26 @@ func TestRenderQueueAt_PrettyShowsRemainingAndFinish(t *testing.T) {
 	if !strings.Contains(out, "1 unmeasured") {
 		t.Fatalf("header omits the unmeasured waiter count:\n%s", out)
 	}
-	holder := lineWith(t, out, "run-measured")
+	holder := lineWith(t, out, "hold-profiled")
 	if !strings.Contains(holder, "4m0s") {
 		t.Fatalf("measured holder omits its 4m0s remaining: %q", holder)
 	}
 	if !strings.Contains(holder, "09:04:00") {
 		t.Fatalf("measured holder omits its 09:04:00 finish: %q", holder)
 	}
-	if unmeasured := lineWith(t, out, "run-unmeasured"); !strings.Contains(unmeasured, "unmeasured") {
-		t.Fatalf("holder with no profile must say unmeasured: %q", unmeasured)
+	if cold := lineWith(t, out, "hold-cold"); strings.Count(cold, "unmeasured") != 2 {
+		t.Fatalf("holder with no profile must say unmeasured for both remaining and finish: %q", cold)
 	}
-	waiter := lineWith(t, out, "wait-measured")
+	waiter := lineWith(t, out, "queue-profiled")
 	if !strings.Contains(waiter, "1m30s") {
 		t.Fatalf("measured waiter omits its 1m30s start: %q", waiter)
 	}
 	if !strings.Contains(waiter, "09:03:30") {
 		t.Fatalf("measured waiter omits its 09:03:30 finish: %q", waiter)
 	}
-	unmeasuredWaiter := lineWith(t, out, "wait-unmeasured")
-	if !strings.Contains(unmeasuredWaiter, "unmeasured  unmeasured") {
-		t.Fatalf("waiter with no profile must say unmeasured for both start and finish: %q", unmeasuredWaiter)
+	coldWaiter := lineWith(t, out, "queue-cold")
+	if !strings.Contains(coldWaiter, "unknown") || !strings.Contains(coldWaiter, "unmeasured") {
+		t.Fatalf("waiter with no profile must say why each cell is empty: %q", coldWaiter)
 	}
 }
 
@@ -110,9 +110,58 @@ func TestRenderQueueAt_PrettySaysPastP50WhenAHolderOutlivesItsProfile(t *testing
 	if err := opsview.RenderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
-	line := lineWith(t, buf.String(), "run-measured")
+	line := lineWith(t, buf.String(), "hold-profiled")
 	if !strings.Contains(line, "past p50") {
 		t.Fatalf("holder past its p50 must say so rather than estimate: %q", line)
+	}
+}
+
+func TestRenderQueueAt_PrettySaysUnknownWhenNoStartCanBeProjected(t *testing.T) {
+	qs := etaFixture()
+	qs.Waiters[0].ExpectedStartMS = nil
+	var buf bytes.Buffer
+	if err := opsview.RenderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	line := lineWith(t, out, "queue-profiled")
+	if !strings.Contains(line, "unknown") {
+		t.Fatalf("a measured waiter the daemon cannot place must say unknown: %q", line)
+	}
+	if strings.Contains(line, "unmeasured") {
+		t.Fatalf("a measured waiter must not be called unmeasured: %q", line)
+	}
+	if !strings.Contains(out, "(1 unmeasured)") {
+		t.Fatalf("header counts only the waiters with no profile of their own:\n%s", out)
+	}
+}
+
+func TestRenderQueueAt_PrettyNamesTheYearOfADistantFinish(t *testing.T) {
+	qs := etaFixture()
+	qs.Holders[0].ExpectedDurationMS = 200 * 24 * 60 * 60 * 1000
+	var buf bytes.Buffer
+	if err := opsview.RenderQueueAt(&buf, qs, "pretty", etaFixtureNow()); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	if line := lineWith(t, buf.String(), "hold-profiled"); !strings.Contains(line, "2027") {
+		t.Fatalf("a finish in another year must name it: %q", line)
+	}
+}
+
+func TestRenderQueueAt_PrettyDatesAFinishPastMidnight(t *testing.T) {
+	qs := etaFixture()
+	qs.Holders[0].ExpectedDurationMS = 20 * 60 * 60 * 1000
+	var buf bytes.Buffer
+	now := time.Date(2026, 9, 10, 23, 0, 0, 0, time.Local)
+	if err := opsview.RenderQueueAt(&buf, qs, "pretty", now); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	line := lineWith(t, buf.String(), "hold-profiled")
+	if !strings.Contains(line, "Sep 11 18:59") {
+		t.Fatalf("a finish on another day must carry the date: %q", line)
+	}
+	if strings.Contains(line, "2026") {
+		t.Fatalf("a finish inside this year must not carry it: %q", line)
 	}
 }
 
@@ -181,16 +230,17 @@ func TestRenderQueueAt_PlainKeepsOneTabSeparatedRecordPerRow(t *testing.T) {
 		t.Fatalf("render plain: %v", err)
 	}
 	out := buf.String()
-	holder := lineWith(t, out, "run-measured")
+	holder := lineWith(t, out, "hold-profiled")
 	if strings.Count(holder, "\t") < 13 {
 		t.Fatalf("holder record lost its columns: %q", holder)
 	}
-	if !strings.HasSuffix(holder, "\t4m0s\t09:04:00") {
-		t.Fatalf("holder record must end with remaining and finish: %q", holder)
+	finish := etaFixtureNow().Add(240 * time.Second).Format(time.RFC3339)
+	if !strings.HasSuffix(holder, "\t4m0s\t"+finish) {
+		t.Fatalf("holder record must end with remaining and an RFC3339 finish: %q", holder)
 	}
-	waiter := lineWith(t, out, "wait-measured")
-	if !strings.HasSuffix(waiter, "\t09:03:30") {
-		t.Fatalf("waiter record must end with its expected finish: %q", waiter)
+	waiter := lineWith(t, out, "queue-profiled")
+	if !strings.HasSuffix(waiter, "\t"+etaFixtureNow().Add(210*time.Second).Format(time.RFC3339)) {
+		t.Fatalf("waiter record must end with an RFC3339 expected finish: %q", waiter)
 	}
 	if !strings.Contains(out, "unmeasured-waiters\t1") {
 		t.Fatalf("plain output omits the unmeasured waiter count:\n%s", out)

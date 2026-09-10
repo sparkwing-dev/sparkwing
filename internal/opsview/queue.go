@@ -152,7 +152,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 			orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
 			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
 			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(queueParentID(h)),
-			fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word))
+			fmtEstimate(remaining, word), fmtFinishStamp(now, remaining, word))
 	}
 	for _, wt := range qs.Waiters {
 		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
@@ -161,7 +161,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
 			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason), wt.Priority,
-			fmtFinishClock(now, waiterFinishMS(wt), estimateUnmeasured))
+			fmtFinishStamp(now, waiterFinishMS(wt), waiterEstimateWord(wt)))
 	}
 	for _, r := range qs.Runners {
 		fmt.Fprintf(w, "runner\t%s\t%.3f\t%d\t%d\n", r.Name, r.Cores, r.MemoryBytes, r.QueueDepth)
@@ -286,7 +286,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
 			orDash(wt.CostSource), fmtWaiterStart(wt),
-			fmtFinishClock(now, waiterFinishMS(wt), estimateUnmeasured),
+			fmtFinishClock(now, waiterFinishMS(wt), waiterEstimateWord(wt)),
 			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
@@ -658,12 +658,16 @@ func fmtHolderCost(h wingwire.Holder) string {
 	return fmtCost(h.Resources)
 }
 
-// estimateUnmeasured marks a row the daemon has no measured profile for, and
-// estimatePastP50 a run that has already outlived the profile it does have.
-// Neither is an estimate: a p50 no longer predicts a run that passed it.
+// The three reasons a cell carries no estimate. estimateUnmeasured means the
+// row's own profile is missing; estimatePastP50, that the run has already
+// outlived the profile it has, which a p50 no longer predicts; and
+// estimateUnknown, that the daemon could not project this row's start, which
+// happens to a fully measured waiter when a run ahead of it has no usable
+// estimate of its own.
 const (
 	estimateUnmeasured = "unmeasured"
 	estimatePastP50    = "past p50"
+	estimateUnknown    = "unknown"
 )
 
 func holderRemainingMS(h wingwire.Holder) *int64 {
@@ -702,14 +706,22 @@ func unmeasuredWaiters(qs wingwire.QueueState) int {
 	return n
 }
 
-// fmtWaiterStart reads "unmeasured" where the plain record's ETA column keeps
-// its established "-", so the two cells a queued row shows for one missing
-// profile agree with each other.
+// fmtWaiterStart names why a start is missing where the plain record's ETA
+// column keeps its established "-".
 func fmtWaiterStart(wt wingwire.Waiter) string {
 	if wt.ExpectedStartMS == nil {
-		return estimateUnmeasured
+		return estimateUnknown
 	}
 	return fmtETA(wt.ExpectedStartMS)
+}
+
+// waiterEstimateWord separates a queued row with no profile of its own from
+// one whose start the daemon could not project.
+func waiterEstimateWord(wt wingwire.Waiter) string {
+	if wt.ExpectedDurationMS <= 0 {
+		return estimateUnmeasured
+	}
+	return estimateUnknown
 }
 
 func fmtEstimate(ms *int64, word string) string {
@@ -724,10 +736,24 @@ func fmtFinishClock(now time.Time, ms *int64, word string) string {
 		return word
 	}
 	at := finishAt(now, *ms)
-	if at.YearDay() == now.YearDay() && at.Year() == now.Year() {
+	switch {
+	case at.Year() != now.Year():
+		return at.Format("Jan 2 2006 15:04")
+	case at.YearDay() != now.YearDay():
+		return at.Format("Jan 2 15:04")
+	default:
 		return at.Format("15:04:05")
 	}
-	return at.Format("Jan 2 15:04")
+}
+
+// fmtFinishStamp is the plain record's clock cell. It keeps one shape whatever
+// the date, because the pretty view's shorter forms would hand a script parsing
+// that column a different layout after midnight.
+func fmtFinishStamp(now time.Time, ms *int64, word string) string {
+	if ms == nil {
+		return word
+	}
+	return finishAt(now, *ms).Format(time.RFC3339)
 }
 
 func finishAt(now time.Time, ms int64) time.Time {
@@ -742,7 +768,9 @@ func fmtRFC3339(now time.Time, ms *int64) string {
 }
 
 // holderView adds the schedule a client would otherwise compute from
-// expected_duration_ms and elapsed_ms. An absent field means unmeasured.
+// expected_duration_ms and elapsed_ms. The fields are absent when no estimate
+// exists, which is either a holder with no profile or one already past its
+// p50; expected_duration_ms against elapsed_ms tells the two apart.
 // ExpectedFinishMS repeats ExpectedRemainingMS, so one field name carries the
 // finish estimate on both holder and waiter rows.
 type holderView struct {
@@ -753,7 +781,9 @@ type holderView struct {
 }
 
 // waiterView adds the clock time behind expected_start_ms and the finish that
-// follows it. An absent field means unmeasured.
+// follows it. The fields are absent when no estimate exists, which is either a
+// waiter with no profile or one the daemon could not place behind the runs
+// ahead of it; expected_duration_ms tells the two apart.
 type waiterView struct {
 	wingwire.Waiter
 	ExpectedStartAt  string `json:"expected_start_at,omitempty"`

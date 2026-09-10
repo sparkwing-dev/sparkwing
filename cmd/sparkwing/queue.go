@@ -53,7 +53,7 @@ func runQueueList(cmd Command, args []string) error {
 	}
 
 	if *on != "" {
-		return runQueueProfile(*on, format)
+		return runQueueProfile(cmd, *on, format)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -68,7 +68,7 @@ func runQueueList(cmd Command, args []string) error {
 				return rerr
 			}
 			warnLegacy(os.Stderr, len(legacy))
-			return exitError(4, fmt.Errorf("queue: %w", err))
+			return exitError(4, fmt.Errorf("%s: %w", cmd.Path, err))
 		}
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
@@ -77,7 +77,7 @@ func runQueueList(cmd Command, args []string) error {
 			warnLegacy(os.Stderr, len(legacy))
 			return nil
 		}
-		return fmt.Errorf("queue: %w", err)
+		return fmt.Errorf("%s: %w", cmd.Path, err)
 	}
 	if rerr := renderLocalQueue(os.Stdout, qs, format); rerr != nil {
 		return rerr
@@ -86,7 +86,7 @@ func runQueueList(cmd Command, args []string) error {
 	return nil
 }
 
-func runQueueProfile(profileName, format string) error {
+func runQueueProfile(cmd Command, profileName, format string) error {
 	prof, err := resolveProfile(profileName)
 	if err != nil {
 		return err
@@ -98,7 +98,7 @@ func runQueueProfile(profileName, format string) error {
 	defer cancel()
 	qs, err := fetchControllerQueueState(ctx, prof.ControllerURL(), prof.ControllerToken())
 	if err != nil {
-		return fmt.Errorf("queue: %w", err)
+		return fmt.Errorf("%s: %w", cmd.Path, err)
 	}
 	return renderQueue(os.Stdout, qs, format)
 }

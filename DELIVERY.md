@@ -51,13 +51,12 @@ this file is a menu and checklist, not a command that every change must run.
   seen its own package, and runs `store-postgres` when that change touches
   `pkg/store`. Unit and ESLint run in parallel; the production build then
   feeds the browser suite.
-- **Gating beside other agents:** one gate at a time. `sparkwing run` admits
-  through the machine's admission daemon, which is what serializes concurrent
-  agents against each other; a bare `go test ./...` or `golangci-lint run`
-  outside a run is load the daemon cannot see and every queued run pays for.
-  `sparkwing queue list` shows what is running and queued with expected start
-  and finish, and `sparkwing queue priority --run <id> --set front` re-ranks a
-  queued run.
+- **Gating beside other agents:** one gate at a time. The machine's admission
+  daemon serializes concurrent agents, and `sparkwing run` is how a check
+  reaches it; a bare `go test ./...` or `golangci-lint run` outside a run is
+  load the daemon cannot see and every queued run pays for. `sparkwing queue
+  list` shows what is running and queued with expected start and finish, and
+  `sparkwing queue priority --run <id> --set front` re-ranks a queued run.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
   machine's admission daemon, admission refuses the run. Give the gate a home

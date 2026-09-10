@@ -19,11 +19,13 @@ admission simulation, when it is expected to start and finish. Attached child
 runs appear under their parent. Connected runs that hold no resources have
 separate rows.
 
-An estimate exists only where every profile it rests on does. A cell with no
-estimate reads "unmeasured" -- the row's own profile is missing, or a run
-ahead of it has none -- and a run that has already outlived its p50 reads
-"past p50". Neither is replaced by a guess. The header counts the queued runs
-with no profile of their own, because those are the ones that starve.
+An estimate exists only where the measurements behind it do, and a cell
+without one says which measurement is missing. "unmeasured" is a row the
+daemon has no profile for. "past p50" is a run that has already outlived the
+profile it has, which no longer predicts it. "unknown" is a queued row the
+daemon cannot place, because a run ahead of it has no estimate of its own.
+None of the three is replaced by a guess. The header counts the queued runs
+with no profile, because those are the ones that starve.
 'sparkwing queue priority' re-ranks a queued run.
 
 A stalled holder includes a cancellation command:
@@ -31,16 +33,16 @@ A stalled holder includes a cancellation command:
 The queue command only reports state.
 
 Output is pretty on a terminal and JSON when piped. Select JSON explicitly
-with -o json, or tab-separated records with -o plain. JSON carries every
-estimate twice: milliseconds from now, and an RFC3339 clock time.
+with -o json, or tab-separated records with -o plain. JSON carries each
+estimate as milliseconds from the snapshot and as an RFC3339 clock time;
+plain carries humanised durations and RFC3339 clock times.
 
 An absent daemon reports an empty queue and exits 0. An unreachable daemon
 reports the connection failure and exits 4; its queue state is unknown.
 
-'sparkwing queue' and 'sparkwing queue list' print the same listing.
-
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.
+'sparkwing queue' and 'sparkwing queue list' print the same listing.
 
 ### Subcommands
 
@@ -126,11 +128,13 @@ admission simulation, when it is expected to start and finish. Attached child
 runs appear under their parent. Connected runs that hold no resources have
 separate rows.
 
-An estimate exists only where every profile it rests on does. A cell with no
-estimate reads "unmeasured" -- the row's own profile is missing, or a run
-ahead of it has none -- and a run that has already outlived its p50 reads
-"past p50". Neither is replaced by a guess. The header counts the queued runs
-with no profile of their own, because those are the ones that starve.
+An estimate exists only where the measurements behind it do, and a cell
+without one says which measurement is missing. "unmeasured" is a row the
+daemon has no profile for. "past p50" is a run that has already outlived the
+profile it has, which no longer predicts it. "unknown" is a queued row the
+daemon cannot place, because a run ahead of it has no estimate of its own.
+None of the three is replaced by a guess. The header counts the queued runs
+with no profile, because those are the ones that starve.
 'sparkwing queue priority' re-ranks a queued run.
 
 A stalled holder includes a cancellation command:
@@ -138,16 +142,16 @@ A stalled holder includes a cancellation command:
 The queue command only reports state.
 
 Output is pretty on a terminal and JSON when piped. Select JSON explicitly
-with -o json, or tab-separated records with -o plain. JSON carries every
-estimate twice: milliseconds from now, and an RFC3339 clock time.
+with -o json, or tab-separated records with -o plain. JSON carries each
+estimate as milliseconds from the snapshot and as an RFC3339 clock time;
+plain carries humanised durations and RFC3339 clock times.
 
 An absent daemon reports an empty queue and exits 0. An unreachable daemon
 reports the connection failure and exits 4; its queue state is unknown.
 
-This is the same output as 'sparkwing queue'.
-
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.
+This is the same output as 'sparkwing queue'.
 
 ### Flags
 

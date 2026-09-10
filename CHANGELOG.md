@@ -37,14 +37,21 @@ unlock.
   bare `queue` runs the same code. Running rows gain the expected remaining
   time and the clock time the run is expected to finish; queued rows gain the
   expected finish beside the expected start. Both come from the run's measured
-  p50 profile and the daemon's admission simulation, so a cell whose estimate
-  rests on a profile that does not exist reads "unmeasured" and a run past its
-  p50 reads "past p50" rather than carrying a guess. The header counts the
-  queued runs with no profile of their own. `-o
-  json` carries each estimate as milliseconds from now and as an RFC3339 clock
-  time, in `expected_remaining_ms`, `expected_finish_ms`, `expected_finish_at`,
-  `expected_start_at`, and `unmeasured_waiters`; `-o plain` appends the same
-  values as trailing columns.
+  p50 profile and the daemon's admission simulation, and a cell without an
+  estimate names the measurement it lacks rather than carrying a guess:
+  "unmeasured" for a row with no profile, "past p50" for a run that has
+  outlived the profile it has, "unknown" for a queued row the daemon cannot
+  place behind the runs ahead of it. The header counts the queued runs with no
+  profile. In the pretty view the section that was headed "Waiting" is now
+  headed "Queued".
+  `-o json` gains `expected_remaining_ms`, `expected_finish_ms`,
+  `expected_finish_at` on running rows, `expected_start_at`,
+  `expected_finish_ms`, `expected_finish_at` on queued rows, and
+  `unmeasured_waiters` at the top level, each duration in milliseconds from the
+  snapshot and each clock time as RFC3339. `-o plain` gains an
+  `unmeasured-waiters` record, two trailing columns on a holder record
+  (humanised remaining, RFC3339 finish) and one on a waiter record (RFC3339
+  finish); every existing column keeps its position.
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
