@@ -47,6 +47,7 @@ type InfoSDKPin struct {
 	Runs      string `json:"runs"`
 	RunsFrom  string `json:"runs_from,omitempty"`
 	Switches  bool   `json:"switches"`
+	Refusal   string `json:"refusal,omitempty"`
 }
 
 type InfoExecutable struct {
@@ -496,6 +497,9 @@ func sdkPinLine(pin *InfoSDKPin) string {
 	if pin == nil {
 		return ""
 	}
+	if pin.Refusal != "" {
+		return pin.Refusal
+	}
 	if pin.Switches {
 		return fmt.Sprintf("this repo pins SDK %s, so a pipeline run switches to %s at %s",
 			pin.Pin, pin.Runs, tildePath(pin.RunsFrom))
@@ -522,6 +526,11 @@ func gatherSDKPin(info Info) *InfoSDKPin {
 		return report
 	}
 	decision := planToolchainSwitch(info.Version.Installed, pin, mode, toolchainActive)
+	if decision.action == toolchainRefuse {
+		report.Runs, report.RunsFrom = "", ""
+		report.Refusal = toolchainLocalRefusal(decision).Error()
+		return report
+	}
 	if decision.action != toolchainSwitch {
 		return report
 	}
