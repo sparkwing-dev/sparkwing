@@ -1557,7 +1557,7 @@ func (e *SkewError) Error() string {
 		return fmt.Sprintf(
 			"sparkwing: this state database needs sparkwing >= %s; you have %s "+
 				"(database schema %d, this binary understands %d). "+
-				"Run `sparkwing version update --cli` to upgrade.",
+				"Run `sparkwing update --cli` to upgrade.",
 			e.MinVersion, installed, e.DBVersion, e.BinaryVersion,
 		)
 	}

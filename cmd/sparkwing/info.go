@@ -677,7 +677,7 @@ func tipCLIBehindLatest(info Info) (InfoTip, bool) {
 	return InfoTip{
 		ID:      "cli-behind",
 		Title:   "A newer sparkwing release is available",
-		Command: "sparkwing version update --cli",
+		Command: "sparkwing update --cli",
 		Note:    "installed " + info.Version.Semver + " → latest " + latest,
 	}, true
 }

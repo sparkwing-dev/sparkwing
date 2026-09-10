@@ -52,9 +52,6 @@ const versionFetchTimeout = 3 * time.Second
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 func runVersion(args []string) error {
-	if len(args) > 0 && args[0] == "update" {
-		return runVersionUpdate(args[1:])
-	}
 	if len(args) > 0 && args[0] == "hold" {
 		return runVersionHold(args[1:])
 	}
@@ -252,9 +249,9 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Green("up to date"))
 	}
 	if r.Behind {
-		fmt.Printf("  upgrade:  %s\n", "sparkwing version update --cli")
+		fmt.Printf("  upgrade:  %s\n", "sparkwing update --cli")
 	} else {
-		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing version update --cli"))
+		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing update --cli"))
 	}
 	if r.Hold != nil {
 		fmt.Printf("  hold:     %s %s\n",
@@ -290,7 +287,7 @@ func printVersionTable(r VersionReport) {
 		}
 		fmt.Printf("  sdk:      %s   %s\n", p.SDKPin, label)
 		if p.SDKBehind {
-			fmt.Printf("  upgrade:  sparkwing version update --sdk\n")
+			fmt.Printf("  upgrade:  sparkwing update --sdk\n")
 		}
 	}
 	if len(p.Sparks) > 0 {

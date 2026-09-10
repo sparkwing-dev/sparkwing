@@ -284,7 +284,7 @@ and the permission fix so the command reports existing state.`,
 
 var cmdVersion = Command{
 	Path:     "sparkwing version",
-	Synopsis: "Show + update versions (CLI, SDK, sparks)",
+	Synopsis: "Inspect versions (CLI, SDK, sparks)",
 	Description: `Reports the installed CLI version + build provenance, the
 latest published release on GitHub (with a short network
 fetch -- bounded by ~3s, fail-soft when offline), and the
@@ -298,7 +298,7 @@ trigger an upgrade without parsing prose.
 --offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
-	SubcommandOrder:    []string{"update", "hold"},
+	SubcommandOrder:    []string{"hold"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -312,8 +312,8 @@ latest) for shell pipelines.`,
 		{"CLI semver only (scripts)", "sparkwing version -o plain | head -n1"},
 		{"Local-only (no network)", "sparkwing version --offline"},
 		{"Changelog for the installed release", "sparkwing version --changelog"},
-		{"Update the CLI binary", "sparkwing version update --cli"},
-		{"Bump the SDK pin in this project", "sparkwing version update --sdk"},
+		{"Update the CLI binary", "sparkwing update --cli"},
+		{"Bump the SDK pin in this project", "sparkwing update --sdk"},
 	},
 }
 
@@ -321,7 +321,7 @@ var cmdVersionHold = Command{
 	Path:     "sparkwing version hold",
 	Synopsis: "Show, set, or clear the operator ceiling on CLI upgrades",
 	Description: `A version hold is an operator-set ceiling that the tool enforces:
-once set, 'sparkwing version update --cli' (and 'sparkwing update')
+once set, 'sparkwing update' and 'sparkwing update --cli'
 refuse to install anything beyond it, so an agent cannot perform a
 major upgrade against operator instruction.
 
@@ -353,72 +353,48 @@ being deferred.`,
 
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
-	Synopsis: "Self-update the CLI binary",
-	Description: `Downloads, authenticates, and atomically installs the latest
-(or a specific) sparkwing release from GitHub Releases.
+	Synopsis: "Update the CLI binary or this project's SDK pin",
+	Description: `CLI is the default target; --cli selects it explicitly. --sdk selects
+this project's .sparkwing/go.mod pin. Targets are mutually exclusive.
+Both resolve the latest published GitHub release unless --version names a
+specific release tag.
 
-By default the command fetches the latest version pointer, pulls
-the matching binary for the current OS/arch, verifies Ed25519
-signatures over the manifest and asset plus the manifest digest,
-and replaces the running binary atomically. Verification failure
-is terminal; the updater never selects an unsigned fallback.
+CLI updates verify Ed25519 signatures and the release digest before atomic
+replacement. Verification failure is terminal. --force permits a downgrade;
+--override-hold crosses an operator CLI hold. Both flags are CLI-only.
 
---check is the read-only probe: it reports the installed version
-and the latest published release, exits 0 when already current,
-and exits 1 when a newer release exists (useful for CI/notifications).
+SDK updates run native go get for the resolved release, then go mod tidy.
+Go retains its toolchain selection, module verification and dependency rules.
+The CLI binary and operator CLI hold are unchanged.
 
-Downgrades are blocked by default. Pass --force to install an older
-release when investigating a regression.
+--check reads installed identity and release metadata without installing,
+running Go, changing module files or writing caches. It honors the selected
+target and --version. Exit 0 means current or ahead, 1 means an update is
+available, and 2 means unknown, diverged or a check failure. Local SDK
+replacements and unverified CLI provenance are reported as unknown.
+A check does not verify downloadable assets or promise installation will work.
 
-For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.`,
+Output is pretty on a terminal and NDJSON otherwise. Checks emit one
+update_check record; successful updates emit one update receipt. Progress
+and failures go to stderr. Plain checks print the status word; plain updates
+print the resulting version.`,
 	Flags: []FlagSpec{
-		{Name: "check", Desc: "Report installed vs latest; exit 1 if a newer release exists (read-only)", Group: "Behavior"},
-		{Name: "force", Desc: "Allow downgrading to an older release", Group: "Behavior"},
-		{Name: "override-hold", Desc: "Cross an operator version hold", Group: "Behavior"},
-		{Name: "version", Argument: "TAG", Desc: "Target release tag (vX.Y.Z). Default: latest.", Group: "Input"},
+		{Name: "cli", Desc: "Update the CLI binary (default target)", Group: "Target", ConflictsWith: []string{"sdk"}},
+		{Name: "sdk", Desc: "Update this project's .sparkwing/go.mod SDK pin", Group: "Target", ConflictsWith: []string{"cli"}},
+		{Name: "check", Desc: "Compare the selected target without changing it", Group: "Behavior"},
+		{Name: "force", Desc: "Allow CLI downgrade (--cli only)", Group: "Behavior"},
+		{Name: "override-hold", Desc: "Cross an operator CLI version hold (--cli only)", Group: "Behavior"},
+		{Name: "version", Argument: "TAG", Desc: "Canonical release tag; omit for latest published release", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "pretty | json | plain", Group: "Output"},
 	},
-	GroupOrder: []string{"Behavior", "Input", "Other"},
+	GroupOrder: []string{"Target", "Input", "Behavior", "Output", "Other"},
 	Examples: []Example{
-		{"Check for a newer release (read-only)", "sparkwing update --check"},
-		{"Update to latest", "sparkwing update"},
-		{"Pin to a specific release", "sparkwing update --version v9.8.7"},
-		{"Downgrade to an older release", "sparkwing update --version v9.7.6 --force"},
-	},
-}
-
-var cmdVersionUpdate = Command{
-	Path:     "sparkwing version update",
-	Synopsis: "Self-update the CLI binary (--cli) or bump this project's SDK pin (--sdk)",
-	Description: `Two targets, one verb:
-
-  --cli   Replace the running sparkwing binary with the target
-          release. Resolves the version pointer from GitHub Releases,
-          downloads the binary, verifies the ed25519 signature over
-          SHA256SUMS and the signed digest, atomically installs, and
-          re-hashes the installed file against the verified digest.
-          A verification or install failure is terminal.
-
-  --sdk   Bump the SDK pin in this project's .sparkwing/go.mod via
-          'go get github.com/sparkwing-dev/sparkwing@<version>',
-          then 'go mod tidy'. Doesn't touch the running binary.
-
-Exactly one of --cli or --sdk must be set; they conflict with
-each other so a typo can't update the wrong half. --version
-applies to whichever target is selected.`,
-	Flags: []FlagSpec{
-		{Name: "cli", Desc: "Self-update the sparkwing CLI binary", Group: "Target", ConflictsWith: []string{"sdk"}},
-		{Name: "sdk", Desc: "Bump the SDK pin in this project's .sparkwing/go.mod", Group: "Target", ConflictsWith: []string{"cli"}},
-		{Name: "version", Argument: "TAG", Desc: "Target release tag (vX.Y.Z). Omit for latest.", Group: "Input"},
-		{Name: "force", Desc: "Allow downgrading to an older release (--cli only)", Group: "Input"},
-		{Name: "override-hold", Desc: "Cross an operator version hold (--cli only)", Group: "Input"},
-	},
-	GroupOrder: []string{"Target", "Input", "Other"},
-	Examples: []Example{
-		{"Update the CLI to latest", "sparkwing version update --cli"},
-		{"Pin the CLI to a specific release", "sparkwing version update --cli --version v9.8.7"},
-		{"Downgrade the CLI", "sparkwing version update --cli --version v9.7.6 --force"},
-		{"Bump the SDK in this project to latest", "sparkwing version update --sdk"},
-		{"Pin the SDK to a specific release", "sparkwing version update --sdk --version v9.8.7"},
+		{"Check for a newer CLI release", "sparkwing update --check"},
+		{"Update the CLI", "sparkwing update --cli"},
+		{"Check this project's SDK pin", "sparkwing update --sdk --check"},
+		{"Update the SDK pin", "sparkwing update --sdk"},
+		{"Check a specific CLI release", "sparkwing update --cli --check --version v9.8.7"},
+		{"Downgrade the CLI", "sparkwing update --cli --version v9.7.6 --force"},
 	},
 }
 
@@ -1146,7 +1122,7 @@ support -o json so an agent can parse output directly rather
 than scraping tab-complete.
 
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
-'sparkwing version update --sdk'. To see the current pin, run
+'sparkwing update --sdk'. To see the current pin, run
 'sparkwing version' (composite card).`,
 	SubcommandOrder: []string{"list", "describe", "discover", "new", "explain", "lint", "plan", "run", "trigger", "hooks", "sparks"},
 	Examples: []Example{
