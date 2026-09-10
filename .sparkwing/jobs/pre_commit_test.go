@@ -493,6 +493,9 @@ func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing
 const (
 	emDash    = "\u2014"
 	trackerID = "TOD" + "-42"
+	// safety: split so the sweep under test does not match this file itself.
+	bitwingKey      = "BW" + "-123"
+	lowerBitwingKey = "bw" + "-456"
 )
 
 func gitCommitAll(t *testing.T, dir, message string) {
@@ -529,6 +532,8 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 	}{
 		{"em dash", "package internal\n\n// Note " + emDash + " here.\nfunc Bad() int { return 3 }\n", checkEmDashes},
 		{"tracker id", "package internal\n\n// See " + trackerID + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
+		{"bitwing key", "package internal\n\n// See " + bitwingKey + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
+		{"lowercase bitwing key", "package internal\n\n// See " + lowerBitwingKey + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -881,5 +886,26 @@ func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
 				t.Fatalf("node_modules changed the product %s verdict: %v", name, err)
 			}
 		})
+	}
+}
+
+func TestTrackerIDPatternKeepsTheOtherPrefixesUppercaseOnly(t *testing.T) {
+	refused := []string{"IMP" + "-12", "SDK" + "-3", "TOD" + "-9", "BW" + "-1", "bw" + "-1", "Bw" + "-1"}
+	for _, s := range refused {
+		if !trackerIDPattern.MatchString("see " + s + " for context") {
+			t.Errorf("%q was not refused", s)
+		}
+	}
+	// safety: the case-insensitive group covers BW alone; a lowercase spelling
+	// of any other prefix is ordinary prose and must stay allowed. Each literal
+	// is split so this file does not trip the sweep it exercises.
+	allowed := []string{
+		"imp" + "-12", "sdk" + "-3", "tod" + "-9", "run" + "-3", "Imp" + "-12",
+		"BWT" + "-789", "abw" + "-12", "bw_12",
+	}
+	for _, s := range allowed {
+		if trackerIDPattern.MatchString("see " + s + " for context") {
+			t.Errorf("%q was refused; the case-insensitive group leaked past BW", s)
+		}
 	}
 }

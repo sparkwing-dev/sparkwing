@@ -256,6 +256,19 @@ func TestEnsureBranchContainsRemote(t *testing.T) {
 	if err := ensureBranchContainsRemote(ctx, work, "release-test"); err == nil {
 		t.Fatalf("stale release branch passed freshness fence")
 	}
+
+	runTestGit(t, work, "checkout", "-b", "never-pushed")
+	err := ensureBranchContainsRemote(ctx, work, "never-pushed")
+	if err == nil {
+		t.Fatal("a branch origin has never seen passed the preflight")
+	}
+	if !strings.Contains(err.Error(), "never-pushed") {
+		t.Errorf("error = %q, want it to name the unpublished branch", err)
+	}
+
+	if err := ensureBranchContainsRemote(ctx, work, "HEAD"); err == nil {
+		t.Fatal("a detached HEAD passed the preflight")
+	}
 }
 
 func TestWriteSelfModuleSums(t *testing.T) {

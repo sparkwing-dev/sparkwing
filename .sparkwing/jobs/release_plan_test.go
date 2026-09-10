@@ -20,6 +20,7 @@ func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
 
 var releaseGateNodes = []string{
 	"validate-version",
+	"check-branch-published",
 	"check-clean-tree",
 	"gate-contracts",
 	"gate-pre-commit",
@@ -239,5 +240,22 @@ func TestReleasePlanRestoreDoesNotGateTagPush(t *testing.T) {
 
 	if ancestors(t, plan, "push-tag")["restore-self-replace"] {
 		t.Error("push-tag must not depend on restore-self-replace: cleanup runs after the tag, never as a precondition for it")
+	}
+}
+
+func TestReleaseRefusesAnUnpublishedBranchBeforeTheExpensiveGates(t *testing.T) {
+	plan := releasePlan(t)
+
+	for _, gate := range []string{"gate-pre-commit", "gate-pre-push", "gate-template-verify"} {
+		if !ancestors(t, plan, gate)["check-branch-published"] {
+			t.Errorf("%s must depend on check-branch-published: the tag push refuses an unpublished branch anyway, so running the gate first buys nothing", gate)
+		}
+	}
+
+	deps := ancestors(t, plan, "check-branch-published")
+	for _, gate := range []string{"gate-contracts", "gate-pre-commit", "gate-pre-push", "gate-template-verify"} {
+		if deps[gate] {
+			t.Errorf("check-branch-published must not depend on %s, directly or transitively: that puts it back behind the gates it exists to precede", gate)
+		}
 	}
 }
