@@ -182,11 +182,13 @@ source inputs change.
 
 ### The key
 
-The key is a fingerprint of everything that can change the compiled
-output: the Go major/minor version, `GOOS`/`GOARCH`, the `go build` flags
-sparkwing passes, the contents of `.sparkwing/`, the contents of every
-local `replace` target, the directives of a covering `go.work`, and the
-resolved module overlays.
+The key fingerprints the inputs sparkwing controls: the Go major/minor
+version, `GOOS`/`GOARCH`, the `go build` flags sparkwing passes, the
+contents of `.sparkwing/`, the contents of every local `replace` target,
+the directives of a covering `go.work`, and the resolved module overlays.
+Build environment the calling shell exports -- `GOFLAGS`, `GOEXPERIMENT`,
+`CGO_ENABLED` -- is not among them, so two shells that disagree on one
+compute the same key.
 
 Contents are hashed, not timestamps -- editing a file back to its
 previous bytes restores the previous key. Paths are recorded relative
@@ -206,10 +208,10 @@ on your machine.
 
 Builds also pass `-ldflags "-s -w"`, which drops the symbol table and
 DWARF and takes roughly 30% off the binary and a third off its link
-time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive; a
-debugger attaching to the binary, and core-dump analysis, do not. Set
-`SPARKWING_NO_BINCACHE=1` to run the pipeline through `go run .` when you
-need those.
+time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive. A
+debugger still attaches, without variable names or line numbers, and a
+core dump cannot be symbolised. Set `SPARKWING_NO_BINCACHE=1` to run the
+pipeline through `go run .` when you need those.
 
 ### Bounding the cache
 

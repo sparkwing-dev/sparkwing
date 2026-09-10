@@ -35,8 +35,8 @@ if ! git -C "$ROOT" diff --quiet HEAD 2>/dev/null; then
 fi
 
 echo "build $NAME $VERSION"
-# -trimpath and -s -w match .github/workflows/release.yaml, so a local install
-# and a released binary of the same commit are byte-identical.
+# -trimpath and -s -w are the flags .github/workflows/release.yaml passes, so a
+# local install and a released binary strip and trim the same way.
 go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME" ./cmd/sparkwing
 if [ "$NAME" != sparkwing ]; then
   echo

@@ -839,13 +839,11 @@ func (lb *lockedBuffer) Bytes() []byte {
 	return append([]byte(nil), lb.buf.Bytes()...)
 }
 
-// pipelineBuildFlags are the `go build` flags every compiled pipeline binary
-// carries. keyParts hashes them into the cache key: the cache serves a stored
-// binary without ever digesting its bytes, so flags that the key does not name
-// would hand every local and shared cache a stale binary forever.
-func pipelineBuildFlags() []string {
-	return []string{"-trimpath", "-ldflags", "-s -w"}
-}
+// pipelineBuildFlags are the `go build` flags CompilePipeline passes. keyParts
+// hashes them into the cache key: the cache serves a stored binary without ever
+// digesting its bytes, so a flag the key does not name would hand every local
+// and shared cache a stale binary forever. Tests replace it to prove that.
+var pipelineBuildFlags = []string{"-trimpath", "-ldflags", "-s -w"}
 
 func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 	if _, err := exec.LookPath("go"); err != nil {
@@ -858,7 +856,7 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 		return err
 	}
 
-	args := append([]string{"build"}, pipelineBuildFlags()...)
+	args := append([]string{"build"}, pipelineBuildFlags...)
 	env := os.Environ()
 	overlay := overlayModfilePath(sparkwingDir)
 	work, workPresent := goWorkInScope(sparkwingDir)
@@ -1036,7 +1034,7 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 	add("go toolchain", goMajorMinor(), []byte(fmt.Sprintf("go:%s\n", goMajorMinor())))
 	add("platform", goos+"/"+goarch, []byte(fmt.Sprintf("arch:%s/%s\n", goos, goarch)))
 
-	flags := strings.Join(pipelineBuildFlags(), " ")
+	flags := strings.Join(pipelineBuildFlags, " ")
 	add("build flags", flags, []byte("buildflags:"+flags+"\n"))
 
 	var moduleBuf bytes.Buffer

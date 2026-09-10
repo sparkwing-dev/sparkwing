@@ -100,7 +100,26 @@ func TestCompilePipeline_BuildFlagsAreNamedInTheCacheKey(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("no cache-key input names the build flags %q; inputs were %v", want, parts)
+	var labels []string
+	for _, p := range parts {
+		labels = append(labels, p.Label+"="+p.Detail)
+	}
+	t.Fatalf("no cache-key input names the build flags %q; inputs were %s", want, strings.Join(labels, ", "))
+}
+
+// A key that does not fold the flags into its hash serves the binary the old
+// flags produced, whatever the parts list displays.
+func TestPipelineCacheKey_ChangesWithBuildFlags(t *testing.T) {
+	dir := newCheckout(t, t.TempDir())
+	before := mustKey(t, dir)
+
+	original := pipelineBuildFlags
+	t.Cleanup(func() { pipelineBuildFlags = original })
+	pipelineBuildFlags = append(append([]string{}, original...), "-tags", "probe")
+
+	if after := mustKey(t, dir); after == before {
+		t.Fatalf("changing the build flags left the key at %s", before)
+	}
 }
 
 // compiledFlags returns the flags CompilePipeline passed to `go build`, minus
