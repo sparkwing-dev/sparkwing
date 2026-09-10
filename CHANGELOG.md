@@ -126,6 +126,11 @@ unlock.
 
 ### Fixed
 
+- **cli:** `run --sw-detached` hosts the admission daemon from the launching
+  binary. The consumer's child resolved a host with `exec.LookPath("sparkwing")`
+  and reached the installed binary instead, so a detached run launched from a
+  development or release-candidate build failed admission with a build mismatch.
+  The foreground path already pre-warmed a daemon from its own binary.
 - **cli:** A resolved module overlay whose checksum file never materialized is
   repaired on the next resolve. A materialization that failed or that a Go
   workspace skipped left `.sparkwing/.resolved.mod` on disk with no
