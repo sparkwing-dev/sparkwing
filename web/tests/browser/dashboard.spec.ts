@@ -1486,3 +1486,74 @@ test("explains how to declare a schedule when the host has none", async ({
   ).toBeVisible();
   await expect(page.locator("[data-schedule-id]")).toHaveCount(0);
 });
+
+
+test("cron history shows run results, hover details and run links", async ({ page }) => {
+  const fires = [
+    { ...cronDetail.fires[0], id: "newest", run_status: "success" },
+    { ...cronDetail.fires[0], id: "failure", due_at: isoFromNow(-12 * 3_600_000), run_id: "failed_run", run_status: "failed" },
+    cronDetail.fires[1],
+  ];
+  await installMockAPI(page, { crons: { ...cronsOverview, schedules: [armedCron] }, cronDetail: { ...cronDetail, fires } });
+  await page.goto("/crons");
+  const bars = page.locator("[data-fire-id]");
+  await expect(bars).toHaveCount(3);
+  await expect(bars.nth(0)).toHaveAttribute("data-fire-id", "crf_01");
+  await expect(bars.nth(1)).toHaveClass(/bg-red-400/);
+  await expect(bars.nth(2)).toHaveClass(/bg-green-400/);
+  await bars.nth(1).focus();
+  await expect(page.getByText("Status: failed", { exact: true })).toBeVisible();
+  await bars.nth(1).blur();
+  await bars.nth(1).hover();
+  await expect(page.getByText("Status: failed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Outcome: fired", { exact: true })).toBeVisible();
+  await bars.nth(0).click();
+  await expect(page.getByRole("region", { name: "Schedule detail" })).toBeVisible();
+  await bars.nth(1).click();
+  await expect(page).toHaveURL(/\/runs\?run=failed_run$/);
+});
+
+test("cron history distinguishes empty and unavailable history", async ({ page }) => {
+  await installMockAPI(page, { crons: { ...cronsOverview, schedules: [armedCron] }, cronDetail: { ...cronDetail, fires: [] } });
+  await page.goto("/crons");
+  await expect(page.getByText("No fires yet", { exact: true })).toBeVisible();
+  await page.route("**/api/v1/crons/*", route => route.fulfill({ status: 503, body: "unavailable" }));
+  await page.reload();
+  await expect(page.getByText("History unavailable", { exact: true })).toBeVisible();
+});
+
+
+test("cron detail deep links survive hidden and missing schedules", async ({ page }) => {
+  await installMockAPI(page, { crons: cronsOverview, cronDetail: { ...cronDetail, schedule: undeclaredCron } });
+  await page.goto(`/crons?schedule=${undeclaredCron.id}`);
+  await expect(page.getByRole("region", { name: "Schedule detail" }).getByRole("heading", { name: undeclaredCron.name, exact: true })).toBeVisible();
+  await page.route("**/api/v1/crons/missing", route => route.fulfill({ status: 404 }));
+  await page.goto("/crons?schedule=missing");
+  await expect(page.getByText("That schedule is not on this host.")).toBeVisible();
+});
+
+
+test("runs trigger filters persist and offer badge include and exclude", async ({ page }) => {
+  const scheduled = { ...runningRun, trigger_source: "schedule" };
+  await installMockAPI(page, { runs: [finishedRun, scheduled] });
+  await page.goto("/runs");
+  const githubRow = page.locator(`[data-run-id="${finishedRun.id}"]`);
+  const scheduledRow = page.locator(`[data-run-id="${scheduled.id}"]`);
+  await expect(page.getByRole("button", { name: /^TRIGGER/ })).toBeVisible();
+  await githubRow.getByText("github", { exact: true }).click();
+  await page.getByRole("button", { name: "+ filter to github", exact: true }).click();
+  await expect(page).toHaveURL(/(?:\?|&)trigger=github(?:&|$)/);
+  await expect(scheduledRow).toHaveCount(0);
+  await page.reload();
+  await expect(githubRow).toBeVisible();
+  await expect(scheduledRow).toHaveCount(0);
+  await githubRow.getByText("github", { exact: true }).click();
+  await page.getByRole("button", { name: /exclude github/, exact: false }).click();
+  await expect(page).toHaveURL(/(?:\?|&)ntrigger=github(?:&|$)/);
+  await expect(githubRow).toHaveCount(0);
+  await expect(scheduledRow).toBeVisible();
+  await page.goto("/runs?view=pipelines&trigger=schedule");
+  await expect(page.getByRole("heading", { name: "Pipelines", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /pre-commit/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /deploy-production/ })).toHaveCount(0);
+});

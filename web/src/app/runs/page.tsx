@@ -1339,9 +1339,14 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     params.set("node", m.node_id);
     router.push(`/runs?${params.toString()}`);
   };
+  const visibleResults = results?.filter((match) => {
+    const trigger = runsMap[match.run_id]?.trigger_source || "";
+    return !filterState.excludeTrigger.includes(trigger) &&
+      (!filterState.filterTrigger.length || filterState.filterTrigger.includes(trigger));
+  }) ?? null;
   const byRun = new Map<string, RunsGrepMatch[]>();
   const runOrder: string[] = [];
-  for (const m of results ?? []) {
+  for (const m of visibleResults ?? []) {
     if (!byRun.has(m.run_id)) {
       byRun.set(m.run_id, []);
       runOrder.push(m.run_id);
@@ -1411,21 +1416,21 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             error: {error}
           </div>
         )}
-        {results === null && !loading && !error && (
+        {visibleResults === null && !loading && !error && (
           <div className="text-xs text-[var(--muted)] space-y-1">
             <div>Searches log body across recent runs.</div>
             <div>Tip: filters apply to search results.</div>
           </div>
         )}
-        {results !== null && results.length === 0 && !loading && (
+        {visibleResults !== null && visibleResults.length === 0 && !loading && (
           <div className="text-xs text-[var(--muted)]">
             no matches across {runsScanned} run{runsScanned === 1 ? "" : "s"}
           </div>
         )}
-        {results !== null && results.length > 0 && (
+        {visibleResults !== null && visibleResults.length > 0 && (
           <>
             <div className="text-[10px] text-[var(--muted)] font-mono mb-2">
-              {results.length} match{results.length === 1 ? "" : "es"} across{" "}
+              {visibleResults.length} match{visibleResults.length === 1 ? "" : "es"} across{" "}
               {byRun.size} run{byRun.size === 1 ? "" : "s"} (scanned{" "}
               {runsScanned})
             </div>
@@ -1936,11 +1941,16 @@ const FullRunRow = memo(function FullRunRow({
           </FilterableValue>
         )}
         {r.trigger_source && (
-          <Tooltip content={`Trigger: ${r.trigger_source}`}>
+          <FilterableValue
+            facet="trigger"
+            value={r.trigger_source}
+            ctx={ctx}
+            tooltip={`Trigger: ${r.trigger_source}`}
+          >
             <span className="font-mono text-[10px] text-[var(--muted)] shrink-0">
               {r.trigger_source}
             </span>
-          </Tooltip>
+          </FilterableValue>
         )}
         {(r.retry_of || r.retried_as) && (
           <AttemptsDropdown currentRunID={r.id} dense />

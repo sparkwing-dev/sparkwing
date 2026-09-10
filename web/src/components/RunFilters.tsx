@@ -11,6 +11,8 @@ import Tooltip from "@/components/Tooltip";
 const FILTER_URL_KEYS = [
   "status",
   "nstatus",
+  "trigger",
+  "ntrigger",
   "repo",
   "nrepo",
   "pipeline",
@@ -112,6 +114,11 @@ export function useUrlFilterState() {
       setFilterStatus: (value: string[]) => setParams({ status: value }),
       excludeStatus: getList("nstatus"),
       setExcludeStatus: (value: string[]) => setParams({ nstatus: value }),
+
+      filterTrigger: getList("trigger"),
+      setFilterTrigger: (value: string[]) => setParams({ trigger: value }),
+      excludeTrigger: getList("ntrigger"),
+      setExcludeTrigger: (value: string[]) => setParams({ ntrigger: value }),
 
       filterRepo: getList("repo"),
       setFilterRepo: (value: string[]) => setParams({ repo: value }),
@@ -290,6 +297,9 @@ export function runMatchesFilter(
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
   const tags = pipelineMeta[r.pipeline]?.tags || [];
 
+  if (s.excludeTrigger.includes(r.trigger_source || "")) return false;
+  if (s.filterTrigger.length && !s.filterTrigger.includes(r.trigger_source || ""))
+    return false;
   if (s.excludeStatus.includes(r.status)) return false;
   if (s.excludeRepo.includes(repo)) return false;
   if (s.excludePipeline.includes(r.pipeline)) return false;
@@ -359,6 +369,8 @@ export function runMatchesFilter(
 
 export function activeFilterCount(s: RunFilterState): number {
   return (
+    s.filterTrigger.length +
+    s.excludeTrigger.length +
     s.filterStatus.length +
     s.filterRepo.length +
     s.filterPipeline.length +
@@ -378,6 +390,8 @@ export function activeFilterCount(s: RunFilterState): number {
 }
 
 export function clearAllFilters(s: RunFilterState) {
+  s.setFilterTrigger([]);
+  s.setExcludeTrigger([]);
   s.setFilterRepo([]);
   s.setFilterPipeline([]);
   s.setFilterBranch([]);
@@ -426,6 +440,7 @@ export function buildGroupsFromState(
   s: RunFilterState,
   options: {
     statuses: string[];
+    triggers: string[];
     repos: string[];
     pipelines: string[];
     branches: string[];
@@ -445,6 +460,18 @@ export function buildGroupsFromState(
       color: "text-emerald-400",
       activeBg: "bg-emerald-500/15",
       activeText: "text-emerald-300",
+    },
+    {
+      key: "trigger",
+      label: "TRIGGER",
+      values: s.filterTrigger,
+      set: s.setFilterTrigger,
+      excludeValues: s.excludeTrigger,
+      setExclude: s.setExcludeTrigger,
+      options: options.triggers,
+      color: "text-orange-400",
+      activeBg: "bg-orange-500/15",
+      activeText: "text-orange-300",
     },
     {
       key: "repo",
@@ -515,6 +542,7 @@ export function computeOptions(
 ) {
   return {
     statuses: ["success", "failed", "running", "cancelled"],
+    triggers: [...new Set(runs.map((r) => r.trigger_source || "").filter(Boolean))].sort(),
     repos: [...new Set(runs.map(repoLabel))].sort(),
     pipelines: [...new Set(runs.map((r) => r.pipeline))].sort(),
     branches: [
@@ -1149,6 +1177,7 @@ export function useFilterDropdownState() {
 
 export type FilterFacet =
   | "status"
+  | "trigger"
   | "repo"
   | "pipeline"
   | "branch"
@@ -1180,6 +1209,13 @@ export function createFilterCtx(filterState: RunFilterState): FilterCtx {
           s.setFilterStatus,
           s.excludeStatus,
           s.setExcludeStatus,
+        ] as const;
+      case "trigger":
+        return [
+          s.filterTrigger,
+          s.setFilterTrigger,
+          s.excludeTrigger,
+          s.setExcludeTrigger,
         ] as const;
       case "repo":
         return [

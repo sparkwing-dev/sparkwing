@@ -97,6 +97,16 @@ machine you arm with `sparkwing crons install`: one OS timer per host calls
 `sparkwing crons tick` every minute and sparkwing evaluates the cron
 expressions itself. See [`docs/crons.md`](./docs/crons.md).
 
+## Dashboard
+
+The Runs tab filters by status, trigger, repository, pipeline, branch, commit
+and tag. Click a trigger badge to include or exclude that source, or use the
+Trigger dropdown. Filters stay in the URL across reloads and shared links.
+
+The Crons tab shows recent fires as colored bars. Hover for status and timing,
+click a bar to open its run, or expand a schedule to inspect its history and
+cadence.
+
 ## HTTP API
 
 The controller's HTTP API (served by `sparkwing-controller` in
@@ -132,7 +142,7 @@ surfaces ship with matching entries.
 
 ## Development candidates
 
-`.xwing-env.json` declares an optional Xwing install hook for this repository.
+`.xwing-env.yaml` declares an optional Xwing install hook for this repository.
 Xwing supplies `XWING_TOOL_SOURCE` and `XWING_TOOL_DEST` as absolute paths.
 The hook uses the native installer with a private named destination, rebuilding
 the web bundle and preserving the native version recipe. It ignores an ambient

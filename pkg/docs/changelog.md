@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
+- **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
+
 - **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
   the upstream output is absent. `TryGet` exists for the bootstrap run of a
   compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
@@ -51,6 +54,9 @@ unlock.
   pipeline has not passed turns every commit in the checkout into a failure
 
 ### Changed
+
+- **development (Breaking):** Use `.xwing-env.yaml` for repository candidate declarations
+  See [manifest migration](docs/migrations/project-env-yaml.md#project-manifests-use-yaml).
 
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
