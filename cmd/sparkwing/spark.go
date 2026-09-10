@@ -32,9 +32,11 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (list|lint|resolve|update|add|remove|warmup|inflate)")
+		return errors.New("spark: subcommand required (catalog|list|lint|resolve|update|add|remove|warmup|inflate)")
 	}
 	switch args[0] {
+	case "catalog":
+		return runSparksCatalog(args[1:])
 	case "list", "ls":
 		return runSparksList(args[1:])
 	case "lint":

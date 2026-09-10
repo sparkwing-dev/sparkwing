@@ -627,6 +627,7 @@ sparks.yaml shape, resolution rules, warmup).
 
 ### Subcommands
 
+- `catalog` -- List the blocks a spark library offers
 - `list` -- Show declared sparks libraries and their resolved versions
 - `lint` -- Validate a spark.json library manifest
 - `resolve` -- Resolve versions and materialize the overlay modfile
@@ -639,6 +640,9 @@ sparks.yaml shape, resolution rules, warmup).
 ### Examples
 
 ```sh
+# See what a library offers
+sparkwing pipeline sparks catalog
+
 # List declared sparks libraries
 sparkwing pipeline sparks list
 
@@ -679,6 +683,48 @@ sparkwing pipeline sparks add --source example.com/fictional/sparks
 sparkwing pipeline sparks add --source example.com/fictional/sparks --version "^v0.10.0"
 ```
 
+## `sparkwing pipeline sparks catalog`
+
+List the blocks a spark library offers
+
+Reads a library's spark.json and prints one row per block it
+declares: the name to pass to 'sparks inflate --module', its
+stability, and what it does. 'sparks list' shows the libraries
+this repo already declares; catalog shows what is inside one.
+
+Without --library the catalog reads sparks-core. A library the
+repo declares in .sparkwing/sparks.yaml is read at the version
+declared there; any other resolves to latest. --path reads a
+checkout on disk and never touches the network.
+
+-o plain prints one block name per line, which is what
+'sparks inflate --module' takes.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--library MODULE` | Spark library module path (default: github.com/sparkwing-dev/sparks-core) |
+| `--path DIR` | Read a library checkout on disk instead of downloading it |
+| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# What sparks-core offers
+sparkwing pipeline sparks catalog
+
+# Block names for a script
+sparkwing pipeline sparks catalog -o plain
+
+# Another library
+sparkwing pipeline sparks catalog --library example.com/fictional/sparks
+
+# A checkout on disk
+sparkwing pipeline sparks catalog --path ~/code/fictional-sparks
+```
+
 ## `sparkwing pipeline sparks inflate`
 
 Copy a spark library's source into this repo so you can edit it
@@ -691,6 +737,8 @@ Imports retain their module paths.
 comes from the pipeline's required modules, or resolves to latest when absent.
 The destination must be unused. To undo the copy, remove its directory and
 module replacement.
+
+'sparkwing pipeline sparks catalog' names every module a library offers.
 
 ### Flags
 
@@ -708,6 +756,9 @@ sparkwing pipeline sparks inflate --module templates
 
 # Inflate any spark library by module path
 sparkwing pipeline sparks inflate --module github.com/example/my-sparks
+
+# See the module names first
+sparkwing pipeline sparks catalog
 ```
 
 ## `sparkwing pipeline sparks lint`

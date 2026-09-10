@@ -22,6 +22,15 @@ unlock.
 
 ### Added
 
+- **cli:** `pipeline sparks catalog` lists the blocks a spark library offers.
+  It reads the library's `spark.json` and prints one row per declared block --
+  the name `sparks inflate --module` takes, its stability, and what it does --
+  so a module no longer has to be known by name before it can be inflated.
+  Without `--library` it reads sparks-core, at the version the repo declares
+  when it declares one; `--path` reads a checkout on disk without touching the
+  network. `-o plain` emits the block names one per line, and `-o json` the
+  usual NDJSON. `sparks inflate` with no `--module` now names the verb.
+
 - **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb.
   Both resolve the project's `sparkwing.yaml` from the working directory -- the
   default storage profile for a `runs` read, and the whole project section of

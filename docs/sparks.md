@@ -362,6 +362,11 @@ misses the binary cache pays the cold tier.
 The `sparkwing pipeline sparks` command group manages the `sparks:` block
 and the overlay. What each subcommand does:
 
+- **catalog** -- list the blocks a library offers, read from its `spark.json`:
+  the name `inflate --module` takes, its stability, and what it does. Without
+  `--library` it reads sparks-core; `--path` reads a checkout on disk instead
+  of downloading one. `list` shows the libraries this repo declares, `catalog`
+  shows what is inside one.
 - **list** -- show the declared sparks libraries and their resolved versions.
 - **lint** -- validate a library's `spark.json` (schema, required fields,
   entry-path existence, and the `module` a `modules[]` entry declares

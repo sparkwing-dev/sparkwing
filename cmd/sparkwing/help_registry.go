@@ -3455,8 +3455,9 @@ never modified.
 
 See docs/sparks.md for the full spec (spark.json schema,
 sparks.yaml shape, resolution rules, warmup).`,
-	SubcommandOrder: []string{"list", "lint", "resolve", "update", "add", "remove", "warmup", "inflate"},
+	SubcommandOrder: []string{"catalog", "list", "lint", "resolve", "update", "add", "remove", "warmup", "inflate"},
 	Examples: []Example{
+		{"See what a library offers", "sparkwing pipeline sparks catalog"},
 		{"List declared sparks libraries", "sparkwing pipeline sparks list"},
 		{"Validate a library's spark.json", "sparkwing pipeline sparks lint ~/code/fictional-sparks"},
 		{"Re-materialize the overlay modfile", "sparkwing pipeline sparks resolve"},
@@ -3596,6 +3597,36 @@ Warmup uses the same compilation path and cache key as 'sparkwing run'.`,
 	},
 }
 
+var cmdSparksCatalog = Command{
+	Path:     "sparkwing pipeline sparks catalog",
+	Synopsis: "List the blocks a spark library offers",
+	Description: `Reads a library's spark.json and prints one row per block it
+declares: the name to pass to 'sparks inflate --module', its
+stability, and what it does. 'sparks list' shows the libraries
+this repo already declares; catalog shows what is inside one.
+
+Without --library the catalog reads sparks-core. A library the
+repo declares in .sparkwing/sparks.yaml is read at the version
+declared there; any other resolves to latest. --path reads a
+checkout on disk and never touches the network.
+
+-o plain prints one block name per line, which is what
+'sparks inflate --module' takes.`,
+	Flags: []FlagSpec{
+		{Name: "library", Argument: "MODULE", Desc: "Spark library module path (default: github.com/sparkwing-dev/sparks-core)", Group: "Input"},
+		{Name: "path", Argument: "DIR", Desc: "Read a library checkout on disk instead of downloading it", Group: "Input"},
+		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"What sparks-core offers", "sparkwing pipeline sparks catalog"},
+		{"Block names for a script", "sparkwing pipeline sparks catalog -o plain"},
+		{"Another library", "sparkwing pipeline sparks catalog --library example.com/fictional/sparks"},
+		{"A checkout on disk", "sparkwing pipeline sparks catalog --path ~/code/fictional-sparks"},
+	},
+}
+
 var cmdSparksInflate = Command{
 	Path:     "sparkwing pipeline sparks inflate",
 	Synopsis: "Copy a spark library's source into this repo so you can edit it",
@@ -3606,9 +3637,16 @@ Imports retain their module paths.
 --module accepts a sparks-core module name or a full module path. The version
 comes from the pipeline's required modules, or resolves to latest when absent.
 The destination must be unused. To undo the copy, remove its directory and
-module replacement.`,
+module replacement.
+
+'sparkwing pipeline sparks catalog' names every module a library offers.`,
 	Flags: []FlagSpec{
-		{Name: "module", Argument: "NAME", Desc: "Sparks-core module name or full module path", Required: true, Group: "Input"},
+		{
+			Name: "module", Argument: "NAME", Desc: "Sparks-core module name or full module path",
+			Required:     true,
+			RequiredHint: "`sparkwing pipeline sparks catalog` names every module the library offers",
+			Group:        "Input",
+		},
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
 	},
@@ -3616,6 +3654,7 @@ module replacement.`,
 	Examples: []Example{
 		{"Inflate the sparks-core templates module", "sparkwing pipeline sparks inflate --module templates"},
 		{"Inflate any spark library by module path", "sparkwing pipeline sparks inflate --module github.com/example/my-sparks"},
+		{"See the module names first", "sparkwing pipeline sparks catalog"},
 	},
 }
 

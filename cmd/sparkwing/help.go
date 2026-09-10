@@ -33,6 +33,7 @@ type FlagSpec struct {
 	Group    string
 
 	Required      bool
+	RequiredHint  string
 	RequiredWhen  string
 	RequiresFlags []string
 	ConflictsWith []string
@@ -175,6 +176,9 @@ func validateFlagDeps(cmd Command, fs *flag.FlagSet) error {
 		}
 		changed := fs.Changed(spec.Name)
 		if spec.Required && !changed {
+			if spec.RequiredHint != "" {
+				return fmt.Errorf("%s: --%s is required\n  %s", cmd.Path, spec.Name, spec.RequiredHint)
+			}
 			return fmt.Errorf("%s: --%s is required", cmd.Path, spec.Name)
 		}
 		if !changed {
