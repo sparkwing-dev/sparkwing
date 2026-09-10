@@ -29,6 +29,7 @@ pipelines (head -n1 yields the most-likely next command).
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--for-agent` | Emit current discovery context for one agent wake (no ANSI, no extras) |
 | `--first-time` | Print the post-install onboarding card (used by install.sh; re-runnable any time) |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 

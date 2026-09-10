@@ -361,7 +361,6 @@ func runExampleScaffold(args []string) error {
 	fs := flag.NewFlagSet(cmdExampleScaffold.Path, flag.ContinueOnError)
 	name := fs.String("name", "", "example to materialize")
 	params := fs.StringArray("param", nil, "example parameter, k=v (repeatable)")
-	changeDir := fs.StringP("sw-cd", "C", "", "operate as if started in this directory")
 	if err := parseAndCheck(cmdExampleScaffold, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -370,11 +369,6 @@ func runExampleScaffold(args []string) error {
 	}
 	if *name == "" {
 		return errors.New("examples scaffold: --name is required")
-	}
-	if *changeDir != "" {
-		if err := os.Chdir(*changeDir); err != nil {
-			return fmt.Errorf("examples scaffold: --sw-cd %q: %w", *changeDir, err)
-		}
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

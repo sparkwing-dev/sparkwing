@@ -27,7 +27,6 @@ func runPipelineNew(args []string) error {
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
 	on := fs.StringArray("on", nil, "trigger to declare: "+strings.Join(triggerEventNames, " | ")+" (repeatable or comma-separated; default: the shape's own)")
-	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -45,12 +44,6 @@ func runPipelineNew(args []string) error {
 	name := *pipelineName
 	if err := validatePipelineName(name); err != nil {
 		return err
-	}
-
-	if *changeDir != "" {
-		if err := os.Chdir(*changeDir); err != nil {
-			return fmt.Errorf("new: --sw-cd %q: %w", *changeDir, err)
-		}
 	}
 
 	cwd, err := os.Getwd()

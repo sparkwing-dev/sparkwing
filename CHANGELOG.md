@@ -22,6 +22,13 @@ unlock.
 
 ### Added
 
+- **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb.
+  Both resolve the project's `sparkwing.yaml` from the working directory -- the
+  default storage profile for a `runs` read, and the whole project section of
+  `info` -- so invoking them from outside a checkout silently reported on
+  whichever project the shell happened to sit in. `info --for-agent` describes
+  the repository it re-anchored to. Commands that declare the flag now parse and
+  apply it in one place, so its semantics are identical everywhere.
 - **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
 - **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
 

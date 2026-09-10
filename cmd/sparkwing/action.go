@@ -88,9 +88,7 @@ func runPipeline(args []string) error {
 	}
 }
 
-func chdirFlag(fs *flag.FlagSet) *string {
-	return fs.StringP("sw-cd", "C", "", "operate as if started in this directory (re-anchors the .sparkwing search)")
-}
+const chdirFlagUsage = "operate as if started in this directory (re-anchors the .sparkwing search)"
 
 func applyChdir(dir string) error {
 	if dir == "" {
@@ -106,14 +104,10 @@ func runPipelineList(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineList.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	includeHidden := fs.Bool("all", false, "include hidden entries (hidden: true in yaml / # hidden: true in scripts)")
-	cd := chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
-		return err
-	}
-	if err := applyChdir(*cd); err != nil {
 		return err
 	}
 	format, err := resolveOutputFormat(*output, cmdPipelineList.Path)
@@ -147,14 +141,10 @@ func runPipelineDiscover(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDiscover.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	queryFlag := fs.String("query", "", "search query (one or more tokens; all must match some field)")
-	cd := chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineDiscover, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
-		return err
-	}
-	if err := applyChdir(*cd); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
@@ -257,14 +247,10 @@ func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
-	cd := chdirFlag(fs)
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
-		return err
-	}
-	if err := applyChdir(*cd); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
