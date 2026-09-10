@@ -55,6 +55,9 @@ unlock.
 
 ### Changed
 
+- **development (Breaking):** Use `.xwing-env.yaml` for repository candidate declarations
+  See [manifest migration](docs/migrations/project-env-yaml.md#project-manifests-use-yaml).
+
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
   is the rule `hooks install --fleet` already applied. A repository that

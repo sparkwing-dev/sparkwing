@@ -142,7 +142,7 @@ surfaces ship with matching entries.
 
 ## Development candidates
 
-`.xwing-env.json` declares an optional Xwing install hook for this repository.
+`.xwing-env.yaml` declares an optional Xwing install hook for this repository.
 Xwing supplies `XWING_TOOL_SOURCE` and `XWING_TOOL_DEST` as absolute paths.
 The hook uses the native installer with a private named destination, rebuilding
 the web bundle and preserving the native version recipe. It ignores an ambient
