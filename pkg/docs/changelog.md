@@ -27,6 +27,8 @@ unlock.
 
 ### Added
 
+- **development:** Declare Xwing application commands and gate-verified landing policy
+
 - **cli:** `pipeline sparks catalog` lists the blocks a spark library offers.
   It reads the library's `spark.json` and prints one row per declared block --
   the name `sparks inflate --module` takes, its stability, and what it does --

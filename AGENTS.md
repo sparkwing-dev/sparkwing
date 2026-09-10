@@ -11,4 +11,6 @@ Sparkwing is standalone. Do not assume any other local service or machine-specif
 - Update source documentation and its drift check when behavior changes.
 - Compile-check with `go build -o /dev/null ./cmd/...` or `go vet ./...`. Building one command on its own drops a binary in the repo root, and `go build ./cmd/sparkwing` refuses outright because the output name collides with the `sparkwing/` SDK directory.
 
+- Before building, testing, or running this checkout, use `xwing commands` to discover its declared workflows.
+
 `AGENTS.md` is the repository's canonical harness guidance. `CLAUDE.md` only imports it with `@AGENTS.md`.
