@@ -159,6 +159,22 @@ func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
 	}
 }
 
+func TestReleasePlanRejectsInvalidPreflightsBeforeExpensiveChecks(t *testing.T) {
+	plan := releasePlan(t)
+	preflights := []string{"check-clean-tree", "validate-version", "gate-release-lineage"}
+	for _, check := range []string{"gate-contracts", "gate-pre-commit", "gate-pre-push", "gate-template-verify"} {
+		deps := ancestors(t, plan, check)
+		for _, preflight := range preflights {
+			if !deps[preflight] {
+				t.Errorf("%s can run after %s fails", check, preflight)
+			}
+			if ancestors(t, plan, preflight)[check] {
+				t.Errorf("%s waits for expensive check %s", preflight, check)
+			}
+		}
+	}
+}
+
 func TestReleaseContractPreflightRequiresEveryNamedCheckToPass(t *testing.T) {
 	check := contractCheck{
 		Label:   "contracts",

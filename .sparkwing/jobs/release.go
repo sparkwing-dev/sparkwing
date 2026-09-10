@@ -84,8 +84,12 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
+	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
+		RepoDir: repoDir,
+	})
+
 	gateContracts := sparkwing.Job(plan, "gate-contracts", &checkContractsJob{RepoDir: repoDir})
-	gateContracts.Needs(clean, published)
+	gateContracts.Needs(clean, validate, published, gateLineage)
 
 	gatePreCommit := sparkwing.Job(plan, "gate-pre-commit", &PreCommit{})
 	gatePreCommit.Needs(clean, gateContracts)
@@ -104,10 +108,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		return err
 	}).Resources(sparkwing.Cores(0.5))
 	gateTemplates.Needs(clean, gatePreCommit, gatePrePush)
-
-	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
-		RepoDir: repoDir,
-	})
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
