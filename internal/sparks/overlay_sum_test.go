@@ -279,3 +279,65 @@ func TestWriteOverlayDoesNotRedownloadAReplacedModuleSet(t *testing.T) {
 		t.Errorf("the second resolve ran %d more go invocation(s); a replaced module set must not re-download", got-first)
 	}
 }
+
+// TestWriteOverlayLeavesTheSumToTheWorkspace pins the workspace early return.
+// Modules resolve from go.work there rather than from the overlay, so the repair
+// stays out and its skip notice does not repeat on every resolve.
+func TestWriteOverlayLeavesTheSumToTheWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	bin, counter := countingGoBin(t)
+	t.Setenv("SPARKS_GO_BIN", bin)
+	t.Setenv("GOWORK", "")
+	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOMODCACHE", writableTempDir(t))
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"),
+		"module consumer.example\n\ngo 1.26.0\n\nrequire example.com/product v0.1.0\n")
+	writeFile(t, filepath.Join(dir, "go.work"), "go 1.26.0\n\nuse .\n")
+
+	notices := captureStderr(t, func() {
+		resolved := map[string]string{"example.com/product": "v0.2.0"}
+		for range 2 {
+			if _, err := WriteOverlay(context.Background(), dir, resolved); err != nil {
+				t.Fatalf("WriteOverlay: %v", err)
+			}
+		}
+	})
+	if got := strings.Count(notices, "skipping .resolved.sum materialization"); got != 1 {
+		t.Errorf("skip notice printed %d time(s), want 1:\n%s", got, notices)
+	}
+	if got := countLines(t, counter); got != 0 {
+		t.Errorf("a workspace resolve ran %d go invocation(s); modules resolve from go.work there", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, OverlaySumfileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected no sum under a workspace, stat err = %v", err)
+	}
+}
+
+func captureStderr(t *testing.T, run func()) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "stderr")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stderr
+	os.Stderr = f
+	defer func() {
+		os.Stderr = previous
+		if cerr := f.Close(); cerr != nil {
+			t.Error(cerr)
+		}
+	}()
+	run()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
