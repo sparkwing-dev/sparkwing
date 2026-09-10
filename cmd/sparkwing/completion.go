@@ -90,6 +90,7 @@ func runInternalCompletePipelines(_ []string) error {
 			pipelineNames[p.Name] = struct{}{}
 			rows = append(rows, completionRow{
 				name: p.Name,
+				kind: "pipeline",
 				desc: shortPipelineHint(shortByName[p.Name], helpByName[p.Name], p),
 			})
 		}
@@ -354,7 +355,7 @@ func renderBash() string {
 # accessors below cover the same surface for the simple flag /
 # value matching we do.
 _sparkwing_complete() {
-    local cur prev cword
+    local cur prev cword line
     local -a words
     cur="${COMP_WORDS[COMP_CWORD]:-}"
     if (( COMP_CWORD > 0 )); then
@@ -380,7 +381,7 @@ _sparkwing_complete() {
     # Flag completion: current word starts with '-'.
     if [[ "$cur" == -* ]]; then
         local -a out
-        mapfile -t out < <(sparkwing _complete-flags "${swpath[@]}" 2>/dev/null | cut -f1)
+        while IFS= read -r line; do out+=("$line"); done < <(sparkwing _complete-flags "${swpath[@]}" 2>/dev/null | cut -f1)
         COMPREPLY=( $(compgen -W "${out[*]}" -- "$cur") )
         return
     fi
@@ -406,7 +407,7 @@ _sparkwing_complete() {
     # for specific flags (above: --profile, --pipeline) happens before this
     # block.
     local -a kids
-    mapfile -t kids < <(sparkwing _complete-verbs "${swpath[@]}" 2>/dev/null | cut -f1)
+    while IFS= read -r line; do kids+=("$line"); done < <(sparkwing _complete-verbs "${swpath[@]}" 2>/dev/null | cut -f1)
     if (( ${#kids[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${kids[*]}" -- "$cur") )
         return
@@ -418,7 +419,7 @@ _sparkwing_complete() {
     # so we replicate it here. Filtering by "$cur" is a no-op when
     # empty, but keeps things tidy if the user typed a partial flag.
     local -a leafFlags
-    mapfile -t leafFlags < <(sparkwing _complete-flags "${swpath[@]}" 2>/dev/null | cut -f1)
+    while IFS= read -r line; do leafFlags+=("$line"); done < <(sparkwing _complete-flags "${swpath[@]}" 2>/dev/null | cut -f1)
     if (( ${#leafFlags[@]} > 0 )); then
         COMPREPLY=( $(compgen -W "${leafFlags[*]}" -- "$cur") )
     fi
@@ -434,7 +435,7 @@ func renderZsh() string {
 # sparkwing zsh completion
 # Usage:
 #   autoload -U compinit; compinit
-#   source <(sparkwing completion zsh)
+#   source <(sparkwing completion --shell zsh --output plain)
 
 # Enable group-name rendering and a format for group descriptions so
 # compadd's -X explanation text is shown as a bold/colored header
@@ -714,7 +715,7 @@ compdef _sparkwing sparkwing
 func renderFish() string {
 	var b strings.Builder
 	b.WriteString(`# sparkwing fish completion
-# Usage: sparkwing completion fish | source
+# Usage: sparkwing completion --shell fish --output plain | source
 #   (or write to ~/.config/fish/completions/sparkwing.fish)
 
 function __sparkwing_profiles
@@ -722,8 +723,8 @@ function __sparkwing_profiles
 end
 
 function __sparkwing_pipelines
-    # Columns: name, group, desc. Fish wants name\tdesc, so skip col 2.
-    sparkwing _complete-pipelines 2>/dev/null | awk -F '\t' '{print $1"\t"$3}'
+    # Columns: name, group, kind, desc. Fish wants name\tdesc.
+    sparkwing _complete-pipelines 2>/dev/null | awk -F '\t' '{print $1"\t"$4}'
 end
 
 function __sparkwing_has_path
