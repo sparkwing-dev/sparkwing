@@ -86,7 +86,7 @@ chmod +x "$out"
 	if content, err := os.ReadFile(filepath.Join(source, "web-rebuilt")); err != nil || string(content) != "rebuilt" {
 		t.Fatalf("ambient SKIP_WEB_BUILD bypassed native web build: %v", err)
 	}
-	if !strings.Contains(string(content), "-ldflags\n-X main.Version=v0.1.0-dev+") {
+	if !strings.Contains(string(content), "-trimpath\n-ldflags\n-s -w -X main.Version=v0.1.0-dev+") {
 		t.Fatalf("native version recipe missing: %s", content)
 	}
 	if out, err := run(); err == nil || !strings.Contains(string(out), "already exists") {

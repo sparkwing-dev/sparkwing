@@ -167,7 +167,12 @@ func TestHashLeadingListContinuationStaysInItsItem(t *testing.T) {
 func TestShippedPagesPreserveSourceHeadings(t *testing.T) {
 	closedComment := regexp.MustCompile(`(?s)<!--.*?-->`)
 	heading := regexp.MustCompile(`^#{1,} `)
-	for _, page := range docs.List() {
+	pages := docs.List()
+	if len(pages) == 0 {
+		t.Fatal("the embedded doc set is empty, so this check compares nothing and cannot fail")
+	}
+	compared := 0
+	for _, page := range pages {
 		t.Run(page.Slug, func(t *testing.T) {
 			source, err := docs.ReadRaw(page.Slug)
 			if err != nil {
@@ -189,6 +194,7 @@ func TestShippedPagesPreserveSourceHeadings(t *testing.T) {
 					counts[strings.TrimSpace(render(t, line))]++
 				}
 			}
+			compared += len(counts)
 			for want, count := range counts {
 				if found := strings.Count(got, want); found < count {
 					t.Errorf("source heading %q appears %d times, rendered %d times", want, count, found)
@@ -196,4 +202,124 @@ func TestShippedPagesPreserveSourceHeadings(t *testing.T) {
 			}
 		})
 	}
+	if compared == 0 {
+		t.Fatalf("no heading was compared across %d pages, so this check cannot fail", len(pages))
+	}
+}
+
+// TestShippedPagesCloseEveryBlockTheyOpen asks the renderer what state the
+// shipped corpus leaves it in. An unclosed comment swallows every line after
+// it and an unclosed fence turns the rest of the page into code, both of which
+// publish a page with its second half missing and no error anywhere.
+func TestShippedPagesCloseEveryBlockTheyOpen(t *testing.T) {
+	pages := docs.List()
+	if len(pages) == 0 {
+		t.Fatal("the embedded doc set is empty, so this check reads nothing and cannot fail")
+	}
+	comments, fences := 0, 0
+	for _, page := range pages {
+		source, err := docs.ReadRaw(page.Slug)
+		if err != nil {
+			t.Fatalf("%s: %v", page.Slug, err)
+		}
+		for _, line := range strings.Split(source, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "<!--") {
+				comments++
+			}
+			if strings.HasPrefix(trimmed, "```") {
+				fences++
+			}
+		}
+		r := renderer{linkTarget: noLinks}
+		r.run(source)
+		if r.inComment {
+			t.Errorf("%s opens an HTML comment it never closes; every line after it is dropped", page.Slug)
+		}
+		if r.inCode {
+			t.Errorf("%s opens a fenced code block it never closes; the rest of the page renders as code", page.Slug)
+		}
+	}
+	if comments == 0 {
+		t.Fatalf("no comment marker across %d shipped pages, so the comment half of this check cannot bite", len(pages))
+	}
+	if fences == 0 {
+		t.Fatalf("no code fence across %d shipped pages, so the fence half of this check cannot bite", len(pages))
+	}
+}
+
+// TestShippedPagesKeepEveryTableRow counts the table rows the shipped sources
+// declare and the rows the renderer emits for them. The defect that first put
+// a guard on this corpus dropped rows silently, so equality is the assertion
+// and the corpus, not a fixture, is what it reads.
+func TestShippedPagesKeepEveryTableRow(t *testing.T) {
+	pages := docs.List()
+	if len(pages) == 0 {
+		t.Fatal("the embedded doc set is empty, so this check reads nothing and cannot fail")
+	}
+	total := 0
+	for _, page := range pages {
+		source, err := docs.ReadRaw(page.Slug)
+		if err != nil {
+			t.Fatalf("%s: %v", page.Slug, err)
+		}
+		want := expectedTableRows(source)
+		total += want
+		got := strings.Count(render(t, source), "<tr>")
+		if got != want {
+			t.Errorf("%s declares %d table rows, rendered %d", page.Slug, want, got)
+		}
+	}
+	if total == 0 {
+		t.Fatalf("no table row across %d shipped pages, so this check cannot bite", len(pages))
+	}
+}
+
+// safety: this walks fences and comments the way run does, so a table the
+// renderer never sees is not counted. Its separator rule calls the renderer's own
+// isTableSeparator, so a defect in that predicate passes here and is caught by the
+// fixture tests instead.
+func expectedTableRows(source string) int {
+	rows, block, inCode, inComment := 0, []string{}, false, false
+	flush := func() {
+		if len(block) == 0 {
+			return
+		}
+		rows += len(block)
+		if len(block) > 1 && isTableSeparator(block[1]) {
+			rows--
+		}
+		block = nil
+	}
+	for _, line := range strings.Split(source, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if inComment {
+			if strings.Contains(trimmed, "-->") {
+				inComment = false
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "```") {
+			flush()
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "<!--") {
+			flush()
+			if !strings.Contains(trimmed, "-->") {
+				inComment = true
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "|") {
+			block = append(block, trimmed)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return rows
 }

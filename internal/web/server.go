@@ -231,7 +231,15 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	// safety: /docs belongs on authedMux, above the catch-all: the outer router is
 	// unauthenticated, so mounting it there would publish the pages to anyone who can
 	// reach the listener while the rest of the dashboard needs a session.
-	authedMux.Handle("GET /docs", docsweb.Handler())
+	// safety: ServeMux matches "GET /docs" on that exact path, so the trailing-slash
+	// spelling any proxy may normalize to needs its own pattern or the catch-all
+	// answers it with the app shell.
+	docsHandler := docsweb.Handler()
+	authedMux.Handle("GET /docs", docsHandler)
+	authedMux.Handle("GET /docs/{$}", docsHandler)
+	// safety: the catch-all would answer /docs/anything with the app shell, a 200
+	// carrying no documentation. Pages are addressed by ?p=, so nothing lives here.
+	authedMux.Handle("GET /docs/{rest...}", http.NotFoundHandler())
 
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
 
@@ -362,6 +370,7 @@ func loopbackBind(addr string) bool {
 
 func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	fileServer := http.FileServer(http.FS(bundleFS))
+	assets := &gzipCache{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		p = strings.TrimSuffix(p, "/")
@@ -388,6 +397,9 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 		}
 
 		if info, err := fs.Stat(bundleFS, p); err == nil && !info.IsDir() {
+			if serveBundleAsset(w, r, bundleFS, p, assets) {
+				return
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -410,9 +422,8 @@ func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, 
 	if nonce := cspNonceFrom(r.Context()); nonce != "" {
 		body = nonceInlineScripts(raw, nonce)
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(body)
+	writeGeneratedHTML(w, r, body)
 }
 
 // safety: every inline script needs the nonce or the CSP blanks the page, so

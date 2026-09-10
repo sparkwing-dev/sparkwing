@@ -18,6 +18,7 @@ mkdir -p "$STUB"
 cat >"$STUB/go" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >>"${ARGV_LOG:-/dev/null}"
 case " $* " in
   *" env GOPATH "*) printf '%s\n' "${FAKE_GOPATH:-}"; exit 0 ;;
 esac
@@ -137,5 +138,20 @@ grep -qF "$gp1:$gp2/bin" "$CASE_ROOT/out5" \
   && fail "the whole GOPATH list was glued to /bin" "$CASE_ROOT/out5"
 [ -e "$gp1/bin/sparkwing-local-ws" ] \
   || fail "the stale-binary report modified a file outside DEST" "$CASE_ROOT/out5"
+
+argvlog="$CASE_ROOT/argv.log"
+dest6="$CASE_ROOT/dest6"
+if ! run_install SPARKWING_INSTALL_BIN="$dest6" FAKE_GOPATH="$CASE_ROOT/gopath" \
+  ARGV_LOG="$argvlog" >"$CASE_ROOT/out6" 2>&1; then
+  fail "install for the build-flag check failed" "$CASE_ROOT/out6"
+fi
+buildargv="$(grep -F -- ' build ' "$argvlog" | head -n1 || true)"
+[ -n "$buildargv" ] || fail "install ran no go build" "$argvlog"
+for want in "-trimpath" "-s -w -X main.Version="; do
+  case "$buildargv" in
+    *"$want"*) ;;
+    *) fail "install build argv is missing $want: $buildargv" ;;
+  esac
+done
 
 echo "install-test: ok"

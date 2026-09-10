@@ -1,0 +1,205 @@
+{
+  "version": 2,
+  "tool": "sparkwing",
+  "base_url": "http://127.0.0.1:4343",
+  "notes": "Per-page performance budgets for the dashboard. Two independent rules judge every metric: an absolute ceiling (what acceptable means) and a band around the route's own baseline (what got worse). Only page_bytes is baselined, and it is near-deterministic rather than exact: the navigation response carries a fresh CSP nonce per request, so an encoded page moves by a few bytes between requests -- five bytes across fifteen requests to /, against a 10 percent band. Every subresource is byte-identical every time. page_bytes is otherwise a property of the build rather than of the data: the dashboard is a static export, so a navigation returns a prebuilt page from the binary and every subresource is a content-hashed file beside it, while run data arrives over the API after load. Two pages carry the recharts chunks and are heavy for that reason; the rest differ by a few kilobytes of route code. /runs sits at 90 percent of the ceiling with recharts already route-split, so the next page that draws a chart ships over the ceiling and needs a smaller charting dependency rather than another split. Every number was measured over the wire against a served listener with the encoding the server offers a browser, which is what a page-weight budget means; the same pages unencoded measure 732,498 to 1,475,205 bytes and every one of them breaches the ceiling. /docs is the one baselined page served unencoded. internal/web imports internal/docsweb, so sharing the encoder means moving it to a third package, and at 7 percent of the ceiling that buys nothing. The timings are unmeasured: this repository has no browser sweep of its own, and numbers taken on a machine running parallel gates would bake that in. No check in this repository reads this file. It is written for a scheduled browser sweep that lives elsewhere, in the shape overwing and bitwing use, so a reader can tell an unenforced manifest from a stale one. Any tool reading this file must check version and refuse one it does not implement: unknown keys decode to zero, so a reader meeting a newer schema sees routes with no baselines, which is indistinguishable from routes nobody has baselined.",
+  "corpora": {
+    "local": "The dashboard as `sparkwing serve` serves it from a freshly created SPARKWING_HOME, measured with `Accept-Encoding: gzip, deflate, br`. page_bytes is the navigation response plus every subresource the page references, so it does not move with the runs in the store; it moves with the bundle `bin/build-web.sh` produces. It is the only corpus sparkwing has for this metric."
+  },
+  "defaults": {
+    "samples_scheduled": 9,
+    "warmup_runs": 1,
+    "server_requests_gate": 21,
+    "tolerance": {
+      "timing_pct": 0.3,
+      "timing_floor_ms": 15,
+      "bytes_pct": 0.1
+    },
+    "max_load_per_cpu": 2.0,
+    "baseline_max_load_per_cpu": 1.0,
+    "stale_days": 90,
+    "unbaselined_grace_days": 7
+  },
+  "ceilings": {
+    "page_bytes": 512000,
+    "lcp_ms": 500,
+    "inp_ms": 500,
+    "tbt_ms": 200
+  },
+  "routes": [
+    {
+      "route": "/",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 255090,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/analytics",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 375504,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/capacity",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 259723,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/cluster",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 256607,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/crons",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 259016,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/features",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 256755,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/guide",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 262723,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/learn",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 258172,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/pipeline-overview",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 251669,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/queue",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 256721,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/runs",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 459505,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/docs",
+      "kind": "page",
+      "baselines": {
+        "local": {
+          "page_bytes": 35959,
+          "taken_at": "2026-09-10T08:57:11Z",
+          "commit": "ee750b0",
+          "host": "bomberangz-pc",
+          "load_per_cpu": 0.11,
+          "samples": 5
+        }
+      }
+    },
+    {
+      "route": "/login",
+      "kind": "page",
+      "exempt": "Answers 404 unless the dashboard is configured to require a login, so this corpus cannot measure it. Baseline it from a listener started with that configuration and remove this exemption.",
+      "baselines": {}
+    }
+  ]
+}
