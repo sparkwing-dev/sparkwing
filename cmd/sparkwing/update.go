@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -31,7 +31,7 @@ const (
 )
 
 var (
-	updateFetchLatest     = fetchLatestRelease
+	updateFetchLatest     = fetchLatestReleaseContext
 	updateDownloadInstall = downloadAndInstall
 	updateBaseURL         = defaultUpdateAssetBase
 	updateVerifyKey       ed25519.PublicKey
@@ -39,10 +39,13 @@ var (
 
 func runUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdUpdate.Path, flag.ContinueOnError)
-	check := fs.Bool("check", false, "report current vs latest; exit 1 if a newer release exists")
-	force := fs.Bool("force", false, "allow downgrading to an older release")
-	version := fs.String("version", "", "target release tag (e.g. v0.17.0). Default: latest.")
-	overrideHold := fs.Bool("override-hold", false, "cross an operator version hold (do not use to defy an operator)")
+	cli := fs.Bool("cli", false, "update the CLI binary (default target)")
+	sdk := fs.Bool("sdk", false, "update this project's SDK pin")
+	check := fs.Bool("check", false, "compare the selected target without changing it")
+	force := fs.Bool("force", false, "allow CLI downgrades")
+	version := fs.String("version", "", "target release tag; omit for latest published release")
+	overrideHold := fs.Bool("override-hold", false, "cross an operator CLI version hold")
+	output := fs.StringP("output", "o", "", "pretty | json | plain")
 	if err := parseAndCheck(cmdUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -52,32 +55,43 @@ func runUpdate(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("update: unexpected positional %q", fs.Arg(0))
 	}
-	if *check {
-		return runUpdateCheck()
+	if fs.Changed("cli") && fs.Changed("sdk") {
+		return errors.New("update: --cli and --sdk are mutually exclusive")
 	}
-	return runUpdateBinary(*version, *force, *overrideHold)
+	if *sdk && (fs.Changed("force") || fs.Changed("override-hold")) {
+		return errors.New("update: --force and --override-hold apply only to --cli")
+	}
+	if fs.Changed("cli") && !*cli || fs.Changed("sdk") && !*sdk {
+		return errors.New("update: target selectors must be enabled; choose --cli or --sdk")
+	}
+	if fs.Changed("version") && !validUpdateVersion(*version) {
+		return errors.New("update: --version must be a canonical release tag such as v0.48.1; omit it for latest")
+	}
+	mode, err := resolveOutputFormat(*output, cmdUpdate.Path)
+	if err != nil {
+		return err
+	}
+	target := "cli"
+	if *sdk {
+		target = "sdk"
+	}
+	if *check {
+		return runUpdateCheck(target, *version, *force, *overrideHold, mode)
+	}
+	var result updateReceipt
+	if *sdk {
+		result, err = updateSDK(*version)
+	} else {
+		result, err = updateBinary(*version, *force, *overrideHold)
+	}
+	if err != nil {
+		return err
+	}
+	return writeUpdateReceipt(os.Stdout, result, mode)
 }
 
-func runUpdateCheck() error {
-	current := installedVersion()
-	latest, err := fetchLatestRelease()
-	if err != nil {
-		return fmt.Errorf("update --check: could not fetch latest version: %w", err)
-	}
-
-	switch {
-	case current == "(devel)" || current == "(unknown)":
-		fmt.Fprintf(os.Stdout, "installed: %s (dev build, cannot compare)\n", current)
-		fmt.Fprintf(os.Stdout, "latest:    %s\n", latest)
-		return nil
-	case semver.Compare(current, latest) >= 0:
-		fmt.Fprintf(os.Stdout, "sparkwing %s is up to date (latest: %s)\n", current, latest)
-		return nil
-	default:
-		fmt.Fprintf(os.Stdout, "sparkwing %s is behind -- latest is %s\n", current, latest)
-		fmt.Fprintf(os.Stdout, "run: sparkwing update\n")
-		return exitErrorf(1, "newer version available: %s (installed: %s)", latest, current)
-	}
+func validUpdateVersion(version string) bool {
+	return semver.IsValid(version) && semver.Canonical(version) == version
 }
 
 type downgradeKind int
@@ -101,66 +115,72 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 }
 
 func runUpdateBinary(version string, force, overrideHold bool) error {
-	resolved := strings.TrimSpace(version)
-	if resolved == "" {
-		v, err := updateFetchLatest()
-		if err != nil {
-			return fmt.Errorf("update: fetch latest version: %w", err)
-		}
-		resolved = v
+	_, err := updateBinary(version, force, overrideHold)
+	return err
+}
+
+func updateBinary(version string, force, overrideHold bool) (updateReceipt, error) {
+	result := updateReceipt{Kind: "update", Tool: "sparkwing", Target: "cli", Strategy: "release"}
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
+	resolved, err := resolveUpdateVersion(ctx, version, false)
+	if err != nil {
+		return result, err
 	}
+	identity := updateReadInstalled()
+	current := identity.Version
 
-	current := installedVersion()
-
-	if current != "(unknown)" && current != "(devel)" && resolved == current {
-		fmt.Fprintf(os.Stdout, "sparkwing is already at %s\n", current)
-		return nil
+	currentBin := identity.Path
+	if currentBin == "" || !filepath.IsAbs(currentBin) {
+		return result, errors.New("update: installed destination could not be established")
 	}
-
+	currentFile, err := os.Lstat(currentBin)
+	if err != nil || !currentFile.Mode().IsRegular() {
+		return result, errors.New("update: installed destination must be an existing regular file")
+	}
+	result.Before = identity
 	hold := resolveVersionHold()
 	if hold.Error != "" {
-		return fmt.Errorf("update refused: %s", hold.Error)
+		return result, fmt.Errorf("update refused: %s", hold.Error)
+	}
+	verified, local, provenanceReason := installedReleaseProvenance(ctx, identity)
+	if resolved == current && verified {
+		result.Status = "current"
+		result.After = result.Before
+		return result, nil
+	}
+	if !verified {
+		fmt.Fprintf(os.Stderr, "update: %s; replacement will use verified release assets\n", provenanceReason)
 	}
 	if hold.Value != "" && exceedsHold(resolved, hold.Value) {
 		if !overrideHold {
-			return holdRefusal(resolved, hold)
+			return result, holdRefusal(resolved, hold)
 		}
-		fmt.Fprintf(os.Stderr, "update: crossing operator version hold %s (%s) via --override-hold\n",
-			hold.Value, hold.Source)
+		fmt.Fprintf(os.Stderr, "update: crossing operator version hold %s (%s) via --override-hold\n", hold.Value, hold.Source)
 	}
-
-	switch classifyDowngrade(current, resolved) {
+	downgrade := classifyDowngrade(current, resolved)
+	if local && downgrade == downgradeNeedsForce {
+		downgrade = downgradeRebaseline
+	}
+	switch downgrade {
 	case downgradeNeedsForce:
 		if !force {
-			return fmt.Errorf(
-				"update: %s is older than the installed %s\n  to downgrade, re-run with --force",
-				resolved, current,
-			)
+			return result, fmt.Errorf("update: %s is older than the installed %s; re-run with --force to downgrade", resolved, current)
 		}
 	case downgradeRebaseline:
-		fmt.Fprintf(os.Stdout,
-			"update: installed %s is an unpublished build; re-baselining to the published %s\n",
-			current, resolved,
-		)
+		fmt.Fprintf(os.Stderr, "update: installed %s is an unpublished build; re-baselining to the published %s\n", current, resolved)
 	}
-
-	currentBin, err := os.Executable()
+	fmt.Fprintf(os.Stderr, "updating sparkwing: %s -> %s\n", updateIdentityLabel(identity), resolved)
+	installed, err := updateDownloadInstall(resolved, currentBin)
 	if err != nil {
-		return fmt.Errorf("locate current binary: %w", err)
+		return result, fmt.Errorf("update: verified release install failed: %w", err)
 	}
-	currentBin, _ = filepath.EvalSymlinks(currentBin)
-
-	fmt.Fprintf(os.Stdout, "updating sparkwing: %s -> %s\n", current, resolved)
-
-	result, err := updateDownloadInstall(resolved, currentBin)
-	if err != nil {
-		return fmt.Errorf("update: verified release install failed: %w", err)
-	}
-
-	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\ninstalled: %s\nsha256: %s\n", current, resolved, result.path, result.digest)
-	reportOtherInstalls(os.Stdout, currentBin)
-	fmt.Fprintf(os.Stdout, "what's new: https://github.com/sparkwing-dev/sparkwing/releases\n")
-	return nil
+	result.Status = "updated"
+	result.After = installedArtifactIdentity(installed.path)
+	result.ResolvedRelease = resolved
+	result.Digest = installed.digest
+	reportOtherInstalls(os.Stderr, currentBin)
+	return result, nil
 }
 
 func reportOtherInstalls(w io.Writer, installedBin string) {
@@ -187,34 +207,6 @@ func writeOtherInstallsNote(w io.Writer, installedBin string, others []installsi
 	}
 	fmt.Fprintf(w, "  a shell and a background job can resolve different copies of `sparkwing`, so the same command can be two builds.\n")
 	fmt.Fprintf(w, "  keep one, or point each job at %s by absolute path. `sparkwing doctor` shows the full picture.\n", installedBin)
-}
-
-func runVersionUpdate(args []string) error {
-	fs := flag.NewFlagSet(cmdVersionUpdate.Path, flag.ContinueOnError)
-	cli := fs.Bool("cli", false, "self-update the sparkwing CLI binary")
-	sdk := fs.Bool("sdk", false, "bump the SDK pin in this project's .sparkwing/go.mod")
-	version := fs.String("version", "", "target release (e.g. v0.17.0). Default: latest.")
-	force := fs.Bool("force", false, "allow downgrading to an older release")
-	overrideHold := fs.Bool("override-hold", false, "cross an operator version hold (do not use to defy an operator)")
-	if err := parseAndCheck(cmdVersionUpdate, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("version update: unexpected positional %q", fs.Arg(0))
-	}
-	switch {
-	case *cli && *sdk:
-		return errors.New("version update: --cli and --sdk are mutually exclusive")
-	case *cli:
-		return runUpdateBinary(*version, *force, *overrideHold)
-	case *sdk:
-		return runUpdateSDK(*version)
-	default:
-		return errors.New("version update: must pass --cli (binary) or --sdk (per-project go.mod pin)")
-	}
 }
 
 func installedVersion() string {
@@ -364,46 +356,49 @@ func sha256OfFile(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func runUpdateSDK(version string) error {
+func updateSDK(version string) (updateReceipt, error) {
+	result := updateReceipt{Kind: "update", Tool: "sparkwing", Target: "sdk", Strategy: "release"}
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
 	dir, err := findSparkwingDir()
 	if err != nil {
-		return err
+		return result, err
 	}
-
-	v := strings.TrimSpace(version)
-	if v == "" {
-		v = "latest"
+	before, err := readSDKUpdateIdentity(dir)
+	if err != nil {
+		return result, err
 	}
-	target := "github.com/" + updateRepo + "@" + v
-	fmt.Fprintf(os.Stdout, "bumping pipeline SDK to %s\n", v)
-
+	result.Before = before.Identity
+	resolved, err := resolveUpdateVersion(ctx, version, false)
+	if err != nil {
+		return result, err
+	}
+	target := sdkModulePath + "@" + resolved
+	fmt.Fprintf(os.Stderr, "bumping pipeline SDK to %s\n", resolved)
 	cmd := exec.Command("go", "get", target)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go get: %w", err)
+		return result, fmt.Errorf("go get failed; SDK files may have changed: %w", err)
 	}
-
-	if gomod, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-		for _, line := range strings.Split(string(gomod), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.Contains(line, updateRepo) && !strings.HasPrefix(line, "module") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					fmt.Fprintf(os.Stdout, "SDK: %s\n", parts[len(parts)-1])
-				}
-			}
-		}
-	}
-
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = dir
-	tidy.Stdout = os.Stdout
+	tidy.Stdout = os.Stderr
 	tidy.Stderr = os.Stderr
 	if err := tidy.Run(); err != nil {
-		return fmt.Errorf("go mod tidy: %w", err)
+		return result, fmt.Errorf("go mod tidy failed after go get; SDK files may have changed: %w", err)
 	}
-	fmt.Fprintln(os.Stdout, "done")
-	return nil
+	after, err := readSDKUpdateIdentity(dir)
+	if err != nil {
+		return result, fmt.Errorf("read updated SDK pin: %w", err)
+	}
+	if after.Identity.Version != resolved {
+		return result, fmt.Errorf("SDK files changed but the resulting pin is %q, expected %s", after.Identity.Version, resolved)
+	}
+	result.After = after.Identity
+	result.ResolvedRelease = resolved
+	result.Replacement = after.Replacement
+	result.Status = "updated"
+	return result, nil
 }

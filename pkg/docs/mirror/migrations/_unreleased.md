@@ -3,6 +3,54 @@
 This guide covers breaking changes listed under `[Unreleased]`. At release,
 move the sections into the versioned migration guide and update changelog links.
 
+## Unified update
+
+Use the top-level `update` command for both targets:
+
+| Previous command | Replacement |
+| --- | --- |
+| `sparkwing version update --cli` | `sparkwing update --cli` |
+| `sparkwing version update --sdk` | `sparkwing update --sdk` |
+
+Bare `sparkwing update` selects the CLI. `--cli` and `--sdk` conflict;
+`--force` and `--override-hold` are CLI-only. `--version` selects a canonical
+release tag for either target. Both targets default to the latest published
+GitHub release. SDK updates now pass that resolved tag to native `go get`,
+then run `go mod tidy`, retaining Go's toolchain and module verification rules.
+
+`update --check` performs HTTP metadata reads and local identity inspection.
+It never invokes Go, installs a binary, changes the project pin, or writes
+tool caches. Explicit tags must identify published releases. Clean CLI commit
+provenance must match its stamped release tag before version comparisons are
+reported as known; local builds and SDK replacements produce `unknown`.
+Checks do not verify release asset signatures or guarantee installation.
+
+JSON checks emit one `update_check` record with `tool`, `target`, `strategy`,
+`status`, `installed`, and `available`. Unknown identity fields are omitted;
+`reason` and `blocked_reason` explain uncertainty or operator holds. Exit 0
+means `current` or `ahead`, 1 means `update_available`, and 2 means `unknown`,
+`diverged`, or lookup failure. Plain checks print the status word.
+
+Successful updates emit a compact `update` receipt with `before` and `after`
+identities. CLI artifact metadata is read without executing the new binary;
+`resolved_release` retains the verified release label when embedded version
+metadata cannot be established. Progress goes to stderr. JSON is the pipe default, pretty output
+is the terminal default, and `--output pretty|json|plain` overrides it.
+Plain updates print the resulting version. The rich `version` report and
+`version hold` remain available. The version card keeps its layout and adds
+`cli_status` / `cli_reason` to its JSON report. Its CLI verdict uses the same
+comparison facts as `update --check`; `--offline` reports `not_checked` without
+network access. The entire metadata lookup chain shares one three-second budget.
+The version card describes the invoking process. Update checks and receipts
+inspect the destination on disk, which may already contain a replacement build.
+SDK module inspection accepts regular files up to 1 MiB and reports unsafe or
+oversized inputs as unknown.
+SDK receipts report `updated` whenever native `go get` and `go mod tidy` ran,
+even if the SDK pin stayed the same, because other dependency files can change.
+Unreadable, unsafe, or oversized operator-hold files now report an error and
+refuse updates instead of appearing unset. A missing file still means no hold;
+a nonempty environment hold keeps precedence without requiring a home path.
+
 ## Serve command
 
 The local dashboard and API lifecycle now lives under `sparkwing serve`.

@@ -90,6 +90,14 @@ unlock.
   names or line numbers, and a core dump cannot be symbolised; set
   `SPARKWING_NO_BINCACHE=1` to run the pipeline through `go run .` when that is
   needed
+- **cli (Breaking):** `update` owns CLI and SDK updates
+  Use `update --cli` (the default) or `update --sdk`; `version update` is
+  removed. Read-only `update --check` honors the target and release, emits
+  compact comparison metadata, and reports uncertain local builds instead of
+  assuming matching version labels mean matching releases. SDK updates resolve
+  the same latest published release before native Go tooling runs. See
+  [unified update](docs/migrations/_unreleased.md#unified-update).
+
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
   is the rule `hooks install --fleet` already applied. A repository that

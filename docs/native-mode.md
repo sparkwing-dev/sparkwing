@@ -27,7 +27,7 @@ sparkwing serve status   # report liveness, print URL
 sparkwing serve kill     # stop it
 ```
 
-The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing version update --cli` or `sparkwing serve kill` first.
+The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing update --cli` or `sparkwing serve kill` first.
 
 For the bind address and the other `serve start` flags, see [cli-serve.md](cli-serve.md).
 

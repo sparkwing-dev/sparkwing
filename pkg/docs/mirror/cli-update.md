@@ -6,47 +6,63 @@ Every `sparkwing update` command, flag, and argument, generated from the CLI's o
 
 ## `sparkwing update`
 
-Self-update the CLI binary
+Update the CLI binary or this project's SDK pin
 
-Downloads, authenticates, and atomically installs the latest
-(or a specific) sparkwing release from GitHub Releases.
+CLI is the default target; --cli selects it explicitly. --sdk selects
+this project's .sparkwing/go.mod pin. Targets are mutually exclusive.
+Both resolve the latest published GitHub release unless --version names a
+specific release tag.
 
-By default the command fetches the latest version pointer, pulls
-the matching binary for the current OS/arch, verifies Ed25519
-signatures over the manifest and asset plus the manifest digest,
-and replaces the running binary atomically. Verification failure
-is terminal; the updater never selects an unsigned fallback.
+CLI updates verify Ed25519 signatures and the release digest before atomic
+replacement. Verification failure is terminal. --force permits a downgrade;
+--override-hold crosses an operator CLI hold. Both flags are CLI-only.
 
---check is the read-only probe: it reports the installed version
-and the latest published release, exits 0 when already current,
-and exits 1 when a newer release exists (useful for CI/notifications).
+SDK updates run native go get for the resolved release, then go mod tidy.
+Go retains its toolchain selection, module verification and dependency rules.
+The CLI binary and operator CLI hold are unchanged.
 
-Downgrades are blocked by default. Pass --force to install an older
-release when investigating a regression.
+--check reads installed identity and release metadata without installing,
+running Go, changing module files or writing caches. It honors the selected
+target and --version. Exit 0 means current or ahead, 1 means an update is
+available, and 2 means unknown, diverged or a check failure. Local SDK
+replacements and unverified CLI provenance are reported as unknown.
+A check does not verify downloadable assets or promise installation will work.
 
-For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.
+Output is pretty on a terminal and NDJSON otherwise. Checks emit one
+update_check record; successful updates emit one update receipt. Progress
+and failures go to stderr. Plain checks print the status word; plain updates
+print the resulting version.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--check` | Report installed vs latest; exit 1 if a newer release exists (read-only) |
-| `--force` | Allow downgrading to an older release |
-| `--override-hold` | Cross an operator version hold |
-| `--version TAG` | Target release tag (vX.Y.Z). Default: latest. |
+| `--cli` | Update the CLI binary (default target) |
+| `--sdk` | Update this project's .sparkwing/go.mod SDK pin |
+| `--check` | Compare the selected target without changing it |
+| `--force` | Allow CLI downgrade (--cli only) |
+| `--override-hold` | Cross an operator CLI version hold (--cli only) |
+| `--version TAG` | Canonical release tag; omit for latest published release |
+| `-o, --output FORMAT` | pretty \| json \| plain |
 
 ### Examples
 
 ```sh
-# Check for a newer release (read-only)
+# Check for a newer CLI release
 sparkwing update --check
 
-# Update to latest
-sparkwing update
+# Update the CLI
+sparkwing update --cli
 
-# Pin to a specific release
-sparkwing update --version v9.8.7
+# Check this project's SDK pin
+sparkwing update --sdk --check
 
-# Downgrade to an older release
-sparkwing update --version v9.7.6 --force
+# Update the SDK pin
+sparkwing update --sdk
+
+# Check a specific CLI release
+sparkwing update --cli --check --version v9.8.7
+
+# Downgrade the CLI
+sparkwing update --cli --version v9.7.6 --force
 ```
