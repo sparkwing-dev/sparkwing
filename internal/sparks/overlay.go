@@ -46,6 +46,11 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 
 	existing, err := os.ReadFile(overlayPath)
 	if err == nil && bytes.Equal(existing, overlayBytes) {
+		if len(resolved) > 0 {
+			if err := repairSum(ctx, sparkwingDir, overlayPath, sumPath); err != nil {
+				return false, err
+			}
+		}
 		if err := ensureGitignore(sparkwingDir); err != nil {
 			return false, err
 		}
@@ -61,7 +66,7 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 	}
 
 	if len(resolved) > 0 {
-		if err := materializeSum(ctx, sparkwingDir, overlayPath); err != nil {
+		if err := materializeSum(ctx, sparkwingDir, overlayPath, sumPath); err != nil {
 			return false, err
 		}
 	} else {
@@ -114,7 +119,24 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 	return formatted, nil
 }
 
-func materializeSum(ctx context.Context, workDir, overlayPath string) error {
+// bug: a materialization that failed leaves the overlay on disk with no sum, and
+// an unchanged overlay never reaches materializeSum again, so the consumer has
+// to run go mod download by hand before it can build.
+func repairSum(ctx context.Context, workDir, overlayPath, sumPath string) error {
+	if _, present := goWorkInScope(workDir); present {
+		return nil
+	}
+	_, err := os.Stat(sumPath)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("sparks: stat %s: %w", sumPath, err)
+	}
+	return materializeSum(ctx, workDir, overlayPath, sumPath)
+}
+
+func materializeSum(ctx context.Context, workDir, overlayPath, sumPath string) error {
 	if work, present := goWorkInScope(workDir); present {
 		fmt.Fprintf(os.Stderr,
 			"sparks: %s in effect; skipping .resolved.sum materialization "+
@@ -131,6 +153,14 @@ func materializeSum(ctx context.Context, workDir, overlayPath string) error {
 	if err != nil {
 		return fmt.Errorf("sparks: go mod download -modfile=%s all: %w: %s",
 			overlayPath, err, string(out))
+	}
+	// bug: a module set fully satisfied by replace directives downloads nothing
+	// and writes no sum, which would otherwise read as a materialization that
+	// never ran and repeat this download on every resolve.
+	if _, statErr := os.Stat(sumPath); errors.Is(statErr, os.ErrNotExist) {
+		if werr := os.WriteFile(sumPath, nil, 0o644); werr != nil {
+			return fmt.Errorf("sparks: touch sum: %w", werr)
+		}
 	}
 	return nil
 }

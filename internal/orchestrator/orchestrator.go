@@ -1698,6 +1698,9 @@ func newDispatchState(
 
 func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
+		if err := s.backends.checkTriggerDispatch(); err != nil {
+			return nil, err
+		}
 		currentNode := sparkwing.NodeFromContext(ctx)
 
 		var childRetryOf string
