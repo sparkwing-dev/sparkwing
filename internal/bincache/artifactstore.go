@@ -67,12 +67,12 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	tmp := dest + ".tmp"
-	// safety: the blob earns its execute bit after the digest settles, never while it is still unverified.
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	// safety: concurrent fetches must verify and publish their own staging file.
+	f, err := os.CreateTemp(filepath.Dir(dest), ".fetch-*")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	sum := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(f, sum), rc); err != nil {
 		_ = f.Close()
@@ -115,12 +115,12 @@ func UploadToArtifactStore(ctx context.Context, store storage.ArtifactStore, key
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	if err := store.Put(ctx, "bin/"+key, f); err != nil {
-		return fmt.Errorf("put bin/%s: %w", key, err)
-	}
 	digest := hex.EncodeToString(sum.Sum(nil))
 	if err := store.Put(ctx, digestKey(key), strings.NewReader(digest)); err != nil {
 		return fmt.Errorf("put %s: %w", digestKey(key), err)
+	}
+	if err := store.Put(ctx, "bin/"+key, f); err != nil {
+		return fmt.Errorf("put bin/%s: %w", key, err)
 	}
 	return nil
 }

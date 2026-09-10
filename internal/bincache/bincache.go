@@ -99,11 +99,11 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	tmp := dest + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	f, err := os.CreateTemp(filepath.Dir(dest), ".fetch-*")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	sum := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(f, sum), resp.Body); err != nil {
 		_ = f.Close()
@@ -118,6 +118,10 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	if !bytes.Equal(sum.Sum(nil), want) {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("%w: %s", ErrDigest, hash)
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		_ = os.Remove(tmp)
+		return err
 	}
 	return os.Rename(tmp, dest)
 }
