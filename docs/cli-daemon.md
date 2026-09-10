@@ -17,7 +17,7 @@ version takeover; a stopped daemon stays stopped.
 
 - `status` -- Report whether wingd is running and which build it serves
 - `restart` -- Refresh an answering wingd to this installed build
-- `recover-state` -- Preserve unreadable daemon state after guarded commands stop
+- `recover-state` -- Preserve unreadable daemon state after its holders stop
 
 ### Examples
 
@@ -31,11 +31,11 @@ sparkwing daemon restart
 
 ## `sparkwing daemon recover-state`
 
-Preserve unreadable daemon state after guarded commands stop
+Preserve unreadable daemon state after its holders stop
 
 Fail-closed recovery for a daemon that cannot parse its durable state. The
-unreadable bytes may describe guarded commands that are still running, so
-first stop or verify those commands, then pass --yes. Recovery holds the
+unreadable bytes may describe leases whose runs still hold host capacity, so
+first stop or verify those runs, then pass --yes. Recovery holds the
 daemon election lock, moves state.json to a state.json.corrupt-<time> forensic
 copy, and never discards readable state.
 
@@ -44,12 +44,12 @@ copy, and never discards readable state.
 | Flag | Description |
 |---|---|
 | `--home DIR` | Sparkwing home whose unreadable daemon state should be preserved |
-| `--yes` | Confirm every guarded command described by the unreadable state has stopped (required) |
+| `--yes` | Confirm every run described by the unreadable state has stopped (required) |
 
 ### Examples
 
 ```sh
-# Recover only after verifying guarded commands stopped
+# Recover only after verifying the described runs stopped
 sparkwing daemon recover-state --home /path/to/home --yes
 ```
 

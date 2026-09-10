@@ -72,7 +72,7 @@ func runDaemon(args []string) error {
 func runDaemonRecoverState(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonRecoverState.Path, flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home whose unreadable daemon state should be preserved")
-	yes := fs.Bool("yes", false, "confirm every guarded command described by the unreadable state has stopped")
+	yes := fs.Bool("yes", false, "confirm every run described by the unreadable state has stopped")
 	if err := parseAndCheck(cmdDaemonRecoverState, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -80,7 +80,7 @@ func runDaemonRecoverState(args []string) error {
 		return err
 	}
 	if !*yes {
-		return errors.New("daemon recover-state: refusing without --yes; unreadable state may describe live guarded commands")
+		return errors.New("daemon recover-state: refusing without --yes; unreadable state may describe live admission holders")
 	}
 	quarantined, err := wingd.RecoverUnreadableState(*home, time.Now())
 	if err != nil {

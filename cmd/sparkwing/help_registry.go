@@ -48,19 +48,19 @@ version takeover; a stopped daemon stays stopped.`,
 
 var cmdDaemonRecoverState = Command{
 	Path:     "sparkwing daemon recover-state",
-	Synopsis: "Preserve unreadable daemon state after guarded commands stop",
+	Synopsis: "Preserve unreadable daemon state after its holders stop",
 	Description: `Fail-closed recovery for a daemon that cannot parse its durable state. The
-unreadable bytes may describe guarded commands that are still running, so
-first stop or verify those commands, then pass --yes. Recovery holds the
+unreadable bytes may describe leases whose runs still hold host capacity, so
+first stop or verify those runs, then pass --yes. Recovery holds the
 daemon election lock, moves state.json to a state.json.corrupt-<time> forensic
 copy, and never discards readable state.`,
 	Flags: []FlagSpec{
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home whose unreadable daemon state should be preserved", Group: "Input"},
-		{Name: "yes", Desc: "Confirm every guarded command described by the unreadable state has stopped", Required: true, Group: "Safety"},
+		{Name: "yes", Desc: "Confirm every run described by the unreadable state has stopped", Required: true, Group: "Safety"},
 	},
 	GroupOrder: []string{"Input", "Safety", "Other"},
 	Examples: []Example{
-		{"Recover only after verifying guarded commands stopped", "sparkwing daemon recover-state --home /path/to/home --yes"},
+		{"Recover only after verifying the described runs stopped", "sparkwing daemon recover-state --home /path/to/home --yes"},
 	},
 }
 
