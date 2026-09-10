@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
+- **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
+
 - **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
   the upstream output is absent. `TryGet` exists for the bootstrap run of a
   compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
@@ -30,8 +33,6 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
-- **development:** Repository-owned candidate install hook for Xwing rebuilds
-  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --

@@ -69,6 +69,8 @@ export default function Tooltip({ content, children }: TooltipProps) {
     <>
       <span
         ref={ref}
+        onFocus={() => setShow(true)}
+        onBlur={handleMouseLeave}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >

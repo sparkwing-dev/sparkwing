@@ -164,6 +164,7 @@ is_covered() {
     internal/runners/k8s/k8s.go) return 0 ;;
     internal/*)           return 1 ;;
     docs/*|examples/*)    return 1 ;;
+    pkg/docs/mirror/*|pkg/docs/changelog.md) return 1 ;;
     bench/*|build/*)      return 1 ;;
     charts/*/values.yaml|charts/*/values.schema.json) return 0 ;;
     charts/*/templates/*|charts/*/charts/*.tgz) return 0 ;;

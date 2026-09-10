@@ -189,8 +189,9 @@ this file is a menu and checklist, not a command that every change must run.
   guidance before release. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
-- **Release:** merging is not a release. A release is an explicit operator
-  decision: preview with `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
+- **Release:** merging is not a release. Clean-tree, version, and lineage
+  checks must pass before contract and broad verification start. A release is
+  an explicit operator decision: preview with `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
   --sw-dry-run`, then use `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
   --version vX.Y.Z --sw-allow destructive,prod` to rewrite the changelog and
   push the tag; the isolated home keeps prerelease state out of the operational
