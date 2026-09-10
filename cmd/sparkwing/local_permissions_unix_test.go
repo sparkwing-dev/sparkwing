@@ -13,7 +13,11 @@ func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
 	if err := os.Mkdir(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveDashboardPaths(home); err != nil {
+	dp, err := resolveDashboardPaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDashboardHome(dp); err != nil {
 		t.Fatal(err)
 	}
 	assertLocalPermission(t, home, 0o700)

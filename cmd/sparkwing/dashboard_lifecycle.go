@@ -124,7 +124,7 @@ func runDashboardLaunch(args []string, restart bool) error {
 	if _, err = dashboardBoot(); err != nil {
 		return err
 	}
-	if err = fssecure.EnsureDir(dp.home); err != nil {
+	if err = ensureDashboardHome(dp); err != nil {
 		return err
 	}
 	unlock, err := lockDashboard(dp)
@@ -403,4 +403,12 @@ func dashboardCleanupError(operation string, err error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, os.ErrProcessDone) {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", operation, err)
 	}
+}
+
+// ensureDashboardHome creates the state directory the service writes into.
+// Resolving paths deliberately touches no filesystem, so help and a refused
+// argument leave a fresh home absent; the first writer is what makes it
+// private.
+func ensureDashboardHome(dp dashboardPaths) error {
+	return fssecure.EnsureDir(dp.home)
 }

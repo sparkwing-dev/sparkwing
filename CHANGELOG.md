@@ -178,10 +178,6 @@ unlock.
 
 ### Fixed
 
-- **cli:** Resolving the dashboard home tightens it to `0700` again. The serve
-  lifecycle rewrite moved that check into the start path, so a home that already
-  existed at a wider mode kept it until the next `serve start`, and every path
-  that only read the home left it as it found it.
 - **storage:** An object-store state backend reports a run lookup it could not
   read instead of an empty history. `GetLatestRun` listed the bucket, skipped
   every record whose read failed, and returned `store.ErrNotFound`, so a bucket
