@@ -33,6 +33,27 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
+- **cli:** `queue list` is the canonical name for the admission listing, and
+  bare `queue` runs the same code. Running rows gain the expected remaining
+  time and the clock time the run is expected to finish; queued rows gain the
+  expected finish beside the expected start. Both come from the run's measured
+  p50 profile and the daemon's admission simulation, and a cell without an
+  estimate names the measurement it lacks rather than carrying a guess:
+  "unmeasured" for a row with no profile, "past p50" for a run that has
+  outlived the profile it has, "unknown" for a queued row the daemon cannot
+  place behind the runs ahead of it. The header counts the queued runs with no
+  profile. In the pretty view the section that was headed "Waiting" is now
+  headed "Queued".
+  `-o json` gains `expected_remaining_ms`, `expected_finish_ms`,
+  `expected_finish_at` on running rows, `expected_start_at`,
+  `expected_finish_ms`, `expected_finish_at` on queued rows, and
+  `unmeasured_waiters` at the top level, each duration in milliseconds from the
+  snapshot and each clock time as RFC3339. `-o plain` gains an
+  `unmeasured-waiters` record, two trailing columns on a holder record
+  (humanized remaining, RFC3339 finish) and one on a waiter record (RFC3339
+  finish); every existing column keeps its position. The listing's errors now
+  carry the path that was invoked, so `queue list` reports
+  `sparkwing queue list: ...` where it used to report `queue: ...`.
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -88,6 +109,11 @@ unlock.
   `docs/migrations/compact-run-output.md` to `docs/migrations/v0.48.1.md`, so it
   is named like every other release guide and reachable at the stable
   `/docs/migration-guide/v0.48.1` path. The old slug no longer resolves
+- **cli:** `info --for-agent` and `DELIVERY.md` say to gate through the machine's
+  admission daemon one run at a time, because that daemon is what serializes
+  concurrent agents, and name a bare `go test ./...` or lint run as load it
+  cannot see. Both point at `sparkwing queue list` for order and estimates and
+  `sparkwing queue priority` for re-ranking.
 
 ### Fixed
 

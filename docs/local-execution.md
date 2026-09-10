@@ -1259,7 +1259,8 @@ that is merely busy still queues, because a holder finishing fixes that.
 Day-to-day operation runs through two commands, and neither can hurt the
 machine:
 
-- `sparkwing queue` -- the truthful view of local admission: every
+- `sparkwing queue list`, or bare `sparkwing queue` -- the truthful view of
+  local admission: every
   resource holder with the repo it came from, how long it has held, and its
   cost; connected run registrations that hold no resources, labeled separately;
   every waiter in admission order with its position, priority, estimated start,
@@ -1279,7 +1280,18 @@ machine:
   view states whether the daemon was reached: an idle machine and a
   socket that would not answer are different answers, and the second
   exits 4 with the dial failure named rather than printing an empty
-  queue it never looked at.
+  queue it never looked at. A running row also carries its expected
+  remaining time and the clock time it is expected to finish, and a queued
+  row its expected finish beside its expected start, both from the run's
+  measured p50 profile and the daemon's admission simulation. A cell without
+  an estimate names the measurement it lacks: `unmeasured` for a row the
+  daemon has no profile for, `past p50` for a run that has already outlived
+  the profile it has, and `unknown` for a queued row the daemon cannot place
+  because a run ahead of it has no estimate of its own. The header counts the
+  queued runs with no profile, because those are the ones that starve. `-o
+  json` carries each estimate as milliseconds from the snapshot and as an
+  RFC3339 clock time, and `-o plain` as a humanized duration and an RFC3339
+  clock time.
 - `sparkwing queue priority --run ID --set VALUE` -- re-rank a run that is
   already queued, without restarting it. `--set` takes an integer, or
   `front` / `back`: front is one above the highest priority among the
