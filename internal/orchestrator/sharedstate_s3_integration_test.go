@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -153,7 +154,7 @@ func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
 	}
 }
 
-func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
+func TestS3Sharing_TriggerRefusesInsteadOfAwaitingAChildNothingClaims(t *testing.T) {
 	registerS3IntegPipelines(t)
 	art, logs := openIntegrationS3(t)
 	paths := newPaths(t)
@@ -168,20 +169,33 @@ func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 		ArtifactStore: art,
 	})
 	if elapsed, budget := time.Since(started), timingBudget(2*time.Second); elapsed >= budget {
-		t.Fatalf("child-trigger handoff took %s, over its %s budget", elapsed, budget)
+		t.Fatalf("the refusal took %s, over its %s budget", elapsed, budget)
 	}
 	if err == nil && res != nil && res.Status == "success" {
-		t.Fatalf("trigger pipeline succeeded; expected the await to time out with no runner to claim the child")
+		t.Fatalf("trigger pipeline succeeded; the object-store backend has no claim path, so the await must refuse")
 	}
 	if res == nil || res.RunID == "" {
 		t.Fatalf("no run id from RunLocal (res=%v err=%v)", res, err)
+	}
+	nodes, nerr := backend.NewS3Backend(art, logs).ListNodes(context.Background(), res.RunID)
+	if nerr != nil {
+		t.Fatalf("ListNodes: %v", nerr)
+	}
+	reported := ""
+	for _, n := range nodes {
+		if n.NodeID == "trigger" {
+			reported = n.Error
+		}
+	}
+	if !strings.Contains(reported, "Mode 3") {
+		t.Errorf("the refused node does not point at Mode 3: %q", reported)
 	}
 
 	childID, ferr := state.FindSpawnedChildTriggerID(context.Background(), res.RunID, "trigger", "s3-integ-cache")
 	if ferr != nil {
 		t.Fatalf("FindSpawnedChildTriggerID: %v", ferr)
 	}
-	if childID == "" {
-		t.Fatalf("no child trigger enqueued for %s/trigger -> s3-integ-cache", res.RunID)
+	if childID != "" {
+		t.Errorf("a refused await left child trigger %s enqueued for %s/trigger", childID, res.RunID)
 	}
 }

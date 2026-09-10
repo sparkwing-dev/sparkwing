@@ -126,6 +126,11 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** `sparkwing.RunAndAwait` refuses under an object-store state
+  backend (Mode 2) instead of waiting forever. That backend enqueues the child's
+  trigger and has no path that claims one, so the spawned run never started and
+  the parent waited on it until its own timeout. The error wraps
+  `storage.ErrNotSupported` and names Mode 3.
 - **cli:** `run --sw-detached` hosts the admission daemon from the launching
   binary. The consumer's child resolved a host with `exec.LookPath("sparkwing")`
   and reached the installed binary instead, so a detached run launched from a

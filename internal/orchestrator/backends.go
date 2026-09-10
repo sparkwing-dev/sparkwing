@@ -184,6 +184,24 @@ func s3Unsupported(op string) error {
 	return fmt.Errorf("%w: %s has no object-store state backing", storage.ErrNotSupported, op)
 }
 
+// ErrTriggersUnsupported reports that this run's state backend enqueues a
+// trigger that nothing ever claims, so a pipeline spawned through it would
+// never start. It wraps [storage.ErrNotSupported].
+var ErrTriggersUnsupported = fmt.Errorf(
+	"%w: pipeline triggers need a trigger-claim path, which the object-store state backend does not have, "+
+		"so a spawned run would be enqueued and never start; use Mode 3 (Postgres) or Mode 4 (hosted controller)",
+	storage.ErrNotSupported)
+
+// safety: fails closed on the one backend proven to have no claim path rather
+// than on LocalCoordination, which a hosted controller also leaves false while
+// dispatching child triggers on its own side.
+func (b Backends) checkTriggerDispatch() error {
+	if _, objectStore := b.State.(s3StateAdapter); objectStore {
+		return ErrTriggersUnsupported
+	}
+	return nil
+}
+
 func (s3StateAdapter) ListNodes(context.Context, string) ([]*store.Node, error) {
 	return nil, s3Unsupported("ListNodes")
 }
