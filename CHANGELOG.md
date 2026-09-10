@@ -33,6 +33,17 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
+- **cli:** `queue list` is the canonical name for the admission listing, and
+  bare `queue` runs the same code. Running rows gain the expected remaining
+  time and the clock time the run is expected to finish; queued rows gain the
+  expected finish beside the expected start. Both come from the run's measured
+  p50 profile and the daemon's admission simulation, so a row with no profile
+  reads "unmeasured" and a run past its p50 reads "past p50" rather than
+  carrying a guess. The header counts the queued runs with no profile. `-o
+  json` carries each estimate as milliseconds from now and as an RFC3339 clock
+  time, in `expected_remaining_ms`, `expected_finish_ms`, `expected_finish_at`,
+  `expected_start_at`, and `unmeasured_waiters`; `-o plain` appends the same
+  values as trailing columns.
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --

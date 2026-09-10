@@ -12,14 +12,21 @@ import (
 )
 
 func RenderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
+	return RenderQueueAt(w, qs, format, time.Now())
+}
+
+// RenderQueueAt renders a queue snapshot as of now. Every expected-finish time
+// is projected from that instant, so a caller holding a fixed clock gets
+// deterministic output.
+func RenderQueueAt(w io.Writer, qs wingwire.QueueState, format string, now time.Time) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
-		return enc.Encode(qs)
+		return enc.Encode(queueStateViewOf(qs, now))
 	case "plain":
-		return renderQueuePlain(w, qs)
+		return renderQueuePlain(w, qs, now)
 	default:
-		return RenderQueuePretty(w, qs)
+		return renderQueuePrettyAt(w, qs, now)
 	}
 }
 
@@ -55,21 +62,27 @@ func Unreachable(cause error) DaemonReach {
 }
 
 type queueView struct {
-	wingwire.QueueState
+	queueStateView
 	Daemon DaemonReach `json:"daemon"`
 }
 
 func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, format string) error {
+	return RenderLocalQueueAt(w, qs, reach, format, time.Now())
+}
+
+// RenderLocalQueueAt renders the local queue as of now, which fixes the clock
+// the expected-finish times are projected from.
+func RenderLocalQueueAt(w io.Writer, qs wingwire.QueueState, reach DaemonReach, format string, now time.Time) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
-		return enc.Encode(queueView{QueueState: qs, Daemon: reach})
+		return enc.Encode(queueView{queueStateView: queueStateViewOf(qs, now), Daemon: reach})
 	case "plain":
 		fmt.Fprintf(w, "daemon\t%s\n", reach.State)
 		if reach.State != ReachServing {
 			return nil
 		}
-		return renderQueuePlain(w, qs)
+		return renderQueuePlain(w, qs, now)
 	default:
 		switch reach.State {
 		case ReachAbsent:
@@ -80,7 +93,7 @@ func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, fo
 			fmt.Fprintln(w, "the local queue is unknown, not empty -- nothing here says whether runs are holding or waiting")
 			return nil
 		default:
-			return RenderQueuePretty(w, qs)
+			return renderQueuePrettyAt(w, qs, now)
 		}
 	}
 }
@@ -93,7 +106,7 @@ func RenderUnreachableDaemon(w io.Writer, format string, cause error) error {
 	return RenderLocalQueue(w, wingwire.QueueState{}, Unreachable(cause), format)
 }
 
-func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
+func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error {
 	for _, r := range qs.Resources {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
@@ -124,24 +137,31 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 	if qs.ExternalMeasurementAgeMS > 0 {
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
+	if n := unmeasuredWaiters(qs); n > 0 {
+		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
+	}
 	for _, h := range qs.Holders {
 		kind := "holder"
 		if h.ConnectionOnly {
 			kind = "connected"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind,
+		remaining := holderRemainingMS(h)
+		word := holderEstimateWord(h)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind,
 			h.RunID, orDash(h.ParticipantID), queueDisplayRunID(h.RunID, h.DisplayRunID),
 			orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
 			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
-			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(queueParentID(h)))
+			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(queueParentID(h)),
+			fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			wt.Position, wt.RunID, orDash(wt.ParticipantID),
 			queueDisplayRunID(wt.RunID, wt.DisplayRunID),
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
 			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
-			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason), wt.Priority)
+			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason), wt.Priority,
+			fmtFinishClock(now, waiterFinishMS(wt), estimateUnmeasured))
 	}
 	for _, r := range qs.Runners {
 		fmt.Fprintf(w, "runner\t%s\t%.3f\t%d\t%d\n", r.Name, r.Cores, r.MemoryBytes, r.QueueDepth)
@@ -150,6 +170,10 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 }
 
 func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
+	return renderQueuePrettyAt(out, qs, time.Now())
+}
+
+func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) error {
 	holders := queueLifecycleHolders(qs)
 	connections := queueLifecycleConnections(qs)
 	clear := ""
@@ -162,7 +186,12 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	if cc := FmtCapacityChange(qs.CapacityChange); cc != "" {
 		fmt.Fprintln(out, cc)
 	}
-	fmt.Fprintf(out, "local admission: %d holding, %d connected, %d queued%s\n", len(holders), len(connections), len(qs.Waiters), clear)
+	unmeasured := ""
+	if n := unmeasuredWaiters(qs); n > 0 {
+		unmeasured = fmt.Sprintf(" (%d unmeasured)", n)
+	}
+	fmt.Fprintf(out, "local admission: %d holding, %d connected, %d queued%s%s\n",
+		len(holders), len(connections), len(qs.Waiters), unmeasured, clear)
 	if line := FmtEventsLine(qs.Events); line != "" {
 		fmt.Fprintln(out, line)
 	}
@@ -206,9 +235,9 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Running")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
+	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tREMAINING\tFINISH\tCOST\tSOURCE\tSEMAPHORES")
 	if len(holders) == 0 {
-		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t\t\t")
 	}
 	for _, h := range holders {
 		run := queueDisplayRunID(h.RunID, h.DisplayRunID)
@@ -221,8 +250,11 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		if h.Contended {
 			run += " (contended)"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
-			orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
+		remaining := holderRemainingMS(h)
+		word := holderEstimateWord(h)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
+			orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS),
+			fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word), fmtHolderCost(h),
 			orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
 	}
 	_ = tw.Flush()
@@ -243,18 +275,19 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Waiting")
+	fmt.Fprintln(out, "Queued")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tPRI\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tPRI\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tSTARTS IN\tFINISH\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t-\t(no one queued)\t\t\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "-\t-\t(no one queued)\t\t\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
 		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
-		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
+		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
-			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)),
-			fmtElapsed(wt.WaitingMS))
+			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
+			fmtFinishClock(now, waiterFinishMS(wt), estimateUnmeasured),
+			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
 
@@ -623,6 +656,129 @@ func fmtHolderCost(h wingwire.Holder) string {
 		return "-"
 	}
 	return fmtCost(h.Resources)
+}
+
+// estimateUnmeasured marks a row the daemon has no measured profile for, and
+// estimatePastP50 a run that has already outlived the profile it does have.
+// Neither is an estimate: a p50 no longer predicts a run that passed it.
+const (
+	estimateUnmeasured = "unmeasured"
+	estimatePastP50    = "past p50"
+)
+
+func holderRemainingMS(h wingwire.Holder) *int64 {
+	if h.ExpectedDurationMS <= 0 {
+		return nil
+	}
+	remaining := h.ExpectedDurationMS - h.ElapsedMS
+	if remaining <= 0 {
+		return nil
+	}
+	return &remaining
+}
+
+func holderEstimateWord(h wingwire.Holder) string {
+	if h.ExpectedDurationMS <= 0 {
+		return estimateUnmeasured
+	}
+	return estimatePastP50
+}
+
+func waiterFinishMS(wt wingwire.Waiter) *int64 {
+	if wt.ExpectedStartMS == nil || wt.ExpectedDurationMS <= 0 {
+		return nil
+	}
+	finish := *wt.ExpectedStartMS + wt.ExpectedDurationMS
+	return &finish
+}
+
+func unmeasuredWaiters(qs wingwire.QueueState) int {
+	n := 0
+	for _, wt := range qs.Waiters {
+		if wt.ExpectedDurationMS <= 0 {
+			n++
+		}
+	}
+	return n
+}
+
+func fmtEstimate(ms *int64, word string) string {
+	if ms == nil {
+		return word
+	}
+	return fmtElapsed(*ms)
+}
+
+func fmtFinishClock(now time.Time, ms *int64, word string) string {
+	if ms == nil {
+		return word
+	}
+	at := finishAt(now, *ms)
+	if at.YearDay() == now.YearDay() && at.Year() == now.Year() {
+		return at.Format("15:04:05")
+	}
+	return at.Format("Jan 2 15:04")
+}
+
+func finishAt(now time.Time, ms int64) time.Time {
+	return now.Add(time.Duration(ms) * time.Millisecond).Round(time.Second)
+}
+
+func fmtRFC3339(now time.Time, ms *int64) string {
+	if ms == nil {
+		return ""
+	}
+	return finishAt(now, *ms).Format(time.RFC3339)
+}
+
+// holderView adds the schedule a client would otherwise compute from
+// expected_duration_ms and elapsed_ms. An absent field means unmeasured.
+// ExpectedFinishMS repeats ExpectedRemainingMS, so one field name carries the
+// finish estimate on both holder and waiter rows.
+type holderView struct {
+	wingwire.Holder
+	ExpectedRemainingMS *int64 `json:"expected_remaining_ms,omitempty"`
+	ExpectedFinishMS    *int64 `json:"expected_finish_ms,omitempty"`
+	ExpectedFinishAt    string `json:"expected_finish_at,omitempty"`
+}
+
+// waiterView adds the clock time behind expected_start_ms and the finish that
+// follows it. An absent field means unmeasured.
+type waiterView struct {
+	wingwire.Waiter
+	ExpectedStartAt  string `json:"expected_start_at,omitempty"`
+	ExpectedFinishMS *int64 `json:"expected_finish_ms,omitempty"`
+	ExpectedFinishAt string `json:"expected_finish_at,omitempty"`
+}
+
+type queueStateView struct {
+	wingwire.QueueState
+	Holders           []holderView `json:"holders,omitempty"`
+	Waiters           []waiterView `json:"waiters,omitempty"`
+	UnmeasuredWaiters int          `json:"unmeasured_waiters,omitempty"`
+}
+
+func queueStateViewOf(qs wingwire.QueueState, now time.Time) queueStateView {
+	view := queueStateView{QueueState: qs, UnmeasuredWaiters: unmeasuredWaiters(qs)}
+	for _, h := range qs.Holders {
+		remaining := holderRemainingMS(h)
+		view.Holders = append(view.Holders, holderView{
+			Holder:              h,
+			ExpectedRemainingMS: remaining,
+			ExpectedFinishMS:    remaining,
+			ExpectedFinishAt:    fmtRFC3339(now, remaining),
+		})
+	}
+	for _, wt := range qs.Waiters {
+		finish := waiterFinishMS(wt)
+		view.Waiters = append(view.Waiters, waiterView{
+			Waiter:           wt,
+			ExpectedStartAt:  fmtRFC3339(now, wt.ExpectedStartMS),
+			ExpectedFinishMS: finish,
+			ExpectedFinishAt: fmtRFC3339(now, finish),
+		})
+	}
+	return view
 }
 
 func fmtETA(ms *int64) string {

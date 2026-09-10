@@ -460,25 +460,39 @@ flags. --split-dir writes generated files.`,
 var cmdQueue = Command{
 	Path:     "sparkwing queue",
 	Synopsis: "Inspect local admission holders, connections, and waiters",
-	Description: `Reports the local admission daemon's resource capacity, usage, and queue.
-Each holder shows its repository, age, and charge. Connected runs that hold
-no resources have separate rows. Waiters appear in admission order with
-their position, priority, cost, and blocking resource. Attached child runs
-appear under their parent. The header summarizes recent admission outcomes.
+	Description: `Reports the local admission daemon's resource capacity, usage, and queue in
+two sections: running work, then queued work in admission order.
+
+A running row carries the repository, elapsed time, charge, and, from the
+run's measured p50 profile, its expected remaining time and the clock time it
+is expected to finish. A queued row carries its position, priority, cost, how
+long it has waited, the resource it waits on, and, from the daemon's
+admission simulation, when it is expected to start and finish. Attached child
+runs appear under their parent. Connected runs that hold no resources have
+separate rows.
+
+An estimate exists only where a measured profile does. A row with no profile
+reads "unmeasured", and a run that has already outlived its p50 reads "past
+p50"; neither is replaced by a guess. The header counts the unmeasured
+waiters, because a queued run with no profile is the one that starves.
+'sparkwing queue priority' re-ranks a queued run.
 
 A stalled holder includes a cancellation command:
 'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
 The queue command only reports state.
 
 Output is pretty on a terminal and JSON when piped. Select JSON explicitly
-with -o json, or tab-separated records with -o plain.
+with -o json, or tab-separated records with -o plain. JSON carries every
+estimate twice: milliseconds from now, and an RFC3339 clock time.
 
 An absent daemon reports an empty queue and exits 0. An unreachable daemon
 reports the connection failure and exits 4; its queue state is unknown.
 
+'sparkwing queue' and 'sparkwing queue list' print the same listing.
+
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.`,
-	SubcommandOrder:    []string{"exec", "priority"},
+	SubcommandOrder:    []string{"list", "exec", "priority"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
@@ -487,11 +501,59 @@ concurrency key, its holders and waiters, and registered runner capacity.`,
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
-		{"Show the current queue", "sparkwing queue"},
-		{"Agent-readable snapshot", "sparkwing queue -o json"},
-		{"One record per line for shell pipelines", "sparkwing queue -o plain"},
-		{"Inspect a controller's admission state", "sparkwing queue --profile prod"},
+		{"Show the current queue", "sparkwing queue list"},
+		{"Agent-readable snapshot", "sparkwing queue list -o json"},
+		{"One record per line for shell pipelines", "sparkwing queue list -o plain"},
+		{"Inspect a controller's admission state", "sparkwing queue list --profile prod"},
 		{"Move a queued run to the front", "sparkwing queue priority --run build-123 --set front"},
+	},
+}
+
+var cmdQueueList = Command{
+	Path:     "sparkwing queue list",
+	Synopsis: "List running and queued work with expected start and finish",
+	Description: `Reports the local admission daemon's resource capacity, usage, and queue in
+two sections: running work, then queued work in admission order.
+
+A running row carries the repository, elapsed time, charge, and, from the
+run's measured p50 profile, its expected remaining time and the clock time it
+is expected to finish. A queued row carries its position, priority, cost, how
+long it has waited, the resource it waits on, and, from the daemon's
+admission simulation, when it is expected to start and finish. Attached child
+runs appear under their parent. Connected runs that hold no resources have
+separate rows.
+
+An estimate exists only where a measured profile does. A row with no profile
+reads "unmeasured", and a run that has already outlived its p50 reads "past
+p50"; neither is replaced by a guess. The header counts the unmeasured
+waiters, because a queued run with no profile is the one that starves.
+'sparkwing queue priority' re-ranks a queued run.
+
+A stalled holder includes a cancellation command:
+'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
+The queue command only reports state.
+
+Output is pretty on a terminal and JSON when piped. Select JSON explicitly
+with -o json, or tab-separated records with -o plain. JSON carries every
+estimate twice: milliseconds from now, and an RFC3339 clock time.
+
+An absent daemon reports an empty queue and exits 0. An unreachable daemon
+reports the connection failure and exits 4; its queue state is unknown.
+
+This is the same output as 'sparkwing queue'.
+
+With --profile NAME, the view reads that profile's controller and shows each
+concurrency key, its holders and waiters, and registered runner capacity.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Inspect this profile's controller instead of the local daemon", Group: "System"},
+	},
+	GroupOrder: []string{"Output", "System", "Other"},
+	Examples: []Example{
+		{"Show the current queue", "sparkwing queue list"},
+		{"Agent-readable snapshot", "sparkwing queue list -o json"},
+		{"One record per line for shell pipelines", "sparkwing queue list -o plain"},
 	},
 }
 

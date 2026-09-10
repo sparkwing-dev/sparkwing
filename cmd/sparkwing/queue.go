@@ -25,22 +25,31 @@ func runQueue(args []string) error {
 	if len(args) > 0 && args[0] == "priority" {
 		return runQueuePriority(args[1:])
 	}
-	fs := flag.NewFlagSet(cmdQueue.Path, flag.ContinueOnError)
+	if len(args) > 0 && args[0] == "list" {
+		return runQueueList(cmdQueueList, args[1:])
+	}
+	return runQueueList(cmdQueue, args)
+}
+
+// runQueueList serves both `sparkwing queue list` and bare `sparkwing queue`;
+// cmd only decides whose help and error prefix the invocation carries.
+func runQueueList(cmd Command, args []string) error {
+	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	on := addProfileFlag(fs)
-	if err := parseAndCheck(cmdQueue, fs, args); err != nil {
+	if err := parseAndCheck(cmd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdQueue.Path)
+	format, err := resolveTTYAwareOutput(*outFmt, cmd.Path)
 	if err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("queue: unexpected positional %q (queue takes flags only)", fs.Arg(0))
+		return fmt.Errorf("%s: unexpected positional %q (the listing takes flags only)", cmd.Path, fs.Arg(0))
 	}
 
 	if *on != "" {
