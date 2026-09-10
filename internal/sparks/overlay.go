@@ -46,6 +46,11 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 
 	existing, err := os.ReadFile(overlayPath)
 	if err == nil && bytes.Equal(existing, overlayBytes) {
+		if len(resolved) > 0 {
+			if err := repairSum(ctx, sparkwingDir, overlayPath, sumPath); err != nil {
+				return false, err
+			}
+		}
 		if err := ensureGitignore(sparkwingDir); err != nil {
 			return false, err
 		}
@@ -112,6 +117,20 @@ func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string)
 		return nil, fmt.Errorf("sparks: format overlay: %w", err)
 	}
 	return formatted, nil
+}
+
+// bug: a materialization that failed or was skipped leaves the overlay on disk
+// with no sum, and an unchanged overlay never reaches materializeSum again, so
+// the consumer has to run go mod download by hand before it can build.
+func repairSum(ctx context.Context, workDir, overlayPath, sumPath string) error {
+	info, err := os.Stat(sumPath)
+	switch {
+	case err == nil && info.Size() > 0:
+		return nil
+	case err != nil && !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("sparks: stat %s: %w", sumPath, err)
+	}
+	return materializeSum(ctx, workDir, overlayPath)
 }
 
 func materializeSum(ctx context.Context, workDir, overlayPath string) error {

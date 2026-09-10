@@ -126,6 +126,11 @@ unlock.
 
 ### Fixed
 
+- **cli:** A resolved module overlay whose checksum file never materialized is
+  repaired on the next resolve. A materialization that failed or that a Go
+  workspace skipped left `.sparkwing/.resolved.mod` on disk with no
+  `.resolved.sum`, and an unchanged overlay took the fast path and never tried
+  again, so compiling the pipeline needed a manual `go mod download`.
 - **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
   reads. It was parsed, validated and documented, and no code path read it.
 - **cache:** Concurrent binary downloads use independent staging files and
