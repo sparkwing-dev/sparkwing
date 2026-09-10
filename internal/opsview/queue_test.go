@@ -28,8 +28,8 @@ func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 	if !strings.Contains(out, "available = capacity - in use - reserved") {
 		t.Fatalf("missing legend line:\n%s", out)
 	}
-	if !strings.Contains(out, "\nRunning\n") || !strings.Contains(out, "\nWaiting\n") {
-		t.Fatalf("missing Running/Waiting section headers:\n%s", out)
+	if !strings.Contains(out, "\nRunning\n") || !strings.Contains(out, "\nQueued\n") {
+		t.Fatalf("missing Running/Queued section headers:\n%s", out)
 	}
 	cap, held, reserved, external, available, ok := parseCoresRow(out)
 	if !ok {
@@ -195,7 +195,7 @@ func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
 	for _, want := range []string{
 		"holder\trun-1\tinternal-holder\trun-1/build",
 		"waiter\t1\trun-1\tinternal-waiter\trun-1/test",
-		"\t50\n",
+		"\t50\t",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("plain queue omitted %q:\n%s", want, out)

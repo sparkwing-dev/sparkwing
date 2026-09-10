@@ -25,26 +25,35 @@ func runQueue(args []string) error {
 	if len(args) > 0 && args[0] == "priority" {
 		return runQueuePriority(args[1:])
 	}
-	fs := flag.NewFlagSet(cmdQueue.Path, flag.ContinueOnError)
+	if len(args) > 0 && args[0] == "list" {
+		return runQueueList(cmdQueueList, args[1:])
+	}
+	return runQueueList(cmdQueue, args)
+}
+
+// runQueueList serves both `sparkwing queue list` and bare `sparkwing queue`;
+// cmd only decides whose help and error prefix the invocation carries.
+func runQueueList(cmd Command, args []string) error {
+	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
 	on := addProfileFlag(fs)
-	if err := parseAndCheck(cmdQueue, fs, args); err != nil {
+	if err := parseAndCheck(cmd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdQueue.Path)
+	format, err := resolveTTYAwareOutput(*outFmt, cmd.Path)
 	if err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("queue: unexpected positional %q (queue takes flags only)", fs.Arg(0))
+		return fmt.Errorf("%s: unexpected positional %q (the listing takes flags only)", cmd.Path, fs.Arg(0))
 	}
 
 	if *on != "" {
-		return runQueueProfile(*on, format)
+		return runQueueProfile(cmd, *on, format)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -59,7 +68,7 @@ func runQueue(args []string) error {
 				return rerr
 			}
 			warnLegacy(os.Stderr, len(legacy))
-			return exitError(4, fmt.Errorf("queue: %w", err))
+			return exitError(4, fmt.Errorf("%s: %w", cmd.Path, err))
 		}
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
@@ -68,7 +77,7 @@ func runQueue(args []string) error {
 			warnLegacy(os.Stderr, len(legacy))
 			return nil
 		}
-		return fmt.Errorf("queue: %w", err)
+		return fmt.Errorf("%s: %w", cmd.Path, err)
 	}
 	if rerr := renderLocalQueue(os.Stdout, qs, format); rerr != nil {
 		return rerr
@@ -77,7 +86,7 @@ func runQueue(args []string) error {
 	return nil
 }
 
-func runQueueProfile(profileName, format string) error {
+func runQueueProfile(cmd Command, profileName, format string) error {
 	prof, err := resolveProfile(profileName)
 	if err != nil {
 		return err
@@ -89,7 +98,7 @@ func runQueueProfile(profileName, format string) error {
 	defer cancel()
 	qs, err := fetchControllerQueueState(ctx, prof.ControllerURL(), prof.ControllerToken())
 	if err != nil {
-		return fmt.Errorf("queue: %w", err)
+		return fmt.Errorf("%s: %w", cmd.Path, err)
 	}
 	return renderQueue(os.Stdout, qs, format)
 }

@@ -15,7 +15,7 @@ import (
 )
 
 var allCommands = []*Command{
-	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueExec, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonRecoverState, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
+	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueList, &cmdQueueExec, &cmdQueuePriority, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonRecoverState, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit, &cmdConfigureXrepo, &cmdConfigureXrepoList, &cmdConfigureXrepoAdd, &cmdConfigureXrepoRemove, &cmdConfigureXrepoPrune,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsGuides, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
