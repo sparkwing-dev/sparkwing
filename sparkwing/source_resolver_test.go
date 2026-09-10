@@ -225,3 +225,25 @@ func TestFactory_FileSource_EmptyValuesAreMissing(t *testing.T) {
 		}
 	}
 }
+
+func TestDotenvSupportsExportAndComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.env")
+	body := `export TOKEN=example # explanation
+PLAIN=value#literal
+QUOTED="value # literal" # explanation
+SINGLE='value # literal' # explanation
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := sparkwing.NewSecretResolverFromSpec(t.Context(), backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"TOKEN": "example", "PLAIN": "value#literal", "QUOTED": "value # literal", "SINGLE": "value # literal"} {
+		value, _, err := resolver.Resolve(t.Context(), key)
+		if err != nil || value != want {
+			t.Errorf("%s = %q, %v; want %q", key, value, err, want)
+		}
+	}
+}
