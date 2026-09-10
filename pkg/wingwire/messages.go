@@ -109,15 +109,6 @@ type HostResources struct {
 	MemoryBytes int64 `json:"memory_bytes,omitempty"`
 }
 
-// ProcessSession identifies one operating-system session without trusting a
-// reusable numeric PID alone. LeaderPID and SessionID name the session while
-// BirthToken is the kernel-reported creation identity of its leader.
-type ProcessSession struct {
-	LeaderPID  int    `json:"leader_pid"`
-	SessionID  int    `json:"session_id"`
-	BirthToken string `json:"birth_token"`
-}
-
 // CostSource names how a request's host resources were resolved before
 // reaching the daemon.
 type CostSource string
@@ -199,10 +190,6 @@ type AdmissionRequest struct {
 	// is alive but idle while waiters queue behind it. Zero disables
 	// stall sampling for the holder.
 	PID int `json:"pid,omitempty"`
-	// Guard asks the daemon to retain this admission after connection loss
-	// until the exact process session is proven empty. The session exists but
-	// remains parked until the daemon durably grants the request.
-	Guard *ProcessSession `json:"guard,omitempty"`
 	// Resources is the host capacity the lease is expected to occupy. A
 	// zero value means the request declared no hints and the daemon
 	// charges its conservative default unless SemaphoresOnly is set.
@@ -336,18 +323,6 @@ type LivenessAck struct {
 	Nonce uint64 `json:"nonce"`
 }
 
-// GuardComplete declares that a guarded holder has stopped its command and
-// will start no more descendants. The daemon acknowledges only after the
-// registered process session is empty and the released ledger state is
-// durable.
-type GuardComplete struct {
-	LeaseToken string `json:"lease_token"`
-}
-
-// GuardCompleteAck confirms the guarded session is empty and its
-// admission claim has been durably released.
-type GuardCompleteAck struct{}
-
 // Reattach presents a lease token on a fresh connection to resume a
 // lease that survived a daemon restart or version takeover. Accepted
 // only within the daemon's reconnect grace window; after that the
@@ -467,7 +442,7 @@ type Holder struct {
 	// Stalled marks a holder that is alive but has consumed near-zero CPU for
 	// a sustained window while runs wait behind it -- a likely wedge. Capable
 	// clients are challenged before the daemon reclaims their admission; the
-	// flag remains diagnostic-only for older clients and guarded sessions.
+	// flag remains diagnostic-only for older clients.
 	Stalled bool `json:"stalled,omitempty"`
 	// Recovery is the exact command an operator runs to clear a stalled
 	// holder. Set only when Stalled is true; it never names a
@@ -871,8 +846,6 @@ func (*Evicted) wireType() MessageType          { return TypeEvicted }
 func (*Release) wireType() MessageType          { return TypeRelease }
 func (*LivenessProbe) wireType() MessageType    { return TypeLivenessProbe }
 func (*LivenessAck) wireType() MessageType      { return TypeLivenessAck }
-func (*GuardComplete) wireType() MessageType    { return TypeGuardComplete }
-func (*GuardCompleteAck) wireType() MessageType { return TypeGuardCompleteAck }
 func (*Reattach) wireType() MessageType         { return TypeReattach }
 func (*DrainRequest) wireType() MessageType     { return TypeDrainRequest }
 func (*DrainAck) wireType() MessageType         { return TypeDrainAck }

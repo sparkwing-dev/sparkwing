@@ -9,23 +9,19 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-const stateSchema = 2
+const stateSchema = 1
 
-type persistedGuard struct {
-	LeaseID admission.LeaseID       `json:"lease_id"`
-	RunID   string                  `json:"run_id"`
-	Session wingwire.ProcessSession `json:"session"`
-}
+// safety: schema 2 was written only while an admission was parked on a process
+// session; refusing it would stop the successor of such a daemon from starting.
+const legacyGuardedStateSchema = 2
 
 type persistedState struct {
 	Schema        int                `json:"schema"`
 	Snapshot      admission.Snapshot `json:"snapshot"`
 	Events        []admissionEvent   `json:"events,omitempty"`
 	CancelledRuns []string           `json:"cancelled_runs,omitempty"`
-	Guards        []persistedGuard   `json:"guards,omitempty"`
 }
 
 func writeState(path string, snap admission.Snapshot, events []admissionEvent) error {
@@ -33,16 +29,8 @@ func writeState(path string, snap admission.Snapshot, events []admissionEvent) e
 }
 
 func writeStateWithCancellations(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string) error {
-	return writeStateWithGuards(path, snap, events, cancelledRuns, nil)
-}
-
-func writeStateWithGuards(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string, guards []persistedGuard) error {
 	snap.Waiters = nil
-	schema := 1
-	if len(guards) > 0 {
-		schema = stateSchema
-	}
-	data, err := json.Marshal(persistedState{Schema: schema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns, Guards: guards})
+	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns})
 	if err != nil {
 		return fmt.Errorf("wingd: marshal state: %w", err)
 	}
@@ -90,24 +78,19 @@ func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
 }
 
 func readStateWithCancellations(path string) (*admission.Snapshot, []admissionEvent, []string, error) {
-	snap, events, cancelledRuns, _, err := readStateWithGuards(path)
-	return snap, events, cancelledRuns, err
-}
-
-func readStateWithGuards(path string) (*admission.Snapshot, []admissionEvent, []string, []persistedGuard, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("wingd: read state: %w", err)
+		return nil, nil, nil, fmt.Errorf("wingd: read state: %w", err)
 	}
 	var st persistedState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("wingd: parse state: %w", err)
+		return nil, nil, nil, fmt.Errorf("wingd: parse state: %w", err)
 	}
-	if st.Schema != 1 && st.Schema != stateSchema {
-		return nil, nil, nil, nil, fmt.Errorf("wingd: state schema %d, want 1 or %d", st.Schema, stateSchema)
+	if st.Schema != stateSchema && st.Schema != legacyGuardedStateSchema {
+		return nil, nil, nil, fmt.Errorf("wingd: state schema %d, want %d or %d", st.Schema, stateSchema, legacyGuardedStateSchema)
 	}
-	return &st.Snapshot, st.Events, st.CancelledRuns, st.Guards, nil
+	return &st.Snapshot, st.Events, st.CancelledRuns, nil
 }

@@ -26,7 +26,7 @@ func configuredHandlerDaemon(t *testing.T, cfg Config, cores float64) *Daemon {
 		t.Fatalf("new ledger: %v", err)
 	}
 	d.ledger = ledger
-	d.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string, []persistedGuard) error {
+	d.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string) error {
 		return nil
 	}
 	return d
@@ -37,7 +37,7 @@ func handlerConn(t *testing.T, d *Daemon) (server, peer *conn) {
 	sc, pc := net.Pipe()
 	t.Cleanup(func() { _ = sc.Close(); _ = pc.Close() })
 	server = newConn(d, sc)
-	server.protocolMajor = guardedSessionMajor
+	server.protocolMajor = ProtocolMajor
 	d.mu.Lock()
 	d.conns[server] = struct{}{}
 	d.mu.Unlock()

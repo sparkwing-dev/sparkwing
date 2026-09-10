@@ -66,10 +66,8 @@ type Group struct {
 
 func Supported() error { return platformSupport() }
 
-func GuardedSessionSupported() error { return guardedSessionSupport() }
-
 func CaptureSession(pid int) (SessionIdentity, error) {
-	if err := GuardedSessionSupported(); err != nil {
+	if err := guardedSessionSupport(); err != nil {
 		return SessionIdentity{}, err
 	}
 	sid, token, err := sessionIdentity(pid)
@@ -82,16 +80,12 @@ func CaptureSession(pid int) (SessionIdentity, error) {
 	return SessionIdentity{LeaderPID: pid, SessionID: sid, BirthToken: token}, nil
 }
 
-func SessionQuiescent(identity SessionIdentity) (bool, error) {
-	return inspectSession(identity, true)
-}
-
 func SessionEmpty(identity SessionIdentity) (bool, error) {
-	return inspectSession(identity, false)
+	return inspectSession(identity)
 }
 
 func TerminateSession(identity SessionIdentity) error {
-	empty, err := inspectSession(identity, false)
+	empty, err := inspectSession(identity)
 	if err != nil || empty {
 		return err
 	}
@@ -115,7 +109,7 @@ func TerminateSession(identity SessionIdentity) error {
 }
 
 func DiagnosticSession(identity SessionIdentity) error {
-	empty, err := inspectSession(identity, false)
+	empty, err := inspectSession(identity)
 	if err != nil || empty {
 		return err
 	}
@@ -123,7 +117,7 @@ func DiagnosticSession(identity SessionIdentity) error {
 }
 
 func KillSession(identity SessionIdentity) error {
-	empty, err := inspectSession(identity, false)
+	empty, err := inspectSession(identity)
 	if err != nil || empty {
 		return err
 	}
@@ -173,7 +167,7 @@ func waitSessionEmpty(identity SessionIdentity, timeout time.Duration) (bool, er
 	timer := time.NewTimer(poll.next())
 	defer timer.Stop()
 	for {
-		empty, err := inspectSession(identity, false)
+		empty, err := inspectSession(identity)
 		if err != nil || empty {
 			return empty, err
 		}
@@ -186,26 +180,7 @@ func waitSessionEmpty(identity SessionIdentity, timeout time.Duration) (bool, er
 	}
 }
 
-type SessionTable struct {
-	processes []Info
-}
-
-func CaptureSessionTable() (*SessionTable, error) {
-	processes, err := sessionProcessTable(true)
-	if err != nil {
-		return nil, err
-	}
-	return &SessionTable{processes: processes}, nil
-}
-
-func (t *SessionTable) SessionEmpty(identity SessionIdentity) (bool, error) {
-	if t == nil {
-		return false, fmt.Errorf("nil process session table")
-	}
-	return inspectSessionTable(t.processes, identity, false)
-}
-
-func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) {
+func inspectSession(identity SessionIdentity) (bool, error) {
 	if err := validateSessionIdentity(identity); err != nil {
 		return false, err
 	}
@@ -213,7 +188,7 @@ func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	return inspectSessionTable(processes, identity, excludeLeader)
+	return inspectSessionTable(processes, identity)
 }
 
 func validateSessionIdentity(identity SessionIdentity) error {
@@ -223,7 +198,7 @@ func validateSessionIdentity(identity SessionIdentity) error {
 	return nil
 }
 
-func inspectSessionTable(processes []Info, identity SessionIdentity, excludeLeader bool) (bool, error) {
+func inspectSessionTable(processes []Info, identity SessionIdentity) (bool, error) {
 	if err := validateSessionIdentity(identity); err != nil {
 		return false, err
 	}
@@ -262,10 +237,7 @@ func inspectSessionTable(processes []Info, identity SessionIdentity, excludeLead
 			continue
 		}
 		if leaderReused {
-			return false, fmt.Errorf("guarded session %d has live members after leader identity reuse", identity.SessionID)
-		}
-		if excludeLeader && process.PID == identity.LeaderPID && leaderInSession {
-			continue
+			return false, fmt.Errorf("session %d has live members after leader identity reuse", identity.SessionID)
 		}
 		return false, nil
 	}

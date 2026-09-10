@@ -197,7 +197,7 @@ func TestDiagnosticSummaryReportsWhatTheDaemonHolds(t *testing.T) {
 		leaseRun: map[admission.LeaseID]string{"lease-1": "run-1"},
 	}
 	summary := d.diagnosticSummary()
-	for _, want := range []string{"goroutines=", "conns=2", "holders=1", "waiters=1", "leases=1", "guards=", "v1.2.3"} {
+	for _, want := range []string{"goroutines=", "conns=2", "holders=1", "waiters=1", "leases=1", "v1.2.3"} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary %q is missing %q", summary, want)
 		}

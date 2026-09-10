@@ -86,6 +86,22 @@ unlock.
   bundle file and page now carries `Vary: Accept-Encoding`, and an encoded
   response carries no `Accept-Ranges`.
 
+- **build:** `bin/install.sh` and `bin/cross-compile.sh` build with `-trimpath`
+  and `-ldflags "-s -w"`, the flags `.github/workflows/release.yaml` already
+  passed, so a local install strips and trims the way the release does. On
+  linux/amd64 the CLI falls from 96.0 MiB to 69.0 MiB and
+  relinks in about 2.2s instead of 4.9s. `bin/cross-compile.sh` also stamps
+  `main.Version`, so its artifacts report the commit they came from instead of
+  `(devel)`
+- **cache:** Compiled pipeline binaries build with `-ldflags "-s -w"` beside
+  `-trimpath`, dropping the symbol table and DWARF. On linux/amd64 the binary
+  falls from 100.2 MiB to 71.1 MiB and a relink from about 3.0s to 2.0s. The
+  build flags are now an input to the pipeline cache key, so every checkout
+  recompiles once after upgrading rather than serving the unstripped binary it
+  already cached. A debugger attached to a stripped binary has no variable
+  names or line numbers, and a core dump cannot be symbolised; set
+  `SPARKWING_NO_BINCACHE=1` to run the pipeline through `go run .` when that is
+  needed
 - **cli (Breaking):** `update` owns CLI and SDK updates
   Use `update --cli` (the default) or `update --sdk`; `version update` is
   removed. Read-only `update --check` honors the target and release, emits
@@ -244,6 +260,14 @@ unlock.
   eight findings linted clean in three seconds. Hand each worktree
   `ToolCacheDir("golangci-lint")`. See
   [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
+
+- **cli + wingd (Breaking):** `sparkwing queue exec` and the daemon's
+  guarded-session machinery behind it. The command admitted one bootstrap
+  command under a lease the daemon held over the command's process session, and
+  it was the only sender of the `guard_complete` and `guard_complete_ack`
+  messages and of `admission_request.guard`; all three leave the wire with it.
+  Run work that needs admission as a pipeline. See [queue exec
+  removed](docs/migrations/_unreleased.md#queue-exec-removed).
 
 ## [v0.48.1] - 2026-09-09
 ### Changed
