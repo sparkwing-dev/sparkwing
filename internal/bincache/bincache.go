@@ -120,12 +120,10 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 		return fmt.Errorf("%w: %s", ErrDigest, hash)
 	}
 	if err := os.Chmod(tmp, 0o755); err != nil {
-		_ = os.Remove(tmp)
-		return err
+		return errors.Join(err, os.Remove(tmp))
 	}
 	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		return err
+		return errors.Join(err, os.Remove(tmp))
 	}
 	return nil
 }

@@ -96,12 +96,10 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 		}
 	}
 	if err := os.Chmod(tmp, 0o755); err != nil {
-		_ = os.Remove(tmp)
-		return err
+		return errors.Join(err, os.Remove(tmp))
 	}
 	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		return err
+		return errors.Join(err, os.Remove(tmp))
 	}
 	return nil
 }
