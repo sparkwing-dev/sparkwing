@@ -1125,6 +1125,17 @@ func openBinForRead(hash, path string) (*os.File, string, error) {
 	return f, digest, nil
 }
 
+type binUploadWriter struct {
+	file     *os.File
+	writeErr error
+}
+
+func (w *binUploadWriter) Write(p []byte) (int, error) {
+	n, err := w.file.Write(p)
+	w.writeErr = err
+	return n, err
+}
+
 func handleBin(w http.ResponseWriter, r *http.Request) {
 	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
 	if !validBinHash.MatchString(hash) {
@@ -1178,10 +1189,15 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 		sum := sha256.New()
-		n, err := io.Copy(io.MultiWriter(tmpFile, sum), r.Body)
+		staged := &binUploadWriter{file: tmpFile}
+		n, err := io.Copy(io.MultiWriter(staged, sum), r.Body)
 		if err != nil {
 			tmpFile.Close()
-			http.Error(w, "read error", http.StatusBadRequest)
+			if staged.writeErr != nil {
+				http.Error(w, "write error", http.StatusInternalServerError)
+			} else {
+				http.Error(w, "read error", http.StatusBadRequest)
+			}
 			return
 		}
 		if err := tmpFile.Chmod(0o755); err != nil {
