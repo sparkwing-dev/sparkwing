@@ -118,12 +118,7 @@ func descendantsEmpty(leader int, exited, session bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, process := range processes {
-		if process.Group == leader && process.PID != leader {
-			return false, nil
-		}
-	}
-	return true, nil
+	return descendantsEmptyInTable(processes, leader, false), nil
 }
 
 func signalSession(leader int, sig syscall.Signal) error {
@@ -154,10 +149,18 @@ func sessionDescendantsEmpty(leader int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	return descendantsEmptyInTable(processes, leader, true), nil
+}
+
+func descendantsEmptyInTable(processes []Info, leader int, session bool) bool {
 	for _, process := range processes {
-		if process.Session == leader && process.PID != leader {
-			return false, nil
+		owner := process.Group
+		if session {
+			owner = process.Session
+		}
+		if owner == leader && process.PID != leader && !processTerminated(process.State) {
+			return false
 		}
 	}
-	return true, nil
+	return true
 }
