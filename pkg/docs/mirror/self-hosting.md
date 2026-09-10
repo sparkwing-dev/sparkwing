@@ -18,7 +18,7 @@ Run a pipeline on the machine where you invoke Sparkwing:
 
 ```bash
 sparkwing run build
-sparkwing dashboard start
+sparkwing serve start
 ```
 
 This path needs no controller or Kubernetes cluster. Runs, logs, and cache

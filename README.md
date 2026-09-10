@@ -21,7 +21,7 @@ For a specific version: `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- 
 
 Building from source via `go install` is supported, but the Next.js
 dashboard bundle is a generated artifact and is not checked into the
-repository, so a source build will refuse to start `sparkwing dashboard`
+repository, so a source build will refuse to start `sparkwing serve`
 with a clear message. Use a release binary for the dashboard, or
 generate the bundle locally first (`bash bin/build-web.sh && go install
 ./cmd/sparkwing` from a sparkwing checkout).
@@ -37,7 +37,7 @@ sparkwing pipeline new --name hello
 sparkwing run hello
 
 # Open the local dashboard
-sparkwing dashboard start
+sparkwing serve start
 ```
 
 `sparkwing info` surveys the current repo and suggests next commands.
@@ -111,7 +111,7 @@ cadence.
 
 The controller's HTTP API (served by `sparkwing-controller` in
 cluster mode and embedded in the `sparkwing` CLI for laptop mode
-via `sparkwing dashboard start`) is documented as an OpenAPI 3.0
+via `sparkwing serve start`) is documented as an OpenAPI 3.0
 spec at
 [`api/openapi.yaml`](./api/openapi.yaml). Every route, request
 shape, response shape, and security requirement is described there.

@@ -3,6 +3,24 @@
 This guide covers breaking changes listed under `[Unreleased]`. At release,
 move the sections into the versioned migration guide and update changelog links.
 
+## Serve command
+
+The local dashboard and API lifecycle now lives under `sparkwing serve`.
+Update shell scripts, shortcuts, and runbooks to use these commands:
+
+| Previous command | Replacement |
+| --- | --- |
+| `sparkwing dashboard start` | `sparkwing serve start` |
+| `sparkwing dashboard status` | `sparkwing serve status` |
+| `sparkwing dashboard kill` | `sparkwing serve kill` |
+| `sparkwing dashboard stop` | `sparkwing serve stop` |
+
+The retired `dashboard` command fails with a replacement instruction and
+performs no service action. Existing lifecycle flags and exit codes stay the
+same. The dashboard UI, HTTP routes, JSON service identity `dashboard`, and
+`dashboard.pid` / `dashboard.log` state paths keep their names, so `serve`
+addresses the same local service and state.
+
 ## Lint slots removed
 
 `sparkwing.AcquireLintSlot`, the `LintSlot` type, its `Configure` and

@@ -1,10 +1,10 @@
 <!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
-# CLI reference: sparkwing dashboard
+# CLI reference: sparkwing serve
 
-Every `sparkwing dashboard` command, flag, and argument, generated from the CLI's own command registry. All command groups are indexed in [cli-reference.md](cli-reference.md).
+Every `sparkwing serve` command, flag, and argument, generated from the CLI's own command registry. All command groups are indexed in [cli-reference.md](cli-reference.md).
 
-## `sparkwing dashboard`
+## `sparkwing serve`
 
 Manage the local dashboard + API server
 
@@ -26,16 +26,16 @@ port.
 
 ```sh
 # Start the dashboard
-sparkwing dashboard start
+sparkwing serve start
 
 # Check liveness
-sparkwing dashboard status
+sparkwing serve status
 
 # Stop the dashboard
-sparkwing dashboard kill
+sparkwing serve kill
 ```
 
-## `sparkwing dashboard kill`
+## `sparkwing serve kill`
 
 Stop a running dashboard server
 
@@ -55,10 +55,10 @@ when nothing is running.
 
 ```sh
 # Stop the dashboard
-sparkwing dashboard kill
+sparkwing serve kill
 ```
 
-## `sparkwing dashboard start`
+## `sparkwing serve start`
 
 Spawn the detached dashboard server (replaces any running one)
 
@@ -95,22 +95,22 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 
 ```sh
 # Start with defaults
-sparkwing dashboard start
+sparkwing serve start
 
 # Use an alternate port
-sparkwing dashboard start --addr 127.0.0.1:5000
+sparkwing serve start --addr 127.0.0.1:5000
 
 # Isolate state under a scratch dir
-sparkwing dashboard start --home /tmp/sparkwing-x
+sparkwing serve start --home /tmp/sparkwing-x
 
 # Tail CI runs from S3 (no SQLite)
-sparkwing dashboard start --profile ci-smoke --no-local-store --read-only
+sparkwing serve start --profile ci-smoke --no-local-store --read-only
 
 # Serve a LAN bind under a browser-facing name
-sparkwing dashboard start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343
+sparkwing serve start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343
 ```
 
-## `sparkwing dashboard status`
+## `sparkwing serve status`
 
 Report whether the dashboard is running
 
@@ -129,5 +129,5 @@ running, 1 when not.
 
 ```sh
 # Check liveness
-sparkwing dashboard status
+sparkwing serve status
 ```

@@ -1,10 +1,10 @@
-The sparkwing dashboard: a [Next.js](https://nextjs.org) SPA that the Go
+The sparkwing serve: a [Next.js](https://nextjs.org) SPA that the Go
 binaries embed and serve.
 
 ## Getting started
 
 Run `bash bin/dev-start.sh` from the repo root. It starts the dashboard
-backend on :4343 (`sparkwing dashboard start`, serving /api/v1/* off
+backend on :4343 (`sparkwing serve start`, serving /api/v1/* off
 ~/.sparkwing/state.db) and `next dev` on :3100. The dev-only rewrite in
 `next.config.ts` proxies /api/* to the backend, so UI edits hot-reload
 without rebuilding the Go binary.
@@ -36,7 +36,7 @@ dependencies before running the local gate; hosted CI runs `npm ci` itself.
 
 `next build` static-exports the dashboard to `web/out/`. `bash
 bin/build-web.sh` copies that into `internal/web/next-out/`, which
-`cmd/sparkwing` (`sparkwing dashboard start`) and `cmd/sparkwing-web` (the
+`cmd/sparkwing` (`sparkwing serve start`) and `cmd/sparkwing-web` (the
 cluster dashboard pod) embed with `//go:embed all:next-out`.
 `bin/install.sh` and the release workflow both run that script, so every
 install and released artifact ships the current dashboard. Static export has

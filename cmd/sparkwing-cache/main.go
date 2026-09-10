@@ -42,7 +42,7 @@ func run(args []string) error {
 		"how long a successful mirror fetch lets request handlers skip their own fetch. Negative disables the throttle. Falls back to $FETCH_FRESH_WINDOW.")
 	fs.DurationVar(&cfg.RecloneCooldown, "reclone-cooldown",
 		envDuration("RECLONE_COOLDOWN", cfg.RecloneCooldown),
-		"minimum gap between /archive recovery reclones of the same repo. Negative disables the cooldown. Falls back to $RECLONE_COOLDOWN.")
+		"minimum gap between /archive recovery reclones, and between clone-if-missing attempts, for the same repo. Negative disables the cooldown. Falls back to $RECLONE_COOLDOWN.")
 	fs.DurationVar(&cfg.ProxyCacheTTL, "proxy-cache-ttl",
 		envDuration("PROXY_CACHE_TTL", cfg.ProxyCacheTTL),
 		"max age of mutable proxy entries before re-fetching upstream. Falls back to $PROXY_CACHE_TTL.")

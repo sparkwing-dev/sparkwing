@@ -21,9 +21,9 @@ func TestOutputContractTerminal(t *testing.T) {
 		{"plain", "plain", []string{"version", "--offline"}},
 		{"onboarding-json", "json", []string{"info", "--first-time"}},
 		{"help-json", "json", []string{"--help"}},
-		{"dashboard-default", "", []string{"dashboard", "kill"}},
-		{"dashboard-json", "json", []string{"dashboard", "kill"}},
-		{"dashboard-plain", "plain", []string{"dashboard", "kill"}},
+		{"serve-default", "", []string{"serve", "kill"}},
+		{"serve-json", "json", []string{"serve", "kill"}},
+		{"serve-plain", "plain", []string{"serve", "kill"}},
 		{"consumer-default", "", []string{"runs", "consumer", "stop"}},
 		{"consumer-json", "json", []string{"runs", "consumer", "stop"}},
 	} {

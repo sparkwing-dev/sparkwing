@@ -69,6 +69,11 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A child-await timeout names what the parent observed.
+  The error carries the poll count, the last child status read, how long the
+  parent waited, and the first and last store error it retried past, on both
+  the in-process and node-process wait loops. It previously reported only
+  `context deadline exceeded`.
 - **cli:** `pipeline hooks survey` no longer closes with `every declared gate
   fires` while a row reports a hook that does not; a repository that runs its
   commit gate and is missing a `post-commit` notifier is now counted and named
@@ -93,6 +98,13 @@ unlock.
   instead of reporting a raw socket read timeout the operator has to interpret
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
+- **cache:** A gitcache repository whose mirror is missing is cloned at most
+  once per `RECLONE_COOLDOWN`.
+  A recovery reclone deletes the mirror before cloning, so a reclone that failed
+  left every later `/archive` or `/git/<name>` request re-downloading the whole
+  repository. A successful fetch or clone clears the cooldown, and so does
+  re-registering the repo. `GET /health` now reports a failed clone alongside
+  the fetch failures it already reported.
 - **logs:** Concurrent filesystem appends keep each record and its newline together
 - **logs:** S3 log deletion reports per-object failures
 - **sdk:** Backend overlays preserve the inherited controller name
@@ -123,6 +135,11 @@ unlock.
   process group, cancellation reaches the `go` process alone.
 
 ### Removed
+
+- **cli (Breaking):** The `dashboard` command group is replaced by `serve`
+  Use `sparkwing serve start`, `serve status`, and `serve kill` for the local
+  dashboard and API. The retired noun fails without starting or stopping a
+  service. See [serve command](docs/migrations/_unreleased.md#serve-command).
 
 - **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
   `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they

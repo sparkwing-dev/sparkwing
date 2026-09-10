@@ -413,6 +413,7 @@ func TestGitObjectRE_AcceptsOnlyAnObjectID(t *testing.T) {
 }
 
 func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
+	resetFetchState(t)
 	root := t.TempDir()
 
 	upstream := filepath.Join(root, "upstream.git")
@@ -457,6 +458,7 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 }
 
 func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
+	resetFetchState(t)
 	root := t.TempDir()
 	oldRepoDir := repoDir
 	repoDir = filepath.Join(root, "cache")

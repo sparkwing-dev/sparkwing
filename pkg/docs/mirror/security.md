@@ -65,7 +65,7 @@ nothing else is. Give `runs.read` to a principal you would show the whole
 deployment's history.
 
 **The laptop dashboard serves an unauthenticated controller.** `sparkwing
-dashboard start` mounts the controller API and the dashboard on one
+serve start` mounts the controller API and the dashboard on one
 listener with no token check, so anything that reaches the port can trigger
 pipelines and read secrets. The boundary is the bind address: the process
 refuses a non-loopback `--addr` unless the operator passes `--allow-remote`,
