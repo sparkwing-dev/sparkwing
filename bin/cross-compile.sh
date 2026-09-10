@@ -17,6 +17,15 @@ declare -a PLATFORMS=(
 
 export GOPRIVATE='github.com/sparkwing-dev/*'
 
+# Same stamp install.sh writes: without -X main.Version an artifact reports the
+# module version Go recorded rather than the commit it was built from.
+BASE="$(git -C "$ROOT" tag -l 'v0.*' | sort -V | tail -1)"
+[ -n "$BASE" ] || BASE="v0.0.0"
+VERSION="$BASE-dev+$(git -C "$ROOT" rev-parse --short HEAD)"
+if ! git -C "$ROOT" diff --quiet HEAD 2>/dev/null; then
+  VERSION="$VERSION+dirty"
+fi
+
 for plat in "${PLATFORMS[@]}"; do
   goos="${plat%/*}"
   goarch="${plat##*/}"
@@ -24,7 +33,8 @@ for plat in "${PLATFORMS[@]}"; do
     out="$DIST/${bin}-${goos}-${goarch}"
     echo "build $out"
     GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go -C "$ROOT" build \
-      -ldflags="-s -w" \
+      -trimpath \
+      -ldflags="-s -w -X main.Version=$VERSION" \
       -o "$out" \
       "./cmd/$bin"
   done
