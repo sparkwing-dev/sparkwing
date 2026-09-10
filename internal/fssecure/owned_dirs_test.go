@@ -1,6 +1,7 @@
 package fssecure_test
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -143,7 +144,7 @@ func parseRepo(root string) ([]parsedFile, error) {
 		}
 		file, parseErr := parser.ParseFile(fset, path, nil, 0)
 		if parseErr != nil {
-			return nil
+			return fmt.Errorf("parse %s: %w", path, parseErr)
 		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
