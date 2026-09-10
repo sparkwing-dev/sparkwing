@@ -168,6 +168,11 @@ unlock.
   concurrent agents, and name a bare `go test ./...` or lint run as load it
   cannot see. Both point at `sparkwing queue list` for order and estimates and
   `sparkwing queue priority` for re-ranking.
+- **getting-started:** The hand-placed download recipe no longer offers
+  `SHA256SUMS` on its own as verification. That file travels from the same
+  origin as the binary, so comparing them shows only that the transfer
+  finished. The section names the published signatures and points at
+  `install/cli-install.sh`, which checks them
 
 ### Fixed
 
@@ -329,6 +334,22 @@ unlock.
   messages and of `admission_request.guard`; all three leave the wire with it.
   Run work that needs admission as a pipeline. See [queue exec
   removed](docs/migrations/_unreleased.md#queue-exec-removed).
+
+### Security
+
+- **install:** `install/cli-install.sh` installs the CLI from a release only
+  after checking the release signature. It downloads the asset, `SHA256SUMS`,
+  and both detached signatures, verifies the ed25519 signature over
+  `SHA256SUMS` against a public key built into the script, verifies the asset's
+  digest against its `SHA256SUMS` line, verifies the asset's own signature
+  against the same key, and then requires the binary to report the release tag
+  and platform it was fetched for. A missing, malformed, wrongly-keyed or
+  mismatched signature installs nothing, and so does a missing `openssl`. The
+  built-in key is the one in `internal/releaseauth.TrustedPublicKeys`, which is
+  what the release pipeline refuses to sign without, and a test fails when the
+  two copies drift apart. An installer older than a key rotation refuses the
+  new release and says to re-fetch the script. It sits beside
+  `install/install.sh`, which installs the runner as a service and is unchanged
 
 ## [v0.48.1] - 2026-09-09
 ### Changed

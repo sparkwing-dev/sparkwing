@@ -34,9 +34,21 @@ curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/s
 ```
 
 Keep to one location: `sparkwing doctor` reports competing copies on
-PATH, and a second copy shadows the first. Each release also publishes
-`SHA256SUMS` covering every binary; diff your download against it to
-verify.
+PATH, and a second copy shadows the first.
+
+A hand-placed download is unverified. `SHA256SUMS` reaches you from the
+same origin as the binary, so comparing the two proves the transfer
+finished and nothing else. Every release also publishes `SHA256SUMS.sig`
+and one `.sig` per asset, signed with the key that `sparkwing update`
+carries. `install/cli-install.sh` in the sparkwing repository performs
+the whole check and installs nothing it cannot verify:
+
+```bash
+bash install/cli-install.sh --version vX.Y.Z
+```
+
+To check a download by hand, verify the signature over `SHA256SUMS`
+against that key before you trust any digest in it.
 
 Or, if Go is on PATH, build from source:
 

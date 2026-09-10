@@ -13,7 +13,7 @@ func (Lint) ShortHelp() string {
 }
 
 func (Lint) Help() string {
-	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), the CHANGELOG-style gate enforcing docs/changelog-style.md (dedupe sub-headings + breaking-entry migration links), and the API-surface drift gate (bin/check-api-snapshot.sh). It also runs shellcheck over every tracked script (bin/check-shell.sh), the installer report (bin/install-test.sh), the service installer's config guard (bin/service-install-test.sh), the shell and changelog script-portability checks (bin/check-shell-test.sh, bin/check-changelog-test.sh), the agent-trial oracle's regression test (bin/agent-trial-oracle-test.sh), and markdownlint over the markdown tree. shellcheck, markdownlint-cli2, and jq must be on PATH. See VERSIONING.md."
+	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), the CHANGELOG-style gate enforcing docs/changelog-style.md (dedupe sub-headings + breaking-entry migration links), and the API-surface drift gate (bin/check-api-snapshot.sh). It also runs shellcheck over every tracked script (bin/check-shell.sh), the installer report (bin/install-test.sh), the service installer's config guard (bin/service-install-test.sh), the CLI installer's release-verification causals (bin/cli-install-test.sh), the shell and changelog script-portability checks (bin/check-shell-test.sh, bin/check-changelog-test.sh), the agent-trial oracle's regression test (bin/agent-trial-oracle-test.sh), and markdownlint over the markdown tree. shellcheck, markdownlint-cli2, and jq must be on PATH. See VERSIONING.md."
 }
 
 func (Lint) Examples() []sparkwing.Example {
@@ -77,6 +77,11 @@ func (p *Lint) run(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Info(ctx, "service installer config guard: clean")
+
+	if _, err := sparkwing.Bash(ctx, "bash bin/cli-install-test.sh").Run(); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "CLI installer release verification: clean")
 
 	if _, err := sparkwing.Bash(ctx, "bash bin/agent-trial-oracle-test.sh").Run(); err != nil {
 		return err
