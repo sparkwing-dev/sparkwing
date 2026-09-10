@@ -899,8 +899,10 @@ func TestTrackerIDPatternKeepsTheOtherPrefixesUppercaseOnly(t *testing.T) {
 	// safety: the case-insensitive group covers BW alone; a lowercase spelling
 	// of any other prefix is ordinary prose and must stay allowed. Each literal
 	// is split so this file does not trip the sweep it exercises.
-	allowed := []string{"imp" + "-12", "sdk" + "-3", "tod" + "-9", "run" + "-3", "Imp" + "-12",
-		"BWT" + "-789", "abw" + "-12", "bw_12"}
+	allowed := []string{
+		"imp" + "-12", "sdk" + "-3", "tod" + "-9", "run" + "-3", "Imp" + "-12",
+		"BWT" + "-789", "abw" + "-12", "bw_12",
+	}
 	for _, s := range allowed {
 		if trackerIDPattern.MatchString("see " + s + " for context") {
 			t.Errorf("%q was refused; the case-insensitive group leaked past BW", s)
