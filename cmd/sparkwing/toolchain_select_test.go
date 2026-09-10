@@ -273,3 +273,17 @@ func TestInfoSDKPinReportsBothVersions(t *testing.T) {
 		t.Fatalf("matching versions still reported a pin line: %+v", pin)
 	}
 }
+
+func TestInfoSDKPinReportsLocalToolchainRefusal(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv(toolchainModeEnv, "local")
+	withToolchainActive(t, "")
+	info := Info{Version: parseInfoVersion("v0.38.2"), Binary: "/usr/local/bin/sparkwing", Project: InfoProject{Found: true, SparkwingDir: writeSparkwingModule(t, pinModule("v0.40.0"))}}
+	pin := gatherSDKPin(info)
+	if pin == nil {
+		t.Fatal("missing pin report")
+	}
+	if pin.Runs != "" || pin.RunsFrom != "" || !strings.Contains(sdkPinLine(pin), "forbids") {
+		t.Fatalf("refusal presented as runnable: %+v (%s)", pin, sdkPinLine(pin))
+	}
+}

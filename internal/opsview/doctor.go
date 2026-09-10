@@ -718,7 +718,7 @@ func diagnoseToolchains(p paths.Paths, report *DoctorReport) {
 		})
 	}
 	sort.Slice(report.Toolchains, func(i, j int) bool {
-		return report.Toolchains[i].Version < report.Toolchains[j].Version
+		return semver.Compare(report.Toolchains[i].Version, report.Toolchains[j].Version) < 0
 	})
 }
 

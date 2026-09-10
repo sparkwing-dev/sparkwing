@@ -47,6 +47,7 @@ type InfoSDKPin struct {
 	Runs      string `json:"runs"`
 	RunsFrom  string `json:"runs_from,omitempty"`
 	Switches  bool   `json:"switches"`
+	Refusal   string `json:"refusal,omitempty"`
 }
 
 type InfoExecutable struct {
@@ -135,8 +136,11 @@ func parseInfoVersion(raw string) InfoVersion {
 		clean = clean[:idx]
 	}
 	parts := strings.Split(strings.TrimPrefix(clean, "v"), ".")
-	if len(parts) == 3 && !pseudo {
+	if len(parts) == 3 && !pseudo && semver.IsValid(clean) {
 		v.Semver = clean
+		if !devBuild && !dirty && semver.IsValid(raw) {
+			v.Semver = semver.Canonical(raw)
+		}
 	}
 	switch {
 	case dirty:
@@ -146,6 +150,9 @@ func parseInfoVersion(raw string) InfoVersion {
 	case devBuild:
 		v.BuildType = "local-clean"
 		v.HumanLabel = "local source build"
+	case v.Semver != "" && semver.Prerelease(v.Semver) != "":
+		v.BuildType = "prerelease"
+		v.HumanLabel = "pre-release build"
 	case v.Semver != "":
 		v.IsRelease = true
 		v.BuildType = "release"
@@ -370,7 +377,7 @@ func printFirstTimeCard(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, color.Bold("TIPS"))
 	tips := []InfoNextStep{
-		{Command: "sparkwing dashboard start", Purpose: "run the dashboard locally to watch runs in a browser"},
+		{Command: "sparkwing serve start", Purpose: "run the dashboard locally to watch runs in a browser"},
 		{Command: "sparkwing info", Purpose: "surveys the current repo + suggests next commands"},
 	}
 	cmpCmd, cmpNote := firstTimeCompletionHint()
@@ -488,13 +495,16 @@ func gatherInfo() Info {
 	info.Executable = gatherExecutable()
 	info.SDKPin = gatherSDKPin(info)
 	info.NextSteps = nextStepsFor(info)
-	info.Tips = gatherTips(info)
+	info.Tips = gatherTips()
 	return info
 }
 
 func sdkPinLine(pin *InfoSDKPin) string {
 	if pin == nil {
 		return ""
+	}
+	if pin.Refusal != "" {
+		return pin.Refusal
 	}
 	if pin.Switches {
 		return fmt.Sprintf("this repo pins SDK %s, so a pipeline run switches to %s at %s",
@@ -522,6 +532,11 @@ func gatherSDKPin(info Info) *InfoSDKPin {
 		return report
 	}
 	decision := planToolchainSwitch(info.Version.Installed, pin, mode, toolchainActive)
+	if decision.action == toolchainRefuse {
+		report.Runs, report.RunsFrom = "", ""
+		report.Refusal = toolchainLocalRefusal(decision).Error()
+		return report
+	}
 	if decision.action != toolchainSwitch {
 		return report
 	}
@@ -554,16 +569,13 @@ func gatherExecutable() InfoExecutable {
 	return out
 }
 
-func gatherTips(info Info) []InfoTip {
+func gatherTips() []InfoTip {
 	var tips []InfoTip
 
 	if t, ok := tipTabComplete(); ok {
 		tips = append(tips, t)
 	}
 	if t, ok := tipDashboardNotRunning(); ok {
-		tips = append(tips, t)
-	}
-	if t, ok := tipCLIBehindLatest(info); ok {
 		tips = append(tips, t)
 	}
 
@@ -655,35 +667,9 @@ func tipDashboardNotRunning() (InfoTip, bool) {
 	return InfoTip{
 		ID:      "dashboard",
 		Title:   "Local dashboard is not running",
-		Command: "sparkwing dashboard start",
+		Command: "sparkwing serve start",
 		Note:    "runs at http://127.0.0.1:4343",
 	}, true
-}
-
-func tipCLIBehindLatest(info Info) (InfoTip, bool) {
-	if !info.Version.IsRelease || info.Version.Semver == "" {
-		return InfoTip{}, false
-	}
-	latest, err := fetchLatestRelease()
-	if err != nil || latest == "" {
-		return InfoTip{}, false
-	}
-	if !isSemver(info.Version.Semver) || !isSemver(latest) {
-		return InfoTip{}, false
-	}
-	if !semverBehind(info.Version.Semver, latest) {
-		return InfoTip{}, false
-	}
-	return InfoTip{
-		ID:      "cli-behind",
-		Title:   "A newer sparkwing release is available",
-		Command: "sparkwing version update --cli",
-		Note:    "installed " + info.Version.Semver + " → latest " + latest,
-	}, true
-}
-
-func semverBehind(current, latest string) bool {
-	return semver.Compare(current, latest) < 0
 }
 
 func goToolchainVersion() string {
@@ -730,7 +716,7 @@ func nextStepsFor(info Info) []InfoNextStep {
 		{Command: "sparkwing pipeline new --name <name>", Purpose: "scaffold a new pipeline"},
 		{Command: "sparkwing docs read --guide authoring", Purpose: "everything needed to write a pipeline, in one call"},
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
-		{Command: "sparkwing dashboard start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
+		{Command: "sparkwing serve start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
 	}
 	if step, ok := missingHooksStep(info); ok {
 		steps = append([]InfoNextStep{step}, steps...)

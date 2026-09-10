@@ -27,6 +27,7 @@ func ParseSearch(raw string) SearchTerms {
 }
 
 func ParseLooseDuration(v string) (time.Duration, error) {
+	v = strings.ToLower(v)
 	if v == "" {
 		return 0, errors.New("empty duration")
 	}

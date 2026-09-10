@@ -135,7 +135,10 @@ func IsDirty(ctx context.Context, repoDir string) (bool, error) {
 // staged-but-not-committed changes are reflected in the hash --
 // content addressing keys off the tree the build will actually see.
 func FilesetHash(ctx context.Context, repoDir string) (string, error) {
-	files := listGitFiles(ctx, repoDir)
+	files, err := listGitFiles(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
 	if files == nil {
 		files = listFilesystemFiles(repoDir)
 	}
@@ -185,23 +188,34 @@ func FilesetHash(ctx context.Context, repoDir string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil))[:12], nil
 }
 
-func listGitFiles(ctx context.Context, repoDir string) []string {
-	gitDir := ".git"
-	if repoDir != "" {
-		gitDir = filepath.Join(repoDir, ".git")
+func listGitFiles(ctx context.Context, repoDir string) ([]string, error) {
+	dir, err := filepath.Abs(repoDir)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		return nil
+	for {
+		_, err := os.Stat(filepath.Join(dir, ".git"))
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, nil
+		}
+		dir = parent
 	}
 	tracked, err := runGit(ctx, repoDir, "ls-files")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	untracked, err := runGit(ctx, repoDir, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return splitLines(tracked + "\n" + untracked)
+	return append([]string{}, splitLines(tracked+"\n"+untracked)...), nil
 }
 
 func listFilesystemFiles(repoDir string) []string {
@@ -351,7 +365,8 @@ func TagExistsOnRemote(ctx context.Context, repoDir, tag string) (bool, error) {
 
 // PushTag creates an annotated tag locally in repoDir and pushes it
 // to origin. Refuses with ErrTagAlreadyExists if the remote already
-// has that tag (Go-module safety: never force-push a tag).
+// has that tag or a local tag points elsewhere. A local tag at HEAD can
+// be retried after a failed push. Tags are never force-pushed.
 func PushTag(ctx context.Context, repoDir, tag, message string) error {
 	if tag == "" {
 		return errors.New("git: empty tag")
@@ -368,7 +383,16 @@ func PushTag(ctx context.Context, repoDir, tag, message string) error {
 	if message == "" {
 		message = tag
 	}
-	if _, err := runGit(ctx, repoDir, "tag", "-a", tag, "-m", message); err != nil {
+	local, localErr := runGit(ctx, repoDir, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag+"^{commit}")
+	if localErr == nil {
+		head, err := CurrentSHA(ctx, repoDir)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(local) != head {
+			return fmt.Errorf("%w: local tag %s points outside HEAD", ErrTagAlreadyExists, tag)
+		}
+	} else if _, err := runGit(ctx, repoDir, "tag", "-a", tag, "-m", message); err != nil {
 		return fmt.Errorf("git: create tag %s: %w", tag, err)
 	}
 	if _, err := runGit(ctx, repoDir, "push", "origin", "refs/tags/"+tag); err != nil {
@@ -378,7 +402,7 @@ func PushTag(ctx context.Context, repoDir, tag, message string) error {
 }
 
 func runGit(ctx context.Context, repoDir string, args ...string) (string, error) {
-	return runGitEnv(ctx, repoDir, nil, args...)
+	return runGitEnv(ctx, repoDir, promptlessEnv(), args...)
 }
 
 func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {

@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
+- **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
+
 - **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
   the upstream output is absent. `TryGet` exists for the bootstrap run of a
   compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
@@ -30,8 +33,6 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
-- **development:** Repository-owned candidate install hook for Xwing rebuilds
-  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -51,9 +52,6 @@ unlock.
   pipeline has not passed turns every commit in the checkout into a failure
 
 ### Changed
-
-- **development (Breaking):** Use `.xwing-env.yaml` for repository candidate declarations
-  See [manifest migration](docs/migrations/project-env-yaml.md#project-manifests-use-yaml).
 
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
@@ -78,6 +76,46 @@ unlock.
 
 ### Fixed
 
+- **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
+  reads. It was parsed, validated and documented, and no code path read it.
+- **cache:** Concurrent binary downloads use independent staging files and
+  remove them when publication fails; uploads publish digests before blobs
+- **cache:** Binary storage supports existence checks and deletion, and streams
+  uploads to disk while distinguishing bad input from filesystem failures
+- **storage:** Transient S3 capability-probe failures can be retried
+- **store:** Retention uses finish time and reports only deleted runs; duplicate
+  trigger IDs retain their own errors instead of being labeled idempotency conflicts
+- **orchestrator:** Shared 128-bit random run identifiers avoid clock collisions;
+  failed expansion lookups retain the generator's panic diagnostic
+- **admission:** Child attachments validate owner proofs, terminated descendants
+  do not hold cleanup open, and failed local-console setup closes supplied listeners
+- **sdk:** Concurrent work-directory reads are synchronized, persistent notes
+  stay scoped to nodes, and callers cannot mutate the released protocol table
+- **git:** Input-discovery failures remain visible, tag-push retries preserve
+  existing targets, and network helpers disable Git's terminal credential prompts
+- **secrets:** Readers share dotenv decoding while preserving hash-prefixed
+  values; logged SCP URLs redact usernames and tokenizer settings remain available
+- **cli:** Completion retains descriptions and supports older Bash, including
+  empty results under `nounset`; cross-repository listing describes each repo once
+- **cli:** Version holds are normalized, orientation stays local and preserves
+  prereleases, and unsupported local toolchains report why they cannot run
+- **cli:** Missing runs differ from empty results, config help avoids secret
+  inspection, and invalid worker counts fail before execution
+- **cli:** Failed scaffolds remove their new source file, install and rollback
+  preserve permissions, and manifest verification accepts trust-set public keys
+- **docs:** Mutable web pages expire, pruning failures are reported, and source
+  selectors, migration bounds, directory flags and command errors match their behavior
+- **logs:** Observed file shrinkage resets stream offsets, color overrides are
+  synchronized, and default renderers honor the shared color policy
+- **web:** Zero-duration waterfalls stay finite; capped overview history is
+  labeled, and failed trend queries no longer produce successful partial results
+
+
+- **orchestrator:** A child-await timeout names what the parent observed.
+  The error carries the poll count, the last child status read, how long the
+  parent waited, and the first and last store error it retried past, on both
+  the in-process and node-process wait loops. It previously reported only
+  `context deadline exceeded`.
 - **cli:** `pipeline hooks survey` no longer closes with `every declared gate
   fires` while a row reports a hook that does not; a repository that runs its
   commit gate and is missing a `post-commit` notifier is now counted and named
@@ -102,6 +140,13 @@ unlock.
   instead of reporting a raw socket read timeout the operator has to interpret
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
+- **cache:** A gitcache repository whose mirror is missing is cloned at most
+  once per `RECLONE_COOLDOWN`.
+  A recovery reclone deletes the mirror before cloning, so a reclone that failed
+  left every later `/archive` or `/git/<name>` request re-downloading the whole
+  repository. A successful fetch or clone clears the cooldown, and so does
+  re-registering the repo. `GET /health` now reports a failed clone alongside
+  the fetch failures it already reported.
 - **logs:** Concurrent filesystem appends keep each record and its newline together
 - **logs:** S3 log deletion reports per-object failures
 - **sdk:** Backend overlays preserve the inherited controller name
@@ -132,6 +177,11 @@ unlock.
   process group, cancellation reaches the `go` process alone.
 
 ### Removed
+
+- **cli (Breaking):** The `dashboard` command group is replaced by `serve`
+  Use `sparkwing serve start`, `serve status`, and `serve kill` for the local
+  dashboard and API. The retired noun fails without starting or stopping a
+  service. See [serve command](docs/migrations/_unreleased.md#serve-command).
 
 - **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
   `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they

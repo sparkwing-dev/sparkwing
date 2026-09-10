@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -64,9 +65,7 @@ func readDescribeFile(path string) []sparkwing.DescribePipeline {
 }
 
 func refreshDescribeFromBinary(sparkwingDir, binPath, key string) ([]sparkwing.DescribePipeline, error) {
-	cmd := exec.Command(binPath, "--describe")
-	cmd.Dir = filepath.Dir(sparkwingDir)
-	raw, err := cmd.Output()
+	raw, err := runDescribeBinary(sparkwingDir, binPath)
 	if err != nil {
 		return nil, fmt.Errorf("run %s --describe: %w", binPath, err)
 	}
@@ -92,9 +91,7 @@ func writeDescribeCache(sparkwingDir, binPath string) error {
 		return fmt.Errorf("cache key: %w", err)
 	}
 
-	cmd := exec.Command(binPath, "--describe")
-	cmd.Dir = filepath.Dir(sparkwingDir)
-	out, err := cmd.Output()
+	out, err := runDescribeBinary(sparkwingDir, binPath)
 	if err != nil {
 		return fmt.Errorf("run %s --describe: %w", binPath, err)
 	}
@@ -125,4 +122,18 @@ func pipelineFlagsFromCache(sparkwingDir, pipelineName string) ([]sparkwing.Desc
 		}
 	}
 	return nil, nil
+}
+
+func runDescribeBinary(sparkwingDir, binPath string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binPath, "--describe")
+	cmd.Dir = filepath.Dir(sparkwingDir)
+	// safety: inherited output pipes must not extend the metadata deadline.
+	cmd.WaitDelay = 100 * time.Millisecond
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return out, err
 }

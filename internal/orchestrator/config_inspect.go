@@ -13,9 +13,12 @@ import (
 
 func runPipelineConfigInspect(pipeline string, extra []string) error {
 	format := "pretty"
+	help := false
 	for i := 0; i < len(extra); i++ {
 		tok := extra[i]
 		switch {
+		case tok == "-h", tok == "--help", tok == "--help=true":
+			help = true
 		case tok == "--json", tok == "--json=true":
 			format = "json"
 		case tok == "-o", tok == "--output":
@@ -29,6 +32,15 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	}
 	if format != "pretty" && format != "json" {
 		return fmt.Errorf("--output %q: must be pretty|json", format)
+	}
+
+	if help {
+		text := fmt.Sprintf("Print a pipeline's declared secrets with provenance.\n\nUSAGE\n  sparkwing run %s config [-o pretty|json]\n\nFLAGS\n  -o, --output  Output format: pretty|json\n  -h, --help    Show this help\n", pipeline)
+		if format == "json" {
+			return json.NewEncoder(os.Stdout).Encode(map[string]string{"kind": "help", "text": text})
+		}
+		_, err := fmt.Fprint(os.Stdout, text)
+		return err
 	}
 
 	reg, ok := sparkwing.Lookup(pipeline)

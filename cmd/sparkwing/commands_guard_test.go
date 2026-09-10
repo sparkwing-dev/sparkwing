@@ -11,7 +11,7 @@ import (
 
 func TestAllCommandsAreRegistered(t *testing.T) {
 	declared := commandVarsInSource(t, "help_registry.go")
-	registered := registeredCommandPaths()
+	registered := registeredCommandPaths(t)
 
 	missing := map[string]bool{}
 	for _, name := range declared {
@@ -102,9 +102,13 @@ func commandVarsInSource(t *testing.T, path string) []string {
 	return names
 }
 
-func registeredCommandPaths() map[string]bool {
+func registeredCommandPaths(t *testing.T) map[string]bool {
+	t.Helper()
 	fset := token.NewFileSet()
-	f, _ := parser.ParseFile(fset, "help_registry.go", nil, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, "help_registry.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse help_registry.go: %v", err)
+	}
 	pathByName := map[string]string{}
 	for _, decl := range f.Decls {
 		gen, ok := decl.(*ast.GenDecl)

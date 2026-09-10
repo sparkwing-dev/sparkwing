@@ -3,11 +3,14 @@ package color
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"golang.org/x/term"
 )
 
-var enabled = detectEnabled()
+var enabled atomic.Bool
+
+func init() { enabled.Store(detectEnabled()) }
 
 func detectEnabled() bool {
 	if os.Getenv("CLICOLOR_FORCE") == "1" || os.Getenv("SPARKWING_FORCE_COLOR") == "1" {
@@ -30,10 +33,10 @@ func IsInteractiveStdout() bool {
 
 // SetEnabled overrides the auto-detected setting. Mostly for tests
 // and the rare downstream caller that wants explicit control.
-func SetEnabled(on bool) { enabled = on }
+func SetEnabled(on bool) { enabled.Store(on) }
 
 // Enabled reports whether color output is currently emitted.
-func Enabled() bool { return enabled }
+func Enabled() bool { return enabled.Load() }
 
 func apply(code string, args ...any) string {
 	if len(args) == 0 {
@@ -43,7 +46,7 @@ func apply(code string, args ...any) string {
 	if len(args) > 1 {
 		text = fmt.Sprintf(text, args[1:]...)
 	}
-	if !enabled {
+	if !enabled.Load() {
 		return text
 	}
 	return code + text + "\033[0m"

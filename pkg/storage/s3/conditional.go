@@ -78,8 +78,9 @@ func (s *ArtifactStore) PutIfMatch(ctx context.Context, key string, r io.Reader,
 	return etagOf(out.ETag), nil
 }
 
-// ConditionalWritesSupported probes the live endpoint once and
-// memoizes. The probe does a create-if-absent on a fresh key, then a
+// ConditionalWritesSupported probes the live endpoint and memoizes a
+// completed capability result. Transient probe errors can be retried.
+// The probe does a create-if-absent on a fresh key, then a
 // second create-if-absent on the same key: an endpoint that enforces
 // preconditions rejects the second with ErrPreconditionFailed, while
 // one that ignores them accepts it. The probe key is deleted after.
@@ -90,6 +91,9 @@ func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, e
 		return s.casOnce.ok, s.casOnce.err
 	}
 	ok, err := s.probeConditionalWrites(ctx)
+	if err != nil {
+		return false, err
+	}
 	s.casOnce.resolved = true
 	s.casOnce.ok = ok
 	s.casOnce.err = err

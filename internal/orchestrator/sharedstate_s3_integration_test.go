@@ -167,8 +167,8 @@ func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 		LogStore:      logs,
 		ArtifactStore: art,
 	})
-	if elapsed := time.Since(started); elapsed >= 2*time.Second {
-		t.Fatalf("child-trigger handoff took %s, want less than 2s", elapsed)
+	if elapsed, budget := time.Since(started), timingBudget(2*time.Second); elapsed >= budget {
+		t.Fatalf("child-trigger handoff took %s, over its %s budget", elapsed, budget)
 	}
 	if err == nil && res != nil && res.Status == "success" {
 		t.Fatalf("trigger pipeline succeeded; expected the await to time out with no runner to claim the child")

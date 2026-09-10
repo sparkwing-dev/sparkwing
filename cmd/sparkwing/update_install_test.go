@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -96,7 +97,7 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "sparkwing")
 	old := []byte("old binary")
-	if err := os.WriteFile(target, old, 0o755); err != nil {
+	if err := os.WriteFile(target, old, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	asset := testVerifiedAsset([]byte("signed binary"))
@@ -133,6 +134,13 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	if string(got) != string(old) {
 		t.Fatalf("installed bytes = %q, want restored %q", got, old)
 	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("restored mode=%o, want700", info.Mode().Perm())
+	}
 	if syncCalls != 2 {
 		t.Fatalf("directory sync calls = %d, want failed install plus restored rollback", syncCalls)
 	}
@@ -141,4 +149,24 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 func testVerifiedAsset(body []byte) verifiedReleaseAsset {
 	digest := sha256.Sum256(body)
 	return verifiedReleaseAsset{name: "sparkwing-test", bytes: body, digest: hex.EncodeToString(digest[:])}
+}
+
+func TestInstallVerifiedAssetPreservesExistingPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	target := filepath.Join(t.TempDir(), "sparkwing")
+	if err := os.WriteFile(target, []byte("old binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installVerifiedAsset(testVerifiedAsset([]byte("new binary")), target); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("mode=%o want700", info.Mode().Perm())
+	}
 }

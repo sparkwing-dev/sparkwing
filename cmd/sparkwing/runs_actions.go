@@ -37,7 +37,7 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
 	if ctrlURL == "" {
 		return nil, nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
-			"(start it with `sparkwing dashboard start`, or pass --profile <profile>)", cmd)
+			"(start it with `sparkwing serve start`, or pass --profile <profile>)", cmd)
 	}
 	c = client.New(ctrlURL, nil)
 	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {

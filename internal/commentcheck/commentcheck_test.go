@@ -259,15 +259,14 @@ func notAnExample() {
 }
 
 func TestCheckFile_RejectsOpaqueTicketLabelsInDocumentation(t *testing.T) {
-	src := `// Package widget implements BW-123 behavior.
-package widget
-
-// Add preserves the bw-456 compatibility rule.
-func Add() {}
-
-// Remove accepts BWT-789 because it is not a ticket label.
-func Remove() {}
-`
+	// safety: split so the tracker-ID sweep does not charge this file.
+	const upper, lower = "BW" + "-123", "bw" + "-456"
+	src := "// Package widget implements " + upper + " behavior.\n" +
+		"package widget\n\n" +
+		"// Add preserves the " + lower + " compatibility rule.\n" +
+		"func Add() {}\n\n" +
+		"// Remove accepts BWT-789 because it is not a ticket label.\n" +
+		"func Remove() {}\n"
 	path := filepath.Join(t.TempDir(), "widget.go")
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
@@ -559,5 +558,123 @@ func TestScopedAdds_StagedIgnoresUntrackedFiles(t *testing.T) {
 	}
 	if len(added) != 0 {
 		t.Errorf("the staged diff reported %v; an untracked file the commit does not carry is charged to it", added)
+	}
+}
+
+func TestScan_FailsAFileItCannotParse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package widget\n\nfunc Broken( {\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "clean.go"), []byte("package widget\n\nfunc Clean() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	violations, unread, err := scan(dir)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Errorf("violations = %+v, want none from the parsable file", violations)
+	}
+	if len(unread) != 1 {
+		t.Fatalf("unreadable = %+v, want the file the parser rejected", unread)
+	}
+	if filepath.Base(unread[0].file) != "broken.go" || unread[0].err == nil {
+		t.Errorf("unreadable[0] = %+v, want broken.go and the parse error", unread[0])
+	}
+}
+
+func TestOnlyChanged_DropsFilesOutsideTheDiff(t *testing.T) {
+	root := t.TempDir()
+	unread := []unreadable{
+		{file: filepath.Join(root, "touched.go"), err: errors.New("parse")},
+		{file: filepath.Join(root, "untouched.go"), err: errors.New("parse")},
+	}
+	added := map[string]map[int]bool{"touched.go": {3: true}}
+
+	got := onlyChanged(unread, root, added)
+	if len(got) != 1 || filepath.Base(got[0].file) != "touched.go" {
+		t.Fatalf("onlyChanged = %+v, want only the file the diff touched", got)
+	}
+}
+
+func TestUnreadableFailure_NamesTheFileAndTheVerdict(t *testing.T) {
+	out := unreadableFailure([]unreadable{{file: "internal/widget/broken.go", err: errors.New("expected ')'")}})
+	for _, want := range []string{"internal/widget/broken.go", "expected ')'", "reached no verdict"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("failure = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
+func TestCheckFile_RejectsATaggedBlockComment(t *testing.T) {
+	src := `package widget
+
+func blockTagged() {
+	/* safety: an invariant stated in a block comment */
+	_ = 1
+}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 1 || got[0].line != 4 {
+		t.Fatalf("violations = %+v, want the block comment rejected; the usage text promises a tag opens a // comment", got)
+	}
+}
+
+func TestCheckFile_AllowsATaggedCommentInsideACompositeLiteral(t *testing.T) {
+	src := `package widget
+
+// Config is exported.
+type Config struct {
+	// Name is exported.
+	Name string
+}
+
+// Tagged carries a tagged comment inside its literal.
+var Tagged = Config{
+	// safety: the empty name means the caller supplies one
+	Name: "",
+}
+
+// Narrated carries an untagged one.
+var Narrated = Config{
+	// plain narration inside a composite literal
+	Name: "x",
+}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 1 || got[0].line != 17 {
+		t.Fatalf("violations = %+v, want only the untagged comment; a composite literal takes the same tags as any body", got)
+	}
+}
+
+func TestCheckFileRejectsExampleOutputInProduction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "example.go")
+	if err := os.WriteFile(path, []byte("package widget\nfunc ExampleAnything() {\n // Output: this is production narration\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations, err := checkFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("violations=%v, want production Output comment rejected", violations)
 	}
 }

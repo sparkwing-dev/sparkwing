@@ -152,7 +152,9 @@ by the background fetch interval.
 `POST /git/refresh` **is not throttled**. It exists to close the
 `git push && sparkwing pipeline trigger` race, so it always performs a
 real fetch. Use it (as the CLI does) whenever a caller needs a just-pushed
-SHA immediately. Cloning a repo that is not cached yet is also unaffected.
+SHA immediately. Cloning a repo that is not cached yet is not throttled by
+the freshness window; the reclone cooldown bounds a clone that keeps
+failing (below).
 
 ### Recovery reclone circuit breaker
 
@@ -168,12 +170,23 @@ underlying git error, the remaining cooldown, and a pointer to the fix.
 Each reclone logs loudly with the `recovery reclone:` prefix and the repo
 hash, and increments the `sparkwing.gitcache.recovery_reclones` counter.
 
+The same cooldown bounds cloning a mirror that is missing, on `/archive`
+and on the `/git/<name>` path a runner clones through. A reclone deletes
+the mirror before it clones, so a reclone whose own clone fails leaves no
+mirror at all, and without the bound every later request re-downloaded the
+whole repository. A repo whose mirror is absent is still cloned once; a
+second attempt inside `RECLONE_COOLDOWN` that still finds no mirror is
+refused, naming the remaining cooldown and the error the last attempt hit.
+A successful fetch or clone clears the record, and so does re-registering
+the repo, which is the deliberate way out.
+
 Health problems to expect from `GET /health`:
 
 | Problem text | What it means |
 |--------------|---------------|
 | `repo <hash>: recovery reclone ran N times in 24h -- persistent fetch failure; ...` | The mirror keeps failing to fetch and reclones are papering over it. Read the `recovery reclone:` log line for the git error, fix the cause (often a conflicting ref -- `git remote prune origin`, or delete the conflicting ref inside `/data/repos/<hash>.git`), then let the background loop resume. |
-| `repo <hash>: <friendly fetch error>` | The most recent background fetch failed (SSH, DNS, timeout, fork exhaustion). Unchanged behavior. |
+| `repo <hash>: <friendly fetch error>` | The most recent background fetch failed (SSH, DNS, timeout, fork exhaustion). |
+| `repo <hash>: clone failed: ...` / `auto-clone failed: ...` | A mirror that was missing could not be cloned. The repo is on the clone cooldown until it expires or the repo is re-registered; seeding via `POST /sync/seed` also works when upstream is unreachable. |
 
 An operator who wants the old per-request behavior back can set
 `FETCH_FRESH_WINDOW` and/or `RECLONE_COOLDOWN` to a negative duration
@@ -451,7 +464,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
 | `FETCH_INTERVAL` | Background fetch interval (default: `30s`) |
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |
-| `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones of one repo (default: `1h`; negative disables) |
+| `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
 | `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |

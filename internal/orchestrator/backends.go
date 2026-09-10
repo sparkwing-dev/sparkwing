@@ -631,7 +631,7 @@ func sparkwingGithubSplit(slug string) (owner, repo string) {
 }
 
 func localNewRunID() string {
-	return fmt.Sprintf("run-%s-%08x", time.Now().UTC().Format("20060102-150405"), time.Now().UnixNano()&0xFFFFFFFF)
+	return newRunID()
 }
 
 func NewLocalRunID() string { return localNewRunID() }

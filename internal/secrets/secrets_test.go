@@ -287,3 +287,28 @@ func TestParseDotenv_ReadsHandWrittenFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestDotenvSupportsExportAndComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.env")
+	body := `export TOKEN=example # explanation
+PLAIN=value#literal
+HASH=#s3cr3t
+EMPTY= # comment
+QUOTED="value # literal" # explanation
+SINGLE='value # literal' # explanation
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewDotenvSource(path)
+	for key, want := range map[string]string{"TOKEN": "example", "PLAIN": "value#literal", "HASH": "#s3cr3t", "QUOTED": "value # literal", "SINGLE": "value # literal"} {
+		value, _, err := resolver.Read(key)
+		if err != nil || value != want {
+			t.Errorf("%s = %q, %v; want %q", key, value, err, want)
+		}
+	}
+	value, _, err := resolver.Read("EMPTY")
+	if value != "" || err != nil {
+		t.Fatalf("comment-only value = %q, %v", value, err)
+	}
+}

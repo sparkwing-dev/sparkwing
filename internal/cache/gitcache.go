@@ -248,6 +248,7 @@ type repoFetchState struct {
 	lastOK      time.Time
 	lastReclone time.Time
 	reclones    []time.Time
+	lastClone   time.Time
 }
 
 var bgFetch = &fetchState{repos: map[string]*repoFetchState{}}
@@ -272,6 +273,7 @@ func (fs *fetchState) markFetched(name string) {
 	rs.backoff = 0
 
 	rs.nextRetry = time.Time{}
+	rs.lastClone = time.Time{}
 }
 
 func (fs *fetchState) fresh(name string) bool {
@@ -306,22 +308,78 @@ func (fs *fetchState) allowReclone(name string) bool {
 	return true
 }
 
-func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
+// allowClone bounds the clone-if-missing path. A recovery reclone deletes
+// the mirror before cloning, so a reclone that fails leaves no mirror and
+// every later request would re-download the whole repository. Recording
+// the attempt costs nothing on the happy path: a clone that succeeds
+// leaves a mirror, and markFetched clears the record.
+func (fs *fetchState) allowClone(name string) bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	rs := fs.entry(name)
+	now := time.Now()
+	if !rs.lastClone.IsZero() && now.Sub(rs.lastClone) < recloneCooldown {
+		return false
+	}
+	rs.lastClone = now
+	return true
+}
+
+// markError records why a clone or fetch failed, so /health and the next
+// refusal can name it instead of pointing at the log.
+func (fs *fetchState) markError(name, msg string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	rs := fs.entry(name)
+	rs.lastError = msg
+	rs.lastErrorAt = time.Now()
+}
+
+func (fs *fetchState) lastErrorFor(name string) string {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 	rs := fs.repos[name]
-	if rs == nil || rs.lastReclone.IsZero() {
+	if rs == nil || rs.lastError == "" {
+		return "none recorded"
+	}
+	return rs.lastError
+}
+
+func (fs *fetchState) cloneCooldownRemaining(name string) time.Duration {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	if rs := fs.repos[name]; rs != nil {
+		return cooldownRemaining(rs.lastClone)
+	}
+	return 0
+}
+
+func cooldownRemaining(last time.Time) time.Duration {
+	if last.IsZero() {
 		return 0
 	}
-	left := recloneCooldown - time.Since(rs.lastReclone)
+	left := recloneCooldown - time.Since(last)
 	if left < 0 {
 		return 0
 	}
 	return left.Truncate(time.Second)
 }
 
+func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	if rs := fs.repos[name]; rs != nil {
+		return cooldownRemaining(rs.lastReclone)
+	}
+	return 0
+}
+
 var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
 	return gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+}
+
+var cloneMirror = func(repoURL, bareRepo string) (string, error) {
+	return gitCmd("clone", "--bare", "--", repoURL, bareRepo)
 }
 
 var recloneMirror = func(repoURL, bareRepo string) (string, error) {
@@ -477,11 +535,8 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 				log.Printf("background fetch: %s failed (retry in %s): %s", e.Name(), rs.backoff, errMsg)
 			} else {
 
-				rs = bgFetch.entry(e.Name())
-				rs.lastError = ""
-				rs.backoff = 0
-				rs.lastOK = time.Now()
 				bgFetch.mu.Unlock()
+				bgFetch.markFetched(e.Name())
 				log.Printf("background fetch: %s ok", e.Name())
 			}
 		}
@@ -555,9 +610,22 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	bareRepo := filepath.Join(repoDir, hash+".git")
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
+		if !bgFetch.allowClone(stateKey(hash)) {
+			left := bgFetch.cloneCooldownRemaining(stateKey(hash))
+			last := bgFetch.lastErrorFor(stateKey(hash))
+			log.Printf("archive: mirror for %s is missing and cloning is on cooldown (%s left): %s", hash, left, last)
+			http.Error(w, fmt.Sprintf(
+				"mirror is missing and cloning is on cooldown for another %s -- a clone already ran for this repo and the mirror is still absent.\n"+
+					"last error: %s\n"+
+					"This needs an operator: the mirror was either never cloned successfully or removed by a recovery reclone, which deletes it before it clones. "+
+					"Cloning on every archive request costs a full download each time. Fix the git error above, then re-register the repo to clear the cooldown, or wait for it to expire.",
+				left, last), http.StatusBadGateway)
+			return
+		}
 		// #nosec G706 -- the repository URL is validated at registration and redacted here
 		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
-		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
+			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
 			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
 			return
 		}
@@ -1125,26 +1193,15 @@ func openBinForRead(hash, path string) (*os.File, string, error) {
 	return f, digest, nil
 }
 
-func stageBinBlob(data []byte) (string, error) {
-	tmp, err := os.CreateTemp(binsDir, "bin-*.tmp")
-	if err != nil {
-		return "", err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		_ = os.Remove(tmpPath)
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", err
-	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", err
-	}
-	return tmpPath, nil
+type binUploadWriter struct {
+	file     *os.File
+	writeErr error
+}
+
+func (w *binUploadWriter) Write(p []byte) (int, error) {
+	n, err := w.file.Write(p)
+	w.writeErr = err
+	return n, err
 }
 
 func handleBin(w http.ResponseWriter, r *http.Request) {
@@ -1157,7 +1214,7 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(binsDir, hash)
 
 	switch r.Method {
-	case http.MethodGet:
+	case http.MethodGet, http.MethodHead:
 		f, digest, err := openBinForRead(hash, path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -1177,6 +1234,9 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		info, _ := f.Stat()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+		if r.Method == http.MethodHead {
+			return
+		}
 		if _, err := io.Copy(w, f); err != nil {
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin copy %s: %v", hash, err)
@@ -1184,31 +1244,49 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
-		data, err := io.ReadAll(r.Body)
+		tmpFile, err := os.CreateTemp(binsDir, "bin-*.tmp")
 		if err != nil {
-			http.Error(w, "read error", http.StatusBadRequest)
+			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
-
-		sum := sha256.Sum256(data)
-		digest := hex.EncodeToString(sum[:])
+		tmpPath := tmpFile.Name()
+		defer func() {
+			// #nosec G703 -- CreateTemp supplied the private staging path
+			if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("warning: remove staged binary: %v", err)
+			}
+		}()
+		sum := sha256.New()
+		staged := &binUploadWriter{file: tmpFile}
+		n, err := io.Copy(io.MultiWriter(staged, sum), r.Body)
+		if err != nil {
+			tmpFile.Close()
+			if staged.writeErr != nil {
+				http.Error(w, "write error", http.StatusInternalServerError)
+			} else {
+				http.Error(w, "read error", http.StatusBadRequest)
+			}
+			return
+		}
+		if err := tmpFile.Chmod(0o755); err != nil {
+			tmpFile.Close()
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		if err := tmpFile.Close(); err != nil {
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		digest := hex.EncodeToString(sum.Sum(nil))
 		principal := writingPrincipal(r)
 
 		mu := binKeyLock(hash)
 		mu.Lock()
 		defer mu.Unlock()
 
-		tmpPath, err := stageBinBlob(data)
-		if err != nil {
-			// #nosec G706 -- the blob hash is pattern-validated
-			log.Printf("warning: bin stage %s: %v", hash, err)
-			http.Error(w, "write error", http.StatusInternalServerError)
-			return
-		}
 		// safety: record the digest before the blob so a torn write serves a mismatch the client discards.
-		meta := binMeta{SHA256: digest, Size: int64(len(data)), Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
+		meta := binMeta{SHA256: digest, Size: n, Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := writeBinMeta(hash, meta); err != nil {
-			_ = os.Remove(tmpPath)
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin meta write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
@@ -1217,7 +1295,6 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		// #nosec G703 -- the blob path is built from a pattern-validated hash
 		err = os.Rename(tmpPath, path)
 		if err != nil {
-			_ = os.Remove(tmpPath)
 			// #nosec G703 -- a pattern-validated hash; a digest with no blob would brick every later read
 			_ = os.Remove(binMetaPath(hash))
 			// #nosec G706 -- the blob hash is pattern-validated
@@ -1226,15 +1303,28 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// #nosec G706 -- the blob hash is pattern-validated
-		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, len(data), digest, principal)
+		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, n, digest, principal)
 		if err := setBinDigestHeaders(w, digest); err != nil {
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
 
+	case http.MethodDelete:
+		mu := binKeyLock(hash)
+		mu.Lock()
+		defer mu.Unlock()
+		for _, target := range []string{path, binMetaPath(hash)} {
+			// #nosec G703 -- each path is built from the pattern-validated hash
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				http.Error(w, "delete error", http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
 	default:
-		http.Error(w, "GET or PUT only", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", "GET, HEAD, PUT, DELETE")
+		http.Error(w, "GET, HEAD, PUT or DELETE only", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -2122,13 +2212,17 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 
 		// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
-		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
+			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONBody(w, r, map[string]any{"name": name, "hash": hash, "cloned": false})
 			return
 		}
 		enableSHAFetch(bareRepo)
+		// safety: registering is an explicit operator action, so it is also the
+		// way out of a clone cooldown a failing repo earned.
+		bgFetch.markFetched(stateKey(hash))
 	} else {
 		enableSHAFetch(bareRepo)
 	}
@@ -2294,15 +2388,27 @@ func resolveGitRepo(name string) (string, error) {
 	if _, err := os.Stat(bareRepo); err == nil {
 		return bareRepo, nil
 	}
+	// safety: handleGit reaches this twice per runner clone, so an auto-clone
+	// that keeps failing would re-download upstream on every hit.
+	if !bgFetch.allowClone(stateKey(hash)) {
+		return "", fmt.Errorf(
+			"repo %q registered but not cloned -- cloning is on cooldown for another %s after a failed attempt (%s); "+
+				"fix that error and re-register the repo to clear the cooldown, "+
+				"or seed manually via POST /sync/seed?repo=%s&sha=<commit>",
+			name, bgFetch.cloneCooldownRemaining(stateKey(hash)), bgFetch.lastErrorFor(stateKey(hash)), repoURL,
+		)
+	}
 	// #nosec G706 -- the repository name is pattern-validated and its URL was validated at registration
 	log.Printf("gitcache: registered repo %q missing on disk; auto-cloning %s", name, repoURL)
-	if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+	if out, err := cloneMirror(repoURL, bareRepo); err != nil {
+		bgFetch.markError(stateKey(hash), fmt.Sprintf("auto-clone failed: %s", err))
 		return "", fmt.Errorf(
 			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s&sha=<commit>",
 			name, err, sshHint(out), repoURL,
 		)
 	}
 	enableSHAFetch(bareRepo)
+	bgFetch.markFetched(stateKey(hash))
 	// #nosec G706 -- the repository name is pattern-validated
 	log.Printf("gitcache: auto-clone complete for %q at %s", name, bareRepo)
 	return bareRepo, nil

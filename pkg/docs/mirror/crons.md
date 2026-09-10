@@ -438,6 +438,18 @@ timer, along with when it last ticked and what that tick reported. The
 dashboard reads the same routes through its controller proxy, so a browser
 session with `runs.read` sees the controller's schedules beside its runs.
 
+## Dashboard history
+
+The Crons dashboard shows expandable schedule cards with the latest 30 fires,
+oldest on the left. Green bars mark successful runs, red marks failures, indigo
+marks running jobs, and amber marks skipped, missed or cancelled fires. Gray
+marks a fire whose run status is unavailable.
+
+Hover over a bar for its run status, scheduling outcome, due time and decision
+time. Click a bar to open its run. A fire that launched no run opens the schedule
+details. Click the schedule name or Details to expand its cadence, lock,
+upcoming fires and recent history. Pause, Resume and Run now remain on each card.
+
 ## Related
 
 - [scheduling.md](scheduling.md) -- the `on.schedule` fields, and how a run

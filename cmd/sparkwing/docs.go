@@ -137,6 +137,9 @@ func runDocsRead(args []string) error {
 		*topic = fs.Arg(0)
 	}
 	if *guide != "" {
+		if wf.web || wf.version != "" || wf.noCache {
+			return errors.New("docs read: --guide reads embedded docs; use --topic with --web, --version, or --no-cache")
+		}
 		if *topic != "" {
 			return errors.New("docs read: --topic and --guide are mutually exclusive")
 		}

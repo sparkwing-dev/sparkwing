@@ -38,6 +38,7 @@ func atoiNonNeg(s string) (int, error) {
 }
 
 type runFlags struct {
+	parseErr          error
 	unknownRunnerFlag string
 	ref               string
 
@@ -240,17 +241,24 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			flags.mode = strings.TrimPrefix(argument, "--sw-mode=")
 			argumentIndex++
 		case argument == "--sw-workers":
+			value := ""
 			if argumentIndex+1 < len(args) {
-				if n, err := atoiNonNeg(args[argumentIndex+1]); err == nil {
-					flags.workers = n
-					argumentIndex += 2
-					continue
-				}
+				value = args[argumentIndex+1]
+				argumentIndex++
 			}
-			passthroughArgs = append(passthroughArgs, argument)
+			n, err := atoiNonNeg(value)
+			if err != nil {
+				flags.parseErr = fmt.Errorf("run: --sw-workers must be a nonnegative integer, got %q", value)
+			} else {
+				flags.workers = n
+			}
 			argumentIndex++
 		case strings.HasPrefix(argument, "--sw-workers="):
-			if n, err := atoiNonNeg(strings.TrimPrefix(argument, "--sw-workers=")); err == nil {
+			value := strings.TrimPrefix(argument, "--sw-workers=")
+			n, err := atoiNonNeg(value)
+			if err != nil {
+				flags.parseErr = fmt.Errorf("run: --sw-workers must be a nonnegative integer, got %q", value)
+			} else {
 				flags.workers = n
 			}
 			argumentIndex++

@@ -110,6 +110,9 @@ func dispatchRun(args []string) error {
 		return fmt.Errorf("run: pipeline name must come first; got flag %q", pipelineName)
 	}
 	flags, passthrough := parseRunFlags(args[1:])
+	if flags.parseErr != nil {
+		return flags.parseErr
+	}
 	var err error
 
 	runnerArgs := passthrough
@@ -345,6 +348,9 @@ func removeEnv(env []string, key string) []string {
 }
 
 func runSparkwing(args []string) error {
+	if removedDashboardCommand(args) {
+		return errors.New("dashboard was removed; use sparkwing serve (for example, sparkwing serve start)")
+	}
 	args = moveRootOutput(args)
 	if cmd, ok := commandHelp(args); ok {
 		requested, _, err := requestedOutput(args)
@@ -379,7 +385,7 @@ func runSparkwing(args []string) error {
 	case "profile":
 		return runProfileCmd(args[1:])
 
-	case "dashboard":
+	case "serve":
 		return runDashboard(args[1:])
 
 	case "repos":

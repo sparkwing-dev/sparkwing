@@ -41,6 +41,11 @@ type violation struct {
 	text string
 }
 
+type unreadable struct {
+	file string
+	err  error
+}
+
 const usageText = `usage: commentcheck [-staged | -base ref] [-allow-no-diff] <root>
 
 <root> is one directory to walk, normally the repository root; commentcheck
@@ -53,6 +58,10 @@ Allowed: GoDoc on exported API declarations and fields, body comments tagged
 hack:, safety:, bug: or perf:, and #nosec GNNN -- reason annotations.
 Caps: a tagged comment runs at most 4 lines, each at most 120 characters; a
 #nosec annotation is one line standing alone in its comment group.
+A tag opens a // comment, so a /* */ block carries no tag and is a violation
+wherever a tagged comment would be allowed. A .go file the parser rejects
+fails the run, because a file the gate could not read is a file it did not
+judge.
 
 flags:
 `
@@ -74,7 +83,7 @@ func main() {
 	}
 	root := flag.Arg(0)
 
-	violations, err := scan(root)
+	violations, unread, err := scan(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "commentcheck:", err)
 		os.Exit(2)
@@ -92,10 +101,16 @@ func main() {
 			return
 		}
 		violations = onlyAdded(violations, root, added)
+		unread = onlyChanged(unread, root, added)
 	}
 
 	if len(violations) > 0 {
 		report(violations)
+	}
+	if len(unread) > 0 {
+		fmt.Print(unreadableFailure(unread))
+	}
+	if len(violations) > 0 || len(unread) > 0 {
 		os.Exit(1)
 	}
 	fmt.Println("commentcheck: clean")
@@ -112,8 +127,9 @@ func diffFailure(base string, err error) string {
 		"Pass -allow-no-diff to accept a run that gates nothing.", scope, err)
 }
 
-func scan(root string) ([]violation, error) {
+func scan(root string) ([]violation, []unreadable, error) {
 	var violations []violation
+	var unread []unreadable
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -129,13 +145,13 @@ func scan(root string) ([]violation, error) {
 		}
 		v, perr := checkFile(path)
 		if perr != nil {
-			fmt.Fprintf(os.Stderr, "commentcheck: skipping %s: %v\n", path, perr)
+			unread = append(unread, unreadable{file: path, err: perr})
 			return nil
 		}
 		violations = append(violations, v...)
 		return nil
 	})
-	return violations, err
+	return violations, unread, err
 }
 
 func checkFile(path string) ([]violation, error) {
@@ -153,7 +169,7 @@ func checkFile(path string) ([]violation, error) {
 			if d.Name != nil && d.Name.IsExported() {
 				mark(allowed, d.Doc)
 			}
-			if d.Name != nil && strings.HasPrefix(d.Name.Name, "Example") && d.Body != nil {
+			if strings.HasSuffix(path, "_test.go") && d.Name != nil && strings.HasPrefix(d.Name.Name, "Example") && d.Body != nil {
 				bodyStart := d.Body.Lbrace
 				bodyEnd := d.Body.Rbrace
 				for _, cg := range f.Comments {
@@ -457,6 +473,24 @@ func parseAddedLines(diff string) map[string]map[int]bool {
 	return added
 }
 
+// safety: an unparseable file outside the scope is not something this run
+// claimed to judge. This asks whether the diff names the file, not whether it
+// added lines: a change that only deletes lines is the one most likely to
+// break parsing.
+func onlyChanged(unread []unreadable, root string, added map[string]map[int]bool) []unreadable {
+	var out []unreadable
+	for _, u := range unread {
+		rel, err := filepath.Rel(root, u.file)
+		if err != nil {
+			rel = u.file
+		}
+		if _, touched := added[rel]; touched {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 func onlyAdded(violations []violation, root string, added map[string]map[int]bool) []violation {
 	var out []violation
 	for _, v := range violations {
@@ -501,13 +535,32 @@ func report(violations []violation) {
 	fmt.Print(advice)
 }
 
+// safety: a file the parser rejected carries no verdict, and a gate that
+// passes it reports health it never established.
+func unreadableFailure(unread []unreadable) string {
+	lines := make([]string, len(unread))
+	for i, u := range unread {
+		// safety: a go/parser error already opens with file:line:col, so naming
+		// the file again would print it twice.
+		text := u.err.Error()
+		if !strings.Contains(text, u.file) {
+			text = u.file + ": " + text
+		}
+		lines[i] = text
+	}
+	sort.Strings(lines)
+	return fmt.Sprintf("%s\n\ncommentcheck: %d file(s) could not be parsed, so this run reached no verdict on them.\n"+
+		"Fix: make each file parse, then run the gate again.\n", strings.Join(lines, "\n"), len(unread))
+}
+
 const advice = `Allowed: GoDoc on exported API declarations and fields, plus
   // hack:   a necessary deviation from the obvious approach
   // safety: an invariant that isn't visible locally
   // bug:    a known defect that remains unresolved
   // perf:   a non-obvious optimization
   // #nosec GNNN -- why the scanner finding is not a defect (one line, alone in its group)
-A tagged comment runs at most 4 lines, each at most 120 characters.
+A tagged comment runs at most 4 lines, each at most 120 characters, and opens a
+// comment; rewrite a /* */ block as // lines to tag it.
 Fix: tag the comment, do not delete it. A body comment must start with one of
   hack:/safety:/bug:/perf: and say why in one short line. Rationale for a
   non-obvious choice is a why-comment and belongs under hack: or safety:,

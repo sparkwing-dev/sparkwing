@@ -5,7 +5,7 @@ Running `sparkwing` executes pipelines on your laptop, each job in its own proce
 The design is small:
 
 1. Every local `sparkwing` run writes records to the SQLite store under `~/.sparkwing/`.
-2. `sparkwing dashboard start` spawns a detached local server (`pkg/localws`) against that store, hosting the embedded dashboard SPA, the JSON API, and the log endpoints on one port (default `http://127.0.0.1:4343`). `sparkwing dashboard status` and `sparkwing dashboard kill` manage its lifecycle.
+2. `sparkwing serve start` spawns a detached local server (`pkg/localws`) against that store, hosting the embedded dashboard SPA, the JSON API, and the log endpoints on one port (default `http://127.0.0.1:4343`). `sparkwing serve status` and `sparkwing serve kill` manage its lifecycle.
 
 No daemon, no controller pod, no queue, no cluster lifecycle commands.
 
@@ -22,14 +22,14 @@ You do not have to assemble that path yourself. Each run records the directory a
 ## Running the dashboard
 
 ```
-sparkwing dashboard start    # spawn detached server (replaces any running one)
-sparkwing dashboard status   # report liveness, print URL
-sparkwing dashboard kill     # stop it
+sparkwing serve start    # spawn detached server (replaces any running one)
+sparkwing serve status   # report liveness, print URL
+sparkwing serve kill     # stop it
 ```
 
-The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing version update --cli` or `sparkwing dashboard kill` first.
+The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing version update --cli` or `sparkwing serve kill` first.
 
-For the bind address and the other `dashboard start` flags, see [cli-dashboard.md](cli-dashboard.md).
+For the bind address and the other `serve start` flags, see [cli-serve.md](cli-serve.md).
 
 ## Why no resident process
 
@@ -55,7 +55,7 @@ sparkwing run test &
 In another, start the dashboard:
 
 ```
-sparkwing dashboard start
+sparkwing serve start
 ```
 
 Point your browser at `http://127.0.0.1:4343`. Both runs stream live; when they finish, status flips to `passed` or `failed`.

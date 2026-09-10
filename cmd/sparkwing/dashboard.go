@@ -34,6 +34,24 @@ const (
 
 const dashboardStartTimeout = 30 * time.Second
 
+func removedDashboardCommand(args []string) bool {
+	for len(args) > 0 {
+		arg := args[0]
+		switch {
+		case arg == "-o" || arg == "--output":
+			if len(args) < 2 {
+				return false
+			}
+			args = args[2:]
+		case arg == "help" || arg == "--help" || arg == "-h" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2):
+			args = args[1:]
+		default:
+			return arg == "dashboard"
+		}
+	}
+	return false
+}
+
 func runDashboard(args []string) error {
 	if handleParentHelp(cmdDashboard, args) {
 		return nil
@@ -51,7 +69,7 @@ func runDashboard(args []string) error {
 		return runDashboardStatus(args[1:])
 	default:
 		PrintHelp(cmdDashboard, os.Stderr)
-		return fmt.Errorf("dashboard: unknown subcommand %q", args[0])
+		return fmt.Errorf("serve: unknown subcommand %q", args[0])
 	}
 }
 
@@ -155,7 +173,7 @@ func runDashboardStart(args []string) error {
 			return fmt.Errorf(
 				"the running dashboard (%s, pid %d) is newer than this CLI (%s); "+
 					"it was left running. Upgrade the CLI with `sparkwing version update --cli`, "+
-					"or stop it first with `sparkwing dashboard kill`",
+					"or stop it first with `sparkwing serve kill`",
 				running.Version, pid, mine)
 		}
 		fmt.Fprintf(os.Stderr, "==> draining previous dashboard (pid %d) for replacement\n", pid)
@@ -246,7 +264,7 @@ func runDashboardStart(args []string) error {
 		_ = signalTerminate(pid)
 		return fmt.Errorf("dashboard supervisor came up but never wrote %s; check %s", dp.pid, dp.log)
 	}
-	pretty := fmt.Sprintf("%s\n  dashboard:  %s\n  api:        %s/api/v1\n  home:       %s\n  log:        %s\n  pid:        %d\n%s\nstop with: sparkwing dashboard kill\n", bannerLine(), baseURL, baseURL, dp.home, dp.log, pid, bannerLine())
+	pretty := fmt.Sprintf("%s\n  dashboard:  %s\n  api:        %s/api/v1\n  home:       %s\n  log:        %s\n  pid:        %d\n%s\nstop with: sparkwing serve kill\n", bannerLine(), baseURL, baseURL, dp.home, dp.log, pid, bannerLine())
 	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "running", PID: pid, Home: dp.home, Log: dp.log, URL: baseURL, API: baseURL + "/api/v1"}, mode, pretty)
 }
 
