@@ -81,16 +81,13 @@ func readDocHeadings(repo fs.FS, path string) ([]string, bool) {
 	if repo == nil {
 		return nil, false
 	}
-	f, err := repo.Open(path)
+	body, err := fs.ReadFile(repo, path)
 	if err != nil {
 		return nil, false
 	}
-	defer func() { _ = f.Close() }()
 	var headings []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if m := headingRe.FindStringSubmatch(scanner.Text()); m != nil {
+	for line := range strings.Lines(string(body)) {
+		if m := headingRe.FindStringSubmatch(strings.TrimRight(line, "\r\n")); m != nil {
 			headings = append(headings, strings.TrimSpace(m[1]))
 		}
 	}

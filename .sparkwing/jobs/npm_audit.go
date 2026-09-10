@@ -289,9 +289,9 @@ func recordNpmAuditProof(dir, digest string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() { dropProofCleanupError(os.Remove(tmp.Name())) }()
 	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
+		dropProofCleanupError(tmp.Close())
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -313,6 +313,17 @@ func pruneNpmAuditProofs(dir string, now time.Time) {
 		if err != nil || now.Sub(info.ModTime()) <= npmAuditRetention {
 			continue
 		}
-		_ = os.Remove(filepath.Join(dir, e.Name()))
+		dropProofCleanupError(os.Remove(filepath.Join(dir, e.Name())))
 	}
+}
+
+// dropProofCleanupError reports a proof file this scanner could not remove.
+// A leftover proof cannot admit a stale pass -- reuse is keyed by digest and
+// bounded by npmAuditRetention -- so the removal failing is worth naming and
+// never worth failing a security gate over.
+func dropProofCleanupError(err error) {
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "npm audit: could not remove a proof file: %v\n", err)
 }
