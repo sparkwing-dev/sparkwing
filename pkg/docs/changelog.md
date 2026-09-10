@@ -119,6 +119,12 @@ unlock.
 
 ### Fixed
 
+- **web:** `/docs/` serves the embedded documentation instead of the dashboard app
+  shell. Go's `ServeMux` matched the existing `GET /docs` pattern on that exact path
+  only, so the trailing-slash spelling -- reachable by typing it, or through any
+  proxy that normalizes to it -- fell through to the catch-all and answered 200 with
+  a page carrying no documentation.
+
 - **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
   reads. It was parsed, validated and documented, and no code path read it.
 - **cache:** Concurrent binary downloads use independent staging files and

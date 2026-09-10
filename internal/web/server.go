@@ -231,7 +231,12 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	// safety: /docs belongs on authedMux, above the catch-all: the outer router is
 	// unauthenticated, so mounting it there would publish the pages to anyone who can
 	// reach the listener while the rest of the dashboard needs a session.
-	authedMux.Handle("GET /docs", docsweb.Handler())
+	// safety: ServeMux matches "GET /docs" on that exact path, so the trailing-slash
+	// spelling any proxy may normalize to needs its own pattern or the catch-all
+	// answers it with the app shell.
+	docsHandler := docsweb.Handler()
+	authedMux.Handle("GET /docs", docsHandler)
+	authedMux.Handle("GET /docs/{$}", docsHandler)
 
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
 

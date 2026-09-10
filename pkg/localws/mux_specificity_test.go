@@ -1,9 +1,17 @@
 package localws
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/fstest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestMuxSpecificity_ApiV1Routing(t *testing.T) {
@@ -124,4 +132,61 @@ func marker(name string) http.Handler {
 		w.Header().Set("X-Marker", name)
 		w.WriteHeader(http.StatusOK)
 	})
+}
+
+// TestMuxSpecificity_DocsReachesTheDocsHandler pins /docs against the real root
+// mux. Nothing on that mux names /docs today, so the route survives only because
+// the dashboard handler under "/" claims it; a route added above the catch-all
+// would take it silently, and the answer would still be a 200.
+func TestMuxSpecificity_DocsReachesTheDocsHandler(t *testing.T) {
+	if len(docs.List()) == 0 {
+		t.Fatal("the embedded doc set is empty, so this test would pass without reading a page")
+	}
+
+	paths, err := localPaths(t.TempDir())
+	if err != nil {
+		t.Fatalf("localPaths: %v", err)
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	const shellMarker = "stub dashboard shell"
+	bundle := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html><body>" + shellMarker + "</body></html>")},
+	}
+	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
+		paths:   paths,
+		backend: backend.NewStoreBackend(st, paths, nil),
+		store:   st,
+	}, bundle)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	for _, path := range []string{"/docs", "/docs/", "/docs?p=" + docs.List()[0].Slug} {
+		t.Run(path, func(t *testing.T) {
+			resp, err := http.Get(srv.URL + path)
+			if err != nil {
+				t.Fatalf("get %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if strings.Contains(string(body), shellMarker) {
+				t.Fatalf("%s reached the dashboard shell instead of the docs handler", path)
+			}
+			if !strings.Contains(string(body), "sparkwing docs") {
+				t.Fatalf("%s served neither the docs pages nor the shell: %.200s", path, body)
+			}
+		})
+	}
 }

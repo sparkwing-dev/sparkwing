@@ -84,3 +84,28 @@ func TestDocsRouteInheritsTheDashboardsAuthPosture(t *testing.T) {
 		t.Errorf("GET /docs on a login-free dashboard status %d, want 200", open.Code)
 	}
 }
+
+func TestDocsRouteAnswersTheTrailingSlashSpelling(t *testing.T) {
+	var opts HandlerOptions
+	pages := docs.List()
+	if len(pages) == 0 {
+		t.Fatal("embedded set has no pages; this test needs one to request")
+	}
+	slug := pages[0].Slug
+
+	// Both spellings answer 200, so only the bytes distinguish the docs index
+	// from the app shell the catch-all serves.
+	for _, target := range []string{"/docs/", "/docs/?p=" + slug} {
+		canonical := getPath(t, opts, strings.Replace(target, "/docs/", "/docs", 1)).Body.String()
+		slashed := getPath(t, opts, target).Body.String()
+		shell := getPath(t, opts, "/").Body.String()
+
+		if slashed == shell {
+			t.Errorf("GET %s returned the app shell, not the docs page; got %s", target, head(slashed))
+		}
+		if slashed != canonical {
+			t.Errorf("GET %s and its slash-free spelling returned different bytes (%d against %d)",
+				target, len(slashed), len(canonical))
+		}
+	}
+}
