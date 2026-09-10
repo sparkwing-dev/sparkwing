@@ -163,7 +163,7 @@ func TestRenderQueue_PlainCarriesRepoAndParent(t *testing.T) {
 	if !strings.Contains(parentRec, "\twebapp\t") {
 		t.Errorf("holder record missing repo: %q", parentRec)
 	}
-	if !strings.HasSuffix(childRec, "\trun-holder") {
+	if !strings.Contains(childRec, "\trun-holder\t") {
 		t.Errorf("child record missing parent: %q", childRec)
 	}
 	if !strings.Contains(waiterRec, "\tapi-server\t") {
