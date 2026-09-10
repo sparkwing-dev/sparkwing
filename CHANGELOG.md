@@ -124,6 +124,11 @@ unlock.
 
 ### Removed
 
+- **cli (Breaking):** The `dashboard` command group is replaced by `serve`
+  Use `sparkwing serve start`, `serve status`, and `serve kill` for the local
+  dashboard and API. The retired noun fails without starting or stopping a
+  service. See [serve command](docs/migrations/_unreleased.md#serve-command).
+
 - **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
   `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they
   could share a linter cache; git resolves the alias to the real worktree and

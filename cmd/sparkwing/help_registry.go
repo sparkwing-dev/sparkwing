@@ -21,14 +21,14 @@ programs in a repo's .sparkwing/ directory, triggered by git hooks,
 webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.`,
-	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "dashboard", "doctor", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
+	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "serve", "doctor", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
 		{"List every invocable (agents)", "sparkwing pipeline list -o json"},
 		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name fictional-release -o json"},
 		{"Bootstrap + scaffold your first pipeline in a new repository", "sparkwing pipeline new --name release"},
-		{"Start the local dashboard", "sparkwing dashboard start"},
+		{"Start the local dashboard", "sparkwing serve start"},
 	},
 }
 
@@ -159,7 +159,7 @@ Configure profiles with 'sparkwing configure profiles'.
 
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
-local dashboard with 'sparkwing dashboard'.`,
+local dashboard with 'sparkwing serve'.`,
 	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
@@ -1635,7 +1635,7 @@ to your next command would select. Tokens are never printed.`,
 }
 
 var cmdDashboard = Command{
-	Path:     "sparkwing dashboard",
+	Path:     "sparkwing serve",
 	Synopsis: "Manage the local dashboard + API server",
 	Description: `Background lifecycle for the laptop-local dashboard.
 'start' spawns a detached server (writes PID + log under
@@ -1646,14 +1646,14 @@ the JSON API, the log endpoints, and the SQLite store on the same
 port.`,
 	SubcommandOrder: []string{"start", "kill", "status"},
 	Examples: []Example{
-		{"Start the dashboard", "sparkwing dashboard start"},
-		{"Check liveness", "sparkwing dashboard status"},
-		{"Stop the dashboard", "sparkwing dashboard kill"},
+		{"Start the dashboard", "sparkwing serve start"},
+		{"Check liveness", "sparkwing serve status"},
+		{"Stop the dashboard", "sparkwing serve kill"},
 	},
 }
 
 var cmdDashboardStart = Command{
-	Path:     "sparkwing dashboard start",
+	Path:     "sparkwing serve start",
 	Synopsis: "Spawn the detached dashboard server (replaces any running one)",
 	Description: `Detaches a child process that runs the in-process
 dashboard + API + logs server (pkg/localws). PID is written to
@@ -1682,16 +1682,16 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 	},
 	GroupOrder: []string{"Bind", "Storage", "System", "Other"},
 	Examples: []Example{
-		{"Start with defaults", "sparkwing dashboard start"},
-		{"Use an alternate port", "sparkwing dashboard start --addr 127.0.0.1:5000"},
-		{"Isolate state under a scratch dir", "sparkwing dashboard start --home " + helpExampleScratchDir("sparkwing-x")},
-		{"Tail CI runs from S3 (no SQLite)", "sparkwing dashboard start --profile ci-smoke --no-local-store --read-only"},
-		{"Serve a LAN bind under a browser-facing name", "sparkwing dashboard start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343"},
+		{"Start with defaults", "sparkwing serve start"},
+		{"Use an alternate port", "sparkwing serve start --addr 127.0.0.1:5000"},
+		{"Isolate state under a scratch dir", "sparkwing serve start --home " + helpExampleScratchDir("sparkwing-x")},
+		{"Tail CI runs from S3 (no SQLite)", "sparkwing serve start --profile ci-smoke --no-local-store --read-only"},
+		{"Serve a LAN bind under a browser-facing name", "sparkwing serve start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343"},
 	},
 }
 
 var cmdDashboardKill = Command{
-	Path:     "sparkwing dashboard kill",
+	Path:     "sparkwing serve kill",
 	Synopsis: "Stop a running dashboard server",
 	Description: `Sends SIGTERM to the PID recorded in
 $SPARKWING_HOME/dashboard.pid, polls for exit, escalates to SIGKILL
@@ -1702,12 +1702,12 @@ when nothing is running.`,
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Stop the dashboard", "sparkwing dashboard kill"},
+		{"Stop the dashboard", "sparkwing serve kill"},
 	},
 }
 
 var cmdDashboardStatus = Command{
-	Path:     "sparkwing dashboard status",
+	Path:     "sparkwing serve status",
 	Synopsis: "Report whether the dashboard is running",
 	Description: `Reads $SPARKWING_HOME/dashboard.pid, probes the PID
 with kill(0), and reports running state + URL. Exit code 0 when
@@ -1717,7 +1717,7 @@ running, 1 when not.`,
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Check liveness", "sparkwing dashboard status"},
+		{"Check liveness", "sparkwing serve status"},
 	},
 }
 
@@ -1729,7 +1729,7 @@ controller and executes each claimed trigger in-process on this host.
 Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
-or against a local 'sparkwing dashboard start' via --profile local.`,
+or against a local 'sparkwing serve start' via --profile local.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile name from profiles.yaml", Required: true, Group: "Connection"},
 		{Name: "poll", Argument: "DUR", Desc: "Claim poll interval when the queue is empty", Default: "1s", Group: "Tuning"},

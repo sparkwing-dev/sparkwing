@@ -13,7 +13,6 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing configure`](cli-configure.md) -- Configure laptop-local settings
 - [`sparkwing crons`](cli-crons.md) -- Arm, inspect and drive this host's local pipeline schedules
 - [`sparkwing daemon`](cli-daemon.md) -- Inspect or refresh the local admission daemon
-- [`sparkwing dashboard`](cli-dashboard.md) -- Manage the local dashboard + API server
 - [`sparkwing debug`](cli-debug.md) -- Interactive debugging for pipeline runs
 - [`sparkwing docs`](cli-docs.md) -- Embedded user docs (offline)
 - [`sparkwing doctor`](cli-doctor.md) -- Inspect and repair abandoned local state
@@ -27,6 +26,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing run`](cli-run.md) -- Invoke a pipeline
 - [`sparkwing runs`](cli-runs.md) -- Inspect and control pipeline runs
 - [`sparkwing secrets`](cli-secrets.md) -- Manage secrets (local dotenv or controller-stored)
+- [`sparkwing serve`](cli-serve.md) -- Manage the local dashboard + API server
 - [`sparkwing update`](cli-update.md) -- Self-update the CLI binary
 - [`sparkwing version`](cli-version.md) -- Show + update versions (CLI, SDK, sparks)
 
@@ -59,5 +59,5 @@ sparkwing pipeline describe --name fictional-release -o json
 sparkwing pipeline new --name release
 
 # Start the local dashboard
-sparkwing dashboard start
+sparkwing serve start
 ```

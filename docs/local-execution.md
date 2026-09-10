@@ -53,8 +53,8 @@ Your laptop:
 
 Your laptop runs the pipeline directly. No sparkwing controller is
 involved. Each invocation's outcome lands in the SQLite store under
-`~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
-Run `sparkwing dashboard start` once and leave it up to watch
+`~/.sparkwing/`, which is what `sparkwing serve start` reads.
+Run `sparkwing serve start` once and leave it up to watch
 concurrent runs in a browser without needing any remote service.
 
 The run does not open that store. It sends its run, node, event, and
@@ -693,7 +693,7 @@ private.
 
 Laptop mode trusts the user account on the machine, and nothing narrower.
 
-`sparkwing dashboard start` serves the controller API and the dashboard from
+`sparkwing serve start` serves the controller API and the dashboard from
 one process with no bearer check, so every caller that reaches the listener
 can trigger pipelines, read secrets, and delete runs. It binds
 `127.0.0.1:4343` and refuses a non-loopback `--addr` unless you pass

@@ -67,7 +67,7 @@
         "cli-configure",
         "cli-crons",
         "cli-daemon",
-        "cli-dashboard",
+        "cli-serve",
         "cli-debug",
         "cli-docs",
         "cli-doctor",
