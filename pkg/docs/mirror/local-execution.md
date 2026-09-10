@@ -1283,10 +1283,11 @@ machine:
   queue it never looked at. A running row also carries its expected
   remaining time and the clock time it is expected to finish, and a queued
   row its expected finish beside its expected start, both from the run's
-  measured p50 profile and the daemon's admission simulation. A row the
-  daemon has no profile for reads `unmeasured`, a run that has already
-  outlived its p50 reads `past p50`, and the header counts the queued runs
-  with no profile, because those are the ones that starve. `-o json`
+  measured p50 profile and the daemon's admission simulation. A cell whose
+  estimate rests on a profile that does not exist reads `unmeasured` -- the
+  row's own, or that of a run ahead of it -- a run that has already outlived
+  its p50 reads `past p50`, and the header counts the queued runs with no
+  profile of their own, because those are the ones that starve. `-o json`
   carries each estimate as milliseconds from the snapshot and as an RFC3339
   clock time.
 - `sparkwing queue priority --run ID --set VALUE` -- re-rank a run that is

@@ -37,9 +37,10 @@ unlock.
   bare `queue` runs the same code. Running rows gain the expected remaining
   time and the clock time the run is expected to finish; queued rows gain the
   expected finish beside the expected start. Both come from the run's measured
-  p50 profile and the daemon's admission simulation, so a row with no profile
-  reads "unmeasured" and a run past its p50 reads "past p50" rather than
-  carrying a guess. The header counts the queued runs with no profile. `-o
+  p50 profile and the daemon's admission simulation, so a cell whose estimate
+  rests on a profile that does not exist reads "unmeasured" and a run past its
+  p50 reads "past p50" rather than carrying a guess. The header counts the
+  queued runs with no profile of their own. `-o
   json` carries each estimate as milliseconds from now and as an RFC3339 clock
   time, in `expected_remaining_ms`, `expected_finish_ms`, `expected_finish_at`,
   `expected_start_at`, and `unmeasured_waiters`; `-o plain` appends the same

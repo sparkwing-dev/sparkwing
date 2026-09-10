@@ -19,10 +19,11 @@ admission simulation, when it is expected to start and finish. Attached child
 runs appear under their parent. Connected runs that hold no resources have
 separate rows.
 
-An estimate exists only where a measured profile does. A row with no profile
-reads "unmeasured", and a run that has already outlived its p50 reads "past
-p50"; neither is replaced by a guess. The header counts the unmeasured
-waiters, because a queued run with no profile is the one that starves.
+An estimate exists only where every profile it rests on does. A cell with no
+estimate reads "unmeasured" -- the row's own profile is missing, or a run
+ahead of it has none -- and a run that has already outlived its p50 reads
+"past p50". Neither is replaced by a guess. The header counts the queued runs
+with no profile of their own, because those are the ones that starve.
 'sparkwing queue priority' re-ranks a queued run.
 
 A stalled holder includes a cancellation command:
@@ -125,10 +126,11 @@ admission simulation, when it is expected to start and finish. Attached child
 runs appear under their parent. Connected runs that hold no resources have
 separate rows.
 
-An estimate exists only where a measured profile does. A row with no profile
-reads "unmeasured", and a run that has already outlived its p50 reads "past
-p50"; neither is replaced by a guess. The header counts the unmeasured
-waiters, because a queued run with no profile is the one that starves.
+An estimate exists only where every profile it rests on does. A cell with no
+estimate reads "unmeasured" -- the row's own profile is missing, or a run
+ahead of it has none -- and a run that has already outlived its p50 reads
+"past p50". Neither is replaced by a guess. The header counts the queued runs
+with no profile of their own, because those are the ones that starve.
 'sparkwing queue priority' re-ranks a queued run.
 
 A stalled holder includes a cancellation command:
