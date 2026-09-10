@@ -25,7 +25,7 @@ commands:
     argv: [env, GOWORK=off, go, run, ./cmd/sparkwing]
     description: Run the checkout CLI with arguments after --
   verify:
-    argv: [env, GOWORK=off, sparkwing, run, pre-commit, --sw-local-only]
+    argv: [env, GOWORK=off, sparkwing, run, gate, --sw-local-only]
     description: Run the repository landing gate
 landing:
   branch: main

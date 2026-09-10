@@ -34,7 +34,7 @@ answers several is hard to keep correct.
   that code (the command registry in `cmd/sparkwing/help_registry.go`,
   the schema structs in `pkg/pipelines` / `pkg/projectconfig`, the
   `sparkwing` package, or the route registrations in `pkg/controller` /
-  `pkg/logs`) and run the `bin/gen-*-docs.sh` the banner names. pre-push
+  `pkg/logs`) and run the `bin/gen-*-docs.sh` the banner names. `pre-release`
   regenerates each one and fails if the committed file is stale.
 
 ## Writing rules (hand-written pages)
@@ -56,7 +56,7 @@ answers several is hard to keep correct.
 
 ## What enforces this
 
-`internal/doccheck` runs in pre-push over `docs/` (the source) plus the
+`internal/doccheck` runs in `pre-release` over `docs/` (the source) plus the
 CLI help registry, and is the durable guard:
 
 - go blocks compile against the in-repo SDK;
@@ -80,9 +80,9 @@ CLI help registry, and is the durable guard:
   subject matter. The CHANGELOG is excluded outright -- recording dead
   names is its job.
 
-Plus: a pre-commit check that `docs/` and `pkg/docs/mirror/` are in
-sync, and pre-push drift gates that regenerate the generated reference
-pages and fail if the committed file is stale.
+Plus: a `pre-commit` check that `docs/` and `pkg/docs/mirror/` are in
+sync, and `pre-release` drift gates that regenerate the generated
+reference pages and fail if the committed file is stale.
 
 ## Adding a new generated reference
 
@@ -90,7 +90,7 @@ pages and fail if the committed file is stale.
    stdout.
 2. Write a `bin/gen-<name>-docs.sh` that redirects it to
    `docs/<name>.md` and runs `bin/sync-docs.sh`.
-3. Add a pre-push drift gate: regenerate and `diff` against the
+3. Add a `pre-release` drift gate: regenerate and `diff` against the
    committed file.
 4. Register the slug in `docs/_sidebar.json` and link it from the
    relevant concept page.

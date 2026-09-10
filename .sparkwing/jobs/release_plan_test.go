@@ -23,8 +23,8 @@ var releaseGateNodes = []string{
 	"check-branch-published",
 	"check-clean-tree",
 	"gate-contracts",
-	"gate-pre-commit",
-	"gate-pre-push",
+	"gate-broad",
+	"gate-pre-release",
 	"gate-template-verify",
 	"gate-release-lineage",
 	"gate-schema-changelog",
@@ -134,7 +134,7 @@ func TestReleasePlanDoesNotCommitChangelogBeforeIndependentGatesPass(t *testing.
 func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) {
 	plan := releasePlan(t)
 	deps := ancestors(t, plan, "gate-template-verify")
-	for _, gate := range []string{"gate-pre-commit", "gate-pre-push"} {
+	for _, gate := range []string{"gate-broad", "gate-pre-release"} {
 		if !deps[gate] {
 			t.Errorf("gate-template-verify must depend on %s", gate)
 		}
@@ -148,13 +148,13 @@ func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) 
 func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
 	plan := releasePlan(t)
 
-	if !ancestors(t, plan, "gate-pre-commit")["gate-contracts"] {
-		t.Error("gate-pre-commit must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
+	if !ancestors(t, plan, "gate-broad")["gate-contracts"] {
+		t.Error("gate-broad must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
 	}
-	if ancestors(t, plan, "gate-contracts")["gate-pre-commit"] {
-		t.Error("gate-contracts must not depend on gate-pre-commit, directly or transitively: that puts it back behind the suite it exists to precede")
+	if ancestors(t, plan, "gate-contracts")["gate-broad"] {
+		t.Error("gate-contracts must not depend on gate-broad, directly or transitively: that puts it back behind the suite it exists to precede")
 	}
-	if ancestors(t, plan, "gate-contracts")["gate-pre-push"] || ancestors(t, plan, "gate-contracts")["gate-template-verify"] {
+	if ancestors(t, plan, "gate-contracts")["gate-pre-release"] || ancestors(t, plan, "gate-contracts")["gate-template-verify"] {
 		t.Error("gate-contracts must not depend on the expensive gates")
 	}
 }
@@ -162,7 +162,7 @@ func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
 func TestReleasePlanRejectsInvalidPreflightsBeforeExpensiveChecks(t *testing.T) {
 	plan := releasePlan(t)
 	preflights := []string{"check-clean-tree", "validate-version", "gate-release-lineage"}
-	for _, check := range []string{"gate-contracts", "gate-pre-commit", "gate-pre-push", "gate-template-verify"} {
+	for _, check := range []string{"gate-contracts", "gate-broad", "gate-pre-release", "gate-template-verify"} {
 		deps := ancestors(t, plan, check)
 		for _, preflight := range preflights {
 			if !deps[preflight] {
@@ -228,10 +228,10 @@ func TestReleaseAlwaysRequestsAnExhaustiveTemplateProof(t *testing.T) {
 	}
 }
 
-func TestReleasePlanSerializesPrePushAfterPreCommit(t *testing.T) {
-	deps := ancestors(t, releasePlan(t), "gate-pre-push")
-	if !deps["gate-pre-commit"] {
-		t.Error("gate-pre-push must depend on gate-pre-commit")
+func TestReleasePlanSerializesPreReleaseAfterTheBroadGate(t *testing.T) {
+	deps := ancestors(t, releasePlan(t), "gate-pre-release")
+	if !deps["gate-broad"] {
+		t.Error("gate-pre-release must depend on gate-broad")
 	}
 }
 
@@ -246,14 +246,14 @@ func TestReleasePlanRestoreDoesNotGateTagPush(t *testing.T) {
 func TestReleaseRefusesAnUnpublishedBranchBeforeTheExpensiveGates(t *testing.T) {
 	plan := releasePlan(t)
 
-	for _, gate := range []string{"gate-pre-commit", "gate-pre-push", "gate-template-verify"} {
+	for _, gate := range []string{"gate-broad", "gate-pre-release", "gate-template-verify"} {
 		if !ancestors(t, plan, gate)["check-branch-published"] {
 			t.Errorf("%s must depend on check-branch-published: the tag push refuses an unpublished branch anyway, so running the gate first buys nothing", gate)
 		}
 	}
 
 	deps := ancestors(t, plan, "check-branch-published")
-	for _, gate := range []string{"gate-contracts", "gate-pre-commit", "gate-pre-push", "gate-template-verify"} {
+	for _, gate := range []string{"gate-contracts", "gate-broad", "gate-pre-release", "gate-template-verify"} {
 		if deps[gate] {
 			t.Errorf("check-branch-published must not depend on %s, directly or transitively: that puts it back behind the gates it exists to precede", gate)
 		}

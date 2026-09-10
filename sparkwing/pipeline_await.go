@@ -28,8 +28,8 @@ import (
 // sparkwing.Job(plan, name, &B{}). The job runs as a regular node,
 // sub-steps appear natively in the parent's event stream, and
 // there's no controller hop. See .sparkwing/jobs/release.go for an
-// example (the release pipeline composes PreCommit and PrePush
-// directly as gate-pre-commit and gate-pre-push nodes).
+// example (the release pipeline composes Gate and PreRelease
+// directly as gate-broad and gate-pre-release nodes).
 //
 // The two type parameters:
 //

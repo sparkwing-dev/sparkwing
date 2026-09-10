@@ -101,7 +101,7 @@ func TestStorePostgresStepPassesWithoutPostgresWhenTheStoreIsUntouched(t *testin
 
 func TestStorePostgresStepWaitsOnTheTestStep(t *testing.T) {
 	w := sparkwing.NewWork()
-	if _, err := (&PreCommit{}).Work(w); err != nil {
+	if _, err := (&Gate{}).Work(w); err != nil {
 		t.Fatal(err)
 	}
 	if w.StepByID("store-postgres") == nil {

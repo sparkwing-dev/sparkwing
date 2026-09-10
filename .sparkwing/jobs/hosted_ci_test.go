@@ -89,7 +89,7 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	requireWorkflowText(t, body,
 		"  workflow_call:\n",
 		"permissions:\n  contents: read\n",
-		"gate: [pre-commit, pre-push]",
+		"gate: [gate, pre-release]",
 		"persist-credentials: false",
 		"Copy the immutable release verifier",
 		`cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"`,
@@ -100,8 +100,8 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"git tag --delete -- \"$RELEASE_TAG\"",
 		"-dropreplace=github.com/sparkwing-dev/sparkwing",
 		"pkg/scaffold/version.go",
-		"run pre-commit",
-		"run pre-push",
+		"run gate",
+		"run pre-release",
 	)
 	if strings.Contains(body, ": write") {
 		t.Fatal("canonical gates grant a write permission")
@@ -118,23 +118,23 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	copyAt := strings.Index(body, `cp "$snapshot_dir/pkg_scaffold.txt" .apidiff/pkg_scaffold.txt`)
 	stageAt := strings.Index(body, `git add -- .sparkwing/go.mod .sparkwing/go.sum`)
 	hashAt := strings.Index(body, `patch_oid="$(git diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum`)
-	prePushAt := strings.Index(body, `"$RUNNER_TEMP/sparkwing" run pre-push`)
-	if stageAt < 0 || regenAt < stageAt || copyAt < regenAt || hashAt < copyAt || prePushAt < hashAt {
-		t.Fatal("release self-pin snapshot is not regenerated before fingerprinting and pre-push")
+	preReleaseAt := strings.Index(body, `"$RUNNER_TEMP/sparkwing" run pre-release`)
+	if stageAt < 0 || regenAt < stageAt || copyAt < regenAt || hashAt < copyAt || preReleaseAt < hashAt {
+		t.Fatal("release self-pin snapshot is not regenerated before fingerprinting and pre-release")
 	}
 }
 
-func TestCanonicalPreCommitOwnsDashboardDependencyInstallation(t *testing.T) {
+func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
-	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'pre-commit'\n        run: npm ci --ignore-scripts --prefix web"
+	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'gate'\n        run: npm ci --ignore-scripts --prefix web"
 	requireWorkflowText(t, body, install)
 	if got := strings.Count(body, "npm ci --ignore-scripts --prefix web"); got != 1 {
 		t.Fatalf("dashboard dependency install count = %d, want 1", got)
 	}
 	installAt := strings.Index(body, install)
-	gateAt := strings.Index(body, "- name: Run canonical pre-commit")
+	gateAt := strings.Index(body, "- name: Run canonical gate")
 	if gateAt < 0 || installAt > gateAt {
-		t.Fatal("dashboard dependencies are not installed before canonical pre-commit")
+		t.Fatal("dashboard dependencies are not installed before the canonical broad gate")
 	}
 	if strings.Contains(body, "npm --prefix web run lint") {
 		t.Fatal("hosted workflow bypasses the canonical frontend-lint step")
@@ -156,7 +156,7 @@ func TestCanonicalWorkflowPinsEveryExternalAction(t *testing.T) {
 func TestCanonicalWorkflowUploadsOnlyFailedBrowserEvidence(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	requireWorkflowText(t, body,
-		"- name: Upload dashboard browser failure artifacts\n        if: ${{ failure() && matrix.gate == 'pre-commit' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}\n        continue-on-error: true\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: dashboard-browser-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            web/test-results/\n            web/playwright-report/\n          if-no-files-found: ignore\n          retention-days: 14",
+		"- name: Upload dashboard browser failure artifacts\n        if: ${{ failure() && matrix.gate == 'gate' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}\n        continue-on-error: true\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: dashboard-browser-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            web/test-results/\n            web/playwright-report/\n          if-no-files-found: ignore\n          retention-days: 14",
 	)
 }
 

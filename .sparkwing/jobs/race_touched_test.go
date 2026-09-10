@@ -65,7 +65,7 @@ func TestRaceTouchedRunsTheRaceDetectorOnTheChangedPackage(t *testing.T) {
 
 func TestRaceTouchedWaitsOnTheTestStep(t *testing.T) {
 	w := sparkwing.NewWork()
-	if _, err := (&PreCommit{}).Work(w); err != nil {
+	if _, err := (&Gate{}).Work(w); err != nil {
 		t.Fatal(err)
 	}
 	if w.StepByID("race-touched") == nil {
