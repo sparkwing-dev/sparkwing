@@ -263,3 +263,12 @@ func TestSetHostPolicyRunsAfterTheBuiltInChecks(t *testing.T) {
 		})
 	}
 }
+
+func TestRedactSCPUser(t *testing.T) {
+	for _, user := range []string{"git", "token_example_123"} {
+		got := Redact(user + "@github.com:acme/repo.git")
+		if got != "redacted@github.com:acme/repo.git" {
+			t.Fatalf("Redact SCP URL = %q", got)
+		}
+	}
+}

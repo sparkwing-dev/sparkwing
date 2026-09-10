@@ -88,7 +88,7 @@ func Redact(raw string) string {
 		return ""
 	}
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
-		return raw
+		return "redacted@" + match[1] + ":" + match[2]
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.User == nil {
