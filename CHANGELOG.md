@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.49.0] - 2026-09-10
 Five surfaces are cut here, each with a section in [the migration
 guide](docs/migrations/v0.49.0.md): `update` owns CLI and SDK updates,
 `serve` replaces the `dashboard` command group, and `queue exec`,
