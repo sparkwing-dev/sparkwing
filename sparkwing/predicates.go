@@ -39,8 +39,7 @@ type Predicate interface {
 // directly outside of tests (where a minimal in-memory impl is fine).
 type PredicateContext interface {
 	// Arg returns the resolved value of the named arg and true when
-	// some source provided a value (explicit flag, profile
-	// default-args, computed, or a constraint Default). Returns
+	// some source provided a value (explicit flag, computed, or a constraint Default). Returns
 	// (nil, false) when the arg has no resolved value at all -- this
 	// is the signal [ArgUnset] looks for.
 	Arg(name string) (value any, ok bool)
@@ -147,7 +146,7 @@ func (p argSetPredicate) Eval(ctx PredicateContext) bool {
 func (p argSetPredicate) String() string { return fmt.Sprintf("%s is set", p.name) }
 func (argSetPredicate) isPredicate()     {}
 
-// ArgSet holds when some source (explicit flag, profile default-args,
+// ArgSet holds when some source (explicit flag,
 // schema default, or computed) has populated the named arg. Note this
 // is "has a resolved value," not "has a non-zero value" -- a default of
 // false on a bool still counts as set.

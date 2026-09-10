@@ -74,7 +74,7 @@ type RunOptions struct {
 // Run executes Opts.Cmd inside a one-shot Opts.Image container. The
 // flow is:
 //
-//  1. docker pull <image>          (idempotent; cached after first run)
+//  1. docker pull <image>          (checks the registry on every call)
 //  2. docker create ...            (named container, returns id)
 //  3. docker cp <inputDir>/. <id>:<workDir>/   (when InputDir set)
 //  4. docker start -a <id>         (streams stdout/stderr)

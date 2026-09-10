@@ -1,7 +1,7 @@
 // Package services is the sparkwing SDK's sidecar-container helper:
-// spin up postgres/redis/etc. on --network=host for the duration of
-// a function, wait for readiness, and guarantee cleanup on every
-// exit path (normal return, error, panic, ctx cancellation).
+// start sidecars for a function, wait for readiness, and clean up services
+// whose startup succeeded on return, error, panic, or context cancellation.
+// Declared ports bind to 127.0.0.1. Services without a port use host networking.
 //
 //	err := services.WithServices(ctx, []services.Service{
 //	    {
@@ -45,9 +45,9 @@ const readyPollInterval = 500 * time.Millisecond
 
 const fallbackReadyWait = 2 * time.Second
 
-// Service describes a sidecar container to spin up via `docker run -d
-// --network=host`. Because all services share the host network, tests
-// reach each one at `localhost:<Port>`.
+// Service describes a sidecar container started with docker run -d. A
+// declared Port is published on 127.0.0.1 for host-side tests. Without
+// a Port, the container uses host networking, which requires Linux.
 type Service struct {
 	// Image is the fully-qualified image reference, e.g. "postgres:15-alpine".
 	// Required.
