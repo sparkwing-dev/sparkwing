@@ -71,10 +71,8 @@ func buildSubmitCLI(t *testing.T) string {
 	return submitCLIBin
 }
 
-// seededBundleOverlay writes a go build overlay that embeds a stub dashboard
-// index page. The real bundle is a gitignored artifact of bin/build-web.sh, so
-// without the stub every command this binary serves a dashboard for would pass
-// or fail on whether the developer had built one.
+// safety: the dashboard bundle is a gitignored artifact of bin/build-web.sh, so
+// without a stub this binary's dashboard depends on the developer's build state.
 func seededBundleOverlay(dir string) (string, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -83,6 +81,9 @@ func seededBundleOverlay(dir string) (string, error) {
 	root, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
 	if err != nil {
 		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "internal", "web", "next-out")); err != nil {
+		return "", fmt.Errorf("locate the embedded dashboard directory: %w", err)
 	}
 	index := filepath.Join(dir, "index.html")
 	if err = os.WriteFile(index, []byte("<!doctype html><title>sparkwing test bundle</title>\n"), 0o600); err != nil {
