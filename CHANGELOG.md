@@ -20,9 +20,47 @@ unlock.
 
 ## [Unreleased]
 
+Five surfaces are cut here, each with a section in [the migration
+guide](docs/migrations/v0.49.0.md): `update` owns CLI and SDK updates,
+`serve` replaces the `dashboard` command group, and `queue exec`,
+`run --sw-isolated-home`, and the SDK's lint slots are gone.
+
+The whole public API change since v0.48.1, for a consumer pinning `sparkwing/`
+or `pkg/...`:
+
+**Added**
+
+- `sparkwing`: `func (r Ref[T]) TryGet(ctx context.Context) (T, bool)`
+- `sparkwing`: `var ErrRefAbsent`
+- `pkg/backends`: `func (s Surfaces) BinaryCache() *Spec`
+
+**Removed**
+
+- `sparkwing`: `func AcquireLintSlot(tool string) (*LintSlot, error)`,
+  `type LintSlot`, `func (*LintSlot) Configure`, `func (*LintSlot) ConfigureIn`,
+  `func (*LintSlot) Release`, `const LintSlotsEnv`
+- `pkg/wingwire`: `type GuardComplete`, `type GuardCompleteAck`,
+  `type ProcessSession`, `const TypeGuardComplete`, `const TypeGuardCompleteAck`,
+  and the `Guard` field on `AdmissionRequest`
+
+**Changed**
+
+- `pkg/localws`: `func Run(ctx context.Context, opts Options) error` names its
+  returned error. Callers are unaffected.
+- `pkg/scaffold`: `const FallbackSDKVersion` tracks the published release a
+  scaffold pins, and moves with every release.
+
+Nothing else exported by a covered package changed. The per-package snapshots
+under `.apidiff/` are the machine-readable form of this list.
+
 ### Changed
 
-- **Breaking:** Dashboard start preserves running instances; use `serve restart` for replacement and `serve stop` instead of `serve kill`. Lifecycle receipts report ownership, effective endpoints, readiness and artifact identity; `serve logs` provides bounded access.
+- **cli (Breaking):** `serve start` leaves a running service alone
+  `dashboard start` replaced whatever it found. `serve restart` replaces a
+  running service and `serve stop` ends one; there is no `serve kill`.
+  Lifecycle receipts name the owner, the effective endpoints, readiness, and
+  the artifact the service runs, and `serve logs` reads a bounded window of the
+  service log. See [serve command](docs/migrations/v0.49.0.md#serve-command).
 - **cache:** A cache directory sparkwing cannot create now names `SPARKWING_HOME`.
   The message points at the one environment variable that moves the cache root
   instead of leaving the reader to look for a cache-specific override, which
@@ -64,7 +102,7 @@ unlock.
   compact comparison metadata, and reports uncertain local builds instead of
   assuming matching version labels mean matching releases. SDK updates resolve
   the same latest published release before native Go tooling runs. See
-  [unified update](docs/migrations/_unreleased.md#unified-update).
+  [unified update](docs/migrations/v0.49.0.md#unified-update).
 
 - **cli:** `pipeline hooks survey` and `doctor` count a repository as gated only
   where a declared `pre-commit` or `pre-push` runs from that repository, which
@@ -320,12 +358,12 @@ unlock.
   sparkwing hosting the machine's daemon, is now an admission refusal that
   names how to identify the daemon's build, both versions, and the upgrade that
   resolves it. `SPARKWING_HOME` keeps its meaning as deliberate isolation. See
-  [isolated home removed](docs/migrations/_unreleased.md#isolated-home-removed).
+  [isolated home removed](docs/migrations/v0.49.0.md#isolated-home-removed).
 
 - **cli (Breaking):** The `dashboard` command group is replaced by `serve`
   Use `sparkwing serve start`, `serve status`, and `serve kill` for the local
   dashboard and API. The retired noun fails without starting or stopping a
-  service. See [serve command](docs/migrations/_unreleased.md#serve-command).
+  service. See [serve command](docs/migrations/v0.49.0.md#serve-command).
 
 - **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
   `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they
@@ -334,7 +372,7 @@ unlock.
   outside the diff and `new-from-merge-base` dropped every one -- a tree with
   eight findings linted clean in three seconds. Hand each worktree
   `ToolCacheDir("golangci-lint")`. See
-  [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
+  [lint slots removed](docs/migrations/v0.49.0.md#lint-slots-removed).
 
 - **cli + wingd (Breaking):** `sparkwing queue exec` and the daemon's
   guarded-session machinery behind it. The command admitted one bootstrap
@@ -342,7 +380,7 @@ unlock.
   it was the only sender of the `guard_complete` and `guard_complete_ack`
   messages and of `admission_request.guard`; all three leave the wire with it.
   Run work that needs admission as a pipeline. See [queue exec
-  removed](docs/migrations/_unreleased.md#queue-exec-removed).
+  removed](docs/migrations/v0.49.0.md#queue-exec-removed).
 
 ## [v0.48.1] - 2026-09-09
 ### Changed
