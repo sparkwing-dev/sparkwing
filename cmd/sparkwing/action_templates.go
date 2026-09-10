@@ -39,7 +39,6 @@ func runExamples(args []string) error {
 	fs.StringVar(&cloud, "cloud", "", "filter the list by cloud (aws | gcp); cloud-agnostic templates always match")
 	fs.StringVar(&name, "name", "", "show full detail for one template instead of the list")
 	fs.BoolVar(&body, "body", false, "with --name, also print the rendered pipeline body")
-	_ = chdirFlag(fs)
 	if err := parseAndCheck(cmdExamples, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
