@@ -22,6 +22,14 @@ unlock.
 
 ### Added
 
+- **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
+  the upstream output is absent. `TryGet` exists for the bootstrap run of a
+  compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
+  a pipeline's first run, and `Get` panics there. It still panics on a
+  cancelled or expired context, and on output that does not fit `T`. Misses are
+  logged at warn naming the pipeline and node, because the SDK cannot tell an
+  unreachable store from a genuine absence and reports both as absence. `Get`
+  is unchanged.
 - **development:** Repository-owned candidate install hook for Xwing rebuilds
   the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
