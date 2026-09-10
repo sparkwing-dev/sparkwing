@@ -281,17 +281,3 @@ determine who can publish binaries.
 A missing sidecar causes the run to compile from source. Set
 `SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` only for a trusted store to accept
 blobs without sidecars and write digests from the downloaded bytes.
-
-To replace an older binary with a newly built, attested copy, run this from its
-trusted pipeline checkout:
-
-```sh
-recovery_home="$(mktemp -d)"
-SPARKWING_HOME="$recovery_home" sparkwing pipeline publish --artifact-store 's3://example-bucket/pipeline-binaries'
-```
-
-Use the same artifact-store URI as the consumers. Publication builds for the
-current platform by default; pass `--platform` for other consumer platforms.
-The fresh home prevents a local binary cache hit, so publication rebuilds from
-source instead of trusting cached bytes. Remove that temporary home after a
-successful publication.
