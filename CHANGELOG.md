@@ -39,8 +39,8 @@ unlock.
 
 ### Fixed
 
-- **cache:** A profile's `cache.binaries` sub-spec routes `bin/<hash>` reads
-  It was parsed, validated and documented but never consumed.
+- **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
+  reads. It was parsed, validated and documented, and no code path read it.
 - **cli:** Cross-repository configuration commands report invalid flags
 - **cli:** User creation accepts complete piped passphrases, including spaces
 - **cli:** `info` reports unavailable pipeline catalogs instead of silently
