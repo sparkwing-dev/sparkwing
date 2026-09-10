@@ -376,8 +376,9 @@ func RunNodeOnce(
 				clearInspector := nodeTimeout.setDeadlineInspector(admissionDeadlineHandled)
 				defer clearInspector()
 			}
-			var awaitObs childAwaitObserver
+			awaitObs := childAwaitObserver{startedAt: startedAt}
 			awaitTimeout := func(cause error) error {
+				awaitObs.admissionOff = admissionPauseActive()
 				return fmt.Errorf("waiting for child %s: %w (%s)", childRunID, cause, awaitObs.evidence())
 			}
 			for {
@@ -388,14 +389,21 @@ func RunNodeOnce(
 				}
 				run, err := stateClient.GetRun(pollCtx, childRunID)
 				if err != nil {
-					awaitObs.observe("", err)
-					if awaitObs.firstError() {
-						logger.Warn("child run status poll failed; retrying until the wait times out",
-							"run_id", runID, "node", currentNode, "child_run_id", childRunID,
-							"pipeline", req.Pipeline, "err", err)
+					// safety: ErrNotFound is a healthy answer -- the child's runs
+					// row appears only once a consumer claims it, so a queued or
+					// still-compiling child must not read as a store fault.
+					if errors.Is(err, store.ErrNotFound) {
+						awaitObs.observeMissing()
+					} else {
+						awaitObs.observeError(err)
+						if awaitObs.firstError() {
+							logger.Warn("child run status poll failed; retrying",
+								"run_id", runID, "node", currentNode, "child_run_id", childRunID,
+								"pipeline", req.Pipeline, "err", err)
+						}
 					}
 				} else {
-					awaitObs.observe(run.Status, nil)
+					awaitObs.observeStatus(run.Status)
 					switch run.Status {
 					case "success":
 						updateTimeoutForAdmission(parentCtx)

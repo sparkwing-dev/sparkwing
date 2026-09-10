@@ -4,36 +4,56 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChildAwaitObserver_EvidenceWithoutErrors(t *testing.T) {
-	var obs childAwaitObserver
-	obs.observe("queued", nil)
-	obs.observe("running", nil)
+	obs := childAwaitObserver{startedAt: time.Now().Add(-2 * time.Second)}
+	obs.observeStatus("queued")
+	obs.observeStatus("running")
 
 	got := obs.evidence()
-	if !strings.Contains(got, "polls=2") {
-		t.Errorf("evidence %q does not report the poll count", got)
+	for _, want := range []string{"polls=2", "last_status=running", "waited=", "first_status_after="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("evidence %q is missing %q", got, want)
+		}
 	}
-	if !strings.Contains(got, "last_status=running") {
-		t.Errorf("evidence %q does not report the last observed child status", got)
-	}
-	if strings.Contains(got, "getrun_errors") {
+	if strings.Contains(got, "store_errors") {
 		t.Errorf("evidence %q reports errors when none were swallowed", got)
+	}
+}
+
+// A child that has not been claimed yet has no runs row, which the loop
+// must not report as a store fault: it is the normal state of every queued
+// or still-compiling child.
+func TestChildAwaitObserver_MissingRunRowIsNotAStoreError(t *testing.T) {
+	var obs childAwaitObserver
+	obs.observeMissing()
+	obs.observeMissing()
+
+	if obs.firstError() {
+		t.Error("a missing runs row must not trip the swallowed-error log")
+	}
+	got := obs.evidence()
+	if !strings.Contains(got, "polls_before_run_row=2") {
+		t.Errorf("evidence %q does not count the polls before the run row appeared", got)
+	}
+	if strings.Contains(got, "store_errors") {
+		t.Errorf("evidence %q counts a missing row as a store error", got)
 	}
 }
 
 func TestChildAwaitObserver_EvidenceNamesFirstAndLastSwallowedError(t *testing.T) {
 	var obs childAwaitObserver
-	obs.observe("", errors.New("dial tcp: connection refused"))
-	obs.observe("", errors.New("read: i/o timeout"))
-	obs.observe("", errors.New("read: i/o timeout"))
+	obs.observeError(errors.New("dial tcp: connection refused"))
+	obs.observeError(errors.New("read: i/o timeout"))
+	obs.observeError(errors.New("read: i/o timeout"))
 
 	got := obs.evidence()
 	for _, want := range []string{
 		"polls=3",
 		"last_status=none",
-		"getrun_errors=3",
+		"store_errors=3",
 		"dial tcp: connection refused",
 		"read: i/o timeout",
 	} {
@@ -47,8 +67,8 @@ func TestChildAwaitObserver_EvidenceNamesFirstAndLastSwallowedError(t *testing.T
 // describes: the last status matters as much as the errors that preceded it.
 func TestChildAwaitObserver_EvidenceKeepsBothErrorsAndLaterStatus(t *testing.T) {
 	var obs childAwaitObserver
-	obs.observe("", errors.New("store unavailable"))
-	obs.observe("running", nil)
+	obs.observeError(errors.New("store unavailable"))
+	obs.observeStatus("running")
 
 	got := obs.evidence()
 	if !strings.Contains(got, "last_status=running") {
@@ -61,7 +81,7 @@ func TestChildAwaitObserver_EvidenceKeepsBothErrorsAndLaterStatus(t *testing.T) 
 
 func TestChildAwaitObserver_EvidenceSingleErrorIsNotRepeated(t *testing.T) {
 	var obs childAwaitObserver
-	obs.observe("", errors.New("store unavailable"))
+	obs.observeError(errors.New("store unavailable"))
 
 	got := obs.evidence()
 	if strings.Count(got, "store unavailable") != 1 {
@@ -71,10 +91,13 @@ func TestChildAwaitObserver_EvidenceSingleErrorIsNotRepeated(t *testing.T) {
 
 func TestChildAwaitObserver_FirstErrorIsReportedOnce(t *testing.T) {
 	var obs childAwaitObserver
-	if obs.observe("", errors.New("first")); !obs.firstError() {
+
+	obs.observeError(errors.New("first"))
+	if !obs.firstError() {
 		t.Fatal("the first swallowed error should be worth logging")
 	}
-	if obs.observe("", errors.New("second")); obs.firstError() {
+	obs.observeError(errors.New("second"))
+	if obs.firstError() {
 		t.Fatal("only the first swallowed error should be logged")
 	}
 }

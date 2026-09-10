@@ -22,6 +22,11 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A child-await timeout names what the parent observed.
+  The error carries the poll count, the last child status read, how long the
+  parent waited, and the first and last store error it retried past, on both
+  the in-process and node-process wait loops. It previously reported only
+  `context deadline exceeded`.
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **logs:** Concurrent filesystem appends keep each record and its newline together
