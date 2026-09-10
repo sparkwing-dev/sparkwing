@@ -66,6 +66,11 @@ func installedArtifactIdentity(path string) updateIdentity {
 	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
 		return identity
 	}
+	return artifactIdentityFromFile(file, path)
+}
+
+func artifactIdentityFromFile(file *os.File, path string) updateIdentity {
+	identity := updateIdentity{Path: path}
 	info, err := gobuildinfo.Read(file)
 	if err != nil {
 		return identity

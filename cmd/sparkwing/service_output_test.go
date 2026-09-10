@@ -16,7 +16,7 @@ func TestServiceOutputStoppedRoutes(t *testing.T) {
 		code    int
 	}{
 		{[]string{"serve", "status"}, "dashboard", 1},
-		{[]string{"serve", "kill"}, "dashboard", 0},
+		{[]string{"serve", "stop"}, "dashboard", 0},
 		{[]string{"runs", "consumer", "status"}, "consumer", 1},
 		{[]string{"runs", "consumer", "stop"}, "consumer", 0},
 	} {
@@ -44,7 +44,7 @@ func TestServiceOutputStoppedRoutes(t *testing.T) {
 						t.Fatalf("plain: %q", out)
 					}
 				case "pretty":
-					if !strings.Contains(string(out), "not running") {
+					if !strings.Contains(string(out), "not running") && !strings.Contains(string(out), "stopped") {
 						t.Fatalf("pretty: %q", out)
 					}
 				}
@@ -53,18 +53,18 @@ func TestServiceOutputStoppedRoutes(t *testing.T) {
 	}
 }
 
-func TestServiceOutputRunningDashboard(t *testing.T) {
+func TestServiceOutputDoesNotTrustOpaqueDashboardPID(t *testing.T) {
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "dashboard.pid"), fmt.Appendf(nil, "%d", os.Getpid()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cmd := outputContractCommand(t, "serve", "status", "--home", home)
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || cmd.ProcessState.ExitCode() != 2 {
+		t.Fatalf("opaque PID error: %v", err)
 	}
 	records := decodeOutputRecords(t, out)
-	if len(records) != 1 || records[0]["state"] != "running" || records[0]["pid"] != float64(os.Getpid()) || records[0]["home"] != home {
+	if len(records) != 1 || records[0]["state"] != "unknown" || records[0]["pid"] != float64(os.Getpid()) || records[0]["home"] != home {
 		t.Fatalf("running report: %s", out)
 	}
 	if _, ok := records[0]["url"]; ok {

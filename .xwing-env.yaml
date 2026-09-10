@@ -7,3 +7,27 @@ tools:
       - bash
       - bin/xwing-install.sh
     runtime: sparkwing
+commands:
+  install:
+    argv: [env, GOWORK=off, sh, -c, 'go mod download && go -C .sparkwing mod download && npm --prefix web ci --ignore-scripts --no-audit']
+    description: Prepare both Go modules and dashboard dependencies
+  build:
+    argv: [env, GOWORK=off, sh, -c, 'bash bin/build-web.sh && sparkwing run build --sw-local-only "$@"', xwing-build]
+    description: Build dashboard assets and compile every public Go binary
+  test:
+    argv: [env, GOWORK=off, sparkwing, run, test, --sw-local-only]
+    description: Run the repository Go test pipeline through machine admission
+  test-frontend:
+    argv: [npm, test, --]
+    dir: web
+    description: Run dashboard unit tests
+  run:
+    argv: [env, GOWORK=off, go, run, ./cmd/sparkwing]
+    description: Run the checkout CLI with arguments after --
+  verify:
+    argv: [env, GOWORK=off, sparkwing, run, pre-commit, --sw-local-only]
+    description: Run the repository landing gate
+landing:
+  branch: main
+  verify: verify
+  push: true

@@ -82,6 +82,9 @@ type Options struct {
 	// caller passes the running CLI's version (typically the value
 	// of cmd/sparkwing.installedVersion()). Empty hides the pill.
 	Version string
+
+	// Instance binds a lifecycle readiness probe to this supervisor invocation.
+	Instance string
 }
 
 // Run starts the local dev server and blocks until ctx is cancelled
@@ -249,7 +252,7 @@ func buildHandler(
 	webHandler := web.HandlerFromOptionsWithBundle(webOpts, bundle)
 
 	root := http.NewServeMux()
-	root.Handle("GET /api/v1/version", versionHandler(opts.Version))
+	root.Handle("GET /api/v1/version", versionHandler(opts.Version, opts.Instance))
 	root.Handle("/api/v1/health/services", webHandler)
 	root.Handle("GET /api/v1/runs/grep", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)

@@ -23,12 +23,15 @@ type Options struct {
 	AllowOrigins []string
 
 	Version string
+
+	Instance string
 }
 func Run(ctx context.Context, opts Options) (retErr error)
 type VersionInfo struct {
-	Version string
-	Schema  int
-	PID     int
+	Version  string
+	Schema   int
+	PID      int
+	Instance string
 }
 
 # methods on un-declared receiver types (likely a bug)

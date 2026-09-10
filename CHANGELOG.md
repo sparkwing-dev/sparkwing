@@ -20,7 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Dashboard start preserves running instances; use `serve restart` for replacement and `serve stop` instead of `serve kill`. Lifecycle receipts report ownership, effective endpoints, readiness and artifact identity; `serve logs` provides bounded access.
+
+
 ### Added
+
+- **development:** Declare Xwing application commands and gate-verified landing policy
 
 - **cli:** `pipeline sparks catalog` lists the blocks a spark library offers.
   It reads the library's `spark.json` and prints one row per declared block --
