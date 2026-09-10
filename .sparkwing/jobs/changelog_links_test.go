@@ -86,3 +86,26 @@ func TestPinnedMigrationLink_RefusesAPermalinkToAnotherRelease(t *testing.T) {
 		t.Fatalf("issues = %v, want one missing-migration-link: the pin names a different release", categories(got))
 	}
 }
+
+func TestMigrationAnchor_ResolvesOffAnyHeadingLevel(t *testing.T) {
+	guides := fstest.MapFS{
+		"one-topic.md": &fstest.MapFile{Data: []byte("# Project manifests use YAML\n\ntext\n")},
+	}
+	body := "## [Unreleased]\n### Changed\n\n" +
+		"- **development (Breaking):** manifests move. See [migration](docs/migrations/one-topic.md#project-manifests-use-yaml).\n"
+	if got := LintChangelog(body, guides); len(got) != 0 {
+		t.Errorf("issues = %v, want none: an anchor resolves off an H1 as readily as an H2", categories(got))
+	}
+}
+
+func TestMigrationAnchor_StillReportsOneNoHeadingMatches(t *testing.T) {
+	guides := fstest.MapFS{
+		"one-topic.md": &fstest.MapFile{Data: []byte("# Project manifests use YAML\n\ntext\n")},
+	}
+	body := "## [Unreleased]\n### Changed\n\n" +
+		"- **development (Breaking):** manifests move. See [migration](docs/migrations/one-topic.md#a-section-nobody-wrote).\n"
+	got := LintChangelog(body, guides)
+	if len(got) != 1 || got[0].Category != "missing-migration-anchor" {
+		t.Fatalf("issues = %v, want one missing-migration-anchor", categories(got))
+	}
+}

@@ -649,7 +649,7 @@ func validateMigrationLink(s changelogSection, e changelogEntry, urlTail string,
 	return []ChangelogIssue{{
 		Line:     e.titleLine,
 		Category: "missing-migration-anchor",
-		Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor does not match any H2 in the file; available headings: %s",
+		Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor matches no heading in the file; available headings: %s",
 			path, anchor, formatAnchorList(headings)),
 	}}
 }
@@ -666,10 +666,11 @@ func readMigrationHeadings(migrations fs.FS, path string) ([]string, bool) {
 	var headings []string
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// safety: an anchor resolves off any heading level, so restricting this to
+	// H2 would report a link that works as broken.
 	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "## ") {
-			headings = append(headings, strings.TrimSpace(strings.TrimPrefix(line, "## ")))
+		if m := headingRe.FindStringSubmatch(scanner.Text()); m != nil {
+			headings = append(headings, strings.TrimSpace(m[1]))
 		}
 	}
 	return headings, true
