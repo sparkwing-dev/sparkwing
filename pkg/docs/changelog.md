@@ -74,6 +74,15 @@ unlock.
 
 ### Changed
 
+- **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
+  that accepts the encoding. Measured over a served listener, the heaviest page
+  falls from 1,475,121 bytes to 459,420 and the lightest from 732,414 to 251,583,
+  which puts every dashboard page under the 512,000-byte page-weight ceiling. Each
+  bundle file is encoded once per process and every later request writes the stored
+  bytes. A client that does not offer gzip, and any request carrying a `Range`
+  header, receives the same bytes it received before. Event streams are never
+  encoded: the handlers that serve them do not reach the encoding path.
+
 - **cli (Breaking):** `update` owns CLI and SDK updates
   Use `update --cli` (the default) or `update --sdk`; `version update` is
   removed. Read-only `update --check` honors the target and release, emits

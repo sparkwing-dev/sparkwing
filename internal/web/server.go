@@ -362,6 +362,7 @@ func loopbackBind(addr string) bool {
 
 func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	fileServer := http.FileServer(http.FS(bundleFS))
+	assets := &gzipCache{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		p = strings.TrimSuffix(p, "/")
@@ -388,6 +389,10 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 		}
 
 		if info, err := fs.Stat(bundleFS, p); err == nil && !info.IsDir() {
+			w.Header().Add("Vary", "Accept-Encoding")
+			if serveBundleAsset(w, r, bundleFS, p, assets) {
+				return
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -410,9 +415,8 @@ func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, 
 	if nonce := cspNonceFrom(r.Context()); nonce != "" {
 		body = nonceInlineScripts(raw, nonce)
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(body)
+	writeGeneratedHTML(w, r, body)
 }
 
 // safety: every inline script needs the nonce or the CSP blanks the page, so
