@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -71,16 +72,63 @@ func TestDocsRouteRejectsAnUnknownSlug(t *testing.T) {
 func TestDocsRouteInheritsTheDashboardsAuthPosture(t *testing.T) {
 	opts := HandlerOptions{RequireLogin: true, ControllerURL: "http://127.0.0.1:1"}
 
-	rec := getPath(t, opts, "/docs")
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("unauthenticated GET /docs status %d, want 303 to the login page; got %s",
-			rec.Code, head(rec.Body.String()))
+	for target, want := range map[string]string{
+		"/docs":  "/login?next=%2Fdocs",
+		"/docs/": "/login?next=%2Fdocs%2F",
+	} {
+		rec := getPath(t, opts, target)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("unauthenticated GET %s status %d, want 303 to the login page; got %s",
+				target, rec.Code, head(rec.Body.String()))
+		}
+		if loc := rec.Header().Get("Location"); loc != want {
+			t.Errorf("unauthenticated GET %s redirected to %q, want %q", target, loc, want)
+		}
+		if open := getPath(t, HandlerOptions{}, target); open.Code != http.StatusOK {
+			t.Errorf("GET %s on a login-free dashboard status %d, want 200", target, open.Code)
+		}
 	}
-	if loc := rec.Header().Get("Location"); loc != "/login?next=%2Fdocs" {
-		t.Errorf("unauthenticated GET /docs redirected to %q, want the login page", loc)
-	}
+}
 
-	if open := getPath(t, HandlerOptions{}, "/docs"); open.Code != http.StatusOK {
-		t.Errorf("GET /docs on a login-free dashboard status %d, want 200", open.Code)
+func TestDocsRouteAnswersTheTrailingSlashSpelling(t *testing.T) {
+	var opts HandlerOptions
+	pages := docs.List()
+	if len(pages) == 0 {
+		t.Fatal("embedded set has no pages; this test needs one to request")
+	}
+	slug := pages[0].Slug
+
+	// safety: both spellings answer 200, so only the bytes distinguish the docs
+	// index from the app shell the catch-all serves.
+	for _, target := range []string{"/docs/", "/docs/?p=" + slug} {
+		canonical := getPath(t, opts, strings.Replace(target, "/docs/", "/docs", 1)).Body.String()
+		slashed := getPath(t, opts, target).Body.String()
+		shell := getPath(t, opts, "/").Body.String()
+
+		if slashed == shell {
+			t.Errorf("GET %s returned the app shell, not the docs page; got %s", target, head(slashed))
+		}
+		if slashed != canonical {
+			t.Errorf("GET %s and its slash-free spelling returned different bytes (%d against %d)",
+				target, len(slashed), len(canonical))
+		}
+	}
+}
+
+func TestDocsRouteRefusesAPathBelowIt(t *testing.T) {
+	// safety: the shell carries a fresh CSP nonce per response, so two copies of it
+	// are never byte-equal and only the normalized text tells them apart.
+	nonce := regexp.MustCompile(`nonce="[^"]*"`)
+	normalize := func(body string) string { return nonce.ReplaceAllString(body, "") }
+	shell := normalize(getPath(t, HandlerOptions{}, "/").Body.String())
+
+	for _, target := range []string{"/docs/getting-started", "/docs/a/b"} {
+		rec := getPath(t, HandlerOptions{}, target)
+		if normalize(rec.Body.String()) == shell {
+			t.Errorf("GET %s returned the app shell, a 200 carrying no documentation", target)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s status %d, want 404; doc pages are addressed by ?p=", target, rec.Code)
+		}
 	}
 }

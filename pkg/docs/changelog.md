@@ -74,6 +74,18 @@ unlock.
 
 ### Changed
 
+- **web:** The dashboard serves its bundle and its pages gzip-encoded to a client
+  that accepts the encoding. Measured over a served listener, the heaviest page
+  falls from 1,475,205 bytes to 459,505 and the lightest from 732,498 to 251,669,
+  which puts every dashboard page under the 512,000-byte page-weight ceiling. Each
+  bundle file is encoded once per process and every later request writes the stored
+  bytes. A client that does not offer gzip, and any request carrying a `Range`
+  header, receives the same body it received before. Event streams are never
+  encoded: the handlers that serve them do not reach the encoding path. Two
+  response headers change for anyone caching in front of the dashboard: every
+  bundle file and page now carries `Vary: Accept-Encoding`, and an encoded
+  response carries no `Accept-Ranges`.
+
 - **build:** `bin/install.sh` and `bin/cross-compile.sh` build with `-trimpath`
   and `-ldflags "-s -w"`, the flags `.github/workflows/release.yaml` already
   passed, so a local install strips and trims the way the release does. On
@@ -141,6 +153,13 @@ unlock.
   workspace skipped left `.sparkwing/.resolved.mod` on disk with no
   `.resolved.sum`, and an unchanged overlay took the fast path and never tried
   again, so compiling the pipeline needed a manual `go mod download`.
+- **web:** `/docs/` serves the embedded documentation instead of the dashboard app
+  shell. Go's `ServeMux` matched the existing `GET /docs` pattern on that exact path
+  only, so the trailing-slash spelling -- reachable by typing it, or through any
+  proxy that normalizes to it -- fell through to the catch-all and answered 200 with
+  a page carrying no documentation. A path below the route -- `/docs/anything` --
+  now answers 404 for the same reason; doc pages are addressed by `?p=<slug>`.
+
 - **cache:** A profile's `cache.binaries` sub-spec now serves `bin/<hash>`
   reads. It was parsed, validated and documented, and no code path read it.
 - **cache:** Concurrent binary downloads use independent staging files and
