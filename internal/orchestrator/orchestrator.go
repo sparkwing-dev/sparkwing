@@ -1990,32 +1990,10 @@ func repoSuffix(repo string) string {
 }
 
 func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
-	return sparkwing.PipelineResolverFunc(func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
-		run, err := s.backends.State.GetLatestRun(ctx, pipeline, []string{"success"}, maxAge)
-		if err != nil {
-			return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, err)
-		}
-		output, err := s.backends.State.GetNodeOutput(ctx, run.ID, nodeID)
-		if err != nil {
-			return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, nodeID, err)
-		}
-		currentNode := sparkwing.NodeFromContext(ctx)
-		if currentNode != "" {
-			payload, _ := json.Marshal(map[string]any{
-				"pipeline":        pipeline,
-				"node_id":         nodeID,
-				"source_run_id":   run.ID,
-				"max_age_seconds": int64(maxAge.Seconds()),
-				"source_finished": run.FinishedAt,
-			})
-			if evErr := s.backends.State.AppendEvent(ctx, s.runID, currentNode,
-				"pipeline_ref_resolved", payload); evErr != nil {
-				sparkwing.Warn(ctx,
-					"pipeline_ref audit event append failed: %v", evErr)
-			}
-		}
-		return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: output}, nil
-	})
+	return newPipelineRefResolver(s.backends.State, s.runID,
+		func(ctx context.Context, _ string, err error) {
+			sparkwing.Warn(ctx, "pipeline_ref audit event append failed: %v", err)
+		})
 }
 
 func (s *dispatchState) rehydrateFromRetry(ctx context.Context, priorRunID string) error {
