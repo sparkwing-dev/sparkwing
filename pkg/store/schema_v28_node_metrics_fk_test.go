@@ -24,7 +24,7 @@ func seedRunWithMetricSample(t *testing.T, st *store.Store, runID string, starte
 	t.Helper()
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
-		ID: runID, Pipeline: "demo", Status: "success", StartedAt: startedAt,
+		ID: runID, Pipeline: "demo", Status: "success", StartedAt: startedAt, FinishedAt: &startedAt,
 	}); err != nil {
 		t.Fatalf("CreateRun %s: %v", runID, err)
 	}
