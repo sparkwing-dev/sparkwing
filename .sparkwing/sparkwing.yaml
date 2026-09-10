@@ -1,9 +1,13 @@
 pipelines:
   - name: pre-commit
     entrypoint: PreCommit
+    on:
+      pre_commit: {}
 
   - name: pre-push
     entrypoint: PrePush
+    on:
+      pre_push: {}
 
   - name: push-checks
     entrypoint: PrePush

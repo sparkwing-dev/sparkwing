@@ -586,6 +586,41 @@ m := j.Manifest.Get(ctx)
 `sw.RefTo[T]` requires a job struct to embed `sw.Produces[T]`. It panics
 if that marker is missing or declares another output type.
 
+`Get` panics when the reference cannot be resolved. For a
+compare-to-last-run pipeline that is the normal first state --
+`sw.RefToLastRun` has no successful run to read on the pipeline's first
+run -- so read those refs with `TryGet`, which reports the miss instead:
+
+```go
+prev, ok := j.Prev.TryGet(ctx)
+if !ok {
+    return j.buildEverything(ctx) // bootstrap run: nothing to compare against
+}
+```
+
+`ok` is false when the upstream node has not completed, when the run
+that was found stored no output, and on any cross-pipeline resolver
+failure; the value is the zero `T`. The SDK cannot tell an unreachable
+store from a genuine absence -- a resolver returns a bare error -- and
+reports both as absence. For the compare-to-last-run shape that errs
+toward doing the whole job; a step that uses `TryGet` to *skip* work
+turns a store outage into a silent skip, so read the warn log before
+relying on that shape. Every miss is logged at warn naming the pipeline
+and node, because "no matching run" is also what a misspelled pipeline
+name and an unreachable store produce.
+
+One input divides the two accessors: a cross-pipeline run that stored
+empty or null output. `Get` renders that as the zero `T` and carries on;
+`TryGet` reports it as a miss. Swapping one for the other on such a ref
+changes which branch runs.
+
+`TryGet` panics for the failures a pipeline author cannot handle at
+runtime: no resolver in context, which happens only outside a dispatched
+step; stored output that does not fit `T`; and a cancelled or expired
+context, which is the step being torn down rather than an upstream that
+is absent. Keep `Get` where a missing output is itself a programmer
+mistake.
+
 Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
 `sw.RefTo[T]`; pass plain bytes via env vars or sibling steps.
 
