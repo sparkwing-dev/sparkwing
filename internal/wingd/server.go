@@ -1217,13 +1217,12 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		return
 	}
 	requestID := d.leaseRun[leaseID]
-	reclaimed := requestID
 	c.role = roleHolder
 	c.leaseID = leaseID
 	c.startAt = d.now()
 	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
-	reclaimed = d.claimUnreclaimedMemberLocked(leaseID, requestID)
+	reclaimed := d.claimUnreclaimedMemberLocked(leaseID, requestID)
 	c.members = []string{reclaimed}
 	c.runID = reclaimed
 	for _, m := range c.members {
