@@ -13,9 +13,8 @@ import (
 
 const stateSchema = 1
 
-// legacyGuardedStateSchema was written by daemons that parked an admission on a
-// process session. Nothing reads the extra field any more, but a file left by
-// such a daemon still has to load or its successor refuses to start.
+// safety: schema 2 was written only while an admission was parked on a process
+// session; refusing it would stop the successor of such a daemon from starting.
 const legacyGuardedStateSchema = 2
 
 type persistedState struct {

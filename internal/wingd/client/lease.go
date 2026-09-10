@@ -20,8 +20,8 @@ type Lease struct {
 	SoleRunUnderLoad bool
 	ExternalCores    float64
 
-	// connMu serialises the writes and the reconnect that Release and
-	// recoverWatch make on the same connection.
+	// safety: Release writes on the same connection recoverWatch replaces, so
+	// both take connMu.
 	connMu sync.Mutex
 }
 

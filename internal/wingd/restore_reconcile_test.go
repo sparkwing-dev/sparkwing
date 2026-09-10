@@ -204,4 +204,3 @@ func TestStartupRefusesUnreadableLeaseAuthority(t *testing.T) {
 		})
 	}
 }
-

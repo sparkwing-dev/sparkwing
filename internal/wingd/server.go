@@ -21,11 +21,11 @@ const defaultChargeCores = 1.0
 const maxCancelledRunTombstones = 4096
 
 type Daemon struct {
-	cfg            Config
-	layout         layout
-	sampler        HostSampler
-	procSampler    ProcSampler
-	ownedSampler   OwnedCPUSampler
+	cfg          Config
+	layout       layout
+	sampler      HostSampler
+	procSampler  ProcSampler
+	ownedSampler OwnedCPUSampler
 
 	lockFile *os.File
 	ln       net.Listener
