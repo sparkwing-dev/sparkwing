@@ -3612,7 +3612,9 @@ repo declares in .sparkwing/sparks.yaml is read at the version
 declared there; any other resolves to latest. --path reads a
 checkout on disk and never touches the network.
 
--o plain prints one block name per line.`,
+-o plain prints one row per line: a modules[] row as its module
+path, which is what 'sparks inflate --module' takes, and a
+packages[] row as its package name.`,
 	Flags: []FlagSpec{
 		{Name: "library", Argument: "MODULE", Desc: "Spark library module path (default: github.com/sparkwing-dev/sparks-core)", Group: "Input"},
 		{Name: "path", Argument: "DIR", Desc: "Read a library checkout on disk instead of downloading it", Group: "Input"},

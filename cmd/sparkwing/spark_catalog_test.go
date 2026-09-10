@@ -152,3 +152,28 @@ func TestSparksInflateWithoutModulePointsAtTheCatalog(t *testing.T) {
 		t.Errorf("error does not name the verb that lists the choices: %v", err)
 	}
 }
+
+func TestSparksCatalogPlainNamesEachPackageOnce(t *testing.T) {
+	dir := writeSparkFixture(t, map[string]string{
+		"spark.json": `{
+  "name": "one-module-lib",
+  "description": "a single Go module with several packages",
+  "author": "tester",
+  "packages": [
+    {"path": "docker", "description": "docker helpers"},
+    {"path": "kube", "description": "kube helpers"}
+  ]
+}`,
+		"go.mod": "module github.com/acme/one-module-lib\n\ngo 1.26.0\n",
+	})
+
+	var err error
+	out := captureStdout(t, func() { err = runSparksCatalog([]string{"--path", dir, "-o", "plain"}) })
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	got := strings.Fields(out)
+	if len(got) != 2 || got[0] != "docker" || got[1] != "kube" {
+		t.Errorf("plain output = %q, want one line per package; a packages[] row is not a module", out)
+	}
+}

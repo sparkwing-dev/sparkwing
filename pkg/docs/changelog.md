@@ -30,8 +30,10 @@ unlock.
   the output says to inflate the library itself instead. Without `--library` it
   reads sparks-core, at the version the repo declares when it declares one;
   `--path` reads a checkout on disk without touching the network. `-o plain`
-  emits the block names one per line, and `-o json` the usual NDJSON.
-  `sparks inflate` with no `--module` now names the verb.
+  emits one row per line -- a `modules[]` row as the module path
+  `inflate --module` takes, a `packages[]` row as its package name -- and
+  `-o json` the usual NDJSON. `sparks inflate` with no `--module` now names
+  the verb.
 
 - **cli:** `-C/--sw-cd DIR` re-anchors `sparkwing info` and every `runs` verb
   that takes `--profile`. Both resolve the project's `sparkwing.yaml` from the

@@ -120,7 +120,7 @@ func runSparksCatalog(args []string) error {
 		return ndjson.Write(os.Stdout, blocks)
 	case "plain":
 		for _, b := range blocks {
-			fmt.Println(inflateTarget(b, libModule))
+			fmt.Println(blockValue(b))
 		}
 		return nil
 	default:
@@ -138,12 +138,11 @@ func downloadDir(sparkwingDir string) string {
 	return os.TempDir()
 }
 
-func inflateTarget(b sparkCatalogBlock, libModule string) string {
+// safety: a modules[] row is its own module and `inflate --module` must get that path,
+// because a bare name resolves against sparks-core; a packages[] row is not a module at all.
+func blockValue(b sparkCatalogBlock) string {
 	if b.Module != "" {
 		return b.Module
-	}
-	if libModule != "" {
-		return libModule
 	}
 	return b.Name
 }
@@ -230,7 +229,7 @@ func printSparkCatalog(summary sparkCatalogSummary, field, libModule string, blo
 		fmt.Printf("import: %s/<name>\n", libModule)
 	}
 	if field == "modules" {
-		fmt.Printf("edit one: sparkwing pipeline sparks inflate --module %s\n", inflateTarget(blocks[0], libModule))
+		fmt.Printf("edit one: sparkwing pipeline sparks inflate --module %s\n", blockValue(blocks[0]))
 		return
 	}
 	if libModule != "" {

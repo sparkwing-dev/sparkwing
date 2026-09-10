@@ -365,8 +365,10 @@ and the overlay. What each subcommand does:
 - **catalog** -- list the blocks a library offers, read from its `spark.json`,
   with each block's stability and what it does. For a `modules[]` library each
   row's name is what `inflate --module` takes; a `packages[]` library is one Go
-  module, so inflate it by its own module path. Without `--library` it reads
-  sparks-core; `--path` reads a checkout on disk instead of downloading one.
+  module, so inflate it by its own module path. `-o plain` prints one row per
+  line -- a `modules[]` row as its module path, a `packages[]` row as its
+  package name. Without `--library` it reads sparks-core; `--path` reads a
+  checkout on disk instead of downloading one.
   `list` shows the libraries this repo declares, `catalog` shows what is inside
   one.
 - **list** -- show the declared sparks libraries and their resolved versions.
