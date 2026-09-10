@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -77,5 +78,13 @@ func TestChildRun_StartAndFinishEventsInParentStream(t *testing.T) {
 	}
 	if finish["child_run_id"] != childID {
 		t.Errorf("child_run_finish child_run_id = %v, want %v (must match start)", finish["child_run_id"], childID)
+	}
+	// The audit trail is the only record of a timed-out wait, so it carries
+	// what the parent observed rather than a bare deadline.
+	reason, _ := finish["error"].(string)
+	for _, want := range []string{"polls=", "last_status=", "waited="} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("child_run_finish error %q is missing %q", reason, want)
+		}
 	}
 }

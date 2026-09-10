@@ -22,6 +22,9 @@ unlock.
 
 ### Added
 
+- **web:** Runs gains a Trigger filter with include/exclude controls and shareable URLs
+- **web:** Crons overview gains expandable schedule cards and colored fire history with hover details and links to individual runs
+
 - **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
   the upstream output is absent. `TryGet` exists for the bootstrap run of a
   compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
@@ -30,8 +33,6 @@ unlock.
   logged at warn naming the pipeline and node, because the SDK cannot tell an
   unreachable store from a genuine absence and reports both as absence. `Get`
   is unchanged.
-- **development:** Repository-owned candidate install hook for Xwing rebuilds
-  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -68,6 +69,11 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A child-await timeout names what the parent observed.
+  The error carries the poll count, the last child status read, how long the
+  parent waited, and the first and last store error it retried past, on both
+  the in-process and node-process wait loops. It previously reported only
+  `context deadline exceeded`.
 - **cli:** `pipeline hooks survey` no longer closes with `every declared gate
   fires` while a row reports a hook that does not; a repository that runs its
   commit gate and is missing a `post-commit` notifier is now counted and named
