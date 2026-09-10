@@ -1290,7 +1290,7 @@ machine:
   because a run ahead of it has no estimate of its own. The header counts the
   queued runs with no profile, because those are the ones that starve. `-o
   json` carries each estimate as milliseconds from the snapshot and as an
-  RFC3339 clock time, and `-o plain` as a humanised duration and an RFC3339
+  RFC3339 clock time, and `-o plain` as a humanized duration and an RFC3339
   clock time.
 - `sparkwing queue priority --run ID --set VALUE` -- re-rank a run that is
   already queued, without restarting it. `--set` takes an integer, or

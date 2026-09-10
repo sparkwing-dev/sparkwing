@@ -50,7 +50,7 @@ unlock.
   `unmeasured_waiters` at the top level, each duration in milliseconds from the
   snapshot and each clock time as RFC3339. `-o plain` gains an
   `unmeasured-waiters` record, two trailing columns on a holder record
-  (humanised remaining, RFC3339 finish) and one on a waiter record (RFC3339
+  (humanized remaining, RFC3339 finish) and one on a waiter record (RFC3339
   finish); every existing column keeps its position.
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`

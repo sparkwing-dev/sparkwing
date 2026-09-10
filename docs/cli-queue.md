@@ -35,7 +35,7 @@ The queue command only reports state.
 Output is pretty on a terminal and JSON when piped. Select JSON explicitly
 with -o json, or tab-separated records with -o plain. JSON carries each
 estimate as milliseconds from the snapshot and as an RFC3339 clock time;
-plain carries humanised durations and RFC3339 clock times.
+plain carries humanized durations and RFC3339 clock times.
 
 An absent daemon reports an empty queue and exits 0. An unreachable daemon
 reports the connection failure and exits 4; its queue state is unknown.
@@ -144,7 +144,7 @@ The queue command only reports state.
 Output is pretty on a terminal and JSON when piped. Select JSON explicitly
 with -o json, or tab-separated records with -o plain. JSON carries each
 estimate as milliseconds from the snapshot and as an RFC3339 clock time;
-plain carries humanised durations and RFC3339 clock times.
+plain carries humanized durations and RFC3339 clock times.
 
 An absent daemon reports an empty queue and exits 0. An unreachable daemon
 reports the connection failure and exits 4; its queue state is unknown.
