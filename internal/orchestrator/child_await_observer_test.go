@@ -101,3 +101,35 @@ func TestChildAwaitObserver_FirstErrorIsReportedOnce(t *testing.T) {
 		t.Fatal("only the first swallowed error should be logged")
 	}
 }
+
+func TestChildAwaitObserver_CountsOnlyTheLeadingNotFoundStreak(t *testing.T) {
+	o := childAwaitObserver{startedAt: time.Now()}
+	o.observeMissing()
+	o.observeMissing()
+	o.observeStatus("running")
+	o.observeMissing()
+
+	got := o.evidence()
+	if !strings.Contains(got, "polls_before_run_row=2") {
+		t.Errorf("evidence %q should count only the polls before the row appeared", got)
+	}
+	if !strings.Contains(got, "time_to_first_row=") {
+		t.Errorf("evidence %q should time the row's appearance", got)
+	}
+}
+
+func TestChildAwaitObserver_ARowThatNeverAppearsHasNoFirstRowTime(t *testing.T) {
+	o := childAwaitObserver{startedAt: time.Now()}
+	o.observeMissing()
+	o.observeMissing()
+
+	got := o.evidence()
+	if strings.Contains(got, "time_to_first_row=") {
+		t.Errorf("evidence %q claims a row appeared when none did", got)
+	}
+	for _, want := range []string{"last_status=none", "polls_before_run_row=2", "waited="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("evidence %q is missing %q", got, want)
+		}
+	}
+}

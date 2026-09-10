@@ -16,6 +16,7 @@ type childAwaitObserver struct {
 
 	polls        int
 	notFound     int
+	rowSeenAt    time.Time
 	lastStatus   string
 	firstSeenAt  time.Time
 	errCount     int
@@ -26,10 +27,14 @@ type childAwaitObserver struct {
 
 // observeMissing records a poll that found no runs row. That is a healthy
 // answer while the child is queued or still compiling its pipeline binary:
-// the row appears only once a consumer claims the run.
+// the row appears only once a consumer claims the run. Only the leading
+// streak is counted, so a row that disappears mid-wait does not read as
+// one that never appeared.
 func (o *childAwaitObserver) observeMissing() {
 	o.polls++
-	o.notFound++
+	if o.rowSeenAt.IsZero() {
+		o.notFound++
+	}
 }
 
 // observeError records a poll whose store error the loop swallowed.
@@ -42,9 +47,14 @@ func (o *childAwaitObserver) observeError(err error) {
 	o.lastErr = err
 }
 
-// observeStatus records a poll that read the child's status.
+// observeStatus records a poll that read the runs row. Reaching the row at
+// all is what ends the leading not-found streak, so an empty status still
+// counts as the row having appeared.
 func (o *childAwaitObserver) observeStatus(status string) {
 	o.polls++
+	if o.rowSeenAt.IsZero() {
+		o.rowSeenAt = time.Now()
+	}
 	if status == "" {
 		return
 	}
@@ -74,6 +84,10 @@ func (o *childAwaitObserver) evidence() string {
 	}
 	if !o.startedAt.IsZero() {
 		parts = append(parts, fmt.Sprintf("waited=%s", time.Since(o.startedAt).Round(time.Millisecond)))
+		if !o.rowSeenAt.IsZero() {
+			parts = append(parts, fmt.Sprintf("time_to_first_row=%s",
+				o.rowSeenAt.Sub(o.startedAt).Round(time.Millisecond)))
+		}
 		if !o.firstSeenAt.IsZero() {
 			parts = append(parts, fmt.Sprintf("first_status_after=%s",
 				o.firstSeenAt.Sub(o.startedAt).Round(time.Millisecond)))
