@@ -26,7 +26,6 @@ type Daemon struct {
 	sampler        HostSampler
 	procSampler    ProcSampler
 	ownedSampler   OwnedCPUSampler
-	guardInspector SessionGuardInspector
 
 	lockFile *os.File
 	ln       net.Listener
@@ -49,7 +48,7 @@ type Daemon struct {
 	mu                  sync.Mutex
 	persistMu           sync.Mutex
 	persistedEventSeq   uint64
-	persistWrite        func(string, admission.Snapshot, []admissionEvent, []string, []persistedGuard) error
+	persistWrite        func(string, admission.Snapshot, []admissionEvent, []string) error
 	ledger              *admission.Ledger
 	conns               map[*conn]struct{}
 	byRun               map[string]*conn
@@ -62,7 +61,6 @@ type Daemon struct {
 	cancelledRuns       map[string]struct{}
 	cancelledRunOrder   []string
 	disconnectedPending map[string]struct{}
-	guards              map[admission.LeaseID]*sessionGuardState
 	draining            bool
 	shuttingDown        bool
 	lastActivity        time.Time
@@ -129,10 +127,6 @@ func New(cfg Config) (*Daemon, error) {
 	if procSampler == nil {
 		procSampler = newProcSampler()
 	}
-	guardInspector := cfg.SessionGuardInspector
-	if guardInspector == nil {
-		guardInspector = processSessionInspector{}
-	}
 	ownedSampler := cfg.OwnedCPUSampler
 	if ownedSampler == nil {
 		ownedSampler = newOwnedCPUSampler()
@@ -143,7 +137,6 @@ func New(cfg Config) (*Daemon, error) {
 		sampler:             sampler,
 		procSampler:         procSampler,
 		ownedSampler:        ownedSampler,
-		guardInspector:      guardInspector,
 		container:           containerSensorFor(cfg),
 		ready:               make(chan struct{}),
 		quit:                make(chan struct{}),
@@ -157,7 +150,6 @@ func New(cfg Config) (*Daemon, error) {
 		cancelPending:       map[string]struct{}{},
 		cancelledRuns:       map[string]struct{}{},
 		disconnectedPending: map[string]struct{}{},
-		guards:              map[admission.LeaseID]*sessionGuardState{},
 	}, nil
 }
 
@@ -203,7 +195,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.sampleLoop(ctx)
 	go d.stallLoop(ctx)
 	go d.idleLoop(ctx)
-	go d.guardLoop(ctx.Done())
 
 	for {
 		nc, err := ln.Accept()
@@ -303,10 +294,10 @@ func (d *Daemon) finalizeAsync(runID string) {
 }
 
 func (d *Daemon) initLedger() error {
-	snap, events, cancelledRuns, guards, err := readStateWithGuards(d.layout.state)
+	snap, events, cancelledRuns, err := readStateWithCancellations(d.layout.state)
 	if err != nil {
 		home := filepath.Dir(d.layout.dir)
-		return fmt.Errorf("wingd: durable state %s is unreadable and may describe live guarded commands; after stopping them, run sparkwing daemon recover-state --yes --home %q: %w", d.layout.state, home, err)
+		return fmt.Errorf("wingd: durable state %s is unreadable; run sparkwing daemon recover-state --yes --home %q: %w", d.layout.state, home, err)
 	}
 	if len(cancelledRuns) > maxCancelledRunTombstones {
 		cancelledRuns = cancelledRuns[len(cancelledRuns)-maxCancelledRunTombstones:]
@@ -348,9 +339,6 @@ func (d *Daemon) initLedger() error {
 	if snap != nil {
 		lg, kept, rerr := d.restoreLedger(*snap)
 		if rerr != nil {
-			if len(guards) > 0 {
-				return fmt.Errorf("wingd: restore guarded authority: %w", rerr)
-			}
 			d.discardState(rerr)
 		} else {
 			d.ledger = lg
@@ -374,21 +362,8 @@ func (d *Daemon) initLedger() error {
 			MemoryBytes: int64(ls.MemoryBytes),
 		}
 		d.leaseMembers[ls.ID] = append([]string(nil), ls.Members...)
-		guard, guarded := persistedGuardForLease(guards, ls.ID)
-		if guarded {
-			if guard.RunID != ls.RequestID || !validGuardSession(guard.Session) {
-				return fmt.Errorf("wingd: invalid guard for lease %s", ls.ID)
-			}
-			d.guards[ls.ID] = &sessionGuardState{persistedGuard: guard, disconnected: true}
-		} else {
-			d.reattachWait[ls.ID] = struct{}{}
-			d.reattachMembers[ls.ID] = append([]string(nil), ls.Members...)
-		}
-	}
-	for _, guard := range guards {
-		if _, ok := d.guards[guard.LeaseID]; !ok {
-			return fmt.Errorf("wingd: guard names absent lease %s", guard.LeaseID)
-		}
+		d.reattachWait[ls.ID] = struct{}{}
+		d.reattachMembers[ls.ID] = append([]string(nil), ls.Members...)
 	}
 	d.mu.Lock()
 	d.lastActivity = d.now()
@@ -567,8 +542,6 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleReattach(c, m)
 	case *wingwire.Release:
 		d.handleRelease(c, m)
-	case *wingwire.GuardComplete:
-		d.handleGuardComplete(c, m)
 	case *wingwire.LivenessAck:
 		d.handleLivenessAck(c, m)
 	case *wingwire.QueueState:
@@ -700,8 +673,6 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 
 const subLeaseMajor = 2
 
-const guardedSessionMajor = 3
-
 func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
 	if protocolMajor < subLeaseMajor {
 		return !req.SemaphoresOnly
@@ -723,25 +694,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			"admission request invalid: unrecognized cost source %q; pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n)), or upgrade this box's sparkwing so its daemon knows the source",
 			req.CostSource))
 		return
-	}
-	if req.Guard != nil {
-		if c.protocolMajor < guardedSessionMajor || req.ParentLeaseToken != "" || !validGuardSession(*req.Guard) {
-			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: guarded session is unavailable for this request")
-			return
-		}
-		if err := d.guardInspector.Validate(*req.Guard); err != nil {
-			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: guarded session: "+err.Error())
-			return
-		}
-		quiescent, err := d.guardInspector.Quiescent(*req.Guard)
-		if err != nil || !quiescent {
-			reason := "guarded session is not parked"
-			if err != nil {
-				reason = "guarded session inspection: " + err.Error()
-			}
-			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: "+reason)
-			return
-		}
 	}
 	d.mu.Lock()
 	_, cancelled := d.cancelledRuns[req.RunID]
@@ -795,10 +747,6 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.priority = req.Priority
 	c.repo = req.Repo
 	c.pid = req.PID
-	if req.Guard != nil {
-		guard := *req.Guard
-		c.guard = &guard
-	}
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
 	c.finalizable = finalizesRun(c.protocolMajor, req)
@@ -1025,7 +973,6 @@ func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest, newF
 		existing.pipeline == req.Pipeline &&
 		existing.repo == req.Repo &&
 		existing.pid == req.PID &&
-		processSessionMatches(existing.guard, req.Guard) &&
 		existing.origin == req.Origin &&
 		existing.priority == req.Priority &&
 		existing.ownerRunID == req.OwnerRunID &&
@@ -1115,45 +1062,20 @@ func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
 		d.mu.Unlock()
 		return
 	}
-	type supersededHolder struct {
-		connection *conn
-		guard      *persistedGuard
-	}
-	var holders []supersededHolder
+	var holders []*conn
 	for _, id := range leases {
 		rid, ok := d.leaseRun[id]
 		if !ok {
 			continue
 		}
 		if c := d.byRun[rid]; c != nil && c.leaseID == id && c.role == roleHolder {
-			holder := supersededHolder{connection: c}
-			if state := d.guards[id]; state != nil {
-				guard := state.persistedGuard
-				holder.guard = &guard
-			}
-			holders = append(holders, holder)
-		} else if state := d.guards[id]; state != nil && state.disconnected {
-			guard := state.persistedGuard
-			holders = append(holders, supersededHolder{guard: &guard})
+			holders = append(holders, c)
 		}
 	}
 	d.mu.Unlock()
 	for _, holder := range holders {
-		runID := ""
-		if holder.connection != nil {
-			runID = holder.connection.runID
-		} else if holder.guard != nil {
-			runID = holder.guard.RunID
-		}
-		d.cfg.logf("cancel timeout: stopping superseded holder %s", runID)
-		if holder.guard != nil {
-			if err := d.guardInspector.Terminate(holder.guard.Session); err != nil {
-				d.cfg.logf("cancel timeout: terminate guarded holder %s: %v", holder.guard.RunID, err)
-			}
-		}
-		if holder.connection != nil {
-			go d.handleDisconnect(holder.connection)
-		}
+		d.cfg.logf("cancel timeout: stopping superseded holder %s", holder.runID)
+		go d.handleDisconnect(holder)
 	}
 }
 
@@ -1252,9 +1174,8 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
 	}
-	guard := d.guards[leaseID]
 	_, pending := d.reattachWait[leaseID]
-	if (!pending && guard == nil) || (guard != nil && guard.terminating) {
+	if !pending {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
@@ -1290,9 +1211,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	d.mu.Lock()
 	currentLeaseID, err := d.ledger.Reattach(req.LeaseToken)
 	_, pending = d.reattachWait[leaseID]
-	guard = d.guards[leaseID]
-	if err != nil || currentLeaseID != leaseID || (!pending && guard == nil) ||
-		(guard != nil && (!guard.disconnected || guard.terminating)) {
+	if err != nil || currentLeaseID != leaseID || !pending {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
@@ -1304,19 +1223,8 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	c.startAt = d.now()
 	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
-	if guard != nil {
-		session := guard.Session
-		c.guard = &session
-		guard.disconnected = false
-		d.stopGuardGraceLocked(guard)
-		c.members = append([]string(nil), d.leaseMembers[leaseID]...)
-		if len(c.members) == 0 {
-			c.members = []string{requestID}
-		}
-	} else {
-		reclaimed = d.claimUnreclaimedMemberLocked(leaseID, requestID)
-		c.members = []string{reclaimed}
-	}
+	reclaimed = d.claimUnreclaimedMemberLocked(leaseID, requestID)
+	c.members = []string{reclaimed}
 	c.runID = reclaimed
 	for _, m := range c.members {
 		d.byRun[m] = c
@@ -1369,11 +1277,6 @@ func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
 		d.mu.Unlock()
 		return
 	}
-	if d.guards[c.leaseID] != nil {
-		d.mu.Unlock()
-		c.close()
-		return
-	}
 	events := d.releaseConnLocked(c)
 	deliveries := d.routeLocked(events)
 	snap := d.ledger.Snapshot()
@@ -1404,18 +1307,6 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		d.mu.Unlock()
 		c.close()
 		return
-	}
-	if target == nil {
-		guard := d.disconnectedGuardForRunLocked(req.RunID)
-		if guard != nil {
-			affected := guardLeaseMembers(d.ledger.Snapshot(), guard.LeaseID)
-			for _, runID := range affected {
-				d.cancelPending[runID] = struct{}{}
-			}
-			d.mu.Unlock()
-			d.cancelDisconnectedGuard(c, guard.persistedGuard, affected)
-			return
-		}
 	}
 	if target == nil || !target.finalizable ||
 		(target.role != roleHolder && target.role != roleWaiter) {
@@ -1482,9 +1373,7 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			owner.role = roleNone
 			owner.finalizable = false
 		case roleHolder:
-			if d.guards[owner.leaseID] == nil {
-				events = append(events, d.releaseConnLocked(owner)...)
-			}
+			events = append(events, d.releaseConnLocked(owner)...)
 		}
 	}
 	deliveries := d.routeLocked(events)
@@ -1558,19 +1447,6 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		if d.shuttingDown {
 			d.mu.Unlock()
 			return
-		}
-		if c.role == roleHolder {
-			if guard := d.guards[c.leaseID]; guard != nil {
-				guard.disconnected = true
-				if guard.completion == c {
-					guard.completion = nil
-				}
-				d.armGuardGraceLocked(c.leaseID, guard)
-				d.touchConnLocked(c)
-				d.mu.Unlock()
-				d.logDisconnect(c, role, runID)
-				return
-			}
 		}
 		var orphaned []string
 		if c.finalizable && d.cfg.Runs != nil {
@@ -1651,12 +1527,6 @@ func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
 		d.cfg.logf("persist: %v", persistErr)
 	}
 	for _, dl := range deliveries {
-		if persistErr != nil {
-			if _, grant := dl.msg.(*wingwire.Grant); grant && dl.c.guard != nil {
-				go d.handleDisconnect(dl.c)
-				continue
-			}
-		}
 		if err := dl.c.send(dl.msg); err != nil {
 			go d.handleDisconnect(dl.c)
 		}
@@ -1685,14 +1555,13 @@ func (d *Daemon) persistState(snap admission.Snapshot) error {
 	}
 	d.mu.Lock()
 	cancelledRuns := append([]string(nil), d.cancelledRunOrder...)
-	guards := d.persistedGuardsLocked()
 	d.mu.Unlock()
 	write := d.persistWrite
 	if write != nil {
-		if err := write(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns, guards); err != nil {
+		if err := write(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
 			return err
 		}
-	} else if err := writeStateWithGuards(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns, guards); err != nil {
+	} else if err := writeStateWithCancellations(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
 		return err
 	}
 	d.persistedEventSeq = snap.EventSeq

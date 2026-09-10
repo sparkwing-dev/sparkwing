@@ -103,7 +103,7 @@ func (d *Daemon) stallTick() {
 			if now.Sub(c.lowSince) >= stallWindow {
 				c.stalled = true
 
-				if c.holderLiveness && c.guard == nil && c.livenessNonce == 0 {
+				if c.holderLiveness && c.livenessNonce == 0 {
 					c.livenessSeq++
 					c.livenessNonce = c.livenessSeq
 					challenges = append(challenges, struct {

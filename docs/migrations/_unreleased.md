@@ -65,3 +65,37 @@ the findings.
 
 A worktree therefore starts its linter cold, which is the cost of a gate that
 reports what is in the tree.
+
+## Queue exec removed
+
+`sparkwing queue exec` is gone. It ran one command under a lease from the local
+admission daemon, and the daemon kept that lease alive across a lost connection
+until the command's process session was proven empty. Nothing in the pipeline
+path used it.
+
+Run the work as a pipeline instead. A pipeline run takes admission the same way,
+appears in `sparkwing queue`, and gets the retries, logging, and cancellation a
+bare command never had:
+
+```sh
+# Before
+sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 \
+  --semaphore bootstrap -- make prepare
+
+# After: a pipeline job that runs `make prepare`, with the same charge
+sparkwing run bootstrap
+```
+
+Declare the charge and the shared lock in the pipeline's plan --
+`plan.Resources(sparkwing.Cores(1))` and a semaphore named `bootstrap` -- so the
+daemon arbitrates the run exactly as it arbitrated the command.
+
+### What left the wire
+
+The messages `guard_complete` and `guard_complete_ack`, and the
+`admission_request.guard` field, are removed from the protocol. The daemon still
+speaks protocol major 3 and still serves every major from 1 up, so a pipeline
+binary pinned to any released SDK keeps its admission: no SDK ever sent these.
+A `sparkwing` CLI older than this release that runs `queue exec` against a newer
+daemon is admitted without the guard and then fails with a message naming the
+operation the daemon no longer serves, rather than hanging.

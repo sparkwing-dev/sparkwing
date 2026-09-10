@@ -185,6 +185,14 @@ unlock.
   `ToolCacheDir("golangci-lint")`. See
   [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
 
+- **cli + wingd (Breaking):** `sparkwing queue exec` and the daemon's
+  guarded-session machinery behind it. The command admitted one bootstrap
+  command under a lease the daemon held over the command's process session, and
+  it was the only sender of the `guard_complete` and `guard_complete_ack`
+  messages and of `admission_request.guard`; all three leave the wire with it.
+  Run work that needs admission as a pipeline. See [queue exec
+  removed](docs/migrations/_unreleased.md#queue-exec-removed).
+
 ## [v0.48.1] - 2026-09-09
 ### Changed
 

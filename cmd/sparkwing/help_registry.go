@@ -478,7 +478,7 @@ reports the connection failure and exits 4; its queue state is unknown.
 
 With --profile NAME, the view reads that profile's controller and shows each
 concurrency key, its holders and waiters, and registered runner capacity.`,
-	SubcommandOrder:    []string{"exec", "priority"},
+	SubcommandOrder:    []string{"priority"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
@@ -492,36 +492,6 @@ concurrency key, its holders and waiters, and registered runner capacity.`,
 		{"One record per line for shell pipelines", "sparkwing queue -o plain"},
 		{"Inspect a controller's admission state", "sparkwing queue --profile prod"},
 		{"Move a queued run to the front", "sparkwing queue priority --run build-123 --set front"},
-	},
-}
-
-var cmdQueueExec = Command{
-	Path:     "sparkwing queue exec",
-	Synopsis: "Run a command under local machine admission",
-	Description: `Submits the command to the local admission daemon before starting it. While
-blocked, the command is visible in sparkwing queue. Once granted, its complete
-process tree runs under the lease; interruption or cancellation terminates and
-reaps that tree before the lease is released. Exact process-session ownership
-is available on Linux and macOS; queue exec refuses before admission on
-Windows and other Unix platforms.`,
-	PosArgs: []PosArg{
-		{Name: "command", Desc: "Command and arguments to execute after --", Required: true},
-	},
-	Flags: []FlagSpec{
-		{Name: "run-id", Argument: "ID", Desc: "Unique admission participant identifier", Required: true, Group: "Identity"},
-		{Name: "name", Argument: "NAME", Desc: "Short operation name shown in the queue", Group: "Identity"},
-		{Name: "repo", Argument: "NAME", Desc: "Repository name shown in the queue", Group: "Identity"},
-		{Name: "cores", Argument: "N", Desc: "CPU cores reserved while the command runs", Required: true, Group: "Resources"},
-		{Name: "memory-bytes", Argument: "N", Desc: "Memory bytes reserved while the command runs", Group: "Resources"},
-		{Name: "semaphore", Argument: "NAME", Desc: "Logical semaphore shared with equivalent commands", Group: "Resources"},
-		{Name: "semaphore-capacity", Argument: "N", Desc: "Capacity declared for --semaphore", Default: "1", RequiresFlags: []string{"semaphore"}, Group: "Resources"},
-		{Name: "ready-file", Argument: "PATH", Desc: "Write queued or granted readiness to a new JSON file", Group: "Output"},
-		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "System"},
-	},
-	GroupOrder:  []string{"Identity", "Resources", "Output", "System", "Other"},
-	UsageSuffix: "-- <command> [args...]",
-	Examples: []Example{
-		{"Serialize a bootstrap command", "sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 --semaphore bootstrap -- make prepare"},
 	},
 }
 
