@@ -67,7 +67,11 @@ The Go module pipeline authors import:
 ```go
 package jobs
 
-import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+import (
+    "context"
+
+    sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
 
 type Hello struct{ sw.Base }
 
@@ -125,6 +129,17 @@ See [VERSIONING.md](./VERSIONING.md) for the full policy, the
 deprecation procedure, and the pre-1.0 caveat. User-visible changes
 land in [CHANGELOG.md](./CHANGELOG.md); CI enforces that covered
 surfaces ship with matching entries.
+
+## Development candidates
+
+`.xwing-env.json` declares an optional Xwing install hook for this repository.
+Xwing supplies `XWING_TOOL_SOURCE` and `XWING_TOOL_DEST` as absolute paths.
+The hook uses the native installer with a private named destination, rebuilding
+the web bundle and preserving the native version recipe. It ignores an ambient
+`SKIP_WEB_BUILD` because a candidate must embed the selected source's assets.
+Existing destination files are rejected. Xwing owns candidate selection and the
+`sparkwing` runtime profile. The hook does not install a host service or replace
+the normal executable.
 
 ## Reporting issues
 

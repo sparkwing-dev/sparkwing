@@ -131,7 +131,7 @@ func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, er
 		return "", false, f.err
 	}
 	v, ok := f.cache[name]
-	if !ok {
+	if !ok || v == "" {
 		return "", false, ErrSecretMissing
 	}
 	return v, true, nil

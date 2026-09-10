@@ -27,6 +27,8 @@ unlock.
   compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
   a pipeline's first run, and `Get` panics there. Misses are logged at warn
   level. `Get` is unchanged.
+- **development:** Repository-owned candidate install hook for Xwing rebuilds
+  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
@@ -41,6 +43,14 @@ unlock.
   budget, and a sweep that runs out prints what it reached alongside the error
 
 ### Fixed
+
+- **cli:** Cross-repository configuration commands report invalid flags
+- **cli:** User creation accepts complete piped passphrases, including spaces
+- **cli:** `info` reports unavailable pipeline catalogs instead of silently
+  displaying zero pipelines
+- **sdk:** Invalid dynamic expansion batches leave the plan unchanged
+- **secrets:** Empty filesystem values report missing secrets, matching the
+  environment backend
 
 - **admission:** A guarded command whose daemon restarted mid-run is
   acknowledged when it completes. The guard sweep chose which client to
