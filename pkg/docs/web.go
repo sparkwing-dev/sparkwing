@@ -476,7 +476,10 @@ func (c *WebClient) ClearCache() (int, error) {
 	if err != nil {
 		return removed, err
 	}
-	_ = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, _ error) error {
+	_ = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
 		if !info.IsDir() || p == c.CacheDir {
 			return nil
 		}
