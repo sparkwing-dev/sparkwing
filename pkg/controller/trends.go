@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"sort"
@@ -98,17 +99,16 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		defer nrows.Close()
 		byRun := map[string][]string{}
 		for nrows.Next() {
 			var runID, outcome string
 			if err := nrows.Scan(&runID, &outcome); err != nil {
-				writeError(w, http.StatusInternalServerError, err)
+				writeError(w, http.StatusInternalServerError, errors.Join(err, nrows.Close()))
 				return
 			}
 			byRun[runID] = append(byRun[runID], outcome)
 		}
-		if err := nrows.Err(); err != nil {
+		if err := errors.Join(nrows.Err(), nrows.Close()); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}

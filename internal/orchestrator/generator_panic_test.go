@@ -2,9 +2,10 @@ package orchestrator
 
 import (
 	"context"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestGeneratorLookupPreservesPanicDiagnostic(t *testing.T) {
@@ -16,6 +17,7 @@ func TestGeneratorLookupPreservesPanicDiagnostic(t *testing.T) {
 		t.Fatalf("generator diagnostic lost: nodes=%v err=%v", nodes, err)
 	}
 }
+
 func TestGeneratorLookupKeepsSuccessfulChildren(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	child := sparkwing.Job(plan, "child", func(context.Context) error { return nil })

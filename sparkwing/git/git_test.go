@@ -592,6 +592,7 @@ func TestFilesetHashRejectsGitFailure(t *testing.T) {
 		t.Fatal("git failure silently changed to filesystem hashing")
 	}
 }
+
 func TestFilesetHashInSubdirectoryHonorsGitignore(t *testing.T) {
 	dir := withRepo(t)
 	writeFile(t, dir, ".gitignore", "ignored\n")
@@ -611,6 +612,7 @@ func TestFilesetHashInSubdirectoryHonorsGitignore(t *testing.T) {
 		t.Fatal("subdirectory hashing included a gitignored input")
 	}
 }
+
 func TestPushTagRetriesExistingLocalTag(t *testing.T) {
 	for _, different := range []bool{false, true} {
 		t.Run(fmt.Sprint(different), func(t *testing.T) {

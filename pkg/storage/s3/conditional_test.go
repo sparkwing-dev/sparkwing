@@ -109,6 +109,7 @@ func (a *firstFailureAPI) PutObject(ctx context.Context, in *s3.PutObjectInput, 
 	}
 	return a.API.PutObject(ctx, in, opts...)
 }
+
 func TestConditionalWritesSupportedRetriesTransientFailure(t *testing.T) {
 	api, closeServer := fakeS3(t)
 	defer closeServer()

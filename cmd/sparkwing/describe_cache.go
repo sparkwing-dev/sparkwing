@@ -129,7 +129,7 @@ func runDescribeBinary(sparkwingDir, binPath string) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binPath, "--describe")
 	cmd.Dir = filepath.Dir(sparkwingDir)
-	// Inherited output pipes must not extend the metadata deadline.
+	// safety: inherited output pipes must not extend the metadata deadline.
 	cmd.WaitDelay = 100 * time.Millisecond
 	out, err := cmd.Output()
 	if ctx.Err() != nil {

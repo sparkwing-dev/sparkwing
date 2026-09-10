@@ -3691,16 +3691,13 @@ func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]str
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	_ = rows.Close()
 	var deleted []string
 	for _, id := range ids {
 		if err := s.DeleteRun(ctx, id); err != nil {

@@ -29,11 +29,10 @@
 // same-major implementations that may otherwise ignore one another's fields.
 package wingwire
 
-import "slices"
-
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 )
 
