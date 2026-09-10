@@ -93,8 +93,8 @@ func TestDocsRouteAnswersTheTrailingSlashSpelling(t *testing.T) {
 	}
 	slug := pages[0].Slug
 
-	// Both spellings answer 200, so only the bytes distinguish the docs index
-	// from the app shell the catch-all serves.
+	// safety: both spellings answer 200, so only the bytes distinguish the docs
+	// index from the app shell the catch-all serves.
 	for _, target := range []string{"/docs/", "/docs/?p=" + slug} {
 		canonical := getPath(t, opts, strings.Replace(target, "/docs/", "/docs", 1)).Body.String()
 		slashed := getPath(t, opts, target).Body.String()

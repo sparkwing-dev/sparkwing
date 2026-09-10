@@ -16,9 +16,8 @@ import (
 // encoding saves, so small bodies go out as they are.
 const minGzipBytes = 1024
 
-// gzipCache holds the gzip encoding of each bundle file it is asked for. The
-// embedded bundle is fixed for the life of the process, so an entry is computed
-// once and every later request for that file writes the stored bytes.
+// perf: the embedded bundle is fixed for the life of the process, so each file's
+// encoding is computed once and every later request writes the stored bytes.
 type gzipCache struct {
 	entries sync.Map
 }
@@ -29,9 +28,8 @@ type gzipEntry struct {
 	ok   bool
 }
 
-// encoded returns the gzip encoding of the file named by key, calling load only
-// on the first request for that key. It reports false when the file is too
-// small to encode, cannot be read, or does not shrink.
+// perf: load runs only on the first request for a key, because embed.FS copies
+// the whole file on every read.
 func (c *gzipCache) encoded(key string, load func() ([]byte, error)) ([]byte, bool) {
 	stored, _ := c.entries.LoadOrStore(key, &gzipEntry{})
 	entry, _ := stored.(*gzipEntry)
@@ -65,8 +63,8 @@ func gzipEncode(raw []byte, level int) []byte {
 	return buf.Bytes()
 }
 
-// acceptsGzip reports whether the request offers gzip. An explicit gzip entry
-// outranks a wildcard, and a quality of zero refuses the encoding.
+// safety: an explicit gzip entry outranks a wildcard and a quality of zero
+// refuses the encoding, so a client that says no is never encoded to.
 func acceptsGzip(r *http.Request) bool {
 	explicit, wildcard := -1.0, -1.0
 	for _, field := range r.Header.Values("Accept-Encoding") {
@@ -102,10 +100,9 @@ func encodingQuality(params string) float64 {
 	return 1
 }
 
-// compressibleType reports whether a body of this media type is worth encoding.
-// Media, fonts and archives arrive compressed already, so encoding them again
-// spends processor time to add bytes. An event stream is refused outright: the
-// encoder buffers, and a buffered event stream stops being a live one.
+// perf: media, fonts and archives arrive compressed, so encoding them again
+// spends processor time to add bytes. An event stream is refused outright
+// because the encoder buffers, and a buffered event stream is not a live one.
 func compressibleType(contentType string) bool {
 	base := strings.ToLower(strings.TrimSpace(contentType))
 	if semicolon := strings.IndexByte(base, ';'); semicolon >= 0 {
@@ -129,9 +126,8 @@ func compressibleType(contentType string) bool {
 	return false
 }
 
-// serveBundleAsset writes the named bundle file gzip-encoded and reports
-// whether it did. A false return leaves the response untouched for the caller's
-// own file server.
+// safety: a false return must leave the response untouched, because the caller
+// then hands the same request to its own file server.
 func serveBundleAsset(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, name string, cache *gzipCache) bool {
 	// safety: a byte range names an offset in the identity representation, which
 	// the encoded body does not share, so a ranged request stays unencoded.
@@ -154,9 +150,8 @@ func serveBundleAsset(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, na
 	return true
 }
 
-// writeGeneratedHTML writes a page this process built for this request, gzip
-// encoded when the client accepts it. The bytes carry a per-request nonce, so
-// no stored encoding can serve them.
+// safety: these bytes carry a per-request CSP nonce, so no stored encoding can
+// serve them and the page is encoded on its way out.
 func writeGeneratedHTML(w http.ResponseWriter, r *http.Request, body []byte) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")

@@ -275,9 +275,8 @@ func TestShippedPagesKeepEveryTableRow(t *testing.T) {
 	}
 }
 
-// expectedTableRows counts the rows flushTable would emit, following the same
-// rules: pipe lines outside a fence group into blocks, and a block whose second
-// line is a separator loses that line to the header.
+// safety: this mirrors flushTable's own rule -- pipe lines outside a fence group
+// into blocks, and a block whose second line is a separator loses it to the header.
 func expectedTableRows(source string) int {
 	rows, block, inCode := 0, []string{}, false
 	flush := func() {

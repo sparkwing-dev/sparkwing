@@ -23,7 +23,6 @@ func compressibleChunk() []byte {
 	return bytes.Repeat([]byte("export const sparkwingDashboardChunk = 1;\n"), 400)
 }
 
-// countingFS records how often each file is read out of the bundle.
 type countingFS struct {
 	fs.FS
 	reads map[string]*atomic.Int64
