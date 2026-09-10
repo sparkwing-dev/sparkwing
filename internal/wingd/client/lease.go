@@ -151,7 +151,9 @@ func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
 // base once a frame arrives, which is the only proof the watch is working
 // again.
 func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) {
-	_ = l.watchLease(onEvicted, onCancel, nil)
+	if err := l.watchLease(onEvicted, onCancel, nil); err != nil {
+		l.cl.opts.logf("lease %s: eviction watch ended: %v", l.RunID, err)
+	}
 }
 
 // WatchOwnership keeps the lease attached across daemon restarts and reports

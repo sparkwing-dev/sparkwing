@@ -86,9 +86,12 @@ sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 \
 sparkwing run bootstrap
 ```
 
-Declare the charge and the shared lock in the pipeline's plan --
-`plan.Resources(sparkwing.Cores(1))` and a semaphore named `bootstrap` -- so the
-daemon arbitrates the run exactly as it arbitrated the command.
+Declare the charge and the shared lock in the pipeline's plan:
+`plan.Resources(sparkwing.Cores(1))` for the charge, and a
+`sparkwing.NewConcurrencyGroup("bootstrap", ...)` enrolled with
+`plan.Concurrency(group)` for the lock. The orchestrator turns the group into
+the same admission claim the `--semaphore` flag used to send, so the daemon
+arbitrates the run exactly as it arbitrated the command.
 
 ### What left the wire
 
@@ -97,5 +100,7 @@ The messages `guard_complete` and `guard_complete_ack`, and the
 speaks protocol major 3 and still serves every major from 1 up, so a pipeline
 binary pinned to any released SDK keeps its admission: no SDK ever sent these.
 A `sparkwing` CLI older than this release that runs `queue exec` against a newer
-daemon is admitted without the guard and then fails with a message naming the
-operation the daemon no longer serves, rather than hanging.
+daemon is admitted without the guard, runs the command to completion, and then
+exits non-zero naming the operation the daemon no longer serves: it sends
+`guard_complete` only once the command has finished. The work is done and the
+exit code says otherwise, so replace the call rather than relying on it.
