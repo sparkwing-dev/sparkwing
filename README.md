@@ -97,6 +97,16 @@ machine you arm with `sparkwing crons install`: one OS timer per host calls
 `sparkwing crons tick` every minute and sparkwing evaluates the cron
 expressions itself. See [`docs/crons.md`](./docs/crons.md).
 
+## Dashboard
+
+The Runs tab filters by status, trigger, repository, pipeline, branch, commit
+and tag. Click a trigger badge to include or exclude that source, or use the
+Trigger dropdown. Filters stay in the URL across reloads and shared links.
+
+The Crons tab shows recent fires as colored bars. Hover for status and timing,
+click a bar to open its run, or expand a schedule to inspect its history and
+cadence.
+
 ## HTTP API
 
 The controller's HTTP API (served by `sparkwing-controller` in
