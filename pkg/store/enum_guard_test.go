@@ -175,7 +175,7 @@ func switchSites(t *testing.T, root string, values []string) []string {
 		fset := token.NewFileSet()
 		f, perr := parser.ParseFile(fset, path, nil, 0)
 		if perr != nil {
-			return nil
+			return fmt.Errorf("parse %s: %w", path, perr)
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			sw, ok := n.(*ast.SwitchStmt)
