@@ -138,7 +138,7 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o700 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("restored mode=%o, want700", info.Mode().Perm())
 	}
 	if syncCalls != 2 {
