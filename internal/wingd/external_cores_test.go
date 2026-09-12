@@ -20,10 +20,10 @@ type blockingOwnedCPUSampler struct {
 	fraction float64
 }
 
-func (s *blockingOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
+func (s *blockingOwnedCPUSampler) CPUUsage(pids []int) (map[int]float64, bool) {
 	s.started <- append([]int(nil), pids...)
 	<-s.release
-	return s.fraction, true
+	return ownedOnFirstRoot(pids, s.fraction), true
 }
 
 type fixedOwnedCPUSampler struct {
@@ -45,14 +45,21 @@ func (s *pairedHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
 }
 
-func (s *pairedHostSampler) SampleWithOwned([]int) (HostStat, float64, bool, error) {
+func (s *pairedHostSampler) SampleWithOwned(roots []int) (HostStat, map[int]float64, bool, error) {
 	s.pairCalls++
-	return s.stat, s.owned, s.measured, nil
+	return s.stat, ownedOnFirstRoot(roots, s.owned), s.measured, nil
 }
 
-func (s *fixedOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
+func (s *fixedOwnedCPUSampler) CPUUsage(pids []int) (map[int]float64, bool) {
 	s.roots = append([]int(nil), pids...)
-	return s.fraction, s.measured
+	return ownedOnFirstRoot(pids, s.fraction), s.measured
+}
+
+func ownedOnFirstRoot(pids []int, fraction float64) map[int]float64 {
+	if len(pids) == 0 {
+		return nil
+	}
+	return map[int]float64{pids[0]: fraction}
 }
 
 func (s *countingHostSampler) Sample() (HostStat, error) {
@@ -245,7 +252,7 @@ func TestRefreshHeadroomSubtractsMeasuredHolderUsageNotLeaseCapacity(t *testing.
 	}
 }
 
-func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T) {
+func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0)
 	d.sampler = &countingHostSampler{stat: HostStat{
 		TotalCores:       8,
@@ -288,8 +295,9 @@ func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testin
 	}
 
 	cores := queueRow(t, queueState(t, d), "cores")
-	if cores.External != 3 {
-		t.Errorf("external cores = %v, want 3 after the sampled holder was replaced", cores.External)
+	if cores.External != 0 {
+		t.Errorf("external cores = %v, want 0: the process tree at that pid is still this daemon's work whichever run holds it, and a pid the OS genuinely recycled is caught by the sampler's start-time baseline instead",
+			cores.External)
 	}
 }
 

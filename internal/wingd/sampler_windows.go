@@ -115,13 +115,13 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	if len(roots) == 0 {
-		return 0, true
+		return nil, true
 	}
 	procs, ok := windowsProcesses()
 	if !ok {
-		return 0, false
+		return nil, false
 	}
 	children := windowsProcessChildren(procs)
 	for _, root := range roots {
@@ -132,17 +132,17 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
 			s.mu.Lock()
 			s.last = map[processIdentity]cpuSample{}
 			s.mu.Unlock()
-			return 0, false
+			return nil, false
 		}
 	}
 	processes := windowsOwnedProcesses(procs, children)
-	owned := ownedProcessIdentities(roots, processes)
+	owners := ownedProcessOwners(roots, processes)
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fraction, measured, next := ownedCPUFromProcesses(s.last, processes, owned, now)
+	byRoot, measured, next := ownedCPUByRoot(s.last, processes, owners, now)
 	s.last = next
-	return fraction, measured
+	return byRoot, measured
 }
 
 func windowsProcesses() (map[int]windowsProc, bool) {

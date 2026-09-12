@@ -79,53 +79,69 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	if len(roots) == 0 {
-		return 0, true
+		return nil, true
 	}
 	procs, ok := darwinProcesses()
 	if !ok {
-		return 0, false
+		return nil, false
 	}
-	children := map[int][]int{}
-	byPID := map[int]struct{}{}
+	parent := map[int]int{}
 	for _, proc := range procs {
-		processID := int(proc.Proc.P_pid)
-		byPID[processID] = struct{}{}
-		children[int(proc.Eproc.Ppid)] = append(children[int(proc.Eproc.Ppid)], processID)
+		parent[int(proc.Proc.P_pid)] = int(proc.Eproc.Ppid)
 	}
-	owned := map[int]struct{}{}
+	rootPIDs := map[int]struct{}{}
 	for _, root := range roots {
-		if _, ok := byPID[root]; !ok {
-			continue
-		}
-		for _, processID := range collectSubtree(root, children) {
-			owned[processID] = struct{}{}
+		if _, ok := parent[root]; ok {
+			rootPIDs[root] = struct{}{}
 		}
 	}
-	pids := make([]int, 0, len(owned))
-	for processID := range owned {
+	ownerByPID := map[int]int{}
+	for processID := range parent {
+		if root, ok := darwinNearestRootByParent(processID, rootPIDs, parent); ok {
+			ownerByPID[processID] = root
+		}
+	}
+	pids := make([]int, 0, len(ownerByPID))
+	for processID := range ownerByPID {
 		pids = append(pids, processID)
 	}
 	cpu, ok := darwinProcessCPUFractions(pids)
 	if !ok {
-		return 0, false
+		return nil, false
 	}
-	var fraction float64
-	for _, usage := range cpu {
-		fraction += usage
+	byRoot := make(map[int]float64, len(rootPIDs))
+	for processID, usage := range cpu {
+		byRoot[ownerByPID[processID]] += usage
 	}
-	return fraction, true
+	return byRoot, true
 }
 
-func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool, error) {
+func darwinNearestRootByParent(processID int, rootPIDs map[int]struct{}, parent map[int]int) (int, bool) {
+	seen := map[int]bool{}
+	for current := processID; current > 0 && !seen[current]; {
+		seen[current] = true
+		if _, ok := rootPIDs[current]; ok {
+			return current, true
+		}
+		next, ok := parent[current]
+		if !ok {
+			return 0, false
+		}
+		current = next
+	}
+	return 0, false
+}
+
+func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, map[int]float64, bool, error) {
 	stat, err := sampleHost()
 	if err != nil {
-		return stat, 0, false, err
+		return stat, nil, false, err
 	}
 	snapshot, ok := darwinProcessCPUSnapshot()
 	if !ok {
-		return stat, 0, false, nil
+		return stat, nil, false, nil
 	}
 
 	now := time.Now()

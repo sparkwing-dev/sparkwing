@@ -125,33 +125,48 @@ func TestExternalAgeNote_DistinguishesMeasurementFromEffectiveValue(t *testing.T
 	}
 }
 
-func TestExternalAttributionNote_ReportsSamplesChargedToTheMachine(t *testing.T) {
+func TestExternalAttributionNote_ReportsBothCausesAgainstTheSampleCount(t *testing.T) {
 	qs := wingwire.QueueState{
-		ExternalAttribution: &wingwire.ExternalAttribution{CohortChanged: 7, Retained: 6, Unattributed: 1},
+		ExternalAttribution: &wingwire.ExternalAttribution{Samples: 120, OwnedUnreadable: 7, HolderUnidentified: 3},
 	}
-	want := "external attribution: 7 samples met a changed holder set, 6 kept the previous reading" +
-		"; 1 charged the whole host reading as external"
+	want := "external attribution: 7 of 120 host readings measured none of this daemon's own CPU" +
+		"; 3 of 120 ran while a holding run reported no process id" +
+		"; that work is counted as external, so available reads low by it"
 	if got := opsview.ExternalAttributionNote(qs); got != want {
 		t.Fatalf("attribution note = %q, want %q", got, want)
 	}
 }
 
-func TestExternalAttributionNote_DropsTheUnattributedClauseWhenNoneWere(t *testing.T) {
+func TestExternalAttributionNote_DropsTheCauseThatDidNotHappen(t *testing.T) {
 	qs := wingwire.QueueState{
-		ExternalAttribution: &wingwire.ExternalAttribution{CohortChanged: 1, Retained: 1},
+		ExternalAttribution: &wingwire.ExternalAttribution{Samples: 40, HolderUnidentified: 2},
 	}
-	want := "external attribution: 1 sample met a changed holder set, 1 kept the previous reading"
+	want := "external attribution: 2 of 40 ran while a holding run reported no process id" +
+		"; that work is counted as external, so available reads low by it"
 	if got := opsview.ExternalAttributionNote(qs); got != want {
-		t.Fatalf("attribution note = %q, want %q", got, want)
+		t.Fatalf("attribution note = %q, want %q: a cause that did not happen must not be reported as zero", got, want)
 	}
 }
 
-func TestExternalAttributionNote_IsSilentWhileAttributionIsClean(t *testing.T) {
+func TestExternalAttributionNote_IsSilentWhileEverySampleAttributed(t *testing.T) {
 	if got := opsview.ExternalAttributionNote(wingwire.QueueState{}); got != "" {
-		t.Fatalf("attribution note = %q for a daemon that reports none, want empty", got)
+		t.Fatalf("attribution note = %q for a daemon that predates the field, want empty", got)
 	}
-	qs := wingwire.QueueState{ExternalAttribution: &wingwire.ExternalAttribution{}}
+	qs := wingwire.QueueState{ExternalAttribution: &wingwire.ExternalAttribution{Samples: 900}}
 	if got := opsview.ExternalAttributionNote(qs); got != "" {
-		t.Fatalf("attribution note = %q with every counter at zero, want empty", got)
+		t.Fatalf("attribution note = %q after 900 clean samples, want empty", got)
+	}
+}
+
+func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
+	qs := wingwire.QueueState{
+		ExternalAttribution: &wingwire.ExternalAttribution{Samples: 900},
+	}
+	var out strings.Builder
+	if err := opsview.RenderQueue(&out, qs, "plain"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out.String(), "external-attribution\t900\t0\t0\n") {
+		t.Fatalf("plain output = %q, want the attribution row: a machine reader needs the denominator even when nothing went wrong", out.String())
 	}
 }

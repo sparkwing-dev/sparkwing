@@ -78,12 +78,10 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	if !d.measuredAt.IsZero() {
 		qs.ExternalMeasurementAgeMS = d.now().Sub(d.measuredAt).Milliseconds()
 	}
-	if a := d.attribution; a != (externalAttribution{}) {
-		qs.ExternalAttribution = &wingwire.ExternalAttribution{
-			CohortChanged: a.cohortChanged,
-			Retained:      a.retained,
-			Unattributed:  a.unattributed,
-		}
+	qs.ExternalAttribution = &wingwire.ExternalAttribution{
+		Samples:            d.attribution.samples,
+		OwnedUnreadable:    d.attribution.ownedUnreadable,
+		HolderUnidentified: d.attribution.holderUnidentified,
 	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{

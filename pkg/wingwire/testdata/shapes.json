@@ -912,19 +912,19 @@
           "omitempty": true,
           "fields": [
             {
-              "name": "cohort_changed",
+              "name": "samples",
               "kind": "int64",
-              "omitempty": true
+              "omitempty": false
             },
             {
-              "name": "retained",
+              "name": "owned_unreadable",
               "kind": "int64",
-              "omitempty": true
+              "omitempty": false
             },
             {
-              "name": "unattributed",
+              "name": "holder_unidentified",
               "kind": "int64",
-              "omitempty": true
+              "omitempty": false
             }
           ]
         },

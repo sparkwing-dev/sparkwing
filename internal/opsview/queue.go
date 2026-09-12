@@ -138,7 +138,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
 	if a := qs.ExternalAttribution; a != nil {
-		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\n", a.CohortChanged, a.Retained, a.Unattributed)
+		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\n", a.Samples, a.OwnedUnreadable, a.HolderUnidentified)
 	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
@@ -431,21 +431,26 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 	return note
 }
 
-// ExternalAttributionNote names the host samples charged to the machine because
-// the daemon could not separate its own holders' work out. It is empty while
-// every sample has attributed cleanly, so a healthy queue view carries no line.
 func ExternalAttributionNote(qs wingwire.QueueState) string {
 	a := qs.ExternalAttribution
-	if a == nil || (a.CohortChanged == 0 && a.Unattributed == 0) {
+	if a == nil || !externalAttributionDegraded(a) {
 		return ""
 	}
-	note := fmt.Sprintf("external attribution: %d %s met a changed holder set, %d kept the previous reading",
-		a.CohortChanged, pluralWord(int(a.CohortChanged), "sample", "samples"), a.Retained)
-	if a.Unattributed > 0 {
-		note += fmt.Sprintf("; %d charged the whole host reading as external",
-			a.Unattributed)
+	var clauses []string
+	if a.OwnedUnreadable > 0 {
+		clauses = append(clauses, fmt.Sprintf("%d of %d host readings measured none of this daemon's own CPU",
+			a.OwnedUnreadable, a.Samples))
 	}
-	return note
+	if a.HolderUnidentified > 0 {
+		clauses = append(clauses, fmt.Sprintf("%d of %d ran while a holding run reported no process id",
+			a.HolderUnidentified, a.Samples))
+	}
+	return "external attribution: " + strings.Join(clauses, "; ") +
+		"; that work is counted as external, so available reads low by it"
+}
+
+func externalAttributionDegraded(a *wingwire.ExternalAttribution) bool {
+	return a.OwnedUnreadable > 0 || a.HolderUnidentified > 0
 }
 
 func isHostResource(key string) bool { return key == "cores" || key == "memory" }

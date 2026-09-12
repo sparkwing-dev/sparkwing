@@ -23,10 +23,9 @@ unlock.
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
-- **admission:** `sparkwing queue` reports the host samples the daemon could not
-  separate from its own runs' CPU. An External figure inflated by the daemon's
-  own work is now visible in the queue view rather than inferred from a
-  grantable budget that looks too small.
+- **admission:** `sparkwing queue` reports how many host CPU readings the daemon
+  could not separate its own runs' work out of, over how many it took, through
+  the new `wingwire.ExternalAttribution` on `QueueState`
 
 ### Changed
 
@@ -37,14 +36,18 @@ unlock.
 
 ### Fixed
 
-- **admission:** Keep the measured CPU of the daemon's own runs attributed to
-  them when the set of holding runs moves while that reading is in flight. A run
-  starting, a run finishing, or a holder's root process changing discarded the
-  reading and charged the daemon's own work to the rest of the machine. The
-  grantable budget then fell toward zero on exactly the busy hosts where runs
-  queue, so a host with capacity ran its queue one run at a time instead of
-  admitting alongside the work already holding resources. A discarded reading
-  depressed later samples too, because the external estimate is smoothed.
+- **admission:** Attribute host CPU to each holding run separately, so a run
+  starting or finishing no longer costs the daemon the measurement of every
+  other run. The daemon subtracts its own runs' CPU from the host reading to
+  avoid billing itself for work it admitted; it previously took that
+  measurement as one total and threw the whole total away whenever the set of
+  holding runs moved while the reading was in flight. On a busy host, where
+  runs start and finish constantly, that charged the daemon's own work to the
+  rest of the machine and drove the grantable budget toward zero, so a host
+  with spare capacity ran its queue one run at a time. CPU is now summed per
+  run and only the runs still holding are credited, so a set that keeps moving
+  costs nothing. A run whose process tree contains another holding run's tree
+  is counted once, against the nearer run.
 
 ### Security
 

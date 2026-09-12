@@ -30,7 +30,7 @@ type HostSampler interface {
 }
 
 type pairedHostOwnedSampler interface {
-	SampleWithOwned(roots []int) (HostStat, float64, bool, error)
+	SampleWithOwned(roots []int) (HostStat, map[int]float64, bool, error)
 }
 
 type hostSamplerOnly struct {
@@ -62,7 +62,10 @@ type ProcBatchSampler interface {
 }
 
 type OwnedCPUSampler interface {
-	CPUUsage(pids []int) (fraction float64, measured bool)
+	// CPUUsage reports the CPU each root's process tree ran, keyed by the
+	// root pid the caller asked about. A process under more than one root
+	// counts once, against its nearest ancestor root.
+	CPUUsage(pids []int) (byRoot map[int]float64, measured bool)
 }
 
 type ownedProcSampler struct {
@@ -75,7 +78,7 @@ func newOwnedCPUSampler() *ownedProcSampler {
 	return &ownedProcSampler{last: map[processIdentity]cpuSample{}}
 }
 
-func (s *ownedProcSampler) CPUUsage(pids []int) (float64, bool) {
+func (s *ownedProcSampler) CPUUsage(pids []int) (map[int]float64, bool) {
 	return s.sampleOwned(pids)
 }
 
@@ -120,33 +123,48 @@ type ownedProcess struct {
 	cpuSeconds float64
 }
 
-func ownedProcessIdentities(roots []int, processes map[int]ownedProcess) map[processIdentity]struct{} {
-	children := map[int][]int{}
-	for processID, process := range processes {
-		children[process.parentPID] = append(children[process.parentPID], processID)
-	}
-	owned := map[processIdentity]struct{}{}
+func ownedProcessOwners(roots []int, processes map[int]ownedProcess) map[processIdentity]int {
+	rootPIDs := make(map[int]struct{}, len(roots))
 	for _, root := range roots {
-		if _, ok := processes[root]; !ok {
-			continue
-		}
-		for _, processID := range collectSubtree(root, children) {
-			owned[processes[processID].identity] = struct{}{}
+		if _, ok := processes[root]; ok {
+			rootPIDs[root] = struct{}{}
 		}
 	}
-	return owned
+	owners := make(map[processIdentity]int, len(processes))
+	for processID, process := range processes {
+		if root, ok := nearestRootPID(processID, rootPIDs, processes); ok {
+			owners[process.identity] = root
+		}
+	}
+	return owners
 }
 
-func ownedCPUFromProcesses(
+func nearestRootPID(processID int, rootPIDs map[int]struct{}, processes map[int]ownedProcess) (int, bool) {
+	seen := map[int]bool{}
+	for current := processID; current > 0 && !seen[current]; {
+		seen[current] = true
+		if _, ok := rootPIDs[current]; ok {
+			return current, true
+		}
+		process, ok := processes[current]
+		if !ok {
+			return 0, false
+		}
+		current = process.parentPID
+	}
+	return 0, false
+}
+
+func ownedCPUByRoot(
 	previous map[processIdentity]cpuSample,
 	processes map[int]ownedProcess,
-	owned map[processIdentity]struct{},
+	owners map[processIdentity]int,
 	now time.Time,
-) (float64, bool, map[processIdentity]cpuSample) {
-	next := make(map[processIdentity]cpuSample, len(owned))
-	var fraction float64
+) (map[int]float64, bool, map[processIdentity]cpuSample) {
+	next := make(map[processIdentity]cpuSample, len(owners))
+	byRoot := make(map[int]float64, len(owners))
 	var measured bool
-	for identity := range owned {
+	for identity, root := range owners {
 		process, ok := processes[identity.pid]
 		if !ok || process.identity != identity {
 			continue
@@ -161,10 +179,10 @@ func ownedCPUFromProcesses(
 		if wall <= 0 || delta < 0 {
 			continue
 		}
-		fraction += delta / wall
+		byRoot[root] += delta / wall
 		measured = true
 	}
-	return fraction, measured, next
+	return byRoot, measured, next
 }
 
 type darwinCPUProcess struct {
@@ -221,15 +239,13 @@ func darwinCPUFromSnapshot(
 	elapsedSeconds float64,
 	roots []int,
 	totalCores float64,
-) (float64, bool, float64, bool) {
+) (float64, bool, map[int]float64, bool) {
 	if len(processes) == 0 || len(previous) == 0 || elapsedSeconds <= 0 {
-		return 0, false, 0, false
+		return 0, false, nil, false
 	}
 	fractions := make(map[int]float64, len(processes))
-	children := map[int][]int{}
 	var host float64
 	for processID, process := range processes {
-		children[process.parentPID] = append(children[process.parentPID], processID)
 		prior, seen := previous[processID]
 		if !seen {
 			continue
@@ -244,22 +260,41 @@ func darwinCPUFromSnapshot(
 	}
 	host = clampCores(host, totalCores)
 	if len(roots) == 0 {
-		return host, true, 0, true
+		return host, true, nil, true
 	}
-	ownedIDs := map[int]struct{}{}
+	rootPIDs := make(map[int]struct{}, len(roots))
 	for _, root := range roots {
 		if _, ok := processes[root]; !ok {
-			return host, true, 0, false
+			return host, true, nil, false
 		}
-		for _, processID := range collectSubtree(root, children) {
-			ownedIDs[processID] = struct{}{}
+		rootPIDs[root] = struct{}{}
+	}
+	byRoot := make(map[int]float64, len(rootPIDs))
+	for processID, fraction := range fractions {
+		if root, ok := darwinNearestRootPID(processID, rootPIDs, processes); ok {
+			byRoot[root] += fraction
 		}
 	}
-	var owned float64
-	for processID := range ownedIDs {
-		owned += fractions[processID]
+	for root, owned := range byRoot {
+		byRoot[root] = clampCores(owned, totalCores)
 	}
-	return host, true, clampCores(owned, totalCores), true
+	return host, true, byRoot, true
+}
+
+func darwinNearestRootPID(processID int, rootPIDs map[int]struct{}, processes map[int]darwinCPUProcess) (int, bool) {
+	seen := map[int]bool{}
+	for current := processID; current > 0 && !seen[current]; {
+		seen[current] = true
+		if _, ok := rootPIDs[current]; ok {
+			return current, true
+		}
+		process, ok := processes[current]
+		if !ok {
+			return 0, false
+		}
+		current = process.parentPID
+	}
+	return 0, false
 }
 
 func newProcSampler() *procSampler {

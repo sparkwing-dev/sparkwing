@@ -15,14 +15,26 @@ func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	host, hostMeasured, owned, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10, 11}, 8)
+	host, hostMeasured, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10, 11}, 8)
 
 	if !hostMeasured || math.Abs(host-3) > 0.0001 {
 		t.Fatalf("host CPU = %v, measured %v; want 3 cores", host, hostMeasured)
 	}
+	owned := sumOwnedCPU(byRoot)
 	if !ownedMeasured || math.Abs(owned-1.5) > 0.0001 {
 		t.Fatalf("owned CPU = %v, measured %v; want overlapping roots' 1.5-core union", owned, ownedMeasured)
 	}
+	if math.Abs(byRoot[10]-1) > 0.0001 || math.Abs(byRoot[11]-0.5) > 0.0001 {
+		t.Fatalf("owned CPU by root = %v; want root 11's own 0.5 split out of its parent root 10's 1.0, so neither is counted twice", byRoot)
+	}
+}
+
+func sumOwnedCPU(byRoot map[int]float64) float64 {
+	var total float64
+	for _, fraction := range byRoot {
+		total += fraction
+	}
+	return total
 }
 
 func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
@@ -85,10 +97,10 @@ func TestDarwinCPUSnapshotMissingRootCreditsNoOwnedCPU(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, owned, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
 
-	if ownedMeasured || owned != 0 {
-		t.Fatalf("owned CPU = %v, measured %v; want no credit for a missing root", owned, ownedMeasured)
+	if ownedMeasured || len(byRoot) != 0 {
+		t.Fatalf("owned CPU = %v, measured %v; want no credit for a missing root", byRoot, ownedMeasured)
 	}
 }
 

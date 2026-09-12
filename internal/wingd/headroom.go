@@ -37,8 +37,8 @@ func (d *Daemon) refreshHeadroom() {
 }
 
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
-	roots, cohort := d.holderSample()
-	stat, ownedBusy, ownedMeasured, err := d.sampleHostAndOwned(roots)
+	roots := d.holderSample()
+	stat, ownedByRoot, ownedMeasured, err := d.sampleHostAndOwned(roots)
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
 		return
@@ -47,34 +47,40 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 		d.applyCapacity(stat)
 	}
 	stat = d.container.apply(stat)
-	d.applyHeadroomSample(stat, cohort, ownedBusy, ownedMeasured)
+	d.applyHeadroomSample(stat, ownedByRoot, ownedMeasured)
 }
 
-func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, float64, bool, error) {
+func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, map[int]float64, bool, error) {
 	if paired, ok := d.sampler.(pairedHostOwnedSampler); ok {
 		return paired.SampleWithOwned(roots)
 	}
 	stat, err := d.sampler.Sample()
 	if err != nil {
-		return stat, 0, false, err
+		return stat, nil, false, err
 	}
 	if len(roots) == 0 {
-		return stat, 0, true, nil
+		return stat, nil, true, nil
 	}
-	owned, measured := d.ownedSampler.CPUUsage(roots)
-	return stat, owned, measured, nil
+	byRoot, measured := d.ownedSampler.CPUUsage(roots)
+	return stat, byRoot, measured, nil
 }
 
 func (d *Daemon) applyHeadroom(stat HostStat) {
-	d.applyHeadroomSample(stat, nil, 0, false)
+	d.applyHeadroomSample(stat, nil, false)
 }
 
-func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedBusy float64, ownedMeasured bool) {
+func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
 	now := d.now()
-	ownedBusy, ownedMeasured = d.attributeOwnedCPULocked(now, sampled, ownedBusy, ownedMeasured)
-	if stat.CPUMeasured && !ownedMeasured {
-		d.attribution.unattributed++
+	ownedBusy, unidentified := d.ownedBusyLocked(ownedByRoot)
+	if stat.CPUMeasured {
+		d.attribution.samples++
+		if !ownedMeasured {
+			d.attribution.ownedUnreadable++
+		}
+		if unidentified {
+			d.attribution.holderUnidentified++
+		}
 	}
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
@@ -202,74 +208,46 @@ func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) f
 	return external
 }
 
-type ownedCPUReading struct {
-	cores float64
-	at    time.Time
-}
-
 type externalAttribution struct {
-	cohortChanged int64
-	retained      int64
-	unattributed  int64
+	samples            int64
+	ownedUnreadable    int64
+	holderUnidentified int64
 }
 
-func (d *Daemon) attributeOwnedCPULocked(now time.Time, sampled holderCohort, ownedBusy float64, ownedMeasured bool) (float64, bool) {
-	if !ownedMeasured {
-		return 0, false
+func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, unidentified bool) {
+	counted := map[int]struct{}{}
+	for _, c := range d.byRun {
+		if c.role != roleHolder {
+			continue
+		}
+		if c.pid <= 0 {
+			unidentified = true
+			continue
+		}
+		if _, done := counted[c.pid]; done {
+			continue
+		}
+		counted[c.pid] = struct{}{}
+		owned += ownedByRoot[c.pid]
 	}
-	if sameHolderCohort(sampled, d.holderCohortLocked()) {
-		d.ownedCPU = ownedCPUReading{cores: ownedBusy, at: now}
-		return ownedBusy, true
-	}
-	d.attribution.cohortChanged++
-	// safety: a reading taken against a holder set that has since moved does not
-	// describe the holders there are now, but discarding it adds this daemon's own
-	// work to the external figure and drives the grantable budget toward zero.
-	if d.ownedCPU.at.IsZero() || now.Sub(d.ownedCPU.at) > d.cfg.headroomMaxAge() {
-		return 0, false
-	}
-	d.attribution.retained++
-	return d.ownedCPU.cores, true
+	return owned, unidentified
 }
 
-type holderCohort map[*conn]int
-
-func (d *Daemon) holderSample() ([]int, holderCohort) {
+func (d *Daemon) holderSample() []int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	cohort := d.holderCohortLocked()
 	seen := map[int]struct{}{}
-	for _, pid := range cohort {
-		seen[pid] = struct{}{}
+	for _, c := range d.byRun {
+		if c.role == roleHolder && c.pid > 0 {
+			seen[c.pid] = struct{}{}
+		}
 	}
 	pids := make([]int, 0, len(seen))
 	for pid := range seen {
 		pids = append(pids, pid)
 	}
 	sort.Ints(pids)
-	return pids, cohort
-}
-
-func (d *Daemon) holderCohortLocked() holderCohort {
-	cohort := holderCohort{}
-	for _, c := range d.byRun {
-		if c.role == roleHolder && c.pid > 0 {
-			cohort[c] = c.pid
-		}
-	}
-	return cohort
-}
-
-func sameHolderCohort(a, b holderCohort) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for c, pid := range a {
-		if b[c] != pid {
-			return false
-		}
-	}
-	return true
+	return pids
 }
 
 func coresContention(stat HostStat, load, usedCores float64) float64 {

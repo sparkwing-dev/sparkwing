@@ -149,11 +149,11 @@ type EvictionCount struct {
 	Count int
 }
 type ExternalAttribution struct {
-	CohortChanged int64
+	Samples int64
 
-	Retained int64
+	OwnedUnreadable int64
 
-	Unattributed int64
+	HolderUnidentified int64
 }
 const ExternalMeasured = "measured"
 const ExternalUnmeasured = "unmeasured"

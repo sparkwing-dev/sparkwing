@@ -391,23 +391,29 @@ type ResourceState struct {
 	Available float64 `json:"available,omitempty"`
 }
 
-// ExternalAttribution counts, since the daemon started, the host CPU samples
-// it could not fully attribute to its own lease holders. A sample the daemon
-// cannot attribute is charged to the rest of the machine, so these counters
-// bound how much of a reported External figure is the daemon's own work.
+// ExternalAttribution says how much of the daemon's own CPU it managed to
+// separate from the rest of the machine's, counted over the host samples taken
+// since it started. A sample the daemon cannot attribute charges its own runs'
+// CPU to the machine, which reads as External too high and Available too low.
+//
+// A daemon reports it whether or not anything went wrong, because "every
+// sample attributed" and "a build that does not track this" are different
+// answers and a reader cannot tell them apart from silence. Samples says which
+// it is: zero means the daemon has taken no readable host sample yet.
 type ExternalAttribution struct {
-	// CohortChanged counts samples whose holder set moved while the owned
-	// CPU reading was in flight, so the reading described a set of holders
-	// the daemon no longer has.
-	CohortChanged int64 `json:"cohort_changed,omitempty"`
-	// Retained counts the CohortChanged samples the daemon covered with
-	// the previous owned reading instead of charging them to the machine.
-	Retained int64 `json:"retained,omitempty"`
-	// Unattributed counts samples that charged the whole host reading as
-	// external because no owned reading was available: the owned sampler
-	// read nothing, or the holder set moved with no previous reading left
-	// to stand in.
-	Unattributed int64 `json:"unattributed,omitempty"`
+	// Samples is how many host CPU readings the daemon has attributed,
+	// the denominator the other counts are read against.
+	Samples int64 `json:"samples"`
+	// OwnedUnreadable is how many of those samples measured no CPU for the
+	// daemon's own runs, because the process sampler returned nothing. The
+	// whole host reading was charged to the machine. A count that tracks
+	// Samples means the sampler cannot read this host at all.
+	OwnedUnreadable int64 `json:"owned_unreadable"`
+	// HolderUnidentified is how many of those samples ran while a holding
+	// run reported no process id, so the daemon could not measure that
+	// run's CPU and charged it to the machine. Every other run's CPU is
+	// still attributed.
+	HolderUnidentified int64 `json:"holder_unidentified"`
 }
 
 // Holder is one run currently holding admission, or a connected run carrying
@@ -606,11 +612,11 @@ type QueueState struct {
 	// quota edit), for the queue header. Nil when capacity has held steady
 	// since start, or for older daemons.
 	CapacityChange *CapacityChange `json:"capacity_change,omitempty"`
-	// ExternalAttribution reports the host samples whose CPU the daemon
-	// charged to the rest of the machine because it could not separate its
-	// own lease holders' work out, which reads as External too high and
-	// Available too low. Nil when every sample attributed cleanly, and for
-	// older daemons.
+	// ExternalAttribution says how many host readings the daemon could not
+	// separate its own runs' CPU out of, over how many it took. Read it
+	// whenever External looks too high: it tells a genuinely busy machine
+	// apart from a daemon billing itself for its own runs. Nil only for a
+	// daemon that predates the field.
 	ExternalAttribution *ExternalAttribution `json:"external_attribution,omitempty"`
 	// Runners carries each registered runner's advertised free capacity when
 	// the state comes from a controller's unified admission view. Empty for
