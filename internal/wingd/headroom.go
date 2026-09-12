@@ -75,6 +75,14 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	d.mu.Lock()
 	now := d.now()
 	ownedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
+	if stat.CPUMeasured && ownedBusy > stat.BusyCores {
+		// safety: this daemon's runs cannot have used more CPU than the host ran, so
+		// a larger figure is a sampler reporting something impossible. Charging the
+		// difference to nobody would understate external and over-admit, so the
+		// reading is capped and reported as one that did not attribute.
+		ownedBusy = stat.BusyCores
+		awaitingMeasure = true
+	}
 	if stat.CPUMeasured {
 		d.attribution.samples++
 		// safety: one reading is counted under one cause, worst first, so the

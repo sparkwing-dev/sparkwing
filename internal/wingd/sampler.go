@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -190,6 +191,7 @@ func ownedCPUByRoot(
 	windows := rootWindows(previous, processes, roots, now, maxWindow)
 	next := make(map[processIdentity]cpuSample, len(owners))
 	byRoot := make(map[int]float64, len(owners))
+	unbounded := map[int]struct{}{}
 	for identity, root := range owners {
 		process, ok := processes[identity.pid]
 		if !ok {
@@ -212,15 +214,27 @@ func ownedCPUByRoot(
 			byRoot[root] += delta / wall
 			continue
 		}
-		// safety: a process the sampler has not seen before, in a tree it was
-		// already watching, ran all of its CPU inside this window. Crediting its
-		// whole total is exact rather than an estimate, and crediting nothing is
-		// what charges a short run's entire load to the rest of the machine.
-		if window > 0 {
-			byRoot[root] += process.cpuSeconds / window
+		// safety: a process first seen here ran all its CPU inside this window, so
+		// the whole total belongs here. A total larger than the window could hold
+		// proves it is older, joined the tree rather than started in it, and has an
+		// age nothing here can bound -- so the tree's whole figure goes with it.
+		if window <= 0 || process.cpuSeconds > window*hostCoreCount() {
+			unbounded[root] = struct{}{}
+			continue
 		}
+		byRoot[root] += process.cpuSeconds / window
+	}
+	for root := range unbounded {
+		delete(byRoot, root)
 	}
 	return byRoot, next
+}
+
+func hostCoreCount() float64 {
+	if n := runtime.NumCPU(); n > 0 {
+		return float64(n)
+	}
+	return 1
 }
 
 func rootWindows(

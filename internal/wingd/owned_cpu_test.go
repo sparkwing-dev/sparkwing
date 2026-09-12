@@ -81,6 +81,30 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 }
 
+func TestOwnedCPU_AProcessOlderThanTheWindowIsNotCreditedToIt(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	cases := map[string]map[int]ownedProcess{
+		"a long-running process adopted into a tree just being watched": {
+			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 900}, cpuSeconds: 0.1},
+			11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1}, cpuSeconds: 3600},
+		},
+		"a run reattaching after a restart, with no reading and a fresh hold": {
+			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 7}, cpuSeconds: 900},
+		},
+	}
+	for name, processes := range cases {
+		roots := []OwnedRoot{{PID: 10, Since: now.Add(-time.Second)}}
+		owners := ownedProcessOwners(roots, processes)
+
+		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now, ownedFirstSightWindow)
+
+		if _, figure := byRoot[10]; figure {
+			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold proves the process predates it, and crediting that total would understate external and over-admit",
+				name, byRoot)
+		}
+	}
+}
+
 func TestOwnedCPU_AStaleParentPIDDoesNotResurrectAMissingRoot(t *testing.T) {
 	processes := map[int]ownedProcess{
 		9: {parentPID: 10, identity: processIdentity{pid: 9, startTicks: 400}},

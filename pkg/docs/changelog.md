@@ -74,7 +74,11 @@ unlock.
   total belongs to that window exactly. A run that began holding inside the
   window is bounded the same way by how long it has held. A run held since
   before the window stays unmeasured rather than credited a lifetime average
-  that no longer describes it. Measured on a ten-core host where a three-core
+  that no longer describes it, and so does a process carrying more CPU than the
+  window could physically hold, which proves it joined the run's process tree
+  rather than starting inside it. The daemon caps what it credits itself at what
+  the host actually ran, because a larger figure would understate external and
+  admit work the machine has no room for. Measured on a ten-core host where a three-core
   run restarts every reading beside a four-core long-lived one: external fell
   from 4.0 cores to the true 1.0, and the budget stopped under-admitting by 47%.
 - **admission:** `ResourceState.ExternalSource` reports a third value,

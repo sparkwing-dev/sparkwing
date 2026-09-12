@@ -282,7 +282,7 @@ func TestRefreshHeadroom_ABlindSamplerClearsTheVerdictWithTheFigure(t *testing.T
 	blind.CPUMeasured = false
 	d.sampler = &countingHostSampler{stat: blind}
 	d.refreshHeadroom()
-	d.sampler = &countingHostSampler{stat: attributionHost(10, 4)}
+	d.sampler = &countingHostSampler{stat: attributionHost(10, 7)}
 	d.refreshHeadroom()
 
 	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalMeasured {
