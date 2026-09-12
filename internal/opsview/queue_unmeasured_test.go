@@ -124,3 +124,34 @@ func TestExternalAgeNote_DistinguishesMeasurementFromEffectiveValue(t *testing.T
 		t.Fatalf("ExternalAgeNote = %q, want %q", got, want)
 	}
 }
+
+func TestExternalAttributionNote_ReportsSamplesChargedToTheMachine(t *testing.T) {
+	qs := wingwire.QueueState{
+		ExternalAttribution: &wingwire.ExternalAttribution{CohortChanged: 7, Retained: 6, Unattributed: 1},
+	}
+	want := "external attribution: 7 samples met a changed holder set, 6 kept the previous reading" +
+		"; 1 charged the whole host reading as external"
+	if got := opsview.ExternalAttributionNote(qs); got != want {
+		t.Fatalf("attribution note = %q, want %q", got, want)
+	}
+}
+
+func TestExternalAttributionNote_DropsTheUnattributedClauseWhenNoneWere(t *testing.T) {
+	qs := wingwire.QueueState{
+		ExternalAttribution: &wingwire.ExternalAttribution{CohortChanged: 1, Retained: 1},
+	}
+	want := "external attribution: 1 sample met a changed holder set, 1 kept the previous reading"
+	if got := opsview.ExternalAttributionNote(qs); got != want {
+		t.Fatalf("attribution note = %q, want %q", got, want)
+	}
+}
+
+func TestExternalAttributionNote_IsSilentWhileAttributionIsClean(t *testing.T) {
+	if got := opsview.ExternalAttributionNote(wingwire.QueueState{}); got != "" {
+		t.Fatalf("attribution note = %q for a daemon that reports none, want empty", got)
+	}
+	qs := wingwire.QueueState{ExternalAttribution: &wingwire.ExternalAttribution{}}
+	if got := opsview.ExternalAttributionNote(qs); got != "" {
+		t.Fatalf("attribution note = %q with every counter at zero, want empty", got)
+	}
+}

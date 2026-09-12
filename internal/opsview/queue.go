@@ -137,6 +137,9 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 	if qs.ExternalMeasurementAgeMS > 0 {
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
+	if a := qs.ExternalAttribution; a != nil {
+		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\n", a.CohortChanged, a.Retained, a.Unattributed)
+	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
 	}
@@ -226,6 +229,9 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		fmt.Fprintln(out, note)
 	}
 	if note := ExternalAgeNote(qs); note != "" {
+		fmt.Fprintln(out, note)
+	}
+	if note := ExternalAttributionNote(qs); note != "" {
 		fmt.Fprintln(out, note)
 	}
 	if note := ExternalPressureNote(qs); note != "" {
@@ -421,6 +427,23 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 	note := "external reading: " + fmtElapsed(qs.ExternalSampleAgeMS) + " old"
 	if qs.ExternalMeasurementAgeMS > 0 && qs.ExternalMeasurementAgeMS < qs.ExternalSampleAgeMS {
 		note += " (host sampled " + fmtElapsed(qs.ExternalMeasurementAgeMS) + " ago)"
+	}
+	return note
+}
+
+// ExternalAttributionNote reports host samples this daemon could not separate
+// from its own holders' work, which reads as external load and holds available
+// down. It is empty while every sample has attributed cleanly.
+func ExternalAttributionNote(qs wingwire.QueueState) string {
+	a := qs.ExternalAttribution
+	if a == nil || (a.CohortChanged == 0 && a.Unattributed == 0) {
+		return ""
+	}
+	note := fmt.Sprintf("external attribution: %d %s met a changed holder set, %d kept the previous reading",
+		a.CohortChanged, pluralWord(int(a.CohortChanged), "sample", "samples"), a.Retained)
+	if a.Unattributed > 0 {
+		note += fmt.Sprintf("; %d charged the whole host reading as external",
+			a.Unattributed)
 	}
 	return note
 }

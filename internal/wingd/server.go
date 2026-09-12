@@ -79,6 +79,9 @@ type Daemon struct {
 	reservedMem   uint64
 	externalMem   uint64
 
+	ownedCPU    ownedCPUReading
+	attribution externalAttribution
+
 	cpuMeasured bool
 	memMeasured bool
 

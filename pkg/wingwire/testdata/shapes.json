@@ -907,6 +907,28 @@
           ]
         },
         {
+          "name": "external_attribution",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "cohort_changed",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "retained",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "unattributed",
+              "kind": "int64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
           "name": "runners",
           "kind": "[]struct",
           "omitempty": true,

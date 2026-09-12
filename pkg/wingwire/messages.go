@@ -391,6 +391,25 @@ type ResourceState struct {
 	Available float64 `json:"available,omitempty"`
 }
 
+// ExternalAttribution counts, since the daemon started, the host CPU samples
+// it could not fully attribute to its own lease holders. A sample the daemon
+// cannot attribute is charged to the rest of the machine, so these counters
+// bound how much of a reported External figure is the daemon's own work.
+type ExternalAttribution struct {
+	// CohortChanged counts samples whose holder set moved while the owned
+	// CPU reading was in flight, so the reading described a set of holders
+	// the daemon no longer has.
+	CohortChanged int64 `json:"cohort_changed,omitempty"`
+	// Retained counts the CohortChanged samples the daemon covered with
+	// the previous owned reading instead of charging them to the machine.
+	Retained int64 `json:"retained,omitempty"`
+	// Unattributed counts samples that charged the whole host reading as
+	// external because no owned reading was available: the owned sampler
+	// read nothing, or the holder set moved with no previous reading left
+	// to stand in.
+	Unattributed int64 `json:"unattributed,omitempty"`
+}
+
 // Holder is one run currently holding admission, or a connected run carrying
 // a zero-cost orchestration lease, as reported in a [QueueState].
 type Holder struct {
@@ -587,6 +606,11 @@ type QueueState struct {
 	// quota edit), for the queue header. Nil when capacity has held steady
 	// since start, or for older daemons.
 	CapacityChange *CapacityChange `json:"capacity_change,omitempty"`
+	// ExternalAttribution reports how often the daemon failed to separate
+	// its own lease holders' CPU from the rest of the machine's, which
+	// makes the External column too high and Available too low. Nil when
+	// every sample so far attributed cleanly, and for older daemons.
+	ExternalAttribution *ExternalAttribution `json:"external_attribution,omitempty"`
 	// Runners carries each registered runner's advertised free capacity when
 	// the state comes from a controller's unified admission view. Empty for
 	// the local daemon, which arbitrates only its own host.

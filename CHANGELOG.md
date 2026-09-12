@@ -23,6 +23,10 @@ unlock.
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
+- **admission:** `sparkwing queue` reports the host samples the daemon could not
+  separate from its own runs' CPU. An External figure inflated by the daemon's
+  own work is now visible in the queue view rather than inferred from a
+  grantable budget that looks too small.
 
 ### Changed
 
@@ -30,6 +34,16 @@ unlock.
   script `https://sparkwing.dev/install.sh` serves. The runner service
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
+
+### Fixed
+
+- **admission:** Keep the measured CPU of the daemon's own runs attributed to
+  them when the set of holding runs moves while that reading is in flight. A run
+  starting, a run finishing, or a holder's root process changing discarded the
+  reading and charged the daemon's own work to the rest of the machine, so the
+  grantable budget fell toward zero on exactly the busy hosts where runs are
+  queued, and admission could stop granting anything. A discarded reading also
+  persisted, because the external-load estimate is smoothed across samples.
 
 ### Security
 

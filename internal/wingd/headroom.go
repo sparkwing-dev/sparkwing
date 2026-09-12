@@ -71,11 +71,11 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 
 func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedBusy float64, ownedMeasured bool) {
 	d.mu.Lock()
-	if !sameHolderCohort(sampled, d.holderCohortLocked()) {
-		ownedBusy = 0
-		ownedMeasured = false
-	}
 	now := d.now()
+	ownedBusy, ownedMeasured = d.attributeOwnedCPULocked(now, sampled, ownedBusy, ownedMeasured)
+	if stat.CPUMeasured && !ownedMeasured {
+		d.attribution.unattributed++
+	}
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
 	}
@@ -200,6 +200,37 @@ func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) f
 		return 0
 	}
 	return external
+}
+
+type ownedCPUReading struct {
+	cores float64
+	at    time.Time
+}
+
+type externalAttribution struct {
+	cohortChanged int64
+	retained      int64
+	unattributed  int64
+}
+
+func (d *Daemon) attributeOwnedCPULocked(now time.Time, sampled holderCohort, ownedBusy float64, ownedMeasured bool) (float64, bool) {
+	if !ownedMeasured {
+		return 0, false
+	}
+	if sameHolderCohort(sampled, d.holderCohortLocked()) {
+		d.ownedCPU = ownedCPUReading{cores: ownedBusy, at: now}
+		return ownedBusy, true
+	}
+	d.attribution.cohortChanged++
+	// safety: a reading taken against a holder set that has since moved does not
+	// describe the holders there are now, but discarding it charges this daemon's
+	// own work to the rest of the machine, which can leave nothing grantable. The
+	// previous reading stands in while it is no older than a headroom sample may be.
+	if d.ownedCPU.at.IsZero() || now.Sub(d.ownedCPU.at) > d.cfg.headroomMaxAge() {
+		return 0, false
+	}
+	d.attribution.retained++
+	return d.ownedCPU.cores, true
 }
 
 type holderCohort map[*conn]int
