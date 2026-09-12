@@ -39,6 +39,12 @@ unlock.
   installed no hook, and `guards: {rejct: [...]}` loaded clean and dropped the
   reject fence. Keys nested deeper, such as `on.push.branches`, are still
   matched loosely.
+### Removed
+
+- **web:** The analytics page drops its three unbuilt sections
+  Slowest pipelines, failure clustering, and agent utilization rendered
+  placeholder text for views the dashboard does not build. The trend charts
+  stay.
 
 ### Security
 
