@@ -39,6 +39,7 @@ type Guards struct {
 }
 func (g Guards) Evaluate(pipeline string, ctx GuardContext) error
 func (g Guards) IsEmpty() bool
+func (g *Guards) UnmarshalYAML(node *yaml.Node) error
 func (g Guards) Validate(pipeline string) error
 const KindArg
 const KindGitBranch
@@ -134,6 +135,7 @@ type Triggers struct {
 
 	PostCommitHook *PostCommitHookTrigger
 }
+func (t *Triggers) UnmarshalYAML(node *yaml.Node) error
 type WebhookTrigger struct {
 	Path string
 }

@@ -234,3 +234,12 @@ func TestWriteSparksSectionPreservesCommentOnlyFile(t *testing.T) {
 		t.Fatalf("result is invalid config: %v", err)
 	}
 }
+
+func TestLoad_DefaultsGuardsStayStrict(t *testing.T) {
+	dir := t.TempDir()
+	path := writeYAML(t, dir, "sparkwing.yaml", "defaults:\n  guards:\n    rejct: [profile:local]\n")
+	_, err := projectconfig.Load(path)
+	if err == nil || !strings.Contains(err.Error(), `guards: unknown field "rejct"`) {
+		t.Fatalf("expected defaults.guards to reject an unknown key; got %v", err)
+	}
+}
