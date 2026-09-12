@@ -23,6 +23,9 @@ unlock.
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
+- **cli:** `sparkwing runs status` and `sparkwing runs errors` take the run id as
+  a positional argument, so `sparkwing runs status run-20260910-...` works.
+  `--run` keeps working; passing both refuses.
 
 ### Changed
 

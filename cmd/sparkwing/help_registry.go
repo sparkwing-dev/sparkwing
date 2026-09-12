@@ -2236,8 +2236,11 @@ status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
 while returning zero. For a blocking wait, use 'runs wait'.`,
+	PosArgs: []PosArg{
+		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
+	},
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
 		{Name: "follow", Short: "f", Desc: "Poll until the run reaches a terminal state", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "steps", Desc: "Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too.", Group: "Output"},
@@ -2247,7 +2250,7 @@ while returning zero. For a blocking wait, use 'runs wait'.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Check a local run once", "sparkwing runs status --run run-fictional"},
+		{"Check a local run once", "sparkwing runs status run-fictional"},
 		{"Follow a running job to completion", "sparkwing runs status --run run-fictional --follow"},
 		{"Inspect a known-failed run without nonzero exit", "sparkwing runs status --run run-fictional --exit-zero"},
 		{"Expand every step on every node", "sparkwing runs status --run run-fictional --steps"},
@@ -2310,13 +2313,16 @@ var cmdJobsErrors = Command{
 	Path:        "sparkwing runs errors",
 	Synopsis:    "Surface the error trail for a failed run",
 	Description: `Reads the local run store and prints each failed node's error chain.`,
+	PosArgs: []PosArg{
+		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
+	},
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Inspect a local failure", "sparkwing runs errors --run run-fictional"},
+		{"Inspect a local failure", "sparkwing runs errors run-fictional"},
 		{"As JSON", "sparkwing runs errors --run run-fictional -o json"},
 	},
 }

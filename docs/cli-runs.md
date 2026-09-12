@@ -397,18 +397,22 @@ Surface the error trail for a failed run
 
 Reads the local run store and prints each failed node's error chain.
 
+### Arguments
+
+- `[RUN_ID]` (optional) -- Run identifier, when --run is not supplied
+
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run RUN_ID` | Run identifier (required) |
+| `--run RUN_ID` | Run identifier. Positional fallback accepted. |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 
 ### Examples
 
 ```sh
 # Inspect a local failure
-sparkwing runs errors --run run-fictional
+sparkwing runs errors run-fictional
 
 # As JSON
 sparkwing runs errors --run run-fictional -o json
@@ -961,11 +965,15 @@ exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
 while returning zero. For a blocking wait, use 'runs wait'.
 
+### Arguments
+
+- `[RUN_ID]` (optional) -- Run identifier, when --run is not supplied
+
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run RUN_ID` | Run identifier (required) |
+| `--run RUN_ID` | Run identifier. Positional fallback accepted. |
 | `-f, --follow` | Poll until the run reaches a terminal state |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--steps` | Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too. |
@@ -977,7 +985,7 @@ while returning zero. For a blocking wait, use 'runs wait'.
 
 ```sh
 # Check a local run once
-sparkwing runs status --run run-fictional
+sparkwing runs status run-fictional
 
 # Follow a running job to completion
 sparkwing runs status --run run-fictional --follow
