@@ -16,6 +16,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -30,7 +31,7 @@ type publishedBinary struct {
 func runPipelinePublish(args []string) error {
 	fs := flag.NewFlagSet("pipeline publish", flag.ContinueOnError)
 	on := fs.String("profile", "",
-		"profile name; uses its artifact_store field as the upload target")
+		"profile name; uploads to the backend its cache surface serves binaries from")
 	artifactStore := fs.String("artifact-store", "",
 		"artifact-store URL (fs:///path or s3://bucket/prefix). Overrides --profile.")
 	platforms := fs.String("platform", "",
@@ -43,16 +44,9 @@ func runPipelinePublish(args []string) error {
 		return err
 	}
 
-	storeURL, err := resolveArtifactStoreURL(*on, *artifactStore)
+	store, storeLocation, err := resolveArtifactStore(context.Background(), *on, *artifactStore)
 	if err != nil {
 		return err
-	}
-	if storeURL == "" {
-		return errors.New("pipeline publish: no artifact-store configured. Pass --profile PROFILE (with artifact_store set) or --artifact-store URL")
-	}
-	store, err := storeurl.OpenArtifactStore(context.Background(), storeURL)
-	if err != nil {
-		return fmt.Errorf("open artifact-store: %w", err)
 	}
 
 	dir := *sparkwingDirFlag
@@ -71,7 +65,7 @@ func runPipelinePublish(args []string) error {
 
 	results := make([]publishedBinary, 0, len(platformsList))
 	for _, p := range platformsList {
-		row, err := compileAndPublishOne(context.Background(), dir, p, store, storeURL)
+		row, err := compileAndPublishOne(context.Background(), dir, p, store, storeLocation)
 		if err != nil {
 			return fmt.Errorf("publish %s: %w", p.label(), err)
 		}
@@ -113,7 +107,7 @@ func parsePlatforms(s string) ([]platform, error) {
 	return out, nil
 }
 
-func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, store storage.ArtifactStore, storeURL string) (publishedBinary, error) {
+func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, store storage.ArtifactStore, storeLocation string) (publishedBinary, error) {
 	key, err := bincache.PipelineCacheKeyForPlatform(sparkwingDir, p.OS, p.Arch)
 	if err != nil {
 		return publishedBinary{}, fmt.Errorf("hash: %w", err)
@@ -143,7 +137,7 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 		Key:        key,
 		Platform:   p.label(),
 		SizeBytes:  size,
-		UploadedTo: strings.TrimRight(storeURL, "/") + "/bin/" + key,
+		UploadedTo: strings.TrimRight(storeLocation, "/") + "/bin/" + key,
 	}, nil
 }
 
@@ -182,8 +176,30 @@ func overlayModfilePath(sparkwingDir string) string {
 	return ""
 }
 
-func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
-	return urlFlag, nil
+func resolveArtifactStore(ctx context.Context, profileName, urlFlag string) (storage.ArtifactStore, string, error) {
+	if urlFlag != "" {
+		store, err := storeurl.OpenArtifactStore(ctx, urlFlag)
+		if err != nil {
+			return nil, "", fmt.Errorf("open artifact-store: %w", err)
+		}
+		return store, urlFlag, nil
+	}
+	if profileName == "" {
+		return nil, "", errors.New("pipeline publish: no artifact-store configured. Pass --profile PROFILE (with a cache surface) or --artifact-store URL")
+	}
+	p, err := resolveProfileFlag(profileName)
+	if err != nil {
+		return nil, "", err
+	}
+	spec := p.Surfaces().BinaryCache()
+	if spec == nil {
+		return nil, "", fmt.Errorf("pipeline publish: profile %q declares no cache surface. Pass --artifact-store URL", profileName)
+	}
+	store, err := storeurl.OpenArtifactStoreFromSpec(ctx, *spec, controllerLookup(p))
+	if err != nil {
+		return nil, "", fmt.Errorf("open artifact-store: %w", err)
+	}
+	return store, profile.SpecString(spec), nil
 }
 
 func renderPublishResults(rows []publishedBinary, format string) error {

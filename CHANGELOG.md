@@ -31,6 +31,14 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Fixed
+
+- **cli:** `sparkwing pipeline publish --profile NAME` uploads to the backend
+  that profile serves pipeline binaries from -- its `cache.binaries` sub-spec
+  when it declares one, its cache surface otherwise. The flag was read for its
+  name and then discarded, so a publish that named a profile refused with an
+  error telling the operator to name a profile.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.
