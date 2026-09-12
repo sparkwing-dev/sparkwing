@@ -223,9 +223,8 @@ func (d *Daemon) attributeOwnedCPULocked(now time.Time, sampled holderCohort, ow
 	}
 	d.attribution.cohortChanged++
 	// safety: a reading taken against a holder set that has since moved does not
-	// describe the holders there are now, but discarding it charges this daemon's
-	// own work to the rest of the machine, which can leave nothing grantable. The
-	// previous reading stands in while it is no older than a headroom sample may be.
+	// describe the holders there are now, but discarding it adds this daemon's own
+	// work to the external figure and drives the grantable budget toward zero.
 	if d.ownedCPU.at.IsZero() || now.Sub(d.ownedCPU.at) > d.cfg.headroomMaxAge() {
 		return 0, false
 	}

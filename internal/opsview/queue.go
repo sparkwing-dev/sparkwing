@@ -431,9 +431,9 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 	return note
 }
 
-// ExternalAttributionNote reports host samples this daemon could not separate
-// from its own holders' work, which reads as external load and holds available
-// down. It is empty while every sample has attributed cleanly.
+// ExternalAttributionNote names the host samples charged to the machine because
+// the daemon could not separate its own holders' work out. It is empty while
+// every sample has attributed cleanly, so a healthy queue view carries no line.
 func ExternalAttributionNote(qs wingwire.QueueState) string {
 	a := qs.ExternalAttribution
 	if a == nil || (a.CohortChanged == 0 && a.Unattributed == 0) {

@@ -40,10 +40,11 @@ unlock.
 - **admission:** Keep the measured CPU of the daemon's own runs attributed to
   them when the set of holding runs moves while that reading is in flight. A run
   starting, a run finishing, or a holder's root process changing discarded the
-  reading and charged the daemon's own work to the rest of the machine, so the
-  grantable budget fell toward zero on exactly the busy hosts where runs are
-  queued, and admission could stop granting anything. A discarded reading also
-  persisted, because the external-load estimate is smoothed across samples.
+  reading and charged the daemon's own work to the rest of the machine. The
+  grantable budget then fell toward zero on exactly the busy hosts where runs
+  queue, so a host with capacity ran its queue one run at a time instead of
+  admitting alongside the work already holding resources. A discarded reading
+  depressed later samples too, because the external estimate is smoothed.
 
 ### Security
 
