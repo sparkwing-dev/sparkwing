@@ -10,6 +10,8 @@ import (
 
 const loadEMAAlpha = 0.4
 
+const unattributedResidual = 0.05
+
 func (d *Daemon) sampleLoop(ctx context.Context) {
 	t := time.NewTicker(d.cfg.sampleInterval())
 	defer t.Stop()
@@ -66,7 +68,7 @@ func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, map[int]float64, boo
 }
 
 func (d *Daemon) applyHeadroom(stat HostStat) {
-	d.applyHeadroomSample(stat, nil, false)
+	d.applyHeadroomSample(stat, nil, true)
 }
 
 func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
@@ -84,7 +86,16 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		if awaitingMeasure {
 			d.attribution.runsAwaitingMeasure++
 		}
-		d.attribution.latestAttributed = ownedMeasured && !withoutProcess && !awaitingMeasure
+		attributed := ownedMeasured && !withoutProcess && !awaitingMeasure
+		unattributed := 0.0
+		if !attributed {
+			unattributed = 1
+		}
+		if !d.unattributedInit {
+			d.smoothedUnattributed, d.unattributedInit = unattributed, true
+		} else {
+			d.smoothedUnattributed = loadEMAAlpha*unattributed + (1-loadEMAAlpha)*d.smoothedUnattributed
+		}
 	}
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
@@ -217,7 +228,14 @@ type externalAttribution struct {
 	samplerUnreadable   int64
 	runsWithoutProcess  int64
 	runsAwaitingMeasure int64
-	latestAttributed    bool
+}
+
+func (d *Daemon) externalAttributedLocked() bool {
+	// safety: the external figure is an EMA, so a reading carrying this daemon's
+	// own CPU keeps weight in it for several readings after. Decaying the verdict
+	// through the same filter clears it when the figure is clean rather than when
+	// the last bad reading ended.
+	return d.smoothedUnattributed < unattributedResidual
 }
 
 func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure bool) {

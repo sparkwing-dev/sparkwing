@@ -110,9 +110,11 @@ func TestRefreshHeadroom_DepartedHolderStopsBeingCredited(t *testing.T) {
 		t.Errorf("external cores = %.2f, want 8.50: with no run holding, every busy core belongs to the rest of the machine",
 			d.smoothedExternal)
 	}
-	if got := queueAttribution(t, d); got.SamplerUnreadable != 0 || !got.LatestAttributed {
-		t.Errorf("attribution = %+v, want clean: a daemon holding nothing has nothing it failed to measure, and must not warn for every reading it takes",
-			got)
+	if got := queueAttribution(t, d); got.SamplerUnreadable != 0 {
+		t.Errorf("attribution = %+v, want clean: a daemon holding nothing has nothing it failed to measure", got)
+	}
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalMeasured {
+		t.Errorf("cores external source = %q, want %q: a daemon holding nothing must not warn on every reading it takes", src, wingwire.ExternalMeasured)
 	}
 }
 
@@ -130,8 +132,8 @@ func TestRefreshHeadroom_CountsEveryAttributedSample(t *testing.T) {
 	if got.SamplerUnreadable != 0 || got.RunsWithoutProcess != 0 || got.RunsAwaitingMeasure != 0 {
 		t.Errorf("attribution = %+v, want every fault count at zero", got)
 	}
-	if !got.LatestAttributed {
-		t.Error("latest-attributed = false, want true: every holding run's CPU was measured")
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalMeasured {
+		t.Errorf("cores external source = %q, want %q: every holding run's CPU was measured", src, wingwire.ExternalMeasured)
 	}
 }
 
@@ -158,8 +160,8 @@ func TestRefreshHeadroom_CountsAnUnreadableSampler(t *testing.T) {
 	if got.SamplerUnreadable != 1 || got.Samples != 1 {
 		t.Errorf("attribution = %+v, want 1 unreadable of 1 reading", got)
 	}
-	if got.LatestAttributed {
-		t.Error("latest-attributed = true, want false: nothing of this daemon's own CPU was measured")
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalUnattributed {
+		t.Errorf("cores external source = %q, want %q: the figure carries CPU this daemon could not separate out", src, wingwire.ExternalUnattributed)
 	}
 	cores := queueRow(t, queueState(t, d), "cores")
 	if math.Abs(cores.External-8.5) > coresEpsilon {
@@ -180,8 +182,8 @@ func TestRefreshHeadroom_CountsAHolderThatReportsNoProcess(t *testing.T) {
 	if got.SamplerUnreadable != 0 || got.RunsAwaitingMeasure != 0 {
 		t.Errorf("attribution = %+v, want the other fault counts at zero", got)
 	}
-	if got.LatestAttributed {
-		t.Error("latest-attributed = true, want false: one holding run's CPU went unmeasured")
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalUnattributed {
+		t.Errorf("cores external source = %q, want %q: the figure carries CPU this daemon could not separate out", src, wingwire.ExternalUnattributed)
 	}
 	cores := queueRow(t, queueState(t, d), "cores")
 	if math.Abs(cores.External-2) > coresEpsilon {
@@ -202,8 +204,8 @@ func TestRefreshHeadroom_CountsAHolderWithNoReadingYet(t *testing.T) {
 		t.Errorf("runs-awaiting-measure = %d, want 1: a run the sampler returned no figure for is charged to the machine, and saying so is the difference between a known gap and a silent one",
 			got.RunsAwaitingMeasure)
 	}
-	if got.LatestAttributed {
-		t.Error("latest-attributed = true, want false: one holding run had no CPU figure")
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalUnattributed {
+		t.Errorf("cores external source = %q, want %q: the figure carries CPU this daemon could not separate out", src, wingwire.ExternalUnattributed)
 	}
 }
 

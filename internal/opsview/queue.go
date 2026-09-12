@@ -138,8 +138,8 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
 	if a := qs.ExternalAttribution; a != nil {
-		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\t%d\t%t\n", a.Samples,
-			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsAwaitingMeasure, a.LatestAttributed)
+		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\t%d\n", a.Samples,
+			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsAwaitingMeasure)
 	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
@@ -433,28 +433,44 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 }
 
 func ExternalAttributionNote(qs wingwire.QueueState) string {
-	a := qs.ExternalAttribution
-	if a == nil || a.Samples == 0 || a.LatestAttributed {
+	if qs.IgnoreExternal || !coresExternalUnattributed(qs) {
+		return ""
+	}
+	note := "external attribution: this reading carries some of this daemon's own runs' CPU," +
+		" so external reads high and available reads low by it"
+	if causes := externalAttributionCauses(qs.ExternalAttribution); causes != "" {
+		note += " (since this daemon started: " + causes + ")"
+	}
+	return note
+}
+
+func coresExternalUnattributed(qs wingwire.QueueState) bool {
+	for _, r := range qs.Resources {
+		if r.Key == "cores" && r.ExternalSource == wingwire.ExternalUnattributed {
+			return true
+		}
+	}
+	return false
+}
+
+func externalAttributionCauses(a *wingwire.ExternalAttribution) string {
+	if a == nil || a.Samples == 0 {
 		return ""
 	}
 	var clauses []string
 	if a.SamplerUnreadable > 0 {
-		clauses = append(clauses, fmt.Sprintf("the process sampler has read nothing on %d of %d readings",
+		clauses = append(clauses, fmt.Sprintf("the process sampler read nothing on %d of %d readings",
 			a.SamplerUnreadable, a.Samples))
 	}
 	if a.RunsWithoutProcess > 0 {
-		clauses = append(clauses, fmt.Sprintf("a holding run has reported no process id on %d of %d",
+		clauses = append(clauses, fmt.Sprintf("a holding run reported no process id on %d of %d",
 			a.RunsWithoutProcess, a.Samples))
 	}
 	if a.RunsAwaitingMeasure > 0 {
 		clauses = append(clauses, fmt.Sprintf("a holding run had no CPU figure yet on %d of %d",
 			a.RunsAwaitingMeasure, a.Samples))
 	}
-	note := "external attribution: this reading carries some of this daemon's own runs' CPU, so external reads high and available reads low"
-	if len(clauses) > 0 {
-		note += " (" + strings.Join(clauses, "; ") + ")"
-	}
-	return note
+	return strings.Join(clauses, "; ")
 }
 
 func isHostResource(key string) bool { return key == "cores" || key == "memory" }

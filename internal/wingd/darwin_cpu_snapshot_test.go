@@ -100,7 +100,7 @@ func TestDarwinCPUSnapshotMissingRootCreditsNoOwnedCPU(t *testing.T) {
 	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
 
 	if !ownedMeasured || len(byRoot) != 0 {
-		t.Fatalf("owned CPU = %v, measured %v; want a read that credits the missing root nothing: it is absent from this snapshot, so its CPU is outside the host delta too",
+		t.Fatalf("owned CPU = %v, measured %v; want a read that credits the missing root nothing rather than refusing every other root's figure",
 			byRoot, ownedMeasured)
 	}
 }

@@ -351,6 +351,13 @@ const (
 	// ExternalMeasured marks an External figure that came from a live host
 	// reading.
 	ExternalMeasured = "measured"
+	// ExternalUnattributed marks an External figure the host sampler did
+	// read, but which carries some of this daemon's own runs' CPU because
+	// their share could not be measured and separated out. The figure is a
+	// real reading that reads high, so Available reads low by the same
+	// amount. [QueueState.ExternalAttribution] says how often that happens
+	// and why.
+	ExternalUnattributed = "unattributed"
 	// ExternalUnmeasured marks a dimension the host sampler could not read.
 	// Renderers print the word, never a byte or core count, because a
 	// substituted number in a measurement's format is what made a healthy
@@ -401,9 +408,10 @@ type ResourceState struct {
 // answers and a reader cannot tell them apart from silence. Samples says which
 // it is: zero means the daemon has taken no readable host reading yet.
 //
-// The three counts run for the daemon's lifetime and never decay, so they
-// describe a trend rather than the reading on screen. LatestAttributed is what
-// describes the reading on screen.
+// The counts run for the daemon's lifetime and never decay, so they describe a
+// trend rather than the reading on screen. Whether the reading on screen
+// attributed is [ResourceState.ExternalSource] on the cores row, which reads
+// [ExternalUnattributed] when it did not.
 type ExternalAttribution struct {
 	// Samples is how many host CPU readings the daemon has attributed, the
 	// denominator the three counts below are read against.
@@ -420,17 +428,13 @@ type ExternalAttribution struct {
 	// is a fault rather than a passing condition.
 	RunsWithoutProcess int64 `json:"runs_without_process"`
 	// RunsAwaitingMeasure is how many readings ran while a holding run had
-	// no CPU figure yet. A run's CPU is a rate between two readings, so the
-	// run after it starts is charged to the machine and every reading after
-	// that is attributed to it. A host starting runs continuously always has
-	// one such run, so this count rising with Samples is the expected shape
-	// rather than a fault.
+	// no CPU figure yet, either because a run's CPU is a rate between two
+	// readings and it has only one, or because it began holding after the
+	// reading was taken. Either way that run is charged to the machine for
+	// one reading and attributed from the next. A host starting runs
+	// continuously always has one such run, so this count rising with
+	// Samples is the expected shape rather than a fault.
 	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
-	// LatestAttributed says whether the most recent reading -- the one the
-	// External and Available figures are showing -- had every holding run's
-	// CPU measured. False means those two figures currently carry some of
-	// this daemon's own work.
-	LatestAttributed bool `json:"latest_attributed"`
 }
 
 // Holder is one run currently holding admission, or a connected run carrying

@@ -59,7 +59,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			Held:           heldCores,
 			Reserved:       d.reservedCores,
 			External:       d.externalCores,
-			ExternalSource: externalSource(d.cpuMeasured),
+			ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributedLocked()),
 			Available:      grantCores,
 		},
 		wingwire.ResourceState{
@@ -83,7 +83,6 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		SamplerUnreadable:   d.attribution.samplerUnreadable,
 		RunsWithoutProcess:  d.attribution.runsWithoutProcess,
 		RunsAwaitingMeasure: d.attribution.runsAwaitingMeasure,
-		LatestAttributed:    d.attribution.latestAttributed,
 	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{
@@ -576,6 +575,13 @@ func minU64(a, b uint64) uint64 {
 		return a
 	}
 	return b
+}
+
+func coresExternalSource(measured, attributed bool) string {
+	if measured && !attributed {
+		return wingwire.ExternalUnattributed
+	}
+	return externalSource(measured)
 }
 
 func externalSource(measured bool) string {

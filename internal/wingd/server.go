@@ -66,13 +66,15 @@ type Daemon struct {
 	lastActivity        time.Time
 	startedAt           time.Time
 
-	loadInit         bool
-	externalInit     bool
-	smoothedLoad     float64
-	smoothedExternal float64
-	headroomInit     bool
-	appliedCores     float64
-	appliedMem       uint64
+	loadInit             bool
+	externalInit         bool
+	unattributedInit     bool
+	smoothedUnattributed float64
+	smoothedLoad         float64
+	smoothedExternal     float64
+	headroomInit         bool
+	appliedCores         float64
+	appliedMem           uint64
 
 	reservedCores float64
 	externalCores float64

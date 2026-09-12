@@ -156,10 +156,9 @@ type ExternalAttribution struct {
 	RunsWithoutProcess int64
 
 	RunsAwaitingMeasure int64
-
-	LatestAttributed bool
 }
 const ExternalMeasured = "measured"
+const ExternalUnattributed = "unattributed"
 const ExternalUnmeasured = "unmeasured"
 type Grant struct {
 	RunID      string

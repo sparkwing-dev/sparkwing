@@ -107,9 +107,6 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 		return nil, false
 	}
 	byRoot := make(map[int]float64, len(rootPIDs))
-	for root := range rootPIDs {
-		byRoot[root] = 0
-	}
 	for processID, usage := range cpu {
 		byRoot[ownerByPID[processID]] += usage
 	}

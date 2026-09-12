@@ -64,7 +64,12 @@ type ProcBatchSampler interface {
 type OwnedCPUSampler interface {
 	// CPUUsage reports the CPU each root's process tree ran, keyed by the
 	// root pid the caller asked about. A process under more than one root
-	// counts once, against its nearest ancestor root.
+	// counts once, against its nearest ancestor root. A root is in the map
+	// only where a figure could be computed for it, so a missing key means
+	// no reading for that root this call and a zero value means it ran no
+	// measurable CPU. measured reports whether the host's process table was
+	// read at all; false leaves byRoot empty and says nothing about any
+	// individual root.
 	CPUUsage(pids []int) (byRoot map[int]float64, measured bool)
 }
 
@@ -199,7 +204,6 @@ func ownedCPUByRoot(
 ) (map[int]float64, bool, map[processIdentity]cpuSample) {
 	next := make(map[processIdentity]cpuSample, len(owners))
 	byRoot := make(map[int]float64, len(owners))
-	var measured bool
 	for identity, root := range owners {
 		process, ok := processes[identity.pid]
 		if !ok || process.identity != identity {
@@ -216,9 +220,8 @@ func ownedCPUByRoot(
 			continue
 		}
 		byRoot[root] += delta / wall
-		measured = true
 	}
-	return byRoot, measured, next
+	return byRoot, true, next
 }
 
 type darwinCPUProcess struct {
@@ -284,14 +287,13 @@ func darwinCPUFromSnapshot(
 	for processID, process := range processes {
 		// bug: this snapshot carries no process start time, so a pid the OS
 		// recycles within one interval reads as the dead process continuing.
-		// Only a falling cpuSeconds catches it. The linux and windows paths
-		// key on pid plus start ticks and do not have this gap.
+		// Only a falling cpuSeconds catches it.
 		prior, seen := previous[processID]
 		if !seen {
 			continue
 		}
 		delta := process.cpuSeconds - prior.cpuSeconds
-		if delta <= 0 {
+		if delta < 0 {
 			continue
 		}
 		fraction := delta / elapsedSeconds
@@ -314,11 +316,6 @@ func darwinCPUFromSnapshot(
 	}
 	owners := ownersByNearestRoot(parentOf, rootPIDs)
 	byRoot := make(map[int]float64, len(rootPIDs))
-	for root := range rootPIDs {
-		if _, ok := previous[root]; ok {
-			byRoot[root] = 0
-		}
-	}
 	for processID, fraction := range fractions {
 		if root, ok := owners[processID]; ok {
 			byRoot[root] += fraction

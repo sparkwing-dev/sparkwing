@@ -42,8 +42,12 @@ func TestOwnedCPU_PIDReuseNeedsANewBaseline(t *testing.T) {
 	byRoot, measured, _ := ownedCPUByRoot(previous, processes, owners, now)
 	usage := sumOwnedCPU(byRoot)
 
-	if measured || usage != 0 {
-		t.Fatalf("recycled PID CPU = %v, measured %v; want an unmeasured new identity", usage, measured)
+	if _, figure := byRoot[10]; figure || usage != 0 {
+		t.Fatalf("recycled PID CPU = %v, root has a figure %v; want no figure for the new identity, which is what an absent key means",
+			usage, figure)
+	}
+	if !measured {
+		t.Fatal("measured = false; want true: the process table was read, and whether one root has a figure is that root's key, not this flag")
 	}
 }
 

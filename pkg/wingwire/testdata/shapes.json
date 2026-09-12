@@ -930,11 +930,6 @@
               "name": "runs_awaiting_measure",
               "kind": "int64",
               "omitempty": false
-            },
-            {
-              "name": "latest_attributed",
-              "kind": "bool",
-              "omitempty": false
             }
           ]
         },
