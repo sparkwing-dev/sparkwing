@@ -35,8 +35,13 @@ func newAttributionDaemon(t *testing.T, byRoot map[int]float64) *Daemon {
 	t.Helper()
 	d := newHeadroomDaemon(t, 10, 0.2)
 	d.sampler = &countingHostSampler{stat: attributionHost(10, 8.5)}
-	d.ownedSampler = &perRootOwnedSampler{byRoot: byRoot, measured: true}
+	reported := map[int]float64{9999: 5}
+	for pid, cores := range byRoot {
+		reported[pid] = cores
+	}
+	d.ownedSampler = &perRootOwnedSampler{byRoot: reported, measured: true}
 	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+	d.byRun["watcher"] = &conn{runID: "watcher", role: roleWaiter, pid: 7777}
 	return d
 }
 
@@ -55,7 +60,8 @@ func TestRefreshHeadroom_ChargesOnlyUnownedCPUAsExternal(t *testing.T) {
 
 	cores := queueRow(t, queueState(t, d), "cores")
 	if math.Abs(cores.External-2) > coresEpsilon {
-		t.Errorf("external cores = %.2f, want 2.00: 8.5 busy less the 6.5 this daemon's holders ran", cores.External)
+		t.Errorf("external cores = %.2f, want 2.00: 8.5 busy less the 6.5 this daemon's holders ran, crediting only the runs that hold and not every tree the sampler reported",
+			cores.External)
 	}
 	if math.Abs(d.appliedCores-6) > coresEpsilon {
 		t.Errorf("grantable cores = %.2f, want 6.00: 10 total less the 2.0 reserve and 2.0 external", d.appliedCores)
@@ -104,6 +110,10 @@ func TestRefreshHeadroom_DepartedHolderStopsBeingCredited(t *testing.T) {
 		t.Errorf("external cores = %.2f, want 8.50: with no run holding, every busy core belongs to the rest of the machine",
 			d.smoothedExternal)
 	}
+	if got := queueAttribution(t, d); got.SamplerUnreadable != 0 || !got.LatestAttributed {
+		t.Errorf("attribution = %+v, want clean: a daemon holding nothing has nothing it failed to measure, and must not warn for every reading it takes",
+			got)
+	}
 }
 
 func TestRefreshHeadroom_CountsEveryAttributedSample(t *testing.T) {
@@ -122,6 +132,19 @@ func TestRefreshHeadroom_CountsEveryAttributedSample(t *testing.T) {
 	}
 	if !got.LatestAttributed {
 		t.Error("latest-attributed = false, want true: every holding run's CPU was measured")
+	}
+}
+
+func TestRefreshHeadroom_DoesNotCountAnUnreadableHost(t *testing.T) {
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	blind := attributionHost(10, 8.5)
+	blind.CPUMeasured = false
+	d.sampler = &countingHostSampler{stat: blind}
+
+	d.refreshHeadroom()
+
+	if got := queueAttribution(t, d); got.Samples != 0 {
+		t.Errorf("samples = %d, want 0: a reading that measured no host CPU is no denominator for the counts read against it", got.Samples)
 	}
 }
 
@@ -159,6 +182,11 @@ func TestRefreshHeadroom_CountsAHolderThatReportsNoProcess(t *testing.T) {
 	}
 	if got.LatestAttributed {
 		t.Error("latest-attributed = true, want false: one holding run's CPU went unmeasured")
+	}
+	cores := queueRow(t, queueState(t, d), "cores")
+	if math.Abs(cores.External-2) > coresEpsilon {
+		t.Errorf("external cores = %.2f, want 2.00: one run without a process id costs its own CPU, not every other run's measurement",
+			cores.External)
 	}
 }
 

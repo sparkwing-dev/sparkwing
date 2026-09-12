@@ -3,6 +3,7 @@ package wingd
 import (
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -275,6 +276,10 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 		close(done)
 	}()
 
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(owned.release) }) }
+	t.Cleanup(release)
+
 	select {
 	case roots := <-owned.started:
 		if len(roots) != 1 || roots[0] != 4242 {
@@ -287,7 +292,7 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 	delete(d.byRun, "first")
 	d.byRun["second"] = &conn{runID: "second", role: roleHolder, pid: 4242}
 	d.mu.Unlock()
-	close(owned.release)
+	release()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -296,7 +301,7 @@ func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T
 
 	cores := queueRow(t, queueState(t, d), "cores")
 	if cores.External != 0 {
-		t.Errorf("external cores = %v, want 0: the process tree at that pid is still this daemon's work whichever run holds it, and a pid the OS genuinely recycled is caught by the sampler's start-time baseline instead",
+		t.Errorf("external cores = %v, want 0: the process tree at that pid is still this daemon's work whichever run holds it, so charging it to the machine bills this daemon for its own run",
 			cores.External)
 	}
 }

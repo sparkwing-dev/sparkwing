@@ -282,6 +282,10 @@ func darwinCPUFromSnapshot(
 	fractions := make(map[int]float64, len(processes))
 	var host float64
 	for processID, process := range processes {
+		// bug: this snapshot carries no process start time, so a pid the OS
+		// recycles within one interval reads as the dead process continuing.
+		// Only a falling cpuSeconds catches it. The linux and windows paths
+		// key on pid plus start ticks and do not have this gap.
 		prior, seen := previous[processID]
 		if !seen {
 			continue

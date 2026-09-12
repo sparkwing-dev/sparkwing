@@ -71,6 +71,29 @@ func TestOwnedCPU_NewChildDoesNotEraseMeasuredParentDelta(t *testing.T) {
 	}
 }
 
+func TestOwnedCPU_SumsEveryMeasuredProcessUnderOneRoot(t *testing.T) {
+	previousAt := time.Unix(100, 0)
+	now := previousAt.Add(time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	previous := map[processIdentity]cpuSample{
+		root:  {cpuSeconds: 1, at: previousAt},
+		child: {cpuSeconds: 2, at: previousAt},
+	}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 2},
+		11: {parentPID: 10, identity: child, cpuSeconds: 5},
+	}
+	owners := ownedProcessOwners([]int{10}, processes)
+
+	byRoot, measured, _ := ownedCPUByRoot(previous, processes, owners, now)
+
+	if !measured || math.Abs(byRoot[10]-4) > 0.0001 {
+		t.Fatalf("owned CPU by root = %v, measured %v; want the root's own 1 core plus its child's 3 summed into one tree, not the last one read",
+			byRoot, measured)
+	}
+}
+
 func TestOwnedCPU_OverlappingRootsCountTheirUnionOnce(t *testing.T) {
 	processes := map[int]ownedProcess{
 		10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 1000}},
