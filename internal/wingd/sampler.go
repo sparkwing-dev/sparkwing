@@ -201,10 +201,24 @@ func ownedCPUByRoot(
 	processes map[int]ownedProcess,
 	owners map[processIdentity]int,
 	now time.Time,
-) (map[int]float64, bool, map[processIdentity]cpuSample) {
+) (map[int]float64, map[processIdentity]cpuSample) {
 	next := make(map[processIdentity]cpuSample, len(owners))
 	byRoot := make(map[int]float64, len(owners))
+	rooted := map[int]struct{}{}
 	for identity, root := range owners {
+		if identity.pid == root {
+			if _, based := previous[identity]; based {
+				rooted[root] = struct{}{}
+			}
+		}
+	}
+	for identity, root := range owners {
+		if _, complete := rooted[root]; !complete {
+			if process, ok := processes[identity.pid]; ok {
+				next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
+			}
+			continue
+		}
 		process, ok := processes[identity.pid]
 		if !ok || process.identity != identity {
 			continue
@@ -221,7 +235,7 @@ func ownedCPUByRoot(
 		}
 		byRoot[root] += delta / wall
 	}
-	return byRoot, true, next
+	return byRoot, next
 }
 
 type darwinCPUProcess struct {
@@ -293,7 +307,7 @@ func darwinCPUFromSnapshot(
 			continue
 		}
 		delta := process.cpuSeconds - prior.cpuSeconds
-		if delta < 0 {
+		if delta <= 0 {
 			continue
 		}
 		fraction := delta / elapsedSeconds
@@ -316,10 +330,20 @@ func darwinCPUFromSnapshot(
 	}
 	owners := ownersByNearestRoot(parentOf, rootPIDs)
 	byRoot := make(map[int]float64, len(rootPIDs))
-	for processID, fraction := range fractions {
-		if root, ok := owners[processID]; ok {
-			byRoot[root] += fraction
+	for root := range rootPIDs {
+		if _, based := previous[root]; based {
+			byRoot[root] = 0
 		}
+	}
+	for processID, fraction := range fractions {
+		root, ok := owners[processID]
+		if !ok {
+			continue
+		}
+		if _, complete := byRoot[root]; !complete {
+			continue
+		}
+		byRoot[root] += fraction
 	}
 	for root, owned := range byRoot {
 		byRoot[root] = clampCores(owned, totalCores)

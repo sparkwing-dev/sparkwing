@@ -135,9 +135,6 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 		readable = append(readable, root)
 	}
 	if len(readable) == 0 {
-		s.mu.Lock()
-		s.last = map[processIdentity]cpuSample{}
-		s.mu.Unlock()
 		return nil, false
 	}
 	processes := windowsOwnedProcesses(procs, children)
@@ -145,9 +142,9 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byRoot, measured, next := ownedCPUByRoot(s.last, processes, owners, now)
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, now)
 	s.last = next
-	return byRoot, measured
+	return byRoot, true
 }
 
 func windowsProcesses() (map[int]windowsProc, bool) {

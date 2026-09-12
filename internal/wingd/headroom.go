@@ -74,19 +74,24 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
 	now := d.now()
-	ownedBusy, withoutProcess, awaitingMeasure := d.ownedBusyLocked(ownedByRoot)
+	ownedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
 	if stat.CPUMeasured {
 		d.attribution.samples++
-		if !ownedMeasured {
+		// safety: one reading is counted under one cause, worst first, so the
+		// counts stay disjoint and a reader can subtract them from samples to get
+		// the readings that attributed. A sampler that read nothing explains every
+		// run's missing figure, so the per-run causes say nothing more.
+		switch {
+		case !ownedMeasured:
 			d.attribution.samplerUnreadable++
-		}
-		if withoutProcess {
+		case withoutProcess:
 			d.attribution.runsWithoutProcess++
-		}
-		if awaitingMeasure {
+		case processGone:
+			d.attribution.runsProcessGone++
+		case awaitingMeasure:
 			d.attribution.runsAwaitingMeasure++
 		}
-		attributed := ownedMeasured && !withoutProcess && !awaitingMeasure
+		attributed := ownedMeasured && !withoutProcess && !awaitingMeasure && !processGone
 		unattributed := 0.0
 		if !attributed {
 			unattributed = 1
@@ -111,6 +116,8 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	if !stat.CPUMeasured {
 		d.smoothedExternal = 0
 		d.externalInit = false
+		d.smoothedUnattributed = 0
+		d.unattributedInit = false
 	} else if !d.externalInit {
 		d.smoothedExternal = rawExternal
 		d.externalInit = true
@@ -158,6 +165,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	// table that does not balance against the headroom admission is on.
 	d.reservedCores = reservedCores
 	d.externalCores = externalCores
+	d.externalAttributed = d.smoothedUnattributed < unattributedResidual
 	d.reservedMem = reservedMem
 	d.externalMem = externalMem
 	d.cpuMeasured = stat.CPUMeasured
@@ -228,17 +236,10 @@ type externalAttribution struct {
 	samplerUnreadable   int64
 	runsWithoutProcess  int64
 	runsAwaitingMeasure int64
+	runsProcessGone     int64
 }
 
-func (d *Daemon) externalAttributedLocked() bool {
-	// safety: the external figure is an EMA, so a reading carrying this daemon's
-	// own CPU keeps weight in it for several readings after. Decaying the verdict
-	// through the same filter clears it when the figure is clean rather than when
-	// the last bad reading ended.
-	return d.smoothedUnattributed < unattributedResidual
-}
-
-func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure bool) {
+func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure, processGone bool) {
 	counted := map[int]struct{}{}
 	for _, c := range d.byRun {
 		if c.role != roleHolder {
@@ -254,12 +255,26 @@ func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, wi
 		counted[c.pid] = struct{}{}
 		cores, measured := ownedByRoot[c.pid]
 		if !measured {
-			awaitingMeasure = true
+			// safety: a run this daemon has already measured, whose process is now
+			// gone while it still holds, is a run that died without releasing. That
+			// is a fault, where a run waiting for its second reading is not, and the
+			// two are only separable by remembering which pids had a figure.
+			if _, seen := d.measuredPIDs[c.pid]; seen {
+				processGone = true
+			} else {
+				awaitingMeasure = true
+			}
 			continue
 		}
+		d.measuredPIDs[c.pid] = struct{}{}
 		owned += cores
 	}
-	return owned, withoutProcess, awaitingMeasure
+	for pid := range d.measuredPIDs {
+		if _, held := counted[pid]; !held {
+			delete(d.measuredPIDs, pid)
+		}
+	}
+	return owned, withoutProcess, awaitingMeasure, processGone
 }
 
 func (d *Daemon) holderSample() []int {

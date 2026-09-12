@@ -193,7 +193,7 @@ func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
 	if err := opsview.RenderQueue(&out, qs, "plain"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(out.String(), "external-attribution\t900\t0\t0\t0\n") {
+	if !strings.Contains(out.String(), "external-attribution\t900\t0\t0\t0\t0\n") {
 		t.Fatalf("plain output = %q, want the attribution row: a machine reader needs the denominator even when nothing went wrong", out.String())
 	}
 }

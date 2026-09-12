@@ -927,6 +927,11 @@
               "omitempty": false
             },
             {
+              "name": "runs_process_gone",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
               "name": "runs_awaiting_measure",
               "kind": "int64",
               "omitempty": false

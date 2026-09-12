@@ -105,6 +105,43 @@ func TestDarwinCPUSnapshotSumsEveryProcessUnderOneRoot(t *testing.T) {
 	}
 }
 
+func TestDarwinCPUSnapshotGivesAnIdleRootAZeroFigure(t *testing.T) {
+	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:05.00\n20 1 0:00.00\n")
+	if !ok {
+		t.Fatal("parse previous snapshot failed")
+	}
+	current, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:05.00\n20 1 0:10.00\n")
+	if !ok {
+		t.Fatal("parse current snapshot failed")
+	}
+
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
+
+	figure, present := byRoot[10]
+	if !ownedMeasured || !present || figure != 0 {
+		t.Fatalf("owned CPU by root = %v, measured %v; want a zero figure for a root that ran nothing: no key would read as a run awaiting its first reading and warn for as long as it stays idle",
+			byRoot, ownedMeasured)
+	}
+}
+
+func TestDarwinCPUSnapshotStaleParentPIDDoesNotResurrectAMissingRoot(t *testing.T) {
+	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n9 10 0:00.00\n")
+	if !ok {
+		t.Fatal("parse previous snapshot failed")
+	}
+	current, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n9 10 0:10.00\n")
+	if !ok {
+		t.Fatal("parse current snapshot failed")
+	}
+
+	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
+
+	if len(byRoot) != 0 {
+		t.Fatalf("owned CPU by root = %v; want none: pid 10 is gone, so a survivor still naming it as its parent must not be credited to a root this daemon cannot see",
+			byRoot)
+	}
+}
+
 func TestDarwinCPUSnapshotCreditsNothingToARootItCannotSee(t *testing.T) {
 	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:00.00\n20 1 0:00.00\n")
 	if !ok {

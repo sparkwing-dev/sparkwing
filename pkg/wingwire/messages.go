@@ -388,8 +388,15 @@ type ResourceState struct {
 	// ExternalSource says where External came from:
 	// [ExternalMeasured] for a host reading, [ExternalUnmeasured] when the
 	// sampler could not read this dimension, in which case External carries
-	// no measurement and admission subtracted none. Empty for semaphore
-	// rows and for daemons that predate the field.
+	// no measurement and admission subtracted none, and
+	// [ExternalUnattributed] for a reading that carries some of this
+	// daemon's own runs' CPU. Empty for semaphore rows and for daemons that
+	// predate the field.
+	//
+	// Read this as an open set: a later daemon may report a value this build
+	// does not know. Every value other than [ExternalUnmeasured] is a real
+	// host reading, so branch on [ExternalUnmeasured] and treat the rest as
+	// measured rather than switching on the known values and falling through.
 	ExternalSource string `json:"external_source,omitempty"`
 	// Available is what a new run can actually draw right now: capacity
 	// minus the reserve, minus external load, minus what sparkwing
@@ -414,7 +421,9 @@ type ResourceState struct {
 // [ExternalUnattributed] when it did not.
 type ExternalAttribution struct {
 	// Samples is how many host CPU readings the daemon has attributed, the
-	// denominator the three counts below are read against.
+	// denominator the counts below are read against. A reading is counted
+	// under at most one of them, worst cause first, so subtracting all four
+	// from Samples leaves the readings that attributed cleanly.
 	Samples int64 `json:"samples"`
 	// SamplerUnreadable is how many readings measured no CPU for any of the
 	// daemon's own runs, because the process sampler returned nothing. The
@@ -427,6 +436,13 @@ type ExternalAttribution struct {
 	// charged to the machine. A run reaching admission without a process id
 	// is a fault rather than a passing condition.
 	RunsWithoutProcess int64 `json:"runs_without_process"`
+	// RunsProcessGone is how many readings ran while a holding run this
+	// daemon had already measured stopped yielding a figure: it died without
+	// releasing its admission, or its process became unreadable. Either way
+	// it holds capacity nothing can use and has its share charged to the
+	// machine, so unlike RunsAwaitingMeasure this count rising is a fault
+	// rather than the expected shape.
+	RunsProcessGone int64 `json:"runs_process_gone"`
 	// RunsAwaitingMeasure is how many readings ran while a holding run had
 	// no CPU figure yet, either because a run's CPU is a rate between two
 	// readings and it has only one, or because it began holding after the

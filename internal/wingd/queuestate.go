@@ -59,7 +59,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			Held:           heldCores,
 			Reserved:       d.reservedCores,
 			External:       d.externalCores,
-			ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributedLocked()),
+			ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributed),
 			Available:      grantCores,
 		},
 		wingwire.ResourceState{
@@ -83,6 +83,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		SamplerUnreadable:   d.attribution.samplerUnreadable,
 		RunsWithoutProcess:  d.attribution.runsWithoutProcess,
 		RunsAwaitingMeasure: d.attribution.runsAwaitingMeasure,
+		RunsProcessGone:     d.attribution.runsProcessGone,
 	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{
@@ -650,7 +651,7 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 		extCores, extMem = 0, 0
 	}
 	avail := map[string]wingwire.ResourceState{
-		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: externalSource(d.cpuMeasured)},
+		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributed)},
 		"memory": {Key: "memory", Available: grantMem, External: extMem, ExternalSource: externalSource(d.memMeasured)},
 	}
 	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)

@@ -138,8 +138,8 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
 	if a := qs.ExternalAttribution; a != nil {
-		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\t%d\n", a.Samples,
-			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsAwaitingMeasure)
+		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\t%d\t%d\n", a.Samples,
+			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsAwaitingMeasure, a.RunsProcessGone)
 	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
@@ -466,6 +466,10 @@ func externalAttributionCauses(a *wingwire.ExternalAttribution) string {
 	if a.RunsWithoutProcess > 0 {
 		clauses = append(clauses, fmt.Sprintf("a holding run reported no process id on %d of %d",
 			a.RunsWithoutProcess, a.Samples))
+	}
+	if a.RunsProcessGone > 0 {
+		clauses = append(clauses, fmt.Sprintf("a holding run had died without releasing on %d of %d",
+			a.RunsProcessGone, a.Samples))
 	}
 	if a.RunsAwaitingMeasure > 0 {
 		clauses = append(clauses, fmt.Sprintf("a holding run had no CPU figure yet on %d of %d",

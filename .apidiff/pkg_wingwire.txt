@@ -155,6 +155,8 @@ type ExternalAttribution struct {
 
 	RunsWithoutProcess int64
 
+	RunsProcessGone int64
+
 	RunsAwaitingMeasure int64
 }
 const ExternalMeasured = "measured"

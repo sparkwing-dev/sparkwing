@@ -110,9 +110,9 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byRoot, measured, next := ownedCPUByRoot(s.last, processes, owners, now)
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, now)
 	s.last = next
-	return byRoot, measured
+	return byRoot, true
 }
 
 type linuxProc struct {

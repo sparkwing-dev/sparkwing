@@ -51,6 +51,26 @@ unlock.
   one before that is charged to the machine; `sparkwing queue` counts those
   readings rather than leaving the gap silent. A run whose process tree
   contains another holding run's tree is counted once, against the nearer run.
+- **admission:** Report a run that died without releasing its admission
+  separately from one still waiting for its first CPU figure. Both leave a run's
+  CPU charged to the machine, but a dead run holds capacity nothing can use and
+  keeps holding it, where a waiting one is attributed on the next reading. They
+  were one count, documented as the expected shape, so a host serving a dead
+  lease read as a host doing ordinary work.
+- **admission:** Report no figure for a run whose own process restarted, rather
+  than a figure covering only the parts of its process tree that survived. A run
+  that re-execs kept its surviving children's CPU and silently lost its own, so
+  its share of the host reading was charged to the machine with nothing saying
+  so.
+- **admission (Windows):** Keep every run's CPU baseline when a reading finds no
+  measurable run. Discarding them cost every other run two further readings
+  before it could be credited again, on exactly the busy hosts where runs queue.
+- **admission:** `ResourceState.ExternalSource` reports a third value,
+  `unattributed`, for an External figure the host sampler did read but which
+  carries some of sparkwing's own runs' CPU. Read the field as an open set: any
+  value other than `unmeasured` is a real host reading, so branch on `unmeasured`
+  rather than switching on the values a build happens to know. `sparkwing queue`
+  and the capacity dashboard both say so where it applies.
 
 ### Security
 

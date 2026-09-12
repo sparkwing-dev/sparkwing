@@ -20,11 +20,11 @@ func TestOwnedCPU_ReapedChildIsNotCountedAgainThroughParent(t *testing.T) {
 	}
 	owners := ownedProcessOwners([]int{10}, processes)
 
-	byRoot, measured, _ := ownedCPUByRoot(previous, processes, owners, now)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, now)
 	usage := sumOwnedCPU(byRoot)
 
-	if !measured || math.Abs(usage-1) > 0.0001 {
-		t.Fatalf("owned CPU = %v, measured %v; want one parent core without re-counting the reaped child", usage, measured)
+	if math.Abs(usage-1) > 0.0001 {
+		t.Fatalf("owned CPU = %v; want one parent core without re-counting the reaped child", usage)
 	}
 }
 
@@ -39,15 +39,12 @@ func TestOwnedCPU_PIDReuseNeedsANewBaseline(t *testing.T) {
 	}
 	owners := ownedProcessOwners([]int{10}, processes)
 
-	byRoot, measured, _ := ownedCPUByRoot(previous, processes, owners, now)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, now)
 	usage := sumOwnedCPU(byRoot)
 
 	if _, figure := byRoot[10]; figure || usage != 0 {
 		t.Fatalf("recycled PID CPU = %v, root has a figure %v; want no figure for the new identity, which is what an absent key means",
 			usage, figure)
-	}
-	if !measured {
-		t.Fatal("measured = false; want true: the process table was read, and whether one root has a figure is that root's key, not this flag")
 	}
 }
 
@@ -64,14 +61,51 @@ func TestOwnedCPU_NewChildDoesNotEraseMeasuredParentDelta(t *testing.T) {
 	}
 	owners := ownedProcessOwners([]int{10}, processes)
 
-	byRoot, measured, next := ownedCPUByRoot(previous, processes, owners, now)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, now)
 	usage := sumOwnedCPU(byRoot)
 
-	if !measured || math.Abs(usage-1) > 0.0001 {
-		t.Fatalf("owned CPU = %v, measured %v; want the measured parent delta only", usage, measured)
+	if math.Abs(usage-1) > 0.0001 {
+		t.Fatalf("owned CPU = %v; want the measured parent delta only", usage)
 	}
 	if len(next) != 2 {
 		t.Fatalf("next baselines = %d, want parent and new child", len(next))
+	}
+}
+
+func TestOwnedCPU_AStaleParentPIDDoesNotResurrectAMissingRoot(t *testing.T) {
+	processes := map[int]ownedProcess{
+		9: {parentPID: 10, identity: processIdentity{pid: 9, startTicks: 400}},
+	}
+
+	owners := ownedProcessOwners([]int{10}, processes)
+
+	if len(owners) != 0 {
+		t.Fatalf("owners = %v; want none: pid 10 is gone from the process table, so a survivor still naming it as its parent belongs to no root this daemon holds",
+			owners)
+	}
+}
+
+func TestOwnedCPU_ARootWithoutItsOwnBaselineReportsNoFigure(t *testing.T) {
+	previousAt := time.Unix(100, 0)
+	now := previousAt.Add(time.Second)
+	child := processIdentity{pid: 8, startTicks: 100}
+	previous := map[processIdentity]cpuSample{
+		child: {cpuSeconds: 7, at: previousAt},
+	}
+	processes := map[int]ownedProcess{
+		7: {parentPID: 1, identity: processIdentity{pid: 7, startTicks: 900}, cpuSeconds: 5},
+		8: {parentPID: 7, identity: child, cpuSeconds: 9},
+	}
+	owners := ownedProcessOwners([]int{7}, processes)
+
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, now)
+
+	if _, figure := byRoot[7]; figure {
+		t.Fatalf("owned CPU by root = %v; want no figure for a root that re-execed: its own process has no baseline, so the tree's sum covers only the surviving child and is silently short",
+			byRoot)
+	}
+	if _, carried := next[processes[7].identity]; !carried {
+		t.Fatal("the new root's baseline was not carried forward, so it would report no figure on the next reading either")
 	}
 }
 
@@ -105,11 +139,10 @@ func TestOwnedCPU_SumsEveryMeasuredProcessUnderOneRoot(t *testing.T) {
 	}
 	owners := ownedProcessOwners([]int{10}, processes)
 
-	byRoot, measured, _ := ownedCPUByRoot(previous, processes, owners, now)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, now)
 
-	if !measured || math.Abs(byRoot[10]-4) > 0.0001 {
-		t.Fatalf("owned CPU by root = %v, measured %v; want the root's own 1 core plus its child's 3 summed into one tree, not the last one read",
-			byRoot, measured)
+	if math.Abs(byRoot[10]-4) > 0.0001 {
+		t.Fatalf("owned CPU by root = %v; want the root's own 1 core plus its child's 3 summed into one tree, not the last one read", byRoot)
 	}
 }
 

@@ -438,16 +438,21 @@ function ExternalCell({ r }: { r: QueueResource }) {
   const label = externalCell(r, fmtAmount);
   if (!r.external_source) return <>{label}</>;
   return (
-    <Tooltip
-      content={
-        r.external_source === "unmeasured"
-          ? "No host sensor for this dimension; nothing was subtracted for external load"
-          : "Measured from the host, outside sparkwing"
-      }
-    >
+    <Tooltip content={externalSourceTooltip(r.external_source)}>
       <span className="cursor-default">{label}</span>
     </Tooltip>
   );
+}
+
+function externalSourceTooltip(source: string): string {
+  switch (source) {
+    case "unmeasured":
+      return "No host sensor for this dimension; nothing was subtracted for external load";
+    case "unattributed":
+      return "Measured from the host, but carrying some of sparkwing's own runs' CPU, so this reads high and available reads low by it";
+    default:
+      return "Measured from the host, outside sparkwing";
+  }
 }
 
 function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {

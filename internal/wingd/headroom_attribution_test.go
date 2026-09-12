@@ -3,6 +3,7 @@ package wingd
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -191,9 +192,6 @@ func TestRefreshHeadroom_CountsAHolderWithNoReadingYet(t *testing.T) {
 		t.Errorf("runs-awaiting-measure = %d, want 1: a run the sampler returned no figure for is charged to the machine, and saying so is the difference between a known gap and a silent one",
 			got.RunsAwaitingMeasure)
 	}
-	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalUnattributed {
-		t.Errorf("cores external source = %q, want %q: the figure carries CPU this daemon could not separate out", src, wingwire.ExternalUnattributed)
-	}
 }
 
 func TestRefreshHeadroom_CountsOneHolderPerProcessID(t *testing.T) {
@@ -205,6 +203,91 @@ func TestRefreshHeadroom_CountsOneHolderPerProcessID(t *testing.T) {
 	cores := queueRow(t, queueState(t, d), "cores")
 	if math.Abs(cores.External-2) > coresEpsilon {
 		t.Errorf("external cores = %.2f, want 2.00: two runs sharing a process tree own that tree's CPU once", cores.External)
+	}
+}
+
+func TestRefreshHeadroom_CountsAHolderWhoseProcessDied(t *testing.T) {
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	d.refreshHeadroom()
+
+	d.ownedSampler = &perRootOwnedSampler{byRoot: map[int]float64{9999: 5}, measured: true}
+	d.refreshHeadroom()
+
+	got := queueAttribution(t, d)
+	if got.RunsProcessGone != 1 {
+		t.Errorf("runs-process-gone = %d, want 1: a run this daemon had already measured, now holding with no process to measure, died without releasing",
+			got.RunsProcessGone)
+	}
+	if got.RunsAwaitingMeasure != 0 {
+		t.Errorf("runs-awaiting-measure = %d, want 0: a dead run is a fault, and filing it under the count documented as the expected shape hides it",
+			got.RunsAwaitingMeasure)
+	}
+}
+
+func TestRefreshHeadroom_ForgetsARunItNoLongerHolds(t *testing.T) {
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	d.refreshHeadroom()
+	delete(d.byRun, "holder")
+	d.refreshHeadroom()
+
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+	d.ownedSampler = &perRootOwnedSampler{byRoot: map[int]float64{}, measured: true}
+	d.refreshHeadroom()
+
+	if got := queueAttribution(t, d); got.RunsProcessGone != 0 {
+		t.Errorf("runs-process-gone = %d, want 0: a pid that released and came back is a fresh run awaiting its first figure, not a death, and remembering it forever would leak a pid per run",
+			got.RunsProcessGone)
+	}
+}
+
+func TestRefreshHeadroom_VerdictOutlastsTheReadingThatCausedIt(t *testing.T) {
+	now := time.Now()
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	d.cfg.Now = func() time.Time { return now }
+	tick := func() {
+		now = now.Add(d.cfg.headroomMaxAge())
+		d.refreshHeadroom()
+	}
+	d.byRun["quiet"] = &conn{runID: "quiet", role: roleHolder}
+	tick()
+	delete(d.byRun, "quiet")
+
+	readingsUntilWeightSpent := 0
+	for weight := 1.0; weight >= unattributedResidual; weight *= 1 - loadEMAAlpha {
+		readingsUntilWeightSpent++
+	}
+
+	for range readingsUntilWeightSpent - 1 {
+		tick()
+		if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalUnattributed {
+			t.Fatalf("cores external source = %q, want %q: the bad reading still holds more than the residual share of the figure, so the verdict must not clear before the figure does",
+				src, wingwire.ExternalUnattributed)
+		}
+	}
+
+	tick()
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalMeasured {
+		t.Errorf("cores external source = %q, want %q: the bad reading's weight is spent, so the figure no longer carries it",
+			src, wingwire.ExternalMeasured)
+	}
+}
+
+func TestRefreshHeadroom_ABlindSamplerClearsTheVerdictWithTheFigure(t *testing.T) {
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	d.byRun["quiet"] = &conn{runID: "quiet", role: roleHolder}
+	d.refreshHeadroom()
+	delete(d.byRun, "quiet")
+
+	blind := attributionHost(10, 8.5)
+	blind.CPUMeasured = false
+	d.sampler = &countingHostSampler{stat: blind}
+	d.refreshHeadroom()
+	d.sampler = &countingHostSampler{stat: attributionHost(10, 4)}
+	d.refreshHeadroom()
+
+	if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalMeasured {
+		t.Errorf("cores external source = %q, want %q: losing the host sensor throws the smoothed figure away, so the verdict on it cannot outlive it",
+			src, wingwire.ExternalMeasured)
 	}
 }
 
