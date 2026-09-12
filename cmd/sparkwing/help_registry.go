@@ -3550,19 +3550,23 @@ overlay already matches. The repository's module file stays unchanged.`,
 
 var cmdSparksUpdate = Command{
 	Path:     "sparkwing pipeline sparks update",
-	Synopsis: "Re-resolve one or all libraries",
-	Description: `Re-runs resolution for every declared library (or a single
-named one) and re-materializes the overlay modfile. For a
-range or 'latest' constraint this picks up any new tag from
-the module proxy; for an exact pin it is a no-op.`,
+	Synopsis: "Re-resolve every declared library",
+	Description: `Re-runs resolution for every declared library and
+re-materializes the overlay modfile. For a range or 'latest'
+constraint this picks up any new tag from the module proxy;
+for an exact pin it is a no-op.
+
+The overlay is rebuilt from the whole manifest in one pass, so
+there is no single-library update: --name is refused. To hold
+one library still, give it an exact version: in
+.sparkwing/sparkwing.yaml.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Restrict update to one library (name or source); omit to update all", Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Refused; update re-resolves every declared library", Group: "Input"},
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
 		{"Update every declared library", "sparkwing pipeline sparks update"},
-		{"Update one by name", "sparkwing pipeline sparks update --name fictional-sparks"},
 	},
 }
 

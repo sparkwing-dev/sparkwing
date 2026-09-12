@@ -33,6 +33,12 @@ unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing pipeline sparks update --name NAME` refuses instead of
+  updating every declared library. Resolution rebuilds the overlay modfile from
+  the whole manifest in one pass, so a single-library update would drop the
+  other libraries' resolved versions. The flag was checked against the manifest
+  and then discarded, so naming one library re-resolved them all. Give a library
+  an exact `version:` in `.sparkwing/sparkwing.yaml` to hold it still.
 - **cli:** `sparkwing pipeline publish --profile NAME` uploads to the backend
   that profile serves pipeline binaries from -- its `cache.binaries` sub-spec
   when it declares one, its cache surface otherwise. The flag was read for its

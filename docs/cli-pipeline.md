@@ -630,7 +630,7 @@ sparks.yaml shape, resolution rules, warmup).
 - `list` -- Show declared sparks libraries and their resolved versions
 - `lint` -- Validate a spark.json library manifest
 - `resolve` -- Resolve versions and materialize the overlay modfile
-- `update` -- Re-resolve one or all libraries
+- `update` -- Re-resolve every declared library
 - `add` -- Add a library to sparks.yaml
 - `remove` -- Remove a library from sparks.yaml
 - `warmup` -- Pre-compile pipeline binaries after a sparks release
@@ -886,18 +886,23 @@ sparkwing pipeline sparks resolve -q
 
 ## `sparkwing pipeline sparks update`
 
-Re-resolve one or all libraries
+Re-resolve every declared library
 
-Re-runs resolution for every declared library (or a single
-named one) and re-materializes the overlay modfile. For a
-range or 'latest' constraint this picks up any new tag from
-the module proxy; for an exact pin it is a no-op.
+Re-runs resolution for every declared library and
+re-materializes the overlay modfile. For a range or 'latest'
+constraint this picks up any new tag from the module proxy;
+for an exact pin it is a no-op.
+
+The overlay is rebuilt from the whole manifest in one pass, so
+there is no single-library update: --name is refused. To hold
+one library still, give it an exact version: in
+.sparkwing/sparkwing.yaml.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Restrict update to one library (name or source); omit to update all |
+| `--name NAME` | Refused; update re-resolves every declared library |
 | `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
 
 ### Examples
@@ -905,9 +910,6 @@ the module proxy; for an exact pin it is a no-op.
 ```sh
 # Update every declared library
 sparkwing pipeline sparks update
-
-# Update one by name
-sparkwing pipeline sparks update --name fictional-sparks
 ```
 
 ## `sparkwing pipeline sparks warmup`
