@@ -2310,20 +2310,24 @@ controller, and any profile that declares its own logs surface.`,
 }
 
 var cmdJobsErrors = Command{
-	Path:        "sparkwing runs errors",
-	Synopsis:    "Surface the error trail for a failed run",
-	Description: `Reads the local run store and prints each failed node's error chain.`,
+	Path:     "sparkwing runs errors",
+	Synopsis: "Surface the error trail for a failed run",
+	Description: `Prints each failed node's error chain. Reads the local run store,
+or the controller a --profile names.`,
 	PosArgs: []PosArg{
 		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
 	},
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Inspect a local failure", "sparkwing runs errors run-fictional"},
 		{"As JSON", "sparkwing runs errors --run run-fictional -o json"},
+		{"Read a controller-held run", "sparkwing runs errors run-fictional --profile prod"},
 	},
 }
 

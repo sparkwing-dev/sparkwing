@@ -395,7 +395,8 @@ sparkwing runs consumer stop
 
 Surface the error trail for a failed run
 
-Reads the local run store and prints each failed node's error chain.
+Prints each failed node's error chain. Reads the local run store,
+or the controller a --profile names.
 
 ### Arguments
 
@@ -407,6 +408,8 @@ Reads the local run store and prints each failed node's error chain.
 |---|---|
 | `--run RUN_ID` | Run identifier. Positional fallback accepted. |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
+| `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
@@ -416,6 +419,9 @@ sparkwing runs errors run-fictional
 
 # As JSON
 sparkwing runs errors --run run-fictional -o json
+
+# Read a controller-held run
+sparkwing runs errors run-fictional --profile prod
 ```
 
 ## `sparkwing runs failures`

@@ -30,6 +30,7 @@ var chdirCommands = []string{
 	"sparkwing runs approvals list",
 	"sparkwing runs bounce",
 	"sparkwing runs cancel",
+	"sparkwing runs errors",
 	"sparkwing runs failures",
 	"sparkwing runs find",
 	"sparkwing runs get",

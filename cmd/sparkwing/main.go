@@ -753,6 +753,7 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -772,6 +773,16 @@ func runJobs(args []string) error {
 			return err
 		}
 		emitJSON := resolvedFormat == "json"
+		if *profileName != "" {
+			prof, profileErr := resolveProfile(*profileName)
+			if profileErr != nil {
+				return profileErr
+			}
+			if err := requireController(prof, "runs errors"); err != nil {
+				return err
+			}
+			return orchestrator.JobErrorsRemote(contextValue, prof.ControllerURL(), prof.ControllerToken(), *runID, emitJSON, os.Stdout)
+		}
 		return orchestrator.JobErrors(contextValue, paths, *runID, emitJSON, os.Stdout)
 
 	case "consumer":

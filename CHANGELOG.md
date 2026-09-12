@@ -26,6 +26,10 @@ unlock.
 - **cli:** `sparkwing runs status` and `sparkwing runs errors` take the run id as
   a positional argument, so `sparkwing runs status run-20260910-...` works.
   `--run` keeps working; passing both refuses.
+- **cli:** `sparkwing runs errors --profile NAME` reads a run held on that
+  profile's controller, and `-C/--sw-cd` re-anchors the profile search the way
+  it does on the other `runs` read verbs. It was the one read verb in the family
+  that could only read the local store.
 
 ### Changed
 
