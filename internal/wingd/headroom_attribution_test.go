@@ -291,6 +291,48 @@ func TestRefreshHeadroom_ABlindSamplerClearsTheVerdictWithTheFigure(t *testing.T
 	}
 }
 
+func TestRefreshHeadroom_UnmeasuredFirstReadingDoesNotCompound(t *testing.T) {
+	const total, longCores, shortCores, reserve = 10.0, 4.0, 3.0, 0.2
+	const foreign = 1.0
+
+	overstated := map[int]float64{}
+	lifetimes := []int{2, 4, 7, 14}
+	for _, lifetime := range lifetimes {
+		d := newHeadroomDaemon(t, total, reserve)
+		d.sampler = &countingHostSampler{stat: attributionHost(total, longCores+shortCores+foreign)}
+		sampler := &baselineOwnedSampler{cores: map[int]float64{1000: longCores}, seen: map[int]bool{}}
+		d.ownedSampler = sampler
+		d.byRun["long"] = &conn{runID: "long", role: roleHolder, pid: 1000}
+
+		pid := 2000
+		for reading := range 60 {
+			if reading%lifetime == 0 {
+				delete(sampler.cores, pid)
+				pid++
+				sampler.cores[pid] = shortCores
+			}
+			d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: pid}
+			d.refreshHeadroom()
+		}
+		overstated[lifetime] = d.smoothedExternal - foreign
+	}
+
+	for _, lifetime := range lifetimes {
+		if over := overstated[lifetime]; over > shortCores+coresEpsilon {
+			t.Errorf("a run restarting every %d readings overstates external by %.3f cores, want at most its own %.1f: the daemon loses one reading of a run it cannot measure yet, and losing more than that run's whole load means the loss is accumulating across readings",
+				lifetime, over, shortCores)
+		}
+	}
+	for i := 1; i < len(lifetimes); i++ {
+		shorter, longer := lifetimes[i-1], lifetimes[i]
+		if overstated[longer] > overstated[shorter]+coresEpsilon {
+			t.Errorf("a run living %d readings overstates external by %.3f, more than one living %d does at %.3f: the loss must fall as a run lives longer, because it is one unmeasurable reading spread over that run's life",
+				longer, overstated[longer], shorter, overstated[shorter])
+		}
+	}
+	t.Logf("external overstated by, per run lifetime in readings: %v", overstated)
+}
+
 type baselineOwnedSampler struct {
 	cores map[int]float64
 	seen  map[int]bool
