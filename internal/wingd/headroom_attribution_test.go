@@ -115,26 +115,32 @@ func TestRefreshHeadroom_CountsEveryAttributedSample(t *testing.T) {
 
 	got := queueAttribution(t, d)
 	if got.Samples != 3 {
-		t.Errorf("samples = %d, want 3: the denominator counts every readable host sample", got.Samples)
+		t.Errorf("samples = %d, want 3: the denominator counts every readable host reading", got.Samples)
 	}
-	if got.OwnedUnreadable != 0 || got.HolderUnidentified != 0 {
-		t.Errorf("attribution = %+v, want no unreadable or unidentified samples", got)
+	if got.SamplerUnreadable != 0 || got.RunsWithoutProcess != 0 || got.RunsAwaitingMeasure != 0 {
+		t.Errorf("attribution = %+v, want every fault count at zero", got)
+	}
+	if !got.LatestAttributed {
+		t.Error("latest-attributed = false, want true: every holding run's CPU was measured")
 	}
 }
 
-func TestRefreshHeadroom_CountsAnUnreadableOwnedSampler(t *testing.T) {
+func TestRefreshHeadroom_CountsAnUnreadableSampler(t *testing.T) {
 	d := newAttributionDaemon(t, nil)
 	d.ownedSampler = &perRootOwnedSampler{measured: false}
 
 	d.refreshHeadroom()
 
 	got := queueAttribution(t, d)
-	if got.OwnedUnreadable != 1 || got.Samples != 1 {
-		t.Errorf("attribution = %+v, want 1 unreadable of 1 sample", got)
+	if got.SamplerUnreadable != 1 || got.Samples != 1 {
+		t.Errorf("attribution = %+v, want 1 unreadable of 1 reading", got)
+	}
+	if got.LatestAttributed {
+		t.Error("latest-attributed = true, want false: nothing of this daemon's own CPU was measured")
 	}
 	cores := queueRow(t, queueState(t, d), "cores")
 	if math.Abs(cores.External-8.5) > coresEpsilon {
-		t.Errorf("external cores = %.2f, want the whole 8.50 charged when the owned sampler reads nothing", cores.External)
+		t.Errorf("external cores = %.2f, want the whole 8.50 charged when the sampler reads nothing", cores.External)
 	}
 }
 
@@ -145,11 +151,31 @@ func TestRefreshHeadroom_CountsAHolderThatReportsNoProcess(t *testing.T) {
 	d.refreshHeadroom()
 
 	got := queueAttribution(t, d)
-	if got.HolderUnidentified != 1 {
-		t.Errorf("holder-unidentified = %d, want 1: a holder with no process id has CPU this daemon cannot measure", got.HolderUnidentified)
+	if got.RunsWithoutProcess != 1 {
+		t.Errorf("runs-without-process = %d, want 1: a run with no process id has CPU this daemon cannot locate", got.RunsWithoutProcess)
 	}
-	if got.OwnedUnreadable != 0 {
-		t.Errorf("owned-unreadable = %d, want 0: the sampler read the holders it could identify", got.OwnedUnreadable)
+	if got.SamplerUnreadable != 0 || got.RunsAwaitingMeasure != 0 {
+		t.Errorf("attribution = %+v, want the other fault counts at zero", got)
+	}
+	if got.LatestAttributed {
+		t.Error("latest-attributed = true, want false: one holding run's CPU went unmeasured")
+	}
+}
+
+func TestRefreshHeadroom_CountsAHolderWithNoReadingYet(t *testing.T) {
+	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
+	d.refreshHeadroom()
+	d.byRun["fresh"] = &conn{runID: "fresh", role: roleHolder, pid: 5150}
+
+	d.refreshHeadroom()
+
+	got := queueAttribution(t, d)
+	if got.RunsAwaitingMeasure != 1 {
+		t.Errorf("runs-awaiting-measure = %d, want 1: a run the sampler returned no figure for is charged to the machine, and saying so is the difference between a known gap and a silent one",
+			got.RunsAwaitingMeasure)
+	}
+	if got.LatestAttributed {
+		t.Error("latest-attributed = true, want false: one holding run had no CPU figure")
 	}
 }
 
@@ -162,5 +188,44 @@ func TestRefreshHeadroom_CountsOneHolderPerProcessID(t *testing.T) {
 	cores := queueRow(t, queueState(t, d), "cores")
 	if math.Abs(cores.External-2) > coresEpsilon {
 		t.Errorf("external cores = %.2f, want 2.00: two runs sharing a process tree own that tree's CPU once", cores.External)
+	}
+}
+
+type baselineOwnedSampler struct {
+	cores map[int]float64
+	seen  map[int]bool
+}
+
+func (s *baselineOwnedSampler) CPUUsage(pids []int) (map[int]float64, bool) {
+	byRoot := make(map[int]float64, len(pids))
+	for _, pid := range pids {
+		if s.seen[pid] {
+			byRoot[pid] = s.cores[pid]
+		}
+		s.seen[pid] = true
+	}
+	return byRoot, true
+}
+
+func TestRefreshHeadroom_ChurnDoesNotCostTheRunsAlreadyMeasured(t *testing.T) {
+	d := newHeadroomDaemon(t, 10, 0.2)
+	d.sampler = &countingHostSampler{stat: attributionHost(10, 8.5)}
+	d.ownedSampler = &baselineOwnedSampler{cores: map[int]float64{4242: 6.5}, seen: map[int]bool{}}
+	d.byRun["long"] = &conn{runID: "long", role: roleHolder, pid: 4242}
+	d.refreshHeadroom()
+
+	for i := range 40 {
+		d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: 5150 + i}
+		d.refreshHeadroom()
+		delete(d.byRun, "short")
+		d.refreshHeadroom()
+	}
+
+	if math.Abs(d.smoothedExternal-2) > coresEpsilon {
+		t.Errorf("external cores = %.2f, want 2.00: short runs arriving without a CPU figure yet must not cost the long run the 6.5 cores already measured for it",
+			d.smoothedExternal)
+	}
+	if got := queueAttribution(t, d); got.RunsAwaitingMeasure == 0 {
+		t.Error("runs-awaiting-measure = 0, want the arrivals counted: a run charged to the machine because it has no figure yet must be visible, not silent")
 	}
 }

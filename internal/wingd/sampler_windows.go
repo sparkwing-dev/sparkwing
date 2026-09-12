@@ -124,19 +124,24 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 		return nil, false
 	}
 	children := windowsProcessChildren(procs)
+	readable := make([]int, 0, len(roots))
 	for _, root := range roots {
 		if _, ok := procs[root]; !ok {
 			continue
 		}
 		if !windowsTreeMeasured(collectSubtree(root, children), procs) {
-			s.mu.Lock()
-			s.last = map[processIdentity]cpuSample{}
-			s.mu.Unlock()
-			return nil, false
+			continue
 		}
+		readable = append(readable, root)
+	}
+	if len(readable) == 0 {
+		s.mu.Lock()
+		s.last = map[processIdentity]cpuSample{}
+		s.mu.Unlock()
+		return nil, false
 	}
 	processes := windowsOwnedProcesses(procs, children)
-	owners := ownedProcessOwners(roots, processes)
+	owners := ownedProcessOwners(readable, processes)
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()

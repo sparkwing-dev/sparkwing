@@ -45,9 +45,12 @@ unlock.
   runs start and finish constantly, that charged the daemon's own work to the
   rest of the machine and drove the grantable budget toward zero, so a host
   with spare capacity ran its queue one run at a time. CPU is now summed per
-  run and only the runs still holding are credited, so a set that keeps moving
-  costs nothing. A run whose process tree contains another holding run's tree
-  is counted once, against the nearer run.
+  run and only the runs still holding are credited, so a run starting or
+  finishing costs the runs already measured nothing. A run's CPU is a rate
+  between two readings, so a run is credited from its second reading on and the
+  one before that is charged to the machine; `sparkwing queue` counts those
+  readings rather than leaving the gap silent. A run whose process tree
+  contains another holding run's tree is counted once, against the nearer run.
 
 ### Security
 

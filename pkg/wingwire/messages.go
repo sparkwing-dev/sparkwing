@@ -392,28 +392,45 @@ type ResourceState struct {
 }
 
 // ExternalAttribution says how much of the daemon's own CPU it managed to
-// separate from the rest of the machine's, counted over the host samples taken
-// since it started. A sample the daemon cannot attribute charges its own runs'
-// CPU to the machine, which reads as External too high and Available too low.
+// separate from the rest of the machine's, over the host readings it has taken
+// since starting. CPU it cannot separate out is charged to the machine, which
+// reads as External too high and Available too low.
 //
 // A daemon reports it whether or not anything went wrong, because "every
-// sample attributed" and "a build that does not track this" are different
+// reading attributed" and "a build that does not track this" are different
 // answers and a reader cannot tell them apart from silence. Samples says which
-// it is: zero means the daemon has taken no readable host sample yet.
+// it is: zero means the daemon has taken no readable host reading yet.
+//
+// The three counts run for the daemon's lifetime and never decay, so they
+// describe a trend rather than the reading on screen. LatestAttributed is what
+// describes the reading on screen.
 type ExternalAttribution struct {
-	// Samples is how many host CPU readings the daemon has attributed,
-	// the denominator the other counts are read against.
+	// Samples is how many host CPU readings the daemon has attributed, the
+	// denominator the three counts below are read against.
 	Samples int64 `json:"samples"`
-	// OwnedUnreadable is how many of those samples measured no CPU for the
+	// SamplerUnreadable is how many readings measured no CPU for any of the
 	// daemon's own runs, because the process sampler returned nothing. The
 	// whole host reading was charged to the machine. A count that tracks
-	// Samples means the sampler cannot read this host at all.
-	OwnedUnreadable int64 `json:"owned_unreadable"`
-	// HolderUnidentified is how many of those samples ran while a holding
-	// run reported no process id, so the daemon could not measure that
-	// run's CPU and charged it to the machine. Every other run's CPU is
-	// still attributed.
-	HolderUnidentified int64 `json:"holder_unidentified"`
+	// Samples means the sampler cannot read this host at all, which is a
+	// fault on the box rather than a passing condition.
+	SamplerUnreadable int64 `json:"sampler_unreadable"`
+	// RunsWithoutProcess is how many readings ran while a holding run
+	// reported no process id. That run's CPU cannot be located, so it is
+	// charged to the machine. A run reaching admission without a process id
+	// is a fault rather than a passing condition.
+	RunsWithoutProcess int64 `json:"runs_without_process"`
+	// RunsAwaitingMeasure is how many readings ran while a holding run had
+	// no CPU figure yet. A run's CPU is a rate between two readings, so the
+	// run after it starts is charged to the machine and every reading after
+	// that is attributed to it. A host starting runs continuously always has
+	// one such run, so this count rising with Samples is the expected shape
+	// rather than a fault.
+	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
+	// LatestAttributed says whether the most recent reading -- the one the
+	// External and Available figures are showing -- had every holding run's
+	// CPU measured. False means those two figures currently carry some of
+	// this daemon's own work.
+	LatestAttributed bool `json:"latest_attributed"`
 }
 
 // Holder is one run currently holding admission, or a connected run carrying

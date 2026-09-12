@@ -97,12 +97,7 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 			rootPIDs[root] = struct{}{}
 		}
 	}
-	ownerByPID := map[int]int{}
-	for processID := range parent {
-		if root, ok := darwinNearestRootByParent(processID, rootPIDs, parent); ok {
-			ownerByPID[processID] = root
-		}
-	}
+	ownerByPID := ownersByNearestRoot(parent, rootPIDs)
 	pids := make([]int, 0, len(ownerByPID))
 	for processID := range ownerByPID {
 		pids = append(pids, processID)
@@ -112,26 +107,13 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 		return nil, false
 	}
 	byRoot := make(map[int]float64, len(rootPIDs))
+	for root := range rootPIDs {
+		byRoot[root] = 0
+	}
 	for processID, usage := range cpu {
 		byRoot[ownerByPID[processID]] += usage
 	}
 	return byRoot, true
-}
-
-func darwinNearestRootByParent(processID int, rootPIDs map[int]struct{}, parent map[int]int) (int, bool) {
-	seen := map[int]bool{}
-	for current := processID; current > 0 && !seen[current]; {
-		seen[current] = true
-		if _, ok := rootPIDs[current]; ok {
-			return current, true
-		}
-		next, ok := parent[current]
-		if !ok {
-			return 0, false
-		}
-		current = next
-	}
-	return 0, false
 }
 
 func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, map[int]float64, bool, error) {

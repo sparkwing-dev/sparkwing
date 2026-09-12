@@ -72,15 +72,19 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
 	now := d.now()
-	ownedBusy, unidentified := d.ownedBusyLocked(ownedByRoot)
+	ownedBusy, withoutProcess, awaitingMeasure := d.ownedBusyLocked(ownedByRoot)
 	if stat.CPUMeasured {
 		d.attribution.samples++
 		if !ownedMeasured {
-			d.attribution.ownedUnreadable++
+			d.attribution.samplerUnreadable++
 		}
-		if unidentified {
-			d.attribution.holderUnidentified++
+		if withoutProcess {
+			d.attribution.runsWithoutProcess++
 		}
+		if awaitingMeasure {
+			d.attribution.runsAwaitingMeasure++
+		}
+		d.attribution.latestAttributed = ownedMeasured && !withoutProcess && !awaitingMeasure
 	}
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
@@ -209,28 +213,35 @@ func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) f
 }
 
 type externalAttribution struct {
-	samples            int64
-	ownedUnreadable    int64
-	holderUnidentified int64
+	samples             int64
+	samplerUnreadable   int64
+	runsWithoutProcess  int64
+	runsAwaitingMeasure int64
+	latestAttributed    bool
 }
 
-func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, unidentified bool) {
+func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure bool) {
 	counted := map[int]struct{}{}
 	for _, c := range d.byRun {
 		if c.role != roleHolder {
 			continue
 		}
 		if c.pid <= 0 {
-			unidentified = true
+			withoutProcess = true
 			continue
 		}
 		if _, done := counted[c.pid]; done {
 			continue
 		}
 		counted[c.pid] = struct{}{}
-		owned += ownedByRoot[c.pid]
+		cores, measured := ownedByRoot[c.pid]
+		if !measured {
+			awaitingMeasure = true
+			continue
+		}
+		owned += cores
 	}
-	return owned, unidentified
+	return owned, withoutProcess, awaitingMeasure
 }
 
 func (d *Daemon) holderSample() []int {

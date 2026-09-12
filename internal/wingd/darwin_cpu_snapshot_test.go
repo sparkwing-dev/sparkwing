@@ -99,8 +99,27 @@ func TestDarwinCPUSnapshotMissingRootCreditsNoOwnedCPU(t *testing.T) {
 
 	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
 
-	if ownedMeasured || len(byRoot) != 0 {
-		t.Fatalf("owned CPU = %v, measured %v; want no credit for a missing root", byRoot, ownedMeasured)
+	if !ownedMeasured || len(byRoot) != 0 {
+		t.Fatalf("owned CPU = %v, measured %v; want a read that credits the missing root nothing: it is absent from this snapshot, so its CPU is outside the host delta too",
+			byRoot, ownedMeasured)
+	}
+}
+
+func TestDarwinCPUSnapshotKeepsTheRootsItStillSees(t *testing.T) {
+	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:00.00\n20 1 0:00.00\n")
+	if !ok {
+		t.Fatal("parse previous snapshot failed")
+	}
+	current, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:10.00\n")
+	if !ok {
+		t.Fatal("parse current snapshot failed")
+	}
+
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10, 20}, 8)
+
+	if !ownedMeasured || math.Abs(byRoot[10]-1) > 0.0001 {
+		t.Fatalf("owned CPU by root = %v, measured %v; want root 10's measured core kept: a run that finished must not cost the daemon the measurement of the run still working",
+			byRoot, ownedMeasured)
 	}
 }
 
