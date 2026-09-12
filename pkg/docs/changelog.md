@@ -31,6 +31,13 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Removed
+
+- **web:** The analytics page drops its three unbuilt sections
+  Slowest pipelines, failure clustering, and agent utilization rendered
+  placeholder text for views the dashboard does not build. The trend charts
+  stay.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.

@@ -23,26 +23,6 @@ export default function AnalyticsPage() {
       <Section title="Trends">
         <TrendCharts />
       </Section>
-
-      <Section title="Slowest pipelines">
-        <Placeholder>
-          Coming soon: p50 / p95 duration over the last 7 days, grouped by
-          pipeline.
-        </Placeholder>
-      </Section>
-
-      <Section title="Failure clustering">
-        <Placeholder>
-          Coming soon: failure rate by branch and by pipeline; recent flake
-          detection (passed last N then failing).
-        </Placeholder>
-      </Section>
-
-      <Section title="Agent utilization">
-        <Placeholder>
-          Coming soon: busy / idle time per runner type over the last 24h.
-        </Placeholder>
-      </Section>
     </div>
   );
 }
@@ -59,14 +39,6 @@ function Section({
       <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--muted)] mb-2">
         {title}
       </h2>
-      {children}
-    </div>
-  );
-}
-
-function Placeholder({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 text-sm text-[var(--muted)]">
       {children}
     </div>
   );
