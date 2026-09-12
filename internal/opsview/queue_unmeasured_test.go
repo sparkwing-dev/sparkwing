@@ -170,6 +170,13 @@ func TestExternalAttributionNote_IsSilentOnceTheFigureIsClean(t *testing.T) {
 	}
 }
 
+func TestExternalAttributionNote_IsSilentBeforeAnyReading(t *testing.T) {
+	qs := coresUnattributed(&wingwire.ExternalAttribution{})
+	if got := opsview.ExternalAttributionNote(qs); got != "" {
+		t.Fatalf("attribution note = %q, want empty: a daemon that has read nothing yet has no reading to describe", got)
+	}
+}
+
 func TestExternalAttributionNote_IsSilentWhenExternalIsIgnored(t *testing.T) {
 	qs := coresUnattributed(&wingwire.ExternalAttribution{Samples: 40, RunsWithoutProcess: 2})
 	qs.IgnoreExternal = true

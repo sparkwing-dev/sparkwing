@@ -75,6 +75,21 @@ func TestOwnedCPU_NewChildDoesNotEraseMeasuredParentDelta(t *testing.T) {
 	}
 }
 
+func TestOwnedCPU_ACyclicParentTableTerminates(t *testing.T) {
+	done := make(chan map[int]int, 1)
+	go func() {
+		done <- ownersByNearestRoot(map[int]int{10: 11, 11: 12, 12: 10, 13: 10}, map[int]struct{}{13: {}})
+	}()
+	select {
+	case owners := <-done:
+		if owners[13] != 13 {
+			t.Fatalf("owners = %v; want the root outside the cycle still resolved", owners)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("resolving a cyclic parent table did not terminate: the sample loop would spin on a bad process table")
+	}
+}
+
 func TestOwnedCPU_SumsEveryMeasuredProcessUnderOneRoot(t *testing.T) {
 	previousAt := time.Unix(100, 0)
 	now := previousAt.Add(time.Second)

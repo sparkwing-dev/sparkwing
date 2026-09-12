@@ -87,6 +87,62 @@ func TestDarwinCPUSnapshotIgnoresABackwardsOrNewPID(t *testing.T) {
 	}
 }
 
+func TestDarwinCPUSnapshotSumsEveryProcessUnderOneRoot(t *testing.T) {
+	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:00.00\n11 10 0:00.00\n12 11 0:00.00\n")
+	if !ok {
+		t.Fatal("parse previous snapshot failed")
+	}
+	current, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:10.00\n11 10 0:20.00\n12 11 0:30.00\n")
+	if !ok {
+		t.Fatal("parse current snapshot failed")
+	}
+
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
+
+	if !ownedMeasured || math.Abs(byRoot[10]-6) > 0.0001 {
+		t.Fatalf("owned CPU by root = %v, measured %v; want the root's 1 core plus its child's 2 and grandchild's 3 summed into one tree, not the last process read",
+			byRoot, ownedMeasured)
+	}
+}
+
+func TestDarwinCPUSnapshotCreditsNothingToARootItCannotSee(t *testing.T) {
+	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:00.00\n20 1 0:00.00\n")
+	if !ok {
+		t.Fatal("parse previous snapshot failed")
+	}
+	current, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n20 1 0:10.00\n")
+	if !ok {
+		t.Fatal("parse current snapshot failed")
+	}
+
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10}, 8)
+
+	if !ownedMeasured {
+		t.Fatal("measured = false; want true: the snapshot was read, and one absent root is that root's key, not the whole reading")
+	}
+	if _, figure := byRoot[10]; figure {
+		t.Fatalf("owned CPU by root = %v; want no key for a root absent from the snapshot, so pid 20's unrelated CPU is never credited to it", byRoot)
+	}
+}
+
+func TestDarwinCPUSnapshotWithNoRootsReadsTheHostAndOwnsNothing(t *testing.T) {
+	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n20 1 0:00.00\n")
+	if !ok {
+		t.Fatal("parse previous snapshot failed")
+	}
+	current, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n20 1 0:10.00\n")
+	if !ok {
+		t.Fatal("parse current snapshot failed")
+	}
+
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, nil, 8)
+
+	if !ownedMeasured || len(byRoot) != 0 {
+		t.Fatalf("owned CPU = %v, measured %v; want a read that owns nothing: a daemon holding no run must not warn on every reading it takes",
+			byRoot, ownedMeasured)
+	}
+}
+
 func TestDarwinCPUSnapshotMissingRootCreditsNoOwnedCPU(t *testing.T) {
 	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n20 1 0:00.00\n")
 	if !ok {

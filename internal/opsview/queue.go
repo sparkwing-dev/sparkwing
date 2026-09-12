@@ -433,12 +433,13 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 }
 
 func ExternalAttributionNote(qs wingwire.QueueState) string {
-	if qs.IgnoreExternal || !coresExternalUnattributed(qs) {
+	a := qs.ExternalAttribution
+	if qs.IgnoreExternal || a == nil || a.Samples == 0 || !coresExternalUnattributed(qs) {
 		return ""
 	}
 	note := "external attribution: this reading carries some of this daemon's own runs' CPU," +
 		" so external reads high and available reads low by it"
-	if causes := externalAttributionCauses(qs.ExternalAttribution); causes != "" {
+	if causes := externalAttributionCauses(a); causes != "" {
 		note += " (since this daemon started: " + causes + ")"
 	}
 	return note

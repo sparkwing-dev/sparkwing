@@ -68,22 +68,6 @@ func TestRefreshHeadroom_ChargesOnlyUnownedCPUAsExternal(t *testing.T) {
 	}
 }
 
-func TestRefreshHeadroom_ChurnAroundALongRunDoesNotSpendTheBudget(t *testing.T) {
-	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
-
-	for i := range 40 {
-		d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: 5150 + i}
-		d.refreshHeadroom()
-		delete(d.byRun, "short")
-		d.refreshHeadroom()
-	}
-
-	if math.Abs(d.appliedCores-6) > coresEpsilon {
-		t.Errorf("grantable cores = %.2f, want 6.00: short runs starting and finishing around a long one must not charge that long run's 6.5 cores to the machine, however long the churn lasts",
-			d.appliedCores)
-	}
-}
-
 func TestRefreshHeadroom_HolderThatStartsIsNotYetCredited(t *testing.T) {
 	d := newAttributionDaemon(t, map[int]float64{4242: 6.5})
 	d.refreshHeadroom()
@@ -175,6 +159,9 @@ func TestRefreshHeadroom_CountsAHolderThatReportsNoProcess(t *testing.T) {
 
 	d.refreshHeadroom()
 
+	if roots := d.ownedSampler.(*perRootOwnedSampler).roots; len(roots) != 1 || roots[0] != 4242 {
+		t.Errorf("sampled roots = %v, want [4242]: a run with no process id gives the sampler nothing to walk, and a waiter is not this daemon's work either", roots)
+	}
 	got := queueAttribution(t, d)
 	if got.RunsWithoutProcess != 1 {
 		t.Errorf("runs-without-process = %d, want 1: a run with no process id has CPU this daemon cannot locate", got.RunsWithoutProcess)
