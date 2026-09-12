@@ -21,10 +21,10 @@ type blockingOwnedCPUSampler struct {
 	fraction float64
 }
 
-func (s *blockingOwnedCPUSampler) CPUUsage(pids []int) (map[int]float64, bool) {
-	s.started <- append([]int(nil), pids...)
+func (s *blockingOwnedCPUSampler) CPUUsage(roots []OwnedRoot) (map[int]float64, bool) {
+	s.started <- rootPIDsOf(roots)
 	<-s.release
-	return ownedOnFirstRoot(pids, s.fraction), true
+	return ownedOnFirstRoot(rootPIDsOf(roots), s.fraction), true
 }
 
 type fixedOwnedCPUSampler struct {
@@ -46,14 +46,22 @@ func (s *pairedHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
 }
 
-func (s *pairedHostSampler) SampleWithOwned(roots []int) (HostStat, map[int]float64, bool, error) {
+func (s *pairedHostSampler) SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
 	s.pairCalls++
-	return s.stat, ownedOnFirstRoot(roots, s.owned), s.measured, nil
+	return s.stat, ownedOnFirstRoot(rootPIDsOf(roots), s.owned), s.measured, nil
 }
 
-func (s *fixedOwnedCPUSampler) CPUUsage(pids []int) (map[int]float64, bool) {
-	s.roots = append([]int(nil), pids...)
-	return ownedOnFirstRoot(pids, s.fraction), s.measured
+func (s *fixedOwnedCPUSampler) CPUUsage(roots []OwnedRoot) (map[int]float64, bool) {
+	s.roots = rootPIDsOf(roots)
+	return ownedOnFirstRoot(s.roots, s.fraction), s.measured
+}
+
+func rootPIDsOf(roots []OwnedRoot) []int {
+	pids := make([]int, 0, len(roots))
+	for _, root := range roots {
+		pids = append(pids, root.PID)
+	}
+	return pids
 }
 
 func ownedOnFirstRoot(pids []int, fraction float64) map[int]float64 {

@@ -115,7 +115,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot) (map[int]float64, bool) {
 	if len(roots) == 0 {
 		return nil, true
 	}
@@ -124,12 +124,12 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 		return nil, false
 	}
 	children := windowsProcessChildren(procs)
-	readable := make([]int, 0, len(roots))
+	readable := make([]OwnedRoot, 0, len(roots))
 	for _, root := range roots {
-		if _, ok := procs[root]; !ok {
+		if _, ok := procs[root.PID]; !ok {
 			continue
 		}
-		if !windowsTreeMeasured(collectSubtree(root, children), procs) {
+		if !windowsTreeMeasured(collectSubtree(root.PID, children), procs) {
 			continue
 		}
 		readable = append(readable, root)
@@ -142,7 +142,7 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, now)
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, readable, now, ownedFirstSightWindow)
 	s.last = next
 	return byRoot, true
 }

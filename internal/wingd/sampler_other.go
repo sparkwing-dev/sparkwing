@@ -12,4 +12,4 @@ func (p *procSampler) sample(int) (ProcUsage, bool) { return ProcUsage{}, false 
 
 func (p *procSampler) sampleMany([]int) map[int]ProcUsage { return nil }
 
-func (s *ownedProcSampler) sampleOwned([]int) (map[int]float64, bool) { return nil, false }
+func (s *ownedProcSampler) sampleOwned([]OwnedRoot) (map[int]float64, bool) { return nil, false }

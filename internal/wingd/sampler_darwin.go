@@ -79,7 +79,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot) (map[int]float64, bool) {
 	if len(roots) == 0 {
 		return nil, true
 	}
@@ -93,8 +93,8 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	}
 	rootPIDs := map[int]struct{}{}
 	for _, root := range roots {
-		if _, ok := parent[root]; ok {
-			rootPIDs[root] = struct{}{}
+		if _, ok := parent[root.PID]; ok {
+			rootPIDs[root.PID] = struct{}{}
 		}
 	}
 	ownerByPID := ownersByNearestRoot(parent, rootPIDs)
@@ -113,7 +113,7 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	return byRoot, true
 }
 
-func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, map[int]float64, bool, error) {
+func (p *platformSampler) SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
 	stat, err := sampleHost()
 	if err != nil {
 		return stat, nil, false, err
@@ -135,6 +135,7 @@ func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, map[int]float6
 		previous,
 		elapsedSeconds,
 		roots,
+		now,
 		stat.TotalCores,
 	)
 	stat.BusyCores = host

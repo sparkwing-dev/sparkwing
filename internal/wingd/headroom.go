@@ -52,7 +52,7 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	d.applyHeadroomSample(stat, ownedByRoot, ownedMeasured)
 }
 
-func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, map[int]float64, bool, error) {
+func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
 	if paired, ok := d.sampler.(pairedHostOwnedSampler); ok {
 		return paired.SampleWithOwned(roots)
 	}
@@ -277,21 +277,30 @@ func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, wi
 	return owned, withoutProcess, awaitingMeasure, processGone
 }
 
-func (d *Daemon) holderSample() []int {
+func (d *Daemon) holderSample() []OwnedRoot {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	seen := map[int]struct{}{}
+	since := map[int]time.Time{}
 	for _, c := range d.byRun {
-		if c.role == roleHolder && c.pid > 0 {
-			seen[c.pid] = struct{}{}
+		if c.role != roleHolder || c.pid <= 0 {
+			continue
+		}
+		// safety: two runs sharing a process tree are one root, and the earlier
+		// hold bounds how old that tree's processes can be.
+		if held, seen := since[c.pid]; !seen || c.startAt.Before(held) {
+			since[c.pid] = c.startAt
 		}
 	}
-	pids := make([]int, 0, len(seen))
-	for pid := range seen {
+	pids := make([]int, 0, len(since))
+	for pid := range since {
 		pids = append(pids, pid)
 	}
 	sort.Ints(pids)
-	return pids
+	roots := make([]OwnedRoot, 0, len(pids))
+	for _, pid := range pids {
+		roots = append(roots, OwnedRoot{PID: pid, Since: since[pid]})
+	}
+	return roots
 }
 
 func coresContention(stat HostStat, load, usedCores float64) float64 {

@@ -90,7 +90,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot) (map[int]float64, bool) {
 	if len(roots) == 0 {
 		return nil, true
 	}
@@ -110,7 +110,7 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (map[int]float64, bool) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, now)
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, now, ownedFirstSightWindow)
 	s.last = next
 	return byRoot, true
 }

@@ -65,6 +65,18 @@ unlock.
 - **admission (Windows):** Keep every run's CPU baseline when a reading finds no
   measurable run. Discarding them cost every other run two further readings
   before it could be credited again, on exactly the busy hosts where runs queue.
+- **admission:** Credit a run from its first reading rather than its second. A
+  run's CPU is a rate between two readings, so a process the daemon had not seen
+  before was credited nothing — and a run whose processes are new every reading
+  was therefore never credited at all, charging its whole load to the rest of the
+  machine for as long as it ran. A process first seen in a tree the daemon was
+  already watching has run all of its CPU since the previous reading, so its
+  total belongs to that window exactly. A run that began holding inside the
+  window is bounded the same way by how long it has held. A run held since
+  before the window stays unmeasured rather than credited a lifetime average
+  that no longer describes it. Measured on a ten-core host where a three-core
+  run restarts every reading beside a four-core long-lived one: external fell
+  from 4.0 cores to the true 1.0, and the budget stopped under-admitting by 47%.
 - **admission:** `ResourceState.ExternalSource` reports a third value,
   `unattributed`, for an External figure the host sampler did read but which
   carries some of sparkwing's own runs' CPU. Read the field as an open set: any

@@ -27,8 +27,8 @@ type perRootOwnedSampler struct {
 	roots    []int
 }
 
-func (s *perRootOwnedSampler) CPUUsage(pids []int) (map[int]float64, bool) {
-	s.roots = append([]int(nil), pids...)
+func (s *perRootOwnedSampler) CPUUsage(roots []OwnedRoot) (map[int]float64, bool) {
+	s.roots = rootPIDsOf(roots)
 	return s.byRoot, s.measured
 }
 
@@ -291,13 +291,11 @@ func TestRefreshHeadroom_ABlindSamplerClearsTheVerdictWithTheFigure(t *testing.T
 	}
 }
 
-func TestRefreshHeadroom_UnmeasuredFirstReadingDoesNotCompound(t *testing.T) {
+func TestRefreshHeadroom_AShortRunIsCreditedFromItsFirstReading(t *testing.T) {
 	const total, longCores, shortCores, reserve = 10.0, 4.0, 3.0, 0.2
 	const foreign = 1.0
 
-	overstated := map[int]float64{}
-	lifetimes := []int{2, 4, 7, 14}
-	for _, lifetime := range lifetimes {
+	for _, lifetime := range []int{1, 2, 4, 14} {
 		d := newHeadroomDaemon(t, total, reserve)
 		d.sampler = &countingHostSampler{stat: attributionHost(total, longCores+shortCores+foreign)}
 		sampler := &baselineOwnedSampler{cores: map[int]float64{1000: longCores}, seen: map[int]bool{}}
@@ -311,26 +309,33 @@ func TestRefreshHeadroom_UnmeasuredFirstReadingDoesNotCompound(t *testing.T) {
 				pid++
 				sampler.cores[pid] = shortCores
 			}
-			d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: pid}
+			d.byRun["short"] = &conn{runID: "short", role: roleHolder, pid: pid, startAt: d.now()}
 			d.refreshHeadroom()
 		}
-		overstated[lifetime] = d.smoothedExternal - foreign
-	}
 
-	for _, lifetime := range lifetimes {
-		if over := overstated[lifetime]; over > shortCores+coresEpsilon {
-			t.Errorf("a run restarting every %d readings overstates external by %.3f cores, want at most its own %.1f: the daemon loses one reading of a run it cannot measure yet, and losing more than that run's whole load means the loss is accumulating across readings",
-				lifetime, over, shortCores)
+		if over := d.smoothedExternal - foreign; math.Abs(over) > coresEpsilon {
+			t.Errorf("a run restarting every %d reading(s) leaves external at %.3f, want the true %.1f: a run's whole CPU is inside the window that first sees it, so no part of it belongs to the rest of the machine",
+				lifetime, d.smoothedExternal, foreign)
 		}
 	}
-	for i := 1; i < len(lifetimes); i++ {
-		shorter, longer := lifetimes[i-1], lifetimes[i]
-		if overstated[longer] > overstated[shorter]+coresEpsilon {
-			t.Errorf("a run living %d readings overstates external by %.3f, more than one living %d does at %.3f: the loss must fall as a run lives longer, because it is one unmeasurable reading spread over that run's life",
-				longer, overstated[longer], shorter, overstated[shorter])
-		}
+}
+
+func TestRefreshHeadroom_ARunHeldSinceBeforeTheWindowIsNotCreditedOnSight(t *testing.T) {
+	d := newHeadroomDaemon(t, 10, 0.2)
+	d.sampler = &countingHostSampler{stat: attributionHost(10, 8.5)}
+	d.ownedSampler = &perRootOwnedSampler{byRoot: map[int]float64{}, measured: true}
+	d.byRun["old"] = &conn{runID: "old", role: roleHolder, pid: 4242, startAt: d.now().Add(-24 * time.Hour)}
+
+	d.refreshHeadroom()
+
+	cores := queueRow(t, queueState(t, d), "cores")
+	if math.Abs(cores.External-8.5) > coresEpsilon {
+		t.Errorf("external cores = %.2f, want the whole 8.50 charged: a run held since long before this reading did not run its lifetime of CPU inside the window, so crediting that total would understate external and over-admit",
+			cores.External)
 	}
-	t.Logf("external overstated by, per run lifetime in readings: %v", overstated)
+	if got := queueAttribution(t, d); got.RunsAwaitingMeasure != 1 {
+		t.Errorf("runs-awaiting-measure = %d, want 1: a run the daemon has no reading for and cannot bound is unmeasured, and must say so", got.RunsAwaitingMeasure)
+	}
 }
 
 type baselineOwnedSampler struct {
@@ -338,13 +343,13 @@ type baselineOwnedSampler struct {
 	seen  map[int]bool
 }
 
-func (s *baselineOwnedSampler) CPUUsage(pids []int) (map[int]float64, bool) {
-	byRoot := make(map[int]float64, len(pids))
-	for _, pid := range pids {
-		if s.seen[pid] {
-			byRoot[pid] = s.cores[pid]
+func (s *baselineOwnedSampler) CPUUsage(roots []OwnedRoot) (map[int]float64, bool) {
+	byRoot := make(map[int]float64, len(roots))
+	for _, root := range roots {
+		if s.seen[root.PID] || !root.Since.IsZero() {
+			byRoot[root.PID] = s.cores[root.PID]
 		}
-		s.seen[pid] = true
+		s.seen[root.PID] = true
 	}
 	return byRoot, true
 }
