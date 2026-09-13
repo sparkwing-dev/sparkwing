@@ -30,6 +30,12 @@ unlock.
   script `https://sparkwing.dev/install.sh` serves. The runner service
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
+- **development:** A test binary no longer reaches the operator's home or daemon.
+  `SPARKWING_HOME` naming the default home is refused under `go test`, with the
+  fix in the message, and a test that hosts the admission daemon names its
+  binary in `SPARKWING_WINGD_BIN` rather than taking whatever `PATH` offers. A
+  suite that sets neither keeps the sandbox home and the standalone runs store
+  it already had.
 
 ### Security
 

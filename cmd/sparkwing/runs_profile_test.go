@@ -9,6 +9,7 @@ import (
 
 func setProfilesFixture(t *testing.T, body string) {
 	t.Helper()
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -17,6 +18,7 @@ func setProfilesFixture(t *testing.T, body string) {
 }
 
 func TestRunsList_OnFlagRetired(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	err := runJobs([]string{"list", "--on", "prod"})
 	if err == nil {
 		t.Fatal("expected retired-flag error for --on")
@@ -41,6 +43,7 @@ profiles:
 }
 
 func TestRunsStatus_OnFlagRetired(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	err := runJobs([]string{"status", "--run", "r1", "--on", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "--on") {
 		t.Fatalf("status: want retired --on pointer, got %v", err)
@@ -48,6 +51,7 @@ func TestRunsStatus_OnFlagRetired(t *testing.T) {
 }
 
 func TestRunsLogs_OnFlagRetired(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	err := runJobs([]string{"logs", "--run", "r1", "--on", "prod"})
 	if err == nil || !strings.Contains(err.Error(), "--on") {
 		t.Fatalf("logs: want retired --on pointer, got %v", err)
@@ -55,6 +59,7 @@ func TestRunsLogs_OnFlagRetired(t *testing.T) {
 }
 
 func TestRunsLogs_ErrorUsesPublicCommandName(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	err := runJobs([]string{"logs", "--run", "r1", "--tail", "1", "--head", "1"})
 	if err == nil {
 		t.Fatal("expected conflicting range error")

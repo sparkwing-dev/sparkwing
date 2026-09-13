@@ -28,6 +28,13 @@ func TestSandbox() string {
 
 func DefaultPaths() (Paths, error) {
 	if root := os.Getenv("SPARKWING_HOME"); root != "" {
+		if UnderTest() && isOperatorHome(root) {
+			return Paths{}, fmt.Errorf("refusing to open the operator's sparkwing home %s from a test binary: "+
+				"a run started here would write the real runs store and spawn the real daemon. "+
+				"Give the test a home it owns with t.Setenv(\"SPARKWING_HOME\", t.TempDir()), "+
+				"or clear it with t.Setenv(\"SPARKWING_HOME\", \"\") to take the sandbox under %s",
+				root, TestSandbox())
+		}
 		return PathsAt(root), nil
 	}
 	if UnderTest() {
@@ -38,6 +45,17 @@ func DefaultPaths() (Paths, error) {
 		return Paths{}, err
 	}
 	return PathsAt(filepath.Join(home, ".sparkwing")), nil
+}
+
+// safety: bound before any test can redirect HOME, so a suite that fakes a home
+// directory cannot move the home this refuses.
+var operatorHome, _ = os.UserHomeDir()
+
+func isOperatorHome(root string) bool {
+	if operatorHome == "" {
+		return false
+	}
+	return filepath.Clean(root) == filepath.Join(operatorHome, ".sparkwing")
 }
 
 func PathsAt(root string) Paths { return Paths{Root: root} }
