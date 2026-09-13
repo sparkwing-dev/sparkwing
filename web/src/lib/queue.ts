@@ -216,6 +216,14 @@ export function queueLifecycleHolders(
   return queueLifecycleRows(holders, waiters).filter((h) => !h.connection_only);
 }
 
+// A connected lease stays listed while its own run waits for admission, which
+// is how the CLI groups it.
+export function queueLifecycleConnections(
+  holders: QueueHolder[],
+): QueueHolder[] {
+  return holders.filter((h) => !!h.connection_only);
+}
+
 export function daemonUptimeLabel(qs: QueueState): string {
   const up = qs.daemon_uptime_ms ?? 0;
   if (up <= 0) return "";

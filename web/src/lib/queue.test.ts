@@ -16,6 +16,7 @@ import {
   groupHolders,
   hasDaemon,
   humanBytes,
+  queueLifecycleConnections,
   queueLifecycleHolders,
   queueLifecycleRows,
   queueRowID,
@@ -348,7 +349,7 @@ describe("queueLifecycleHolders", () => {
     ]);
   });
 
-  it("counts a lease that owns capacity of its own", () => {
+  it("counts a lease the daemon left unmarked", () => {
     const holders: QueueHolder[] = [
       {
         run_id: "run-gate",
@@ -371,6 +372,57 @@ describe("queueLifecycleHolders", () => {
       connection_only: true,
     };
     assert.deepEqual(queueLifecycleHolders([holder], []), []);
+  });
+});
+
+describe("queueLifecycleConnections", () => {
+  it("takes the lease the holder table leaves out", () => {
+    const holders: QueueHolder[] = [
+      {
+        run_id: "run-active",
+        pipeline: "pre-push",
+        elapsed_ms: 12_000,
+        resources: {},
+        connection_only: true,
+      },
+      {
+        run_id: "run-active",
+        participant_id: "run-active/node-host/dGVzdA",
+        display_run_id: "run-active/pre-push",
+        pipeline: "pre-push",
+        elapsed_ms: 12_000,
+        resources: { cores: 4 },
+      },
+    ];
+    assert.deepEqual(queueLifecycleConnections(holders).map(queueRowID), [
+      "run-active",
+    ]);
+  });
+
+  it("lists an orchestration lease whose node is queued", () => {
+    const holders: QueueHolder[] = [
+      {
+        run_id: "run-1",
+        elapsed_ms: 90_000,
+        resources: {},
+        connection_only: true,
+        admission_waiting: true,
+        active_waiter_participant_ids: ["run-1/node-host/YnVpbGQ"],
+      },
+    ];
+    const waiters = [
+      {
+        run_id: "run-1",
+        participant_id: "run-1/node-host/YnVpbGQ",
+        position: 1,
+        resources: { cores: 6 },
+        waiting_ms: 30_000,
+      },
+    ];
+    assert.deepEqual(queueLifecycleHolders(holders, waiters), []);
+    assert.deepEqual(queueLifecycleConnections(holders).map(queueRowID), [
+      "run-1",
+    ]);
   });
 });
 

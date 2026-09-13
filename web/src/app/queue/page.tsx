@@ -24,8 +24,8 @@ import {
   fmtHolderCost,
   groupHolders,
   hasDaemon,
+  queueLifecycleConnections,
   queueLifecycleHolders,
-  queueLifecycleRows,
   queueRowID,
   resourceAvailable,
 } from "@/lib/queue";
@@ -80,6 +80,7 @@ export default function QueuePage() {
 function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
   const waiterRows = qs?.waiters ?? [];
   const holders = queueLifecycleHolders(qs?.holders ?? [], waiterRows).length;
+  const connections = queueLifecycleConnections(qs?.holders ?? []).length;
   const waiters = waiterRows.length;
   const running = qs != null && hasDaemon(qs);
   const version = qs?.daemon_version || "";
@@ -114,7 +115,7 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
       {running ? (
         <>
           <div className="text-sm text-[var(--muted)]">
-            {holders} holding, {waiters} queued
+            {holders} holding, {connections} connected, {waiters} queued
             {clear != null && clear > 0 ? (
               <> · clears in ~{fmtDuration(clear)}</>
             ) : null}
@@ -138,13 +139,17 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
 
 function QueueBody({ qs }: { qs: QueueState }) {
   const waiters = qs.waiters ?? [];
-  const groups = groupHolders(queueLifecycleRows(qs.holders ?? [], waiters));
+  const groups = groupHolders(queueLifecycleHolders(qs.holders ?? [], waiters));
+  const connections = queueLifecycleConnections(qs.holders ?? []);
   const pressure = externalPressureNote(qs);
   const drifts = driftNotes(qs);
   return (
     <div className="flex flex-col gap-6">
       <ResourcesSection qs={qs} pressure={pressure} />
       <HoldersSection groups={groups} />
+      {connections.length > 0 && (
+        <ConnectionsSection connections={connections} />
+      )}
       <WaitersSection waiters={waiters} />
       {drifts.length > 0 && (
         <div className="flex flex-col gap-2">
@@ -307,22 +312,107 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
           </tbody>
         </table>
       </div>
-      {groups.flatMap((g) =>
-        [g.holder, ...g.children]
-          .filter((h) => h.stalled && h.recovery)
-          .map((h) => (
-            <div key={`rec-${queueRowID(h)}`} className="mt-2">
-              <Callout tone="danger">
-                <span className="font-mono text-violet-300">{h.run_id}</span> is
-                stalled (idle while runs wait). Recover with:
-                <code className="block mt-1 font-mono text-[var(--foreground)] bg-[var(--background)] rounded px-2 py-1 overflow-x-auto">
-                  {h.recovery}
-                </code>
-              </Callout>
-            </div>
-          )),
-      )}
+      <StalledRecovery
+        rows={groups.flatMap((g) => [g.holder, ...g.children])}
+      />
     </Section>
+  );
+}
+
+function ConnectionsSection({ connections }: { connections: QueueHolder[] }) {
+  return (
+    <Section title="Connected (no resources held)">
+      <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-[var(--muted)] bg-[var(--surface)]">
+              <Th>Run</Th>
+              <Th hideSm>Pipeline</Th>
+              <Th hideSm>Repo</Th>
+              <Th right>Elapsed</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {connections.map((h) => (
+              <tr
+                key={queueRowID(h)}
+                className="border-t border-[var(--border)] bg-[var(--surface)]"
+              >
+                <Td>
+                  <RunCell h={h} />
+                </Td>
+                <Td hideSm mono muted>
+                  {h.pipeline || "-"}
+                </Td>
+                <Td hideSm mono muted>
+                  {h.repo || "-"}
+                </Td>
+                <Td right mono>
+                  {fmtDuration(h.elapsed_ms)}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <StalledRecovery rows={connections} />
+    </Section>
+  );
+}
+
+function StalledRecovery({ rows }: { rows: QueueHolder[] }) {
+  return (
+    <>
+      {rows
+        .filter((h) => h.stalled && h.recovery)
+        .map((h) => (
+          <div key={`rec-${queueRowID(h)}`} className="mt-2">
+            <Callout tone="danger">
+              <span className="font-mono text-violet-300">{h.run_id}</span> is
+              stalled (idle while runs wait). Recover with:
+              <code className="block mt-1 font-mono text-[var(--foreground)] bg-[var(--background)] rounded px-2 py-1 overflow-x-auto">
+                {h.recovery}
+              </code>
+            </Callout>
+          </div>
+        ))}
+    </>
+  );
+}
+
+function RunCell({ h, attached }: { h: QueueHolder; attached?: boolean }) {
+  // A lease whose parent sits in the other table still rides that lease.
+  const rides = attached || !!h.parent;
+  return (
+    <div className={rides ? "pl-4 flex items-center gap-1.5" : ""}>
+      {rides && (
+        <span className="text-[var(--muted)] text-xs" aria-hidden="true">
+          ↳
+        </span>
+      )}
+      <RunLink id={h.run_id} label={queueRunLabel(h)} />
+      {rides && (
+        <Tooltip content="Rides its parent's lease; draws no budget of its own">
+          <span className="text-[10px] font-mono text-[var(--muted)] cursor-default">
+            attached
+          </span>
+        </Tooltip>
+      )}
+      {h.stalled && (
+        <Tooltip content="Alive but near-zero CPU while runs wait behind it -- a likely wedge">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 cursor-default">
+            stalled
+          </span>
+        </Tooltip>
+      )}
+      {!h.stalled && h.contended && (
+        <Tooltip content="Running slower than its measured profile while the host is saturated">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 cursor-default">
+            contended
+          </span>
+        </Tooltip>
+      )}
+    </div>
   );
 }
 
@@ -330,35 +420,7 @@ function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {
   return (
     <tr className="border-t border-[var(--border)] bg-[var(--surface)]">
       <Td>
-        <div className={attached ? "pl-4 flex items-center gap-1.5" : ""}>
-          {attached && (
-            <span className="text-[var(--muted)] text-xs" aria-hidden="true">
-              ↳
-            </span>
-          )}
-          <RunLink id={h.run_id} label={queueRunLabel(h)} />
-          {attached && (
-            <Tooltip content="Rides its parent's lease; draws no budget of its own">
-              <span className="text-[10px] font-mono text-[var(--muted)] cursor-default">
-                attached
-              </span>
-            </Tooltip>
-          )}
-          {h.stalled && (
-            <Tooltip content="Alive but near-zero CPU while runs wait behind it -- a likely wedge">
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 cursor-default">
-                stalled
-              </span>
-            </Tooltip>
-          )}
-          {!h.stalled && h.contended && (
-            <Tooltip content="Running slower than its measured profile while the host is saturated">
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 cursor-default">
-                contended
-              </span>
-            </Tooltip>
-          )}
-        </div>
+        <RunCell h={h} attached={attached} />
       </Td>
       <Td hideSm mono muted>
         {h.pipeline || "-"}
