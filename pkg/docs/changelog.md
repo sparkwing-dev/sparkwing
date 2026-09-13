@@ -22,6 +22,19 @@ unlock.
 
 ### Added
 
+- **runner + chart:** A runner pool can keep its Go caches across pod
+  restarts and warm them at startup. `runner.goCache.persistence.enabled`
+  mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
+  `GOMODCACHE`, off by default; every replica mounts that claim, so the
+  StorageClass must serve `ReadWriteMany` above one replica and the chart
+  refuses to render otherwise. `sparkwing-runner runner --warm-modules`
+  (env `SPARKWING_WARM_MODULES`, chart `runner.goCache.warmModules`)
+  downloads modules into `GOMODCACHE` while the claim loop starts and
+  defaults to the Sparkwing SDK at the runner's own version; `off` warms
+  nothing. The runner also logs `binary_cache` (`local`, `remote`, or
+  `compiled`) and `build_ms` for each pipeline binary it readies, so the
+  cost of a cold compile is visible per run. `runner.maxClaimsBeforeRestart`
+  is unchanged.
 - **cli:** `sparkwing cluster runners add --profile P --name NAME` enrolls the
   machine it runs on in one command: it mints a runner token scoped to
   `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and

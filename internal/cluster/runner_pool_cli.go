@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
@@ -266,7 +267,7 @@ func executorKind(source string) string {
 	return "runner"
 }
 
-func runRunnerCLI(args []string) error {
+func runRunnerCLI(args []string, version string) error {
 	fs := flag.NewFlagSet("runner", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
 		"controller base URL (required)")
@@ -330,6 +331,10 @@ func runRunnerCLI(args []string) error {
 	var triggerRunnerTolerations multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_TOLERATION"))
 	fs.Var(&triggerRunnerTolerations, "trigger-runner-toleration",
 		"toleration for trigger-spawned runner Jobs, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
+	warmModules := fs.String("warm-modules", os.Getenv("SPARKWING_WARM_MODULES"),
+		"comma-separated modules downloaded into GOMODCACHE at startup so the first pipeline compile after a "+
+			"restart is not fully cold; each entry may carry an @version, \"off\" warms nothing "+
+			"(default: the Sparkwing SDK at this runner's version; env: SPARKWING_WARM_MODULES)")
 	localAdmission := fs.Bool("local-admission", false,
 		"route claimed nodes through this box's local admission daemon (for a runner on a box that also runs local pipelines; off for in-cluster pods)")
 	localReserve := fs.String("local-reserve", os.Getenv("SPARKWING_LOCAL_RESERVE"),
@@ -350,6 +355,15 @@ func runRunnerCLI(args []string) error {
 	}
 	if *triggerRunnerKind == "warm" && *claimNodes {
 		return errors.New("--trigger-runner=warm requires --claim-nodes=false so this process does not race remote agents")
+	}
+	if !*claimNodes && !*alsoClaimTriggers {
+		return errors.New("--claim-nodes=false requires --also-claim-triggers")
+	}
+
+	identity := buildinfo.Read("sparkwing-runner", version)
+	warmList, err := parseWarmModules(*warmModules, identity.Version)
+	if err != nil {
+		return fmt.Errorf("--warm-modules: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -419,10 +433,10 @@ func runRunnerCLI(args []string) error {
 			}
 		}()
 	}
+	// safety: warming in the foreground would hold every claim behind a download.
+	go warmModuleCache(ctx, warmList, logger)
+
 	if !*claimNodes {
-		if !*alsoClaimTriggers {
-			return errors.New("--claim-nodes=false requires --also-claim-triggers")
-		}
 		<-ctx.Done()
 		return nil
 	}
