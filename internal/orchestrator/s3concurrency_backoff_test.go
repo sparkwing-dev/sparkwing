@@ -5,25 +5,32 @@ import (
 	"time"
 )
 
-func TestCASBackoffSpreadsContendersAcrossTheWholeWait(t *testing.T) {
-	for attempt := range 6 {
-		base := time.Duration(attempt+1) * s3CASBackoffStep
-		if base > s3CASBackoffCap {
-			base = s3CASBackoffCap
+func TestCASBackoffCeilingDoublesAndCaps(t *testing.T) {
+	prev := time.Duration(0)
+	for attempt := range 12 {
+		ceiling := s3CASBackoffStep << attempt
+		if ceiling > s3CASBackoffCap || ceiling <= 0 {
+			ceiling = s3CASBackoffCap
 		}
-		seen := map[time.Duration]int{}
 		for range 200 {
 			got := casBackoff(attempt)
-			if got < base || got > base+base/2 {
-				t.Fatalf("attempt %d: backoff %s outside [%s, %s]", attempt, got, base, base+base/2)
+			if got < 0 || got >= ceiling {
+				t.Fatalf("attempt %d: backoff %s outside [0, %s)", attempt, got, ceiling)
 			}
-			seen[got]++
 		}
-		if len(seen) < 2 {
-			t.Fatalf("attempt %d: 200 draws produced one backoff %v; contenders never decorrelate", attempt, seen)
+		if ceiling < prev {
+			t.Fatalf("attempt %d: ceiling %s shrank from %s", attempt, ceiling, prev)
 		}
-		if len(seen) < 50 {
-			t.Errorf("attempt %d: 200 draws produced only %d distinct backoffs", attempt, len(seen))
-		}
+		prev = ceiling
+	}
+}
+
+func TestCASBackoffSpreadsContendersAcrossTheWholeWait(t *testing.T) {
+	seen := map[time.Duration]int{}
+	for range 400 {
+		seen[casBackoff(6)]++
+	}
+	if len(seen) < 50 {
+		t.Fatalf("400 draws produced only %d distinct backoffs; contenders never decorrelate", len(seen))
 	}
 }

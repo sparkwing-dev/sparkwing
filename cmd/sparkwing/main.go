@@ -500,6 +500,8 @@ func runCluster(args []string) error {
 		return runWebhooks(args[1:])
 	case "concurrency":
 		return runConcurrency(args[1:])
+	case "object-store":
+		return runClusterObjectStore(args[1:])
 	default:
 		PrintHelp(cmdCluster, os.Stderr)
 		return fmt.Errorf("cluster: unknown subcommand %q", args[0])

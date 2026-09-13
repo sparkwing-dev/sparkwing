@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -24,8 +24,13 @@ const s3CASMaxRetries = 200
 
 const (
 	s3CASBackoffStep = 2 * time.Millisecond
-	s3CASBackoffCap  = 40 * time.Millisecond
+	s3CASBackoffCap  = 250 * time.Millisecond
 )
+
+// safety: the ceiling doubles per attempt, so a slot that stays contended costs
+// a few requests a second rather than tens, and full jitter is what keeps
+// contenders that lost the same CAS from waking together.
+var s3CASBackoff = objectguard.Backoff{Base: s3CASBackoffStep, Max: s3CASBackoffCap}
 
 const s3FinishedRetention = 5 * time.Minute
 
@@ -284,18 +289,7 @@ func (c *s3Concurrency) mutate(ctx context.Context, key string, fn func(doc *s3S
 	}
 }
 
-func casBackoff(attempt int) time.Duration {
-	d := time.Duration(attempt+1) * s3CASBackoffStep
-	if d > s3CASBackoffCap {
-		d = s3CASBackoffCap
-	}
-	// safety: contenders that lost the same CAS have to wake at different
-	// times, so the spread is drawn per attempt rather than from the key
-	// every one of them shares.
-
-	// #nosec G404 -- retry jitter, not a security decision
-	return d + time.Duration(rand.Int64N(int64(d/2)+1))
-}
+func casBackoff(attempt int) time.Duration { return s3CASBackoff.Delay(attempt) }
 
 func liveHolderCost(holders []s3Holder, nowNS int64) int {
 	used := 0

@@ -39,12 +39,19 @@ func TestController_Health(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health status=%d want 200", resp.StatusCode)
 	}
-	var body map[string]string
+	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if body["status"] != "ok" {
 		t.Errorf("status=%q want ok", body["status"])
+	}
+	objectStore, ok := body["object_store"].(map[string]any)
+	if !ok {
+		t.Fatalf("health carries no object_store summary: %#v", body["object_store"])
+	}
+	if objectStore["tripped"] != false {
+		t.Errorf("object_store.tripped=%v want false on a fresh controller", objectStore["tripped"])
 	}
 }
 

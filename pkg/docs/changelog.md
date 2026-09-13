@@ -106,6 +106,35 @@ unlock.
   `Store.RotateSecretValues` rewrites every secret row's stored value through a
   caller-supplied function in one transaction. `store.ValidateRawToken` reports
   whether a credential minted elsewhere carries a usable shape.
+- **storage + controller:** Every object-store client a process builds draws on
+  one request budget, counting `put`, `get`, `list` and `delete` separately
+  against a per-minute rate and a per-day total. A class that spends either
+  budget trips: requests of that class are refused with an error naming the
+  class and the limit, nothing queues, and the other classes keep serving on
+  their own budgets. Defaults are 1200 put, 3000 get, 600 list and 600 delete a
+  minute, and 200000/500000/100000/100000 a day, so normal load never reaches
+  them and a retry loop with no sleep trips in under two seconds. The budget
+  counts billed attempts rather than API calls: it sits inside the AWS SDK's
+  retry loop, so a call the SDK re-sends spends one unit per attempt. A class
+  tripped by its per-minute rate clears when that minute rolls; a class tripped
+  by its per-day budget follows `SPARKWING_OBJECT_STORE_TRIP_RESET`. The budget
+  belongs to one process and does not aggregate, so N processes on one bucket
+  can spend N budgets. Override with
+  `SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE` and
+  `SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY`; `SPARKWING_OBJECT_STORE_TRIP_RESET`
+  picks whether a tripped class clears on the day roll (`day`) or waits for an
+  operator (`manual`); `SPARKWING_OBJECT_STORE_BREAKER=off` counts without
+  refusing. The controller reports the budget on `GET /api/v1/health` under
+  `object_store` and exports `sparkwing_object_store_requests_total`,
+  `sparkwing_object_store_trips_total` and `sparkwing_object_store_tripped`.
+- **cli + controller:** `sparkwing cluster object-store status --profile NAME`
+  prints a controller's object-store budget and `sparkwing cluster object-store
+  reset-breaker --profile NAME` clears a tripped one, over the new admin-scoped
+  `GET /api/v1/object-store/breaker` and `POST
+  /api/v1/object-store/reset-breaker`. `Client.ObjectStoreBreakerState` and
+  `Client.ResetObjectStoreBreaker` reach both from Go. The reset reaches the
+  controller process alone; a local process clears its own budget with
+  `SPARKWING_OBJECT_STORE_BREAKER=off`, which the refusal message names.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the
@@ -129,6 +158,29 @@ unlock.
   [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-refuses-to-start).
   `--allow-enrolled-preview` restores the polling behavior for the developers of
   the enrolled path.
+- **storage:** Every retry path that can reach an object store now waits an
+  exponentially growing, fully jittered interval between attempts and stops at a
+  stated cap. The AWS SDK retryer is pinned to 4 attempts and a 5s backoff
+  ceiling; the state backend's conditional-write loops space their 16 attempts
+  instead of spinning; the state outbox gives up after 12 consecutive failed
+  replay cycles, reports the stall on the controller's health route, and drops
+  to one attempt every five minutes until a write lands; the state flush loop
+  backs off to a 30s ceiling while every dirty run is failing; concurrency
+  compare-and-swap retries grow to a 250ms ceiling; the hosted daemon transport
+  caps one call at 32 attempts; and a log append retry and a controller 503
+  retry each carry jitter. A bucket that refuses every write now costs a bounded
+  number of requests rather than one per loop iteration for as long as the
+  process lives.
+
+  One latency cost comes with it: a concurrency slot under sustained contention
+  now takes roughly 25s of jittered waiting to exhaust its 200 compare-and-swap
+  attempts, against roughly 10s before. Slots are held for the length of a run,
+  so the added wait is small beside what a contended slot is waiting for, and it
+  is what drops the exhausted-loop request rate from about 40 a second to about
+  8.
+- **storage:** A write the object-store request budget refuses is never staged to
+  the state outbox. The outbox absorbs an outage; a spent budget is a guard
+  against a runaway loop, so it fails the write closed instead of queueing it.
 - **config (Breaking):** A trigger key under `on:` that carries no value is
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a

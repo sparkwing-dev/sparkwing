@@ -108,6 +108,17 @@ type NoopDispatcher struct {
 	Logger *slog.Logger
 }
 func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error
+type ObjectStoreBreakerResponse struct {
+	Enabled bool
+
+	Reset string
+
+	Tripped bool
+
+	Classes []objectguard.ClassState
+
+	Cleared []string
+}
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 type PoolConfig struct {
 	Client kubernetes.Interface
@@ -208,4 +219,6 @@ func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
 func (l *liveLogs) Stats() (nodes int, bytes int64)
 func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
+func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
+func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (r *statusRecorder) WriteHeader(code int)

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
 
 // HostedRestartBudget is how long a hosted request waits out a daemon that
@@ -24,6 +26,14 @@ const (
 	hostedRetryFirstWait = 100 * time.Millisecond
 	hostedRetryMaxWait   = 2 * time.Second
 )
+
+// safety: the restart budget normally ends the loop, and this bounds how many
+// requests one logical call can bill whatever the clock does.
+const hostedRetryMaxAttempts = 32
+
+// safety: full jitter, so a fleet of runs that lost the same daemon does not
+// rebuild its load in one step.
+var hostedRetryBackoff = objectguard.Backoff{Base: hostedRetryFirstWait, Max: hostedRetryMaxWait}
 
 type hostedRetryPolicy int
 
@@ -113,7 +123,6 @@ func newHostedRetryTransport(base http.RoundTripper) *hostedRetryTransport {
 func (t *hostedRetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	policy := hostedRetryPolicyFor(req)
 	deadline := t.now().Add(t.budget)
-	wait := hostedRetryFirstWait
 	for attempt := 1; ; attempt++ {
 		next, rewindErr := hostedRewind(req)
 		if rewindErr != nil {
@@ -128,18 +137,15 @@ func (t *hostedRetryTransport) RoundTrip(req *http.Request) (*http.Response, err
 		if !hostedRetryAllowed(policy, err) {
 			return hostedFinalAnswer(resp), err
 		}
-		if !t.now().Before(deadline) {
+		if !t.now().Before(deadline) || attempt >= hostedRetryMaxAttempts {
 			return hostedFinalAnswer(resp), err
 		}
 		if resp != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 		}
-		if waitErr := hostedWait(req.Context(), wait); waitErr != nil {
+		if waitErr := hostedWait(req.Context(), hostedRetryBackoff.Delay(attempt-1)); waitErr != nil {
 			return nil, waitErr
-		}
-		if wait *= 2; wait > hostedRetryMaxWait {
-			wait = hostedRetryMaxWait
 		}
 	}
 }

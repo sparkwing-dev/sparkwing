@@ -90,6 +90,18 @@ the state backend, report an error when the run's terminal state is
 still queued locally, and `sparkwing run` prints that error and exits
 non-zero, because the bucket is the run's only copy and the outbox
 sits on a disk a CI runner discards at job end.
+Replay is bounded: the drainer waits an exponentially growing,
+fully jittered interval between cycles that made no progress, and after
+twelve consecutive failures it declares the replay stalled, logs `s3
+state outbox replay gave up`, and drops to one attempt every five
+minutes. The stall reaches an operator through the controller's health
+route, and the drainer clears it the moment a write lands, so a bucket
+that returns hours later still delivers. A bucket that refuses every
+write costs a dozen requests and then twelve an hour, rather than one
+every five seconds for as long as the host lives.
+A write the object-store request budget refuses is never staged: the
+outbox absorbs an outage, and a spent budget is a guard against a
+runaway loop, not an outage to buffer.
 Cache and log writes are not buffered this way: a cache write that
 can't reach the bucket surfaces the error, and the step recomputes on
 a later run rather than reading a half-written result.

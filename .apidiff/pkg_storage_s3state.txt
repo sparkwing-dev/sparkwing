@@ -62,8 +62,11 @@ func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) e
 const DefaultBufferThreshold = 16 * 1024
 const DefaultDrainTimeout = 5 * time.Second
 const DefaultFlushInterval = 500 * time.Millisecond
+const DefaultFlushMaxBackoff = 30 * time.Second
 const DefaultOutboxDrainInterval = 5 * time.Second
+const DefaultOutboxMaxReplayAttempts = 12
 const DefaultOutboxMaxRows = 1024
+const DefaultOutboxReplayMaxBackoff = 5 * time.Minute
 const DefaultReadCacheTTL = time.Second
 var ErrNotSupported = fmt.Errorf("%w: s3state: operation not supported in S3-only mode", storage.ErrNotSupported)
 const KindEvent = "event"
@@ -81,6 +84,7 @@ func (o *Outbox) Close() error
 func (o *Outbox) Drain(ctx context.Context) error
 func (o *Outbox) HasPending(ctx context.Context, key string) (bool, error)
 func (o *Outbox) Pending(ctx context.Context) (int, error)
+func (o *Outbox) ReplayStalled() error
 func (o *Outbox) Stage(ctx context.Context, kind OutboxKind, key string, body []byte) error
 type OutboxKind string
 const OutboxKindArtifact OutboxKind = "artifact"

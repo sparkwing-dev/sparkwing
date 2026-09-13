@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
@@ -138,6 +139,10 @@ var (
 	httpNodeLogRetryAttempts = 3
 	httpNodeLogRetryBackoff  = 200 * time.Millisecond
 )
+
+// safety: one append is one object-store PUT, so an unreachable log store must
+// not cost a doubling series that keeps growing per line.
+const httpNodeLogRetryMaxBackoff = 2 * time.Second
 
 var httpNodeLogDropCooldown = 5 * time.Second
 
@@ -301,8 +306,9 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 	}
 	var lastErr error
 	for retry := 0; retry < httpNodeLogRetryAttempts; retry++ {
-		if retry > 0 {
-			time.Sleep(httpNodeLogRetryBackoff << (retry - 1))
+		if retry > 0 && httpNodeLogRetryBackoff > 0 {
+			backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
+			time.Sleep(backoff.Delay(retry - 1))
 		}
 		attemptCtx := l.ctx
 		if ordinal > 0 {
