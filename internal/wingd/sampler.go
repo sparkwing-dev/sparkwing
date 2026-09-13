@@ -208,17 +208,26 @@ func (s *ownedProcSampler) forgetSamples(now time.Time) {
 // safety: seenSince is when this scan began listing, not when it finished. A
 // process born between the two is absent from a reading already underway, so
 // dating it against the finish refuses a credit the tree earned.
+// scanWindow carries the two instants a reading is measured against. They are
+// one argument because they are the same type and mean opposite things: a
+// transposition reads as a plausible edit and turns the dating bound into the
+// scan's end, which is the state this sampler exists to avoid.
+type scanWindow struct {
+	startedListingAt time.Time
+	readAt           time.Time
+}
+
 func (s *ownedProcSampler) creditScan(
 	processes map[int]ownedProcess,
 	roots []OwnedRoot,
-	scanStart, now time.Time,
+	window scanWindow,
 	arbitratedCores float64,
 ) map[int]float64 {
 	owners := ownedProcessOwners(roots, processes)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, s.seenSince, now, arbitratedCores)
-	s.last, s.lastAt, s.seenSince = next, now, scanStart
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, s.seenSince, window.readAt, arbitratedCores)
+	s.last, s.lastAt, s.seenSince = next, window.readAt, window.startedListingAt
 	return byRoot
 }
 

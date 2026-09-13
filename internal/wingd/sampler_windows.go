@@ -137,7 +137,7 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 	}
 	now := time.Now()
 	processes := windowsOwnedProcesses(procs, children, now)
-	return s.creditScan(processes, readable, scanStart, now, arbitratedCores), true
+	return s.creditScan(processes, readable, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
 }
 
 func windowsProcesses() (map[int]windowsProc, bool) {

@@ -9,12 +9,17 @@ import (
 )
 
 func TestLinuxProcessStart_DatesFromTheBootClock(t *testing.T) {
-	now := time.Unix(1_000_000, 0)
+	now := time.Now()
 
-	if got := linuxProcessStart(now, 3600, 6000); !got.Equal(now.Add(-3540 * time.Second)) {
+	if started := linuxProcessStart(now, 3600, 6000); started == started.Round(0) {
+		t.Fatalf("process start %v carries no monotonic reading; want one, because a comparison against the scan bounds then falls back to the wall clock and a step larger than the dating slack moves the admit bound",
+			started)
+	}
+
+	if got := linuxProcessStart(now, 3600, 6000); got != now.Add(-3540*time.Second) {
 		t.Errorf("process start = %v, want %v for a process that began 60s after a boot 3600s ago", got, now.Add(-3540*time.Second))
 	}
-	if got := linuxProcessStart(now, 3600, 360000); !got.Equal(now) {
+	if got := linuxProcessStart(now, 3600, 360000); got != now {
 		t.Errorf("process start = %v, want %v for a process as old as the machine's uptime", got, now)
 	}
 	for name, tc := range map[string]struct {

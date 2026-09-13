@@ -107,7 +107,7 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 			startedAt:  linuxProcessStart(now, uptime, proc.startTicks),
 		}
 	}
-	return s.creditScan(processes, roots, scanStart, now, arbitratedCores), true
+	return s.creditScan(processes, roots, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
 }
 
 type linuxProc struct {
@@ -224,17 +224,7 @@ func readMemAvailable() (uint64, bool) {
 }
 
 func linuxProcessStart(now time.Time, uptimeSeconds float64, startTicks uint64) time.Time {
-	// safety: the returned time keeps now's monotonic reading, which is what makes
-	// a later comparison survive a clock adjustment. Rebuilding it from a wall
-	// value, or routing it through UTC or Round, strips that and nothing goes red.
-	if uptimeSeconds <= 0 {
-		return time.Time{}
-	}
-	age := uptimeSeconds - float64(startTicks)/linuxClockTicks
-	if age < 0 {
-		return time.Time{}
-	}
-	return now.Add(-time.Duration(age * float64(time.Second)))
+	return processStartFromUptime(now, uptimeSeconds, float64(startTicks)/linuxClockTicks)
 }
 
 func linuxUptime() float64 {

@@ -431,9 +431,13 @@ func TestStartedInWindow_AdmitsOnlyAProcessThePreviousScanCouldNotHaveSeen(t *te
 		"running before the scan":   {scanStart.Add(-time.Hour), scanStart, false},
 		"a tick before the scan":    {scanStart.Add(-5 * time.Millisecond), scanStart, true},
 		"two ticks before the scan": {scanStart.Add(-20 * time.Millisecond), scanStart, false},
-		"born during the scan":      {scanStart.Add(time.Millisecond), scanStart, true},
-		"born inside the window":    {now.Add(-time.Second), scanStart, true},
-		"dated after this reading":  {now.Add(time.Hour), scanStart, false},
+		// safety: these two pin the slack to one clock tick from both sides. A
+		// bound expressed against the constant moves with it and admits any value.
+		"exactly one clock tick before the scan": {scanStart.Add(-10 * time.Millisecond), scanStart, true},
+		"a nanosecond older than one clock tick": {scanStart.Add(-10*time.Millisecond - time.Nanosecond), scanStart, false},
+		"born during the scan":                   {scanStart.Add(time.Millisecond), scanStart, true},
+		"born inside the window":                 {now.Add(-time.Second), scanStart, true},
+		"dated after this reading":               {now.Add(time.Hour), scanStart, false},
 	} {
 		if got := startedInWindow(tc.startedAt, tc.seenSince, now); got != tc.want {
 			t.Errorf("%s: startedInWindow = %v, want %v", name, got, tc.want)
@@ -492,12 +496,12 @@ func TestOwnedProcSampler_ASecondScanDatesAProcessFromWhenTheFirstBeganListing(t
 	oldRoot := ownedProcess{parentPID: 1, identity: root, cpuSeconds: 1, startedAt: firstScanStart.Add(-time.Hour)}
 
 	sampler := &ownedProcSampler{}
-	sampler.creditScan(map[int]ownedProcess{10: oldRoot}, held, firstScanStart, firstNow, 8)
+	sampler.creditScan(map[int]ownedProcess{10: oldRoot}, held, scanWindow{startedListingAt: firstScanStart, readAt: firstNow}, 8)
 
 	byRoot := sampler.creditScan(map[int]ownedProcess{
 		10: oldRoot,
 		11: {parentPID: 10, identity: child, cpuSeconds: 3, startedAt: firstScanStart.Add(20 * time.Millisecond)},
-	}, held, firstNow, secondNow, 8)
+	}, held, scanWindow{startedListingAt: firstNow, readAt: secondNow}, 8)
 
 	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
 		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: the scan it is missing from was already listing when the child began, so its absence there is not evidence of age",
@@ -528,6 +532,79 @@ func TestProcessStartFromCreation_RefusesAProcessCreatedAfterTheScan(t *testing.
 
 	if !started.IsZero() {
 		t.Fatalf("process dated %v; want no date, because a creation stamp after the scan is a clock the daemon cannot measure against",
+			started)
+	}
+}
+
+func TestFirstSightCredit_BoundsAFirstSeenTotalByTheArbitratedCapacity(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cpuSeconds, window, arbitratedCores, want float64
+		wantOK                                    bool
+	}{
+		"a total the arbitrated capacity could just have run": {8, 2, 4, 4, true},
+		"more than the arbitrated capacity could have run":    {8.5, 2, 4, 0, false},
+		"that same total under twice the capacity":            {8.5, 2, 8, 4.25, true},
+		"a window that stood still":                           {1, 0, 4, 0, false},
+		"no arbitrated capacity to bound it against":          {0, 2, 0, 0, false},
+	} {
+		got, ok := firstSightCredit(tc.cpuSeconds, tc.window, tc.arbitratedCores)
+		if ok != tc.wantOK || math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("%s: firstSightCredit(%v, %v, %v) = %v, %v; want %v, %v: the ceiling is the capacity admission arbitrates, and a looser one credits CPU that ran before the window while a tighter one drops a figure the tree earned",
+				name, tc.cpuSeconds, tc.window, tc.arbitratedCores, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+func TestProcessStartFromUptime_KeepsTheMonotonicReadingTheScanBoundsCarry(t *testing.T) {
+	now := time.Now()
+
+	started := processStartFromUptime(now, 3600, 60)
+
+	if started == started.Round(0) {
+		t.Fatalf("process start %v carries no monotonic reading; want one, because a comparison against the scan bounds then falls back to the wall clock and a step larger than the dating slack moves the admit bound",
+			started)
+	}
+	if got, want := now.Sub(started), 3540*time.Second; got != want {
+		t.Fatalf("process aged %v off the boot clock, want %v", got, want)
+	}
+}
+
+func TestProcessStartFromUptime_RefusesADateItCannotStandBehind(t *testing.T) {
+	now := time.Now()
+	for name, tc := range map[string]struct{ uptimeSeconds, startSeconds float64 }{
+		"unreadable uptime":          {0, 0},
+		"negative uptime":            {-1, 0},
+		"a start after the boot ran": {10, 3600},
+	} {
+		if got := processStartFromUptime(now, tc.uptimeSeconds, tc.startSeconds); !got.IsZero() {
+			t.Errorf("%s: process start = %v; want undated, so the tree goes unmeasured rather than credited on a bad date", name, got)
+		}
+	}
+}
+
+func TestOwnedCPU_ARecycledPIDDoesNotInheritTheDeadProcessBaseline(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	lastAt := now.Add(-time.Second)
+	dead := processIdentity{pid: 10, startTicks: 1}
+	previous := map[processIdentity]cpuSample{dead: {cpuSeconds: 5, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 2}, cpuSeconds: 99, startedAt: lastAt},
+	}
+	held := []OwnedRoot{{PID: 4242, HeldSince: lastAt}}
+
+	_, next := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, lastAt, now, 8)
+
+	if sample, carried := next[dead]; carried {
+		t.Fatalf("the dead identity carried forward %v CPU-seconds read off the process that reused its PID; want it dropped, because re-holding that tree would then charge the window a delta measured against a counter belonging to neither process",
+			sample.cpuSeconds)
+	}
+}
+
+func TestProcessStartFromCreation_RefusesAnAgeWiderThanADurationHolds(t *testing.T) {
+	started := processStartFromCreation(time.Now(), time.Time{})
+
+	if !started.IsZero() {
+		t.Fatalf("process dated %v; want no date: the age saturates, and subtracting a saturated duration overflows away the monotonic reading this function exists to carry",
 			started)
 	}
 }
