@@ -28,7 +28,7 @@ func TestOwnedCPU_ReapedChildIsNotCountedAgainThroughParent(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-1) > 0.0001 {
@@ -47,7 +47,7 @@ func TestOwnedCPU_PIDReuseNeedsANewBaseline(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if _, figure := byRoot[10]; figure || usage != 0 {
@@ -74,7 +74,7 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, previousAt, now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-5) > 0.0001 {
@@ -101,7 +101,7 @@ func TestOwnedCPU_AProcessOlderThanTheWindowIsNotCreditedToIt(t *testing.T) {
 		roots := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Second)}}
 		owners := ownedProcessOwners(roots, processes)
 
-		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now.Add(-time.Second), now, 8)
+		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now.Add(-time.Second), now.Add(-time.Second), now, 8)
 
 		if _, figure := byRoot[10]; figure {
 			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold proves the process predates it, and crediting that total would understate external and over-admit",
@@ -136,7 +136,7 @@ func TestOwnedCPU_ARootWithoutItsOwnBaselineReportsNoFigure(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(7), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(7), now.Add(-time.Second), now, 8)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(7), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 
 	if _, figure := byRoot[7]; figure {
 		t.Fatalf("owned CPU by root = %v; want no figure for a root that re-execed: its own process has no baseline, so the tree's sum covers only the surviving child and is silently short",
@@ -177,7 +177,7 @@ func TestOwnedCPU_SumsEveryMeasuredProcessUnderOneRoot(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 
 	if math.Abs(byRoot[10]-4) > 0.0001 {
 		t.Fatalf("owned CPU by root = %v; want the root's own 1 core plus its child's 3 summed into one tree, not the last one read", byRoot)
@@ -214,7 +214,7 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 	processes := process(50)
 	_, next := ownedCPUByRoot(
 		map[processIdentity]cpuSample{identity: {cpuSeconds: 40, at: firstAt}},
-		processes, ownedProcessOwners(held, processes), held, firstAt, releasedAt, 8)
+		processes, ownedProcessOwners(held, processes), held, firstAt, firstAt, releasedAt, 8)
 	sampler.last, sampler.lastAt = next, releasedAt
 
 	sampler.forgetSamples(reheldAt)
@@ -223,6 +223,7 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
 		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
+		sampler.lastAt,
 		sampler.lastAt, reheldAt.Add(10*time.Second), 8)
 
 	if figure, reported := byRoot[10]; reported {
@@ -239,7 +240,7 @@ func TestOwnedCPU_ATreeThatRanNothingReportsZeroRatherThanNoReading(t *testing.T
 	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 7}}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, previousAt, now, 8)
 
 	figure, reported := byRoot[10]
 	if !reported || figure != 0 {
@@ -272,12 +273,12 @@ func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
 			kept:     {cpuSeconds: 0, at: firstAt},
 			released: {cpuSeconds: 0, at: firstAt},
 		},
-		processes, ownedProcessOwners(both, processes), both, firstAt, secondAt, 8)
+		processes, ownedProcessOwners(both, processes), both, firstAt, firstAt, secondAt, 8)
 
 	processes = table(20, 90)
 	_, afterRelease := ownedCPUByRoot(
 		afterBoth, processes, ownedProcessOwners(onlyKept, processes),
-		onlyKept, secondAt, thirdAt, 8)
+		onlyKept, secondAt, secondAt, thirdAt, 8)
 
 	processes = table(30, 90)
 	rehold := []OwnedRoot{
@@ -286,6 +287,7 @@ func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
 	}
 	byRoot, _ := ownedCPUByRoot(
 		afterRelease, processes, ownedProcessOwners(rehold, processes), rehold,
+		thirdAt,
 		thirdAt, thirdAt.Add(10*time.Second), 8)
 
 	figure, reported := byRoot[20]
@@ -302,7 +304,7 @@ func TestOwnedCPU_ARootFirstSeenWithNoReadingBehindItGetsNoFigure(t *testing.T) 
 	held := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Hour)}}
 
 	byRoot, _ := ownedCPUByRoot(
-		nil, processes, ownedProcessOwners(held, processes), held, time.Time{}, now, 8)
+		nil, processes, ownedProcessOwners(held, processes), held, time.Time{}, time.Time{}, now, 8)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("root reported %v cores against no previous reading; want no figure, because the counter says nothing about when that CPU ran",
@@ -325,6 +327,7 @@ func TestOwnedProcSampler_AReadingWithNothingHeldEndsTheWindow(t *testing.T) {
 	rehold := []OwnedRoot{{PID: 10, HeldSince: time.Now()}}
 	byRoot, _ := ownedCPUByRoot(
 		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
+		sampler.lastAt,
 		sampler.lastAt, time.Now().Add(10*time.Second), 8)
 
 	if figure, reported := byRoot[10]; reported {
@@ -348,10 +351,57 @@ func TestOwnedCPU_ATreeWithAnUnreadableCounterReportsNoFigure(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, previousAt, now, 8)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("tree reported %v cores with one counter unreadable; want no figure, because the rest of the tree is short by an unknown amount and a short figure still subtracts from external",
 			figure)
+	}
+}
+
+func TestOwnedCPU_AProcessBornWhileTheLastReadingScannedIsStillCredited(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	lastAt := scanStart.Add(50 * time.Millisecond)
+	now := lastAt.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	previous := map[processIdentity]cpuSample{root: {cpuSeconds: 1, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 1, startedAt: scanStart.Add(-time.Hour)},
+		11: {parentPID: 10, identity: child, cpuSeconds: 3, startedAt: scanStart.Add(20 * time.Millisecond)},
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
+
+	if figure, reported := byRoot[10]; !reported || figure <= 0 {
+		t.Fatalf("tree reports %v with a figure %v; want the child's CPU credited: it started after the previous reading began listing, so that reading could not have seen it and its absence is not evidence of age",
+			figure, reported)
+	}
+}
+
+func TestOwnedCPU_AProcessDatedOneTickBeforeTheScanKeepsItsCredit(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	lastAt := scanStart.Add(50 * time.Millisecond)
+	now := lastAt.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	previous := map[processIdentity]cpuSample{root: {cpuSeconds: 1, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 1, startedAt: scanStart.Add(-time.Hour)},
+		11: {
+			parentPID:  10,
+			identity:   child,
+			cpuSeconds: 3,
+			startedAt:  scanStart.Add(-processDatingSlack / 2),
+		},
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
+
+	if figure, reported := byRoot[10]; !reported || figure <= 0 {
+		t.Fatalf("tree reports %v with a figure %v; want it credited: a tick of dating resolution is not evidence the process predates the scan, and refusing it costs the whole tree its figure",
+			figure, reported)
 	}
 }

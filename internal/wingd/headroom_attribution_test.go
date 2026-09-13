@@ -344,14 +344,14 @@ func TestRefreshHeadroom_ARunHeldSinceBeforeTheWindowIsNotCreditedOnSight(t *tes
 	}
 
 	held := []OwnedRoot{{PID: 4242, HeldSince: now.Add(-time.Hour)}}
-	byRoot, _ := ownedCPUByRoot(nil, born, ownedProcessOwners(held, born), held, lastAt, now, 8)
+	byRoot, _ := ownedCPUByRoot(nil, born, ownedProcessOwners(held, born), held, lastAt, lastAt, now, 8)
 	if _, figure := byRoot[4242]; figure {
 		t.Errorf("owned CPU by root = %v; want no figure: the run was held since long before this reading, so how much of its CPU belongs to the reading is unknowable",
 			byRoot)
 	}
 
 	fresh := []OwnedRoot{{PID: 4242, HeldSince: now.Add(-500 * time.Millisecond)}}
-	byRoot, _ = ownedCPUByRoot(nil, born, ownedProcessOwners(fresh, born), fresh, lastAt, now, 8)
+	byRoot, _ = ownedCPUByRoot(nil, born, ownedProcessOwners(fresh, born), fresh, lastAt, lastAt, now, 8)
 	if math.Abs(byRoot[4242]-2) > 0.0001 {
 		t.Errorf("owned CPU by root = %v, want 2.0: the run began holding inside this reading and its process began inside it too", byRoot)
 	}
@@ -364,7 +364,7 @@ func TestRefreshHeadroom_ARunHeldSinceBeforeTheWindowIsNotCreditedOnSight(t *tes
 			startedAt:  now.Add(-time.Hour),
 		},
 	}
-	byRoot, _ = ownedCPUByRoot(nil, older, ownedProcessOwners(fresh, older), fresh, lastAt, now, 8)
+	byRoot, _ = ownedCPUByRoot(nil, older, ownedProcessOwners(fresh, older), fresh, lastAt, lastAt, now, 8)
 	if figure, reported := byRoot[4242]; reported {
 		t.Errorf("owned CPU by root = %v; want no figure: beginning to hold a tree does not make the CPU it ran beforehand this window's, and crediting it over-states owned, which under-states external and over-admits",
 			figure)

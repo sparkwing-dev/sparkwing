@@ -95,9 +95,10 @@ type OwnedCPUSampler interface {
 
 type ownedProcSampler struct {
 	//lint:ignore U1000 used by platform implementations
-	mu     sync.Mutex
-	last   map[processIdentity]cpuSample
-	lastAt time.Time
+	mu        sync.Mutex
+	last      map[processIdentity]cpuSample
+	lastAt    time.Time
+	seenSince time.Time
 }
 
 func newOwnedCPUSampler() *ownedProcSampler {
@@ -201,7 +202,7 @@ func (s *ownedProcSampler) forgetSamples(now time.Time) {
 	// no later window can span a stretch this sampler sat out.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.last, s.lastAt = nil, now
+	s.last, s.lastAt, s.seenSince = nil, now, now
 }
 
 func ownedCPUByRoot(
@@ -210,6 +211,7 @@ func ownedCPUByRoot(
 	owners map[processIdentity]int,
 	roots []OwnedRoot,
 	lastAt time.Time,
+	seenSince time.Time,
 	now time.Time,
 	arbitratedCores float64,
 ) (map[int]float64, map[processIdentity]cpuSample) {
@@ -237,7 +239,7 @@ func ownedCPUByRoot(
 		}
 		prior, seen := previous[identity]
 		if !seen {
-			if !startedInWindow(process.startedAt, lastAt, now) {
+			if !startedInWindow(process.startedAt, seenSince, now) {
 				// safety: the daemon has no reading for this process and it was already
 				// running when the window opened, so its counter covers time nobody
 				// watched. Crediting the total would charge this window for CPU that ran
@@ -322,14 +324,17 @@ func creditableRoots(
 	return creditable
 }
 
-func startedInWindow(startedAt, lastAt, now time.Time) bool {
-	// safety: beginning inside the window is what makes a process's whole counter
-	// this window's. A platform that cannot date one answers no, leaving the tree
-	// unmeasured rather than credited CPU that ran before anyone was watching.
-	if startedAt.IsZero() || lastAt.IsZero() {
+const processDatingSlack = 10 * time.Millisecond
+
+func startedInWindow(startedAt, seenSince, now time.Time) bool {
+	// safety: a process absent from the previous reading is only evidence of age if
+	// that reading could have listed it, so the bound is when its scan began, minus
+	// a clock tick because a start time and an uptime both floor to one. A platform
+	// that cannot date a process answers no and its tree goes unmeasured.
+	if startedAt.IsZero() || seenSince.IsZero() {
 		return false
 	}
-	return !startedAt.Before(lastAt) && !startedAt.After(now)
+	return !startedAt.Before(seenSince.Add(-processDatingSlack)) && !startedAt.After(now)
 }
 
 func firstSightCredit(cpuSeconds, window, arbitratedCores float64) (float64, bool) {
