@@ -31,8 +31,9 @@ unlock.
   declares none; empty, its default, leaves those nodes first-in-first-out.
   `Requires` is unchanged: preferences reorder the claim queue and never widen
   it. Each claim stamps `placement_reason` (`preference`, `fallback`, `none`) on
-  the node and writes a `node_placed` event, and `sparkwing runs status` names
-  the runner and the reason under a node the preference decided.
+  the node and writes a `node_placed` event, and `sparkwing runs status` and the
+  dashboard's node panel name the runner and the reason under a node the
+  preference decided.
 - **controller + runner:** `POST /api/v1/nodes/claim` accepts a `capacity`
   object carrying the runner's `max_concurrent` and `active_claims`, which
   `pkg/controller/client.Client.ClaimNodeWithCapacity` sends and the agents view
