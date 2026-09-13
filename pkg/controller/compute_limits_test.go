@@ -357,3 +357,69 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 		t.Fatalf("runs = %d, want the refused one absent", len(runs))
 	}
 }
+
+// safety: a retry storm is exactly the loop the hourly guard exists to bound,
+// so a retry has to count against the principal that asked for it.
+func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now().UTC(),
+		store.TokenOptions{})
+	if err != nil {
+		t.Fatalf("mint a writer for the metered principal: %v", err)
+	}
+	seedRunNodeFor(t, f, "pool", "run-source", "build")
+	if err := f.store.FinishRun(ctx, "run-source", "failed", "boom"); err != nil {
+		t.Fatalf("finish the source run: %v", err)
+	}
+	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
+
+	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/runs/run-source/retry", writer, nil)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("a retry past the cap = %d, want 429: %s", status, body)
+	}
+	runs, err := f.store.ListRuns(ctx, store.RunFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want the retry absent", len(runs))
+	}
+	triggers, err := f.store.ListTriggers(ctx, store.TriggerFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list triggers: %v", err)
+	}
+	for _, trig := range triggers {
+		if trig.RetryOf != "" {
+			t.Fatalf("the refused retry left trigger %s behind", trig.ID)
+		}
+	}
+}
+
+// safety: a schedule's runs belong to the principal that armed it, which is
+// what makes a hot cron count against that team rather than nobody.
+func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {
+	f := newCronsFixture(t)
+	ctx := context.Background()
+	body := map[string]any{
+		"repo_url": cronTestRepoURL,
+		"branch":   "main",
+		"sha":      cronTestSHA,
+		"schedules": []map[string]any{
+			{"pipeline": "nightly", "cron": "0 3 * * *"},
+		},
+	}
+	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
+
+	rows, err := f.store.ListCronSchedules(ctx)
+	if err != nil {
+		t.Fatalf("list schedules: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("schedules = %d, want one", len(rows))
+	}
+	if rows[0].ArmedBy != "pusher" {
+		t.Fatalf("armed_by = %q, want the arming principal", rows[0].ArmedBy)
+	}
+}

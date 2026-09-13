@@ -54,7 +54,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	key := CronIdempotencyKey(s.ID, due)
 	runID := newRunID()
-	err = l.server.admitTrigger(ctx, triggerIntake{
+	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), triggerIntake{
 		RunID:    runID,
 		Pipeline: s.Pipeline,
 		Args:     s.Effective().Args,
@@ -122,6 +122,12 @@ func CronIdempotencyKey(scheduleID string, due time.Time) string {
 }
 
 func (s *Server) cronService() *crons.Service {
+	return s.cronServiceArmedBy("")
+}
+
+// safety: the principal that armed a schedule owns the runs it fires, so the
+// per-principal guards measure it rather than leaving cron launches unowned.
+func (s *Server) cronServiceArmedBy(principal string) *crons.Service {
 	return &crons.Service{
 		Store:    s.store,
 		Launcher: cronLauncher{server: s},
@@ -129,6 +135,7 @@ func (s *Server) cronService() *crons.Service {
 		Host:     s.cronHolder,
 		Version:  buildinfo.Read("sparkwing-controller", "").Version,
 		Side:     store.CronWhereController,
+		ArmedBy:  principal,
 	}
 }
 
@@ -321,7 +328,7 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	report, err := s.cronService().ArmPushed(r.Context(), crons.ArmPush{
+	report, err := s.cronServiceArmedBy(claimIdentity(r).Principal).ArmPushed(r.Context(), crons.ArmPush{
 		RepoURL: repoURL,
 		Branch:  body.Branch,
 		SHA:     sha,

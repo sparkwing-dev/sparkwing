@@ -239,7 +239,9 @@ const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, d
 // restart its history or discard the host's edits. ArmedAt defaults to
 // now on a create when the caller leaves it zero, an empty Name means
 // [CronScheduleDefaultName], an empty Overlap means CronOverlapSkip, and
-// an empty Where means CronWhereLocal.
+// an empty Where means CronWhereLocal. A row that recorded no ArmedBy takes
+// the one this arming carries, so a schedule armed before the host recorded
+// an owner gains one on its next push.
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
@@ -301,10 +303,11 @@ VALUES (`+cronScheduleInsertPlaceholders+`)`,
 UPDATE cron_schedules
    SET cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, git_branch = ?, args = ?,
        locked_ref = ?, locked_binary = ?, locked_digest = ?, declared = 1,
+       armed_by = CASE WHEN armed_by = '' THEN ? ELSE armed_by END,
        updated_at = ?, next_due_at = ?
  WHERE id = ?`,
 		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
-		sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
+		sched.LockedRef, sched.LockedBinary, sched.LockedDigest, sched.ArmedBy,
 		now.UnixNano(), nullNanos(sched.NextDueAt), id,
 	); err != nil {
 		return CronSchedule{}, false, err

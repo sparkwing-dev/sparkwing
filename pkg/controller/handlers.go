@@ -865,12 +865,9 @@ type triggerIntake struct {
 // here -- the trigger, the pending run, the dispatch -- so an HTTP submission
 // and a schedule the controller fired land identically.
 func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
-	// safety: the trigger row is written before the run, so a guard that would
-	// refuse the run is asked first and no orphan trigger is left behind.
-	if err := s.store.RunsPerHourRefusal(ctx, in.At); err != nil {
-		return err
-	}
-	if err := s.store.CreateTrigger(ctx, store.Trigger{
+	// safety: the trigger and the run it names are written together, so a guard
+	// that refuses the run leaves no trigger behind for a worker to claim.
+	if err := s.store.CreateTriggerWithRun(ctx, store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
 		Args:           in.Args,
@@ -889,14 +886,7 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		RetryOf:        in.RetryOf,
 		RepoInherited:  in.RepoInherited,
 		IdempotencyKey: in.IdempotencyKey,
-	}); err != nil {
-		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-			return err
-		}
-		return fmt.Errorf("persist trigger: %w", err)
-	}
-
-	if err := s.store.CreateRun(ctx, store.Run{
+	}, store.Run{
 		ID:            in.RunID,
 		Pipeline:      in.Pipeline,
 		Status:        "pending",
@@ -913,7 +903,10 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
 	}); err != nil {
-		return fmt.Errorf("persist run: %w", err)
+		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
+			return err
+		}
+		return fmt.Errorf("persist the trigger and its run: %w", err)
 	}
 
 	return s.dispatcher.Dispatch(ctx, RunRequest{
