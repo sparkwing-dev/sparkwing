@@ -1417,6 +1417,10 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
+	metered, allowed := s.meteredClaimAllowed(w, r)
+	if !allowed {
+		return
+	}
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	if body.ExecutorName != "" {
 		if body.RunID == "" || body.NodeID == "" || body.ReservationID == "" || body.ResourceDigest == "" || body.Slot < 0 {
@@ -1470,6 +1474,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if metered {
+			s.startMetering(r, result.Node)
+		}
 		writeClaimedNode(w, r, s, result.Node)
 		return
 	}
@@ -1490,6 +1497,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	if metered {
+		s.startMetering(r, n)
 	}
 	writeClaimedNode(w, r, s, n)
 }
@@ -1772,6 +1782,12 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// safety: the runner abandons a node whose claim the controller refuses,
+	// which is how a cancellation for an empty balance reaches it.
+	if s.chargeMeteredHeartbeat(r, runID, nodeID) {
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

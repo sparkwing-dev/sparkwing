@@ -26,6 +26,9 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/concurrency/{key}/release` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
+| `GET` | `/api/v1/credits` | `runs.read` |
+| `POST` | `/api/v1/credits/grants` | `admin` |
+| `GET` | `/api/v1/credits/history` | `runs.read` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.write` |
 | `PUT` | `/api/v1/crons/repos` | `runs.write` |
@@ -127,6 +130,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |
 | `GET` | `/api/v1/tokens/{prefix}` | `admin` |
+| `POST` | `/api/v1/tokens/{prefix}/metered` | `admin` |
 | `POST` | `/api/v1/tokens/{prefix}/rotate` | `admin` |
 | `GET` | `/api/v1/trends` | `runs.read` |
 | `GET` | `/api/v1/triggers` | `triggers.read` |

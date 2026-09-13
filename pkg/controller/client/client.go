@@ -1789,6 +1789,11 @@ func readHTTPError(resp *http.Response) error {
 	if resp.StatusCode == http.StatusConflict {
 		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
 	}
+	// safety: a spent credit balance is a standing condition, not a transport
+	// failure, so the caller can tell it apart and keep polling.
+	if resp.StatusCode == http.StatusPaymentRequired {
+		return fmt.Errorf("%w: %s", store.ErrInsufficientCredits, bytes.TrimSpace(body))
+	}
 	if resp.StatusCode == http.StatusNotImplemented {
 		return fmt.Errorf("%w: controller returned %s", storage.ErrNotSupported, resp.Status)
 	}

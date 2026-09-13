@@ -234,3 +234,39 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 		t.Fatalf("runRunnerCLI() error = %v, want warm fallback service-account validation", err)
 	}
 }
+
+func TestRunPoolLoop_InsufficientCreditsKeepsPollingAndLogsOnce(t *testing.T) {
+	stub := &stubClaimer{responses: []claimResp{
+		{err: store.ErrInsufficientCredits},
+		{err: store.ErrInsufficientCredits},
+		{err: store.ErrInsufficientCredits},
+		{node: fakeNode("a")},
+		{err: store.ErrInsufficientCredits},
+	}}
+
+	var executed atomic.Int64
+	exec := func(ctx context.Context, n *store.Node, holderID string) { executed.Add(1) }
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://stub",
+		HolderPrefix:  "test",
+		MaxConcurrent: 1,
+		PollInterval:  time.Millisecond,
+		MaxClaims:     1,
+		SourceName:    "test runner",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runPoolLoop(ctx, cfg, stub, exec, nil, logger); err != nil {
+		t.Fatalf("runPoolLoop: %v", err)
+	}
+	if got := executed.Load(); got != 1 {
+		t.Fatalf("exec calls = %d, want 1: a spent balance must not stop the loop", got)
+	}
+	if got := strings.Count(logs.String(), "credit balance is spent"); got != 1 {
+		t.Fatalf("credit refusal logged %d times, want 1", got)
+	}
+}

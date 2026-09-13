@@ -150,6 +150,9 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	defer wg.Wait()
 
 	claimed := 0
+	// safety: a spent credit balance persists across every poll, so the log
+	// says so once rather than twice a second until it is topped up.
+	creditsLogged := false
 	for {
 		if err := ctx.Err(); err != nil {
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
@@ -196,6 +199,16 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
+			if errors.Is(err, store.ErrInsufficientCredits) {
+				observeClaimOutcome("insufficient-credits")
+				if !creditsLogged {
+					creditsLogged = true
+					logger.Error("claim withheld; the controller's credit balance is spent",
+						"err", err, "source", cfg.SourceName)
+				}
+				sleepOrCancel(ctx, cfg.PollInterval)
+				continue
+			}
 			observeClaimOutcome("error")
 			logger.Error("claim failed", "err", err, "source", cfg.SourceName)
 			sleepOrCancel(ctx, cfg.PollInterval)
@@ -211,6 +224,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			continue
 		}
 		observeClaimOutcome("claimed")
+		creditsLogged = false
 		claimed++
 
 		logger.Info("claimed node",

@@ -881,6 +881,11 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/services", http.HandlerFunc(s.handleServices))
 
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
+	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
+
+	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
+	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
+	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsGrant)))
 
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
