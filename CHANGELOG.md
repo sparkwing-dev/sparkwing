@@ -91,6 +91,12 @@ unlock.
   beside the participant that holds the cores, which is the occupancy
   `sparkwing queue` reports. The capacity page still lists every lease in one
   table.
+- **orchestrator:** On Linux the process table behind process-group cleanup is
+  read from `/proc` instead of a `ps` fork. BusyBox `ps`, which minimal images
+  such as Alpine ship, rejects `-axo pid=,pgid=,stat=`, so every cleanup on
+  those hosts failed and no pipeline could compile. Other Unixes keep the `ps`
+  path, and a process that exits mid-scan is a gap in the snapshot rather than
+  a failed listing.
 
 ## [v0.50.1] - 2026-09-13
 
