@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 )
+
+// ErrNoLiveLog reports that the controller holds no live buffer for the
+// node: it never wrote, or it finished and its buffer was released. The
+// caller reads the durable copy instead. Every other failure is a real
+// error and is returned as one.
+var ErrNoLiveLog = errors.New("controller holds no live log for this node")
 
 // LiveLogChunk is one live read of a running node's log: the bytes
 // after the caller's offset, where to ask from next, and whether the
@@ -58,6 +65,9 @@ func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, sinc
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNoLiveLog
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}
@@ -84,6 +94,11 @@ func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, si
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		return nil, ErrNoLiveLog
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
