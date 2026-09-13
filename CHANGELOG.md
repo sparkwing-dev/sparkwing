@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **dashboard:** The queue page counts a running pipeline once. Its
+  zero-resource orchestration lease no longer adds to the "holding" figure
+  beside the participant that holds the cores, which is the occupancy
+  `sparkwing queue` reports. The holder tables still list every lease.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added

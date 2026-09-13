@@ -31,7 +31,7 @@ import {
   hasDaemon,
   humanBytes,
   isHostResource,
-  queueLifecycleHolders,
+  queueLifecycleRows,
   queueRowID,
   resourceAvailable,
   trimFloat,
@@ -243,9 +243,7 @@ function HostSection({
     );
   }
   const waiters = qs.waiters ?? [];
-  const holders = groupHolders(
-    queueLifecycleHolders(qs.holders ?? [], waiters),
-  );
+  const holders = groupHolders(queueLifecycleRows(qs.holders ?? [], waiters));
   const unmeasured = externalUnmeasuredNote(qs);
   const pressure = externalPressureNote(qs);
   const sampleAge = qs.external_sample_age_ms ?? 0;

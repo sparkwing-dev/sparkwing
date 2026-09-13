@@ -25,6 +25,7 @@ import {
   groupHolders,
   hasDaemon,
   queueLifecycleHolders,
+  queueLifecycleRows,
   queueRowID,
   resourceAvailable,
 } from "@/lib/queue";
@@ -137,7 +138,7 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
 
 function QueueBody({ qs }: { qs: QueueState }) {
   const waiters = qs.waiters ?? [];
-  const groups = groupHolders(queueLifecycleHolders(qs.holders ?? [], waiters));
+  const groups = groupHolders(queueLifecycleRows(qs.holders ?? [], waiters));
   const pressure = externalPressureNote(qs);
   const drifts = driftNotes(qs);
   return (
