@@ -7437,6 +7437,60 @@ func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// Queue states a node occupies before it reaches a terminal outcome. The set
+// is closed, so a caller may use it as a metric label without growing the
+// series count.
+const (
+	// QueueStateWaiting is a node whose dependencies have not all finished.
+	QueueStateWaiting = "waiting"
+	// QueueStateReady is a node any eligible runner may claim.
+	QueueStateReady = "ready"
+	// QueueStateClaimed is a node a runner holds but has not started.
+	QueueStateClaimed = "claimed"
+	// QueueStateRunning is a node a runner is executing.
+	QueueStateRunning = "running"
+	// QueueStateApprovalPending is a node waiting on a human decision.
+	QueueStateApprovalPending = "approval_pending"
+)
+
+// QueueStates lists every state [Store.CountNodesByQueueState] reports, in the
+// order a node passes through them.
+func QueueStates() []string {
+	return []string{
+		QueueStateWaiting, QueueStateReady, QueueStateClaimed,
+		QueueStateRunning, QueueStateApprovalPending,
+	}
+}
+
+// CountNodesByQueueState counts the nodes sitting in each queue state, keyed
+// by the [QueueStates] names. Terminal nodes are absent: the answer is the
+// work still outstanding, which is what a queue-depth alert reads.
+func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error) {
+	var waiting, ready, claimed, running, approval int
+	err := s.queryRow(ctx,
+		`SELECT
+                    COALESCE(SUM(CASE WHEN status = 'pending' AND ready_at IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'pending' AND ready_at IS NOT NULL
+                                      AND (claimed_by IS NULL OR claimed_by = '') THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'pending' AND claimed_by IS NOT NULL
+                                      AND claimed_by != '' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = 'approval_pending' THEN 1 ELSE 0 END), 0)
+                   FROM nodes
+                  WHERE status IN ('pending', 'running', 'approval_pending')`,
+	).Scan(&waiting, &ready, &claimed, &running, &approval)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]int{
+		QueueStateWaiting:         waiting,
+		QueueStateReady:           ready,
+		QueueStateClaimed:         claimed,
+		QueueStateRunning:         running,
+		QueueStateApprovalPending: approval,
+	}, nil
+}
+
 // CountActiveRunners counts distinct claimed_by within `window`.
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error) {
 	threshold := time.Now().Add(-window).UnixNano()

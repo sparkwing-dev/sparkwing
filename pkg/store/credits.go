@@ -354,6 +354,53 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 	return out, nil
 }
 
+// CreditLedgerTotals is the ledger summed the way a meter reads it: what was
+// granted, split by whether the operator paid for it, and what the charge
+// rows did with it.
+type CreditLedgerTotals struct {
+	// BalanceMicro is what is left to spend.
+	BalanceMicro int64
+	// GrantedFreeMicro and GrantedPaidMicro sum the grants of each kind.
+	GrantedFreeMicro int64
+	GrantedPaidMicro int64
+	// ReservedMicro is the runway claims took up front, refunds included, so
+	// it is the gross reservation rather than the part never returned.
+	ReservedMicro int64
+	// ChargedMicro is what execution billed.
+	ChargedMicro int64
+	// RefundedMicro is the unused reservation tail returned at finish,
+	// reported as a positive amount.
+	RefundedMicro int64
+}
+
+// CreditLedgerTotals reports the ledger's lifetime sums. A controller exports
+// them as metrics, so they survive a restart the way an in-process counter
+// does not.
+func (s *Store) CreditLedgerTotals(ctx context.Context) (CreditLedgerTotals, error) {
+	var out CreditLedgerTotals
+	if err := s.queryRow(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
+                   FROM credit_grants`,
+		CreditGrantFree, CreditGrantPaid,
+	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro); err != nil {
+		return out, err
+	}
+	var settled int64
+	if err := s.queryRow(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(amount_micro), 0)
+                   FROM credit_charges`,
+		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
+	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro, &settled); err != nil {
+		return out, err
+	}
+	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - settled
+	return out, nil
+}
+
 // CreditRateMicroPerSecond returns the price of one cloud runner second in
 // micro-credits. A controller that never set one reads the default.
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
