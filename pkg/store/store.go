@@ -3246,6 +3246,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if err := s.assertRunMutationFenceTx(ctx, tx, r.ID); err != nil {
 		return err
 	}
+	if err := enforceRunsPerHourTx(ctx, tx, time.Now()); err != nil {
+		return err
+	}
 	argsJSON, _ := json.Marshal(r.Args)
 	var invocationJSON []byte
 	if len(r.Invocation) > 0 {
@@ -3935,6 +3938,9 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
+		return err
+	}
+	if err := enforceNodesPerRunTx(ctx, tx, n.RunID); err != nil {
 		return err
 	}
 	requestedSlots := n.RequestedSlots
