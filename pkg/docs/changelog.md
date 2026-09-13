@@ -30,20 +30,18 @@ unlock.
   client that sends no `run_id` is served exactly as before, so no protocol
   floor moves; one that names a run the lease does not hold is now refused
   rather than granted another member's identity.
+- **dashboard:** The queue page counts a running pipeline once. Its
+  zero-resource orchestration lease no longer adds to the "holding" figure
+  beside the participant that holds the cores, which is the occupancy
+  `sparkwing queue` reports. The capacity page still lists every lease in one
+  table.
+
 ### Added
 
 - **dashboard:** The queue page lists connection-only leases in their own
   "Connected (no resources held)" table, with its own count beside the holding
   one. Those rows leave the holder table, so a lease appears in one table or
   the other, and the page groups admission the way `sparkwing queue` does.
-
-### Fixed
-
-- **dashboard:** The queue page counts a running pipeline once. Its
-  zero-resource orchestration lease no longer adds to the "holding" figure
-  beside the participant that holds the cores, which is the occupancy
-  `sparkwing queue` reports. The capacity page still lists every lease in one
-  table.
 
 ## [v0.50.1] - 2026-09-13
 
