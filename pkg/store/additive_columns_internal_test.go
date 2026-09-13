@@ -48,6 +48,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v37 adds one table nothing older reads and no column, so an
 	// older binary keeps writing the migrated database.
 	37: nil,
+	38: {runsPrincipalCols},
 }
 
 func columnSpecMaps() []map[string]string {

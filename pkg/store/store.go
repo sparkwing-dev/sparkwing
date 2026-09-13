@@ -1042,7 +1042,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 37
+const expectedSchemaVersion = 38
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1913,6 +1913,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 37:
 		_, err := tx.ExecContext(ctx, githubWebhookBindingsTableSQLite)
 		return err
+	case 38:
+		return applyComputeGuardsMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2228,6 +2230,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 37:
 		_, err := tx.ExecContext(ctx, githubWebhookBindingsTablePostgres)
 		return err
+	case 38:
+		return applyComputeGuardsMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3246,7 +3250,7 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if err := s.assertRunMutationFenceTx(ctx, tx, r.ID); err != nil {
 		return err
 	}
-	if err := enforceRunsPerHourTx(ctx, tx, time.Now()); err != nil {
+	if err := enforceRunsPerHourTx(ctx, tx, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
 		return err
 	}
 	argsJSON, _ := json.Marshal(r.Args)
@@ -3280,8 +3284,8 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -3308,7 +3312,8 @@ ON CONFLICT(id) DO UPDATE SET
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json,
-    last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at)
+    last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
+    created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
 WHERE runs.status = '`+runStatusPending+`'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
@@ -3316,7 +3321,7 @@ WHERE runs.status = '`+runStatusPending+`'`,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
 		r.RetryAvoidCoordinatorID, r.RetryAvoidExecutorKind, r.RetryAvoidExecutorID, nullableTimeNS(r.RetryAvoidUntil),
 		r.ReplayOfRunID, r.ReplayOfNodeID,
-		invocationJSON, heartbeat,
+		invocationJSON, heartbeat, creatingPrincipal(ctx),
 	)
 	if err != nil {
 		return err
@@ -3940,7 +3945,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
 		return err
 	}
-	if err := enforceNodesPerRunTx(ctx, tx, n.RunID); err != nil {
+	if err := enforceNodesPerRunTx(ctx, tx, n.RunID, n.NodeID); err != nil {
 		return err
 	}
 	requestedSlots := n.RequestedSlots

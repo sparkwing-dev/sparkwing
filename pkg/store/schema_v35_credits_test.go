@@ -45,6 +45,10 @@ func downgradeCreditsToV34(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	statements := []string{
+		// safety: v38 indexes the charge window, and neither dialect drops a
+		// column an index still names.
+		`DROP INDEX IF EXISTS idx_nodes_credit_active`,
+		`DROP INDEX IF EXISTS idx_nodes_credit_principal`,
 		`DROP TABLE credit_charges`,
 		`DROP TABLE credit_grants`,
 		`ALTER TABLE tokens DROP COLUMN metered`,

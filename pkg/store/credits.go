@@ -537,9 +537,6 @@ func reserveNodeCreditsTx(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
-	if err := enforceClaimComputeLimitsTx(ctx, tx, claimant, runID, now); err != nil {
-		return err
-	}
 	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
 	if err != nil {
 		return err
@@ -549,8 +546,19 @@ func reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
+	// safety: an empty balance is the refusal a runner already understands, so
+	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+	}
+	limits, err := computeLimitsTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if limits.Any() {
+		if err := enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+			return err
+		}
 	}
 	id, err := newCreditID("charge")
 	if err != nil {
