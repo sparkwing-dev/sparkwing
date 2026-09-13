@@ -20,6 +20,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -33,13 +34,61 @@ var (
 func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(submitCLIDir)
-	if code == 0 {
+	if err := killFixtureSurvivors(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
+	} else if code == 0 {
 		if err := testleak.Check(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			code = 1
 		}
 	}
 	os.Exit(code)
+}
+
+const fixtureExitGrace = 10 * time.Second
+
+// safety: a supervisor a test leaves behind is reparented to init and keeps
+// respawning its worker under a home the suite has already deleted.
+func killFixtureSurvivors() error {
+	deadline := time.Now().Add(fixtureExitGrace)
+	survivors := fixtureProcesses()
+	for len(survivors) > 0 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		survivors = fixtureProcesses()
+	}
+	if len(survivors) == 0 {
+		return nil
+	}
+	for _, pid := range survivors {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	}
+	return fmt.Errorf("fixture CLI processes outlived the suite: %v", survivors)
+}
+
+func fixtureProcesses() []int {
+	if submitCLIDir == "" {
+		return nil
+	}
+	out, err := exec.Command("ps", "-eww", "-o", "pid=,args=").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fixture survivor check disarmed: ps: %v\n", err)
+		return nil
+	}
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, submitCLIDir) {
+			continue
+		}
+		var pid int
+		if _, err := fmt.Sscan(strings.TrimSpace(line), &pid); err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
 }
 
 func buildSubmitCLI(t *testing.T) string {
@@ -175,6 +224,7 @@ func newSubmitTestEnv(t *testing.T) *submitTestEnv {
 		marker:    filepath.Join(repoDir, "dispatched.txt"),
 		envMarker: filepath.Join(repoDir, "environment.txt"),
 	}
+	t.Cleanup(env.stopDaemon)
 	t.Cleanup(env.stopConsumer)
 	return env
 }
@@ -316,6 +366,17 @@ func (e *submitTestEnv) stopConsumer() {
 				return
 			}
 		}
+	}
+}
+
+// safety: the CLI pre-warms a daemon in this home and nothing else ends it,
+// so it outlives the test binary.
+func (e *submitTestEnv) stopDaemon() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := wingdclient.Stop(ctx, wingdclient.Options{Home: e.home}); err != nil &&
+		!errors.Is(err, wingdclient.ErrNoDaemon) {
+		e.t.Errorf("stop wingd for home %s: %v", e.home, err)
 	}
 }
 

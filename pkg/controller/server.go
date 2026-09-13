@@ -64,6 +64,7 @@ type Server struct {
 	cacheToken string
 
 	metricsAddr string
+	metricsLn   net.Listener
 
 	reconcileHook func(context.Context) error
 
@@ -254,6 +255,24 @@ func (s *Server) WithCacheCredentials(url, token string) *Server {
 // keeps /metrics on the main listener.
 func (s *Server) WithMetricsAddr(addr string) *Server {
 	s.metricsAddr = addr
+	return s
+}
+
+// WithMetricsListener moves the Prometheus endpoint onto a socket the
+// caller already holds, and serves it there instead of binding the
+// address [Server.WithMetricsAddr] takes. Pass a listener when the
+// address is one the operating system assigned, so nothing else can take
+// the port between the assignment and the bind.
+//
+// [ServeWith] closes the listener when it returns, so a Server configured
+// this way serves once. A nil listener leaves the server on whatever
+// [Server.WithMetricsAddr] gave it.
+func (s *Server) WithMetricsListener(ln net.Listener) *Server {
+	if ln == nil {
+		return s
+	}
+	s.metricsLn = ln
+	s.metricsAddr = ln.Addr().String()
 	return s
 }
 
@@ -1030,10 +1049,14 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	metricsSrv := s.metricsServer()
 	if metricsSrv != nil {
-		// safety: a metrics endpoint that never binds leaves the operator blind, so refuse to start instead.
-		metricsLn, err := net.Listen("tcp", metricsSrv.Addr)
-		if err != nil {
-			return fmt.Errorf("controller metrics listener: %w", err)
+		metricsLn := s.metricsLn
+		if metricsLn == nil {
+			// safety: a metrics endpoint that never binds leaves the operator blind, so refuse to start instead.
+			var err error
+			metricsLn, err = net.Listen("tcp", metricsSrv.Addr)
+			if err != nil {
+				return fmt.Errorf("controller metrics listener: %w", err)
+			}
 		}
 		go func() {
 			s.logger.Info("controller metrics listening", "addr", metricsSrv.Addr)
