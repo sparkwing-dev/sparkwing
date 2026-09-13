@@ -49,6 +49,10 @@ type Config struct {
 	GitForkLimit int
 
 	WorkspaceSeedMaxAge time.Duration
+
+	MaxArtifactBytes int64
+
+	MaxCacheArchiveBytes int64
 }
 
 func DefaultConfig() Config {
@@ -63,6 +67,9 @@ func DefaultConfig() Config {
 		ProxyMaxAge:      7 * 24 * time.Hour,
 		SSHKeyDir:        "/etc/ssh-key",
 		GitForkLimit:     4,
+
+		MaxArtifactBytes:     DefaultMaxArtifactBytes,
+		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 	}
@@ -130,6 +137,9 @@ func New(cfg Config) (*Server, error) {
 	if cfg.WorkspaceSeedMaxAge == 0 {
 		cfg.WorkspaceSeedMaxAge = 24 * time.Hour
 	}
+	if cfg.MaxArtifactBytes < 0 || cfg.MaxCacheArchiveBytes < 0 {
+		return nil, fmt.Errorf("cache: an object size cap must not be negative; pass 0 to accept an object of any size")
+	}
 
 	dataRoot = cfg.DataDir
 	repoDir = filepath.Join(cfg.DataDir, "repos")
@@ -151,6 +161,11 @@ func New(cfg Config) (*Server, error) {
 	recloneCooldown = cfg.RecloneCooldown
 	gitForkSem = make(chan struct{}, cfg.GitForkLimit)
 	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
+	maxArtifactBytes = cfg.MaxArtifactBytes
+	maxCacheArchiveBytes = cfg.MaxCacheArchiveBytes
+
+	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes (0 means no cap)",
+		maxArtifactBytes, maxCacheArchiveBytes)
 
 	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

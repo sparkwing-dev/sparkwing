@@ -26,13 +26,16 @@
 //
 // # Resource bounds
 //
-// [Limits] caps stored bytes per node and per run, holds the free-space
-// floor below which appends are rejected, sets the retention the
-// sweeper enforces, and bounds one search request. [DefaultLimits]
-// carries the shipped values; [Server.WithLimits] and
+// [Limits] caps stored bytes per node and per run, caps one line, holds
+// the free-space floor below which appends are rejected, sets the
+// retention the sweeper enforces, and bounds one search request.
+// [DefaultLimits] carries the shipped values; [Server.WithLimits] and
 // [ServeOptions] replace them. A node or run that reaches its cap gets
-// [TruncationMarker] appended once, and a search stopped by a budget
-// reports Truncated on its [SearchResponse].
+// [TruncationMarker] appended once, a line past MaxLineBytes is stored
+// cut to the cap with [LineTruncationMarker] in place of its tail, an
+// append whose control-byte share runs past BinaryRatio is dropped with
+// [BinaryDropMarker], and a search stopped by a budget reports Truncated
+// on its [SearchResponse].
 //
 // # Storage shape (v1)
 //

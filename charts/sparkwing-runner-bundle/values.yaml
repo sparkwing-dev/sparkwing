@@ -352,6 +352,13 @@ logs:
     searchMaxBytes: ""
     # How long one log search may scan (default 10s).
     searchTimeout: ""
+    # Byte cap for one log line; a longer line is stored cut to the cap
+    # with a truncation marker in place of its tail. Off unless set.
+    maxLineBytes: ""
+    # Share of control bytes in one append above which it reads as
+    # binary and is dropped, leaving one warning line per node log.
+    # Off unless set; 0.3 catches a pipeline that cats a binary.
+    binaryRatio: ""
 
   resources:
     requests:

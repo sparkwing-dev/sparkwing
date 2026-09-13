@@ -617,6 +617,8 @@ failure.
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
   | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
+  | `--max-line-bytes` (`SPARKWING_LOGS_MAX_LINE_BYTES`) | 0 (off) | Byte cap for one log line. A longer line is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail, so one unbroken line cannot spend a node's whole allowance. |
+  | `--binary-ratio` (`SPARKWING_LOGS_BINARY_RATIO`) | 0 (off) | Share of control bytes in one append above which the append reads as binary and is dropped, leaving one `[sparkwing-logs] dropped` line per node log. Bytes above `0x7f` are not counted, so UTF-8 text in any language is stored as sent; `0.3` catches a pipeline that cats a binary. |
 
   A search that hits either budget, or whose caller disconnects, returns
   the matches it found with `"truncated": true`. Search also requires
@@ -625,7 +627,8 @@ failure.
 
   The runner-bundle chart passes these through as `logs.limits.*`
   (`maxNodeBytes`, `maxRunBytes`, `maxInflightBytes`, `minFreeBytes`,
-  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`); an
+  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`,
+  `maxLineBytes`, `binaryRatio`); an
   empty value keeps the binary's default. Size them against
   `logs.storage.size`, because a volume left to fill answers `507` to
   every append until you turn on retention or delete runs. A malformed

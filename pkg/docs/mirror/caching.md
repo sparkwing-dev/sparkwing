@@ -156,8 +156,15 @@ Restores require an exact key match.
   runner's agent token. Every pod in the cluster shares one cache.
 
 Both use tar.gz archives.
-The cache service bounds uploads at 500 MB; a larger archive logs a
-warning and is skipped.
+The cache service bounds one archive at
+`sparkwing-cache --max-cache-archive-bytes`
+(`SPARKWING_CACHE_MAX_ARCHIVE_BYTES`), 500 MB by default and unbounded
+at `0`. A larger archive is refused with `413` naming the cap, and the
+node logs a warning and proceeds without the dependency cache.
+`--max-artifact-bytes` (`SPARKWING_CACHE_MAX_ARTIFACT_BYTES`) is the
+same cap for one uploaded artifact, also 500 MB. Both caps are applied
+before the first byte reaches the volume, so one pipeline cannot spend a
+team's quota, or the bucket ceiling, on a single object.
 
 ### Guarantees
 

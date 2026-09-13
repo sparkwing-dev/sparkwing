@@ -172,3 +172,89 @@ func TestArtifactListReturnsAnEmptyArrayNotNull(t *testing.T) {
 		t.Errorf("body %q, want []", got)
 	}
 }
+
+func TestCacheArchiveRejectsABodyOverTheCap(t *testing.T) {
+	oldDir, oldMax := cacheDir, maxCacheArchiveBytes
+	cacheDir, maxCacheArchiveBytes = t.TempDir(), 1<<10
+	t.Cleanup(func() { cacheDir, maxCacheArchiveBytes = oldDir, oldMax })
+
+	req := httptest.NewRequest(http.MethodPut, "/cache/deps-abc123",
+		io.LimitReader(neverEndingReader{}, maxCacheArchiveBytes+1))
+	w := httptest.NewRecorder()
+	handleCache(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413 for an archive over the cap", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "1024") {
+		t.Errorf("the refusal %q does not name the cap", w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "deps-abc123.tar.gz")); !os.IsNotExist(err) {
+		t.Errorf("an over-cap archive must not be stored: %v", err)
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		t.Errorf("the refused upload left %q behind", e.Name())
+	}
+}
+
+func TestCacheArchiveAcceptsABodyUnderTheCap(t *testing.T) {
+	oldDir, oldMax := cacheDir, maxCacheArchiveBytes
+	cacheDir, maxCacheArchiveBytes = t.TempDir(), 1<<10
+	t.Cleanup(func() { cacheDir, maxCacheArchiveBytes = oldDir, oldMax })
+
+	req := httptest.NewRequest(http.MethodPut, "/cache/deps-abc123", strings.NewReader("small archive"))
+	w := httptest.NewRecorder()
+	handleCache(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status %d, want 201 for an archive under the cap", w.Code)
+	}
+}
+
+func TestArtifactUploadNamesTheCapItRefusedAgainst(t *testing.T) {
+	oldDir, oldMax := artifactsDir, maxArtifactBytes
+	artifactsDir, maxArtifactBytes = t.TempDir(), 2<<10
+	t.Cleanup(func() { artifactsDir, maxArtifactBytes = oldDir, oldMax })
+
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=big.bin",
+		io.LimitReader(neverEndingReader{}, maxArtifactBytes+1))
+	w := httptest.NewRecorder()
+	handleArtifacts(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413 for a body over the cap", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "2048") {
+		t.Errorf("the refusal %q does not name the cap", w.Body.String())
+	}
+}
+
+func TestUncappedUploadsAreNotRefusedAsZeroByteOnes(t *testing.T) {
+	oldArtifacts, oldArtifactMax := artifactsDir, maxArtifactBytes
+	oldCache, oldCacheMax := cacheDir, maxCacheArchiveBytes
+	artifactsDir, maxArtifactBytes = t.TempDir(), 0
+	cacheDir, maxCacheArchiveBytes = t.TempDir(), 0
+	t.Cleanup(func() {
+		artifactsDir, maxArtifactBytes = oldArtifacts, oldArtifactMax
+		cacheDir, maxCacheArchiveBytes = oldCache, oldCacheMax
+	})
+
+	body := strings.Repeat("x", 1<<20)
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=big.bin", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handleArtifacts(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("artifact upload status %d with the cap disabled, want 200", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/cache/deps-abc123", strings.NewReader(body))
+	w = httptest.NewRecorder()
+	handleCache(w, req)
+	if w.Code != http.StatusCreated {
+		t.Errorf("cache archive status %d with the cap disabled, want 201", w.Code)
+	}
+}

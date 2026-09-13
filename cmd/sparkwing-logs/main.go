@@ -63,6 +63,15 @@ func run(args []string) error {
 	searchMaxBytes := fs.Int64("search-max-bytes", defaults.SearchMaxBytes,
 		"bytes one search request may read before it returns a truncated result; "+
 			"0 disables the cap (env: SPARKWING_LOGS_SEARCH_MAX_BYTES)")
+	maxLineBytes := fs.Int64("max-line-bytes", defaults.MaxLineBytes,
+		"byte cap for one log line; a longer line is stored cut to the cap with a "+
+			"truncation marker in place of its tail. 0 stores a line of any length "+
+			"(env: SPARKWING_LOGS_MAX_LINE_BYTES)")
+	binaryRatio := fs.Float64("binary-ratio", defaults.BinaryRatio,
+		"share of control bytes in one append above which the append reads as binary "+
+			"and is dropped, leaving one warning line in the node's log. 0 stores every "+
+			"append whatever it holds; 0.3 catches a binary a pipeline cats "+
+			"(env: SPARKWING_LOGS_BINARY_RATIO)")
 	searchTimeout := fs.Duration("search-timeout", defaults.SearchTimeout,
 		"how long one search request may scan before it returns a truncated result; "+
 			"0 disables the deadline (env: SPARKWING_LOGS_SEARCH_TIMEOUT)")
@@ -74,11 +83,15 @@ func run(args []string) error {
 		flagValue{"--max-inflight-bytes", *maxInFlightBytes},
 		flagValue{"--min-free-bytes", *minFreeBytes},
 		flagValue{"--search-max-bytes", *searchMaxBytes},
+		flagValue{"--max-line-bytes", *maxLineBytes},
 		flagValue{"--retention", int64(*retention)},
 		flagValue{"--sweep-interval", int64(*sweepInterval)},
 		flagValue{"--search-timeout", int64(*searchTimeout)},
 	); err != nil {
 		return err
+	}
+	if *binaryRatio < 0 || *binaryRatio > 1 {
+		return fmt.Errorf("--binary-ratio must be between 0 and 1; pass 0 to store every append")
 	}
 	limits := logs.Limits{
 		MaxNodeBytes:     *maxNodeBytes,
@@ -89,6 +102,8 @@ func run(args []string) error {
 		SweepInterval:    *sweepInterval,
 		SearchMaxBytes:   *searchMaxBytes,
 		SearchTimeout:    *searchTimeout,
+		MaxLineBytes:     *maxLineBytes,
+		BinaryRatio:      *binaryRatio,
 	}
 
 	if *requireAuth {
@@ -163,6 +178,12 @@ func limitsFromEnv(def logs.Limits) (logs.Limits, error) {
 	if def.SearchMaxBytes, err = envInt64("SPARKWING_LOGS_SEARCH_MAX_BYTES", def.SearchMaxBytes); err != nil {
 		return def, err
 	}
+	if def.MaxLineBytes, err = envInt64("SPARKWING_LOGS_MAX_LINE_BYTES", def.MaxLineBytes); err != nil {
+		return def, err
+	}
+	if def.BinaryRatio, err = envRatio("SPARKWING_LOGS_BINARY_RATIO", def.BinaryRatio); err != nil {
+		return def, err
+	}
 	def.SearchTimeout, err = envDuration("SPARKWING_LOGS_SEARCH_TIMEOUT", def.SearchTimeout)
 	return def, err
 }
@@ -180,6 +201,18 @@ func envInt64(name string, def int64) (int64, error) {
 		return 0, fmt.Errorf("%s=%q must not be negative; pass 0 to turn that bound off", name, raw)
 	}
 	return n, nil
+}
+
+func envRatio(name string, def float64) (float64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || f < 0 || f > 1 {
+		return 0, fmt.Errorf("%s=%q is not a share between 0 and 1", name, raw)
+	}
+	return f, nil
 }
 
 func envDuration(name string, def time.Duration) (time.Duration, error) {

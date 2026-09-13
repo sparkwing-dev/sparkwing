@@ -1378,7 +1378,11 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
-		r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
+		// safety: the cap is applied before the first byte reaches the volume, so an
+		// oversized archive costs a refusal rather than the disk it would have filled.
+		if maxCacheArchiveBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxCacheArchiveBytes)
+		}
 
 		tmpFile, err := os.CreateTemp(cacheDir, "upload-*.tmp")
 		if err != nil {
@@ -1391,6 +1395,12 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		tmpFile.Close()
 		if err != nil {
 			_ = os.Remove(tmpPath)
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, fmt.Sprintf("cache archive exceeds the %d byte upload limit", maxCacheArchiveBytes),
+					http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "read error", http.StatusBadRequest)
 			return
 		}
@@ -1422,7 +1432,20 @@ var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 const artifactTempPrefix = ".sparkwing-upload-"
 
-var maxArtifactBytes int64 = 500 << 20
+// Default per-object caps. One pipeline that tars a dataset or caches a
+// multi-gigabyte directory should not spend a team's whole quota, or the
+// bucket ceiling, in a single run.
+const (
+	// DefaultMaxArtifactBytes caps one uploaded artifact.
+	DefaultMaxArtifactBytes int64 = 500 << 20
+	// DefaultMaxCacheArchiveBytes caps one stored dependency archive.
+	DefaultMaxCacheArchiveBytes int64 = 500 << 20
+)
+
+var (
+	maxArtifactBytes     = DefaultMaxArtifactBytes
+	maxCacheArchiveBytes = DefaultMaxCacheArchiveBytes
+)
 
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
@@ -1496,7 +1519,9 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	// safety: an unbounded or half-written body must never reach the path a download serves.
-	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
+	if maxArtifactBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
+	}
 
 	// #nosec G703 -- the staging file sits beside a destination contained under the artifacts root
 	tmp, err := os.CreateTemp(destDir, artifactTempPrefix+"*")

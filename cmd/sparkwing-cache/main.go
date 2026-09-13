@@ -70,6 +70,12 @@ func run(args []string) error {
 	fs.DurationVar(&cfg.WorkspaceSeedMaxAge, "workspace-seed-max-age",
 		envDuration("WORKSPACE_SEED_MAX_AGE", cfg.WorkspaceSeedMaxAge),
 		"how long a working-tree snapshot ref is retained before the next seed expires it. Negative disables expiry. Falls back to $WORKSPACE_SEED_MAX_AGE.")
+	fs.Int64Var(&cfg.MaxArtifactBytes, "max-artifact-bytes",
+		envInt64("SPARKWING_CACHE_MAX_ARTIFACT_BYTES", cfg.MaxArtifactBytes),
+		"size cap for one uploaded artifact; a larger upload is refused with 413 naming the cap. 0 accepts an artifact of any size. Falls back to $SPARKWING_CACHE_MAX_ARTIFACT_BYTES.")
+	fs.Int64Var(&cfg.MaxCacheArchiveBytes, "max-cache-archive-bytes",
+		envInt64("SPARKWING_CACHE_MAX_ARCHIVE_BYTES", cfg.MaxCacheArchiveBytes),
+		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
@@ -113,6 +119,15 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 func envInt(name string, fallback int) int {
 	if v := os.Getenv(name); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func envInt64(name string, fallback int64) int64 {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
 			return n
 		}
 	}

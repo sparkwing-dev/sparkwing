@@ -67,7 +67,9 @@ spec:
                   (dict "flag" "--retention" "value" $limits.retention)
                   (dict "flag" "--sweep-interval" "value" $limits.sweepInterval)
                   (dict "flag" "--search-max-bytes" "value" $limits.searchMaxBytes)
-                  (dict "flag" "--search-timeout" "value" $limits.searchTimeout) }}
+                  (dict "flag" "--search-timeout" "value" $limits.searchTimeout)
+                  (dict "flag" "--max-line-bytes" "value" $limits.maxLineBytes)
+                  (dict "flag" "--binary-ratio" "value" $limits.binaryRatio) }}
             {{- $value := $limit.value }}
             {{- if not (kindIs "invalid" $value) }}
             {{- if ne (toString $value) "" }}

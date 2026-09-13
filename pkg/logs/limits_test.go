@@ -446,3 +446,106 @@ func TestLogs_SweepSparesRunsWrittenNearTheCutoff(t *testing.T) {
 		t.Errorf("run removed while an append could still be in flight: %v", err)
 	}
 }
+
+func TestLogs_LineCapTruncatesTheLongLineAndKeepsTheRest(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: 8})
+	defer stop()
+
+	body := []byte("short\n" + strings.Repeat("L", 200) + "\nafter\n")
+	if err := c.Append(context.Background(), "run-1", "step-a", body); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if !strings.Contains(stored, "short\n") {
+		t.Errorf("the line under the cap was not stored:\n%s", stored)
+	}
+	if !strings.Contains(stored, "after\n") {
+		t.Errorf("the line after the long one was dropped:\n%s", stored)
+	}
+	if strings.Count(stored, logs.LineTruncationMarker) != 1 {
+		t.Errorf("want one line-truncation marker, got:\n%s", stored)
+	}
+	if strings.Contains(stored, strings.Repeat("L", 9)) {
+		t.Errorf("the long line was stored past its 8-byte cap:\n%s", stored)
+	}
+}
+
+func TestLogs_LineCapLeavesShortLinesByteIdentical(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: 64})
+	defer stop()
+
+	body := "one\ntwo\nthree without a newline"
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(body)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != body {
+		t.Errorf("stored %q, want the body unchanged", stored)
+	}
+}
+
+func TestLogs_UncappedLinesAreStoredWhole(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{})
+	defer stop()
+
+	line := strings.Repeat("x", 5000) + "\n"
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(line)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != line {
+		t.Errorf("stored %d bytes with no line cap, want the whole %d-byte line", len(stored), len(line))
+	}
+}
+
+func TestLogs_BinaryOutputIsDroppedAfterOneWarningLine(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{BinaryRatio: 0.3})
+	defer stop()
+	ctx := context.Background()
+
+	binary := make([]byte, 512)
+	for i := range binary {
+		binary[i] = byte(i % 7)
+	}
+	for range 3 {
+		if err := c.Append(ctx, "run-1", "step-a", binary); err != nil {
+			t.Fatalf("append binary: %v", err)
+		}
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if strings.Count(stored, logs.BinaryDropMarker) != 1 {
+		t.Errorf("want one binary-drop marker across three binary appends, got:\n%q", stored)
+	}
+	if strings.Contains(stored, "\x00\x01\x02") {
+		t.Errorf("binary output reached the stored log:\n%q", stored)
+	}
+	if int64(len(stored)) != int64(len(logs.BinaryDropMarker)) {
+		t.Errorf("stored %d bytes, want only the %d-byte marker", len(stored), len(logs.BinaryDropMarker))
+	}
+}
+
+func TestLogs_TextWithEscapeSequencesIsNotMistakenForBinary(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{BinaryRatio: 0.3})
+	defer stop()
+
+	body := "\x1b[32mPASS\x1b[0m ok\tgithub.com/example/pkg\t0.4s\nrésumé built\n"
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(body)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != body {
+		t.Errorf("colored UTF-8 output was altered:\nstored %q\nwant   %q", stored, body)
+	}
+}
+
+func TestLogs_BinaryDetectionIsOffByDefault(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{})
+	defer stop()
+
+	binary := []byte{0, 1, 2, 3, 0, 1, 2, 3}
+	if err := c.Append(context.Background(), "run-1", "step-a", binary); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != string(binary) {
+		t.Errorf("stored %q with detection off, want the bytes as sent", stored)
+	}
+}

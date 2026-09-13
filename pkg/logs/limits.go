@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"bytes"
 	"context"
 	"io/fs"
 	"os"
@@ -11,9 +12,18 @@ import (
 )
 
 // TruncationMarker is the line the service appends once to a node log
-// when the node or run byte cap stops it accepting more bytes. It is
-// the only content the service writes that a runner did not send.
+// when the node or run byte cap stops it accepting more bytes.
 const TruncationMarker = "[sparkwing-logs] truncated: byte cap reached\n"
+
+// LineTruncationMarker replaces the tail of a line that ran past
+// [Limits.MaxLineBytes]. The line before it is stored whole up to the
+// cap.
+const LineTruncationMarker = "[sparkwing-logs] truncated: line byte cap reached\n"
+
+// BinaryDropMarker stands in for output the service refused to store
+// because it reads as binary rather than text. It is written once per
+// node log, and the output it replaces is discarded.
+const BinaryDropMarker = "[sparkwing-logs] dropped: this node's output reads as binary, not text\n"
 
 // Limits bounds the disk, memory and search work one logs service will
 // spend on callers it has already authenticated. Every field is
@@ -39,6 +49,16 @@ type Limits struct {
 	SearchMaxBytes int64
 	// SearchTimeout caps how long one search request scans for.
 	SearchTimeout time.Duration
+	// MaxLineBytes caps one log line. A longer line is stored cut to
+	// the cap with LineTruncationMarker in place of its tail. Zero, the
+	// default, stores a line of any length.
+	MaxLineBytes int64
+	// BinaryRatio is the share of control bytes in one append above
+	// which the whole append reads as binary and is dropped with
+	// BinaryDropMarker. Zero, the default, stores every append whatever
+	// it holds; 0.3 catches a binary a pipeline cats without flagging
+	// text that carries the odd escape sequence.
+	BinaryRatio float64
 }
 
 // DefaultLimits returns the bounds a logs service uses when its
@@ -181,6 +201,66 @@ func (rt *runTotal) unreserve(n int64) {
 		rt.total = 0
 	}
 	rt.mu.Unlock()
+}
+
+// safety: the line cap is applied to the body before the node and run budgets
+// see it, so one unbroken line cannot spend a node's whole allowance.
+func capLines(body []byte, limit int64) []byte {
+	if limit <= 0 || int64(len(body)) <= limit {
+		return body
+	}
+	out := make([]byte, 0, len(body))
+	for len(body) > 0 {
+		line := body
+		rest := []byte(nil)
+		if i := bytes.IndexByte(body, '\n'); i >= 0 {
+			line, rest = body[:i+1], body[i+1:]
+		}
+		if int64(len(line)) > limit {
+			out = append(out, line[:limit]...)
+			out = append(out, LineTruncationMarker...)
+		} else {
+			out = append(out, line...)
+		}
+		body = rest
+	}
+	return out
+}
+
+// safety: bytes above 0x7f are left uncounted because they carry UTF-8 text,
+// so a log in any language is not mistaken for a binary.
+func looksBinary(body []byte, ratio float64) bool {
+	if ratio <= 0 || len(body) == 0 {
+		return false
+	}
+	control := 0
+	for _, b := range body {
+		switch {
+		case b == '\t' || b == '\n' || b == '\v' || b == '\f' || b == '\r':
+		case b < 0x20 || b == 0x7f:
+			control++
+		}
+	}
+	return float64(control)/float64(len(body)) > ratio
+}
+
+// safety: the marker is written once per node log, so a node that keeps sending
+// binary costs one line rather than one line per append.
+func endsWithMarker(root *os.Root, name, marker string) bool {
+	f, err := root.Open(name)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || info.Size() < int64(len(marker)) {
+		return false
+	}
+	buf := make([]byte, len(marker))
+	if _, err := f.ReadAt(buf, info.Size()-int64(len(marker))); err != nil {
+		return false
+	}
+	return string(buf) == marker
 }
 
 type appendPlan struct {

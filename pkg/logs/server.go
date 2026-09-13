@@ -448,6 +448,9 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 			"logs service listening",
 			"addr", addr, "root", root,
 			"auth_controller", controllerURL != "",
+			"max_node_bytes", s.limits.MaxNodeBytes,
+			"max_line_bytes", s.limits.MaxLineBytes,
+			"binary_ratio", s.limits.BinaryRatio,
 		)
 		errCh <- srv.ListenAndServe()
 	}()
@@ -611,6 +614,16 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	lock := s.appendNodeLock(runID, nodeID)
 	lock.Lock()
 	defer lock.Unlock()
+
+	if looksBinary(body, s.limits.BinaryRatio) {
+		if endsWithMarker(root, name, BinaryDropMarker) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		body = []byte(BinaryDropMarker)
+	} else {
+		body = capLines(body, s.limits.MaxLineBytes)
+	}
 
 	plan := s.planAppend(root, runID, nodeID, rt, body)
 	if len(plan.write) == 0 {
