@@ -132,15 +132,21 @@ func ParseBudget(s string) (Budget, error) {
 	return b, nil
 }
 
+// positiveFinite reports whether a parsed cap is a number the daemon can hold a
+// run to. A caller must ask it rather than write the bound as a refusal, because
+// every comparison against a NaN is false: a NaN cap passes each one, then reads
+// as no cap at all, so a budget the operator typed grants the whole machine with
+// enforcement off.
+func positiveFinite(n float64) bool {
+	return n > 0 && !math.IsInf(n, 0)
+}
+
 func parsePercent(tok string) (float64, error) {
 	n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "%"), 64)
 	if err != nil {
 		return 0, fmt.Errorf("budget: %q is not a percentage", tok)
 	}
-	// safety: the bound admits the percentages it can stand behind rather than
-	// refusing the ones it cannot, because a NaN passes every refusal written as
-	// a comparison and then reads as no cap at all.
-	if !(n > 0 && n <= 100) {
+	if !positiveFinite(n) || n > 100 {
 		return 0, fmt.Errorf("budget: percentage %q out of range; want (0, 100]", tok)
 	}
 	return n / 100, nil
@@ -158,10 +164,7 @@ func parseCoreCount(tok string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("budget: %q is not a core count, percentage, or memory size", tok)
 	}
-	// safety: the bound admits the core counts it can stand behind. A NaN passes
-	// every refusal written as a comparison, and a NaN cap then reads as no cap,
-	// so a budget the operator typed grants the whole machine with enforcement off.
-	if !(n > 0) || math.IsInf(n, 0) {
+	if !positiveFinite(n) {
 		return 0, fmt.Errorf("budget: cores %q must be positive", tok)
 	}
 	return n, nil
@@ -196,7 +199,7 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		if perr != nil {
 			return 0, false, fmt.Errorf("budget: %q is not a memory size", tok)
 		}
-		if n <= 0 {
+		if !positiveFinite(n) {
 			return 0, false, fmt.Errorf("budget: memory %q must be positive", tok)
 		}
 		return uint64(n * u.scale), true, nil
