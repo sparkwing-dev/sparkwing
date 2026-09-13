@@ -31,13 +31,6 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
-### Removed
-
-- **cli:** The retired `dashboard` noun lost the parsing and
-  migration message it kept after v0.49.0 removed the command. It reads as an
-  unknown subcommand. `sparkwing serve` is the supported command group; see
-  [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
-  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map
 ### Fixed
 
 - **dashboard:** A log line over 1 MiB says so. Such a line ends the scan for
@@ -53,8 +46,13 @@ unlock.
   installed no hook, and `guards: {rejct: [...]}` loaded clean and dropped the
   reject fence. Keys nested deeper, such as `on.push.branches`, are still
   matched loosely.
+
 ### Removed
 
+- **cli:** The retired `dashboard` noun lost the parsing and migration message
+  it kept after v0.49.0 removed the command. It reads as an unknown subcommand. `sparkwing serve` is the supported command group; see
+  [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
+  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map
 - **web:** The analytics page drops its three unbuilt sections
   Slowest pipelines, failure clustering, and agent utilization rendered
   placeholder text for views the dashboard does not build. The trend charts
