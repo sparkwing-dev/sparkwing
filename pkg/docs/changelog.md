@@ -22,6 +22,10 @@ unlock.
 
 ### Added
 
+- **cli:** `sparkwing runs logs --follow` prints log lines rather than the
+  server-sent-events frames that carried them. A follow against a controller
+  logs surface used to show each line's `data:` prefix and the stream's own
+  `: open` and keepalive comments.
 - **controller + web:** A run is watchable live even when its logs surface is
   an object store. The node's runner mirrors its lines to the controller, which
   holds the last 512 KiB of each running node in memory and serves it over
@@ -39,7 +43,11 @@ unlock.
   per flush instead of one object per line. A flush lands when the buffer
   reaches `batch_bytes` (256 KiB), when `batch_interval` (2s) elapses, when
   a reader asks for the node's log, and when the node finishes, so a node
-  costs one object per 256 KiB of log text rather than one per line. `max_log_objects`
+  costs one object per 256 KiB of log text rather than one per line. The
+  finish flush runs before the node's status is written on every path, so a
+  node that reads terminal has a complete log, and a flush the store refuses
+  counts its whole batch into the node's dropped-line total. The four keys
+  are refused on any surface that does not act on them, and when negative. `max_log_objects`
   (2000) and `max_log_bytes` (64 MiB) bound one node's log, and past either
   the surface drops further lines and ends the node's log with one marker
   line counting them. All four keys are optional on the profile's `logs:`

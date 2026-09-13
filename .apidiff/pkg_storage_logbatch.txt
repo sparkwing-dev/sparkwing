@@ -15,6 +15,7 @@ func (s *Store) Close() error
 func (s *Store) Delegate() storage.LogStore
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) FlushNode(ctx context.Context, runID, nodeID string) error
+func (s *Store) LostOnFlush(runID, nodeID string) (lines int, bytes int64)
 func (s *Store) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
 func (s *Store) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (s *Store) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)

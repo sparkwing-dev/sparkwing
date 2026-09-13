@@ -72,15 +72,20 @@ profiles:
       batch_bytes: 524288
 ```
 
-A flush also lands when a reader asks for the node's log and when the
-node finishes, so a finished node's log is complete the moment its
-status says so. Past `max_log_objects` or `max_log_bytes` the surface
-drops further lines and ends that node's log with one marker line
-counting them.
+A flush also lands when a reader asks for the node's log, and when the
+node finishes. The finish flush runs before the node's status is
+written, on the failing and cancelled paths as well as the succeeding
+one, so a node whose status reads terminal has a complete log. Past
+`max_log_objects` or `max_log_bytes` the surface drops further lines and
+ends that node's log with one marker line counting them. A flush the
+object store refuses loses its whole batch; those lines are counted into
+the node's dropped-line total and reported as a `logs_drop` event.
 
-The keys apply to object-store logs surfaces. A `filesystem` surface
-appends to an open file and a `controller` surface takes a streaming
-append, so both write through and ignore these keys.
+The keys are valid only on an object-store logs surface. A `filesystem`
+surface appends to an open file and a `controller` surface takes a
+streaming append, so neither reads them, and a profile that sets one
+anywhere else is refused at load with the key named. A negative value is
+refused the same way.
 
 State backends correspond to deployment modes. See
 [Deployment modes](deployment-modes.md) for when to pick each:

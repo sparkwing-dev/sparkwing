@@ -327,13 +327,24 @@ runs logs --follow` read that ring while the node runs. The durable
 copy still goes to the bucket, and a read after the node finishes comes
 from there.
 
-The ring is memory, so it is bounded twice: 512 KiB per node and 64 MiB
-across every node together, with the oldest bytes of the widest ring
-dropped first. A node's ring is released shortly after the node
-finishes, or after ten minutes of silence from a node that never
-reported finishing. `sparkwing-controller` takes all three bounds as
-flags. A deployment that runs `sparkwing-logs` keeps its own live
-stream and mirrors nothing.
+The ring is memory, so it is bounded three ways: 512 KiB per node,
+64 MiB across every node together, and 1024 nodes holding a ring at
+once. Past the byte bounds the oldest bytes of the widest ring go first;
+past the node bound the ring of the node that wrote least recently is
+released. A node's ring is released shortly after the node finishes, or
+after ten minutes of silence from a node that never reported finishing.
+`sparkwing-controller` takes all four bounds as `--live-log-node-kb`,
+`--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`, and
+refuses a non-positive value.
+
+A reader is told when it misses bytes: a stream whose buffer dropped
+lines before the reader got to them emits one marker line naming the
+dropped byte count, and a reader still attached when the buffer is
+released gets a marker pointing it at the durable copy. Only a node the
+run actually has can write to a ring.
+
+A deployment that runs `sparkwing-logs` keeps its own live stream and
+mirrors nothing.
 
 ## Forcing local mode for a single run
 

@@ -213,6 +213,7 @@ type CronReposResponse struct {
 }
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
+var ErrNoLiveLog = errors.New("controller holds no live log for this node")
 type ExecutorClaim struct {
 	ExecutorName   string
 	HolderID       string
