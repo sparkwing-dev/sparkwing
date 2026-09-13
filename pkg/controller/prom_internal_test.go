@@ -402,6 +402,15 @@ func TestExpositionParsesAndNamesTheDocumentedSet(t *testing.T) {
 	observeRunFinish("expo", "success", time.Second)
 	liveRunners.sample([][]string{{"expo-runner"}})
 
+	// safety: the request families mint no child until a request goes through
+	// the logging middleware, so this test asks for one rather than leaning on
+	// whatever another test in the package happened to send.
+	health, err := http.Get(api.URL + "/api/v1/health")
+	if err != nil {
+		t.Fatalf("health request: %v", err)
+	}
+	_ = health.Body.Close()
+
 	body := scrapeRegistry(t)
 	families := map[string]string{}
 	for i, line := range strings.Split(body, "\n") {

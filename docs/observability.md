@@ -360,13 +360,12 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 comes from the credit ledger rather than from a request handler. A claim
 reserves a minute up front and a finish refunds the part the node did not use,
 so the series counts a reservation as the node consumes it rather than all at
-once: the figure only ever grows, which is what a counter has to do. Work the
-ledger has not settled is absent until it settles. A node the credit-exhaustion
-sweep cancels settles there, and a node whose lease expires keeps the seconds
-its reservation already charged, because the requeue writes no refund. A node
-whose run fails without any finish reaching the controller keeps an open
-reservation, and its seconds appear once a later requeue, cancel or finish
-resolves it.
+once: the figure only ever grows, which is what a counter has to do. A node the
+credit-exhaustion sweep cancels settles there. A node whose lease expires keeps
+every second its reservation charged, because the requeue writes no refund. A
+node whose run fails with no finish reaching the controller keeps the same
+seconds: nothing refunds them, and the reserved minute enters the total as the
+clock passes it.
 
 The `local` series counts what this controller process settled for an unmetered
 credential, read from the claiming credential recorded on the node, and it
