@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli:** `sparkwing queue` names the soft-core allowance when cores in use
+  exceed a host resource's capacity. The human view states the bound the
+  allowance has -- a run priced from an estimate is admitted only while cores in
+  use sit at or below capacity less reserved and external, so at most one grant
+  crosses the line -- and lists the holders priced from estimates rather than
+  pins. Machine output is unchanged.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added
