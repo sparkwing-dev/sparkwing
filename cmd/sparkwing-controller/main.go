@@ -75,6 +75,11 @@ func run(args []string) error {
 			"the announcement, which is correct only when one process serves both.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
+	externalURL := fs.String("external-url", os.Getenv("SPARKWING_EXTERNAL_URL"),
+		"base URL this controller answers on from outside the cluster, which is "+
+			"where GitHub posts webhook deliveries. `sparkwing cluster webhooks "+
+			"connect` points a repository's webhook at it. Empty answers each "+
+			"connect request with the URL that request arrived at.")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
 		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For "+
 			"for login throttling; empty ignores forwarded headers and keys the "+
@@ -213,6 +218,7 @@ func run(args []string) error {
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
 		WithCacheURL(*cacheURL).
+		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
 		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness)

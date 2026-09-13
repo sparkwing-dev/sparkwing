@@ -71,11 +71,34 @@ type GitHubWebhookBindingCounts struct {
 	DenyAll     int
 	RepoSecrets int
 }
+type GitHubWebhookBindingRequest struct {
+	Pipeline string
+	Repo     string
+	Secret   string
+	Events   []string
+	HookID   int64
+}
+type GitHubWebhookBindingResponse struct {
+	Pipeline    string
+	Repo        string
+	Events      []string
+	HookID      int64
+	DeliveryURL string
+	CreatedAt   int64
+	UpdatedAt   int64
+}
 type GitHubWebhookConfig struct {
 	Pipelines   map[string]GitHubWebhookBinding
 	RepoSecrets map[string]string
 }
 func (c GitHubWebhookConfig) BindingCounts() GitHubWebhookBindingCounts
+type GitHubWebhookDisconnectResponse struct {
+	Pipeline    string
+	Repo        string
+	Removed     bool
+	DeliveryURL string
+	HookID      int64
+}
 type LiveLogRead struct {
 	Start int64
 
@@ -179,6 +202,7 @@ func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
+func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server

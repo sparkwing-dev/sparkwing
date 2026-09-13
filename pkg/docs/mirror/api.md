@@ -27,6 +27,13 @@ re-sending a body the controller already accepted answers `409` with the
 run the first delivery produced, and a delivery with no
 `X-GitHub-Delivery` header answers `400`. See [security.md](security.md).
 
+`POST /api/v1/webhooks/github/bindings` (scope `admin`) stores the secret one
+repository's deliveries to one pipeline are signed with and allows that
+repository for the pipeline; `DELETE` on the same path removes it. Stored
+bindings add to the `GITHUB_WEBHOOK_BINDINGS` document rather than replacing
+it. `sparkwing cluster webhooks connect` drives both sides; see
+[hooks.md](hooks.md).
+
 ## Logs service
 
 Logs live in a separate service keyed by run and node
