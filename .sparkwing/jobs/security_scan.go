@@ -17,7 +17,7 @@ import (
 
 const (
 	gosecModule       = "github.com/securego/gosec/v2/cmd/gosec@v2.29.0"
-	govulncheckModule = "golang.org/x/vuln/cmd/govulncheck@v1.4.0"
+	govulncheckModule = "golang.org/x/vuln/cmd/govulncheck@v1.8.0"
 	gitleaksModule    = "github.com/zricethezav/gitleaks/v8@v8.30.1"
 )
 

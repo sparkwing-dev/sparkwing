@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
 func TestDispatch_UnbindsFromTheRepositoryThatLaunchedIt(t *testing.T) {

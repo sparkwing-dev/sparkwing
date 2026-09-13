@@ -2,7 +2,6 @@ package git
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,6 +143,98 @@ func TestCloneThroughSecuredGitcache(t *testing.T) {
 	}
 }
 
+func TestCloneFallsBackWhenTheCacheDoesNotServeTheName(t *testing.T) {
+	root := t.TempDir()
+	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
+	// safety: this is the gitcache's real answer for a name nothing registered,
+	// which is every name Clone asks for, because Clone registers nothing.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `repo "repo" not registered -- POST /git/register?name=repo&repo=<url>`, http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("SPARKWING_GITCACHE", srv.URL)
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+
+	dest := filepath.Join(root, "dest")
+	if err := Clone(context.Background(), upstream, dest); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
+		t.Fatalf("clone did not fall back to upstream: %v", err)
+	}
+}
+
+func TestCloneFallsBackWhenTheCacheAnswersAServerError(t *testing.T) {
+	root := t.TempDir()
+	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "backend down", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("SPARKWING_GITCACHE", srv.URL)
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+
+	dest := filepath.Join(root, "dest")
+	if err := Clone(context.Background(), upstream, dest); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
+		t.Fatalf("clone did not fall back to upstream: %v", err)
+	}
+}
+
+func TestCloneFallsBackWhenTheCacheIsUnreachable(t *testing.T) {
+	root := t.TempDir()
+	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := dead.URL
+	dead.Close()
+
+	t.Setenv("SPARKWING_GITCACHE", url)
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+
+	dest := filepath.Join(root, "dest")
+	if err := Clone(context.Background(), upstream, dest); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
+		t.Fatalf("clone did not fall back to upstream: %v", err)
+	}
+}
+
+func TestCloneLeavesAPreexistingDestinationAlone(t *testing.T) {
+	root := t.TempDir()
+	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "repo not registered", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("SPARKWING_GITCACHE", srv.URL)
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+
+	dest := filepath.Join(root, "dest")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(dest, "keep.txt")
+	if err := os.WriteFile(keep, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Clone(context.Background(), upstream, dest); err == nil {
+		t.Fatal("Clone into a non-empty directory should fail")
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("the fallback deleted a directory it did not create: %v", err)
+	}
+}
+
 func TestGitcacheEnvKeepsBearerOffTheCommandLine(t *testing.T) {
 	t.Setenv("GIT_CONFIG_COUNT", "")
 
@@ -183,30 +274,6 @@ func TestGitcacheEnvPreservesInheritedConfigEntries(t *testing.T) {
 	}
 	if !strings.Contains(joined, "GIT_CONFIG_KEY_1=http.http://cache.local:9999/.extraHeader") {
 		t.Error("the bearer entry overwrote an inherited config slot")
-	}
-}
-
-func TestRejectedByCache(t *testing.T) {
-	cases := []struct {
-		name string
-		msg  string
-		want bool
-	}{
-		{"prompts disabled", "fatal: could not read Username for 'http://c': terminal prompts disabled", true},
-		{"explicit 401", "fatal: unable to access 'http://c/': The requested URL returned error: 401", true},
-		{"auth failed", "fatal: Authentication failed for 'http://c/'", true},
-		{"redirecting ingress", "fatal: unable to access 'http://c/': The requested URL returned error: 301", true},
-		{"temporary redirect", "fatal: unable to access 'http://c/': The requested URL returned error: 307", true},
-		{"server error", "fatal: unable to access 'http://c/': The requested URL returned error: 500", false},
-		{"missing repo", "fatal: repository 'http://c/git/repo' not found", false},
-		{"connection refused", "fatal: unable to access 'http://c/': Failed to connect", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := rejectedByCache(errors.New(c.msg)); got != c.want {
-				t.Fatalf("rejectedByCache(%q) = %t, want %t", c.msg, got, c.want)
-			}
-		})
 	}
 }
 

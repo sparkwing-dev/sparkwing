@@ -13,11 +13,16 @@ import (
 
 const childTerminationGrace = 5 * time.Second
 
-func execChild(bin string, args, env []string) error {
-	return execChildWith(bin, args, env, nil)
+func execChild(bin string, args, env []string, afterChild func()) error {
+	return execChildWith(bin, args, env, nil, afterChild)
 }
 
-func execChildWith(bin string, args, env []string, beforeStart func()) error {
+func execChildWith(bin string, args, env []string, beforeStart, afterChild func()) error {
+	run := func() {
+		if afterChild != nil {
+			afterChild()
+		}
+	}
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	cmd := exec.Command(bin, args...)
@@ -27,6 +32,7 @@ func execChildWith(bin string, args, env []string, beforeStart func()) error {
 	}
 	if err := cmd.Start(); err != nil {
 		signal.Stop(signals)
+		run()
 		return err
 	}
 	done := make(chan error, 1)
@@ -44,6 +50,7 @@ func execChildWith(bin string, args, env []string, beforeStart func()) error {
 			deadline = nil
 		case err := <-done:
 			signal.Stop(signals)
+			run()
 			if err == nil {
 				os.Exit(0) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status
 			}

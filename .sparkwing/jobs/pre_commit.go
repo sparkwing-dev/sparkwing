@@ -86,7 +86,7 @@ func runGofmtOnTheChange(ctx context.Context) error {
 	if len(files) == 0 {
 		return nil
 	}
-	return sparkwing.Bash(ctx, "gofmt -l "+shellQuoteAll(files)).MustBeEmpty("files need formatting")
+	return sparkwing.Bash(ctx, "gofmt -l -- "+shellQuoteAll(files)).MustBeEmpty("files need formatting")
 }
 
 func init() {

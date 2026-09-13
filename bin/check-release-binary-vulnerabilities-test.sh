@@ -77,6 +77,6 @@ export GOARCH=amd64
 PATH="$CASE_ROOT/fallback-tools:/usr/bin:/bin" \
   bash "$ROOT/bin/check-release-binary-vulnerabilities.sh" "$CASE_ROOT/one"
 printf '%s\0' \
-  run golang.org/x/vuln/cmd/govulncheck@v1.4.0 \
+  run golang.org/x/vuln/cmd/govulncheck@v1.8.0 \
   -mode=binary "$CASE_ROOT/one" >"$CASE_ROOT/fallback-expected"
 cmp "$CASE_ROOT/fallback-expected" "$CASE_ROOT/fallback-actual"

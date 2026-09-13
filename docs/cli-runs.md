@@ -245,6 +245,11 @@ needs the same idempotency a restarted pod already demands.
 A job that finishes before the stop lands is left alone. Bouncing
 again is allowed -- one request is one restart.
 
+The local runner is what acts on the request, whether the run's state
+lives here or on a controller. A job the in-cluster Kubernetes runner
+executes records the request and nothing consumes it, so the job keeps
+running; cancel the run and retry it instead.
+
 ### Flags
 
 | Flag | Description |
@@ -258,10 +263,10 @@ again is allowed -- one request is one restart.
 ### Examples
 
 ```sh
-# Bounce a wedged job in a local run
+# Bounce a wedged job
 sparkwing runs bounce --run run-fictional --node build
 
-# Bounce a job in a cluster run
+# Bounce a job in a run a controller holds
 sparkwing runs bounce --run run-fictional --node build --profile prod
 ```
 
@@ -395,23 +400,33 @@ sparkwing runs consumer stop
 
 Surface the error trail for a failed run
 
-Reads the local run store and prints each failed node's error chain.
+Prints each failed node's error chain. Reads the local run store,
+or the controller a --profile names.
+
+### Arguments
+
+- `[RUN_ID]` (optional) -- Run identifier, when --run is not supplied
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run RUN_ID` | Run identifier (required) |
+| `--run RUN_ID` | Run identifier. Positional fallback accepted. |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
+| `--profile NAME` | Profile name; omit for local-only |
+| `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
 
 ```sh
 # Inspect a local failure
-sparkwing runs errors --run run-fictional
+sparkwing runs errors run-fictional
 
 # As JSON
 sparkwing runs errors --run run-fictional -o json
+
+# Read a controller-held run
+sparkwing runs errors run-fictional --profile prod
 ```
 
 ## `sparkwing runs failures`
@@ -961,11 +976,15 @@ exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
 while returning zero. For a blocking wait, use 'runs wait'.
 
+### Arguments
+
+- `[RUN_ID]` (optional) -- Run identifier, when --run is not supplied
+
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run RUN_ID` | Run identifier (required) |
+| `--run RUN_ID` | Run identifier. Positional fallback accepted. |
 | `-f, --follow` | Poll until the run reaches a terminal state |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--steps` | Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too. |
@@ -977,7 +996,7 @@ while returning zero. For a blocking wait, use 'runs wait'.
 
 ```sh
 # Check a local run once
-sparkwing runs status --run run-fictional
+sparkwing runs status run-fictional
 
 # Follow a running job to completion
 sparkwing runs status --run run-fictional --follow

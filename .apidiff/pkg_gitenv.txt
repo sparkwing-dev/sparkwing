@@ -1,0 +1,6 @@
+# pkg/gitenv
+
+func GateIndex() string
+const GateIndexVar = "SPARKWING_GATE_INDEX"
+func ShellUnbind() string
+func Unbind()

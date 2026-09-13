@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
 func TestScopedAdds_StagedReadsTheIndexTheCommitIsBeingBuiltIn(t *testing.T) {

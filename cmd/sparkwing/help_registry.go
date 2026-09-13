@@ -38,11 +38,34 @@ var cmdDaemon = Command{
 	Description: `The admission daemon starts on demand when a pipeline needs it. Status never
 starts one. Restart replaces only an answering daemon with this installed
 build, using the same drain, durable lease, and reattachment path as automatic
-version takeover; a stopped daemon stays stopped.`,
-	SubcommandOrder: []string{"status", "restart", "recover-state"},
+version takeover; a stopped daemon stays stopped. Stop drains an answering
+daemon and launches no successor.`,
+	SubcommandOrder: []string{"status", "restart", "stop", "recover-state"},
 	Examples: []Example{
 		{"Machine-readable status", "sparkwing daemon status -o json"},
 		{"Refresh only if already running", "sparkwing daemon restart"},
+		{"Stop it and leave it stopped", "sparkwing daemon stop"},
+	},
+}
+
+var cmdDaemonStop = Command{
+	Path:     "sparkwing daemon stop",
+	Synopsis: "Drain an answering wingd and leave it stopped",
+	Description: `Drains an answering daemon through the same wire request a restart uses, then
+waits for its admission socket to go quiet and its election lock to be
+released. No successor is launched, and the supervisor exits with the worker it
+started, so the pair stays down until the next run needs a daemon. An absent
+daemon is a no-op and exits zero.
+
+A run still holding admission finishes against the store it already opened.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home whose daemon should stop", Group: "Input"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Stop this machine's daemon", "sparkwing daemon stop"},
+		{"Machine-readable result", "sparkwing daemon stop -o json"},
 	},
 }
 
@@ -270,7 +293,11 @@ in one step (no separate init needed).
 Re-running on an already-set-up laptop re-applies 0700 to
 ~/.config/sparkwing/ and reports each config file's mode, naming any
 that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command reports existing state.`,
+and the permission fix so the command reports existing state.
+
+Run inside a sparkwing project, it also reports whether this
+checkout's declared git hooks fire, and names the command that
+arms them. It installs nothing and changes no git configuration.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "dry-run", Desc: "Probe + report without creating or tightening ~/.config/sparkwing/", Group: "Behavior"},
@@ -1664,7 +1691,7 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store)", Group: "Storage"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its logs + cache surfaces)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Storage"},
@@ -2236,8 +2263,11 @@ status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
 while returning zero. For a blocking wait, use 'runs wait'.`,
+	PosArgs: []PosArg{
+		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
+	},
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
 		{Name: "follow", Short: "f", Desc: "Poll until the run reaches a terminal state", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "steps", Desc: "Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too.", Group: "Output"},
@@ -2247,7 +2277,7 @@ while returning zero. For a blocking wait, use 'runs wait'.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Check a local run once", "sparkwing runs status --run run-fictional"},
+		{"Check a local run once", "sparkwing runs status run-fictional"},
 		{"Follow a running job to completion", "sparkwing runs status --run run-fictional --follow"},
 		{"Inspect a known-failed run without nonzero exit", "sparkwing runs status --run run-fictional --exit-zero"},
 		{"Expand every step on every node", "sparkwing runs status --run run-fictional --steps"},
@@ -2307,17 +2337,24 @@ controller, and any profile that declares its own logs surface.`,
 }
 
 var cmdJobsErrors = Command{
-	Path:        "sparkwing runs errors",
-	Synopsis:    "Surface the error trail for a failed run",
-	Description: `Reads the local run store and prints each failed node's error chain.`,
+	Path:     "sparkwing runs errors",
+	Synopsis: "Surface the error trail for a failed run",
+	Description: `Prints each failed node's error chain. Reads the local run store,
+or the controller a --profile names.`,
+	PosArgs: []PosArg{
+		{Name: "[RUN_ID]", Desc: "Run identifier, when --run is not supplied"},
+	},
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier. Positional fallback accepted.", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Inspect a local failure", "sparkwing runs errors --run run-fictional"},
+		{"Inspect a local failure", "sparkwing runs errors run-fictional"},
 		{"As JSON", "sparkwing runs errors --run run-fictional -o json"},
+		{"Read a controller-held run", "sparkwing runs errors run-fictional --profile prod"},
 	},
 }
 
@@ -2768,7 +2805,12 @@ first step. Steps therefore run again, so a job with side effects
 needs the same idempotency a restarted pod already demands.
 
 A job that finishes before the stop lands is left alone. Bouncing
-again is allowed -- one request is one restart.`,
+again is allowed -- one request is one restart.
+
+The local runner is what acts on the request, whether the run's state
+lives here or on a controller. A job the in-cluster Kubernetes runner
+executes records the request and nothing consumes it, so the job keeps
+running; cancel the run and retry it instead.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id owning the job", Group: "Input"},
 		{Name: "node", Argument: "NODE_ID", Desc: "Job id to bounce", Group: "Input"},
@@ -2778,8 +2820,8 @@ again is allowed -- one request is one restart.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Bounce a wedged job in a local run", "sparkwing runs bounce --run run-fictional --node build"},
-		{"Bounce a job in a cluster run", "sparkwing runs bounce --run run-fictional --node build --profile prod"},
+		{"Bounce a wedged job", "sparkwing runs bounce --run run-fictional --node build"},
+		{"Bounce a job in a run a controller holds", "sparkwing runs bounce --run run-fictional --node build --profile prod"},
 	},
 }
 
@@ -3550,19 +3592,23 @@ overlay already matches. The repository's module file stays unchanged.`,
 
 var cmdSparksUpdate = Command{
 	Path:     "sparkwing pipeline sparks update",
-	Synopsis: "Re-resolve one or all libraries",
-	Description: `Re-runs resolution for every declared library (or a single
-named one) and re-materializes the overlay modfile. For a
-range or 'latest' constraint this picks up any new tag from
-the module proxy; for an exact pin it is a no-op.`,
+	Synopsis: "Re-resolve every declared library",
+	Description: `Re-runs resolution for every declared library and
+re-materializes the overlay modfile. For a range or 'latest'
+constraint this picks up any new tag from the module proxy;
+for an exact pin it is a no-op.
+
+The overlay is rebuilt from the whole manifest in one pass, so
+there is no single-library update: --name is refused. To hold
+one library still, pin its "version:" field in
+.sparkwing/sparkwing.yaml.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Restrict update to one library (name or source); omit to update all", Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Refused; update re-resolves every declared library", Group: "Input"},
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
 		{"Update every declared library", "sparkwing pipeline sparks update"},
-		{"Update one by name", "sparkwing pipeline sparks update --name fictional-sparks"},
 	},
 }
 

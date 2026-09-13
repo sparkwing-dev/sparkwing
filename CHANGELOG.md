@@ -20,10 +20,102 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.1] - 2026-09-13
+
+### Added
+
+- **cli:** `sparkwing configure init` reports whether the checkout it stands in
+  runs its declared git hooks, and names the command that arms them. It
+  installs nothing and changes no git configuration; a fresh clone simply no
+  longer has to guess whether its gates fire. The verdict is the same one
+  `sparkwing pipeline hooks survey` computes, and `-o json` carries it as a
+  `hooks` record.
+- **cli:** `sparkwing daemon stop` drains an answering admission daemon and
+  leaves it stopped. It uses the same wire drain a restart does, launches no
+  successor, and waits for the admission socket to go quiet and the election
+  lock to be released; the supervisor exits with the worker it started. An
+  absent daemon is a no-op and exits zero, and the report names the build that
+  was stopped. Every `daemon` report now carries a `stopped` boolean, so
+  `daemon status -o json` and `daemon restart -o json` gain the field too.
+- **cli:** `sparkwing runs status` and `sparkwing runs errors` take the run id as
+  a positional argument, so `sparkwing runs status run-20260910-...` works.
+  `--run` keeps working; passing both refuses.
+- **cli:** `sparkwing runs errors --profile NAME` reads a run held on that
+  profile's controller, and `-C/--sw-cd` re-anchors the profile search the way
+  it does on the other `runs` read verbs. It was the one read verb in the family
+  that could only read the local store.
+
+### Changed
+
+- **cli (Breaking):** `sparkwing pipeline sparks update --name NAME` refuses
+  instead of re-resolving every declared library. Resolution rebuilds the
+  overlay modfile from the whole manifest in one pass, so a single-library
+  update would drop the other libraries' resolved versions; the flag was
+  checked against the manifest and then discarded, so naming one library
+  re-resolved them all. See
+  [sparks update --name](docs/migrations/v0.50.1.md#sparks-update---name).
+
+### Fixed
+
+- **sdk:** `sparkwing/git.Clone` falls back to upstream on any gitcache
+  failure, which is what its doc comment promises. It fell back only for a 401,
+  a 3xx, or a credential prompt, and a cache answers a name it does not serve
+  with a 404 that git reports as "repository not found", so a clone of such a
+  name failed outright on any machine where a cache answered. `Clone` derives
+  the cache name from the URL's basename, so a name nothing registered costs a
+  failed request and a line on stderr rather than the clone.
+- **run:** `sparkwing run --sw-ref <ref>` removes the temporary git worktree it
+  checked the ref out into. Every earlier `--sw-ref` run left one registered in
+  the repository and a `$TMPDIR/sparkwing-from-*` directory beside it; reap
+  those with `git worktree prune` and by deleting the directories. The teardown
+  was a deferred call, and the exec path exits the process to carry the
+  pipeline's status, which skips defers.
+- **cli:** `sparkwing -o json run PIPELINE` refuses instead of handing `-o json`
+  to the pipeline, which rejected it as an unknown flag. A run's stream is
+  pretty on a terminal and NDJSON when piped, and `SPARKWING_LOG_FORMAT`
+  overrides that; flags for the pipeline itself still go after `--`.
+- **controller/client:** A 404 is a missing record only when it carries the JSON
+  error body the controller writes. A 404 from a wrong base URL, something
+  proxying the path, or a surface that does not register the route now returns
+  `client.ErrForeignNotFound` naming the URL it asked, instead of
+  `store.ErrNotFound`. A pipeline pointed at the wrong controller read as a
+  pipeline that had never run and rebuilt everything on every run.
+- **cli:** `sparkwing pipeline publish --profile NAME` uploads to the backend
+  that profile serves pipeline binaries from -- its `cache.binaries` sub-spec
+  when it declares one, its cache surface otherwise. The flag was read for its
+  name and then discarded, so a publish that named a profile refused with an
+  error telling the operator to name a profile.
+- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
+  that takes the connection and then fails the handshake, with the probe error.
+  The sweep dropped every peer whose probe failed, so a machine holding wedged
+  peer daemons read as a machine holding none. The report carries them under
+  `faulted_peers`. A peer that never answered the dial, or that ran out of
+  doctor's budget, stays out of the report.
+
+### Removed
+
+- **cli:** The retired `dashboard` noun reads as an unknown subcommand. The
+  parsing that recognized the old spelling and named `sparkwing serve` carried
+  readers across [v0.49.0](docs/migrations/v0.49.0.md#serve-command), which
+  removed the command and whose guide carries the full command map.
+
+### Docs
+
+- **runs bounce:** The reference page no longer implies a bounce reaches a job
+  the in-cluster Kubernetes runner executes. The local runner is the only one
+  that consumes a pending bounce, whether the run's state lives locally or on a
+  controller; a job running as a Kubernetes Job keeps running and the page now
+  says to cancel and retry instead.
 ## [v0.50.0] - 2026-09-12
 
 ### Added
 
+- **api:** `pkg/gitenv` carries a git hook's index binding across the unbinding
+  that keeps it from reaching the commands a hook runs. `Unbind` records the
+  path, `GateIndex` hands it back to the one command that should read the
+  staged content, and `ShellUnbind` is the same for a hook that runs before
+  this process does. It was internal, so a pipeline job that needed the same
+  answer carried its own copy.
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
 - **admission:** `sparkwing queue` reports how many host CPU readings the daemon
   could not separate its own runs' work out of, over how many it took, through
@@ -2442,7 +2534,7 @@ under `.apidiff/` are the machine-readable form of this list.
   answers `admin` only until `sparkwing secrets set --shared` opens it to every run
   (schema 23). `admin` remains a superset, so existing tokens keep working; see the
   [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#breaking-runner-scopes-split-out-of-admin).
 
 - **cli:** The admission daemon's unix socket is now private to its user. Its path stays
   a pure function of `SPARKWING_HOME`, so every caller resolves the same socket whatever
@@ -2489,7 +2581,7 @@ under `.apidiff/` are the machine-readable form of this list.
   deprecated and ignored and the chart no longer renders it. A token-backed dashboard
   that binds a non-loopback address without `--require-login` refuses to start. See the
   [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
 
 - **web:** `Strict-Transport-Security` now needs evidence that browsers reach the
   dashboard over TLS: a TLS listener, `X-Forwarded-Proto: https` from a peer inside
@@ -2510,7 +2602,7 @@ under `.apidiff/` are the machine-readable form of this list.
   lookup that fails on the store or the signing key now answers `500` instead of `401`,
   so the dashboard reports a backend fault instead of signing the browser out. See the
   [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
 
 - **cache:** The warm-pool controller now accepts only registry references in
   `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional tag, and
@@ -2578,26 +2670,26 @@ under `.apidiff/` are the machine-readable form of this list.
   Sparkwing machine token shape instead of any string, and a request that arrives at the
   concurrent-stream cap waits a few seconds for a slot before answering `503` with
   `Retry-After`. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#cache-reads-require-the-bearer-token).
 
 - **cache:** The unauthenticated `/metrics` endpoint no longer labels its fetch and
   reclone series with the repository directory name, which is an offline-computable hash
   of the clone URL. Scraping the cache can no longer enumerate the mirror set or confirm
   a guessed repository. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#cache-metrics-no-longer-name-repositories).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#cache-metrics-no-longer-name-repositories).
 
 - **cache:** A workspace snapshot ref past `WORKSPACE_SEED_MAX_AGE` is now moved to
   `refs/sparkwing-workspace-archive/` instead of being deleted with its objects pruned,
   so retrying an older `pipeline trigger --working-tree` run still finds its source.
   Archived refs are dropped after seven times the window, or once 128 accumulate. See
   the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#expired-workspace-seeds-are-archived-not-deleted).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#expired-workspace-seeds-are-archived-not-deleted).
 
 - **cache:** `sparkwing-full` now renders `SPARKWING_CACHE_URL` on the controller beside
   `SPARKWING_CACHE_TOKEN`, so the controller's `/api/v1/gitcache/*` proxy works on a
   stock install instead of answering `404 gitcache proxy is not configured`. Override it
   with `controller.cache.url`. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#the-controller-is-told-where-its-cache-is).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#the-controller-is-told-where-its-cache-is).
 
 - **controller (Breaking):** A node claim now binds to the claiming token -- its prefix
   segment and principal name -- as well as to the client-supplied `holder_id`, and the
@@ -2612,7 +2704,7 @@ under `.apidiff/` are the machine-readable form of this list.
   serves plaintext arguments, because the whole API is open there and a redacted
   argument would execute as the literal `***`. Runner tokens claiming their own work are
   unaffected. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-token).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.40.0/docs/migrations/v0.50.1.md#node-claims-bind-to-the-claiming-token).
 
 - **docs:** the security guide names `sparkwing cluster tokens list`, the CLI reference
   lists `secrets --repo`, and the gitleaks history exception covers the argon2 hashing
@@ -2648,7 +2740,7 @@ under `.apidiff/` are the machine-readable form of this list.
   run with `--sw-local-only`, so a project's default profile cannot make local Git
   actions depend on a controller. Pass `--profile NAME` to keep shared storage. See the
   [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#managed-git-hooks-run-locally-by-default).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#managed-git-hooks-run-locally-by-default).
 
 ### Fixed
 
@@ -2662,7 +2754,7 @@ under `.apidiff/` are the machine-readable form of this list.
   upgraded SQL store. Built-in state backends now return `store.ErrSecretInputHash` for
   an unsafe `CreateRun`, and `POST /api/v1/runs` returns 400, so an older remote writer
   cannot reintroduce the hash. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#secret-input-hash-migration).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#secret-input-hash-migration).
 
 - **helm:** A configured web controller-token Secret is now required, so a missing
   Secret or key keeps the web pod unready instead of starting a proxy without its
@@ -2737,7 +2829,7 @@ under `.apidiff/` are the machine-readable form of this list.
   an `admin` principal. Cluster-mode `sparkwing debug rerun` sends the pod manifest to
   `kubectl` on stdin, keeping env values off the command line and out of the echoed
   banner. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#dispatch-snapshot-credentials).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#dispatch-snapshot-credentials).
 
 - **cache:** Cached pipeline binaries now carry a verified sha-256 digest. The cache
   stores the digest and the writing principal's token fingerprint beside each uploaded
@@ -2759,19 +2851,19 @@ under `.apidiff/` are the machine-readable form of this list.
   to `admin`, and `sparkwing cluster users add --scope` creates narrower accounts.
   `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
   [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#dashboard-proxy-allow-list).
 
 - **runner (Breaking):** Runner Job pods mount no ServiceAccount token, and `--runner
   k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently landing
   pipeline code on the namespace default ServiceAccount. `--trigger-runner k8s` now
   requires `--trigger-runner-sa` (or `SPARKWING_RUNNER_SA`) at startup instead of
   failing once per claimed trigger. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#runner-serviceaccount-tokens-and-rbac).
 
 - **controller (Breaking):** `controller.PoolConfig` adds `WarmerServiceAccount`, and
   `pool.WarmPVC` and `pool.WarmingLoop` now accept the warmer ServiceAccount name so
   integrations can use a release-scoped identity. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#runner-serviceaccount-tokens-and-rbac).
 
 - **helm (Breaking):** The runner Role no longer reads namespace Secrets, ConfigMaps,
   pods, or events, and no chart pod mounts a ServiceAccount token unless
@@ -2783,7 +2875,7 @@ under `.apidiff/` are the machine-readable form of this list.
   the warm pool outside that chart must create that ServiceAccount in the pool
   namespace; `pool.WarmerServiceAccountName` exposes its exact name to Go integrations.
   See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#runner-serviceaccount-tokens-and-rbac).
 
 - **cache:** The cache no longer serves an authenticated endpoint to a request that
   omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`, `POST /upload`, and
@@ -2798,7 +2890,7 @@ under `.apidiff/` are the machine-readable form of this list.
   pipeline hooks install`. A config holding a name outside that pattern no longer loads
   at all, so every command that reads it fails until the pipeline is renamed in the YAML
   and in the matching `Register(...)` string. See the [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/_unreleased.md#pipeline-name-charset).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.39.0/docs/migrations/v0.50.1.md#pipeline-name-charset).
 
 - **storage:** Artifact keys are now validated before the filesystem store joins them to
   a path, and the store opens every blob through `os.Root`, so `GET
@@ -2873,7 +2965,7 @@ under `.apidiff/` are the machine-readable form of this list.
   an explicit Kubernetes context, image prefix and tag, and exact namespace/release
   cleanup allow-list; it never creates or deletes cluster infrastructure. See the
   [migration
-  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.38.0/docs/migrations/_unreleased.md#kubernetes-acceptance-testing).
+  guide](https://github.com/sparkwing-dev/sparkwing/blob/v0.38.0/docs/migrations/v0.50.1.md#kubernetes-acceptance-testing).
 
 ### Fixed
 

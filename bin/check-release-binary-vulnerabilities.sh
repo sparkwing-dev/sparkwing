@@ -15,7 +15,7 @@ if [[ -n "${GOVULNCHECK:-}" ]]; then
 elif command -v govulncheck >/dev/null 2>&1; then
   scanner=(govulncheck)
 elif command -v go >/dev/null 2>&1; then
-  scanner=(env -u GOOS -u GOARCH -u GOAMD64 -u GOARM64 go run golang.org/x/vuln/cmd/govulncheck@v1.4.0)
+  scanner=(env -u GOOS -u GOARCH -u GOAMD64 -u GOARM64 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0)
 else
   echo "release vulnerability scan: neither govulncheck nor go is available" >&2
   exit 2

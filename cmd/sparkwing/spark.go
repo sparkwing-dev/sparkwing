@@ -436,7 +436,7 @@ func runSparksResolve(args []string) error {
 func runSparksUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksUpdate.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
-	name := fs.String("name", "", "restrict update to a single library (by name or source)")
+	name := fs.String("name", "", "refused: update re-resolves every declared library")
 	if err := parseAndCheck(cmdSparksUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -444,13 +444,12 @@ func runSparksUpdate(args []string) error {
 		return err
 	}
 	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark update: unexpected positional %q (use --name)", rest[0])
+		return fmt.Errorf("spark update: unexpected positional %q", rest[0])
 	}
 	sparkwingDir := *dir
 	if sparkwingDir == "" {
 		sparkwingDir = defaultSparkwingDir()
 	}
-	only := *name
 	m, path, err := loadManifestForWrite(sparkwingDir)
 	if err != nil {
 		return err
@@ -458,17 +457,10 @@ func runSparksUpdate(args []string) error {
 	if len(m.Libraries) == 0 {
 		return fmt.Errorf("spark update: %s has no libraries", path)
 	}
-	if only != "" {
-		found := false
-		for _, lib := range m.Libraries {
-			if lib.Name == only || lib.Source == only {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("spark update: no library named %q in %s", only, path)
-		}
+	if *name != "" {
+		return fmt.Errorf("spark update: --name is not supported. Resolution rebuilds the overlay from the whole manifest, "+
+			"so updating %q alone would drop the other libraries' resolved versions.\n"+
+			"Pin its \"version:\" field in %s to hold it still, then run `sparkwing pipeline sparks update`", *name, path)
 	}
 	ctx := context.Background()
 	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
