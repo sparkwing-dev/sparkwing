@@ -38,6 +38,27 @@ unlock.
   unknown subcommand. `sparkwing serve` is the supported command group; see
   [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
   and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map
+### Fixed
+
+- **dashboard:** A log line over 1 MiB says so. Such a line ends the scan for
+  the whole rest of the file, so `GET /api/v1/runs/{id}/logs/{node}` and the
+  live SSE tail stopped at it and still answered 200, and
+  `GET /api/v1/runs/{id}/logs/search` and `GET /api/v1/runs/grep` silently
+  stopped scanning that node. The two log routes now close with a notice
+  naming the limit and pointing at `format=raw`, which streams the log
+  unrendered and complete, and the two search routes carry `"truncated": true`.
+- **config:** A pipeline's `on:` and `guards:` mappings reject a key outside
+  their schema, naming the field and the line. Only the pipeline entry's own
+  keys were checked before, so `on: {pre-commit: {}}` loaded clean and
+  installed no hook, and `guards: {rejct: [...]}` loaded clean and dropped the
+  reject fence. Keys nested deeper, such as `on.push.branches`, are still
+  matched loosely.
+### Removed
+
+- **web:** The analytics page drops its three unbuilt sections
+  Slowest pipelines, failure clustering, and agent utilization rendered
+  placeholder text for views the dashboard does not build. The trend charts
+  stay.
 
 ### Security
 
