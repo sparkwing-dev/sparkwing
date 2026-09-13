@@ -976,9 +976,16 @@ func TestScopedStepsSeeARepoRootNameThatStartsWithADash(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "-dash.go"), "package fixture\n\nfunc  Dash( ) int { return 1 }\n")
 	gitAddAll(t, root)
 
-	err := runGofmtOnTheChange(context.Background())
+	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != "-dash.go" {
+		t.Fatalf("staged Go files = %q, want the one name that begins with a dash", files)
+	}
+	err = runGofmtOnTheChange(context.Background())
 	if err == nil {
-		t.Fatal("gofmt passed an unformatted file")
+		t.Fatal("gofmt passed an unformatted file, so the leading-dash name never reached it")
 	}
 	if strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Errorf("gofmt read the file name as a flag: %v", err)

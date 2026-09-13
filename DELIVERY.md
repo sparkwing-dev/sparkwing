@@ -16,11 +16,11 @@ launcher when testing isolated tool state.
 
 - **The three local tiers:** `pre-commit` judges the staged change against
   this repo's source policy and nothing else, which is what keeps it cheap
-  enough to run on every commit; the bullet below measures it, and the git
-  pre-commit hook runs it. `gate` is the broad check, and the
-  git pre-push hook runs it. `pre-release` is the release-boundary tier, which
-  the release pipeline runs and no git hook fires; hosted CI runs `gate` and
-  `pre-release` on every pull request and every push to main.
+  enough to run on every commit; the git pre-commit hook runs it. `gate` is the
+  broad check, and the git pre-push hook runs it. `pre-release` is the
+  release-boundary tier, which the release pipeline runs and no git hook fires;
+  hosted CI runs `gate` and `pre-release` on every pull request and every push
+  to main.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` is the proof they fire; a definition alone
   proves nothing.

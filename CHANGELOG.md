@@ -187,8 +187,8 @@ unlock.
   names. `sparkwing run pre-commit` is source policy only -- gofmt, the
   configured formatters, tracker IDs, em dashes, comments, tracked binaries,
   the docs mirror, changelog links, and home resolution -- and finishes in
-  1.3 s warm and 3.8 s on a typical commit, measured on a 16-core Linux host,
-  which is what lets the git pre-commit hook run on every commit. The broad check that vets, builds, tests and lints every committed
+  about two seconds, which is what lets the git pre-commit hook run on every
+  commit. The broad check that vets, builds, tests and lints every committed
   module and exercises the dashboard is now `sparkwing run gate`, and the git
   pre-push hook runs it. The release-boundary checks (race, chaos,
   vulnerabilities, dependency freshness, public interfaces, Terraform) are now

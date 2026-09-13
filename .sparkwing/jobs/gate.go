@@ -289,8 +289,8 @@ func runFormatters(ctx context.Context) error {
 	}
 	var execErr *sparkwing.ExecError
 	if errors.As(runErr, &execErr) && strings.TrimSpace(execErr.Stdout) != "" {
-		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt %s`:\n%s",
-			scope, strings.Join(files, " "), strings.TrimSpace(execErr.Stdout))
+		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt -- %s`:\n%s",
+			scope, shellQuoteAll(files), strings.TrimSpace(execErr.Stdout))
 	}
 	return fmt.Errorf("golangci-lint fmt: %w", runErr)
 }
@@ -352,16 +352,15 @@ func shellQuoteAll(paths []string) string {
 // safety: git quotes a path holding a non-ASCII byte unless core.quotePath is
 // off, and a quoted name matches no suffix and stats to nothing, so the file
 // drops out of every scoped step and the step passes without judging it. -z
-// also carries a name holding a newline, which no line-split can.
+// also carries a name holding a newline, which no line-split can, and Capture
+// rather than String because String trims the blob, eating the leading byte of
+// a name that begins with whitespace and sorts first.
 func listNames(ctx context.Context, args string) ([]string, error) {
-	// safety: String trims the whole blob, which eats the leading byte of a
-	// NUL-delimited name that starts with whitespace. Such a repo-root path
-	// sorts first, so it would drop out of scope and the step would pass it.
 	res, err := sparkwing.Bash(ctx, "git -c core.quotePath=false "+args).Capture()
 	if err != nil {
 		return nil, err
 	}
-	return splitNULNames(out), nil
+	return splitNULNames(res.Stdout), nil
 }
 
 func stagedNames(ctx context.Context) ([]string, error) {
@@ -373,11 +372,11 @@ func stagedNames(ctx context.Context) ([]string, error) {
 	if index := hookIndex(); index != "" {
 		cmd = cmd.Env("GIT_INDEX_FILE", index)
 	}
-	out, err := cmd.String()
+	res, err := cmd.Capture()
 	if err != nil {
 		return nil, err
 	}
-	return splitNULNames(out), nil
+	return splitNULNames(res.Stdout), nil
 }
 
 func hookIndex() string {
@@ -396,7 +395,7 @@ func hookIndex() string {
 
 func splitNULNames(out string) []string {
 	var names []string
-	for _, name := range strings.Split(res.Stdout, "\x00") {
+	for _, name := range strings.Split(out, "\x00") {
 		if name != "" {
 			names = append(names, name)
 		}
