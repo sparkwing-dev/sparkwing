@@ -17,10 +17,13 @@ func (PreCommit) ShortHelp() string {
 }
 
 func (PreCommit) Help() string {
-	return "Judges the staged change against this repository's source policy and nothing else: " +
-		"gofmt and the configured formatters (gofumpt + goimports) over the staged Go files, " +
-		"no em dashes and no internal tracker IDs in the staged files, no disallowed comments in the " +
-		"staged change (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), no tracked " +
+	return "Judges the change against this repository's source policy and nothing else. Each scoped step " +
+		"reads the staged change, or the change since origin/main when nothing is staged, and names the " +
+		"mode it ran in: " +
+		"gofmt and the configured formatters (gofumpt + goimports) over the Go files, " +
+		"no em dashes and no internal tracker IDs, no disallowed comments (only GoDoc on " +
+		"exported APIs and // hack:/safety:/bug:/perf: tags), which in range mode also reads " +
+		"every untracked Go file, and repo-wide, no tracked " +
 		"ELF, Mach-O or PE executable, an embedded pkg/docs/ mirror that matches docs/ and CHANGELOG.md, " +
 		"live links in released changelog entries, and no product file that resolves the sparkwing home " +
 		"itself instead of through internal/paths.DefaultPaths. Every step reads files; none compiles, " +

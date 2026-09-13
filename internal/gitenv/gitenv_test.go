@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func TestGateIndexVar_KeepsTheNameOtherModulesReadItBy(t *testing.T) {
+	// safety: the .sparkwing pipeline module cannot import this package, so its
+	// staged probe reads the literal. Renaming the constant alone would leave
+	// every scoped step reading a stale repository index and every test green.
+	if GateIndexVar != "SPARKWING_GATE_INDEX" {
+		t.Fatalf("GateIndexVar = %q; the pipeline module reads the literal", GateIndexVar)
+	}
+}
+
 func TestUnbind_DropsEveryRepositoryBindingVariable(t *testing.T) {
 	t.Setenv(GateIndexVar, "")
 	for _, name := range bindingVars {

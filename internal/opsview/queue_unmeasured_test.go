@@ -124,3 +124,79 @@ func TestExternalAgeNote_DistinguishesMeasurementFromEffectiveValue(t *testing.T
 		t.Fatalf("ExternalAgeNote = %q, want %q", got, want)
 	}
 }
+
+func coresUnattributed(a *wingwire.ExternalAttribution) wingwire.QueueState {
+	return wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", ExternalSource: wingwire.ExternalUnattributed},
+		},
+		ExternalAttribution: a,
+	}
+}
+
+func TestExternalAttributionNote_SaysWhichWayTheFigureIsWrong(t *testing.T) {
+	qs := coresUnattributed(&wingwire.ExternalAttribution{
+		Samples: 120, SamplerUnreadable: 7, RunsAwaitingMeasure: 3,
+	})
+	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
+		" so external reads high and available reads low by it" +
+		" (-o plain breaks the readings down by cause)"
+	if got := opsview.ExternalAttributionNote(qs); got != want {
+		t.Fatalf("attribution note = %q, want %q: the note reports a condition holding now, so lifetime counts belong in the rows that are labelled as lifetime",
+			got, want)
+	}
+}
+
+func TestExternalAttributionNote_IsSilentOnceTheFigureIsClean(t *testing.T) {
+	if got := opsview.ExternalAttributionNote(wingwire.QueueState{}); got != "" {
+		t.Fatalf("attribution note = %q for a daemon that predates the field, want empty", got)
+	}
+	clean := wingwire.QueueState{
+		Resources:           []wingwire.ResourceState{{Key: "cores", ExternalSource: wingwire.ExternalMeasured}},
+		ExternalAttribution: &wingwire.ExternalAttribution{Samples: 900, SamplerUnreadable: 1},
+	}
+	if got := opsview.ExternalAttributionNote(clean); got != "" {
+		t.Fatalf("attribution note = %q, want empty: one bad reading at boot must not print on every queue for the daemon's life", got)
+	}
+}
+
+func TestExternalAttributionNote_IsSilentBeforeAnyReading(t *testing.T) {
+	qs := coresUnattributed(&wingwire.ExternalAttribution{})
+	if got := opsview.ExternalAttributionNote(qs); got != "" {
+		t.Fatalf("attribution note = %q, want empty: a daemon that has read nothing yet has no reading to describe", got)
+	}
+}
+
+func TestExternalAttributionNote_IsSilentWhenExternalIsIgnored(t *testing.T) {
+	qs := coresUnattributed(&wingwire.ExternalAttribution{Samples: 40, RunsWithoutProcess: 2})
+	qs.IgnoreExternal = true
+	if got := opsview.ExternalAttributionNote(qs); got != "" {
+		t.Fatalf("attribution note = %q, want empty: admission subtracts no external load at all here, so nothing reads low by it", got)
+	}
+}
+
+func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
+	qs := wingwire.QueueState{
+		ExternalAttribution: &wingwire.ExternalAttribution{
+			Samples: 900, Attributed: 880, SamplerUnreadable: 2,
+			RunsWithoutProcess: 3, RunsProcessGone: 5, RunsAwaitingMeasure: 10,
+		},
+	}
+	var out strings.Builder
+	if err := opsview.RenderQueue(&out, qs, "plain"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{
+		"external-attribution-samples\t900\n",
+		"external-attribution-attributed\t880\n",
+		"external-attribution-sampler-unreadable\t2\n",
+		"external-attribution-runs-without-process\t3\n",
+		"external-attribution-runs-process-gone\t5\n",
+		"external-attribution-runs-awaiting-measure\t10\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("plain output = %q, want the row %q: a machine reader needs the denominator even when nothing went wrong, and one row per count so a later count is additive",
+				out.String(), want)
+		}
+	}
+}
