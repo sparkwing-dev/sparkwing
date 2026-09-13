@@ -57,6 +57,14 @@ unlock.
 
 ### Fixed
 
+- **wingd:** A nested run reattaching to a restored lease keeps its own
+  identity. The `reattach` message carries an optional `run_id` and the daemon
+  grants the member it names. Memberships previously went out in the lease's
+  own order, so a child that reconnected before its parent took the parent's
+  run id, and the child's crash then cancelled the still-running parent. A
+  client that sends no `run_id` is served exactly as before, so no protocol
+  floor moves; one that names a run the lease does not hold is now refused
+  rather than granted another member's identity.
 - **config:** A pipeline's `on.push`, `on.pull_request` and `on.webhook`
   mappings reject a key outside their schema, naming the field and the line.
   `on: {webhook: {pathh: /review}}` loaded clean and exposed the pipeline on

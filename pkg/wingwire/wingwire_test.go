@@ -30,7 +30,7 @@ func roundTripMessages() []Message {
 		&Queued{RunID: "r1", Key: "cores", Position: 2, QueueLength: 3},
 		&Evicted{RunID: "r1", Key: "deploy-lock", SupersededBy: "r2", Policy: PolicyCancelOthers},
 		&Release{LeaseToken: "lease-def456"},
-		&Reattach{LeaseToken: "lease-def456"},
+		&Reattach{LeaseToken: "lease-def456", RunID: "deploy-20260710-120000"},
 		&DrainRequest{SuccessorVersion: "v0.16.0"},
 		&DrainAck{HoldersRemaining: 3},
 		&CancelLease{RunID: "deploy-20260710-120000"},

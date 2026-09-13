@@ -329,6 +329,11 @@ type LivenessAck struct {
 // lease is gone and the run must submit a new [AdmissionRequest].
 type Reattach struct {
 	LeaseToken string `json:"lease_token"`
+	// RunID names the member of the lease this connection is resuming.
+	// Without it a restored multi-member lease hands its memberships out in
+	// order, so a child reconnecting before its parent is given the parent's
+	// identity. Empty from a client that predates the field.
+	RunID string `json:"run_id,omitempty"`
 }
 
 // DrainRequest tells a daemon to stop admitting new work while

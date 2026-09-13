@@ -85,12 +85,15 @@ func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwir
 	}
 }
 
-func (cl *Client) Reattach(ctx context.Context, token string) (*Lease, error) {
+// Reattach resumes the lease token on a fresh connection. runID names which
+// member of a multi-member lease is resuming; a restored lease hands its
+// memberships out in order when the frame names no run.
+func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
 	retry := newRetry("re-attach", 0)
 	for {
-		lease, terminal, transient := cl.readReattach(token)
+		lease, terminal, transient := cl.readReattach(token, runID)
 		if transient == nil {
 			return lease, terminal
 		}
@@ -103,8 +106,8 @@ func (cl *Client) Reattach(ctx context.Context, token string) (*Lease, error) {
 	}
 }
 
-func (cl *Client) readReattach(token string) (lease *Lease, terminal, transient error) {
-	if err := cl.write(&wingwire.Reattach{LeaseToken: token}); err != nil {
+func (cl *Client) readReattach(token, runID string) (lease *Lease, terminal, transient error) {
+	if err := cl.write(&wingwire.Reattach{LeaseToken: token, RunID: runID}); err != nil {
 		return nil, nil, err
 	}
 	msg, err := cl.dec.read()
@@ -215,7 +218,7 @@ func (l *Lease) recoverWatch() (recovered bool, recoverErr error) {
 		l.cl.opts.logf("lease %s: daemon connection lost and not recovered (%v); run continues without eviction watch or daemon-side cancel", l.RunID, err)
 		return false, err
 	}
-	if _, terminal, transient := l.cl.readReattach(l.Token); terminal != nil || transient != nil {
+	if _, terminal, transient := l.cl.readReattach(l.Token, l.RunID); terminal != nil || transient != nil {
 		recoverErr := errors.Join(terminal, transient)
 		l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v); run continues without eviction watch or daemon-side cancel",
 			l.RunID, recoverErr)

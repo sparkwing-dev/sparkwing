@@ -209,6 +209,7 @@ func runReattach(args []string) {
 	fs := flag.NewFlagSet("reattach", flag.ExitOnError)
 	home := fs.String("home", "", "")
 	token := fs.String("token", "", "")
+	run := fs.String("run", "", "")
 	graceMS := fs.Int("daemon-grace-ms", 3000, "")
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	_ = fs.Parse(args)
@@ -222,7 +223,7 @@ func runReattach(args []string) {
 	if err != nil {
 		fail("ensure daemon: %v", err)
 	}
-	lease, err := cl.Reattach(context.Background(), *token)
+	lease, err := cl.Reattach(context.Background(), *token, *run)
 	if err != nil {
 		fail("reattach: %v", err)
 	}
