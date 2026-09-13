@@ -2,7 +2,6 @@ package controller
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -255,14 +254,17 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
 			errors.New("secrets cipher: no key configured, so there is nothing to rotate to"))
 		return
 	}
-	rotated, err := s.store.RotateSecretValues(r.Context(), func(sec store.Secret) (string, error) {
+	skipped := []secretsRotateSkip{}
+	total, err := s.store.RotateSecretValues(r.Context(), func(sec store.Secret) (string, error) {
 		binding := bindingForRow(&sec)
 		plain := sec.Value
 		if secrets.IsEncrypted(plain) {
 			opened, oerr := openSecret(s.secretsCipher, binding, plain)
 			if oerr != nil {
+				// safety: one unreadable row must not cost every other row its rotation, so it keeps its bytes.
 				s.logger.Error("secret rotate: open envelope", "name", sec.Name, "repo", sec.Repo, "err", oerr)
-				return "", fmt.Errorf("secret %q did not open under the configured keys", sec.Name)
+				skipped = append(skipped, secretsRotateSkip{Name: sec.Name, Repo: sec.Repo})
+				return sec.Value, nil
 			}
 			plain = opened
 		}
@@ -276,10 +278,16 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		principal = p.Name
 	}
-	s.logger.Info("secrets rotated", "count", rotated, "principal", principal)
-	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: rotated})
+	s.logger.Info("secrets rotated", "count", total-len(skipped), "skipped", len(skipped), "principal", principal)
+	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: total - len(skipped), Skipped: skipped})
 }
 
 type secretsRotateResponse struct {
-	Rotated int `json:"rotated"`
+	Rotated int                 `json:"rotated"`
+	Skipped []secretsRotateSkip `json:"skipped"`
+}
+
+type secretsRotateSkip struct {
+	Name string `json:"name"`
+	Repo string `json:"repo,omitempty"`
 }

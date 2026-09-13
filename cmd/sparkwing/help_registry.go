@@ -3083,13 +3083,15 @@ var cmdSecretRotate = Command{
 back sealed under the key that controller is running with now, in one
 transaction. Run it after moving a controller onto a new key with the old
 one still configured as --secrets-previous-key-file
-(SPARKWING_SECRETS_PREVIOUS_KEY); once it reports the count, the old key
-can be dropped. A value the controller was holding as plaintext comes out
+(SPARKWING_SECRETS_PREVIOUS_KEY); drop the old key once a rotation reports
+nothing skipped. A value the controller was holding as plaintext comes out
 encrypted too, which is how an existing install turns encryption on
 without re-setting each secret by hand.
 
-The controller refuses when it has no key configured. Values never leave
-it: the rotation opens and reseals them in place.`,
+A row that opens under no configured key keeps the bytes it had and is
+listed by name; the rest of the table still rotates. The controller
+refuses when it has no key configured. Values never leave it: the
+rotation opens and reseals them in place.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile naming the controller to rotate", Required: true, Group: "System"},
 	},

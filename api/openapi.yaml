@@ -3407,10 +3407,12 @@ paths:
         current one, then the previous one when one is configured -- and
         writes it back sealed and bound under the current key, in one
         transaction. A value the controller was holding as plaintext comes
-        out encrypted. Once this answers, the previous key can be dropped.
+        out encrypted. A value that opens under neither key keeps the bytes
+        it had and is named in `skipped`, so one unreadable row costs the
+        others nothing. The previous key can be dropped once a rotation
+        answers with `skipped` empty.
 
-        Answers `400` when no key is configured, and `500` without changing
-        a row when any stored value opens under neither key.
+        Answers `400` when no key is configured.
       responses:
         "200":
           description: Rotation complete.
@@ -3419,11 +3421,25 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.secretsRotateResponse
                 type: object
-                required: [rotated]
+                required: [rotated, skipped]
                 properties:
                   rotated:
                     type: integer
                     description: Secret rows rewritten under the current key.
+                  skipped:
+                    type: array
+                    description: Rows left as they were because they opened under no configured key.
+                    items:
+                      x-sparkwing-go-type: pkg/controller.secretsRotateSkip
+                      type: object
+                      required: [name]
+                      properties:
+                        name: {type: string}
+                        repo:
+                          type: string
+                          description: Owning repository slug; absent on the unscoped row.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
 components:
   securitySchemes:

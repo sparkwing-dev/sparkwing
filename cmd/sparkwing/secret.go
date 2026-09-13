@@ -368,11 +368,7 @@ func runSecretRotate(args []string) error {
 		}
 		return err
 	}
-	on := v.String("profile")
-	if !fs.Changed("profile") {
-		return errors.New("secret rotate: --profile is required; the local store holds no encrypted values")
-	}
-	prof, err := resolveProfile(on)
+	prof, err := resolveProfile(v.String("profile"))
 	if err != nil {
 		return err
 	}
@@ -382,12 +378,26 @@ func runSecretRotate(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	rotated, err := c.RotateSecrets(ctx)
+	result, err := c.RotateSecrets(ctx)
 	if err != nil {
 		return fmt.Errorf("secret rotate: %w", err)
 	}
 	fmt.Fprintf(os.Stdout,
-		"%d secret(s) re-encrypted under the current key (on: %s); the previous key can now be dropped\n",
-		rotated, prof.Name)
+		"%d secret(s) re-encrypted under the current key (on: %s)\n", result.Rotated, prof.Name)
+	if len(result.Skipped) == 0 {
+		fmt.Fprintln(os.Stdout, "the previous key can now be dropped")
+		return nil
+	}
+	fmt.Fprintf(os.Stdout,
+		"%d secret(s) opened under no configured key and were left as they are:\n", len(result.Skipped))
+	for _, skip := range result.Skipped {
+		if skip.Repo == "" {
+			fmt.Fprintf(os.Stdout, "  %s\n", skip.Name)
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "  %s (repo %s)\n", skip.Name, skip.Repo)
+	}
+	fmt.Fprintln(os.Stdout,
+		"re-set those secrets, or name the key they were sealed under, before dropping the previous key")
 	return nil
 }
