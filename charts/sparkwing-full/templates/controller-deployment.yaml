@@ -95,6 +95,9 @@ spec:
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
             {{- end }}
+            {{- if .Values.controller.requireAuth }}
+            - "--require-auth"
+            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /data
@@ -139,6 +142,20 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.controller.secretsKey.name | quote }}
                   key: {{ .Values.controller.secretsKey.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.secretsPreviousKey.name }}
+            - name: SPARKWING_SECRETS_PREVIOUS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.secretsPreviousKey.name | quote }}
+                  key: {{ .Values.controller.secretsPreviousKey.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.bootstrapAdminToken.name }}
+            - name: SPARKWING_BOOTSTRAP_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.bootstrapAdminToken.name | quote }}
+                  key: {{ .Values.controller.bootstrapAdminToken.key | quote }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-controller"

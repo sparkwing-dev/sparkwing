@@ -113,6 +113,34 @@ controller:
     name: ""
     key: key
 
+  # The key stored secret values were sealed under before secretsKey.
+  # Read-only: a value that does not open under secretsKey is tried
+  # against this one, which is what keeps every value readable across a
+  # key change. Run `sparkwing secrets rotate --profile <name>` to
+  # re-encrypt everything under secretsKey, then clear this.
+  secretsPreviousKey:
+    # Empty name disables; the controller holds one key.
+    name: ""
+    key: key
+
+  # The first admin token, read before the listener binds. When the
+  # tokens table is empty the controller stores that token's hash as an
+  # admin credential, so a provisioned controller never serves a request
+  # unauthenticated and requireAuth is satisfied on its first start.
+  # Ignored once any token exists. The value has to look like a minted
+  # token: "swu_" followed by at least 28 characters, for example
+  # `printf 'swu_%s' "$(openssl rand -hex 24)"`.
+  bootstrapAdminToken:
+    # Empty name disables; the controller bootstraps through an open window.
+    name: ""
+    key: token
+
+  # Refuse to start when the tokens table is empty, which turns an
+  # accidentally open controller into a failed rollout instead of a
+  # running hole. Set bootstrapAdminToken alongside it on a fresh
+  # install, or the pod has no way to reach a non-empty table.
+  requireAuth: false
+
   # State DB lives on a PVC. Single-instance, so RWO is fine.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.

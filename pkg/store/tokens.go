@@ -121,29 +121,99 @@ type tokenExecer interface {
 	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 }
 
+// MinSuppliedTokenLen is the shortest raw token [Store.CreateTokenIfNoneExist]
+// accepts. A minted token runs to 47 characters; provisioning that supplies
+// its own credential still has to carry entropy a guesser cannot walk.
+const MinSuppliedTokenLen = 32
+
+// ValidateRawToken reports whether raw is shaped like a usable token of
+// this kind: the kind's three-character marker, an underscore, and enough
+// characters after it. A credential minted elsewhere has to carry that
+// shape because the indexed prefix is what a bearer lookup selects on.
+func ValidateRawToken(raw, kind string) error {
+	marker, ok := prefixForKind(kind)
+	if !ok {
+		return fmt.Errorf("tokens: unknown kind %q", kind)
+	}
+	if TokenKindFromPrefix(raw) != kind {
+		return fmt.Errorf("tokens: a %s token must start with %q", kind, marker+"_")
+	}
+	if len(raw) < MinSuppliedTokenLen {
+		return fmt.Errorf("tokens: a %s token must be at least %d characters, got %d",
+			kind, MinSuppliedTokenLen, len(raw))
+	}
+	return nil
+}
+
+// CreateTokenIfNoneExist stores raw as a token for principal when the
+// tokens table holds no rows at all, and reports whether it wrote one.
+// The emptiness check and the insert share one transaction, so two
+// processes bootstrapping the same database write one token between
+// them. Only the argon2 hash of raw reaches the table; the caller
+// already holds the credential itself.
+func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error) {
+	if err := ValidateRawToken(raw, kind); err != nil {
+		return false, err
+	}
+	ctx := context.Background()
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, fmt.Errorf("tokens: bootstrap: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tokens`).Scan(&existing); err != nil {
+		return false, fmt.Errorf("tokens: bootstrap: count: %w", err)
+	}
+	if existing > 0 {
+		return false, nil
+	}
+	if _, err := insertTokenRow(ctx, tx, raw, principal, kind, scopes, 0, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("tokens: bootstrap: %w", err)
+	}
+	return true, nil
+}
+
 func createTokenRow(
 	ctx context.Context, e tokenExecer,
 	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error) {
-	if principal == "" {
-		return "", nil, errors.New("tokens: principal is required")
-	}
 	marker, ok := prefixForKind(kind)
 	if !ok {
 		return "", nil, fmt.Errorf("tokens: unknown kind %q", kind)
+	}
+	raw, err := mintRaw(marker)
+	if err != nil {
+		return "", nil, err
+	}
+	tok, err := insertTokenRow(ctx, e, raw, principal, kind, scopes, ttl, now)
+	if err != nil {
+		return "", nil, err
+	}
+	return raw, tok, nil
+}
+
+func insertTokenRow(
+	ctx context.Context, e tokenExecer, raw string,
+	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
+) (*Token, error) {
+	if principal == "" {
+		return nil, errors.New("tokens: principal is required")
+	}
+	if err := ValidateRawToken(raw, kind); err != nil {
+		return nil, err
 	}
 	var expires *time.Time
 	if ttl > 0 {
 		t := now.Add(ttl)
 		expires = &t
 	}
-	raw, err := mintRaw(marker)
-	if err != nil {
-		return "", nil, err
-	}
 	hash, err := hashToken(raw)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	scoped := dedupeScopes(scopes)
 	if _, err := e.ExecContext(ctx, `
@@ -154,9 +224,9 @@ func createTokenRow(
 		now.UTC().Unix(),
 		expiresUnix(expires),
 	); err != nil {
-		return "", nil, fmt.Errorf("tokens: insert: %w", err)
+		return nil, fmt.Errorf("tokens: insert: %w", err)
 	}
-	return raw, &Token{
+	return &Token{
 		Hash:      hash,
 		Prefix:    raw[:PrefixLen],
 		Principal: principal,

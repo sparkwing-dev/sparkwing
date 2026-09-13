@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	flag "github.com/spf13/pflag"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,6 +51,19 @@ func run(args []string) error {
 		"kubeconfig path when --pool is set (empty = in-cluster)")
 	secretsKeyFile := fs.String("secrets-key-file", "",
 		"path to a file containing 32 raw bytes for secret encryption (alternative to SPARKWING_SECRETS_KEY)")
+	secretsPreviousKeyFile := fs.String("secrets-previous-key-file", "",
+		"path to the key secret values were sealed under before the current one "+
+			"(alternative to SPARKWING_SECRETS_PREVIOUS_KEY). Read-only: a stored "+
+			"value that does not open under the current key is tried against this "+
+			"one, so a key swap keeps every value readable until "+
+			"`sparkwing secrets rotate` has re-encrypted them.")
+	bootstrapAdminTokenFile := fs.String("bootstrap-admin-token-file", "",
+		"path to a file holding the first admin token (alternative to "+
+			"SPARKWING_BOOTSTRAP_ADMIN_TOKEN, which carries the value itself). "+
+			"When the tokens table is empty the controller stores the hash of "+
+			"that token as an admin credential before it binds the listener, so "+
+			"a provisioned controller never serves a request unauthenticated. "+
+			"Ignored once any token exists.")
 	cachePodURL := fs.String("cache-pod-url", os.Getenv("CACHE_POD_URL"),
 		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
 			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
@@ -108,7 +123,26 @@ func run(args []string) error {
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-controller"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
-	cipher, cerr := loadSecretsCipher(*secretsKeyFile)
+	bootstrapToken, bterr := loadBootstrapAdminToken(*bootstrapAdminTokenFile)
+	if bterr != nil {
+		return fmt.Errorf("load bootstrap admin token: %w", bterr)
+	}
+	created, bterr := controller.EnsureBootstrapAdminToken(st, bootstrapToken, time.Now().UTC())
+	if bterr != nil {
+		return fmt.Errorf("bootstrap admin token: %w", bterr)
+	}
+	if bootstrapToken != "" {
+		if created {
+			fmt.Fprintln(os.Stderr,
+				"sparkwing-controller: bootstrap admin token created for principal "+
+					controller.BootstrapAdminPrincipal)
+		} else {
+			fmt.Fprintln(os.Stderr,
+				"sparkwing-controller: bootstrap admin token skipped: the tokens table already holds a token")
+		}
+	}
+
+	cipher, cerr := loadSecretsCipher(*secretsKeyFile, *secretsPreviousKeyFile)
 	if cerr != nil {
 		return fmt.Errorf("load secrets key: %w", cerr)
 	}
@@ -145,8 +179,10 @@ func run(args []string) error {
 	}
 	if *requireAuth && !srv.AuthEnabled() {
 		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
-			"the tokens table is empty; mint an admin token with the controller " +
-			"started unauthenticated, then restart with --require-auth")
+			"the tokens table is empty; supply the first admin token with " +
+			"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN), or " +
+			"mint one with the controller started unauthenticated and restart " +
+			"with --require-auth")
 	}
 	if *poolEnabled {
 		if *poolNamespace == "" {
@@ -216,29 +252,70 @@ func envTruthy(name string) bool {
 	}
 }
 
-func loadSecretsCipher(filePath string) (*secrets.Cipher, error) {
-	if v := os.Getenv("SPARKWING_SECRETS_KEY"); v != "" {
-		key, err := secrets.DecodeKey(v)
-		if err != nil {
-			return nil, fmt.Errorf("SPARKWING_SECRETS_KEY: %w", err)
+func loadSecretsCipher(keyFile, previousKeyFile string) (*secrets.Cipher, error) {
+	key, err := loadSecretsKey("SPARKWING_SECRETS_KEY", keyFile)
+	if err != nil {
+		return nil, err
+	}
+	previous, err := loadSecretsKey("SPARKWING_SECRETS_PREVIOUS_KEY", previousKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	if key == nil {
+		if previous != nil {
+			return nil, errors.New("a previous secrets key is configured without a current one; " +
+				"set SPARKWING_SECRETS_KEY or --secrets-key-file to the key values are sealed under now")
 		}
+		return nil, nil
+	}
+	if previous == nil {
 		return secrets.NewCipher(key)
 	}
-	if filePath != "" {
-		data, err := os.ReadFile(filePath)
+	return secrets.NewCipherWithPrevious(key, previous)
+}
+
+func loadSecretsKey(envName, filePath string) ([]byte, error) {
+	if v := os.Getenv(envName); v != "" {
+		key, err := secrets.DecodeKey(v)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", filePath, err)
+			return nil, fmt.Errorf("%s: %w", envName, err)
 		}
-		if len(data) == secrets.KeySize {
-			return secrets.NewCipher(data)
-		}
-		decoded, derr := secrets.DecodeKey(string(data))
-		if derr != nil {
-			return nil, fmt.Errorf("%s: %w", filePath, derr)
-		}
-		return secrets.NewCipher(decoded)
+		return key, nil
 	}
-	return nil, nil
+	if filePath == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", filePath, err)
+	}
+	if len(data) == secrets.KeySize {
+		return data, nil
+	}
+	decoded, derr := secrets.DecodeKey(string(data))
+	if derr != nil {
+		return nil, fmt.Errorf("%s: %w", filePath, derr)
+	}
+	return decoded, nil
+}
+
+// safety: a trailing newline from a mounted file or a heredoc is editor noise, not part of the credential.
+func loadBootstrapAdminToken(filePath string) (string, error) {
+	if v := strings.TrimSpace(os.Getenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN")); v != "" {
+		return v, nil
+	}
+	if filePath == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", filePath, err)
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("%s is empty", filePath)
+	}
+	return token, nil
 }
 
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {

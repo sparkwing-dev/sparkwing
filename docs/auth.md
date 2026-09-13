@@ -337,7 +337,10 @@ without TLS; the chart renders that flag with the variable whenever
 ## First-visit signup
 
 Controller authentication is enabled at startup when the tokens table contains
-an active token. `--require-auth` makes startup fail when it does not; see the
+an active token. `--require-auth` makes startup fail when it does not, and
+`--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`) puts the
+first admin token in that table before the listener binds, so a provisioned
+controller starts with both satisfied; see the
 [security operator checklist](security.md#operator-checklist).
 
 A freshly-installed sparkwing cluster has no users, so there is

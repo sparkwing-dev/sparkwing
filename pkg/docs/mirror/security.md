@@ -296,13 +296,30 @@ controller reseals such a row into a bound envelope the first time it
 is read, so rows migrate as they are used. Re-setting a secret rebinds
 it as well.
 
-There is no key rotation and no multi-key read path: the controller
-holds one key and the stored envelope carries no key id. Swapping the
-key makes every previously sealed value unreadable (`GET
-/api/v1/secrets/{name}` returns 500), and configuring a key for the
-first time against a database that already holds plaintext values fails
-the same way. Re-set every secret through the API after changing or
-first enabling the key.
+A stored envelope carries no key id, so the controller opens it by
+trying the keys it holds. Name the key values were sealed under before
+the current one and it becomes a read-only fallback:
+
+- `SPARKWING_SECRETS_PREVIOUS_KEY`, or
+- `--secrets-previous-key-file <path>`.
+
+A value that does not open under the current key is tried against that
+one, which keeps every value readable across a key change. Close the
+window with `sparkwing secrets rotate --profile <name>`
+(`POST /api/v1/secrets/rotate`, admin): it opens every row with the keys
+the controller holds and writes it back sealed and bound under the
+current key, in one transaction, so the rotation lands for the whole
+table or for none of it. Once it reports its count, drop the previous
+key and restart. The same command turns encryption on for a database
+that already holds plaintext values, which come out encrypted with no
+re-set by hand. A row that opens under neither key answers `500` and
+leaves every row as it was.
+
+Configure the keys in this order for a key change: mount the new key as
+`secretsKey` and the outgoing one as `secretsPreviousKey`, restart,
+rotate, then clear `secretsPreviousKey`. A controller started with a
+previous key and no current key refuses to start, because it would have
+nothing to seal new values under.
 
 Encrypted or not, values leave the server only through the
 authenticated secrets API; pipelines read them with `sparkwing.Secret`
@@ -531,13 +548,26 @@ failure.
   serves every endpoint unauthenticated. It logs a warning at startup,
   reports `"auth": "disabled"` on `GET /api/v1/health`, and `sparkwing
   cluster status` flags the controller probe as a warning -- fine for a
-  laptop, not for a shared deployment. Minting the first token needs the
-  controller open (there is no token to authenticate with yet), so it
-  bootstraps unauthenticated by design; enable auth by creating an admin
-  token and restarting. To make an open controller a hard startup error
-  instead -- once you are past bootstrap -- set `SPARKWING_REQUIRE_AUTH=1`
+  laptop, not for a shared deployment. Set `SPARKWING_REQUIRE_AUTH=1`
   (or `--require-auth`) so the pod refuses to start with an empty tokens
   table. See [auth.md](auth.md).
+- **Provision the first admin token.** Hand the controller the first
+  admin credential and it never serves a request unauthenticated:
+  `SPARKWING_BOOTSTRAP_ADMIN_TOKEN` carries the token itself, and
+  `--bootstrap-admin-token-file <path>` reads it from a mounted file.
+  When the tokens table is empty the controller stores that token's
+  argon2 hash as an admin credential under the principal
+  `bootstrap:admin` before it binds the listener, which satisfies
+  `--require-auth` on a first start. A table that already holds a token
+  is left alone, so restarting with the same secret mounted neither
+  duplicates the row nor revives a revoked one. The value has to look
+  like a minted token -- `swu_` followed by at least 28 characters, for
+  example `printf 'swu_%s' "$(openssl rand -hex 24)"` -- because a
+  bearer lookup selects on that prefix. The chart mounts it from
+  `controller.bootstrapAdminToken.name` and renders `--require-auth`
+  from `controller.requireAuth`. Without it, minting the first token
+  needs the controller open, so enable auth by creating an admin token
+  through that window and restarting.
 - **Point the logs service at a controller.** Without `--controller`
   (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
   anything that reaches its Service can read, forge, and delete every
