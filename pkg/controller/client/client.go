@@ -1839,6 +1839,17 @@ func classifyHTTPError(resp *http.Response) error {
 	if resp.StatusCode == http.StatusPaymentRequired {
 		return fmt.Errorf("%w: %s", store.ErrInsufficientCredits, bytes.TrimSpace(body))
 	}
+	// safety: a compute guard is a standing condition like a spent balance, so
+	// the caller tells it apart from a transport failure and keeps polling.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		var refusal computeLimitRefusalWire
+		if json.Unmarshal(body, &refusal) == nil && refusal.Code == computeLimitRefusedCode {
+			return &store.ComputeLimitError{
+				Limit: refusal.Limit, Cap: refusal.Cap,
+				Observed: refusal.Observed, Scope: refusal.Scope,
+			}
+		}
+	}
 	if resp.StatusCode == http.StatusNotImplemented {
 		return fmt.Errorf("%w: controller returned %s", storage.ErrNotSupported, resp.Status)
 	}
@@ -1853,6 +1864,18 @@ func classifyHTTPError(resp *http.Response) error {
 		return fmt.Errorf("controller %d: %s", resp.StatusCode, bytes.TrimSpace(body))
 	}
 	return errors.New(resp.Status)
+}
+
+// safety: the controller's own code string, repeated here so the client does
+// not import the controller package it is a client of.
+const computeLimitRefusedCode = "compute_limit"
+
+type computeLimitRefusalWire struct {
+	Code     string `json:"code"`
+	Limit    string `json:"limit"`
+	Cap      int64  `json:"cap"`
+	Observed int64  `json:"observed"`
+	Scope    string `json:"scope"`
 }
 
 type executionAdmissionErrorWire struct {

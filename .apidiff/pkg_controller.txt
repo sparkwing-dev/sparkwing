@@ -50,6 +50,8 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const ComputeLimitRefusedCode = "compute_limit"
+const ComputeLimitRetryAfterSeconds = 5
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
@@ -263,6 +265,8 @@ const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (creditsCollector) Collect(ch chan<- prometheus.Metric)
+func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
@@ -273,6 +277,8 @@ func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
 func (l *liveLogs) Stats() (nodes int, bytes int64)
 func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
+func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric)
+func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc)
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
 func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (r *statusRecorder) WriteHeader(code int)

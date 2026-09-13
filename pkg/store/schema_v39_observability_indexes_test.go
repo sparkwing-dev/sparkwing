@@ -44,8 +44,8 @@ func TestSchemaV39_UpgradeFromAStoreStampedShortOfTheIndexes(t *testing.T) {
 	if _, err := seeded.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 39`); err != nil {
 		t.Fatalf("rewind the stamp past the indexes: %v", err)
 	}
-	if v := readSchemaVersion(t, seeded.DB()); v != store.ExpectedSchemaVersion()-1 {
-		t.Fatalf("seeded version = %d, want %d", v, store.ExpectedSchemaVersion()-1)
+	if v := readSchemaVersion(t, seeded.DB()); v != 38 {
+		t.Fatalf("seeded version = %d, want %d", v, 38)
 	}
 	_ = seeded.Close()
 

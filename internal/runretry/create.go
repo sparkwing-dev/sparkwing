@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -34,7 +35,9 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 	if strings.HasPrefix(src.TriggerSource, "pipeline-working-tree@") {
 		retrySource = src.TriggerSource
 	}
-	if err := st.CreateTrigger(ctx, store.Trigger{
+	// safety: the trigger and its pending run are written together, so a guard
+	// that refuses the run leaves no trigger behind for a worker to claim.
+	if err := st.CreateTriggerWithRun(ctx, store.Trigger{
 		ID:            newID,
 		Pipeline:      src.Pipeline,
 		Args:          src.Args,
@@ -50,10 +53,7 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 		RetrySource:   store.RetrySourceManual,
 		Full:          full,
 		CreatedAt:     now,
-	}); err != nil {
-		return Created{}, fmt.Errorf("persist trigger: %w", err)
-	}
-	if err := st.CreateRun(ctx, store.Run{
+	}, store.Run{
 		ID:            newID,
 		Pipeline:      src.Pipeline,
 		Status:        "pending",
@@ -71,7 +71,10 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 		StartedAt:     now,
 		Invocation:    store.InheritSecretArgs(nil, src),
 	}); err != nil {
-		return Created{}, fmt.Errorf("persist run: %w", err)
+		if errors.Is(err, store.ErrComputeLimit) {
+			return Created{}, err
+		}
+		return Created{}, fmt.Errorf("persist the retry and its run: %w", err)
 	}
 	if err := st.SetRetriedAs(ctx, sourceID, newID); err != nil {
 		slog.Default().Warn("could not link the source run to its retry", "run_id", sourceID, "retry_id", newID, "error", err)

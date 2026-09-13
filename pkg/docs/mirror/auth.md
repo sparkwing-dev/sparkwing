@@ -74,6 +74,52 @@ and the last day's burn. `sparkwing cluster credits grant --kind free|paid
 --amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
 lists every movement newest first.
 
+## Compute guards
+
+The guards bound what the controller starts before the ledger bills it. Each
+is one non-negative integer, and zero is unlimited, so a controller that sets
+none behaves as it did before the guards existed.
+
+| Guard | Bounds | Measured against |
+|-------|--------|------------------|
+| `max_concurrent_runners` | cloud runners held at once | one principal |
+| `max_global_runners` | cloud runners the controller holds | every principal |
+| `runner_alarm` | cloud runner count that logs a warning, set below the ceiling | every principal |
+| `max_run_seconds` | wall-clock seconds a run may hold cloud runners for | one run |
+| `max_nodes_per_run` | nodes a run may carry, which is what bounds a dynamic fan-out | one metered principal's runs |
+| `max_runs_per_hour` | runs created in the last hour | one metered principal |
+| `max_global_nodes_per_run` | nodes a run may carry | every run |
+| `max_global_runs_per_hour` | runs created in the last hour | every run |
+| `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
+
+A cloud runner is a claim a metered token holds, so the runner guards count
+exactly the work credits pay for. `max_nodes_per_run` and `max_runs_per_hour`
+are a team's own budget: they measure the principal whose token created the
+run and apply only while that principal holds a metered token, so local work
+and unmetered runners pass them untouched. The `max_global_*` pair is the
+operator's own ceiling and counts every run whichever principal created it.
+The hourly window counts runs by their creation stamp, so a run that has
+already finished still occupies the budget until it ages out of the hour.
+
+Work a guard refuses answers `429` with `"code": "compute_limit"` naming the
+guard, its ceiling and what was measured, and a `Retry-After` saying how soon
+to ask again. The run records a `compute_limit_blocked` event that `sparkwing
+runs status` prints on its `guard:` line; a refusal is recorded against a run
+the refused principal owns, and a guard that names no principal records
+nothing and reaches the operator through the log. A claim refused this way
+leaves the node ready and the runner keeps polling. A run that passes
+`max_run_seconds` loses its node on the next heartbeat: the node fails with the
+reason `compute_limit`, its claim is released, and the heartbeat answers `409`.
+
+`min_cron_interval_seconds` is measured over a schedule's next fires rather
+than its text, so `*/5 * * * *` and `0,5,10,...` both measure five minutes. It
+is checked when a repository arms its schedules and again when the tick is
+about to fire one, so a guard set after arming still binds.
+
+`sparkwing cluster limits show` prints every guard with the cloud runners in
+use, per principal and in total. `sparkwing cluster limits set --name G --value
+N` sets one guard and needs `admin`; a value of zero removes it.
+
 ## Scopes
 
 The scope constants live in `pkg/controller/auth.go`; the full route-to-scope
@@ -81,7 +127,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
@@ -91,7 +137,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.

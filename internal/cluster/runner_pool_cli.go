@@ -159,6 +159,9 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// safety: a spent credit balance persists across every poll, so the log
 	// says so once rather than twice a second until it is topped up.
 	creditsLogged := false
+	// safety: a compute guard holds for as long as the work above it runs, so
+	// the log says so once rather than on every poll.
+	limitLogged := false
 	shed := newShedLog(shedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -209,6 +212,16 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
+			if errors.Is(err, store.ErrComputeLimit) {
+				observeClaimOutcome("compute-limit")
+				if !limitLogged {
+					limitLogged = true
+					logger.Error("claim withheld; a compute guard is holding this runner back",
+						"err", err, "source", cfg.SourceName)
+				}
+				sleepOrCancel(ctx, cfg.PollInterval)
+				continue
+			}
 			if errors.Is(err, store.ErrInsufficientCredits) {
 				observeClaimOutcome("insufficient-credits")
 				if !creditsLogged {
@@ -246,6 +259,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		}
 		observeClaimOutcome("claimed")
 		creditsLogged = false
+		limitLogged = false
 		claimed++
 
 		logger.Info("claimed node",
