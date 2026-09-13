@@ -68,14 +68,32 @@ func projectDefaultProfile() (*profile.Profile, string, bool, error) {
 	if err != nil {
 		return nil, "", false, err
 	}
-	if !ok || cfg.Defaults.Profile == "" || cfg.Profiles == nil {
+	if !ok || cfg.Defaults.Profile == "" {
 		return nil, "", false, nil
 	}
-	p, ok := cfg.Profiles[cfg.Defaults.Profile]
-	if !ok || p == nil {
-		return nil, "", false, nil
+	name := cfg.Defaults.Profile
+	if p, ok := cfg.Profiles[name]; ok && p != nil {
+		return p, name, true, nil
 	}
-	return p, cfg.Defaults.Profile, true, nil
+	p, err := userProfile(name)
+	if err != nil || p == nil {
+		return nil, "", false, err
+	}
+	return p, name, true, nil
+}
+
+// safety: the default may name a connection `sparkwing cloud connect` wrote
+// to the user's profiles.yaml, which is where its token stays.
+func userProfile(name string) (*profile.Profile, error) {
+	path, err := profile.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := profile.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	return cfg.Profiles[name], nil
 }
 
 func loadProjectConfig() (*projectconfig.Config, bool, error) {

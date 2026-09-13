@@ -96,9 +96,11 @@ type Config struct {
 // Resolution rules per field are documented inline; the general
 // principle is "replace, unless the field is independently keyed."
 type Defaults struct {
-	// Profile names the project profile (from Config.Profiles) that
-	// applies when neither --profile nor pipeline.profile is set.
-	// Empty means "no default" -- a pipeline without its own
+	// Profile names the profile that applies when neither --profile
+	// nor pipeline.profile is set. The name resolves against
+	// Config.Profiles first and the user's profiles.yaml second, so a
+	// repo can default to a connection whose token stays out of the
+	// checkout. Empty means "no default" -- a pipeline without its own
 	// profile: still runs (against the sqlite-only test/dev shape).
 	// Wholesale-replaced by pipeline.profile when set.
 	Profile string `yaml:"profile,omitempty"`
@@ -213,31 +215,11 @@ func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error) {
 // yaml.Node edit -- it never re-marshals the unrelated sections, so a
 // `sparkwing sparks add` can't perturb pipeline/runner/source config.
 func WriteSparksSection(path string, libs []sparks.Library) error {
-	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read %s: %w", path, err)
+	doc, root, err := loadDocument(path)
+	if err != nil {
+		return err
 	}
-	var doc yaml.Node
-	if len(bytes.TrimSpace(raw)) > 0 {
-		if uerr := yaml.Unmarshal(raw, &doc); uerr != nil {
-			return fmt.Errorf("parse %s: %w", path, uerr)
-		}
-	}
-	if doc.Kind == 0 {
-		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, HeadComment: strings.TrimSpace(string(raw))}}}
-	}
-	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("%s: top-level YAML is not a mapping", path)
-	}
-	root := doc.Content[0]
-
-	idx := -1
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "sparks" {
-			idx = i
-			break
-		}
-	}
+	idx := mappingIndex(root, "sparks")
 	if len(libs) == 0 {
 		if idx >= 0 {
 			root.Content = append(root.Content[:idx], root.Content[idx+2:]...)
@@ -254,19 +236,90 @@ func WriteSparksSection(path string, libs []sparks.Library) error {
 				&yaml.Node{Kind: yaml.ScalarNode, Value: "sparks"}, &val)
 		}
 	}
+	return writeDocument(path, doc)
+}
 
+// SetDefaultProfile rewrites defaults.profile in the sparkwing.yaml at
+// path to name, preserving every other section, comment, and key order.
+// It creates the file when absent and the defaults: block when the file
+// has none. Like WriteSparksSection this is a surgical yaml.Node edit, so
+// writing a project's default connection cannot perturb its pipelines.
+func SetDefaultProfile(path, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("defaults.profile: name must not be empty")
+	}
+	doc, root, err := loadDocument(path)
+	if err != nil {
+		return err
+	}
+	defaults := mappingValue(root, "defaults")
+	if defaults == nil {
+		defaults = &yaml.Node{Kind: yaml.MappingNode}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "defaults"}, defaults)
+	}
+	if defaults.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: defaults: is not a mapping", path)
+	}
+	value := &yaml.Node{Kind: yaml.ScalarNode, Value: name}
+	if idx := mappingIndex(defaults, "profile"); idx >= 0 {
+		defaults.Content[idx+1] = value
+	} else {
+		defaults.Content = append(defaults.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "profile"}, value)
+	}
+	return writeDocument(path, doc)
+}
+
+func loadDocument(path string) (*yaml.Node, *yaml.Node, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc yaml.Node
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if uerr := yaml.Unmarshal(raw, &doc); uerr != nil {
+			return nil, nil, fmt.Errorf("parse %s: %w", path, uerr)
+		}
+	}
+	if doc.Kind == 0 {
+		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, HeadComment: strings.TrimSpace(string(raw))}}}
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("%s: top-level YAML is not a mapping", path)
+	}
+	return &doc, doc.Content[0], nil
+}
+
+func mappingIndex(node *yaml.Node, key string) int {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return i
+		}
+	}
+	return -1
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if idx := mappingIndex(node, key); idx >= 0 {
+		return node.Content[idx+1]
+	}
+	return nil
+}
+
+func writeDocument(path string, doc *yaml.Node) error {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if eerr := enc.Encode(&doc); eerr != nil {
+	if err := enc.Encode(doc); err != nil {
 		_ = enc.Close()
-		return fmt.Errorf("encode %s: %w", path, eerr)
+		return fmt.Errorf("encode %s: %w", path, err)
 	}
-	if cerr := enc.Close(); cerr != nil {
-		return cerr
+	if err := enc.Close(); err != nil {
+		return err
 	}
-	if mkerr := os.MkdirAll(filepath.Dir(path), 0o755); mkerr != nil {
-		return mkerr
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
@@ -288,11 +341,6 @@ func (c *Config) normalize() error {
 		}
 	}
 
-	if c.Defaults.Profile != "" {
-		if _, ok := c.Profiles[c.Defaults.Profile]; !ok {
-			return fmt.Errorf("defaults.profile %q is not declared in profiles", c.Defaults.Profile)
-		}
-	}
 	if err := c.Defaults.Guards.Validate("defaults"); err != nil {
 		return err
 	}
