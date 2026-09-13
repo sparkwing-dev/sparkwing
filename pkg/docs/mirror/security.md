@@ -215,7 +215,10 @@ what it always did.
 create in a rolling hour. An authenticated submission spends its own
 token's budget; a webhook delivery carries no principal, so it spends the
 budget of the repository it names. Past the cap the controller answers
-`429` with a `Retry-After` naming the refill interval.
+`429` with a `Retry-After` naming the real refill delay, which lengthens
+while a caller keeps knocking at an empty budget. The budget lives in
+controller memory, so a restart or a rollout refills every principal;
+it bounds a burst, not a month.
 
 `--shed-queue-depth N` (chart `controller.shedQueueDepth`) answers `503`
 with a `Retry-After` once pending triggers reach N, which is the outer
@@ -224,29 +227,52 @@ once a second, because a flood asks for it far faster than it changes.
 
 `--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`)
 answers a content-identical `POST /api/v1/triggers` submission inside D
-with `409` and the run the first one started. A GitHub redelivery is
-deduped regardless: the store holds one trigger per delivery id and one
-per body digest, so a retried delivery answers `409` naming the original
-run whatever this window says.
+with `409` and the run the first one started. The digest covers the
+submitting principal, so a `409` naming a run id only ever reaches the
+principal that owns that run and two tenants submitting the same body get
+a run each. A GitHub redelivery is deduped regardless: the store holds
+one trigger per delivery id and one per body digest, so a retried
+delivery answers `409` naming the original run whatever this window says.
+
+Deduplication runs before the shed and the cap, so a redelivery is
+answered with its original run rather than a refusal, and retrying one
+never spends the submitter's budget.
 
 Every refusal is a status a caller can act on and a line in the
 controller log at warn naming the principal and the reason. Nothing is
 dropped silently.
 
-## Per-principal request budgets
+## Per-runner request budgets
 
-The claim and heartbeat routes carry a budget of their own, because a
+The claim and heartbeat routes can carry a budget of their own, because a
 looping runner reaches them thousands of times a minute without ever
-failing authentication. `--claims-per-principal-minute` and
-`--heartbeats-per-principal-minute` (chart
-`controller.claimsPerPrincipalMinute`,
-`controller.heartbeatsPerPrincipalMinute`) bound what one principal
-spends per rolling minute; past a budget the route answers `429` with a
-`Retry-After` and `sparkwing_principal_throttled_total{route_class}`
-counts it. The defaults clear a fleet of fifty runners claiming once a
-second and heartbeating every five with room to spare, so they bound a
-misbehaving runner rather than a working one. Zero leaves a route class
-unlimited.
+failing authentication. `--claims-per-runner-minute` and
+`--heartbeats-per-runner-minute` (chart
+`controller.claimsPerRunnerMinute`,
+`controller.heartbeatsPerRunnerMinute`) bound what one runner spends per
+rolling minute. Both default to zero, which is unlimited: an operator
+opts in. 1200 of each suits the cadence the shipped runners use -- a pool
+runner claims every 500ms, or 120 a minute, and a node heartbeat runs
+every 3s.
+
+The budget is keyed on the runner, not the token: the token prefix
+together with the holder id, executor name, or run the request names,
+which every claim and heartbeat carries in `X-Sparkwing-Runner` or its
+claim-fence headers. A fleet sharing one token is therefore budgeted
+runner by runner, so one runner stuck in a tight loop cannot starve its
+peers.
+
+The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
+never budgeted. An agent that loses it tears down its membership and
+every node under it, which is a far worse outcome than the load one
+heartbeat every few seconds represents.
+
+Past a budget the route answers `429` with a `Retry-After` naming the
+real refill delay, and `sparkwing_principal_throttled_total{route_class}`
+counts it. A runner reads a `429` the way it reads a `503`: it waits the
+header out, capped at 30 seconds, and keeps its claim and its node. A
+host's own admission daemon and the loopback controller budget nothing,
+because their callers are unauthenticated and would share one bucket.
 
 ## Webhooks
 

@@ -9,8 +9,30 @@ import (
 )
 
 // DefaultMaxIdleClaimPoll is the widest interval a controller suggests to a
-// claim loop that keeps finding no work.
-const DefaultMaxIdleClaimPoll = 15 * time.Second
+// claim loop that keeps finding no work. It sits far enough below the default
+// placement hold that a runner honoring it, jitter included, still polls
+// inside the window local-first placement measures a runner's liveness in.
+const DefaultMaxIdleClaimPoll = 5 * time.Second
+
+// IdleClaimPollJitterFactor is the widest a runner stretches a suggestion when
+// it spreads its return. An operator sizing the suggestion against another
+// window multiplies by this to get the longest a runner may actually wait.
+const IdleClaimPollJitterFactor = 1.25
+
+// MaxHonoredIdleClaimPoll bounds what a runner accepts however long a
+// controller suggests, so a misconfigured controller cannot park a fleet past
+// the default placement hold.
+const MaxHonoredIdleClaimPoll = 15 * time.Second
+
+// LongestHonoredIdlePoll reports how long a runner may actually wait after
+// being suggested d, jitter included. Operators and startup checks compare it
+// against the placement windows a silent runner falls out of.
+func LongestHonoredIdlePoll(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	return time.Duration(float64(min(d, MaxHonoredIdleClaimPoll)) * IdleClaimPollJitterFactor)
+}
 
 // safety: the advice is a floor a runner may only widen to, so it is withheld
 // until it would be worth a runner's while to widen at all.
@@ -31,8 +53,10 @@ func (s *Server) WithIdleClaimPoll(max time.Duration) *Server {
 	return s
 }
 
-// safety: the idle clock measures from here, so a controller that just handed out work suggests nothing.
-func (s *Server) recordClaimAward(now time.Time) {
+// safety: the idle clock measures from here, and work arriving resets it as
+// surely as work handed out, or a fleet advised while idle would still be
+// waiting minutes after the queue filled.
+func (s *Server) recordQueueActivity(now time.Time) {
 	s.lastClaimAward.Store(now.UnixNano())
 }
 

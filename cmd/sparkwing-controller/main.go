@@ -124,7 +124,8 @@ func run(args []string) error {
 		"cap on the runs one principal may create in a rolling hour. A webhook "+
 			"delivery counts against the repository it names. Past the cap the "+
 			"controller answers 429 with a Retry-After and logs the principal and "+
-			"the reason. Zero is unlimited.")
+			"the reason. The budget lives in controller memory, so a restart "+
+			"refills every principal. Zero is unlimited.")
 	shedQueueDepth := fs.Int("shed-queue-depth", 0,
 		"pending-trigger depth past which a new webhook delivery or API "+
 			"submission is shed with 503 and a Retry-After rather than queued. "+
@@ -134,13 +135,17 @@ func run(args []string) error {
 			"first one started instead of starting a second. GitHub deliveries "+
 			"are deduped by delivery id and body digest regardless. Zero dedupes "+
 			"no API submission.")
-	claimsPerMinute := fs.Int("claims-per-principal-minute", controller.DefaultClaimsPerMinute,
-		"per-principal request budget on the claim routes, per rolling minute. "+
-			"Past it a claim is answered 429 with a Retry-After. Zero is unlimited.")
-	heartbeatsPerMinute := fs.Int("heartbeats-per-principal-minute", controller.DefaultHeartbeatsPerMinute,
-		"per-principal request budget on the heartbeat routes, per rolling "+
-			"minute. Past it a heartbeat is answered 429 with a Retry-After. "+
-			"Zero is unlimited.")
+	claimsPerMinute := fs.Int("claims-per-runner-minute", 0,
+		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
+			"minute, keyed on the token prefix together with the runner the "+
+			"request names. Past it a claim is answered 429 with a Retry-After "+
+			"naming the refill delay. Zero is unlimited; %d suits the cadence the "+
+			"shipped runners poll at.", controller.RecommendedClaimsPerMinute))
+	heartbeatsPerMinute := fs.Int("heartbeats-per-runner-minute", 0,
+		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
+			"rolling minute. The agent liveness heartbeat is never budgeted. "+
+			"Zero is unlimited; %d suits the cadence the shipped runners "+
+			"heartbeat at.", controller.RecommendedHeartbeatsPerMinute))
 	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
 		"widest poll interval this controller suggests to a claim loop while it "+
 			"has no work to hand out. The suggestion travels as a response header "+
@@ -182,10 +187,13 @@ func run(args []string) error {
 		return fmt.Errorf("--trigger-dedupe-window cannot be negative")
 	}
 	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
-		return fmt.Errorf("--claims-per-principal-minute and --heartbeats-per-principal-minute cannot be negative")
+		return fmt.Errorf("--claims-per-runner-minute and --heartbeats-per-runner-minute cannot be negative")
 	}
 	if *idleClaimPoll < 0 {
 		return fmt.Errorf("--idle-claim-poll cannot be negative")
+	}
+	if err := checkIdleClaimPoll(*idleClaimPoll, *placementHold, *placementLiveness); err != nil {
+		return err
 	}
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
@@ -305,6 +313,27 @@ func run(args []string) error {
 		checkStorageClasses(ctx, kcli, *poolNamespace)
 	}
 	return controller.ServeWith(ctx, srv, *addr)
+}
+
+// safety: a runner honoring a suggestion longer than these windows stops
+// counting as live, and local-first placement silently stops preferring it.
+func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
+	longest := controller.LongestHonoredIdlePoll(idle)
+	for _, w := range []struct {
+		flag  string
+		value time.Duration
+	}{
+		{"--placement-hold", hold},
+		{"--placement-liveness", liveness},
+	} {
+		if w.value > 0 && longest >= w.value {
+			return fmt.Errorf(
+				"--idle-claim-poll %s stretches to %s once a runner spreads it, which is not below %s %s; "+
+					"lower the suggestion or raise that window",
+				idle, longest, w.flag, w.value)
+		}
+	}
+	return nil
 }
 
 func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespace string) {

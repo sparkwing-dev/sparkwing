@@ -1061,6 +1061,7 @@ func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setRunnerIdentity(req, executorName)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
@@ -1209,6 +1210,7 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setRunnerIdentity(req, holderID)
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
@@ -1360,6 +1362,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setRunnerIdentity(req, holderID)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
@@ -1794,8 +1797,13 @@ func controllerLacksRoute(route string) error {
 func readHTTPError(resp *http.Response) error {
 	err := classifyHTTPError(resp)
 	// safety: a server that named a Retry-After is asking to be polled again, which a claim loop must not log as a failure.
-	if wait, ok := parseRetryAfter(resp); ok && resp.StatusCode == http.StatusServiceUnavailable {
-		return &UnavailableError{RetryAfter: wait, Err: err}
+	if wait, ok := parseRetryAfter(resp); ok {
+		switch resp.StatusCode {
+		case http.StatusServiceUnavailable:
+			return &UnavailableError{RetryAfter: wait, Err: err}
+		case http.StatusTooManyRequests:
+			return &RateLimitedError{RetryAfter: wait, Err: err}
+		}
 	}
 	return err
 }

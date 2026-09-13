@@ -86,23 +86,17 @@ func runAgentMembershipLoop(ctx context.Context, cfg agentconfig.Config, member 
 		if ctx.Err() != nil {
 			return nil
 		}
-		return err
+		if _, transient := unavailableBackoff(err, 0); !transient {
+			return err
+		}
+		logger.Warn("executor liveness shed on the first heartbeat; starting anyway",
+			"executor", member.Name, "err", err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errCh := make(chan error, member.MaxConcurrent+1)
 	go func() {
-		for {
-			sleepOrCancel(runCtx, interval)
-			if runCtx.Err() != nil {
-				errCh <- nil
-				return
-			}
-			if err := heartbeatExecutor(runCtx, member.Name, provider, ctrl, logger); err != nil {
-				errCh <- err
-				return
-			}
-		}
+		errCh <- runExecutorLiveness(runCtx, member.Name, interval, provider, ctrl, logger)
 	}()
 	instanceID := time.Now().UnixNano()
 	for slot := range member.MaxConcurrent {
@@ -121,6 +115,44 @@ func runAgentMembershipLoop(ctx context.Context, cfg agentconfig.Config, member 
 		return nil
 	}
 	return err
+}
+
+// safety: an executor heartbeat that fails tears down the membership and every
+// node under it, so a shed one is patience rather than failure and only silence
+// past the lease window is fatal.
+var maxExecutorHeartbeatSilence = 3 * time.Minute
+
+func runExecutorLiveness(ctx context.Context, name string, interval time.Duration, provider headroomProvider, ctrl executorMembershipClient, logger *slog.Logger) error {
+	lastOK := time.Now()
+	shed := newShedLog(shedWarnInterval)
+	for ctx.Err() == nil {
+		sleepOrCancel(ctx, interval)
+		if ctx.Err() != nil {
+			break
+		}
+		err := heartbeatExecutor(ctx, name, provider, ctrl, logger)
+		if err == nil {
+			lastOK = time.Now()
+			continue
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		silence := time.Since(lastOK)
+		wait, transient := unavailableBackoff(err, 0)
+		if !transient || silence >= maxExecutorHeartbeatSilence {
+			return err
+		}
+		logger.Debug("executor liveness shed by the controller; backing off",
+			"executor", name, "retry_after", wait, "err", err)
+		if shed.due() {
+			logger.Warn("controller is shedding executor liveness heartbeats",
+				"executor", name, "retry_after", wait, "err", err,
+				"silence", silence.Round(time.Second))
+		}
+		sleepOrCancel(ctx, wait)
+	}
+	return nil
 }
 
 func heartbeatExecutor(ctx context.Context, executorName string, provider headroomProvider, ctrl executorMembershipClient, logger *slog.Logger) error {

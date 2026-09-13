@@ -110,11 +110,11 @@ spec:
             {{- with .Values.controller.triggerDedupeWindow }}
             - {{ printf "--trigger-dedupe-window=%s" . | quote }}
             {{- end }}
-            {{- with .Values.controller.claimsPerPrincipalMinute }}
-            - {{ printf "--claims-per-principal-minute=%d" (int .) | quote }}
+            {{- with .Values.controller.claimsPerRunnerMinute }}
+            - {{ printf "--claims-per-runner-minute=%d" (int .) | quote }}
             {{- end }}
-            {{- with .Values.controller.heartbeatsPerPrincipalMinute }}
-            - {{ printf "--heartbeats-per-principal-minute=%d" (int .) | quote }}
+            {{- with .Values.controller.heartbeatsPerRunnerMinute }}
+            - {{ printf "--heartbeats-per-runner-minute=%d" (int .) | quote }}
             {{- end }}
             {{- with .Values.controller.idleClaimPoll }}
             - {{ printf "--idle-claim-poll=%s" . | quote }}

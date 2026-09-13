@@ -109,7 +109,8 @@ controller:
 
   # Runs one principal may create in a rolling hour. A webhook delivery counts
   # against the repository it names. Past the cap the controller answers 429
-  # with a Retry-After. 0 is unlimited.
+  # with a Retry-After. The budget lives in controller memory, so a restart
+  # refills every principal. 0 is unlimited.
   maxRunsPerPrincipalHour: 0
 
   # Pending-trigger depth past which a new webhook delivery or API submission is
@@ -122,15 +123,19 @@ controller:
   # dedupes no API submission.
   triggerDedupeWindow: ""
 
-  # Per-principal request budgets on the claim and heartbeat routes, per rolling
-  # minute. Empty keeps the controller defaults, which a fleet of fifty runners
-  # claiming once a second stays well inside.
-  claimsPerPrincipalMinute: ""
-  heartbeatsPerPrincipalMinute: ""
+  # Per-runner request budgets on the claim and heartbeat routes, per rolling
+  # minute, keyed on the token prefix together with the runner the request
+  # names, so a fleet sharing one token is budgeted runner by runner. The agent
+  # liveness heartbeat is never budgeted. Empty leaves both unlimited; 1200
+  # suits the cadence the shipped runners use.
+  claimsPerRunnerMinute: ""
+  heartbeatsPerRunnerMinute: ""
 
   # Widest poll interval the controller suggests to a claim loop while it has no
-  # work, for example "15s". A runner honors it only to poll less often. Empty
-  # keeps the controller default of 15s.
+  # work, for example "5s". A runner honors it only to poll less often. The
+  # controller refuses to start when the suggestion plus a runner's own spread
+  # reaches placementHold or placementLiveness. Empty keeps the controller
+  # default of 5s.
   idleClaimPoll: ""
 
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.

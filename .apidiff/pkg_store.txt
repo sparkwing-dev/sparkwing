@@ -833,6 +833,7 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+const RunnerIdentityHeader = "X-Sparkwing-Runner"
 type RunnerPresence struct {
 	Name string
 

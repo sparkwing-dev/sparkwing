@@ -160,6 +160,113 @@ func TestFloodPolicy_UnsetWindowDedupesNothing(t *testing.T) {
 	}
 }
 
+func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	now := time.Now().UTC()
+	tenantA, _, err := st.CreateToken("tenant-a", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite}, 0, now)
+	if err != nil {
+		t.Fatalf("tenant-a token: %v", err)
+	}
+	tenantB, _, err := st.CreateToken("tenant-b", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite}, 0, now)
+	if err != nil {
+		t.Fatalf("tenant-b token: %v", err)
+	}
+	ts := httptest.NewServer(controller.New(st, nil).
+		EnableAuthFromStore().
+		WithFloodPolicy(controller.FloodPolicy{DedupeWindow: time.Minute}).
+		Handler())
+	t.Cleanup(ts.Close)
+
+	submission := map[string]any{
+		"pipeline": "build",
+		"trigger":  map[string]string{"source": "api", "user": "ci"},
+		"git":      map[string]string{"branch": "main", "sha": fortyHex(7)},
+	}
+	status, body := postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantA, submission)
+	if status != http.StatusAccepted {
+		t.Fatalf("tenant-a submission status=%d want 202 (body %s)", status, body)
+	}
+	var first struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(body), &first); err != nil {
+		t.Fatalf("decode tenant-a submission: %v", err)
+	}
+
+	status, body = postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantB, submission)
+	if status != http.StatusAccepted {
+		t.Fatalf("tenant-b submission status=%d want 202; one tenant was answered with another's run (body %s)",
+			status, body)
+	}
+	var second struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(body), &second); err != nil {
+		t.Fatalf("decode tenant-b submission: %v", err)
+	}
+	if second.RunID == first.RunID {
+		t.Errorf("tenant-b was handed tenant-a's run %s", first.RunID)
+	}
+
+	status, _ = postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantA, submission)
+	if status != http.StatusConflict {
+		t.Errorf("tenant-a repeat status=%d want 409; its own redelivery must still dedupe", status)
+	}
+}
+
+func TestFloodPolicy_GitHubRedeliveryDoesNotSpendTheCap(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ts := httptest.NewServer(controller.New(st, nil).
+		WithGitHubWebhookSecret(testWebhookSecret).
+		WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 2}).
+		Handler())
+	t.Cleanup(ts.Close)
+
+	push := func(delivery, sha string) *http.Response {
+		body := []byte(fmt.Sprintf(`{
+			"ref": "refs/heads/main",
+			"before": "0000000000000000000000000000000000000000",
+			"after": %q,
+			"repository": {"full_name": "acme/sample-app"},
+			"pusher": {"name": "alice", "email": "alice@example.com"}
+		}`, sha))
+		return postWebhookDelivery(t, ts.URL+"/webhooks/github/build", "push", delivery,
+			body, signWebhook(testWebhookSecret, body))
+	}
+	for _, step := range []struct {
+		delivery string
+		sha      string
+		want     int
+		note     string
+	}{
+		{"delivery-1", fortyHex(1), http.StatusAccepted, "first delivery"},
+		{"delivery-1", fortyHex(1), http.StatusConflict, "redelivery"},
+		{"delivery-2", fortyHex(2), http.StatusAccepted, "second delivery; the redelivery burned a token of the cap"},
+		{"delivery-3", fortyHex(3), http.StatusTooManyRequests, "third delivery"},
+	} {
+		resp := push(step.delivery, step.sha)
+		status := resp.StatusCode
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("close %s: %v", step.note, err)
+		}
+		if status != step.want {
+			t.Fatalf("%s status=%d want %d", step.note, status, step.want)
+		}
+	}
+}
+
 func TestFloodPolicy_CapsGitHubDeliveriesPerRepository(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

@@ -270,7 +270,8 @@ type LiveLogChunk struct {
 
 	Done bool
 }
-const MaxPollAdvice = 60 * time.Second
+func LoadSignal(err error) (time.Duration, bool)
+const MaxPollAdvice = 15 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
@@ -294,6 +295,13 @@ type ObjectStoreClassState struct {
 	TrippedAt     time.Time
 	TrippedWindow string
 }
+type RateLimitedError struct {
+	RetryAfter time.Duration
+
+	Err error
+}
+func (e *RateLimitedError) Error() string
+func (e *RateLimitedError) Unwrap() error
 type Secret struct {
 	Name      string
 	Value     string

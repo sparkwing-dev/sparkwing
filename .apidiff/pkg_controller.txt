@@ -52,14 +52,11 @@ type Cipher interface {
 }
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
-const DefaultClaimsPerMinute = 12000
-const DefaultHeartbeatsPerMinute = 6000
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
 const DefaultLiveLogTotalBytes = 64 << 20
-const DefaultMaxIdleClaimPoll = 15 * time.Second
-func DefaultRequestBudget() RequestBudget
+const DefaultMaxIdleClaimPoll = 5 * time.Second
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
@@ -110,6 +107,7 @@ type GitHubWebhookDisconnectResponse struct {
 	DeliveryURL string
 	HookID      int64
 }
+const IdleClaimPollJitterFactor = 1.25
 type LiveLogRead struct {
 	Start int64
 
@@ -119,6 +117,7 @@ type LiveLogRead struct {
 
 	Done bool
 }
+func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
@@ -136,6 +135,7 @@ type LoopbackState interface {
 
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
+const MaxHonoredIdleClaimPoll = 15 * time.Second
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback
@@ -173,6 +173,8 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
+const RecommendedClaimsPerMinute = 1200
+const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
 	HeartbeatsPerMinute int

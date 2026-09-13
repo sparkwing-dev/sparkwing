@@ -109,8 +109,10 @@ type Server struct {
 func (s *Server) WithLocalExecution() *Server {
 	s.localExecution = true
 	// safety: a host's own controller serves one machine's runs, where a widened
-	// idle poll costs pickup latency and protects no fleet.
+	// idle poll costs pickup latency and a shed claim has no fleet to protect;
+	// its callers are unauthenticated, so every runner would share one bucket.
 	s.idleClaimPoll = 0
+	s.requestBudget = newPrincipalBudget(RequestBudget{})
 	return s
 }
 
@@ -194,10 +196,10 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		liveLogs:            newLiveLogs(),
 		runnerPresence:      newRunnerPresenceRegistry(),
 		cronHolder:          defaultCronHolder(),
-		requestBudget:       newPrincipalBudget(DefaultRequestBudget()),
+		requestBudget:       newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,
 	}
-	srv.recordClaimAward(time.Now())
+	srv.recordQueueActivity(time.Now())
 	return srv
 }
 
@@ -841,7 +843,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
 	mux.Handle("PUT /api/v1/agents/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEnrollAgent)))
-	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatAgent))))
+	// safety: an agent treats a lost liveness heartbeat as fatal, so shedding
+	// one would take the agent and every node it runs down with it.
+	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatAgent)))
 
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))

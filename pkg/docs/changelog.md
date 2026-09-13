@@ -27,34 +27,49 @@ unlock.
   `sparkwing-controller --max-runs-per-principal-hour N` (chart
   `controller.maxRunsPerPrincipalHour`) caps the runs one principal may create
   in a rolling hour, counting a webhook delivery against the repository it
-  names; past the cap a submission is answered `429` with `Retry-After`.
+  names; past the cap a submission is answered `429` with a `Retry-After`
+  naming the real refill delay, which lengthens while a caller keeps knocking.
+  The budget lives in controller memory, so a restart refills every principal.
   `--shed-queue-depth N` (chart `controller.shedQueueDepth`) sheds a submission
   with `503` and `Retry-After` once pending triggers reach N.
   `--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`) answers a
   content-identical `POST /api/v1/triggers` submission inside D with `409` and
-  the run the first one started, the way a GitHub redelivery is already answered
-  from its delivery id and body digest. All three default to off, so a
-  controller that names none behaves as before, and every refusal is logged at
+  the run the first one started; the digest covers the submitting principal, so
+  one tenant is never handed another's run id. Deduplication runs ahead of the
+  shed and the cap, so a GitHub redelivery gets its original run rather than a
+  refusal and never spends the submitter's budget. All three default to off, so
+  a controller that names none behaves as before, and every refusal is logged at
   warn with the principal and the reason rather than dropped.
-- **controller:** Per-principal request budgets on the claim and heartbeat
-  routes. `--claims-per-principal-minute` and
-  `--heartbeats-per-principal-minute` (chart
-  `controller.claimsPerPrincipalMinute`,
-  `controller.heartbeatsPerPrincipalMinute`) bound what one principal can spend
-  a minute; past a budget the route answers `429` with `Retry-After` and
-  `sparkwing_principal_throttled_total{route_class}` counts it. The defaults
-  clear a fleet of fifty runners claiming once a second and heartbeating every
-  five with room to spare. Zero leaves a route class unlimited.
+- **controller:** Optional per-runner request budgets on the claim and heartbeat
+  routes. `--claims-per-runner-minute` and `--heartbeats-per-runner-minute`
+  (chart `controller.claimsPerRunnerMinute`,
+  `controller.heartbeatsPerRunnerMinute`) bound what one runner spends a minute,
+  keyed on the token prefix together with the runner the request names, so a
+  fleet sharing one token is budgeted runner by runner. Both default to zero,
+  which is unlimited; 1200 of each suits the cadence the shipped runners use.
+  The agent liveness heartbeat is never budgeted, because losing it tears down
+  an agent and every node under it. Past a budget the route answers `429` with a
+  `Retry-After` and `sparkwing_principal_throttled_total{route_class}` counts
+  it.
+- **runner:** A `429` carrying a `Retry-After` is now backpressure rather than a
+  failure, the way a `503` already was. `client.RateLimitedError` and
+  `client.LoadSignal` expose it; the claim, node-heartbeat and trigger-heartbeat
+  loops wait the header out instead of repolling at their own cadence, and an
+  agent's liveness heartbeat survives a shed one, failing only once silence
+  passes its lease window.
 - **controller + runner:** A claim that finds no work can name the interval the
   runner should wait before polling again, in the `X-Sparkwing-Poll-After`
   response header. `--idle-claim-poll D` (chart `controller.idleClaimPoll`,
-  default 15s) caps what the controller suggests, which widens with how long it
-  has had no work to hand out; zero suggests nothing. A runner honors the
-  suggestion only to poll less often and spreads its return with jitter, so a
-  runner that ignores the header keeps the cadence it was configured with.
+  default 5s) caps what the controller suggests, which widens with how long it
+  has had no work and clears the moment work arrives or is handed out; zero
+  suggests nothing. A runner honors the suggestion only to poll less often,
+  spreads its return with jitter, and accepts at most 15s however long the
+  header names. The controller refuses to start when its suggestion plus that
+  spread reaches `--placement-hold` or `--placement-liveness`.
   `client.Client.PollAdvice` reports the last suggestion a claim carried back.
-  A host's own admission daemon and the loopback controller suggest nothing,
-  because a widened idle poll there costs pickup latency and protects no fleet.
+  A host's own admission daemon and the loopback controller suggest nothing and
+  budget nothing, because a widened idle poll there costs pickup latency and
+  their unauthenticated callers would share one bucket.
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and

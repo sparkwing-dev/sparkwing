@@ -817,12 +817,16 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		At:            time.Now(),
 	}
 
-	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "pipeline:"+body.Pipeline), body.Trigger.Source) {
-		return
-	}
-	release, original, duplicate := s.claimSubmissionDigest(intake)
+	principal := s.floodKey(r, "pipeline:"+body.Pipeline)
+	// safety: a redelivery is answered with the run it already started before
+	// anything is charged, so repeating one never spends the submitter's cap.
+	release, original, duplicate := s.claimSubmissionDigest(principal, intake)
 	if duplicate {
 		writeJSON(w, http.StatusConflict, triggerResp{RunID: original, Status: "duplicate"})
+		return
+	}
+	if !s.admitTriggerSubmission(w, r, principal, body.Trigger.Source) {
+		release()
 		return
 	}
 
@@ -840,14 +844,14 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 // safety: the digest is reserved before the run is created, so two simultaneous
 // identical submissions cannot both start one; the release undoes a reservation no run followed.
-func (s *Server) claimSubmissionDigest(in triggerIntake) (release func(), original string, duplicate bool) {
+func (s *Server) claimSubmissionDigest(principal string, in triggerIntake) (release func(), original string, duplicate bool) {
 	if s.flood == nil || s.flood.dedupe == nil {
 		return func() {}, "", false
 	}
-	digest := submissionDigest(in)
+	digest := submissionDigest(principal, in)
 	if original, found := s.flood.dedupe.claim(digest, in.RunID, in.At); found {
 		s.logger.Warn("trigger deduplicated",
-			"principal", in.Source, "pipeline", in.Pipeline,
+			"principal", principal, "pipeline", in.Pipeline,
 			"reason", "an identical submission is already inside the dedupe window",
 			"run_id", original)
 		return func() {}, original, true
@@ -924,6 +928,8 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 	}); err != nil {
 		return fmt.Errorf("persist run: %w", err)
 	}
+
+	s.recordQueueActivity(in.At)
 
 	return s.dispatcher.Dispatch(ctx, RunRequest{
 		RunID:    in.RunID,
@@ -1163,7 +1169,7 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.recordClaimAward(time.Now())
+	s.recordQueueActivity(time.Now())
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -1565,7 +1571,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
-	s.recordClaimAward(time.Now())
+	s.recordQueueActivity(time.Now())
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
 		pipeline = run.Pipeline

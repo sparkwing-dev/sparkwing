@@ -45,26 +45,27 @@ func (s *Server) WithFloodPolicy(p FloodPolicy) *Server {
 	return s
 }
 
-// safety: a cap of one an hour must not name an hour-long Retry-After, and a
-// cap of thousands must not name a millisecond, so the refill interval is the
-// honest delay and these are its ends.
+// safety: a Retry-After shorter than the real refill would invite a caller
+// back before a token exists, so sub-second refills round up and nothing
+// rounds down.
 const (
 	minFloodRetryAfter = time.Second
-	maxFloodRetryAfter = 5 * time.Minute
 	shedRetryAfter     = 5 * time.Second
+	depthWarnInterval  = time.Minute
 )
 
 const maxDedupeEntries = 20000
 
 type floodControl struct {
-	policy FloodPolicy
-	runs   *ratelimit.Limiter
-	dedupe *dedupeWindow
-	depth  *queueDepthCache
+	policy    FloodPolicy
+	runs      *ratelimit.Limiter
+	dedupe    *dedupeWindow
+	depth     *queueDepthCache
+	depthWarn *warnEvery
 }
 
 func newFloodControl(p FloodPolicy) *floodControl {
-	f := &floodControl{policy: p}
+	f := &floodControl{policy: p, depthWarn: &warnEvery{every: depthWarnInterval}}
 	if p.RunsPerPrincipalHour > 0 {
 		f.runs = ratelimit.New(p.RunsPerPrincipalHour, time.Hour)
 	}
@@ -75,14 +76,6 @@ func newFloodControl(p FloodPolicy) *floodControl {
 		f.depth = &queueDepthCache{}
 	}
 	return f
-}
-
-func (f *floodControl) retryAfter() time.Duration {
-	if f == nil || f.policy.RunsPerPrincipalHour <= 0 {
-		return minFloodRetryAfter
-	}
-	wait := time.Hour / time.Duration(f.policy.RunsPerPrincipalHour)
-	return min(max(wait, minFloodRetryAfter), maxFloodRetryAfter)
 }
 
 // safety: a refusal is written here, so a caller that gets false must return without writing its own answer.
@@ -97,8 +90,10 @@ func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, 
 		if err != nil {
 			// safety: a depth this controller cannot read is not grounds to
 			// refuse work, so the submission proceeds and the cap still binds.
-			s.logger.Warn("trigger flood control: queue depth unavailable",
-				"principal", key, "source", source, "err", err)
+			if f.depthWarn.due() {
+				s.logger.Warn("trigger flood control: queue depth unavailable",
+					"principal", key, "source", source, "err", err)
+			}
 		} else if depth >= f.policy.ShedQueueDepth {
 			s.logger.Warn("trigger shed",
 				"principal", key, "source", source, "reason", "queue depth above the shed threshold",
@@ -108,13 +103,16 @@ func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, 
 			return false
 		}
 	}
-	if f.runs != nil && !f.runs.Allow(key, now) {
-		wait := f.retryAfter()
-		s.logger.Warn("trigger shed",
-			"principal", key, "source", source, "reason", "hourly run cap reached",
-			"cap_per_hour", f.policy.RunsPerPrincipalHour, "retry_after", wait)
-		writeRetryAfter(w, wait, "hourly run cap reached for this principal")
-		return false
+	if f.runs != nil {
+		allowed, wait := f.runs.AllowWithRetry(key, now)
+		if !allowed {
+			wait = max(wait, minFloodRetryAfter)
+			s.logger.Warn("trigger shed",
+				"principal", key, "source", source, "reason", "hourly run cap reached",
+				"cap_per_hour", f.policy.RunsPerPrincipalHour, "retry_after", wait)
+			writeRetryAfter(w, wait, "hourly run cap reached for this principal")
+			return false
+		}
 	}
 	return true
 }
@@ -200,6 +198,10 @@ func (d *dedupeWindow) evictLocked(now time.Time) {
 // is a table scan, so one read serves every submission in the same second.
 const queueDepthTTL = time.Second
 
+// safety: the count must not ride one requester's context, or a client that
+// hangs up decides what every other submission sees.
+const queueDepthTimeout = 2 * time.Second
+
 type queueDepthCache struct {
 	mu    sync.Mutex
 	depth int
@@ -210,23 +212,50 @@ type pendingTriggerCounter interface {
 	CountPendingTriggers(ctx context.Context) (int, error)
 }
 
-func (q *queueDepthCache) read(ctx context.Context, counter pendingTriggerCounter, now time.Time) (int, error) {
+func (q *queueDepthCache) read(parent context.Context, counter pendingTriggerCounter, now time.Time) (int, error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	if !q.at.IsZero() && now.Sub(q.at) < queueDepthTTL {
-		return q.depth, nil
+	fresh := !q.at.IsZero() && now.Sub(q.at) < queueDepthTTL
+	depth := q.depth
+	q.mu.Unlock()
+	if fresh {
+		return depth, nil
 	}
-	depth, err := counter.CountPendingTriggers(ctx)
+	// safety: the count outlives one requester, so the caller's cancel is
+	// dropped while its values and tracing are kept.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), queueDepthTimeout)
+	defer cancel()
+	counted, err := counter.CountPendingTriggers(ctx)
 	if err != nil {
 		return 0, err
 	}
-	q.depth, q.at = depth, now
-	return depth, nil
+	q.mu.Lock()
+	q.depth, q.at = counted, now
+	q.mu.Unlock()
+	return counted, nil
+}
+
+// safety: a depth that cannot be read fails on every submission of a flood,
+// so the line that says so is worth one a window rather than one a request.
+type warnEvery struct {
+	mu    sync.Mutex
+	every time.Duration
+	last  time.Time
+}
+
+func (w *warnEvery) due() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	now := time.Now()
+	if !w.last.IsZero() && now.Sub(w.last) < w.every {
+		return false
+	}
+	w.last = now
+	return true
 }
 
 // safety: the digest covers everything that decides what the run does, so two
 // submissions differing anywhere a run can observe stay two runs.
-func submissionDigest(in triggerIntake) string {
+func submissionDigest(principal string, in triggerIntake) string {
 	sum := sha256.New()
 	write := func(parts ...string) {
 		for _, p := range parts {
@@ -234,6 +263,9 @@ func submissionDigest(in triggerIntake) string {
 			sum.Write([]byte{0})
 		}
 	}
+	// safety: a 409 names another caller's run id, so the digest is scoped to
+	// the principal and one tenant can never be answered with another's run.
+	write(principal)
 	write(in.Pipeline, in.Source, in.User, in.ParentRunID, in.ParentNodeID, in.RetryOf)
 	write(in.Git.Branch, in.Git.SHA, in.Git.Repo, in.Git.RepoURL, in.Git.GithubOwner, in.Git.GithubRepo)
 	writeSortedMap(write, in.Args)

@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"errors"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -15,17 +14,19 @@ const (
 
 	shedWarnInterval = time.Minute
 
-	// safety: a controller naming an implausible interval would park a runner
-	// for it, so the invitation to poll less often is bounded here too.
-	maxAdvisedPoll = 60 * time.Second
+	// safety: a runner silent past the controller's placement hold drops out of
+	// local-first placement, so the invitation to poll less often is bounded here too.
+	maxAdvisedPoll = 15 * time.Second
 )
 
+// safety: a 429 is backpressure exactly as a 503 is, so a loop that repolled
+// at its own cadence through one would keep spending the budget it just drained.
 func unavailableBackoff(err error, floor time.Duration) (time.Duration, bool) {
-	var shed *client.UnavailableError
-	if !errors.As(err, &shed) {
+	after, ok := client.LoadSignal(err)
+	if !ok {
 		return 0, false
 	}
-	wait := shed.RetryAfter
+	wait := after
 	if wait < floor {
 		wait = floor
 	}

@@ -8,9 +8,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// MaxPollAdvice caps how far one suggestion can widen a claim loop's cadence,
-// so a controller naming an hour does not park a runner for one.
-const MaxPollAdvice = 60 * time.Second
+// MaxPollAdvice caps how far one suggestion can widen a claim loop's cadence.
+// A runner that stops polling for longer than a controller's placement hold
+// drops out of local-first placement, so the ceiling sits below the shipped
+// hold even after the runner adds its own spread.
+const MaxPollAdvice = 15 * time.Second
 
 // PollAdvice reports the interval the controller most recently suggested a
 // claim loop wait before polling again, or zero when it suggested none. The
@@ -24,6 +26,14 @@ func (c *Client) PollAdvice() time.Duration {
 // controller with work to hand out wants its fleet back at full cadence.
 func (c *Client) recordPollAdvice(resp *http.Response) {
 	c.pollAdvice.Store(int64(pollAdviceOf(resp)))
+}
+
+// safety: runners sharing one token must be told apart by the controller's
+// per-runner budgets, so every claim and heartbeat names the runner behind it.
+func setRunnerIdentity(req *http.Request, id string) {
+	if id != "" {
+		req.Header.Set(store.RunnerIdentityHeader, id)
+	}
 }
 
 func pollAdviceOf(resp *http.Response) time.Duration {
