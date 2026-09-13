@@ -94,9 +94,8 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 	return s.sampleOwnedFrom(time.Now, roots, arbitratedCores)
 }
 
-// safety: the clock is a parameter so a test can name which reading became which
-// bound, and it must carry a monotonic reading. Pairing them the other way divides
-// each first-sight credit by the listing duration instead of the interval.
+// safety: the clock must carry a monotonic reading; a wall-only one refuses every
+// root and charges the whole machine.
 func (s *ownedProcSampler) sampleOwnedFrom(
 	clock func() time.Time,
 	roots []OwnedRoot,
@@ -112,10 +111,8 @@ func (s *ownedProcSampler) sampleOwnedFrom(
 	return s.creditScan(processes, roots, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
 }
 
-// safety: a process is credited the counter covering its own execution. The
-// tree total a parent carries already holds every child it reaped, and each
-// live child is credited its own row, so crediting the tree total here counts
-// one reaped child under every ancestor it had.
+// safety: the tree total a parent carries already holds every child it reaped, so
+// crediting it here counts one reaped child under every ancestor it had.
 func linuxOwnedProcesses(procs map[int]linuxProc, now time.Time, uptimeSeconds float64) map[int]ownedProcess {
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
@@ -247,8 +244,6 @@ func linuxProcessStart(now time.Time, uptimeSeconds float64, startTicks uint64) 
 }
 
 func linuxUptime() float64 {
-	// safety: a zero return leaves every process undated, so a tree the daemon
-	// has no reading for goes unmeasured rather than credited on a bad date.
 	data, err := os.ReadFile("/proc/uptime")
 	if err != nil {
 		return 0

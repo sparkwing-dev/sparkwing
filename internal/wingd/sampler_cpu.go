@@ -82,9 +82,7 @@ func parseProcUptime(data string) (float64, bool) {
 		return 0, false
 	}
 	seconds, err := strconv.ParseFloat(fields[0], 64)
-	// safety: ParseFloat reads "nan" and "inf" without reporting an error, and a
-	// bound written as a comparison admits a NaN, because every comparison
-	// against one is false.
+	// safety: ParseFloat reads "nan" and "inf" without reporting an error.
 	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
 		return 0, false
 	}
@@ -92,9 +90,6 @@ func parseProcUptime(data string) (float64, bool) {
 }
 
 func processStartFromCreation(now, createdAt time.Time) time.Time {
-	// safety: a creation stamp is a wall value, and comparing one against a monotonic
-	// reading drops both sides to the wall clock, where a step larger than the dating
-	// slack moves the admit bound and nothing goes red.
 	age := now.Sub(createdAt)
 	if age < 0 {
 		return time.Time{}
@@ -103,15 +98,11 @@ func processStartFromCreation(now, createdAt time.Time) time.Time {
 }
 
 func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) time.Time {
-	// safety: the returned time keeps now's monotonic reading, which is what a
-	// later comparison against the scan bounds needs. Rebuilding it from a wall
-	// value, or routing it through UTC or Round, strips that and nothing goes red.
 	if uptimeSeconds <= 0 {
 		return time.Time{}
 	}
-	// safety: the bound admits the ages it can stand behind, because a NaN passes every
-	// refusal written as a comparison and converts to a zero Duration. That dates the
-	// process at the scan instant, inside every window and carrying a reading.
+	// safety: a NaN age converts to a zero Duration and dates the process at the scan
+	// instant, so the bound admits the ages it can stand behind rather than refusing.
 	age := uptimeSeconds - startSeconds
 	if age >= 0 {
 		return datedOrUndatable(now, time.Duration(age*float64(time.Second)))
@@ -120,9 +111,8 @@ func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) 
 }
 
 func datedOrUndatable(now time.Time, age time.Duration) time.Time {
-	// safety: a subtraction this large lands outside the range a monotonic reading
-	// survives, and Go drops the reading rather than failing. Ask the result whether it
-	// kept one rather than guessing which ages are wide enough to lose it.
+	// safety: Go drops a monotonic reading that lands outside the range it survives,
+	// rather than failing, and a comparison without one falls back to the wall clock.
 	dated := now.Add(-age)
 	if dated == dated.Round(0) {
 		return time.Time{}

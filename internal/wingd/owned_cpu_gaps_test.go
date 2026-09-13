@@ -104,8 +104,6 @@ func TestOwnedCPU_AMeasuredTreeLosesItsFigureWhenAFirstSeenChildOverrunsTheCeili
 	held := []OwnedRoot{{PID: 10, HeldSince: previousAt.Add(-time.Hour)}}
 	processes := map[int]ownedProcess{
 		10: {parentPID: 1, identity: rootIdentity, cpuSeconds: 4, startedAt: previousAt.Add(-time.Hour)},
-		// safety: the child is first seen and carries more CPU than one second at
-		// eight cores could hold, so its own credit is refused.
 		11: {parentPID: 10, identity: childIdentity, cpuSeconds: 900, startedAt: previousAt.Add(500 * time.Millisecond)},
 	}
 	previous := map[processIdentity]cpuSample{rootIdentity: {cpuSeconds: 2, at: previousAt}}

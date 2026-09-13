@@ -7,11 +7,9 @@ func TestParseBudget_RefusesACapItCannotStandBehind(t *testing.T) {
 		"nancores", "infcores", "-infcores", "nan", "inf",
 		"nan%", "inf%", "-inf%",
 		"nangb", "infgb", "nanmb", "infinitygb",
-		// safety: a finite size can overflow the byte count the cluster layer narrows
-		// to an int64, and one below a byte rounds to no cap at all.
+		// safety: a finite size reaches this too, by overflow and by rounding to zero.
 		"1e10gb", "17179869184gb", "0.0000001kb",
-		// safety: exactly the byte count that narrows to the most negative int64, which
-		// a bound one step looser admits and every larger value here misses.
+		// safety: exactly the byte count that narrows to the most negative int64.
 		"8589934592gib",
 	} {
 		budget, err := ParseBudget(raw)

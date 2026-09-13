@@ -132,8 +132,8 @@ func ParseBudget(s string) (Budget, error) {
 	return b, nil
 }
 
-// safety: a bound written as a refusal admits a NaN, because every comparison against
-// one is false. The cap then reads as absent and the machine is granted whole.
+// safety: every comparison against a NaN is false, so a bound written as a refusal
+// admits one, and the cap then reads as absent.
 func positiveFinite(n float64) bool {
 	return n > 0 && !math.IsInf(n, 0)
 }
@@ -196,10 +196,8 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		if perr != nil {
 			return 0, false, fmt.Errorf("budget: %q is not a memory size", tok)
 		}
-		// safety: the product must hold, not the operand. A size the byte count cannot
-		// represent converts by a rule the architecture picks, so one string reads as no
-		// cap on one machine and a negative reserve on another; one under a byte rounds
-		// to no cap everywhere.
+		// safety: the cluster layer narrows this to an int64, and the conversion of a
+		// value the target cannot hold is the architecture's choice, not Go's.
 		size := n * u.scale
 		if !positiveFinite(size) || size >= math.MaxInt64 || uint64(size) == 0 {
 			return 0, false, fmt.Errorf("budget: memory %q must be positive and hold in a byte count", tok)

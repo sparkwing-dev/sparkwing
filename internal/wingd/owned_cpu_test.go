@@ -431,8 +431,8 @@ func TestStartedInWindow_AdmitsOnlyAProcessThePreviousScanCouldNotHaveSeen(t *te
 		"running before the scan":   {scanStart.Add(-time.Hour), scanStart, false},
 		"a tick before the scan":    {scanStart.Add(-5 * time.Millisecond), scanStart, true},
 		"two ticks before the scan": {scanStart.Add(-20 * time.Millisecond), scanStart, false},
-		// safety: these two pin the slack to one clock tick from both sides. A
-		// bound expressed against the constant moves with it and admits any value.
+		// safety: written as literals, because a case expressed against the constant
+		// moves with it and pins nothing.
 		"exactly one clock tick before the scan": {scanStart.Add(-10 * time.Millisecond), scanStart, true},
 		"a nanosecond older than one clock tick": {scanStart.Add(-10*time.Millisecond - time.Nanosecond), scanStart, false},
 		"born during the scan":                   {scanStart.Add(time.Millisecond), scanStart, true},
@@ -453,13 +453,11 @@ func TestParseProcUptime_RefusesAnythingItCannotRead(t *testing.T) {
 		t.Errorf("parseProcUptime with one field = %v, %v; want it read", got, ok)
 	}
 	for name, data := range map[string]string{
-		"empty":        "",
-		"blank":        "   \n",
-		"not a number": "unknown 1\n",
-		"zero":         "0 0\n",
-		"negative":     "-1 0\n",
-		// safety: ParseFloat reads each of these without reporting an error, and
-		// a bound written as a comparison admits a NaN.
+		"empty":                 "",
+		"blank":                 "   \n",
+		"not a number":          "unknown 1\n",
+		"zero":                  "0 0\n",
+		"negative":              "-1 0\n",
 		"the IEEE not-a-number": "nan 0\n",
 		"positive infinity":     "inf 0\n",
 		"spelled-out infinity":  "Infinity 0\n",
@@ -598,12 +596,9 @@ func TestProcessStartFromUptime_KeepsTheMonotonicReadingTheScanBoundsCarry(t *te
 func TestProcessStartFromUptime_RefusesADateItCannotStandBehind(t *testing.T) {
 	now := time.Now()
 	for name, tc := range map[string]struct{ uptimeSeconds, startSeconds float64 }{
-		"unreadable uptime":          {0, 0},
-		"negative uptime":            {-1, 0},
-		"a start after the boot ran": {10, 3600},
-		// safety: a NaN age converts to a zero Duration, so the process dates to
-		// the instant of the scan -- inside every window, and carrying a monotonic
-		// reading, so asking the result whether it kept one answers yes.
+		"unreadable uptime":              {0, 0},
+		"negative uptime":                {-1, 0},
+		"a start after the boot ran":     {10, 3600},
 		"an uptime that is not a number": {math.NaN(), 60},
 	} {
 		if got := processStartFromUptime(now, tc.uptimeSeconds, tc.startSeconds); !got.IsZero() {
@@ -633,8 +628,7 @@ func TestOwnedCPU_ARecycledPIDDoesNotInheritTheDeadProcessBaseline(t *testing.T)
 func TestProcessStartFromCreation_RefusesACreationStampTooOldToKeepAMonotonicReading(t *testing.T) {
 	now := time.Now()
 	for name, createdAt := range map[string]time.Time{
-		// safety: a garbage FILETIME reaches these, because the conversion clamps to
-		// 1677 at the low end, so each is a value the caller can hand over.
+		// safety: a garbage FILETIME reaches these; the conversion clamps to 1677.
 		"past the range a duration holds":      time.Date(1700, 1, 1, 0, 0, 0, 0, time.UTC),
 		"inside the range a duration holds":    time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC),
 		"an age no source could have measured": {},

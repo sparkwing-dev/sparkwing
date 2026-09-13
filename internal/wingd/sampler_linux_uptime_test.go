@@ -20,10 +20,8 @@ func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 		t.Fatal("the scan could not list this machine's processes, so it never reached the dating this test is about")
 	}
 
-	// safety: the child is first seen by the second scan, which is the one path
-	// that asks how old a process is. Without a process the previous scan never
-	// listed, both a scan that dates its processes and a scan that dates none of
-	// them keep the tree, and nothing here reads the uptime the scan was given.
+	// safety: the child is first seen by the second scan, which is the one path that
+	// asks a process's age. Without it, a scan dating nothing still keeps the tree.
 	child := exec.Command("sleep", "30")
 	if err := child.Start(); err != nil {
 		t.Fatalf("start a child under this test's tree: %v", err)
@@ -33,10 +31,8 @@ func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 		_ = child.Wait()
 	}()
 
-	// safety: the ceiling a first-sight credit is bounded by is the window times the
-	// cores, and a container scan of a sparse /proc closes in microseconds. Holding the
-	// window open past one clock tick keeps the capacity bound from deciding here, so a
-	// red reports the dating this test is about.
+	// safety: a sparse /proc scans in microseconds, and one tick of child CPU exceeds
+	// that window's ceiling, so the capacity bound would decide in the date gate's place.
 	time.Sleep(50 * time.Millisecond)
 
 	byRoot, ok := sampler.sampleOwnedFrom(time.Now, roots, cores)

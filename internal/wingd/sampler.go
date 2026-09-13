@@ -205,9 +205,8 @@ func (s *ownedProcSampler) forgetSamples(now time.Time) {
 	s.last, s.lastAt, s.seenSince = nil, now, now
 }
 
-// safety: the two instants are one argument because they share a type and mean
-// opposite things. A process born mid-listing is absent from a reading already
-// underway, so dating it against the finish refuses a credit the tree earned.
+// safety: one argument, because two adjacent times of the same type invite a
+// transposition that dates against the scan's end.
 type scanWindow struct {
 	startedListingAt time.Time
 	readAt           time.Time
@@ -222,8 +221,8 @@ func (s *ownedProcSampler) creditScan(
 	owners := ownedProcessOwners(roots, processes)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// safety: both ends of every window are stamped from readAt, so whatever offset
-	// sits between it and the counter reads cancels across consecutive readings.
+	// safety: both ends of every window come from readAt, so the offset between it and
+	// the counter reads cancels across readings.
 	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, s.seenSince, window.readAt, arbitratedCores)
 	s.last, s.lastAt, s.seenSince = next, window.readAt, window.startedListingAt
 	return byRoot
@@ -264,9 +263,8 @@ func ownedCPUByRoot(
 		prior, seen := previous[identity]
 		if !seen {
 			if !startedInWindow(process.startedAt, seenSince, now) {
-				// safety: crediting a counter that covers time nobody watched charges
-				// this window for CPU that ran outside it, and admission then grants
-				// against the difference.
+				// safety: a counter covering time nobody watched charges this window for
+				// CPU that ran outside it, and admission grants against the difference.
 				unreadable[root] = struct{}{}
 				continue
 			}
@@ -350,10 +348,8 @@ func creditableRoots(
 const processDatingSlack = 10 * time.Millisecond
 
 func startedInWindow(startedAt, seenSince, now time.Time) bool {
-	// safety: a process absent from the previous reading is only evidence of age if
-	// that reading could have listed it, so the bound is when its scan began, minus
-	// a clock tick because a start time and an uptime both floor to one. A platform
-	// that cannot date a process answers no and its tree goes unmeasured.
+	// safety: the slack is a clock tick, because a start time and an uptime each floor
+	// to one and a process dated a tick early is not evidence it predates the scan.
 	if seenSince.IsZero() {
 		return false
 	}
