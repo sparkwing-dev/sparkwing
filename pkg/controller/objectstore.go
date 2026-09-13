@@ -62,7 +62,12 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 	for _, c := range limiter.Reset() {
 		resp.Cleared = append(resp.Cleared, string(c))
 	}
-	resp.Thawed = limiter.Ceiling().Thaw()
+	thawed, err := limiter.Ceiling().Thaw()
+	if err != nil {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	resp.Thawed = thawed
 	resp.Ceiling = limiter.Ceiling().State()
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -96,13 +101,21 @@ func objectStoreHealth() (map[string]any, []string) {
 	if ceiling.Enforced {
 		// safety: the totals and the ceilings stay on the admin-scoped breaker route,
 		// so an anonymous caller learns that writes are frozen and not how large the bucket is.
-		summary["ceiling"] = map[string]any{"frozen": ceiling.Frozen, "warning": ceiling.Warning}
+		summary["ceiling"] = map[string]any{
+			"frozen":                 ceiling.Frozen,
+			"warning":                ceiling.Warning,
+			"measurement_incomplete": ceiling.Incomplete,
+		}
 		switch {
 		case ceiling.Frozen:
 			problems = append(problems, fmt.Sprintf(
 				"object-store bucket ceiling: the bucket is over its %s ceiling and object writes are frozen", ceiling.FrozenReason))
 		case ceiling.Warning:
 			problems = append(problems, "object-store bucket ceiling: the bucket is past its warning mark")
+		}
+		if ceiling.Incomplete {
+			problems = append(problems,
+				"object-store bucket ceiling: the last measurement did not finish, so the total is the running count")
 		}
 	}
 
@@ -117,33 +130,44 @@ func objectStoreHealth() (map[string]any, []string) {
 	return summary, problems
 }
 
-// safety: a backend that cannot total itself reports false rather than zero, so
-// an unmeasurable store never reads as an empty bucket.
-func (s *Server) bucketUsage(ctx context.Context) (objectguard.Usage, bool, error) {
+// safety: a backend that cannot total itself yields a partial measurement rather
+// than a zero one, so an unmeasurable store never reads as an empty bucket.
+func (s *Server) bucketUsage(ctx context.Context) (objectguard.Usage, error) {
 	measured := s.bucketUsageStore
 	if measured == nil {
 		measured = s.artifactStore
 	}
 	if measured == nil {
-		return objectguard.Usage{}, false, nil
+		return objectguard.Usage{Partial: true}, nil
 	}
 	u, ok, err := storage.Usage(ctx, measured)
-	if err != nil || !ok {
-		return objectguard.Usage{}, ok, err
+	if err != nil {
+		return objectguard.Usage{}, err
 	}
-	return objectguard.Usage{Bytes: u.Bytes, Objects: u.Objects, ObservedAt: u.ObservedAt}, true, nil
+	if !ok {
+		return objectguard.Usage{Partial: true}, nil
+	}
+	return objectguard.Usage{
+		Bytes:      u.Bytes,
+		Objects:    u.Objects,
+		ObservedAt: u.ObservedAt,
+		Partial:    u.Partial,
+	}, nil
 }
 
 // perf: one replica per window pays for the listing, because a bucket total is
 // the same answer whoever asks and each pass is billed per thousand keys.
 func (s *Server) measureBucketLeased(ctx context.Context, ceiling *objectguard.Ceiling, window time.Duration) (bool, error) {
 	measure := func(ctx context.Context) error {
-		usage, ok, err := s.bucketUsage(ctx)
-		if err != nil || !ok {
-			return err
+		// safety: the measurement gets less than the window it runs on, so a bucket
+		// that cannot be walked in time reports itself partial instead of overlapping
+		// the next one.
+		if window > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, window/2)
+			defer cancel()
 		}
-		ceiling.Observe(usage)
-		return nil
+		return ceiling.ReconcileWith(ctx, s.bucketUsage)
 	}
 	if s.store == nil || window <= 0 {
 		return true, measure(ctx)
