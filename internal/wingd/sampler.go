@@ -205,9 +205,6 @@ func ownedCPUByRoot(
 		if _, ok := creditable[root]; !ok {
 			continue
 		}
-		if _, seeded := byRoot[root]; !seeded {
-			byRoot[root] = 0
-		}
 		prior, seen := previous[identity]
 		if !seen {
 			firstSight[root] += process.cpuSeconds
@@ -216,8 +213,13 @@ func ownedCPUByRoot(
 		wall := now.Sub(prior.at).Seconds()
 		delta := process.cpuSeconds - prior.cpuSeconds
 		if wall <= 0 || delta < 0 {
+			// safety: a counter that stood still or ran backwards is unreadable, and
+			// leaving the root absent charges the host for it. Reporting zero would
+			// subtract nothing from external, which is what over-admits.
 			continue
 		}
+		// A tree that ran nothing adds zero here, which is what puts it in the map
+		// as a measured zero rather than leaving it absent as an unread tree.
 		byRoot[root] += delta / wall
 	}
 	for root, cpuSeconds := range firstSight {
@@ -228,7 +230,29 @@ func ownedCPUByRoot(
 		}
 		byRoot[root] += credit
 	}
+	carryLiveBaselines(previous, processes, next)
 	return byRoot, next
+}
+
+// carryLiveBaselines keeps the reading for a process the daemon has stopped
+// owning but that is still running, so re-holding its tree resumes from the
+// figure already taken rather than meeting the tree as new.
+func carryLiveBaselines(
+	previous map[processIdentity]cpuSample,
+	processes map[int]ownedProcess,
+	next map[processIdentity]cpuSample,
+) {
+	for identity, prior := range previous {
+		if _, taken := next[identity]; taken {
+			continue
+		}
+		// A reading is worth keeping only while the process it measured is still
+		// running, so matching the whole identity is what drops it at that process's
+		// death rather than at whenever its pid next comes free.
+		if process, alive := processes[identity.pid]; alive && process.identity == identity {
+			next[identity] = prior
+		}
+	}
 }
 
 func creditableRoots(

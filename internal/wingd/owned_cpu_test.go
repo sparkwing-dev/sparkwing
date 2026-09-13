@@ -194,3 +194,55 @@ func TestOwnedCPU_OverlappingRootsCountTheirUnionOnce(t *testing.T) {
 		t.Fatalf("owners = %v; want each process charged to its nearest ancestor root, so the union is counted once", owners)
 	}
 }
+
+func TestOwnedCPU_ReholdingATreeResumesFromTheFigureAlreadyTaken(t *testing.T) {
+	firstAt := time.Unix(100, 0)
+	releasedAt := firstAt.Add(10 * time.Second)
+	reheldAt := releasedAt.Add(10 * time.Second)
+	identity := processIdentity{pid: 10, startTicks: 1000}
+	// The tree has burned 40 CPU-seconds before the daemon ever reads it and
+	// burns one more core's worth across each ten-second reading.
+	process := func(cpuSeconds float64) map[int]ownedProcess {
+		return map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: cpuSeconds}}
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: firstAt.Add(-time.Hour)}}
+
+	processes := process(50)
+	_, afterFirst := ownedCPUByRoot(
+		map[processIdentity]cpuSample{identity: {cpuSeconds: 40, at: firstAt}},
+		processes, ownedProcessOwners(held, processes), held, firstAt, releasedAt, 8)
+
+	// The run is released, so the daemon owns nothing and asks about no roots.
+	processes = process(60)
+	_, afterRelease := ownedCPUByRoot(afterFirst, processes, nil, nil, releasedAt, reheldAt, 8)
+
+	// The same tree is held again, inside this reading's window, which is the one
+	// case the sampler will credit a tree it has no baseline for.
+	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
+	processes = process(70)
+	byRoot, _ := ownedCPUByRoot(
+		afterRelease, processes, ownedProcessOwners(rehold, processes), rehold,
+		reheldAt, reheldAt.Add(10*time.Second), 8)
+
+	if math.Abs(byRoot[10]-1) > 0.0001 {
+		t.Fatalf("re-held tree CPU = %v cores; want the one core it ran this window, not its whole lifetime spread over it",
+			byRoot[10])
+	}
+}
+
+func TestOwnedCPU_ATreeThatRanNothingReportsZeroRatherThanNoReading(t *testing.T) {
+	previousAt := time.Unix(100, 0)
+	now := previousAt.Add(time.Second)
+	identity := processIdentity{pid: 10, startTicks: 1000}
+	previous := map[processIdentity]cpuSample{identity: {cpuSeconds: 7, at: previousAt}}
+	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 7}}
+	owners := ownedProcessOwners(heldRoots(10), processes)
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+
+	figure, reported := byRoot[10]
+	if !reported || figure != 0 {
+		t.Fatalf("idle tree reports %v with a figure %v; want zero cores reported, because an absent key means no reading and would charge the host for a run that ran nothing",
+			figure, reported)
+	}
+}
