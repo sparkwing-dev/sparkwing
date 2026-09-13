@@ -76,6 +76,7 @@ var apiReadRoutes = []string{
 	"GET /api/v1/triggers/spawned-child",
 	"GET /api/v1/concurrency/{key}/state",
 	"GET /api/v1/concurrency/{key}/holder",
+	"GET /api/v1/object-store/breaker",
 	"GET /api/v1/pipelines/{name}/latest",
 	"GET /api/v1/pipelines/{name}/profile",
 	"GET /api/v1/crons",

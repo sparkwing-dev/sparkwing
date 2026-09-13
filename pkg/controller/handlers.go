@@ -81,7 +81,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := map[string]any{"status": "ok", "auth": authState}
+	objectStore, objectStoreProblems := objectStoreHealth()
+	problems = append(problems, objectStoreProblems...)
+
+	resp := map[string]any{"status": "ok", "auth": authState, "object_store": objectStore}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems

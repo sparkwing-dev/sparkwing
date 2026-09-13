@@ -337,6 +337,9 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_active_runners` | Gauge | Distinct runners with a non-expired lease in the last 2 minutes |
 | `sparkwing_http_requests_total` | Counter | HTTP requests by route, method, status |
 | `sparkwing_http_request_duration_seconds` | Histogram | HTTP latency by route and method |
+| `sparkwing_object_store_requests_total` | Counter | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
+| `sparkwing_object_store_trips_total` | Counter | Times a request class exhausted its budget and began refusing requests |
+| `sparkwing_object_store_tripped` | Gauge | 1 while a request class is refusing requests |
 
 The `route` label is the pattern the controller registered the request
 against, so every path parameter reaches Prometheus in its declared form
@@ -356,3 +359,48 @@ invented request method can grow the series count.
 | `sparkwing.gitcache.cache_hits` | Counter | Cache hits (git archive and binary/dependency, distinguished by `type` attribute) |
 | `sparkwing.gitcache.cache_misses` | Counter | Cache misses (git archive and binary/dependency, distinguished by `type` attribute) |
 | `sparkwing.gitcache.recovery_reclones` | Counter | Full mirror re-downloads after a failed fetch, by `repo` hash. Should be near zero -- a repo that keeps appearing here has a persistent fetch failure (see [Cache](gitcache.md#recovery-reclone-circuit-breaker)) |
+
+## Object-store request budget
+
+Every object-store client a Sparkwing process builds draws on one
+request budget. The budget counts `put`, `get`, `list` and `delete`
+separately, each against a per-minute rate and a per-day total. A class
+that spends either budget trips: further requests of that class are
+refused with an error naming the class and the limit, and nothing is
+queued. Classes are independent, so a tripped `put` budget leaves reads
+serving until their own budget trips.
+
+The guard exists because a retry loop against a failing bucket bills per
+request and the bill arrives hours later. Defaults sit far above normal
+load and far below a loop with no sleep:
+
+| Class | Per minute | Per day |
+|--------|------|-------------|
+| `put` | 1200 | 200000 |
+| `get` | 3000 | 500000 |
+| `list` | 600 | 100000 |
+| `delete` | 600 | 100000 |
+
+Override any of them with `SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE`
+and `SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY`, where `<CLASS>` is `PUT`,
+`GET`, `LIST` or `DELETE`. A value of `0` removes that budget.
+`SPARKWING_OBJECT_STORE_TRIP_RESET` chooses what clears a tripped class
+without an operator: `day` (the default) clears it when the day window
+rolls, `manual` keeps it until a reset.
+`SPARKWING_OBJECT_STORE_BREAKER=off` counts requests without refusing
+any, which is the escape hatch for a local process that must finish past
+a tripped budget.
+
+The controller reports the budget on `GET /api/v1/health` under
+`object_store`, names every tripped class in `problems`, and exports the
+three `sparkwing_object_store_*` metrics above. Clear a tripped budget
+with:
+
+```bash
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+A reset clears every tripped class and both window counters; lifetime
+request and trip totals survive so the metrics keep their history. A
+budget that keeps tripping wants a larger limit or a caller that stops
+retrying, not a repeated reset.

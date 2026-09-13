@@ -54,6 +54,9 @@ func TestMetrics_EndpointReachable(t *testing.T) {
 	mustContain := []string{
 		"sparkwing_pending_nodes",
 		"sparkwing_active_runners",
+		"sparkwing_object_store_requests_total",
+		"sparkwing_object_store_trips_total",
+		"sparkwing_object_store_tripped",
 		"go_goroutines",
 		"process_resident_memory_bytes",
 	}

@@ -93,6 +93,17 @@ type NoopDispatcher struct {
 	Logger *slog.Logger
 }
 func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error
+type ObjectStoreBreakerResponse struct {
+	Enabled bool
+
+	Reset string
+
+	Tripped bool
+
+	Classes []objectguard.ClassState
+
+	Cleared []string
+}
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 type PoolConfig struct {
 	Client kubernetes.Interface
@@ -187,4 +198,6 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
+func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
+func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (r *statusRecorder) WriteHeader(code int)

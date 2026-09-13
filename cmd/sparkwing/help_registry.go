@@ -184,7 +184,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
+	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -3499,6 +3499,53 @@ command narrows to one namespace.`,
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Who holds and who's queued", "sparkwing cluster concurrency --namespace deploy-prod --profile prod"},
+	},
+}
+
+var cmdClusterObjectStore = Command{
+	Path:     "sparkwing cluster object-store",
+	Synopsis: "Operate the controller's object-store request budget",
+	Description: `The controller counts every object-store request it makes, by class
+(put, get, list, delete), against a per-minute rate and a per-day
+budget. A class that spends either budget trips: writes of that class
+fail closed and reads keep serving until their own budget trips. The
+state appears on 'sparkwing cluster status' and on the controller's
+Prometheus metrics as sparkwing_object_store_requests_total,
+sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
+
+Budgets come from SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE and
+SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
+SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
+clears when its day window rolls (day, the default) or waits for an
+operator (manual). A local process that must finish past a tripped
+budget sets SPARKWING_OBJECT_STORE_BREAKER=off.`,
+	SubcommandOrder: []string{"reset-breaker"},
+	Examples: []Example{
+		{"Clear a tripped budget", "sparkwing cluster object-store reset-breaker --profile prod"},
+	},
+}
+
+var cmdClusterObjectStoreResetBreaker = Command{
+	Path:     "sparkwing cluster object-store reset-breaker",
+	Synopsis: "Clear a tripped object-store request budget",
+	Description: `Clears every tripped request class on the selected controller and
+resets its per-minute and per-day window counters, then prints the
+budget as it stands. Lifetime request and trip totals survive, so the
+metrics keep their history.
+
+Reach for this after fixing what caused the trip. A budget that keeps
+tripping wants a larger limit or a caller that stops retrying, not a
+repeated reset.
+
+Hits POST /api/v1/object-store/reset-breaker on the selected
+profile's controller, which needs an admin-scoped token.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format (json|table)", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "System", "Other"},
+	Examples: []Example{
+		{"Clear a tripped budget", "sparkwing cluster object-store reset-breaker --profile prod"},
 	},
 }
 

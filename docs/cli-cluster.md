@@ -27,6 +27,7 @@ local dashboard with 'sparkwing serve'.
 - `image` -- Rollout helpers for images referenced by a gitops repo
 - `webhooks` -- Inspect and replay GitHub webhooks
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
+- `object-store` -- Operate the controller's object-store request budget
 
 ### Examples
 
@@ -269,6 +270,66 @@ sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --w
 
 # Bump, sync, wait, then tail pod logs
 sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs
+```
+
+## `sparkwing cluster object-store`
+
+Operate the controller's object-store request budget
+
+The controller counts every object-store request it makes, by class
+(put, get, list, delete), against a per-minute rate and a per-day
+budget. A class that spends either budget trips: writes of that class
+fail closed and reads keep serving until their own budget trips. The
+state appears on 'sparkwing cluster status' and on the controller's
+Prometheus metrics as sparkwing_object_store_requests_total,
+sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
+
+Budgets come from SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE and
+SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
+SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
+clears when its day window rolls (day, the default) or waits for an
+operator (manual). A local process that must finish past a tripped
+budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
+
+### Subcommands
+
+- `reset-breaker` -- Clear a tripped object-store request budget
+
+### Examples
+
+```sh
+# Clear a tripped budget
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+## `sparkwing cluster object-store reset-breaker`
+
+Clear a tripped object-store request budget
+
+Clears every tripped request class on the selected controller and
+resets its per-minute and per-day window counters, then prints the
+budget as it stands. Lifetime request and trip totals survive, so the
+metrics keep their history.
+
+Reach for this after fixing what caused the trip. A budget that keeps
+tripping wants a larger limit or a caller that stops retrying, not a
+repeated reset.
+
+Hits POST /api/v1/object-store/reset-breaker on the selected
+profile's controller, which needs an admin-scoped token.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile selecting the controller (required) |
+| `-o, --output FORMAT` | Output format (json\|table) |
+
+### Examples
+
+```sh
+# Clear a tripped budget
+sparkwing cluster object-store reset-breaker --profile prod
 ```
 
 ## `sparkwing cluster status`

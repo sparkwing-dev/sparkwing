@@ -3397,6 +3397,44 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/object-store/breaker:
+    get:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Read the controller's object-store request budget.
+      description: |
+        Reports the per-minute rate and per-day budget for each object-store
+        request class (put, get, list, delete), how much of each window the
+        process has spent, and which classes are refusing requests. Changes
+        nothing.
+      responses:
+        "200":
+          description: The budget as it stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ObjectStoreBreaker"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/object-store/reset-breaker:
+    post:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Clear a tripped object-store request budget.
+      description: |
+        Clears every tripped request class and resets both window counters,
+        then returns the budget as it stands with `cleared` naming the classes
+        that were refusing requests. Lifetime request and trip totals survive,
+        so the metrics keep their history. Takes no body.
+      responses:
+        "200":
+          description: The budget after the reset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ObjectStoreBreaker"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4459,6 +4497,36 @@ components:
         schedule: {$ref: "#/components/schemas/CronSchedule"}
         fires: {type: array, items: {$ref: "#/components/schemas/CronFire"}}
         upcoming: {type: array, items: {type: string}}
+    ObjectStoreBreaker:
+      x-sparkwing-go-type: pkg/controller.ObjectStoreBreakerResponse
+      type: object
+      description: The process-wide object-store request budget, one entry per request class.
+      properties:
+        enabled: {type: boolean}
+        reset: {type: string, enum: [day, manual]}
+        tripped: {type: boolean}
+        classes:
+          type: array
+          items: {$ref: "#/components/schemas/ObjectStoreBreakerClass"}
+        cleared:
+          type: array
+          items: {type: string}
+    ObjectStoreBreakerClass:
+      x-sparkwing-go-type: internal/objectguard.ClassState
+      type: object
+      description: One request class's counters and trip state.
+      properties:
+        class: {type: string, enum: [put, get, list, delete]}
+        per_minute: {type: integer}
+        per_day: {type: integer}
+        minute_used: {type: integer}
+        day_used: {type: integer}
+        allowed_total: {type: integer}
+        refused_total: {type: integer}
+        trips_total: {type: integer}
+        tripped: {type: boolean}
+        tripped_at: {type: string, format: date-time}
+        tripped_window: {type: string, enum: [minute, day]}
     CronScheduleEnvelope:
       x-sparkwing-go-type: internal/crons.ScheduleEnvelope
       type: object
