@@ -22,6 +22,20 @@ unlock.
 
 ### Added
 
+- **cli:** `sparkwing cluster runners add --profile P --name NAME` enrolls the
+  machine it runs on in one command: it mints a runner token scoped to
+  `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and
+  `logs.write` on the profile's controller, writes
+  `~/.config/sparkwing/agent.yaml` at mode 0600 in the claim-mode format the
+  service installer writes, installs and starts the user service (a systemd
+  user unit on Linux, a LaunchAgent on macOS), and prints the token prefix with
+  the command that revokes it. On Windows it prints the manual supervision
+  steps. `--max-concurrent`, `--contribution` and `--labels` set the ceilings
+  and placement terms, `--no-service` stops at the config, and an existing
+  config is replaced only with `--force`. `sparkwing cluster runners remove
+  --profile P` stops the service and then revokes the token.
+  `install/service-install.sh` is unchanged and still installs the same unit
+  and plist.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

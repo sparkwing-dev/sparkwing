@@ -485,8 +485,8 @@ refusal holds back.
 
 The name-less singular configuration uses the existing outbound FIFO
 `/api/v1/nodes/claim` loop. Its `labels` are self-asserted placement terms,
-not administrator-trusted capabilities. The bundled service installer writes
-this format. Existing files keep their `local_admission` setting, including an
+not administrator-trusted capabilities. `sparkwing cluster runners add` and the
+bundled service installer both write this format. Existing files keep their `local_admission` setting, including an
 explicit `false`; when enabled, legacy local admission happens after a claim.
 
 Named or plural configuration selects enrolled assisted-offer mode. Before

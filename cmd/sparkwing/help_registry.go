@@ -184,7 +184,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -3337,6 +3337,78 @@ offline agents and gateways, plus recent legacy claim-only runners.`,
 	SubcommandOrder: []string{"list", "enroll"},
 	Examples: []Example{
 		{"List prod agents", "sparkwing cluster agents list --profile prod"},
+	},
+}
+
+var cmdRunners = Command{
+	Path:     "sparkwing cluster runners",
+	Synopsis: "Enroll and retire this machine as a runner",
+	Description: `Turns one machine into a runner for the selected profile's
+controller in a single command. 'add' mints a scoped runner token, writes the
+owner-only agent config, and installs the user service. 'remove' stops that
+service and revokes the token.
+
+Use 'sparkwing cluster agents list' to see the runners a controller knows
+about.`,
+	SubcommandOrder: []string{"add", "remove"},
+	Examples: []Example{
+		{"Enroll this machine", "sparkwing cluster runners add --profile prod --name dev-laptop"},
+		{"Retire this machine", "sparkwing cluster runners remove --profile prod"},
+	},
+}
+
+var cmdRunnersAdd = Command{
+	Path:     "sparkwing cluster runners add",
+	Synopsis: "Mint a runner token, write the config, start the service",
+	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
+runs.state, secrets.read and logs.write against the profile's controller,
+writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
+the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
+Windows it prints the manual supervision steps instead.
+
+The config is written in claim mode, which is the mode this release executes.
+An existing config is never replaced without --force, because the token it
+holds stays live until it is revoked.
+
+The command prints the token prefix and the revoke command. The raw token
+reaches only the config file.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Runner name, shown in the dashboard", Required: true, Group: "Identity"},
+		{Name: "labels", Argument: "CSV", Desc: "Comma-separated self-asserted placement labels", Group: "Identity"},
+		{Name: "max-concurrent", Argument: "N", Desc: "Concurrent jobs this machine accepts", Default: "2", Group: "Limits"},
+		{Name: "contribution", Argument: "SPEC", Desc: "CPU and memory this machine contributes (4,8gb or 50%,50%)", Default: "50%,50%", Group: "Limits"},
+		{Name: "logs", Argument: "URL", Desc: "Logs service URL (default: the profile's logs surface)", Group: "Input"},
+		{Name: "config", Argument: "PATH", Desc: "Agent config to write (default: ~/.config/sparkwing/agent.yaml)", Group: "Input"},
+		{Name: "force", Desc: "Replace an existing agent config", Group: "Input"},
+		{Name: "no-service", Desc: "Write the config without installing or starting the service", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile naming the controller to enroll against", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Identity", "Limits", "Input", "System", "Other"},
+	Examples: []Example{
+		{"Enroll this machine", "sparkwing cluster runners add --profile prod --name dev-laptop"},
+		{"Enroll with a capacity ceiling and labels", "sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4 --contribution 4,8gb --labels linux,arch=amd64"},
+		{"Write the config and supervise the agent yourself", "sparkwing cluster runners add --profile prod --name dev-laptop --no-service"},
+	},
+}
+
+var cmdRunnersRemove = Command{
+	Path:     "sparkwing cluster runners remove",
+	Synopsis: "Stop the runner service and revoke its token",
+	Description: `Reads the token out of the agent config, stops and removes the
+user service, then revokes that token on the profile's controller. The service
+stops first, so a claim in flight finishes against a credential that still
+authenticates.
+
+The config file stays on disk holding the revoked token; 'runners add --force'
+replaces it.`,
+	Flags: []FlagSpec{
+		{Name: "config", Argument: "PATH", Desc: "Agent config to read the token from (default: ~/.config/sparkwing/agent.yaml)", Group: "Input"},
+		{Name: "no-service", Desc: "Revoke the token without touching the service", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile naming the controller that issued the token", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Input", "System", "Other"},
+	Examples: []Example{
+		{"Retire this machine", "sparkwing cluster runners remove --profile prod"},
 	},
 }
 

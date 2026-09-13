@@ -484,6 +484,8 @@ func runCluster(args []string) error {
 		return runHealth(args[1:])
 	case "agents":
 		return runAgents(args[1:])
+	case "runners":
+		return runRunners(args[1:])
 	case "worker":
 		return runWorker(args[1:])
 	case "gc":
