@@ -28,6 +28,7 @@ unlock.
   embedder serve a dashboard of its own. Leaving it nil keeps the embedded
   bundle and its existing check, and a bundle carrying no `index.html` at its
   root is refused at startup rather than served as a silent 404.
+
 ### Changed
 
 - **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
