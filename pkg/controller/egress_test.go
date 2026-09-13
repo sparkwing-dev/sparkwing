@@ -109,7 +109,7 @@ func (f egressFixture) fetch(t *testing.T, method, path, token string) fetched {
 func (f egressFixture) fetchAs(t *testing.T, path, token, pod string) fetched {
 	t.Helper()
 	req := f.request(t, http.MethodGet, path, token)
-	req.Header.Set(egress.RunnerHeader, pod)
+	req.Header.Set(store.RunnerIdentityHeader, pod)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -547,7 +547,7 @@ func TestEachPodOfAPoolHoldsItsOwnDownloadSlot(t *testing.T) {
 	go func() {
 		defer close(done)
 		req := f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken)
-		req.Header.Set(egress.RunnerHeader, "pod-a")
+		req.Header.Set(store.RunnerIdentityHeader, "pod-a")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return

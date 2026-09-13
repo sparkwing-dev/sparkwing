@@ -88,16 +88,18 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		// safety: a pool shares one bearer, so the slot counts the pod the
-		// request names and falls back to the principal only when nothing
-		// names one.
-		holder := egress.SlotIdentity(r, principal, store.ClaimHolderHeader)
-		release, err := s.egress.Open(holder, slot)
-		if err != nil {
-			s.writeEgressRefusal(w, r, class, err)
-			return
+		if slot != egress.SlotNone {
+			// safety: a pool shares one bearer, so the slot counts the pod
+			// the request names and falls back to the principal only when
+			// nothing names one.
+			holder := egress.SlotIdentity(r, principal, store.RunnerIdentityHeader, store.ClaimHolderHeader)
+			release, err := s.egress.Open(holder, slot)
+			if err != nil {
+				s.writeEgressRefusal(w, r, class, err)
+				return
+			}
+			defer release()
 		}
-		defer release()
 		next.ServeHTTP(s.egress.Serve(w, r, principal, class), r)
 	})
 }

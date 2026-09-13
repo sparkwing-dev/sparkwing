@@ -125,6 +125,9 @@ func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
 type Slot string
 
 const (
+	// SlotNone takes no slot, which is what a route that is metered for
+	// bytes but must never be refused for concurrency passes.
+	SlotNone Slot = ""
 	// SlotDownload counts simultaneous metered downloads.
 	SlotDownload Slot = "download"
 	// SlotLogStream counts simultaneous live log streams.
@@ -185,6 +188,10 @@ type Config struct {
 	// refusal tells the operator which one to raise. The zero value uses
 	// the unprefixed names.
 	Flags FlagNames
+	// Persisted marks a meter whose owner drains it with [Meter.Dirty].
+	// Only such a meter parks a month's closing totals; see
+	// [Meter.WithPersistence], which sets the same thing after the fact.
+	Persisted bool
 }
 
 // Budgeted reports whether any budget in this configuration applies.
@@ -241,6 +248,9 @@ type State struct {
 	AlarmSince               time.Time `json:"alarm_since,omitzero"`
 	Refused                  uint64    `json:"refused_total"`
 	Principals               int       `json:"principals"`
+	// Persisted reports whether this meter's owner drains it, which is what
+	// decides whether a closing month is parked or dropped.
+	Persisted bool `json:"persisted"`
 	// Pending is the closing-month totals waiting for the next drain, and
 	// PendingDropped how many the backlog cap has discarded.
 	Pending        int              `json:"pending,omitempty"`
@@ -315,6 +325,7 @@ type Meter struct {
 func New(cfg Config) *Meter {
 	return &Meter{
 		cfg:        cfg,
+		persists:   cfg.Persisted,
 		logger:     slog.Default(),
 		now:        time.Now,
 		principals: make(map[string]*principalCounters),
@@ -443,12 +454,6 @@ func Bodyless(r *http.Request) bool {
 	return r != nil && r.Method == http.MethodHead
 }
 
-// RunnerHeader names the pod behind a request when the client sends one.
-// A runner pool shares one bearer, so the principal alone cannot tell
-// twenty pods apart and a concurrency cap keyed on it would refuse
-// nineteen of them at once.
-const RunnerHeader = "X-Sparkwing-Runner"
-
 // SlotIdentity returns the name a concurrency slot is counted under: the
 // pod behind the request where one is named, and the principal where
 // none is. Byte budgets always key on the principal, because the bill is
@@ -460,13 +465,15 @@ const RunnerHeader = "X-Sparkwing-Runner"
 // caller working around them; the byte budget, which no header can move,
 // is what bounds that one.
 //
-// fallbacks are the headers to try after [RunnerHeader], in order, which
-// lets a caller offer an identity its own protocol already carries.
-func SlotIdentity(r *http.Request, principal string, fallbacks ...string) string {
+// headers are tried in order; a caller passes the ones its own protocol
+// already carries, most specific first. A pool shares one bearer, so the
+// principal alone cannot tell twenty pods apart and a concurrency cap
+// keyed on it would refuse nineteen of them at once.
+func SlotIdentity(r *http.Request, principal string, headers ...string) string {
 	if r == nil {
 		return principal
 	}
-	for _, header := range append([]string{RunnerHeader}, fallbacks...) {
+	for _, header := range headers {
 		if v := strings.TrimSpace(r.Header.Get(header)); v != "" {
 			return principal + "/" + v
 		}
@@ -478,7 +485,7 @@ func SlotIdentity(r *http.Request, principal string, fallbacks ...string) string
 // caller defers. A principal already at the cap gets a
 // *ConcurrencyError and a release that does nothing.
 func (m *Meter) Open(principal string, slot Slot) (func(), error) {
-	if m == nil || m.cfg.limitFor(slot) <= 0 {
+	if m == nil || slot == SlotNone || m.cfg.limitFor(slot) <= 0 {
 		return func() {}, nil
 	}
 	limit := m.cfg.limitFor(slot)
@@ -598,6 +605,7 @@ func (m *Meter) State() State {
 		AlarmSince:               m.alarmSince,
 		Refused:                  m.refused,
 		Principals:               len(m.principals),
+		Persisted:                m.persists,
 		PendingDropped:           m.pendingDropped,
 	}
 	for name, st := range m.principals {

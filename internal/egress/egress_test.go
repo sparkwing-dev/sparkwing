@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func at(t *testing.T, stamp string) time.Time {
@@ -593,7 +594,7 @@ func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
 func TestSlotIdentityPrefersThePodOverThePrincipal(t *testing.T) {
 	principal := "pool"
 	bare := httptest.NewRequest(http.MethodGet, "/a", nil)
-	if got := egress.SlotIdentity(bare, principal); got != principal {
+	if got := egress.SlotIdentity(bare, principal, store.RunnerIdentityHeader); got != principal {
 		t.Errorf("a request naming no pod = %q, want the principal", got)
 	}
 
@@ -604,15 +605,15 @@ func TestSlotIdentityPrefersThePodOverThePrincipal(t *testing.T) {
 	}
 
 	withRunner := httptest.NewRequest(http.MethodGet, "/a", nil)
-	withRunner.Header.Set(egress.RunnerHeader, "runner-3")
+	withRunner.Header.Set(store.RunnerIdentityHeader, "runner-3")
 	withRunner.Header.Set("X-Sparkwing-Claim-Holder", "holder-7")
 	// safety: the runner header wins, so a pod that names itself is counted
 	// as itself even while it holds a claim.
-	if got := egress.SlotIdentity(withRunner, principal, "X-Sparkwing-Claim-Holder"); got != "pool/runner-3" {
+	if got := egress.SlotIdentity(withRunner, principal, store.RunnerIdentityHeader, "X-Sparkwing-Claim-Holder"); got != "pool/runner-3" {
 		t.Errorf("a runner header = %q, want pool/runner-3", got)
 	}
 
-	if got := egress.SlotIdentity(nil, principal); got != principal {
+	if got := egress.SlotIdentity(nil, principal, store.RunnerIdentityHeader); got != principal {
 		t.Errorf("no request = %q, want the principal", got)
 	}
 }
@@ -624,8 +625,8 @@ func TestAPoolsPodsHoldTheirOwnSlots(t *testing.T) {
 	var releases []func()
 	for pod := range 20 {
 		req := httptest.NewRequest(http.MethodGet, "/a", nil)
-		req.Header.Set(egress.RunnerHeader, fmt.Sprintf("pod-%d", pod))
-		release, err := m.Open(egress.SlotIdentity(req, "pool"), egress.SlotDownload)
+		req.Header.Set(store.RunnerIdentityHeader, fmt.Sprintf("pod-%d", pod))
+		release, err := m.Open(egress.SlotIdentity(req, "pool", store.RunnerIdentityHeader), egress.SlotDownload)
 		if err != nil {
 			t.Fatalf("pod %d was refused its first download: %v", pod, err)
 		}
@@ -633,8 +634,8 @@ func TestAPoolsPodsHoldTheirOwnSlots(t *testing.T) {
 	}
 	// safety: the cap still applies within one pod.
 	req := httptest.NewRequest(http.MethodGet, "/a", nil)
-	req.Header.Set(egress.RunnerHeader, "pod-0")
-	if _, err := m.Open(egress.SlotIdentity(req, "pool"), egress.SlotDownload); err == nil {
+	req.Header.Set(store.RunnerIdentityHeader, "pod-0")
+	if _, err := m.Open(egress.SlotIdentity(req, "pool", store.RunnerIdentityHeader), egress.SlotDownload); err == nil {
 		t.Fatal("one pod's second simultaneous download was admitted past the cap")
 	}
 	for _, release := range releases {
