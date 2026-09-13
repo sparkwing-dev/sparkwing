@@ -33,7 +33,8 @@ unlock.
   successor, and waits for the admission socket to go quiet and the election
   lock to be released; the supervisor exits with the worker it started. An
   absent daemon is a no-op and exits zero, and the report names the build that
-  was stopped.
+  was stopped. Every `daemon` report now carries a `stopped` boolean, so
+  `daemon status -o json` and `daemon restart -o json` gain the field too.
 - **cli:** `sparkwing runs status` and `sparkwing runs errors` take the run id as
   a positional argument, so `sparkwing runs status run-20260910-...` works.
   `--run` keeps working; passing both refuses.
@@ -72,10 +73,11 @@ unlock.
 
 ### Removed
 
-- **cli:** The retired `dashboard` noun lost the parsing and migration message
-  it kept after v0.49.0 removed the command. It reads as an unknown subcommand. `sparkwing serve` is the supported command group; see
+- **cli (Breaking):** The retired `dashboard` noun lost the parsing and
+  migration message it kept after v0.49.0 removed the command. It reads as an
+  unknown subcommand. `sparkwing serve` is the supported command group; see
   [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
-  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map
+  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map.
 
 ### Docs
 
