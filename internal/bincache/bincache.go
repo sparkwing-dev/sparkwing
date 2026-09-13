@@ -1132,13 +1132,16 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 	return parts, nil
 }
 
-func ExecReplace(bin string, args []string, dir string, env []string) error {
+// ExecReplace runs bin in dir and exits with its status. afterChild, when
+// non-nil, runs once the child has finished and before this process exits,
+// because os.Exit here skips every deferred teardown the caller registered.
+func ExecReplace(bin string, args []string, dir string, env []string, afterChild func()) error {
 	if dir != "" {
 		if err := os.Chdir(dir); err != nil {
 			return err
 		}
 	}
-	return execChild(bin, args, env)
+	return execChild(bin, args, env, afterChild)
 }
 
 type fileFilter func(name string) bool

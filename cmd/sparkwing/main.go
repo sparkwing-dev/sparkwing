@@ -182,11 +182,13 @@ func dispatchRun(args []string) error {
 		}
 	}
 
+	var afterChild func()
 	if flags.ref != "" {
 		_, pipelineDirectory, cleanup, err := setupRefWorktree(dir, flags.ref)
 		if err != nil {
 			return fmt.Errorf("--sw-ref %s: %w", flags.ref, err)
 		}
+		afterChild = cleanup
 		defer cleanup()
 		dir = pipelineDirectory
 	}
@@ -326,7 +328,7 @@ func dispatchRun(args []string) error {
 	}
 	sweepStraySessionsBeforeRun()
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
-		compileOptions{NoUpdate: flags.noUpdate || flags.fleet})
+		compileOptions{NoUpdate: flags.noUpdate || flags.fleet, AfterChild: afterChild})
 }
 
 func removeEnv(env []string, key string) []string {

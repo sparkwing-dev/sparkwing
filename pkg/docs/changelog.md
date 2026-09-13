@@ -31,6 +31,16 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Fixed
+
+- **run:** `sparkwing run --sw-ref <ref>` removes the temporary git worktree it
+  checked the ref out into. The teardown was a deferred call, and every exec
+  path ends in `os.Exit` to carry the pipeline's status, which skips defers, so
+  each run left a registered worktree in the repository and a
+  `$TMPDIR/sparkwing-from-*` directory for the user to reap with
+  `git worktree prune`. The teardown now runs once the pipeline binary has
+  finished and before the CLI exits.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.

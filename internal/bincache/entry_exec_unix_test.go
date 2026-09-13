@@ -76,12 +76,21 @@ func TestEntryExecHelper(t *testing.T) {
 		<-released
 		return
 	}
+	if mode == "after-child-wrapper" {
+		witness := os.Getenv("SPARKWING_ENTRY_TEARDOWN_WITNESS")
+		_ = execChild(os.Getenv("SPARKWING_ENTRY_CHILD_BIN"), nil, os.Environ(), func() {
+			if err := os.WriteFile(witness, []byte("torn down"), 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "after-child-wrapper: %v\n", err)
+			}
+		})
+		return
+	}
 	if mode == "start-race-wrapper" {
 		env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "hold")
 		_ = execChildWith(os.Args[0], []string{"-test.run=^TestEntryExecHelper$"}, env, func() {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 			_ = os.WriteFile(os.Getenv("SPARKWING_ENTRY_SIGNAL_RECEIVED"), []byte("contained"), 0o600)
-		})
+		}, nil)
 		return
 	}
 	if mode == "spawn" {
@@ -121,7 +130,7 @@ func TestEntryExecHelper(t *testing.T) {
 		nextMode = "term-delay"
 	}
 	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", nextMode)
-	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
+	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -530,5 +539,47 @@ func TestExecReplaceRetainsHolderLock(t *testing.T) {
 	}
 	if result.ActiveSkippedEntries != 0 || result.ReclaimedEntries != 1 {
 		t.Fatalf("dead exec holder retained its lease: %+v", result)
+	}
+}
+
+func TestExecReplaceTearsDownBeforeItExits(t *testing.T) {
+	trueBin, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("no true(1) on PATH: %v", err)
+	}
+	falseBin, err := exec.LookPath("false")
+	if err != nil {
+		t.Skipf("no false(1) on PATH: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		child string
+		code  int
+	}{
+		{"child exits zero", trueBin, 0},
+		{"child exits non-zero", falseBin, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			witness := filepath.Join(t.TempDir(), "torn-down")
+			wrapper := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+			env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "after-child-wrapper")
+			env = replaceEnv(env, "SPARKWING_ENTRY_TEARDOWN_WITNESS", witness)
+			wrapper.Env = replaceEnv(env, "SPARKWING_ENTRY_CHILD_BIN", tc.child)
+			wrapper.Stdout, wrapper.Stderr = io.Discard, io.Discard
+			runErr := wrapper.Run()
+			code := 0
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				code = exitErr.ExitCode()
+			} else if runErr != nil {
+				t.Fatalf("wrapper: %v", runErr)
+			}
+			if code != tc.code {
+				t.Errorf("wrapper exit = %d, want the child's %d", code, tc.code)
+			}
+			if _, err := os.Stat(witness); err != nil {
+				t.Fatalf("teardown did not run before os.Exit: %v", err)
+			}
+		})
 	}
 }

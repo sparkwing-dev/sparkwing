@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -478,19 +479,24 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 		return "", "", nil, fmt.Errorf("ref %s has no .sparkwing/ directory", ref)
 	}
 
+	// safety: the exec path runs this and so does the error path's defer, and
+	// the second `worktree remove` of a gone path fails loudly.
+	var once sync.Once
 	cleanup = func() {
-		if cleanupErr := exec.Command("git", "-C", repoRoot,
-			"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
-			slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
-		}
-		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
-			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
-		}
-		// safety: git keeps the registration under the origin repository, where a
-		// leftover one blocks adding the same path again.
-		if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
-			slog.Default().Debug("ref worktree prune did not apply", "repo", repoRoot, "error", err)
-		}
+		once.Do(func() {
+			if cleanupErr := exec.Command("git", "-C", repoRoot,
+				"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
+				slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
+			}
+			if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
+				slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
+			}
+			// safety: git keeps the registration under the origin repository, where a
+			// leftover one blocks adding the same path again.
+			if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
+				slog.Default().Debug("ref worktree prune did not apply", "repo", repoRoot, "error", err)
+			}
+		})
 	}
 	return temporaryDir, pipelineDirectory, cleanup, nil
 }

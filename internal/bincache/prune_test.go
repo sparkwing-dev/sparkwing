@@ -115,7 +115,7 @@ func TestConfiguredLimits_HonorEnvironment(t *testing.T) {
 }
 
 func TestExecReplace_MissingBinaryReportsNotExist(t *testing.T) {
-	err := ExecReplace(filepath.Join(t.TempDir(), "absent"), nil, "", os.Environ())
+	err := ExecReplace(filepath.Join(t.TempDir(), "absent"), nil, "", os.Environ(), nil)
 	if err == nil {
 		t.Fatal("exec of a missing binary should fail rather than replace the process")
 	}

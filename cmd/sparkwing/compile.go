@@ -22,8 +22,11 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	err := prepareAndExec(ctx, stopSignals, sparkwingDir, args, env, opts)
 	if ctx.Err() != nil {
 		stopSignals()
-		// safety: does not return on a platform that can re-raise, so the CLI
-		// dies from the signal rather than reporting it as a failed run.
+		// safety: raiseInterrupt does not return on a platform that can
+		// re-raise, so teardown has to happen before it, not in a defer.
+		if opts.AfterChild != nil {
+			opts.AfterChild()
+		}
 		raiseInterrupt()
 	}
 	return err
@@ -44,13 +47,13 @@ func prepareAndExec(
 
 	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
 		stopSignals()
-		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
+		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env, opts.AfterChild)
 	}
 
 	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
 	if err != nil {
 		stopSignals()
-		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
+		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env, opts.AfterChild)
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -115,9 +118,9 @@ func prepareAndExec(
 	// must stop catching signals it can no longer act on for that program.
 	stopSignals()
 	if fleetExecutionEnv(env) {
-		return runExec(lease.Path(), args, sparkwingDir, env)
+		return runExec(lease.Path(), args, sparkwingDir, env, opts.AfterChild)
 	}
-	return lease.ExecReplace(args, sparkwingDir, env)
+	return lease.ExecReplace(args, sparkwingDir, env, opts.AfterChild)
 }
 
 func ensureDescribeCache(sparkwingDir, key, binPath string) {
@@ -144,7 +147,7 @@ func announceCompile() {
 	fmt.Fprintln(os.Stderr, color.Dim(msg))
 }
 
-func runExec(bin string, args []string, dir string, env []string) error {
+func runExec(bin string, args []string, dir string, env []string, afterChild func()) error {
 	// #nosec G702 -- the pipeline binary this command just built, run as argv without a shell
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
@@ -152,7 +155,11 @@ func runExec(bin string, args []string, dir string, env []string) error {
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = env
-	if err := cmd.Run(); err != nil {
+	err := cmd.Run()
+	if afterChild != nil {
+		afterChild()
+	}
+	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			if fleetExecutionEnv(env) {
@@ -174,18 +181,23 @@ func fleetExecutionEnv(env []string) bool {
 	return false
 }
 
-func runGo(dir string, args, env []string) error {
+func runGo(dir string, args, env []string, afterChild func()) error {
 	if !goOnPath() {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via the `go` command.\n" +
 				"  Install Go 1.26+ from https://go.dev/dl/ and re-run",
 		)
 	}
-	return runExec("go", args, dir, env)
+	return runExec("go", args, dir, env, afterChild)
 }
 
 type compileOptions struct {
 	NoUpdate bool
+
+	// safety: every exec path ends in os.Exit to carry the pipeline's status,
+	// which skips defers, so teardown has to travel with the call and run once
+	// the pipeline binary has finished.
+	AfterChild func()
 }
 
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {
