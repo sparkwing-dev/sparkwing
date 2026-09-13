@@ -60,6 +60,10 @@ Re-running on an already-set-up laptop re-applies 0700 to
 that group or other users can read. --dry-run skips both the mkdir
 and the permission fix so the command reports existing state.
 
+Run inside a sparkwing project, it also reports whether this
+checkout's declared git hooks fire, and names the command that
+arms them. It installs nothing and changes no git configuration.
+
 ### Flags
 
 | Flag | Description |
