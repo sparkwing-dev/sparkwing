@@ -64,7 +64,10 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 	t.Parallel()
 
-	const idleTimeout = 300 * time.Millisecond
+	// safety: the guard below needs several probes inside this window, and the window
+	// holds only as many as the interval divides into it. A contended machine stretches
+	// each query past the interval, so the window is sized for the slow case.
+	const idleTimeout = time.Second
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
 
@@ -87,7 +90,7 @@ func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 		return err
 	})
 
-	if err := td.waitExit(t, 3*time.Second); err != nil {
+	if err := td.waitExit(t, idleTimeout+3*time.Second); err != nil {
 		t.Fatalf("daemon with only queue-state query traffic should idle out cleanly, got %v", err)
 	}
 	count := successfulQueries.Load()
