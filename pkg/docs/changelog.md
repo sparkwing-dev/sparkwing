@@ -445,8 +445,10 @@ unlock.
   do, and `sparkwing update`. `sparks.md` points at the same boundary.
 - **docs:** The user-facing docs lead with two paths. Getting started opens
   on Local (a program on your machine, and the machines you own through
-  `--sw-fleet`) and Sparkwing Cloud (`sparkwing cloud connect`), and names
-  every other shape in one paragraph under Advanced deployments.
+  `--sw-fleet`) and Sparkwing Cloud, the hosted controller in private
+  preview whose `sparkwing cloud connect --token-stdin` also connects to a
+  controller a team runs itself, and names every other shape in one
+  paragraph under Advanced deployments.
   `deployment-modes.md` carries the same two paths and groups shared object
   storage, Postgres, the self-hosted controller, and a peer machine as the
   controller under Advanced shapes. The README and the docs index open the

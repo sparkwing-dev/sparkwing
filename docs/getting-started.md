@@ -5,16 +5,21 @@
 **Local** is the product. Sparkwing is a program on your machine: it
 compiles `.sparkwing/` and runs each job as a host subprocess, keeps state
 in SQLite under `~/.sparkwing/`, and serves its own dashboard. No account,
-no cloud, and the machines you own join a run with `--sw-fleet`. It keeps
-working with the network unplugged.
+no cloud, and the machines you own join a run with `--sw-fleet`. After one
+successful run, a pipeline whose sparks are pinned to exact tags runs with
+the network unplugged; see
+[offline after the first build](#offline-after-the-first-build) for what
+still needs it.
 
-**Sparkwing Cloud** is a hosted controller for when a team needs one
-dashboard, one run history, and work scheduled across everybody's
-machines. It picks up the work when your laptops are closed, and one
-command connects this machine to it:
+**Sparkwing Cloud** is the hosted controller, in private preview. A
+controller gives a team one dashboard, one run history, and one queue: a
+triggered run waits there until an enrolled machine claims it, and fails
+with `queue_timeout` at the queue deadline when none does (see
+[scheduling.md](scheduling.md)). Until you have an invite, the same
+command connects this machine to a controller your team runs:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 ```
 
 Start local. Read [Install](#install) and [Quick start](#quick-start),
@@ -178,15 +183,19 @@ If you want a local Kubernetes cluster as a deploy target for user apps
 works. Sparkwing does not run in-cluster locally; the controller is a
 prod-only component.
 
+### Storage class
+
+The controller's PersistentVolumeClaim and the `storageClassName` a cluster
+without a default StorageClass needs are covered in
+[Self-hosting](self-hosting.md#storage-class).
+
 ## Offline after the first build
 
-One successful `sparkwing run` in a checkout is all the network a local
-run ever needs. After it, the same command is green on a plane: the Go
+After one successful `sparkwing run` in a checkout, a pipeline whose
+sparks are pinned to exact tags runs with the network unplugged. After it, the same command is green on a plane: the Go
 modules sit in the module cache, the compiled pipeline binary sits in
 `~/.sparkwing/cache/pipelines/`, and the run's state, logs, dashboard,
-and admission daemon are files and sockets on your own machine. The
-repository's test suite runs a pipeline with the network denied and fails
-if the run reaches for it or recompiles.
+and admission daemon are files and sockets on your own machine.
 
 The first run is the one that reaches out. It downloads the SDK and every
 spark library your `.sparkwing/go.mod` requires, then compiles. A run
@@ -335,25 +344,30 @@ user-managed deploy targets, not local sparkwing deployments.
 
 ## Sparkwing Cloud
 
-Sparkwing Cloud is a controller Sparkwing hosts: it owns the shared
-dashboard, run history, scheduling, webhooks, and tokens, and your
-machines reach it over outbound HTTPS. One command connects this machine
-to it, or to any other controller you can reach:
+Sparkwing Cloud is the hosted controller, in private preview. A controller
+owns the shared dashboard, run history, scheduling, webhooks, and tokens,
+and machines reach it over outbound HTTPS. The same command connects this
+machine to Sparkwing Cloud or to any other controller you can reach, so a
+team can run its own controller today and keep the command it already
+types.
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 ```
 
-It reads an admin token from stdin, mints a user token carrying `runs.read`,
-`runs.write`, `triggers.read`, `logs.read` and `approvals.write`, writes the
-profile into `~/.config/sparkwing/profiles.yaml`, and prints the dashboard URL
-the controller announces along with the same probes `sparkwing configure
-profiles test` runs. The admin token is never stored. Nothing here asks you to
-edit YAML.
+It reads the token you were given on stdin, writes the profile into
+`~/.config/sparkwing/profiles.yaml`, and prints the dashboard URL the
+controller announces along with the same probes `sparkwing configure profiles
+test` runs. Nothing here asks you to edit YAML.
+
+An administrator of a controller mints those tokens with
+`--admin-token-stdin` instead, which reads an admin credential and issues a
+user token carrying `runs.read`, `runs.write`, `triggers.read`, `logs.read`
+and `approvals.write`. The admin token is never stored. See
+[Self-hosting](self-hosting.md) for running the controller that issues them.
 
 The profile is named after the controller host (`api-sparkwing-example`
-above) unless you pass `--name`. Pass a token someone minted for you with
-`--token-stdin` instead of `--admin-token-stdin`. An existing profile of that
+above) unless you pass `--name`. An existing profile of that
 name is replaced only with `--force`, because the token it holds stays live
 until it is revoked.
 

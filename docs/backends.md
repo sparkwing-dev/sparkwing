@@ -87,23 +87,23 @@ streaming append, so neither reads them, and a profile that sets one
 anywhere else is refused at load with the key named. A negative value is
 refused the same way.
 
-State backends correspond to deployment modes. See
+Each state backend is one deployment shape. See
 [Deployment modes](deployment-modes.md) for when to pick each:
 
-- `sqlite` -- laptop-local; the default when no profile is selected.
-- `s3`, `gcs`, `azure-blob` -- per-run NDJSON state on a shared bucket
-  (Mode 2). Cache reservation, approvals, and debug pauses coordinate
+- `sqlite` -- the local path; the default when no profile is selected.
+- `s3`, `gcs`, `azure-blob` -- per-run NDJSON state on a shared bucket.
+  Cache reservation, approvals, and debug pauses coordinate
   over object-store CAS where the bucket enforces write preconditions
   (S3 today; `gcs`/`azure-blob` recognized but not yet implemented).
   Where it does not, cache reservation degrades to last-write-wins,
   while approvals and debug pauses report not-supported and need
-  Mode 3. Pipeline triggers report not-supported here whatever the
+  Postgres. Pipeline triggers report not-supported here whatever the
   bucket does: the backend enqueues a trigger and has no path that
   claims one, so `sparkwing.RunAndAwait` refuses instead of waiting.
-- `postgres` -- shared database for cross-runner coordination
-  (Mode 3). Triggers, approvals, debug pauses all work.
-- `controller` -- runners talk to a hosted controller over HTTP
-  (Mode 4). The controller owns the underlying database.
+- `postgres` -- shared database for cross-runner coordination.
+  Triggers, approvals, debug pauses all work.
+- `controller` -- runners talk to a hosted controller over HTTP,
+  Sparkwing Cloud included. The controller owns the underlying database.
 
 `mysql` is reserved in the schema but not implemented; declaring it
 fails at run start with a clear error.

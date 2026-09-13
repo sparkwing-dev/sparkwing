@@ -8,17 +8,18 @@ its own state, cache, or controller.
 | Shape | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
 | --- | --- | --- | --- | --- | --- |
 | Local | none | -- | -- | -- | filesystem |
-| Hosted controller, Sparkwing Cloud included | controller + DB + object store | yes | yes | yes | tokens / sessions |
+| Sparkwing Cloud | none (hosted) | yes | yes | yes | tokens / sessions |
+| Self-hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
 | Shared object storage | object store | yes (read-only) | with CAS¹ | approvals + pauses, with CAS¹ | bucket IAM |
 | Postgres + object storage | object store + Postgres | yes | yes | yes | DB roles + bucket IAM |
 
-¹ Mode 2 coordinates cross-runner caching, approvals, and debug
-pauses over object-store conditional-write CAS where the bucket
+¹ Shared object storage coordinates cross-runner caching, approvals, and
+debug pauses over object-store conditional-write CAS where the bucket
 enforces write preconditions (S3 today). Where it does not, cache
-reservation degrades to last-write-wins, while approvals and debug
-pauses report not-supported and need Mode 3. Pipeline triggers report
-not-supported under Mode 2 whatever the bucket does, and need Mode 3.
-See [shared object storage](#shared-object-storage-mode-2).
+reservation degrades to last-write-wins, while approvals and debug pauses
+report not-supported and need Postgres. Pipeline triggers report
+not-supported on a bucket whatever it supports, and need Postgres or a
+controller. See [shared object storage](#shared-object-storage-mode-2).
 
 The selection lives in the profile you run under -- each profile in
 `~/.config/sparkwing/profiles.yaml` carries a `state` / `cache` / `logs`
@@ -48,19 +49,21 @@ network once the first build has fetched its modules; see
 
 ## Sparkwing Cloud
 
-A controller Sparkwing runs for you. It owns the shared dashboard, run
-history, scheduling, webhooks, and tokens; your machines reach it over
-outbound HTTPS and never hold a database credential.
+Sparkwing Cloud is the hosted controller, in private preview. A
+controller owns the shared dashboard, run history, scheduling, webhooks,
+and tokens; machines reach it over outbound HTTPS and hold no database
+credential. Until you have an invite, the same command connects to a
+controller your team runs:
 
 ```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 ```
 
-That one command mints a user token, writes the profile, and prints the
+It stores the token you pass on stdin, writes the profile, and prints the
 dashboard URL. See
 [connecting to Sparkwing Cloud](getting-started.md#sparkwing-cloud) for
 the flags, and [hosted controller](#hosted-controller-mode-4) below for
-what the controller process does.
+what the controller process does and how to run one.
 
 ## Advanced shapes
 
@@ -360,7 +363,7 @@ runs logs --follow` read that ring while the node runs. The durable
 copy still goes to the bucket, and a read after the node finishes comes
 from there.
 
-The ring is memory, so every dimension is bounded: 512 KiB per node,
+The ring is memory, so it is bounded three ways: 512 KiB per node,
 64 MiB across every node together, and 1024 nodes holding a ring at
 once. Past the byte bounds the oldest bytes of the widest ring go first;
 past the node bound the ring of the node that wrote least recently is
@@ -390,7 +393,8 @@ person's own machines, coordinated without an account. Solo operators
 and small teams don't need to stand up Postgres to run it. Reach for
 Postgres + object storage when you outgrow a single box -- more than one
 controller instance, or state and caches that must survive that box. A
-team's fleet coordinates through Sparkwing Cloud instead.
+team's fleet coordinates through Sparkwing Cloud, or through a controller
+the team runs.
 
 ## Forcing local mode for a single run
 
@@ -420,19 +424,22 @@ A practical decision order:
 1. **One person, on the machines they own?** Local, plus `--sw-fleet`
    when a run should spread across them.
 2. **A team that wants one dashboard and one run history?**
-   [Sparkwing Cloud](#sparkwing-cloud) -- `sparkwing cloud connect` and
-   nothing to host.
-3. **Multiple people on S3, fine with bucket-dependent
-   coordination?** Mode 2 -- a bucket, a shared profile, and the
-   per-runner environment that profile does not carry: `AWS_REGION`,
-   credentials, and `SPARKWING_S3_ENDPOINT` for a non-AWS store. See
+   [Sparkwing Cloud](#sparkwing-cloud), or a controller your team runs.
+3. **Multiple people on S3, fine with bucket-dependent coordination?**
+   [Shared object storage](#shared-object-storage-mode-2) -- a bucket, a
+   shared profile, and the per-runner environment that profile does not
+   carry: `AWS_REGION`, credentials, and `SPARKWING_S3_ENDPOINT` for a
+   non-AWS store. See
    [what each runner needs](#what-each-runner-needs-beyond-the-profile).
 4. **Expensive cacheable steps where you want reservation guaranteed
    regardless of bucket CAS support, or low tail latency under heavy
-   contention?** Mode 3 -- add a Postgres on top of Mode 2.
+   contention?**
+   [Postgres and object storage](#postgres-and-object-storage-mode-3) --
+   add a database on top of the bucket.
 5. **Untrusted runners (public CI, customer pipelines) or you don't
    want every runner holding DB credentials, and you want to host the
-   controller yourself?** Mode 4.
+   controller yourself?**
+   [Hosted controller](#hosted-controller-mode-4).
 
-You can move between modes by editing a profile (or selecting a
+You can move between shapes by editing a profile (or selecting a
 different one with `--profile`); pipeline code doesn't change.
