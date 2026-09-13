@@ -31,6 +31,15 @@ unlock.
 
 ### Changed
 
+- **runner (Breaking):** `sparkwing-runner agent` refuses to start when
+  `agent.yaml` sets `name` or `coordinators`. That configuration selects
+  enrolled mode, whose execution path the controller does not yet serve, so the
+  agent polled and logged an error on every slot while claiming nothing. It now
+  exits non-zero with `enrolled execution is not available in this release;
+  remove name and coordinators from agent.yaml to run in claim mode, or wait for
+  the release that enables it`. Remove both keys to run the claim-mode loop the
+  service installer writes. `--allow-enrolled-preview` restores the polling
+  behavior for developers of enrolled execution.
 - **config (Breaking):** A trigger key under `on:` that carries no value is
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a

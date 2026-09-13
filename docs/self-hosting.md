@@ -113,6 +113,12 @@ launchd plist or systemd unit. The contribution caps reported capacity; the
 reserve constrains local admission. Neither enables the reservation-backed
 assisted offer protocol.
 
+Keep the config in that claim-mode shape. Adding `name` or `coordinators`
+selects enrolled mode, which this release does not execute, so the agent
+refuses to start and names the state. `sparkwing-runner agent
+--allow-enrolled-preview` starts it anyway, for developers of enrolled
+execution. See [local-execution.md](local-execution.md) for the enrolled design.
+
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
 --config <path>` command, but the bundled installer does not create a Windows
 service. Supervise it with the service manager you already use, or run the

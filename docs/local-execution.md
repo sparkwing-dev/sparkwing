@@ -471,7 +471,17 @@ when testing deterministic placement.
 
 ### Remote machine capacity
 
-`sparkwing-runner agent` has separate legacy and enrolled modes.
+`sparkwing-runner agent` has separate legacy and enrolled modes. This
+release executes work in claim mode only: an agent whose configuration sets
+`name` or `coordinators` refuses to start and exits non-zero with
+
+```
+enrolled execution is not available in this release; remove name and coordinators from agent.yaml to run in claim mode, or wait for the release that enables it
+```
+
+`--allow-enrolled-preview` starts that configuration anyway, for developers of
+enrolled execution. The rest of this section describes the enrolled design the
+refusal holds back.
 
 The name-less singular configuration uses the existing outbound FIFO
 `/api/v1/nodes/claim` loop. Its `labels` are self-asserted placement terms,
