@@ -31,6 +31,15 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Fixed
+
+- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
+  that takes the connection and then fails the handshake, with the probe error.
+  The sweep dropped every peer whose probe failed, so a machine holding wedged
+  peer daemons read as a machine holding none. The report carries them under
+  `unreachable_peers`. A peer that never answered the dial, or that ran out of
+  doctor's budget, stays out of the report.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.
