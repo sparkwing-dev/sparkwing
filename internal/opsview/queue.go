@@ -227,6 +227,9 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	if line := resourceLegend(qs); line != "" {
 		fmt.Fprintln(out, line)
 	}
+	if line := softCoreAllowanceNote(qs, holders); line != "" {
+		fmt.Fprintln(out, line)
+	}
 
 	if c := ContainerNote(qs.Container); c != "" {
 		fmt.Fprintf(out, "%s\n", c)
@@ -396,6 +399,44 @@ func resourceLegend(qs wingwire.QueueState) string {
 		}
 	}
 	return ""
+}
+
+func softCoreAllowanceNote(qs wingwire.QueueState, holders []wingwire.Holder) string {
+	var over wingwire.ResourceState
+	for _, r := range qs.Resources {
+		if r.Key == "cores" && r.Held > r.Capacity {
+			over = r
+			break
+		}
+	}
+	if over.Key == "" {
+		return ""
+	}
+	var estimated []string
+	for _, h := range holders {
+		if h.Resources.Cores > 0 && softCoreSource(h.CostSource) {
+			estimated = append(estimated,
+				fmt.Sprintf("%s (%s)", queueDisplayRunID(h.RunID, h.DisplayRunID), h.CostSource))
+		}
+	}
+	// safety: a pinned grant crosses capacity from an idle ledger too, and the
+	// allowance did not put it there.
+	if len(estimated) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("soft-core allowance: in use %s is above capacity %s. A run priced from an estimate "+
+		"is admitted only while cores in use sit at or below capacity less reserved and external, "+
+		"so at most one grant crosses the line; priced from estimates: %s",
+		fmtAmount(over.Key, over.Held), fmtAmount(over.Key, over.Capacity), strings.Join(estimated, ", "))
+}
+
+func softCoreSource(source string) bool {
+	switch wingwire.CostSource(source) {
+	case wingwire.CostSourceMeasured, wingwire.CostSourceDefault,
+		wingwire.CostSourceMeasuring, wingwire.CostSourceFloor:
+		return true
+	}
+	return false
 }
 
 func fmtHeadroomCell(key string, v float64) string {

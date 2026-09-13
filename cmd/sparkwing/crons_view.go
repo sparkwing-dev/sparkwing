@@ -315,7 +315,8 @@ func renderCronsShow(w io.Writer, report cronsShowReport, format string) error {
 	fmt.Fprintf(tw, "tz\t%s\t%s\t%s\n",
 		cronsZoneLabel(decl.TZ), cronsOverrideValue(r.Override, "tz"), cronsZoneLabel(eff.TZ))
 	fmt.Fprintf(tw, "overlap\t%s\t%s\t%s\n", decl.Overlap, cronsOverrideValue(r.Override, "overlap"), eff.Overlap)
-	fmt.Fprintf(tw, "catch up\t%s\t%s\t%s\n", decl.CatchUp, cronsOverrideValue(r.Override, "catch_up"), eff.CatchUp)
+	fmt.Fprintf(tw, "catch up\t%s\t%s\t%s\n",
+		decl.CatchUp, cronsOverrideValue(r.Override, "catch_up"), cronsCatchUpLabel(r))
 	fmt.Fprintf(tw, "args\t%s\t%s\t%s\n",
 		cronsArgsLabel(decl.Args), cronsOverrideValue(r.Override, "args"), cronsArgsLabel(eff.Args))
 	fmt.Fprintln(tw, "\t")

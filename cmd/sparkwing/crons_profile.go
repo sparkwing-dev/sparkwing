@@ -376,6 +376,13 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 		report.Schedules = append(report.Schedules, cronsPushed{
 			ID: view.ID, Name: view.Name, Ref: view.Lock.Ref, State: view.StateDetail,
 		})
+		if row := crons.RowFromView(view); row.CatchUpClamped {
+			report.Clamped = append(report.Clamped, cronsCatchUpCap{
+				Name:      row.Display,
+				Declared:  row.CronSchedule.Effective().CatchUp.String(),
+				Effective: row.Effective.CatchUp.String(),
+			})
+		}
 	}
 	report.Withdrawals = resp.Withdrawn
 	return renderCronsPush(os.Stdout, report, format)
@@ -496,14 +503,15 @@ func runCronsUninstallProfile(profileName, root, format string) error {
 }
 
 type cronsPushReport struct {
-	Profile     string        `json:"profile"`
-	Repo        string        `json:"repo"`
-	RepoURL     string        `json:"repo_url"`
-	Branch      string        `json:"branch,omitempty"`
-	SHA         string        `json:"sha,omitempty"`
-	Schedules   []cronsPushed `json:"schedules,omitempty"`
-	Local       []string      `json:"local,omitempty"`
-	Withdrawals []string      `json:"withdrawals,omitempty"`
+	Profile     string            `json:"profile"`
+	Repo        string            `json:"repo"`
+	RepoURL     string            `json:"repo_url"`
+	Branch      string            `json:"branch,omitempty"`
+	SHA         string            `json:"sha,omitempty"`
+	Schedules   []cronsPushed     `json:"schedules,omitempty"`
+	Local       []string          `json:"local,omitempty"`
+	Withdrawals []string          `json:"withdrawals,omitempty"`
+	Clamped     []cronsCatchUpCap `json:"clamped,omitempty"`
 }
 
 type cronsPushed struct {
@@ -537,6 +545,7 @@ func renderCronsPush(w io.Writer, report cronsPushReport, format string) error {
 	for _, name := range report.Withdrawals {
 		fmt.Fprintf(w, "withdrawn %s: the repo no longer declares it for the controller\n", name)
 	}
+	renderCronsClamped(w, report.Clamped)
 	if len(report.Schedules) > 0 {
 		fmt.Fprintf(w, "source %s\n", report.RepoURL)
 		if report.SHA == "" {

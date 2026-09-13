@@ -255,6 +255,7 @@ type MockAPIOptions = {
   onLogStream?: (route: Route) => Promise<void>;
   onRequest?: (route: Route) => void;
   crons?: Record<string, unknown> | (() => Record<string, unknown>);
+  queue?: Record<string, unknown>;
   cronDetail?: Record<string, unknown>;
   onCronAction?: (id: string, action: string) => void;
 };
@@ -333,6 +334,10 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     if (request.method() === "GET" && path === "/api/v1/pipelines") {
       await route.fulfill({ json: { pipelines: {} } });
+      return;
+    }
+    if (request.method() === "GET" && path === "/api/v1/queue") {
+      await route.fulfill({ json: options.queue ?? {} });
       return;
     }
     const readCrons = () =>
@@ -1018,6 +1023,49 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
   } finally {
     await dashboard.close();
   }
+});
+
+test("lists a connection-only lease apart from the holders", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    queue: {
+      daemon_version: "v0.50.1",
+      resources: [{ key: "cores", capacity: 16, held: 4 }],
+      holders: [
+        {
+          run_id: "run-active",
+          pipeline: "pre-push",
+          elapsed_ms: 12_000,
+          resources: {},
+          connection_only: true,
+        },
+        {
+          run_id: "run-active",
+          participant_id: "run-active/node-host/dGVzdA",
+          display_run_id: "run-active/pre-push",
+          pipeline: "pre-push",
+          elapsed_ms: 12_000,
+          resources: { cores: 4 },
+        },
+      ],
+      waiters: [],
+    },
+  });
+  await page.goto("/queue");
+
+  await expect(
+    page.getByText("1 holding, 1 connected, 0 queued"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Connected (no resources held)" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "run-active/pre-push" }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("link", { name: "run-active", exact: true }),
+  ).toHaveCount(1);
 });
 
 test("surfaces a general controller connection failure", async ({ page }) => {

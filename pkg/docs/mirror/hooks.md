@@ -134,9 +134,18 @@ inspects one. To fire a fresh trigger (the sparkwing equivalent of
 
 ## Git hooks
 
-Git hooks are opt-in. After declaring `pre_commit:`, `pre_push:`, or
-`post_commit:` on a pipeline in `.sparkwing/sparkwing.yaml`, install them
-once per checkout:
+Git hooks are opt-in. Declare the trigger on a pipeline in
+`.sparkwing/sparkwing.yaml`, giving it a body even when it takes no options:
+
+```yaml
+pipelines:
+  - name: fast-checks
+    entrypoint: FastChecks
+    on:
+      pre_commit: {}
+```
+
+Then install the hooks once per checkout:
 
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit

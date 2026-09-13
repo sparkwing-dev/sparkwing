@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -21,13 +22,15 @@ type fakeLauncher struct {
 	runIDs     []string
 	nextRun    int
 	active     map[string]bool
+	pending    map[string]time.Time
+	now        func() time.Time
 	launchErr  error
 	activeErr  error
 	staleAfter []time.Duration
 }
 
 func newFakeLauncher(runIDs ...string) *fakeLauncher {
-	return &fakeLauncher{runIDs: runIDs, active: map[string]bool{}}
+	return &fakeLauncher{runIDs: runIDs, active: map[string]bool{}, pending: map[string]time.Time{}, now: time.Now}
 }
 
 func (f *fakeLauncher) Launch(_ context.Context, s store.CronSchedule, due time.Time) (string, error) {
@@ -51,6 +54,11 @@ func (f *fakeLauncher) Active(_ context.Context, runID string, staleAfter time.D
 	f.staleAfter = append(f.staleAfter, staleAfter)
 	if f.activeErr != nil {
 		return false, f.activeErr
+	}
+	// safety: the real launcher counts an unclaimed run active only while it is
+	// younger than staleAfter, and the wedge this fake reproduces lives there.
+	if queued, ok := f.pending[runID]; ok {
+		return f.now().Sub(queued) <= staleAfter, nil
 	}
 	return f.active[runID], nil
 }
@@ -109,6 +117,7 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	})
 	c := &clock{at: now}
 	launcher := newFakeLauncher()
+	launcher.now = c.now
 	return &harness{
 		svc: &Service{
 			Store:    st,
@@ -671,6 +680,49 @@ func TestTickAsksActiveWithTheSchedulesCatchUpWindow(t *testing.T) {
 	defer h.launcher.mu.Unlock()
 	if len(h.launcher.staleAfter) != 1 || h.launcher.staleAfter[0] != 15*time.Minute {
 		t.Fatalf("Active was given %v, want the schedule's 15m catch-up", h.launcher.staleAfter)
+	}
+}
+
+func TestTickFiresAgainWhenACatchUpAboveTheCeilingWouldWedgeASkip(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	sched := armOne(t, h, writeRepo(t, "svc", `  - name: every-minute
+    entrypoint: Hourly
+    on:
+      schedule:
+        cron: "0 * * * *"
+        where: local
+        catch_up: 720h
+`))
+
+	h.clock.set(at(t, "2026-01-01T01:00:05Z"))
+	if _, err := h.svc.Tick(ctx, false); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	h.launcher.mu.Lock()
+	h.launcher.pending["run-1"] = h.clock.now()
+	h.launcher.mu.Unlock()
+
+	h.clock.set(at(t, "2026-01-02T07:00:05Z"))
+	report, err := h.svc.Tick(ctx, false)
+	if err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if report.Fired != 1 || report.Skipped != 0 {
+		t.Fatalf("a run unclaimed for 30h still suppressed the schedule: %+v", report)
+	}
+	h.launcher.mu.Lock()
+	staleAfter := append([]time.Duration(nil), h.launcher.staleAfter...)
+	h.launcher.mu.Unlock()
+	if len(staleAfter) != 1 || staleAfter[0] != cronspec.MaxCatchUp {
+		t.Fatalf("Active was given %v, want the ceiling %v", staleAfter, cronspec.MaxCatchUp)
+	}
+	stored, err := h.store.GetCronSchedule(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("GetCronSchedule: %v", err)
+	}
+	if stored.LastOutcome != store.CronOutcomeFired {
+		t.Fatalf("the schedule never fired again: %+v", stored)
 	}
 }
 

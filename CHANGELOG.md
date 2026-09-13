@@ -35,6 +35,77 @@ unlock.
   repository under its basename, as `GITCACHE_REPOS` aliases do, no longer serves
   `git.Clone` from the cache; those clones fall back to upstream until the
   repository is also registered under the hashed name.
+### Added
+
+- **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
+  a socket the caller already holds, instead of binding the address
+  `WithMetricsAddr` names. A caller that lets the operating system assign the
+  port from `:0` hands the listener over, so nothing else can take that port
+  between the assignment and the bind. `ServeWith` closes the listener when it
+  returns, so a server configured this way serves once.
+
+### Changed
+
+- **config (Breaking):** A trigger key under `on:` that carries no value is
+  refused, naming the key and the line. `pre_commit:` with no body yielded no
+  trigger and installed no hook, which read as working. Give every trigger a
+  body: `pre_commit: {}` for one with no options, and a mapping of options for
+  the rest. `on:` itself may still be empty.
+- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
+  host override asking for more is evaluated with 24h: `sparkwing crons
+  install` warns at arm time, naming the schedule, the declared window and the
+  effective one, and `sparkwing crons show` prints the effective window in its
+  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
+  as before.
+- **cli:** `sparkwing queue` names the soft-core allowance when cores in use
+  exceed a host resource's capacity. The human view states the bound the
+  allowance has -- a run priced from an estimate is admitted only while cores in
+  use sit at or below capacity less reserved and external, so at most one grant
+  crosses the line -- and lists the holders priced from estimates rather than
+  pins. Machine output is unchanged.
+- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
+  host override asking for more is evaluated with 24h: `sparkwing crons
+  install` warns at arm time, naming the schedule, the declared window and the
+  effective one, and `sparkwing crons show` prints the effective window in its
+  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
+  as before.
+
+### Fixed
+
+- **wingd:** A nested run reattaching to a restored lease keeps its own
+  identity. The `reattach` message carries an optional `run_id` and the daemon
+  grants the member it names. Memberships previously went out in the lease's
+  own order, so a child that reconnected before its parent took the parent's
+  run id, and the child's crash then cancelled the still-running parent. A
+  client that sends no `run_id` is served exactly as before, so no protocol
+  floor moves; one that names a run the lease does not hold is now refused
+  rather than granted another member's identity.
+- **config:** A pipeline's `on.push`, `on.pull_request` and `on.webhook`
+  mappings reject a key outside their schema, naming the field and the line.
+  `on: {webhook: {pathh: /review}}` loaded clean and exposed the pipeline on
+  the empty path. Keys under `on.pre_commit`, `on.pre_push` and
+  `on.post_commit` are still matched loosely.
+- **localws:** `Options.Bundle` serves a caller-supplied dashboard bundle in
+  place of the one embedded in the binary. A source build embeds no bundle, so
+  `Run` previously refused to start; supplying an `fs.FS` lets a test or an
+  embedder serve a dashboard of its own. Leaving it nil keeps the embedded
+  bundle and its existing check, and a bundle carrying no `index.html` at its
+  root is refused at startup rather than served as a silent 404.
+- **dashboard:** The queue page lists connection-only leases in their own
+  "Connected (no resources held)" table, with its own count beside the holding
+  one. Those rows leave the holder table, so a lease appears in one table or
+  the other, and the page groups admission the way `sparkwing queue` does.
+- **cli:** A schedule under `overlap: skip` no longer suppresses itself for
+  longer than a day. The tick asked whether the previous run was still active
+  using the declared catch-up window, so a run no consumer ever claimed read as
+  active for the whole of that window and every later instant recorded
+  `skipped-overlap` without firing. The window that question is asked with is
+  now capped at 24h, the same one the miss decision reads.
+- **dashboard:** The queue page counts a running pipeline once. Its
+  zero-resource orchestration lease no longer adds to the "holding" figure
+  beside the participant that holds the cores, which is the occupancy
+  `sparkwing queue` reports. The capacity page still lists every lease in one
+  table.
 
 ## [v0.50.1] - 2026-09-13
 
