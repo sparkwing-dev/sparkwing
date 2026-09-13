@@ -53,10 +53,11 @@ func newAttributionDaemon(t *testing.T, byRoot map[int]float64) *Daemon {
 
 func queueAttribution(t *testing.T, d *Daemon) wingwire.ExternalAttribution {
 	t.Helper()
-	if a := queueState(t, d).ExternalAttribution; a != nil {
-		return *a
+	a := queueState(t, d).ExternalAttribution
+	if a == nil {
+		t.Fatal("queue state carried no attribution block; an all-zero struct here would let a test asserting zeros pass against a daemon reporting nothing")
 	}
-	return wingwire.ExternalAttribution{}
+	return *a
 }
 
 func TestRefreshHeadroom_ChargesOnlyUnownedCPUAsExternal(t *testing.T) {

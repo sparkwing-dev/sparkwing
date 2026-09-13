@@ -65,9 +65,10 @@ func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float6
 	if err != nil {
 		return stat, nil, false, err
 	}
-	if len(roots) == 0 {
-		return stat, nil, true, nil
-	}
+	// safety: a reading with nothing held still reaches the sampler, because that
+	// is the reading where it drops what it measured and moves its clock. Returning
+	// here instead freezes both, and holding a run again then charges it every
+	// interval nobody held it.
 	byRoot, measured := d.ownedSampler.CPUUsage(roots, arbitrated)
 	return stat, byRoot, measured, nil
 }

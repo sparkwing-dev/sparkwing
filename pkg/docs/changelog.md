@@ -75,8 +75,8 @@ unlock.
   count of readings that located every holding run's CPU. Read it directly
   rather than subtracting the fault counts from `samples`: a later daemon may
   count a cause this build has no field for, and the subtraction would report
-  those readings as clean. `sparkwing queue` plain output now prints one row per
-  count, `external-attribution-<count>`, instead of five positional columns.
+  those readings as clean. `sparkwing queue` plain output prints one row per
+  count, `external-attribution-<count>`.
 - **admission:** Report no figure for a run whose own process restarted, rather
   than a figure covering only the parts of its process tree that survived. A run
   that re-execs kept its surviving children's CPU and silently lost its own, so

@@ -34,14 +34,3 @@ one is the file its URL implies.
   all. Read `QueueState.ExternalAttribution` for how often the daemon could not
   attribute and why, and take the clean count from its `attributed` field
   rather than by subtracting the fault counts from `samples`.
-
-## Queue plain output prints one row per attribution count
-
-- **Before:** `sparkwing queue -o plain` printed `external-attribution`
-  followed by five positional counts on one line.
-- **After:** each count is its own row, `external-attribution-readings`,
-  `external-attribution-attributed`, and one per fault cause.
-- **Why:** a positional row makes a script depend on column order, and a new
-  count either shifts every column or cannot be added.
-- **Gotchas:** a script cutting fields off the old single row reads nothing.
-  Match the row name instead.

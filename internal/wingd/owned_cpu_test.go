@@ -312,21 +312,27 @@ func TestOwnedCPU_ARootFirstSeenWithNoReadingBehindItGetsNoFigure(t *testing.T) 
 	}
 }
 
-func TestOwnedProcSampler_ForgettingSamplesStopsAGapBecomingARate(t *testing.T) {
+func TestOwnedProcSampler_AReadingWithNothingHeldEndsTheWindow(t *testing.T) {
 	sampler := &ownedProcSampler{}
 	identity := processIdentity{pid: 10, startTicks: 1000}
 	firstAt := time.Now().Add(-time.Hour)
 	sampler.last = map[processIdentity]cpuSample{identity: {cpuSeconds: 0, at: firstAt}}
 	sampler.lastAt = firstAt
 
-	// Nothing is held, which is the reading that froze the clock with the samples.
-	sampler.forgetSamples(time.Now())
-
-	if sampler.last != nil {
-		t.Error("samples survived a reading with nothing held, so a later rate can still span the gap")
+	// The entry point the daemon calls when it holds nothing.
+	if _, measured := sampler.CPUUsage(nil, 8); !measured {
+		t.Fatal("a reading with nothing held reported the host unreadable; nothing failed to be read")
 	}
-	if !sampler.lastAt.After(firstAt) {
-		t.Fatalf("sampler clock stayed at %v; want it moved to the idle reading, because a window measured from before the gap charges a run the whole stretch nobody held it",
-			sampler.lastAt)
+
+	// The tree burned an hour of CPU unheld, then is held again.
+	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 3600}}
+	rehold := []OwnedRoot{{PID: 10, HeldSince: time.Now()}}
+	byRoot, _ := ownedCPUByRoot(
+		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
+		sampler.lastAt, time.Now().Add(10*time.Second), 8)
+
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("re-held tree was charged %v cores; want no figure, because the reading with nothing held ended the window that CPU ran in",
+			figure)
 	}
 }

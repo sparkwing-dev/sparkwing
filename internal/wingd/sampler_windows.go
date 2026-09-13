@@ -116,14 +116,6 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 }
 
 func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
-	if len(roots) == 0 {
-		// safety: the samples and the clock they are read against move together.
-		// Keeping either across a stretch with nothing held would leave this
-		// window open across intervals nobody was watching a tree, and holding
-		// one again would charge it that whole stretch in a single reading.
-		s.forgetSamples(time.Now())
-		return nil, true
-	}
 	procs, ok := windowsProcesses()
 	if !ok {
 		return nil, false

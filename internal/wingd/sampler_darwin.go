@@ -79,50 +79,11 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
-	if len(roots) == 0 {
-		// safety: the samples and the clock they are read against move together.
-		// Keeping either across a stretch with nothing held would leave this
-		// window open across intervals nobody was watching a tree, and holding
-		// one again would charge it that whole stretch in a single reading.
-		s.forgetSamples(time.Now())
-		return nil, true
-	}
-	procs, ok := darwinProcesses()
-	if !ok {
-		return nil, false
-	}
-	parent := map[int]int{}
-	for _, proc := range procs {
-		parent[int(proc.Proc.P_pid)] = int(proc.Eproc.Ppid)
-	}
-	rootPIDs := map[int]struct{}{}
-	for _, root := range roots {
-		if _, ok := parent[root.PID]; ok {
-			rootPIDs[root.PID] = struct{}{}
-		}
-	}
-	ownerByPID := ownersByNearestRoot(parent, rootPIDs)
-	pids := make([]int, 0, len(ownerByPID))
-	for processID := range ownerByPID {
-		pids = append(pids, processID)
-	}
-	cpu, ok := darwinProcessCPUFractions(pids)
-	if !ok {
-		return nil, false
-	}
-	// safety: these are the kernel's own per-process rates rather than a
-	// difference between two readings, so no figure here can predate a window
-	// and HeldSince bounds nothing. The capacity bound still holds: a tree
-	// cannot have run more than admission had to hand out.
-	byRoot := make(map[int]float64, len(rootPIDs))
-	for processID, usage := range cpu {
-		byRoot[ownerByPID[processID]] += usage
-	}
-	for root, owned := range byRoot {
-		byRoot[root] = clampCores(owned, arbitratedCores)
-	}
-	return byRoot, true
+func (s *ownedProcSampler) sampleOwned([]OwnedRoot, float64) (map[int]float64, bool) {
+	// Darwin attributes owned CPU from the paired host sampler, which reads one
+	// process table for host busy and owned CPU together. This path answers for a
+	// host sampler that cannot pair, and it has no second way to measure.
+	return nil, false
 }
 
 // safety: the paired path is reached through a type assertion, so a signature

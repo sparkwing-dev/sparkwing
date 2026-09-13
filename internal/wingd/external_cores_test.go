@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"math"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -382,8 +383,12 @@ func TestNewHonorsExplicitOwnedCPUSamplerWithDefaultHost(t *testing.T) {
 }
 
 func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *testing.T) {
+	if runtime.NumCPU() < 3 {
+		t.Fatalf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
+			runtime.NumCPU())
+	}
 	d := newHeadroomDaemon(t, 8, 0)
-	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "100000 100000"}))
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "200000 100000"}))
 	owned := &fixedOwnedCPUSampler{fraction: 1, measured: true}
 	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true}}
 	d.ownedSampler = owned
@@ -391,16 +396,20 @@ func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *te
 
 	d.refreshHeadroom()
 
-	if owned.arbitratedCores != 1 {
-		t.Fatalf("owned sampler was bounded at %v cores; want the container's 1, because the clamp that produces it runs after the sample and a bound at the machine's count admits against cores nobody can grant",
+	if owned.arbitratedCores != 2 {
+		t.Fatalf("owned sampler was bounded at %v cores; want the container's 2, because the clamp that produces it runs after the sample and a bound at the machine's count admits against cores nobody can grant",
 			owned.arbitratedCores)
 	}
 }
 
 // The paired sampler is the one darwin runs, so the bound has to reach it too.
 func TestRefreshHeadroom_PairedSamplerIsBoundedByTheContainerLimitToo(t *testing.T) {
+	if runtime.NumCPU() < 3 {
+		t.Fatalf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
+			runtime.NumCPU())
+	}
 	d := newHeadroomDaemon(t, 8, 0)
-	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "100000 100000"}))
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "200000 100000"}))
 	paired := &pairedHostSampler{
 		stat:     HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true},
 		owned:    1,
@@ -412,8 +421,47 @@ func TestRefreshHeadroom_PairedSamplerIsBoundedByTheContainerLimitToo(t *testing
 
 	d.refreshHeadroom()
 
-	if paired.arbitratedCores != 1 {
-		t.Fatalf("paired sampler was bounded at %v cores; want the container's 1: darwin takes this branch, so a bound that reaches only the split path leaves the platform unbounded",
+	if paired.arbitratedCores != 2 {
+		t.Fatalf("paired sampler was bounded at %v cores; want the container's 2: darwin takes this branch, so a bound that reaches only the split path leaves the platform unbounded",
 			paired.arbitratedCores)
+	}
+}
+
+// The daemon must reach the sampler on a reading with nothing held, because
+// that is where the sampler ends the window it was measuring against.
+func TestRefreshHeadroom_AReadingWithNothingHeldStillReachesTheSampler(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0)
+	owned := &ownedProcSampler{}
+	frozenAt := time.Now().Add(-time.Hour)
+	owned.last = map[processIdentity]cpuSample{
+		{pid: 10, startTicks: 1000}: {cpuSeconds: 0, at: frozenAt},
+	}
+	owned.lastAt = frozenAt
+	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 8, BusyCores: 1, CPUMeasured: true}}
+	d.ownedSampler = owned
+
+	d.refreshHeadroom()
+
+	owned.mu.Lock()
+	kept, moved := owned.last != nil, owned.lastAt.After(frozenAt)
+	owned.mu.Unlock()
+	if kept || !moved {
+		t.Fatalf("after a reading with nothing held: samples kept=%v, clock moved=%v; want the sampler reached and its window ended, because a frozen clock charges a re-held run every interval nobody held it",
+			kept, moved)
+	}
+}
+
+// Host busy measures the whole machine, so a container limit is not its ceiling.
+func TestDarwinCPUSnapshot_HostBusyIsNotClampedToTheContainerLimit(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:00.00\n")
+	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 1:00.00\n")
+
+	host, measured, _, _ := darwinCPUFromSnapshot(
+		current, previous, 10, nil, now.Add(-10*time.Second), now, 16, 2)
+
+	if !measured || host < 5.9 {
+		t.Fatalf("host busy = %v (measured %v); want the six cores the machine ran, because clamping it to the container's two understates external and admits against cores the machine is already using",
+			host, measured)
 	}
 }

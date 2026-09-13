@@ -104,6 +104,14 @@ func newOwnedCPUSampler() *ownedProcSampler {
 }
 
 func (s *ownedProcSampler) CPUUsage(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
+	if len(roots) == 0 {
+		// safety: the samples and the clock they are read against move together.
+		// Keeping either across a stretch with nothing held leaves this window open
+		// across intervals nobody was watching a tree, and holding one again then
+		// charges it that whole stretch in a single reading.
+		s.forgetSamples(time.Now())
+		return nil, true
+	}
 	return s.sampleOwned(roots, arbitratedCores)
 }
 

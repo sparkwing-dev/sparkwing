@@ -134,26 +134,15 @@ func coresUnattributed(a *wingwire.ExternalAttribution) wingwire.QueueState {
 	}
 }
 
-func TestExternalAttributionNote_LeadsWithWhatTheReadingCarries(t *testing.T) {
+func TestExternalAttributionNote_SaysWhichWayTheFigureIsWrong(t *testing.T) {
 	qs := coresUnattributed(&wingwire.ExternalAttribution{
 		Samples: 120, SamplerUnreadable: 7, RunsAwaitingMeasure: 3,
 	})
 	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
-		" so external reads high and available reads low by it" +
-		" (since this daemon started: the process sampler read nothing on 7 of 120 readings" +
-		"; a holding run had no CPU figure yet on 3 of 120)"
+		" so external reads high and available reads low by it"
 	if got := opsview.ExternalAttributionNote(qs); got != want {
-		t.Fatalf("attribution note = %q, want %q", got, want)
-	}
-}
-
-func TestExternalAttributionNote_DropsTheCauseThatDidNotHappen(t *testing.T) {
-	qs := coresUnattributed(&wingwire.ExternalAttribution{Samples: 40, RunsWithoutProcess: 2})
-	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
-		" so external reads high and available reads low by it" +
-		" (since this daemon started: a holding run reported no process id on 2 of 40)"
-	if got := opsview.ExternalAttributionNote(qs); got != want {
-		t.Fatalf("attribution note = %q, want %q: a cause that did not happen must not be reported as zero", got, want)
+		t.Fatalf("attribution note = %q, want %q: the note reports a condition holding now, so lifetime counts belong in the rows that are labelled as lifetime",
+			got, want)
 	}
 }
 
