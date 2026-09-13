@@ -255,12 +255,29 @@ opts in. 1200 of each suits the cadence the shipped runners use -- a pool
 runner claims every 500ms, or 120 a minute, and a node heartbeat runs
 every 3s.
 
-The budget is keyed on the runner, not the token: the token prefix
-together with the holder id, executor name, or run the request names,
-which every claim and heartbeat carries in `X-Sparkwing-Runner` or its
-claim-fence headers. A fleet sharing one token is therefore budgeted
-runner by runner, so one runner stuck in a tight loop cannot starve its
-peers.
+The budget is keyed on the runner, not the token. The controller derives
+the runner from the route wherever it can -- the node, run, or agent the
+path names -- and falls back to the `X-Sparkwing-Runner` header only on
+`POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
+`POST /api/v1/triggers/claim`, which name nothing. A runner sends one
+identity for the life of its process (a pool runner its holder prefix, an
+enrolled agent its name), not one per poll: a value that changed per
+request would buy a fresh budget on every claim and grow the controller's
+bucket table at the fleet's poll rate.
+
+**What this bounds is a cooperating runner.** On those three claim routes
+the identity is the runner's own word, so a holder of a valid token that
+varies it gets a fresh budget each time. The budget stops a runaway loop
+and keeps one misbehaving runner in a shared-token fleet from spending
+its peers' claim budget; it is not a defence against an authenticated
+caller who means harm. The token itself is the control that bounds that
+caller -- revoke it.
+
+A runner too old to send an identity shares one bucket with its peers on
+those routes, so during a rolling upgrade a shared-token fleet is
+budgeted as one caller there. Size the budgets per runner and the older
+half of the fleet still clears them, or leave the budgets at zero until
+the rollout finishes.
 
 The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
 never budgeted. An agent that loses it tears down its membership and

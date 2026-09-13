@@ -76,7 +76,8 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	cfg = normalizePoolLoopConfig(cfg)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token)
+	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token).
+		WithRunnerIdentity(cfg.HolderPrefix)
 
 	var admission *orchestrator.LocalAdmission
 	var provider headroomProvider
@@ -570,7 +571,7 @@ func runPoolHeartbeat(
 				killNode()
 				return
 			}
-			if wait, ok := unavailableBackoff(err, 0); ok {
+			if wait, ok := unavailableBackoff(err, minShedBackoff); ok {
 				logger.Debug(source+" heartbeat shed by the controller; backing off",
 					"run_id", runID, "node_id", nodeID,
 					"retry_after", wait, "err", err)

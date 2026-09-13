@@ -533,10 +533,11 @@ controller widens what it suggests with how long it has had no work,
 up to `--idle-claim-poll` (default 5s), and stops suggesting anything the
 moment work arrives or is handed out, so a queue that fills returns its
 fleet to full cadence on the next poll. A runner caps what it accepts at
-15 seconds whatever the header says, and the controller refuses to start
-when its suggestion plus a runner's own spread reaches `--placement-hold`
-or `--placement-liveness`, because a runner silent past those windows
-stops counting as live for local-first placement. The header is advice a
+8 seconds whatever the header says, and the controller refuses to start
+unless two of the longest wait its suggestion permits, spread included,
+still fit inside `--placement-hold` and `--placement-liveness`, because a
+runner silent past those windows stops counting as live for local-first
+placement. The header is advice a
 runner may only widen its own cadence to: it never polls faster than it
 was configured to, it spreads its return with jitter so a fleet advised
 together does not come back together, and a runner that ignores the

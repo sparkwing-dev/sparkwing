@@ -13,7 +13,7 @@ import (
 )
 
 func TestPollAdvice_ReadsTheControllerSuggestionOffAClaim(t *testing.T) {
-	advice := "12"
+	advice := "6"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if advice != "" {
 			w.Header().Set(store.ClaimPollAfterHeader, advice)
@@ -26,8 +26,8 @@ func TestPollAdvice_ReadsTheControllerSuggestionOffAClaim(t *testing.T) {
 	if _, err := c.ClaimNode(context.Background(), "runner-1", nil, time.Minute, nil); err != nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
-	if got := c.PollAdvice(); got != 12*time.Second {
-		t.Errorf("PollAdvice=%s want 12s", got)
+	if got := c.PollAdvice(); got != 6*time.Second {
+		t.Errorf("PollAdvice=%s want 6s", got)
 	}
 
 	advice = ""

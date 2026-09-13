@@ -20,6 +20,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// safety: the controller budgets claims per runner, so the name has to outlive
+// one poll; an agent that has one uses it and a nameless one falls back to this
+// process.
+func agentRunnerIdentity(cfg agentconfig.Config, member agentconfig.Coordinator) string {
+	for _, name := range []string{member.Name, cfg.Name, cfg.HolderPrefix} {
+		if name != "" {
+			return name
+		}
+	}
+	return processRunnerIdentity("agent")
+}
+
 func agentCoordinators(cfg agentconfig.Config) []agentconfig.Coordinator {
 	if len(cfg.Coordinators) > 0 {
 		return cfg.Coordinators
@@ -38,7 +50,8 @@ func runAgentMembership(ctx context.Context, cfg agentconfig.Config, member agen
 		return err
 	}
 	provider := newHeadroomProvider("", "", limits.localReserve, limits.globalContribution, limits.membershipContribution)
-	ctrl := client.NewWithToken(member.Controller, &http.Client{Timeout: 30 * time.Second}, member.Token)
+	ctrl := client.NewWithToken(member.Controller, &http.Client{Timeout: 30 * time.Second}, member.Token).
+		WithRunnerIdentity(agentRunnerIdentity(cfg, member))
 	exec := func(execCtx context.Context, n *store.Node, holderID string, admission *orchestrator.LocalAdmission) {
 		executePooledNode(execCtx, ctrl, member.Controller, member.Logs, member.Gitcache, member.Token, member.CacheToken,
 			n, holderID, cfg.Lease, cfg.Heartbeat, "agent", logger, admission, provider)
@@ -138,7 +151,7 @@ func runExecutorLiveness(ctx context.Context, name string, interval time.Duratio
 			continue
 		}
 		silence := time.Since(lastOK)
-		wait, transient := unavailableBackoff(err, 0)
+		wait, transient := unavailableBackoff(err, minShedBackoff)
 		if !transient || silence >= maxExecutorHeartbeatSilence {
 			return err
 		}

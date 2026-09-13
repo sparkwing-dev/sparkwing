@@ -44,8 +44,12 @@ unlock.
   routes. `--claims-per-runner-minute` and `--heartbeats-per-runner-minute`
   (chart `controller.claimsPerRunnerMinute`,
   `controller.heartbeatsPerRunnerMinute`) bound what one runner spends a minute,
-  keyed on the token prefix together with the runner the request names, so a
-  fleet sharing one token is budgeted runner by runner. Both default to zero,
+  keyed on the token prefix together with the runner the controller derives from
+  the route, falling back to the runner's own `X-Sparkwing-Runner` identity on
+  the three claim routes that name none, so a fleet sharing one token is
+  budgeted runner by runner. It bounds a cooperating runner, not a holder of a
+  valid token that varies its identity. `client.Client.WithRunnerIdentity` sets
+  the value a runner sends, once per process. Both default to zero,
   which is unlimited; 1200 of each suits the cadence the shipped runners use.
   The agent liveness heartbeat is never budgeted, because losing it tears down
   an agent and every node under it. Past a budget the route answers `429` with a
@@ -63,9 +67,10 @@ unlock.
   default 5s) caps what the controller suggests, which widens with how long it
   has had no work and clears the moment work arrives or is handed out; zero
   suggests nothing. A runner honors the suggestion only to poll less often,
-  spreads its return with jitter, and accepts at most 15s however long the
-  header names. The controller refuses to start when its suggestion plus that
-  spread reaches `--placement-hold` or `--placement-liveness`.
+  spreads its return with jitter, and accepts at most 8s however long the
+  header names. The controller refuses to start unless two of the longest wait
+  its suggestion permits fit inside `--placement-hold` and
+  `--placement-liveness`.
   `client.Client.PollAdvice` reports the last suggestion a claim carried back.
   A host's own admission daemon and the loopback controller suggest nothing and
   budget nothing, because a widened idle poll there costs pickup latency and

@@ -79,3 +79,14 @@ func splitCSV(s string) []string {
 	}
 	return out
 }
+
+// safety: a runner identity that changed per request would hand the controller
+// a fresh budget every poll and grow its bucket table at the fleet's poll rate,
+// so a caller with no name of its own names this process instead.
+func processRunnerIdentity(role string) string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown-host"
+	}
+	return fmt.Sprintf("%s:%s:%d", role, host, os.Getpid())
+}

@@ -21,8 +21,9 @@ const IdleClaimPollJitterFactor = 1.25
 
 // MaxHonoredIdleClaimPoll bounds what a runner accepts however long a
 // controller suggests, so a misconfigured controller cannot park a fleet past
-// the default placement hold.
-const MaxHonoredIdleClaimPoll = 15 * time.Second
+// the default placement hold. Two of the longest wait it permits, spread
+// included, still fit inside that hold.
+const MaxHonoredIdleClaimPoll = 8 * time.Second
 
 // LongestHonoredIdlePoll reports how long a runner may actually wait after
 // being suggested d, jitter included. Operators and startup checks compare it

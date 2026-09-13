@@ -80,8 +80,14 @@ func writeRetryAfter(w http.ResponseWriter, after time.Duration, message string)
 	writeError(w, http.StatusTooManyRequests, errors.New(message))
 }
 
+// safety: the header is whole seconds, so a sub-second delay truncates to a
+// zero that invites the caller straight back; every delay rounds up instead.
 func setRetryAfter(w http.ResponseWriter, after time.Duration) {
-	w.Header().Set("Retry-After", strconv.Itoa(int(after.Seconds())))
+	seconds := int64(after / time.Second)
+	if after%time.Second > 0 || seconds < 1 {
+		seconds++
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
 }
 
 func writeRetryAfterStatus(w http.ResponseWriter, status int, after time.Duration, message string) {

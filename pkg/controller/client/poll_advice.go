@@ -12,7 +12,7 @@ import (
 // A runner that stops polling for longer than a controller's placement hold
 // drops out of local-first placement, so the ceiling sits below the shipped
 // hold even after the runner adds its own spread.
-const MaxPollAdvice = 15 * time.Second
+const MaxPollAdvice = 8 * time.Second
 
 // PollAdvice reports the interval the controller most recently suggested a
 // claim loop wait before polling again, or zero when it suggested none. The
@@ -28,11 +28,21 @@ func (c *Client) recordPollAdvice(resp *http.Response) {
 	c.pollAdvice.Store(int64(pollAdviceOf(resp)))
 }
 
-// safety: runners sharing one token must be told apart by the controller's
-// per-runner budgets, so every claim and heartbeat names the runner behind it.
-func setRunnerIdentity(req *http.Request, id string) {
-	if id != "" {
-		req.Header.Set(store.RunnerIdentityHeader, id)
+// WithRunnerIdentity names the runner this client speaks for: a value stable
+// for the life of the process, such as a pool runner's holder prefix or an
+// enrolled agent's name. The controller budgets claims and heartbeats per
+// runner, so a fleet sharing one token sets distinct identities and a single
+// runner keeps one across its whole run. A per-request value would hand the
+// runner a fresh budget on every poll and grow the controller's bucket table
+// at the fleet's poll rate. It returns the same client for chaining.
+func (c *Client) WithRunnerIdentity(id string) *Client {
+	c.runnerIdentity = id
+	return c
+}
+
+func (c *Client) setRunnerIdentity(req *http.Request) {
+	if c.runnerIdentity != "" {
+		req.Header.Set(store.RunnerIdentityHeader, c.runnerIdentity)
 	}
 }
 

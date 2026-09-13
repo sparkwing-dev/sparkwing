@@ -317,6 +317,10 @@ func run(args []string) error {
 
 // safety: a runner honoring a suggestion longer than these windows stops
 // counting as live, and local-first placement silently stops preferring it.
+// The margin is a whole second poll, not a hair, because a runner that wakes
+// one request late must still land inside the window.
+const idleClaimPollMargin = 2
+
 func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 	longest := controller.LongestHonoredIdlePoll(idle)
 	for _, w := range []struct {
@@ -326,11 +330,11 @@ func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 		{"--placement-hold", hold},
 		{"--placement-liveness", liveness},
 	} {
-		if w.value > 0 && longest >= w.value {
+		if w.value > 0 && longest*idleClaimPollMargin > w.value {
 			return fmt.Errorf(
-				"--idle-claim-poll %s stretches to %s once a runner spreads it, which is not below %s %s; "+
+				"--idle-claim-poll %s stretches to %s once a runner spreads it, and %d of those do not fit in %s %s; "+
 					"lower the suggestion or raise that window",
-				idle, longest, w.flag, w.value)
+				idle, longest, idleClaimPollMargin, w.flag, w.value)
 		}
 	}
 	return nil

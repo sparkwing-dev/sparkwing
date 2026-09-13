@@ -16,11 +16,15 @@ const (
 
 	// safety: a runner silent past the controller's placement hold drops out of
 	// local-first placement, so the invitation to poll less often is bounded here too.
-	maxAdvisedPoll = 15 * time.Second
+	maxAdvisedPoll = 8 * time.Second
 )
 
 // safety: a 429 is backpressure exactly as a 503 is, so a loop that repolled
 // at its own cadence through one would keep spending the budget it just drained.
+// safety: a Retry-After the server rounded to nothing would otherwise spin a
+// heartbeat loop, so every shed beat waits at least this long.
+var minShedBackoff = time.Second
+
 func unavailableBackoff(err error, floor time.Duration) (time.Duration, bool) {
 	after, ok := client.LoadSignal(err)
 	if !ok {

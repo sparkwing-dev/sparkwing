@@ -185,6 +185,7 @@ func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (c *Client) WithRunnerIdentity(id string) *Client
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 type ConcurrencyState struct {
 	Key               string
@@ -271,7 +272,7 @@ type LiveLogChunk struct {
 	Done bool
 }
 func LoadSignal(err error) (time.Duration, bool)
-const MaxPollAdvice = 15 * time.Second
+const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client

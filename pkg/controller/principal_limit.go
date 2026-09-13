@@ -27,11 +27,18 @@ const (
 // the claim routes and to the heartbeat routes. Zero in either field leaves
 // that class unlimited, which is what a controller starts with.
 //
-// The budget is keyed on the runner behind the request -- the token prefix
-// together with the holder id, executor name, or run the request names -- so
-// a fleet sharing one token is budgeted runner by runner rather than as one
-// caller. The agent liveness heartbeat is never budgeted: losing it takes an
-// agent and every node it runs down with it.
+// The budget is keyed on the runner behind the request: the token prefix
+// together with the run, node or agent the route names, and on the two claim
+// routes that name none, the identity the runner sends in
+// [store.RunnerIdentityHeader]. A fleet sharing one token is therefore
+// budgeted runner by runner rather than as one caller. The agent liveness
+// heartbeat is never budgeted: losing it takes an agent and every node it runs
+// down with it.
+//
+// This bounds a cooperating runner. On the two claim routes the identity is
+// the runner's own word, so a holder of a valid token that varies it gets a
+// fresh budget each time; the budget is a guard against a runaway loop, not
+// against a caller who already authenticated and means harm.
 type RequestBudget struct {
 	ClaimsPerMinute     int
 	HeartbeatsPerMinute int
@@ -105,19 +112,23 @@ func (s *Server) runnerBudgetKey(r *http.Request) string {
 	return s.floodKey(r, "") + "/" + runnerIdentity(r)
 }
 
-// safety: the most specific name the request itself carries, so two runners
-// sharing a token and a route still land in separate buckets.
+// safety: a client-supplied name is taken only where the controller can derive
+// none, so a runner cannot widen its own budget on any route that names a run,
+// a node or an agent.
 func runnerIdentity(r *http.Request) string {
-	for _, header := range []string{store.RunnerIdentityHeader, store.ClaimHolderHeader, store.ClaimMembershipHeader} {
-		if v := r.Header.Get(header); v != "" {
-			return v
-		}
-	}
-	for _, value := range []string{"name", "nodeID", "id"} {
+	for _, value := range []string{"nodeID", "name", "id"} {
 		if v := r.PathValue(value); v != "" {
 			return v
 		}
 	}
+	for _, header := range []string{store.ClaimHolderHeader, store.ClaimMembershipHeader, store.RunnerIdentityHeader} {
+		if v := r.Header.Get(header); v != "" {
+			return v
+		}
+	}
+	// safety: a runner too old to name itself shares this bucket with its
+	// peers for the length of a rolling upgrade, which is why the budgets
+	// are sized per runner rather than per fleet.
 	return "unnamed"
 }
 

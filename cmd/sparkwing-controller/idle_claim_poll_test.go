@@ -20,11 +20,11 @@ func TestCheckIdleClaimPoll(t *testing.T) {
 		{name: "suggestion off", idle: 0, hold: time.Second, liveness: time.Second},
 		{name: "placement off", idle: time.Hour, hold: 0, liveness: 0},
 		{
-			name: "spread reaches the hold", idle: 15 * time.Second, hold: 18 * time.Second, liveness: 30 * time.Second,
+			name: "no margin under the hold", idle: 8 * time.Second, hold: 15 * time.Second, liveness: time.Minute,
 			wantErr: "--placement-hold",
 		},
 		{
-			name: "spread reaches liveness", idle: 12 * time.Second, hold: time.Minute, liveness: 14 * time.Second,
+			name: "no margin under liveness", idle: 8 * time.Second, hold: time.Minute, liveness: 15 * time.Second,
 			wantErr: "--placement-liveness",
 		},
 	}
@@ -47,7 +47,7 @@ func TestCheckIdleClaimPoll(t *testing.T) {
 // A runner never waits longer than this however long a controller suggests, so
 // the ceiling has to clear the placement windows the shipped chart sets.
 func TestLongestHonoredIdlePollClearsTheShippedPlacementWindows(t *testing.T) {
-	if got := controller.LongestHonoredIdlePoll(time.Hour); got >= 20*time.Second {
+	if got := controller.LongestHonoredIdlePoll(time.Hour); got*idleClaimPollMargin > 20*time.Second {
 		t.Errorf("a runner may wait %s; the shipped placement hold is 20s", got)
 	}
 }

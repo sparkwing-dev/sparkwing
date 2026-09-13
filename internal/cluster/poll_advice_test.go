@@ -3,10 +3,15 @@ package cluster
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -26,7 +31,7 @@ func TestAdvisedPoll_OnlyWidensTheConfiguredCadence(t *testing.T) {
 		{"no advisor", time.Second, nil, time.Second, time.Second},
 		{"no advice", time.Second, fixedAdvisor(0), time.Second, time.Second},
 		{"advice below the configured cadence", 5 * time.Second, fixedAdvisor(time.Second), 5 * time.Second, 5 * time.Second},
-		{"advice above the configured cadence", time.Second, fixedAdvisor(10 * time.Second), 10 * time.Second, 12500 * time.Millisecond},
+		{"advice above the configured cadence", time.Second, fixedAdvisor(6 * time.Second), 6 * time.Second, 7500 * time.Millisecond},
 		{"advice above the cap", time.Second, fixedAdvisor(time.Hour), maxAdvisedPoll, maxAdvisedPoll + maxAdvisedPoll/4},
 	}
 	for _, tc := range cases {
@@ -141,6 +146,10 @@ func staticHeadroom() headroomProvider {
 }
 
 func TestRunExecutorLiveness_SurvivesAShedHeartbeat(t *testing.T) {
+	restoreBackoff := minShedBackoff
+	minShedBackoff = 10 * time.Millisecond
+	t.Cleanup(func() { minShedBackoff = restoreBackoff })
+
 	ctrl := &shedHeartbeatClient{shed: 3}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
@@ -157,6 +166,9 @@ func TestRunExecutorLiveness_SurvivesAShedHeartbeat(t *testing.T) {
 
 func TestRunExecutorLiveness_FailsOnceSilencePassesTheLeaseWindow(t *testing.T) {
 	ctrl := &shedHeartbeatClient{shed: 1 << 30}
+	restoreBackoff := minShedBackoff
+	minShedBackoff = 5 * time.Millisecond
+	t.Cleanup(func() { minShedBackoff = restoreBackoff })
 	restore := maxExecutorHeartbeatSilence
 	maxExecutorHeartbeatSilence = 50 * time.Millisecond
 	t.Cleanup(func() { maxExecutorHeartbeatSilence = restore })
@@ -236,4 +248,55 @@ func TestRunPoolLoop_BacksOffOnARateLimitedClaim(t *testing.T) {
 				i+1, gap, retryAfter)
 		}
 	}
+}
+
+func TestRunPoolLoop_AStableIdentityLetsTheBudgetBite(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	var shed atomic.Int64
+	ctrl := controller.New(st, nil).
+		WithRequestBudget(controller.RequestBudget{ClaimsPerMinute: 2})
+	handler := ctrl.Handler()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorder := &statusRecorder{ResponseWriter: w}
+		handler.ServeHTTP(recorder, r)
+		if recorder.status == http.StatusTooManyRequests {
+			shed.Add(1)
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: ts.URL,
+		HolderPrefix:  "runner:test-host",
+		MaxConcurrent: 1,
+		PollInterval:  time.Millisecond,
+		SourceName:    "test runner",
+	})
+	cli := client.NewWithToken(cfg.ControllerURL, nil, "").WithRunnerIdentity(cfg.HolderPrefix)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	exec := func(ctx context.Context, n *store.Node, holderID string) {}
+	if err := runPoolLoop(ctx, cfg, cli, exec, nil, discardLogger()); err != nil {
+		t.Fatalf("runPoolLoop: %v", err)
+	}
+
+	if shed.Load() == 0 {
+		t.Fatal("the controller shed nothing; each poll bought itself a fresh budget")
+	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecorder) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
 }

@@ -26,6 +26,10 @@ type Client struct {
 	token   string
 	http    *http.Client
 
+	// safety: set once before the client is shared, so the claim loops that
+	// read it concurrently never race a write.
+	runnerIdentity string
+
 	pollAdvice atomic.Int64
 }
 
@@ -796,6 +800,7 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 	if body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
+	c.setRunnerIdentity(httpReq)
 	resp, err := c.do(httpReq)
 	if err != nil {
 		return nil, err
@@ -1061,7 +1066,7 @@ func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	setRunnerIdentity(req, executorName)
+	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
@@ -1210,7 +1215,7 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	setRunnerIdentity(req, holderID)
+	c.setRunnerIdentity(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
@@ -1362,7 +1367,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	setRunnerIdentity(req, holderID)
+	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
