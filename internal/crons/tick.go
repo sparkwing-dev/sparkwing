@@ -124,8 +124,12 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 	}
 	// safety: a guard set after the schedule was armed still binds it, so the
 	// cadence is measured again here rather than trusted from arming time.
-	if err := s.refusedByMinInterval(ctx, sched); err != nil {
-		s.recordUnevaluable(ctx, sched, now, dryRun, report, err)
+	refusal, readErr := s.minIntervalRefusal(ctx, sched)
+	if readErr != nil {
+		report.Errors = append(report.Errors,
+			fmt.Sprintf("%s: reading the cadence guard: %v", DisplayName(sched), readErr))
+	} else if refusal != nil {
+		s.recordUnevaluable(ctx, sched, now, dryRun, report, refusal)
 		return
 	}
 
@@ -151,15 +155,15 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 
 // safety: the guard bounds what a controller schedule may cost, and a local
 // schedule spends nothing the operator pays for.
-func (s *Service) refusedByMinInterval(ctx context.Context, sched store.CronSchedule) error {
+func (s *Service) minIntervalRefusal(ctx context.Context, sched store.CronSchedule) (refusal, read error) {
 	if sched.Where != store.CronWhereController {
-		return nil
+		return nil, nil
 	}
-	ceiling, err := s.Store.ComputeLimits(ctx)
+	limits, err := s.Store.ComputeLimits(ctx)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return RefuseBelowMinInterval(sched.Effective().Cron, ceiling.CronSeconds)
+	return RefuseBelowMinInterval(sched.Effective().Cron, limits.CronSeconds), nil
 }
 
 // safety: a host's override can break a cadence the config validated, and such

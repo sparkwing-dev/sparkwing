@@ -19,8 +19,8 @@ func RefuseBelowMinInterval(expr string, ceilingSeconds int64) error {
 	if expr == "" || ceilingSeconds <= 0 {
 		return nil
 	}
-	schedule, err := cronspec.Parse(expr)
-	if err != nil {
+	schedule := parsedOrNil(expr)
+	if schedule == nil {
 		return nil
 	}
 	shortest, ok := schedule.ShortestInterval(time.Now().UTC(), time.UTC, minIntervalSamples)
@@ -35,4 +35,14 @@ func RefuseBelowMinInterval(expr string, ceilingSeconds int64) error {
 		Limit: store.ComputeLimitCronSeconds, Cap: ceilingSeconds,
 		Observed: seconds, Scope: "schedule " + expr,
 	}
+}
+
+// safety: an expression that does not parse is the cron layer's own failure,
+// reported where the schedule is armed and evaluated rather than here.
+func parsedOrNil(expr string) *cronspec.Schedule {
+	schedule, err := cronspec.Parse(expr)
+	if err != nil {
+		return nil
+	}
+	return schedule
 }

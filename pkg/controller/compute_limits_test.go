@@ -323,3 +323,37 @@ func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
 		t.Fatalf("the second claim = %v, want the global guard", err)
 	}
 }
+
+// safety: a trigger creates the run it names, so the hourly guard has to see
+// the triggering principal rather than an unowned run.
+func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
+	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now().UTC(),
+		store.TokenOptions{})
+	if err != nil {
+		t.Fatalf("mint a writer for the metered principal: %v", err)
+	}
+
+	body := map[string]any{
+		"pipeline": "demo",
+		"trigger":  map[string]any{"source": "manual", "user": "operator"},
+	}
+	status, first := creditsRequest(t, http.MethodPost, f.url+"/api/v1/triggers", writer, body)
+	if status != http.StatusAccepted {
+		t.Fatalf("the first trigger = %d, want 202: %s", status, first)
+	}
+	status, second := creditsRequest(t, http.MethodPost, f.url+"/api/v1/triggers", writer, body)
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("the second trigger = %d, want 429: %s", status, second)
+	}
+	runs, err := f.store.ListRuns(ctx, store.RunFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want the refused one absent", len(runs))
+	}
+}

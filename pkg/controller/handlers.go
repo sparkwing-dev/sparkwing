@@ -811,7 +811,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.admitTrigger(r.Context(), triggerIntake{
+	// safety: a trigger creates the run it names, so the hourly guard measures
+	// the principal that triggered it exactly as a direct create does.
+	triggerCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
+	if err := s.admitTrigger(triggerCtx, triggerIntake{
 		RunID:         runID,
 		Pipeline:      body.Pipeline,
 		Args:          body.Args,
@@ -825,6 +828,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RepoInherited: repoInherited,
 		At:            time.Now(),
 	}); err != nil {
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -859,6 +865,11 @@ type triggerIntake struct {
 // here -- the trigger, the pending run, the dispatch -- so an HTTP submission
 // and a schedule the controller fired land identically.
 func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
+	// safety: the trigger row is written before the run, so a guard that would
+	// refuse the run is asked first and no orphan trigger is left behind.
+	if err := s.store.RunsPerHourRefusal(ctx, in.At); err != nil {
+		return err
+	}
 	if err := s.store.CreateTrigger(ctx, store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,

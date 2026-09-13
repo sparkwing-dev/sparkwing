@@ -429,18 +429,39 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, runID, principal str
 	if err != nil || present {
 		return err
 	}
-	since := now.Add(-time.Hour).UnixNano()
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
+	return runsPerHourRefusal(ctx, tx, limits, principal, now)
+}
+
+// RunsPerHourRefusal reports the hourly guard the principal in ctx would meet
+// if it created a run now, without writing anything. A caller that writes rows
+// of its own before the run uses it to refuse first; the guard inside
+// [Store.CreateRun] is still what makes the decision atomic.
+func (s *Store) RunsPerHourRefusal(ctx context.Context, now time.Time) error {
+	limits, err := s.ComputeLimits(ctx)
+	if err != nil {
+		return err
+	}
+	if limits.RunsPerHour <= 0 && limits.GlobalRunsPerHour <= 0 {
+		return nil
+	}
+	return runsPerHourRefusal(ctx, storeRowQuerier{s}, limits, creatingPrincipal(ctx), now)
+}
+
+func runsPerHourRefusal(
+	ctx context.Context, q rowQuerier, limits ComputeLimits, principal string, now time.Time,
+) error {
+	since := now.Add(-time.Hour).UnixNano()
 	if limits.RunsPerHour > 0 {
-		metered, err := principalMeteredTx(ctx, tx, principal)
+		metered, err := principalMeteredTx(ctx, q, principal)
 		if err != nil {
 			return err
 		}
 		if metered {
 			var runs int64
-			if err := tx.QueryRowContext(ctx,
+			if err := q.QueryRowContext(ctx,
 				`SELECT COUNT(*) FROM runs WHERE created_principal = ? AND created_at >= ?`,
 				principal, since).Scan(&runs); err != nil {
 				return err
@@ -455,7 +476,7 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, runID, principal str
 	}
 	if limits.GlobalRunsPerHour > 0 {
 		var runs int64
-		if err := tx.QueryRowContext(ctx,
+		if err := q.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM runs WHERE created_at >= ?`, since).Scan(&runs); err != nil {
 			return err
 		}
@@ -469,9 +490,19 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, runID, principal str
 	return nil
 }
 
-func rowPresentTx(ctx context.Context, tx *storeTx, query string, args ...any) (bool, error) {
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type storeRowQuerier struct{ s *Store }
+
+func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return q.s.queryRow(ctx, query, args...)
+}
+
+func rowPresentTx(ctx context.Context, q rowQuerier, query string, args ...any) (bool, error) {
 	var one int
-	err := tx.QueryRowContext(ctx, query, args...).Scan(&one)
+	err := q.QueryRowContext(ctx, query, args...).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -496,11 +527,11 @@ func runPrincipalTx(ctx context.Context, tx *storeTx, runID string) (string, err
 
 // safety: metering follows the operator's token marker, so a principal holding
 // no metered token is local work the per-principal guards leave alone.
-func principalMeteredTx(ctx context.Context, tx *storeTx, principal string) (bool, error) {
+func principalMeteredTx(ctx context.Context, q rowQuerier, principal string) (bool, error) {
 	if principal == "" {
 		return false, nil
 	}
-	return rowPresentTx(ctx, tx,
+	return rowPresentTx(ctx, q,
 		`SELECT 1 FROM tokens WHERE principal = ? AND metered = 1 LIMIT 1`, principal)
 }
 
