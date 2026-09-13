@@ -2,6 +2,11 @@
 version: "2"
 
 run:
+  # A full `golangci-lint run ./...` over the root module measured 97s on a cold
+  # cache and 56s warm, on an idle 16-core Linux host. Under contention from
+  # parallel agents it has exceeded 5m and exited 4 with packages unjudged, which
+  # reads as a findings failure. The budget sits far above the measurement so a
+  # slow run finishes rather than reporting a partial verdict.
   timeout: 20m
 
 linters:
