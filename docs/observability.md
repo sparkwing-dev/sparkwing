@@ -511,3 +511,60 @@ A reset clears every tripped class and both window counters; lifetime
 request and trip totals survive so the metrics keep their history. A
 budget that keeps tripping wants a larger limit or a caller that stops
 retrying, not a repeated reset.
+
+## Egress budgets
+
+Egress is the bytes a Sparkwing service sends to clients: artifact and
+cache-archive downloads, log reads, the live log stream, and git proxy
+fetches. Object-store egress is about nine cents per gigabyte, so a
+terabyte a month is ninety dollars nobody authorised, and a user can
+spend it without writing a single pipeline.
+
+The controller, the logs service, and the cache each count the response
+bodies of those routes twice: once against the principal that asked for
+them, and once against the process total. Two budgets act on those
+counters, and both are unlimited until an operator sets one.
+
+| Flag | Environment | What it does |
+|------|-------------|--------------|
+| `--egress-monthly-bytes` | `SPARKWING_EGRESS_MONTHLY_BYTES` | Bytes one principal may download in a UTC month. Past it, its downloads answer `429` with a `Retry-After` naming the wait until the month rolls. |
+| `--egress-daily-alarm-bytes` | `SPARKWING_EGRESS_DAILY_ALARM_BYTES` | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
+| `--egress-max-log-streams` | `SPARKWING_EGRESS_MAX_LOG_STREAMS` | Live log streams one principal may hold open at once. Past it, a further stream answers `429`. The cache serves no stream and takes no such flag. |
+
+The monthly budget refuses; the daily threshold only alarms. The
+distinction is deliberate: one principal's spend is that principal's
+problem to answer for, and the deployment's daily total is the
+operator's. The alarm appears as `egress.alarm` on each service's
+`/api/v1/health`, as a line in `problems`, and as a `warn`-level log
+line carrying `day_bytes` and `threshold_bytes`, which is what a
+deployment's alerting keys on. Point CloudWatch alarms on the bucket's
+`BytesDownloaded` metric and the instance's `NetworkOut` at the same
+page, so the bill has a second witness that does not depend on a
+Sparkwing process being up.
+
+Counting is in memory. The controller persists each principal's month
+total to its store on the maintenance sweep and reloads it at startup,
+so a restart resumes the month rather than handing everyone a fresh
+budget; no response costs a store write. The logs service and the cache
+count in memory alone, so their counters start over on a restart.
+
+Read the controller's meter, including the principals that have
+downloaded the most this month, with `GET /api/v1/egress` on an `admin`
+token.
+
+### What a principal means to each service
+
+The controller and the logs service resolve a bearer to a named
+principal, so their budgets are per tenant. The cache authenticates one
+shared token instead, so it separates `bearer` from `anonymous` (the
+open dependency proxy) and leaves per-tenant accounting to the
+controller, which knows who each bearer is.
+
+### One meter per process
+
+Like the object-store budget, an egress meter belongs to a process. Two
+controller replicas each count their own bytes, so a per-principal
+budget sized for one replica admits twice that across two. The
+controller's persisted total only ever rises within a month, so a
+replica whose memory is behind the stored row cannot hand back budget
+another already spent.

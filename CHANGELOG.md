@@ -106,6 +106,27 @@ unlock.
   A host's own admission daemon and the loopback controller suggest nothing and
   budget nothing, because a widened idle poll there costs pickup latency and
   their unauthenticated callers would share one bucket.
+- **controller + logs + cache:** Egress budgets bound the bytes each
+  service sends to clients: artifact and cache-archive downloads, log
+  reads, the live log stream, and git proxy fetches.
+  `--egress-monthly-bytes` (env `SPARKWING_EGRESS_MONTHLY_BYTES`) refuses
+  one principal's downloads past a UTC-month byte total with `429`, a
+  `Retry-After` naming the wait until the month rolls, and a body whose
+  `error` member says who spent what against which limit.
+  `--egress-daily-alarm-bytes` (env `SPARKWING_EGRESS_DAILY_ALARM_BYTES`)
+  refuses nothing and raises an alarm the service reports as
+  `egress.alarm` on `GET /api/v1/health`, as a line in `problems`, and as
+  a `warn` log line carrying `day_bytes` and `threshold_bytes`.
+  `--egress-max-log-streams` (env `SPARKWING_EGRESS_MAX_LOG_STREAMS`) caps
+  the live log streams one principal holds open on the controller and the
+  logs service. Every budget defaults to unlimited, so a deployment that
+  sets none serves what it served before. Counting is in memory; the
+  controller writes each principal's month total to schema v38's
+  `egress_usage` table on its maintenance sweep and reloads it at startup,
+  so no response costs a store write and a restart resumes the month. `GET
+  /api/v1/egress` (scope `admin`) reports the budgets, the day and month
+  totals, the alarm, and the principals that have downloaded the most.
+  Documented under [Egress budgets](docs/observability.md#egress-budgets).
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
