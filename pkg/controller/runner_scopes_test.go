@@ -182,6 +182,55 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	}
 }
 
+// Warm dispatch opens and closes the executor offer round from the process
+// holding the run's trigger claim, so the three readiness routes answer that
+// claim and refuse every other bearer of the same scope set.
+func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	now := time.Now().UTC()
+	strangerRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner, runnerScopes, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken other-pool: %v", err)
+	}
+	adminRaw, _, err := f.store.CreateToken("ops", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken ops: %v", err)
+	}
+
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+	seedRepoTrigger(t, f.store, "warm-run", "acme/web")
+	trigger, err := c.ClaimTrigger(ctx)
+	if err != nil || trigger == nil {
+		t.Fatalf("ClaimTrigger = (%+v, %v)", trigger, err)
+	}
+	seedRunNode(t, f.store, trigger.ID, "build")
+	held := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
+
+	if err := c.MarkNodeReady(held, trigger.ID, "build"); err != nil {
+		t.Fatalf("MarkNodeReady holding the trigger claim: %v", err)
+	}
+	if _, err := c.FinalizeNodeReady(held, trigger.ID, "build"); err != nil {
+		t.Fatalf("FinalizeNodeReady holding the trigger claim: %v", err)
+	}
+	if _, err := c.RevokeNodeReady(held, trigger.ID, "build"); err != nil {
+		t.Fatalf("RevokeNodeReady holding the trigger claim: %v", err)
+	}
+
+	err = client.NewWithToken(f.url, nil, strangerRaw).MarkNodeReady(held, trigger.ID, "build")
+	if err == nil || !strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("MarkNodeReady on a pool token that does not hold the claim = %v, want 403 claim_required", err)
+	}
+	if err := c.MarkNodeReady(ctx, trigger.ID, "build"); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("MarkNodeReady without the claim generation = %v, want 403 claim_required", err)
+	}
+	if err := client.NewWithToken(f.url, nil, adminRaw).MarkNodeReady(ctx, trigger.ID, "build"); err != nil {
+		t.Fatalf("MarkNodeReady on an admin token: %v", err)
+	}
+}
+
 func TestTriggerClaimMutation_RequiresExactTokenAndGeneration(t *testing.T) {
 	f, ownerRaw := newScopedFixture(t, runnerScopes)
 	otherRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner,
@@ -424,7 +473,6 @@ func TestRunnerScopes_SecretsReadIsNotAdmin(t *testing.T) {
 		{"create a user", http.MethodPost, "/api/v1/users", `{"name":"mallory","password":"hunter2hunter2"}`},
 		{"list every secret", http.MethodGet, "/api/v1/secrets", ""},
 		{"write a secret", http.MethodPost, "/api/v1/secrets", `{"name":"X","value":"y"}`},
-		{"mark a node ready", http.MethodPost, "/api/v1/runs/run-web/nodes/build/mark-ready", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := f.do(t, raw, tc.method, tc.path, tc.body); got != http.StatusForbidden {

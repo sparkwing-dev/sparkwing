@@ -29,10 +29,10 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready / revoke-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -52,9 +52,9 @@ opens with exactly those two reads: `GET /api/v1/runs/{id}` and
 run in place of the scope, so the claim the runner already took is what opens
 them. Add `runs.read` only to give a token the deployment-wide view.
 
-Marking a node ready stays `admin`, so a warm-pool dispatcher that hands nodes
-to a pool keeps an `admin` token. That is the one process in the runner path
-above the runner scope set.
+A warm-pool dispatcher hands nodes to a pool on that same set. It opens and
+closes each offer round while holding the run's trigger claim, so the readiness
+routes admit it without an `admin` token.
 
 A route can narrow a field below its route scope. The node dispatch reads
 (`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
@@ -121,9 +121,12 @@ The two reads a node process opens with, `GET /api/v1/runs/{id}` and
 without `runs.read` or `triggers.read` is admitted when it holds a live claim
 on that run, and refused with `403 missing_scope` otherwise.
 
-`mark-ready` and `revoke-ready` both require `admin`. Readiness is a dispatcher
-decision on both sides, and `revoke-ready` writes only an *unclaimed* node, so
-holding a claim can never stand in for the scope.
+`mark-ready`, `revoke-ready`, and `finalize-ready` take `runs.state` plus the
+live claim on the run's trigger, the same gate `auto-retry/reset` carries. A
+node claim never satisfies them: readiness is a dispatcher decision, and the
+dispatcher is whoever claimed the trigger. A caller that does not hold that
+claim gets `403 claim_required`, and a run with no trigger row answers `404`.
+`admin` bypasses.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
 read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and

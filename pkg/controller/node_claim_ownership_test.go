@@ -135,9 +135,9 @@ func TestNodeClaimOwnership_StrangerTokenCannotWriteAnotherRunnersNode(t *testin
 	}
 }
 
-func TestNodeClaimOwnership_ReadinessRoutesAreAdminOnly(t *testing.T) {
+func TestNodeClaimOwnership_ReadinessRoutesRefuseANodeClaim(t *testing.T) {
 	f := newOwnershipFixture(t)
-	for _, route := range []string{"mark-ready", "revoke-ready"} {
+	for _, route := range []string{"mark-ready", "revoke-ready", "finalize-ready"} {
 		for _, token := range []struct{ name, raw string }{
 			{"claiming runner", f.owner},
 			{"stranger", f.stranger},
