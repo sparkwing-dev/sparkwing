@@ -127,7 +127,7 @@ func assertEgressSchema(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestSchemaV40FreshSQLiteEgressShape(t *testing.T) {
+func TestSchemaV41FreshSQLiteEgressShape(t *testing.T) {
 	st, err := storetest.NewSQLite(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -140,13 +140,13 @@ func TestSchemaV40FreshSQLiteEgressShape(t *testing.T) {
 }
 
 // safety: dropping the table is what makes reopening the database run the
-// migration against the shape a v39 binary left behind.
-func downgradeEgressToV39(t *testing.T, db *sql.DB) {
+// migration against the shape a v40 binary left behind.
+func downgradeEgressToV40(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	for _, q := range []string{
 		`DROP TABLE egress_usage`,
-		`DELETE FROM sparkwing_schema_version WHERE version >= 40`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 41`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -154,20 +154,20 @@ func downgradeEgressToV39(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestSchemaV40UpgradesRealV39SQLiteShape(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v39.db")
+func TestSchemaV41UpgradesRealV40SQLiteShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v40.db")
 	st, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeEgressToV39(t, st.DB())
+	downgradeEgressToV40(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	up, err := store.Open(path)
 	if err != nil {
-		t.Fatalf("upgrade v39 to v40: %v", err)
+		t.Fatalf("upgrade v40 to v41: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	assertEgressSchema(t, up.DB())
@@ -176,21 +176,21 @@ func TestSchemaV40UpgradesRealV39SQLiteShape(t *testing.T) {
 	}
 }
 
-func TestSchemaV40UpgradesRealV39PostgresShape(t *testing.T) {
+func TestSchemaV41UpgradesRealV40PostgresShape(t *testing.T) {
 	dsn := pgTestSchemaDSN(t)
 	ctx := context.Background()
 	st, err := store.OpenPostgres(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeEgressToV39(t, st.DB())
+	downgradeEgressToV40(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	up, err := store.OpenPostgres(ctx, dsn)
 	if err != nil {
-		t.Fatalf("upgrade v39 to v40 on Postgres: %v", err)
+		t.Fatalf("upgrade v40 to v41 on Postgres: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	assertEgressSchema(t, up.DB())

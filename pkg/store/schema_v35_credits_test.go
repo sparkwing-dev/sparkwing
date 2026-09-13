@@ -46,6 +46,8 @@ func downgradeCreditsToV34(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
 	statements := []string{
 		`DROP INDEX IF EXISTS idx_nodes_credit_window`,
+		`DROP INDEX IF EXISTS idx_nodes_credit_active`,
+		`DROP INDEX IF EXISTS idx_nodes_credit_principal`,
 		`DROP TABLE credit_charges`,
 		`DROP TABLE credit_grants`,
 		`ALTER TABLE tokens DROP COLUMN metered`,

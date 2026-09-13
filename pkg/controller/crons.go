@@ -54,7 +54,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	key := CronIdempotencyKey(s.ID, due)
 	runID := newRunID()
-	err = l.server.admitTrigger(ctx, triggerIntake{
+	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), triggerIntake{
 		RunID:    runID,
 		Pipeline: s.Pipeline,
 		Args:     s.Effective().Args,
@@ -122,6 +122,12 @@ func CronIdempotencyKey(scheduleID string, due time.Time) string {
 }
 
 func (s *Server) cronService() *crons.Service {
+	return s.cronServiceArmedBy("")
+}
+
+// safety: the principal that armed a schedule owns the runs it fires, so the
+// per-principal guards measure it rather than leaving cron launches unowned.
+func (s *Server) cronServiceArmedBy(principal string) *crons.Service {
 	return &crons.Service{
 		Store:    s.store,
 		Launcher: cronLauncher{server: s},
@@ -129,6 +135,7 @@ func (s *Server) cronService() *crons.Service {
 		Host:     s.cronHolder,
 		Version:  buildinfo.Read("sparkwing-controller", "").Version,
 		Side:     store.CronWhereController,
+		ArmedBy:  principal,
 	}
 }
 
@@ -312,7 +319,16 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	report, err := s.cronService().ArmPushed(r.Context(), crons.ArmPush{
+	for _, entry := range entries {
+		if refusal := s.cronIntervalRefusal(r, entry.Trigger.Cron); refusal != nil {
+			if s.writeComputeLimitRefusal(w, r, "", "", refusal) {
+				return
+			}
+			writeError(w, http.StatusInternalServerError, refusal)
+			return
+		}
+	}
+	report, err := s.cronServiceArmedBy(claimIdentity(r).Principal).ArmPushed(r.Context(), crons.ArmPush{
 		RepoURL: repoURL,
 		Branch:  body.Branch,
 		SHA:     sha,
@@ -452,6 +468,9 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
 	}
 	runID, err := svc.RunNow(r.Context(), sched.ID)
 	if err != nil {
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("launch cron schedule: %w", err))
 		return
 	}
@@ -512,6 +531,13 @@ func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
 	if fields.Empty() {
 		writeError(w, http.StatusBadRequest,
 			errors.New("name at least one of cron, tz, overlap, catch_up or args"))
+		return
+	}
+	if refusal := s.cronIntervalRefusal(r, body.Cron); refusal != nil {
+		if s.writeComputeLimitRefusal(w, r, "", "", refusal) {
+			return
+		}
+		writeError(w, http.StatusInternalServerError, refusal)
 		return
 	}
 	svc := s.cronService()

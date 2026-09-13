@@ -92,6 +92,47 @@ type ClaimPlacement struct {
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
+const ComputeLimitConcurrentRunners = "max_concurrent_runners"
+const ComputeLimitCronSeconds = "min_cron_interval_seconds"
+type ComputeLimitError struct {
+	Limit string
+
+	Cap int64
+
+	Observed int64
+
+	Scope string
+
+	Principal string
+}
+func (e *ComputeLimitError) Error() string
+func (e *ComputeLimitError) Unwrap() error
+const ComputeLimitGlobalNodesPerRun = "max_global_nodes_per_run"
+const ComputeLimitGlobalRunners = "max_global_runners"
+const ComputeLimitGlobalRunsPerHour = "max_global_runs_per_hour"
+func ComputeLimitNames() []string
+const ComputeLimitNodesPerRun = "max_nodes_per_run"
+const ComputeLimitRunSeconds = "max_run_seconds"
+const ComputeLimitRunnerAlarm = "runner_alarm"
+const ComputeLimitRunsPerHour = "max_runs_per_hour"
+type ComputeLimits struct {
+	ConcurrentRunners int64
+	GlobalRunners     int64
+	RunnerAlarm       int64
+	RunSeconds        int64
+	NodesPerRun       int64
+	RunsPerHour       int64
+	GlobalNodesPerRun int64
+	GlobalRunsPerHour int64
+	CronSeconds       int64
+}
+func (l ComputeLimits) Any() bool
+func (l ComputeLimits) Value(name string) (int64, bool)
+type ComputeUsage struct {
+	Runners      int64
+	ByPrincipal  map[string]int64
+	AlarmReached bool
+}
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
@@ -281,10 +322,11 @@ type CronSchedule struct {
 	LockedBinary string
 	LockedDigest string
 
-	Override  *CronOverride
-	Paused    bool
-	Declared  bool
-	ArmedAt   time.Time
+	Override *CronOverride
+	Paused   bool
+	Declared bool
+	ArmedAt  time.Time
+
 	ArmedBy   string
 	UpdatedAt time.Time
 
@@ -349,6 +391,7 @@ type EgressUsage struct {
 }
 const EgressUsageRetentionMonths = 13
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
+var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
@@ -378,6 +421,7 @@ type Event struct {
 	TS      time.Time
 	Payload json.RawMessage
 }
+const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
 type ExecutionAttempt struct {
@@ -511,6 +555,7 @@ type ExecutorSchedulingSummary struct {
 }
 func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
+const FailureComputeLimit = "compute_limit"
 const FailureCreditsExhausted = "credits_exhausted"
 const FailureLogsAuth = "logs_auth"
 const FailureLogsDropped = "logs_dropped"
@@ -1016,9 +1061,12 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
+func (s *Store) CancelNodeForComputeLimit(
+	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
+) error
 func (s *Store) CancelNodeForExhaustedCredits(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
-) (err error)
+) error
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
@@ -1031,6 +1079,9 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
 func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
+func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
+func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
+func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (s *Store) CoordinatorID(ctx context.Context) (string, error)
@@ -1054,6 +1105,7 @@ func (s *Store) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
 ) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
+func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
@@ -1161,6 +1213,9 @@ func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID st
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
 func (s *Store) OldestWaitingReadyNode(ctx context.Context) (runID, nodeID string, err error)
+func (s *Store) OldestWaitingReadyNodeForPrincipal(
+	ctx context.Context, principal string,
+) (runID, nodeID string, err error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
@@ -1211,7 +1266,9 @@ func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPre
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
+func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error
@@ -1350,6 +1407,7 @@ type User struct {
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }
+func ValidComputeLimit(name string) bool
 func ValidCreditGrantKind(kind string) bool
 func ValidStoragePrincipal(name string) bool
 func ValidateRawToken(raw, kind string) error
@@ -1379,6 +1437,7 @@ type WaiterResolution struct {
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
+func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context

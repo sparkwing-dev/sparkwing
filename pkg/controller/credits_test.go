@@ -85,6 +85,36 @@ func creditsRequest(t *testing.T, method, url, token string, body any) (int, []b
 	return resp.StatusCode, out
 }
 
+func creditsRequestWithHeader(
+	t *testing.T, method, url, token string, body any,
+) (int, []byte, http.Header) {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		reader = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequest(method, url, reader)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp.StatusCode, out, resp.Header
+}
+
 func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
 	t.Helper()
 	if _, err := st.DB().Exec(

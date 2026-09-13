@@ -3846,6 +3846,47 @@ paths:
                   enabled: {type: boolean}
                   egress: {type: object}
 
+  /api/v1/compute-limits:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: Read every compute guard and the cloud runners in use.
+      description: |
+        Compute guards bound what the controller starts before the credit
+        ledger bills it. Every guard is zero by default, which is unlimited.
+        The runner guards count cloud runners, which are the claims a metered
+        token holds; the node and hourly guards count one metered principal's
+        runs, and their `max_global_*` counterparts count every run on the
+        controller. `usage` reports the cloud runners claimed right now, in
+        total and per principal, and whether the count reached `runner_alarm`.
+      responses:
+        "200":
+          description: Guards and current usage.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ComputeLimits"}
+    put:
+      x-sparkwing-scope: admin
+      tags: [credits]
+      summary: Set one or more compute guards.
+      description: |
+        Sets each named guard to its value and answers the full set as `GET`
+        does. A value of zero removes that ceiling; a negative value or an
+        unknown guard name is refused with `400`. Work a guard refuses answers
+        `429` with `"code": "compute_limit"` and a `Retry-After`, and the run
+        records a `compute_limit_blocked` event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetComputeLimits"}
+      responses:
+        "200":
+          description: Guards and current usage after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ComputeLimits"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4406,6 +4447,27 @@ components:
         alarm: {type: boolean, description: Whether the last size sample passed the alarm size.}
         quotas: {type: array, description: Every team with a quota row; admin only., items: {$ref: "#/components/schemas/StorageQuota"}}
         largest_teams: {type: array, description: The month's heaviest teams; admin only., items: {$ref: "#/components/schemas/StorageTeamUsage"}}
+    ComputeLimits:
+      x-sparkwing-go-type: pkg/controller.computeLimitsJSON
+      type: object
+      description: Every compute guard, with the cloud runners they are measuring.
+      properties:
+        limits: {type: object, additionalProperties: {type: integer, format: int64}, description: Guard name to ceiling; zero is unlimited.}
+        usage: {$ref: "#/components/schemas/ComputeUsage"}
+    ComputeUsage:
+      x-sparkwing-go-type: pkg/controller.computeUsageJSON
+      type: object
+      description: The cloud runners claimed right now.
+      properties:
+        runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller.}
+        by_principal: {type: object, additionalProperties: {type: integer, format: int64}, description: The same count per principal.}
+        alarm_reached: {type: boolean, description: Whether the count reached runner_alarm.}
+    SetComputeLimits:
+      x-sparkwing-go-type: pkg/controller.setComputeLimitsReq
+      type: object
+      description: The guards to set, by name.
+      properties:
+        limits: {type: object, additionalProperties: {type: integer, format: int64}, description: Guard name to ceiling; zero removes it.}
     CreditState:
       x-sparkwing-go-type: pkg/controller.creditStateJSON
       type: object

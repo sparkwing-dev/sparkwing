@@ -628,8 +628,19 @@ func reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
+	// safety: an empty balance is the refusal a runner already understands, so
+	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+	}
+	limits, err := computeLimitsTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if limits.Any() {
+		if err := enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+			return err
+		}
 	}
 	id, err := newCreditID("charge")
 	if err != nil {
@@ -965,6 +976,24 @@ func (s *Store) eventKindPresent(ctx context.Context, runID, nodeID, kind string
 // node did.
 func (s *Store) CancelNodeForExhaustedCredits(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
+) error {
+	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
+		FailureCreditsExhausted, "credit balance exhausted", now)
+}
+
+// CancelNodeForComputeLimit fails a running node a compute guard stopped,
+// releases its claim, and records the reason on the run. It settles the
+// node's credits first, so a metered node is billed to the instant it
+// stopped.
+func (s *Store) CancelNodeForComputeLimit(
+	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
+) error {
+	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
+		FailureComputeLimit, "compute limit "+limit+" reached", now)
+}
+
+func (s *Store) cancelMeteredNode(
+	ctx context.Context, runID, nodeID, tokenPrefix, reason, message string, now time.Time,
 ) (err error) {
 	if _, err := s.FinalizeNodeCredits(ctx, runID, nodeID, tokenPrefix, now); err != nil {
 		return err
@@ -978,14 +1007,14 @@ func (s *Store) CancelNodeForExhaustedCredits(
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
-   SET `+nodeFailSet+`, error = 'credit balance exhausted', failure_reason = ?, finished_at = ?,
+   SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        ready_at = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-		FailureCreditsExhausted, now.UnixNano(), runID, nodeID); err != nil {
+		message, reason, now.UnixNano(), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -996,7 +1025,7 @@ func (s *Store) CancelNodeForExhaustedCredits(
    SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
        failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
  WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		now.UnixNano(), FailureCreditsExhausted, runID, nodeID); err != nil {
+		now.UnixNano(), reason, runID, nodeID); err != nil {
 		return err
 	}
 	return tx.Commit()

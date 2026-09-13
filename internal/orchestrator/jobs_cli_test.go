@@ -827,3 +827,47 @@ func TestJobErrors_JSON(t *testing.T) {
 		t.Fatalf("unexpected failed node: %v", failed[0])
 	}
 }
+
+func TestJobStatus_ReportsTheComputeGuardThatRefusedWork(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-guarded", Pipeline: "push-checks", Status: "running", StartedAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-guarded", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, "run-guarded", "build", store.EventKindComputeLimitBlocked,
+		[]byte(`{"limit":"max_concurrent_runners","cap":4,"observed":4,"scope":"principal agent:cloud"}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var status bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-guarded", orchestrator.StatusOpts{}, &status); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	if !strings.Contains(status.String(), "guard:     max_concurrent_runners reached (4 of 4) on principal agent:cloud") {
+		t.Fatalf("status should name the guard that refused work, got:\n%s", status.String())
+	}
+
+	var payload map[string]any
+	var asJSON bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-guarded", orchestrator.StatusOpts{JSON: true}, &asJSON); err != nil {
+		t.Fatalf("JobStatus json: %v", err)
+	}
+	if err := json.Unmarshal(asJSON.Bytes(), &payload); err != nil {
+		t.Fatalf("json parse: %v\n%s", err, asJSON.String())
+	}
+	guard, ok := payload["compute_guard"].(map[string]any)
+	if !ok || guard["limit"] != "max_concurrent_runners" {
+		t.Fatalf("json should carry the guard, got %v", payload["compute_guard"])
+	}
+}

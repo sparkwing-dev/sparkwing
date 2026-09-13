@@ -130,3 +130,65 @@ func TestJobLogsRemoteWithTokens_EventsOnlyEmitsStoreEvents(t *testing.T) {
 		t.Fatalf("first record kind = %q, want admission_wait", first.Kind)
 	}
 }
+
+func TestLatestComputeGuardRefusal_StopsWhenAPageDoesNotAdvance(t *testing.T) {
+	const page = 500
+	events := make([]store.Event, page)
+	for i := range events {
+		events[i] = store.Event{RunID: "run-stuck", Seq: int64(i + 1), Kind: "cache_hit"}
+	}
+	events[page-1] = store.Event{
+		RunID: "run-stuck", Seq: page, Kind: store.EventKindComputeLimitBlocked,
+		Payload: []byte(`{"limit":"max_global_runners","cap":4,"observed":4}`),
+	}
+	b := &stuckEventsBackend{page: events}
+
+	type result struct {
+		refusal computeGuardRefusal
+		ok      bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		refusal, ok := latestComputeGuardRefusal(context.Background(), b, "run-stuck")
+		done <- result{refusal, ok}
+	}()
+	select {
+	case got := <-done:
+		if !got.ok || got.refusal.Limit != "max_global_runners" {
+			t.Fatalf("refusal = %+v (found %v), want the guard from the last page", got.refusal, got.ok)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("latestComputeGuardRefusal did not return; a backend ignoring after loops forever (%d calls so far)", b.calls.Load())
+	}
+	if got := b.calls.Load(); got != 2 {
+		t.Fatalf("asked the backend %d times, want 2 (one page, one that did not advance)", got)
+	}
+}
+
+func TestLatestComputeGuardRefusal_ReadsPastOnePage(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "guard-events.db"))
+	if err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	const runID = "run-guard-paging"
+	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	for range 600 {
+		if _, err := st.AppendEvent(ctx, runID, "n1", "cache_hit", nil); err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+	if _, err := st.AppendEvent(ctx, runID, "n1", store.EventKindComputeLimitBlocked,
+		[]byte(`{"limit":"max_concurrent_runners","cap":2,"observed":2,"scope":"principal agent:cloud"}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	refusal, ok := latestComputeGuardRefusal(ctx, st, runID)
+	if !ok || refusal.Limit != "max_concurrent_runners" || refusal.Cap != 2 {
+		t.Fatalf("refusal = %+v (found %v), want the guard recorded after the first page", refusal, ok)
+	}
+}

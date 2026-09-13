@@ -131,9 +131,15 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.store.CreateRun(r.Context(), body); err != nil {
+	// safety: the per-principal guards measure the authenticated caller, so the
+	// principal comes from the token rather than anything the body asserts.
+	runCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
+	if err := s.store.CreateRun(runCtx, body); err != nil {
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
@@ -492,6 +498,9 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.CreateNode(r.Context(), body); err != nil {
+		if s.writeComputeLimitRefusal(w, r, runID, body.NodeID, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -813,6 +822,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// safety: a trigger creates the run it names, so the hourly guard measures
+	// the principal that triggered it exactly as a direct create does.
+	triggerCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
 	intake := triggerIntake{
 		RunID:         runID,
 		Pipeline:      body.Pipeline,
@@ -841,8 +853,11 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.admitTrigger(r.Context(), intake); err != nil {
+	if err := s.admitTrigger(triggerCtx, intake); err != nil {
 		release()
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -894,7 +909,9 @@ type triggerIntake struct {
 // here -- the trigger, the pending run, the dispatch -- so an HTTP submission
 // and a schedule the controller fired land identically.
 func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
-	if err := s.store.CreateTrigger(ctx, store.Trigger{
+	// safety: the trigger and the run it names are written together, so a guard
+	// that refuses the run leaves no trigger behind for a worker to claim.
+	if err := s.store.CreateTriggerWithRun(ctx, store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
 		Args:           in.Args,
@@ -913,14 +930,7 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		RetryOf:        in.RetryOf,
 		RepoInherited:  in.RepoInherited,
 		IdempotencyKey: in.IdempotencyKey,
-	}); err != nil {
-		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-			return err
-		}
-		return fmt.Errorf("persist trigger: %w", err)
-	}
-
-	if err := s.store.CreateRun(ctx, store.Run{
+	}, store.Run{
 		ID:            in.RunID,
 		Pipeline:      in.Pipeline,
 		Status:        "pending",
@@ -937,7 +947,10 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
 	}); err != nil {
-		return fmt.Errorf("persist run: %w", err)
+		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
+			return err
+		}
+		return fmt.Errorf("persist the trigger and its run: %w", err)
 	}
 
 	s.recordQueueActivity(in.At)
@@ -1519,6 +1532,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			if s.writeCreditsRefusal(w, r, err) {
 				return
 			}
+			if s.writeComputeLimitRefusal(w, r, body.RunID, body.NodeID, err) {
+				return
+			}
 			if writeExecutionAdmissionError(w, err) {
 				return
 			}
@@ -1574,10 +1590,14 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		if s.writeCreditsRefusal(w, r, err) {
 			return
 		}
+		if s.writeClaimComputeLimitRefusal(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.runnerPresence.awarded(claimer)
+	s.noteRunnerAlarm(r)
 	writeClaimedNode(w, r, s, n)
 }
 
@@ -1869,7 +1889,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	// safety: the runner abandons a node whose claim the controller refuses,
 	// which is how a cancellation for an empty balance reaches it.
-	if s.chargeMeteredHeartbeat(r, runID, nodeID) {
+	if s.chargeMeteredHeartbeat(r, runID, nodeID) || s.stopForWallClockLimit(r, runID, nodeID) {
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}

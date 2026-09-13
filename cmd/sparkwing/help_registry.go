@@ -184,7 +184,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "limits", "image", "webhooks", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -2228,6 +2228,62 @@ per line.`,
 	Examples: []Example{
 		{"Read the ledger", "sparkwing cluster credits history --profile prod"},
 		{"Sum today's charges", "sparkwing cluster credits history --profile prod -o json | jq 'select(.type==\"charge\") | .amount_micro'"},
+	},
+}
+
+var cmdLimits = Command{
+	Path:     "sparkwing cluster limits",
+	Synopsis: "Read and set the compute guards",
+	Description: `Compute guards bound what the controller starts before the credit
+ledger bills it: the cloud runners one principal holds at once, the cloud
+runners the whole controller holds, the wall-clock seconds a run may hold them
+for, the nodes one run may carry, the runs created per hour, and the shortest
+interval a cloud schedule may declare. Every guard is zero by default, which is
+unlimited, so a controller that sets none behaves as it did before the guards
+existed.`,
+	SubcommandOrder: []string{"show", "set"},
+	Examples: []Example{
+		{"Read the guards and what they measure", "sparkwing cluster limits show --profile prod"},
+		{"Cap the cloud runners one principal holds", "sparkwing cluster limits set --name max_concurrent_runners --value 20 --profile prod"},
+	},
+}
+
+var cmdLimitsShow = Command{
+	Path:     "sparkwing cluster limits show",
+	Synopsis: "Print every compute guard and the cloud runners in use",
+	Description: `Prints each guard with its ceiling, or "unlimited" when nothing set
+one, then the cloud runners claimed now in total and per principal. A
+cloud runner is a claim a metered token holds, so a controller that
+marks no token metered reads zero.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the guards", "sparkwing cluster limits show --profile prod"},
+		{"Read the guards as JSON", "sparkwing cluster limits show --profile prod -o json"},
+	},
+}
+
+var cmdLimitsSet = Command{
+	Path:     "sparkwing cluster limits set",
+	Synopsis: "Set one compute guard",
+	Description: `Sets one guard to a ceiling, or to zero to remove it. The guards are
+max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
+max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
+max_global_runs_per_hour and min_cron_interval_seconds. The per-principal
+guards bind a principal holding a metered token; the max_global_ pair binds
+every run. Work past a guard answers 429 with a Retry-After and the run records
+a compute_limit_blocked event. Requires the admin scope.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "GUARD", Desc: "Guard to set", Required: true, Group: "Input"},
+		{Name: "value", Argument: "N", Desc: "Ceiling; 0 removes it", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Hold the fleet under fifty cloud runners", "sparkwing cluster limits set --name max_global_runners --value 50 --profile prod"},
+		{"Warn at forty", "sparkwing cluster limits set --name runner_alarm --value 40 --profile prod"},
+		{"Remove the per-run node cap", "sparkwing cluster limits set --name max_nodes_per_run --value 0 --profile prod"},
 	},
 }
 

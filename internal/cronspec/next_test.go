@@ -3,6 +3,8 @@ package cronspec_test
 import (
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 )
 
 func TestNext(t *testing.T) {
@@ -192,5 +194,29 @@ func TestUpcoming(t *testing.T) {
 	}
 	if got := mustParse(t, "0 0 30 2 *").Upcoming(after, time.UTC, 3); len(got) != 0 {
 		t.Fatalf("Upcoming() on an impossible schedule = %v, want none", got)
+	}
+}
+
+func TestShortestInterval(t *testing.T) {
+	after := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		expr string
+		want time.Duration
+		ok   bool
+	}{
+		{"*/5 * * * *", 5 * time.Minute, true},
+		{"0,5,10,15,20,25,30,35,40,45,50,55 * * * *", 5 * time.Minute, true},
+		{"0,1 * * * *", time.Minute, true},
+		{"0 3 * * *", 24 * time.Hour, true},
+		{"0 0 1 1 *", 365 * 24 * time.Hour, true},
+	} {
+		got, ok := mustParse(t, tc.expr).ShortestInterval(after, time.UTC, 10)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("ShortestInterval(%q) = (%s, %v), want (%s, %v)", tc.expr, got, ok, tc.want, tc.ok)
+		}
+	}
+	var nilSchedule *cronspec.Schedule
+	if _, ok := nilSchedule.ShortestInterval(after, time.UTC, 10); ok {
+		t.Error("a nil schedule reported an interval")
 	}
 }
