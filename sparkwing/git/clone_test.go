@@ -166,6 +166,47 @@ func TestCloneFallsBackWhenTheCacheDoesNotServeTheName(t *testing.T) {
 	}
 }
 
+func TestCloneFallsBackWhenTheCacheAnswersAServerError(t *testing.T) {
+	root := t.TempDir()
+	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "backend down", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("SPARKWING_GITCACHE", srv.URL)
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+
+	dest := filepath.Join(root, "dest")
+	if err := Clone(context.Background(), upstream, dest); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
+		t.Fatalf("clone did not fall back to upstream: %v", err)
+	}
+}
+
+func TestCloneFallsBackWhenTheCacheIsUnreachable(t *testing.T) {
+	root := t.TempDir()
+	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := dead.URL
+	dead.Close()
+
+	t.Setenv("SPARKWING_GITCACHE", url)
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+
+	dest := filepath.Join(root, "dest")
+	if err := Clone(context.Background(), upstream, dest); err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
+		t.Fatalf("clone did not fall back to upstream: %v", err)
+	}
+}
+
 func TestCloneLeavesAPreexistingDestinationAlone(t *testing.T) {
 	root := t.TempDir()
 	upstream := newTestRepo(t, filepath.Join(root, "upstream"), "upstream.txt")

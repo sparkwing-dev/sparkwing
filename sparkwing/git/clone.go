@@ -112,7 +112,8 @@ func gitcacheToken(named bool) string {
 
 func gitcacheEnv(cacheBase, token string) []string {
 	base := strings.TrimRight(cacheBase, "/") + "/"
-	// safety: LC_ALL=C keeps the cache clone's failure text in one language, which is what the fallback notice prints.
+	// safety: LC_ALL=C keeps the cache clone's failure text in one language,
+	// so the fallback notice reads the same everywhere.
 	env := append(promptlessEnv(), "LC_ALL=C")
 	count, countIndex := 0, -1
 	for i, value := range env {

@@ -20,6 +20,16 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **sdk:** `sparkwing/git.Clone` falls back to upstream on any gitcache
+  failure, which is what its doc comment promises. It fell back only for a 401,
+  a 3xx, or a credential prompt, and a cache answers a name it does not serve
+  with a 404 that git reports as "repository not found", so a clone of such a
+  name failed outright on any machine where a cache answered. `Clone` derives
+  the cache name from the URL's basename, so a name nothing registered costs a
+  failed request and a line on stderr rather than the clone.
+
 ## [v0.50.0] - 2026-09-12
 
 ### Added
@@ -149,18 +159,6 @@ unlock.
   Slowest pipelines, failure clustering, and agent utilization rendered
   placeholder text for views the dashboard does not build. The trend charts
   stay.
-
-### Fixed
-
-- **sdk:** `sparkwing/git.Clone` falls back to upstream on any gitcache
-  failure, which is what its documentation has always promised. It fell back
-  only for a 401, a 3xx, or a credential prompt, and the cache's own answer for
-  a repository it does not serve is a 404 that git reports as
-  "repository not found" -- so on a machine where a gitcache answered, every
-  `Clone` failed outright rather than cloning from upstream. `Clone` still asks
-  the cache for a name nothing registers, so the cache serves none of its
-  clones yet; it now costs a failed request and a stderr notice instead of the
-  clone.
 
 ### Security
 
