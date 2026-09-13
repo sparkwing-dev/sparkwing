@@ -132,11 +132,8 @@ func ParseBudget(s string) (Budget, error) {
 	return b, nil
 }
 
-// positiveFinite reports whether a parsed cap is a number the daemon can hold a
-// run to. A caller must ask it rather than write the bound as a refusal, because
-// every comparison against a NaN is false: a NaN cap passes each one, then reads
-// as no cap at all, so a budget the operator typed grants the whole machine with
-// enforcement off.
+// safety: a bound written as a refusal admits a NaN, because every comparison against
+// one is false. The cap then reads as absent and the machine is granted whole.
 func positiveFinite(n float64) bool {
 	return n > 0 && !math.IsInf(n, 0)
 }
@@ -199,11 +196,10 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		if perr != nil {
 			return 0, false, fmt.Errorf("budget: %q is not a memory size", tok)
 		}
-		// safety: the product is what must hold, not the operand. A size the byte
-		// count cannot represent converts by a rule the target architecture picks,
-		// so one string the operator typed reads as no cap on one machine and as a
-		// negative reserve on another, and a size that rounds to zero reads as no
-		// cap everywhere.
+		// safety: the product must hold, not the operand. A size the byte count cannot
+		// represent converts by a rule the architecture picks, so one string reads as no
+		// cap on one machine and a negative reserve on another; one under a byte rounds
+		// to no cap everywhere.
 		size := n * u.scale
 		if !positiveFinite(size) || size >= math.MaxInt64 || uint64(size) == 0 {
 			return 0, false, fmt.Errorf("budget: memory %q must be positive and hold in a byte count", tok)

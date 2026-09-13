@@ -633,9 +633,8 @@ func TestOwnedCPU_ARecycledPIDDoesNotInheritTheDeadProcessBaseline(t *testing.T)
 func TestProcessStartFromCreation_RefusesACreationStampTooOldToKeepAMonotonicReading(t *testing.T) {
 	now := time.Now()
 	for name, createdAt := range map[string]time.Time{
-		// a creation stamp a garbage FILETIME reaches: the conversion clamps to
-		// 1677 at the low end, so every one of these is a value the caller can
-		// hand over, not a value only a test can build.
+		// safety: a garbage FILETIME reaches these, because the conversion clamps to
+		// 1677 at the low end, so each is a value the caller can hand over.
 		"past the range a duration holds":      time.Date(1700, 1, 1, 0, 0, 0, 0, time.UTC),
 		"inside the range a duration holds":    time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC),
 		"an age no source could have measured": {},
