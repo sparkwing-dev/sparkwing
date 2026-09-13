@@ -137,7 +137,9 @@ polled inside `--placement-liveness` (default 30s), and its last poll advertised
 a slot it has not since spent. The hold runs `--placement-hold` (default 20s)
 from the node's hold-from time, which is when it became claimable; after that,
 the next eligible runner takes it. A node with no `Prefers` falls back to
-`--default-prefer-labels` (comma-separated terms, empty by default), and a node
+`--default-prefer-labels` (comma-separated terms, empty by default; the
+environment variable `SPARKWING_DEFAULT_PREFER_LABELS` supplies the same
+value), and a node
 with neither is claimed first-in-first-out as before.
 
 The rule reorders the queue and never widens it: `Requires` stays a hard filter,
