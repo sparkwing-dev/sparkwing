@@ -91,6 +91,22 @@ controller:
   # inside resources.limits.memory below.
   argon2MemoryBudgetMB: 256
 
+  # Label terms a node whose plan declares no Prefers of its own prefers its
+  # runner to advertise, in the Prefers term syntax. Empty leaves such a node
+  # to the first claimant.
+  defaultPreferLabels: []
+
+  # How long a node is held back from a claim-mode runner that does not
+  # advertise its preference, measured from the node's ready time, while a
+  # runner that does advertise it is live and has a slot. Empty keeps the
+  # controller default of 20s; "0s" claims first-in-first-out regardless of
+  # preference.
+  placementHold: ""
+
+  # How recently a claim-mode runner must have polled for a claim to count as
+  # live for the hold above. Empty keeps the controller default of 30s.
+  placementLiveness: ""
+
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""

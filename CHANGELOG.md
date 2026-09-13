@@ -30,7 +30,8 @@ unlock.
   takes it. `--default-prefer-labels` supplies a preference for nodes whose plan
   declares none; empty, its default, leaves those nodes first-in-first-out.
   `Requires` is unchanged: preferences reorder the claim queue and never widen
-  it. Each claim stamps `placement_reason` (`preference`, `fallback`, `none`) on
+  it. The chart exposes all three as `controller.defaultPreferLabels`,
+  `controller.placementHold`, and `controller.placementLiveness`. Each claim stamps `placement_reason` (`preference`, `fallback`, `none`) on
   the node and writes a `node_placed` event, and `sparkwing runs status` and the
   dashboard's node panel name the runner and the reason under a node the
   preference decided.

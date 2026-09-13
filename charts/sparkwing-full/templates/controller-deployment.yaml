@@ -92,6 +92,15 @@ spec:
             {{- with .Values.controller.argon2MemoryBudgetMB }}
             - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
             {{- end }}
+            {{- with .Values.controller.defaultPreferLabels }}
+            - {{ printf "--default-prefer-labels=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.placementHold }}
+            - {{ printf "--placement-hold=%s" . | quote }}
+            {{- end }}
+            {{- with .Values.controller.placementLiveness }}
+            - {{ printf "--placement-liveness=%s" . | quote }}
+            {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
             {{- end }}
