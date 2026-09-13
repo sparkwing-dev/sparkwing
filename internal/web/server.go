@@ -920,9 +920,10 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 		}
 		// perf: fan out per-node reads; each ReadNodeLog is a separate HTTP hop in cluster mode.
 		type nodeResult struct {
-			matches []match
-			count   int
-			order   int
+			matches   []match
+			count     int
+			order     int
+			truncated bool
 		}
 		const fanout = 8
 		sem := make(chan struct{}, fanout)
@@ -961,14 +962,17 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 						})
 					}
 				}
+				local.truncated = errors.Is(sc.Err(), bufio.ErrTooLong)
 				results[i] = local
 			}(i, n.NodeID)
 		}
 		wg.Wait()
 		matches := make([]match, 0, 64)
 		total := 0
+		truncated := false
 		for _, res := range results {
 			total += res.count
+			truncated = truncated || res.truncated
 			for _, m := range res.matches {
 				if len(matches) >= limit {
 					break
@@ -977,9 +981,10 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"query":   q,
-			"results": matches,
-			"total":   total,
+			"query":     q,
+			"results":   matches,
+			"total":     total,
+			"truncated": truncated,
 		})
 	}
 }
@@ -1058,8 +1063,9 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		const fanout = 8
 		sem := make(chan struct{}, fanout)
 		type unitResult struct {
-			matches []match
-			count   int
+			matches   []match
+			count     int
+			truncated bool
 		}
 		results := make([]unitResult, len(units))
 		var wg sync.WaitGroup
@@ -1098,15 +1104,18 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 						})
 					}
 				}
+				local.truncated = errors.Is(sc.Err(), bufio.ErrTooLong)
 				results[i] = local
 			}(i, u)
 		}
 		wg.Wait()
 		var matches []match
 		total := 0
+		truncated := false
 		hitRuns := map[string]bool{}
 		for _, res := range results {
 			total += res.count
+			truncated = truncated || res.truncated
 			for _, m := range res.matches {
 				hitRuns[m.RunID] = true
 			}
@@ -1128,6 +1137,7 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 			"runs":         runsMeta,
 			"total":        total,
 			"runs_scanned": len(runs),
+			"truncated":    truncated,
 		})
 	}
 }

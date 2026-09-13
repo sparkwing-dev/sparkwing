@@ -351,6 +351,15 @@ const (
 	// ExternalMeasured marks an External figure that came from a live host
 	// reading.
 	ExternalMeasured = "measured"
+	// ExternalUnattributed marks an External figure the host sampler did
+	// read, but which carries some of this daemon's own runs' CPU because
+	// their share could not be measured and separated out. The figure is a
+	// real reading that reads high, so Available reads low by the same
+	// amount. The label is smoothed across readings rather than describing
+	// the one on screen, so it outlasts the cause that raised it and a
+	// single clean reading does not clear it.
+	// [QueueState.ExternalAttribution] says how often that happens and why.
+	ExternalUnattributed = "unattributed"
 	// ExternalUnmeasured marks a dimension the host sampler could not read.
 	// Renderers print the word, never a byte or core count, because a
 	// substituted number in a measurement's format is what made a healthy
@@ -381,14 +390,85 @@ type ResourceState struct {
 	// ExternalSource says where External came from:
 	// [ExternalMeasured] for a host reading, [ExternalUnmeasured] when the
 	// sampler could not read this dimension, in which case External carries
-	// no measurement and admission subtracted none. Empty for semaphore
-	// rows and for daemons that predate the field.
+	// no measurement and admission subtracted none, and
+	// [ExternalUnattributed] for a reading that carries some of this
+	// daemon's own runs' CPU. Empty for semaphore rows and for daemons that
+	// predate the field.
+	//
+	// Read this as an open set: a later daemon may report a value this build
+	// does not know. Every named value other than [ExternalUnmeasured] is a
+	// real host reading, so branch on [ExternalUnmeasured] and treat the
+	// other named values as measured rather than switching on the known
+	// values and falling through. Empty is the one value outside that rule:
+	// it says the daemon predates the field, so whether External was
+	// measured is unknown and treating it as measured renders a zero the
+	// daemon never stood behind.
 	ExternalSource string `json:"external_source,omitempty"`
 	// Available is what a new run can actually draw right now: capacity
 	// minus the reserve, minus external load, minus what sparkwing
 	// already holds, floored at zero. This, not Capacity-Held, is what
 	// gates host admission. Zero for semaphore rows.
 	Available float64 `json:"available,omitempty"`
+}
+
+// ExternalAttribution says how much of the daemon's own CPU it managed to
+// separate from the rest of the machine's, over the host readings it has taken
+// since starting. CPU it cannot separate out is charged to the machine, which
+// reads as External too high and Available too low.
+//
+// A daemon reports it whether or not anything went wrong, because "every
+// reading attributed" and "a build that does not track this" are different
+// answers and a reader cannot tell them apart from silence. Samples says which
+// it is: zero means the daemon has taken no readable host reading yet.
+//
+// The counts run for the daemon's lifetime and never decay, so they describe a
+// trend rather than the reading on screen. Whether the reading on screen
+// attributed is [ResourceState.ExternalSource] on the cores row, which reads
+// [ExternalUnattributed] when it did not.
+type ExternalAttribution struct {
+	// Samples is how many host CPU readings the daemon has taken, the
+	// denominator the counts below are read against. A reading is counted
+	// under at most one of them, worst cause first. Attributed carries the
+	// readings that attributed cleanly.
+	Samples int64 `json:"samples"`
+	// SamplerUnreadable is how many readings the process sampler could not
+	// turn into a usable figure: it returned nothing, or it returned more
+	// CPU than the host itself ran, which cannot be true. The whole host
+	// reading was charged to the machine. A count that tracks Samples is a
+	// fault on the box rather than a passing condition.
+	SamplerUnreadable int64 `json:"sampler_unreadable"`
+	// RunsWithoutProcess is how many readings ran while a holding run
+	// reported no process id. That run's CPU cannot be located, so it is
+	// charged to the machine. A run reaching admission without a process id
+	// is a fault rather than a passing condition.
+	RunsWithoutProcess int64 `json:"runs_without_process"`
+	// RunsProcessGone is how many readings ran while a holding run this
+	// daemon had already measured stopped yielding a figure. The run may
+	// have died without releasing its admission, its process may have become
+	// unreadable, or its process tree may have taken in work the daemon
+	// cannot date. Nothing here says which, so a renderer naming one of them
+	// states more than the count carries. Each holds capacity nothing can
+	// use and charges that run's share to the machine, so unlike
+	// RunsAwaitingMeasure this count rising wants someone to look rather
+	// than being the expected shape.
+	RunsProcessGone int64 `json:"runs_process_gone"`
+	// RunsAwaitingMeasure is how many readings ran while a holding run had
+	// no CPU figure the daemon could stand behind: it began holding after
+	// the reading was taken, or it has been held since before the daemon
+	// started watching it, so how much of its CPU belongs to this reading
+	// is unknowable. That run is charged to the machine until a reading
+	// covers it. A run that has merely just started is not counted here --
+	// it is measured from its first reading.
+	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
+	// Attributed is how many readings located every holding run's CPU and
+	// subtracted it, which is the condition the other counts are absences
+	// of. A reading taken while nothing was holding counts here too, having no
+	// run to miss, so this over Samples is the share of readings that charged
+	// nothing to the machine rather than a score for the sampler on a busy
+	// box. It is carried rather than left to be worked out by subtraction,
+	// because a later daemon may count a cause this build has no field for
+	// and a subtraction would then report those readings as clean.
+	Attributed int64 `json:"attributed"`
 }
 
 // Holder is one run currently holding admission, or a connected run carrying
@@ -587,6 +667,12 @@ type QueueState struct {
 	// quota edit), for the queue header. Nil when capacity has held steady
 	// since start, or for older daemons.
 	CapacityChange *CapacityChange `json:"capacity_change,omitempty"`
+	// ExternalAttribution says how many host readings the daemon could not
+	// separate its own runs' CPU out of, over how many it took. Read it
+	// whenever External looks too high: it tells a genuinely busy machine
+	// apart from a daemon billing itself for its own runs. Nil only for a
+	// daemon that predates the field.
+	ExternalAttribution *ExternalAttribution `json:"external_attribution,omitempty"`
 	// Runners carries each registered runner's advertised free capacity when
 	// the state comes from a controller's unified admission view. Empty for
 	// the local daemon, which arbitrates only its own host.

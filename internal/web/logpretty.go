@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,10 @@ const (
 	mediaTypeANSI   = "text/x-ansi"
 	mediaTypePlain  = "text/plain"
 )
+
+// safety: bufio.Scanner abandons the whole remaining input past its buffer,
+// not just the line that overran it, so silence would read as end of log.
+const logTruncationNotice = "sparkwing: a log line over 1 MiB stopped this log here; request format=raw for the complete log"
 
 type logFormat int
 
@@ -88,6 +93,9 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 		pr.Emit(rec)
 	}
 	pr.Flush()
+	if errors.Is(scanner.Err(), bufio.ErrTooLong) {
+		fmt.Fprintln(w, logTruncationNotice)
+	}
 }
 
 func streamPrettySSE(body io.Reader, w io.Writer, flush func() error, f logFormat) {
@@ -122,6 +130,15 @@ func streamPrettySSE(body io.Reader, w io.Writer, flush func() error, f logForma
 				return
 			}
 		}
+	}
+	if !errors.Is(scanner.Err(), bufio.ErrTooLong) {
+		return
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", logTruncationNotice); err != nil {
+		return
+	}
+	if err := flush(); err != nil {
+		return
 	}
 }
 
