@@ -38,6 +38,28 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+### Storage class
+
+When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),
+the controller provisions a PersistentVolumeClaim for its state DB. A PVC
+that omits `storageClassName` falls back to the cluster's default
+StorageClass; on clusters without one (some bare-metal kubeadm installs,
+fresh kind clusters with the local-path provisioner not installed, etc.)
+the PVC sits `Pending` indefinitely with no clear error.
+
+Set the class explicitly via the chart value:
+
+```bash
+helm install sparkwing charts/sparkwing-full \
+    --set controller.storage.pvc.storageClassName=gp3
+```
+
+Common values: `gp3` (EKS), `standard-rwo` (GKE), `managed-csi` (AKS),
+`standard` (kind/minikube with the default local-path provisioner).
+
+The controller logs a `WARNING` at startup when no PVC declares a class
+and the cluster has no default StorageClass.
+
 ## Migrating from the Docker Compose example
 
 Treat the Helm installation as a new deployment. Sparkwing provides no

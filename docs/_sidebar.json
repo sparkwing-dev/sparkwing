@@ -29,18 +29,6 @@
       "slugs": ["sparks", "sparks-core", "versioning"]
     },
     {
-      "label": "Infrastructure",
-      "slugs": [
-        "deployment",
-        "deployment-modes",
-        "self-hosting",
-        "backends",
-        "scheduling",
-        "warm-pool",
-        "gitcache"
-      ]
-    },
-    {
       "label": "Performance",
       "slugs": ["fast-builds", "build-caching", "caching"]
     },
@@ -58,9 +46,22 @@
       ]
     },
     {
+      "label": "Advanced and self-hosting",
+      "slugs": [
+        "deployment",
+        "deployment-modes",
+        "self-hosting",
+        "backends",
+        "scheduling",
+        "warm-pool",
+        "gitcache"
+      ]
+    },
+    {
       "label": "CLI reference",
       "slugs": [
         "cli-cache",
+        "cli-cloud",
         "cli-cluster",
         "cli-commands",
         "cli-completion",

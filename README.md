@@ -7,6 +7,27 @@ Pipelines as Go code. The public CLI + SDK for sparkwing.
 > **Status:** pre-release. Tester binaries are available; APIs may change.
 > Pre-1.0; expect churn outside the stable surface (`sparkwing/` package).
 
+## Two paths
+
+**Local.** Sparkwing is a program on your machine. It compiles
+`.sparkwing/`, runs each job as a host subprocess, keeps state in SQLite
+under `~/.sparkwing/`, and serves its own dashboard. No account, no
+cloud, and the machines you own join one run with `--sw-fleet`. After one
+successful run, a pipeline whose sparks are pinned to exact tags runs with
+the network unplugged; `latest` pins, controller profiles, your own steps'
+downloads, and `sparkwing update` still need it
+([the whole boundary](docs/getting-started.md#offline-after-the-first-build)).
+
+**Sparkwing Cloud.** The hosted controller. A controller gives a team one
+dashboard, one run history, and one queue that enrolled machines claim
+from. `sparkwing cloud connect --controller URL --token-stdin` stores the
+token you were given and writes the profile, and reaches any controller you
+can reach, including one your team runs.
+
+Hosting your own bucket, database, or controller is an
+[advanced deployment](docs/getting-started.md#advanced-deployments), not a
+step on either path.
+
 ## Install
 
 ```sh
@@ -43,6 +64,18 @@ sparkwing run hello
 # Open the local dashboard
 sparkwing serve start
 ```
+
+When a team should see the same runs, connect the machine to a
+controller:
+
+```sh
+sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+```
+
+It stores the token on stdin in `~/.config/sparkwing/profiles.yaml` and
+prints the dashboard URL. An administrator mints those tokens with
+`--admin-token-stdin`. See
+[getting-started.md](docs/getting-started.md#sparkwing-cloud).
 
 `sparkwing info` surveys the current repo and suggests next commands.
 `sparkwing docs list` browses the embedded reference (offline,

@@ -484,6 +484,29 @@ unlock.
   could not read the process table; the cleanup failure is now a warning naming
   the process group. A cancelled or failing compile reports as before.
 
+### Docs
+
+- **docs:** Getting started documents the offline guarantee and its
+  boundary. A local run needs the network once, to download modules and
+  compile; after that the cached pipeline binary, the SQLite store, the
+  logs, the dashboard, and the admission daemon are all local. What still
+  reaches out is named: a `latest` or range `sparks:`
+  pin (`--sw-no-update` skips the proxy call, exact tags never make one),
+  a profile with a `controller:` block, whatever the pipeline's own steps
+  do, and `sparkwing update`. `sparks.md` points at the same boundary.
+- **docs:** The user-facing docs lead with two paths. Getting started opens
+  on Local (a program on your machine, and the machines you own through
+  `--sw-fleet`) and Sparkwing Cloud, the hosted controller whose
+  `sparkwing cloud connect --token-stdin` reaches any controller you can
+  reach, including one a team runs itself, and names every other shape in
+  one paragraph under Advanced deployments.
+  `deployment-modes.md` carries the same two paths and groups shared object
+  storage, Postgres, the self-hosted controller, and a peer machine as the
+  controller under Advanced shapes. The README and the docs index open the
+  same way, the sidebar's Infrastructure category is now Advanced and
+  self-hosting, and `cli-cloud.md` joins the CLI reference category. No page
+  or command was removed.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added
