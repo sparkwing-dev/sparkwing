@@ -104,11 +104,11 @@ func (l *Lease) Release() error {
 	return err
 }
 
-func (l *Lease) ExecReplace(args []string, dir string, env []string) error {
+func (l *Lease) ExecReplace(args []string, dir string, env []string, afterChild func()) error {
 	if l == nil || l.file == nil {
 		return errors.New("pipeline cache lease is not held")
 	}
-	return ExecReplace(l.Path(), args, dir, env)
+	return ExecReplace(l.Path(), args, dir, env, afterChild)
 }
 
 func (e Entry) Acquire(ctx context.Context) (*Lease, bool, error) {

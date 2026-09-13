@@ -91,13 +91,13 @@ func commandHelp(args []string) (*Command, bool) {
 	return selected, help || selected == &cmdSparkwing
 }
 
-func moveRootOutput(args []string) []string {
+func moveRootOutput(args []string) ([]string, error) {
 	end := 0
 	for end < len(args) {
 		arg := args[end]
 		if arg == "--output" || arg == "-o" {
 			if end+1 >= len(args) {
-				return args
+				return args, nil
 			}
 			end += 2
 		} else if strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2) {
@@ -107,7 +107,7 @@ func moveRootOutput(args []string) []string {
 		}
 	}
 	if end == 0 || end == len(args) {
-		return args
+		return args, nil
 	}
 	rest := args[end:]
 	path, slot := "sparkwing", 0
@@ -124,12 +124,18 @@ func moveRootOutput(args []string) []string {
 		}
 		slot++
 	}
-	if (path == "sparkwing run" || path == "sparkwing pipeline run") && slot < len(rest) && !strings.HasPrefix(rest[slot], "-") {
-		slot++
+	if path == "sparkwing run" || path == "sparkwing pipeline run" {
+		if !wantsHelp(args) {
+			return nil, fmt.Errorf("%s: -o/--output does not select a run's stream. The stream is pretty on a terminal "+
+				"and NDJSON when piped, and SPARKWING_LOG_FORMAT overrides that; flags for the pipeline itself go after --", path)
+		}
+		if slot < len(rest) && !strings.HasPrefix(rest[slot], "-") {
+			slot++
+		}
 	}
 	moved := append([]string{}, rest[:slot]...)
 	moved = append(moved, args[:end]...)
-	return append(moved, rest[slot:]...)
+	return append(moved, rest[slot:]...), nil
 }
 
 func writeDocument(w io.Writer, slug, text, mode string) error {

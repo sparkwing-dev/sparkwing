@@ -941,10 +941,54 @@ func TestScopedStepsRefuseToLetAFilenameRunACommand(t *testing.T) {
 
 	// safety: the step is expected to refuse the file, which is unformatted;
 	// what must not happen is the shell running the name.
-	_ = runGofmtOnTheChange(context.Background())
+	if err := runGofmtOnTheChange(context.Background()); err == nil {
+		t.Error("gofmt passed an unformatted file, so the hostile name never reached it")
+	}
 
 	if _, err := os.Stat(witness); err == nil {
 		t.Fatal("a staged filename ran a command inside the gate")
+	}
+}
+
+func TestScopedStepsSeeARepoRootNameThatStartsWithWhitespace(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	writeGoFile(t, filepath.Join(root, " lead.go"), "package fixture\n\nfunc  Lead( ) int { return 1 }\n")
+	gitAddAll(t, root)
+
+	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != " lead.go" {
+		t.Fatalf("staged Go files = %q, want the one name that begins with a space", files)
+	}
+	if err := runGofmtOnTheChange(context.Background()); err == nil {
+		t.Error("gofmt passed an unformatted file, so the leading-space name never reached it")
+	}
+}
+
+func TestScopedStepsSeeARepoRootNameThatStartsWithADash(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	writeGoFile(t, filepath.Join(root, "-dash.go"), "package fixture\n\nfunc  Dash( ) int { return 1 }\n")
+	gitAddAll(t, root)
+
+	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != "-dash.go" {
+		t.Fatalf("staged Go files = %q, want the one name that begins with a dash", files)
+	}
+	err = runGofmtOnTheChange(context.Background())
+	if err == nil {
+		t.Fatal("gofmt passed an unformatted file, so the leading-dash name never reached it")
+	}
+	if strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Errorf("gofmt read the file name as a flag: %v", err)
 	}
 }
 
@@ -981,7 +1025,7 @@ func TestScopedStepsStayOnTheCommitWhenItStagesNoFileOfTheirKind(t *testing.T) {
 	if len(files) != 0 {
 		t.Errorf("staged Go files = %v, want none", files)
 	}
-	if !strings.Contains(scope, "staged") {
+	if scope != "0 staged Go file(s)" {
 		t.Errorf("scope = %q, want the staged change; this fixture has no origin/main to fall back to", scope)
 	}
 }

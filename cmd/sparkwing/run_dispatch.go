@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -478,19 +479,34 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 		return "", "", nil, fmt.Errorf("ref %s has no .sparkwing/ directory", ref)
 	}
 
+	// safety: more than one caller runs this, and the second `worktree remove`
+	// of a gone path fails loudly.
+	var once sync.Once
 	cleanup = func() {
-		if cleanupErr := exec.Command("git", "-C", repoRoot,
-			"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
-			slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
-		}
-		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
-			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
-		}
-		// safety: git keeps the registration under the origin repository, where a
-		// leftover one blocks adding the same path again.
-		if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
-			slog.Default().Debug("ref worktree prune did not apply", "repo", repoRoot, "error", err)
-		}
+		once.Do(func() {
+			// safety: Windows holds an open handle on a process's working
+			// directory, and the exec path leaves it inside the worktree being
+			// removed.
+			if wd, wdErr := os.Getwd(); wdErr == nil {
+				if rel, relErr := filepath.Rel(temporaryDir, wd); relErr == nil && !strings.HasPrefix(rel, "..") {
+					if chdirErr := os.Chdir(repoRoot); chdirErr != nil {
+						slog.Warn("could not leave the temporary worktree", "path", repoRoot, "error", chdirErr)
+					}
+				}
+			}
+			if cleanupErr := exec.Command("git", "-C", repoRoot,
+				"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
+				slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
+			}
+			if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
+				slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
+			}
+			// safety: git keeps the registration under the origin repository, where a
+			// leftover one blocks adding the same path again.
+			if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
+				slog.Default().Debug("ref worktree prune did not apply", "repo", repoRoot, "error", err)
+			}
+		})
 	}
 	return temporaryDir, pipelineDirectory, cleanup, nil
 }

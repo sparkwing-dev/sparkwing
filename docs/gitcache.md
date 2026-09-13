@@ -485,8 +485,8 @@ line, and never goes to the auto-detected cache: only an operator naming
 the cache in one of those two variables authorizes sending a credential to
 it. Redirects are off for the cache URL so the bearer cannot follow a
 request to another host, which means a cache behind a redirecting ingress
-must be named by the URL it finally serves on. A cache that answers `401`
-or a redirect sends the clone to the upstream remote instead, with one
+must be named by the URL it finally serves on. A cache that fails the
+clone for any reason sends it to the upstream remote instead, with one
 line on stderr naming the cache. A later `git fetch` through
 `sparkwing/git` reuses the same bearer when the checkout's `origin` is
 under the named cache.

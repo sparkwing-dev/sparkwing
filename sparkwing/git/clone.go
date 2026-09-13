@@ -27,9 +27,11 @@ func WithDepth(n int) CloneOption {
 	return func(c *cloneConfig) { c.depth = n }
 }
 
-// Clone clones url into destDir. Routes through the local gitcache
-// HTTP cache when reachable, falling back transparently to upstream.
-// destDir must not already exist; matches `git clone` semantics.
+// Clone clones url into destDir. It tries the local gitcache HTTP cache
+// when one is reachable and falls back to upstream on any cache-side
+// failure, so a cache can never turn a clone that would work into one
+// that does not. destDir must not already exist; matches `git clone`
+// semantics.
 func Clone(ctx context.Context, url, destDir string, opts ...CloneOption) error {
 	cfg := &cloneConfig{}
 	for _, o := range opts {
@@ -41,16 +43,25 @@ func Clone(ctx context.Context, url, destDir string, opts ...CloneOption) error 
 		args = append(args, "--depth", fmt.Sprintf("%d", cfg.depth))
 	}
 	if cache != "" {
+		// safety: Lstat, because a dangling symlink the caller placed would
+		// stat as absent and the fallback would then unlink it.
+		_, statErr := os.Lstat(destDir)
+		preexisting := statErr == nil
 		cacheArgs := append(append([]string{}, args...), resolved, destDir)
 		_, err := runGitEnv(ctx, "", gitcacheEnv(cache, gitcacheToken(named)), cacheArgs...)
 		if err == nil {
 			return nil
 		}
-		if !rejectedByCache(err) {
-			return err
+		// safety: the cache is an optimization, so every failure falls back.
+		// Classifying them does not work: the cache answers 404 for a name it
+		// does not serve, and git reports that as "repository not found", the
+		// same text an upstream miss produces.
+		fmt.Fprintf(os.Stderr, "sparkwing: gitcache %s did not serve the clone, cloning %s from upstream: %v\n", cache, url, err)
+		if !preexisting {
+			if rmErr := os.RemoveAll(destDir); rmErr != nil {
+				return fmt.Errorf("clear %s after the gitcache clone failed: %w", destDir, rmErr)
+			}
 		}
-		fmt.Fprintf(os.Stderr, "sparkwing: gitcache %s rejected the clone, cloning %s from upstream: %v\n", cache, url, err)
-		_ = os.Remove(destDir)
 	}
 	args = append(args, url, destDir)
 	_, err := runGitEnv(ctx, "", promptlessEnv(), args...)
@@ -101,7 +112,8 @@ func gitcacheToken(named bool) string {
 
 func gitcacheEnv(cacheBase, token string) []string {
 	base := strings.TrimRight(cacheBase, "/") + "/"
-	// safety: LC_ALL=C keeps git's rejection messages in the language rejectedByCache matches.
+	// safety: LC_ALL=C keeps the cache clone's failure text in one language,
+	// so the fallback notice reads the same everywhere.
 	env := append(promptlessEnv(), "LC_ALL=C")
 	count, countIndex := 0, -1
 	for i, value := range env {
@@ -141,40 +153,6 @@ func inheritedConfigCount(value string) int {
 		return 0
 	}
 	return n
-}
-
-func rejectedByCache(err error) bool {
-	msg := strings.ToLower(err.Error())
-	for _, marker := range []string{
-		"authentication failed",
-		"could not read username",
-		"could not read password",
-	} {
-		if strings.Contains(msg, marker) {
-			return true
-		}
-	}
-	// safety: redirects are disabled for the cache, so its 3xx is a rejection the upstream clone must absorb.
-	status := statusFromGitError(msg)
-	return status == http.StatusUnauthorized || (status >= 300 && status < 400)
-}
-
-func statusFromGitError(msg string) int {
-	const marker = "returned error: "
-	i := strings.Index(msg, marker)
-	if i < 0 {
-		return 0
-	}
-	rest := msg[i+len(marker):]
-	end := 0
-	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
-		end++
-	}
-	status, err := strconv.Atoi(rest[:end])
-	if err != nil {
-		return 0
-	}
-	return status
 }
 
 func configuredGitcache() string {

@@ -2,26 +2,79 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestRetiredDashboardCommandRefusesBeforeServiceState(t *testing.T) {
-	for _, args := range [][]string{{"dashboard"}, {"dashboard", "start", "--addr", "127.0.0.1:0"}, {"dashboard", "status"}, {"dashboard", "kill"}, {"dashboard", "stop"}, {"dashboard", "--help"}, {"-o", "json", "dashboard", "start"}, {"--output=plain", "dashboard", "status"}, {"help", "dashboard"}, {"--help", "dashboard"}, {"-h", "dashboard"}, {"-ojson", "--help", "dashboard"}} {
+func TestRetiredDashboardNounCannotPerformServiceActions(t *testing.T) {
+	for _, args := range [][]string{{"dashboard"}, {"dashboard", "start", "--addr", "127.0.0.1:0"}, {"dashboard", "status"}, {"dashboard", "kill"}, {"dashboard", "stop"}, {"dashboard", "--help"}, {"-o", "json", "dashboard", "start"}, {"--output=plain", "dashboard", "status"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cmd := outputContractCommand(t, args...)
 			var errs bytes.Buffer
 			cmd.Stderr = &errs
 			out, err := cmd.Output()
-			if err == nil || len(out) != 0 || !strings.Contains(errs.String(), "use sparkwing serve") {
-				t.Fatalf("retired route: %v stdout=%q stderr=%q", err, out, errs.String())
+			if err == nil || len(out) != 0 || !strings.Contains(errs.String(), "unknown subcommand") {
+				t.Fatalf("retired noun: %v stdout=%q stderr=%q", err, out, errs.String())
 			}
-			if _, err := os.Stat(filepath.Join(cmd.Dir, "state")); !os.IsNotExist(err) {
-				t.Fatalf("retired route touched service state: %v", err)
+			assertNoServiceState(t, filepath.Join(cmd.Dir, "state"))
+
+			inventedArgs := append([]string(nil), args...)
+			for i, arg := range inventedArgs {
+				if arg == "dashboard" {
+					inventedArgs[i] = "nosuchnoun"
+				}
+			}
+			invented := outputContractCommand(t, inventedArgs...)
+			var inventedErrs bytes.Buffer
+			invented.Stderr = &inventedErrs
+			inventedOut, inventedErr := invented.Output()
+			if fmt.Sprint(err) != fmt.Sprint(inventedErr) || !bytes.Equal(out, inventedOut) ||
+				strings.ReplaceAll(errs.String(), `"dashboard"`, `"nosuchnoun"`) != inventedErrs.String() {
+				t.Fatalf("retired noun still answers differently from an invented one:\n%v %q\n---\n%v %q",
+					err, errs.String(), inventedErr, inventedErrs.String())
 			}
 		})
+	}
+	for _, verb := range []string{"help", "--help", "-h"} {
+		t.Run(verb+" dashboard", func(t *testing.T) {
+			retired := outputContractCommand(t, verb, "dashboard")
+			retiredOut, err := retired.Output()
+			if err != nil {
+				t.Fatalf("retired help topic: %v stdout=%q", err, retiredOut)
+			}
+			assertNoServiceState(t, filepath.Join(retired.Dir, "state"))
+			invented := outputContractCommand(t, verb, "nosuchnoun")
+			inventedOut, err := invented.Output()
+			if err != nil {
+				t.Fatalf("invented help topic: %v stdout=%q", err, inventedOut)
+			}
+			if !bytes.Equal(retiredOut, inventedOut) {
+				t.Fatalf("retired noun still has help handling of its own:\n%s\n---\n%s", retiredOut, inventedOut)
+			}
+		})
+	}
+}
+
+// safety: an unsupported noun reaches the version-transition marker like any
+// other, so the home existing is not the signal; a PID, a log, or a record is.
+func assertNoServiceState(t *testing.T, home string) {
+	t.Helper()
+	for _, name := range []string{dashboardPIDFile, dashboardLogFile, "dashboard.lock"} {
+		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
+			t.Fatalf("service state %s exists: %v", name, err)
+		}
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read service home: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "dashboard-state") {
+			t.Fatalf("service record %s exists", entry.Name())
+		}
 	}
 }
 

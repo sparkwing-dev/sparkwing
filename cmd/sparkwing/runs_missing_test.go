@@ -61,7 +61,9 @@ func TestRemoteAnnotationsChecksRunBeforeChildren(t *testing.T) {
 			w.Write([]byte(`{"nodes":[]}`))
 			return
 		}
-		http.Error(w, "not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	}))
 	defer srv.Close()
 	writeProfilesFixture(t, "profiles:\n  remote:\n    controller: {url: "+srv.URL+"}\n")

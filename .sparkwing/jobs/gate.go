@@ -285,14 +285,14 @@ func runFormatters(ctx context.Context) error {
 	if len(files) == 0 {
 		return nil
 	}
-	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff "+shellQuoteAll(files)).Capture()
+	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff -- "+shellQuoteAll(files)).Capture()
 	if runErr == nil {
 		return nil
 	}
 	var execErr *sparkwing.ExecError
 	if errors.As(runErr, &execErr) && strings.TrimSpace(execErr.Stdout) != "" {
-		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt %s`:\n%s",
-			scope, strings.Join(files, " "), strings.TrimSpace(execErr.Stdout))
+		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt -- %s`:\n%s",
+			scope, shellQuoteAll(files), strings.TrimSpace(execErr.Stdout))
 	}
 	return fmt.Errorf("golangci-lint fmt: %w", runErr)
 }
@@ -354,13 +354,15 @@ func shellQuoteAll(paths []string) string {
 // safety: git quotes a path holding a non-ASCII byte unless core.quotePath is
 // off, and a quoted name matches no suffix and stats to nothing, so the file
 // drops out of every scoped step and the step passes without judging it. -z
-// also carries a name holding a newline, which no line-split can.
+// also carries a name holding a newline, which no line-split can, and Capture
+// rather than String because String trims the blob, eating the leading byte of
+// a name that begins with whitespace and sorts first.
 func listNames(ctx context.Context, args string) ([]string, error) {
-	out, err := sparkwing.Bash(ctx, "git -c core.quotePath=false "+args).String()
+	res, err := sparkwing.Bash(ctx, "git -c core.quotePath=false "+args).Capture()
 	if err != nil {
 		return nil, err
 	}
-	return splitNULNames(out), nil
+	return splitNULNames(res.Stdout), nil
 }
 
 func stagedNames(ctx context.Context) ([]string, error) {
@@ -372,11 +374,11 @@ func stagedNames(ctx context.Context) ([]string, error) {
 	if index := hookIndex(); index != "" {
 		cmd = cmd.Env("GIT_INDEX_FILE", index)
 	}
-	out, err := cmd.String()
+	res, err := cmd.Capture()
 	if err != nil {
 		return nil, err
 	}
-	return splitNULNames(out), nil
+	return splitNULNames(res.Stdout), nil
 }
 
 func hookIndex() string {
@@ -502,7 +504,7 @@ func forEachGoModule(ctx context.Context, label, cmd string, unset []string) err
 		command := strings.TrimSuffix(cmd, "./...") + strings.Join(packages, " ")
 		script := withoutInherited(fmt.Sprintf("cd %q && %s", dir, command), unset)
 		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", dir, err))
+			failures = append(failures, describeModuleFailure(dir, err))
 		}
 	}
 	if len(failures) == 0 {
@@ -510,6 +512,42 @@ func forEachGoModule(ctx context.Context, label, cmd string, unset []string) err
 	}
 	return fmt.Errorf("%s failed in %d module(s):\n  - %s",
 		label, len(failures), strings.Join(failures, "\n  - "))
+}
+
+const maxNamedTestFailures = 25
+
+// safety: the summary is bounded from its head, so the names go first or a
+// hosted runner keeps nothing but the module that failed.
+func describeModuleFailure(dir string, err error) string {
+	named := failedTestNames(err)
+	if len(named) == 0 {
+		return fmt.Sprintf("%s: %v", dir, err)
+	}
+	return fmt.Sprintf("%s: %s\n%v", dir, strings.Join(named, "\n"), err)
+}
+
+func failedTestNames(err error) []string {
+	var execErr *sparkwing.ExecError
+	if !errors.As(err, &execErr) {
+		return nil
+	}
+	var out []string
+	truncated := false
+	for _, line := range strings.Split(execErr.Stdout+"\n"+execErr.Stderr, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "--- FAIL: ") && !strings.HasPrefix(line, "FAIL\t") {
+			continue
+		}
+		if len(out) == maxNamedTestFailures {
+			truncated = true
+			break
+		}
+		out = append(out, line)
+	}
+	if truncated {
+		out = append(out, fmt.Sprintf("… more than %d failures; read the run log for the rest", maxNamedTestFailures))
+	}
+	return out
 }
 
 func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string, error) {
