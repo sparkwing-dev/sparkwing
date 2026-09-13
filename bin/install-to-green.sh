@@ -43,8 +43,12 @@ fail() {
   exit 1
 }
 
+# A skipped measurement is still a record: the caller logs the phase that could
+# not resolve and when, rather than a bare status.
 unavailable() {
-  printf 'install-to-green: %s\n' "$*" >&2
+  printf '{"measured":false,"green":false,"phase":"%s","started_at":"%s","reason":"%s"}\n' \
+    "$1" "$started_at" "$(json_string "$2")"
+  printf 'install-to-green: %s phase: %s, so nothing was measured\n' "$1" "$2" >&2
   exit "$EXIT_UNAVAILABLE"
 }
 
@@ -124,6 +128,10 @@ load_average() {
   fi
 }
 
+json_string() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g'
+}
+
 json_number() {
   if [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     printf '%s' "$1"
@@ -145,7 +153,8 @@ core_count() {
 # A Go failure that is the network rather than the change under measurement.
 # Reporting one as a slow demo path would publish a number nothing produced.
 download_unavailable() {
-  grep -Eq 'dial tcp|no such host|i/o timeout|TLS handshake timeout|connection refused|network is unreachable|module lookup disabled|502 Bad Gateway|503 Service Unavailable|504 Gateway Time-?out' "$1"
+  tail -n 25 "$1" |
+    grep -Eq 'dial tcp|no such host|i/o timeout|TLS handshake timeout|connection refused|network is unreachable|module lookup disabled|502 Bad Gateway|503 Service Unavailable|504 Gateway Time-?out'
 }
 
 # Git binds a working context through the environment, and a hook, `git rebase
@@ -327,16 +336,36 @@ case "$mode" in
 esac
 
 previous="$mark"
-sparkwing pipeline new --name demo --template "$template" -C "$REPO" >"$WORK/scaffold.log" 2>&1 || {
+# In build mode the scaffold resolves the candidate's graph, not the published
+# release's: GOPROXY=off leaves `pipeline new` to write the skeleton while its
+# own dependency resolution finds nothing to download, the replace then points
+# the module at this worktree, and the tidy that follows resolves what the
+# candidate actually needs. Without that tidy a candidate that adds a
+# dependency fails the compile on a missing go.sum entry.
+scaffold_proxy=("GOPROXY=$goproxy")
+if [[ "$mode" == build ]]; then
+  scaffold_proxy=("GOPROXY=off")
+fi
+env "${scaffold_proxy[@]}" sparkwing pipeline new --name demo --template "$template" -C "$REPO" \
+  >"$WORK/scaffold.log" 2>&1 || {
   cat "$WORK/scaffold.log" >&2
   if download_unavailable "$WORK/scaffold.log"; then
-    unavailable "the scaffold could not reach the module proxy, so nothing was measured"
+    unavailable scaffold "could not reach the module proxy"
   fi
   fail "the scaffold phase failed"
 }
 if [[ "$mode" == build ]]; then
+  [[ -f "$REPO/.sparkwing/go.mod" ]] ||
+    { cat "$WORK/scaffold.log" >&2; fail "the scaffold left no pipeline module under $REPO/.sparkwing"; }
   go -C "$REPO/.sparkwing" mod edit -replace "github.com/sparkwing-dev/sparkwing=$ROOT" ||
     fail "could not point the scaffolded module at this worktree"
+  go -C "$REPO/.sparkwing" mod tidy >"$WORK/tidy.log" 2>&1 || {
+    cat "$WORK/tidy.log" >&2
+    if download_unavailable "$WORK/tidy.log"; then
+      unavailable scaffold "could not resolve the candidate module graph"
+    fi
+    fail "could not resolve the scaffolded module against this worktree"
+  }
 fi
 mark="$(now_ns)"
 scaffold_ms="$(milliseconds_of $((mark - previous)))"
@@ -345,7 +374,7 @@ previous="$mark"
 sparkwing pipeline explain --name demo -C "$REPO" >"$WORK/compile.log" 2>&1 || {
   cat "$WORK/compile.log" >&2
   if download_unavailable "$WORK/compile.log"; then
-    unavailable "the first compile could not reach the module proxy, so nothing was measured"
+    unavailable compile "could not reach the module proxy"
   fi
   fail "the first-compile phase failed"
 }
@@ -389,10 +418,10 @@ if [[ "$output" == json ]]; then
   printf '{"total_seconds":%s,"phases":{"install":%s,"scaffold":%s,"compile":%s,"run":%s},' \
     "$(seconds_of "$total_ms")" "$(seconds_of "$install_ms")" "$(seconds_of "$scaffold_ms")" \
     "$(seconds_of "$compile_ms")" "$(seconds_of "$run_ms")"
-  printf '"dominant_phase":"%s","mode":"%s","template":"%s","version":"%s","sdk_source":"%s","green":true,' \
-    "$dominant" "$mode" "$template" "$installed_version" "$sdk_source"
+  printf '"dominant_phase":"%s","mode":"%s","template":"%s","version":"%s","sdk_source":"%s","measured":true,"green":true,' \
+    "$dominant" "$mode" "$template" "$(json_string "$installed_version")" "$(json_string "$sdk_source")"
   printf '"started_at":"%s","cores":%s,"load_start":%s,"load_end":%s,"goproxy":"%s","inherited_go_env":[' \
-    "$started_at" "$(json_number "$cores")" "$(json_number "$load_start")" "$(json_number "$load_end")" "$goproxy"
+    "$started_at" "$(json_number "$cores")" "$(json_number "$load_start")" "$(json_number "$load_end")" "$(json_string "$goproxy")"
   separator=""
   for name in ${inherited_list}; do
     printf '%s"%s"' "$separator" "$name"

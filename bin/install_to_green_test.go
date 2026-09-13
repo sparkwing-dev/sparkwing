@@ -289,19 +289,7 @@ func TestInstallToGreenLeavesTheCallersGitBindingAlone(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git is not on PATH: %v", err)
 	}
-	operatorRepo := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{
-			"-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
-			"-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "operator work",
-		},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", operatorRepo}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git fixture: %v %s", err, out)
-		}
-	}
+	operatorRepo := operatorRepository(t)
 	commitsBefore := gitCommitCount(t, operatorRepo)
 
 	// safety: this is the environment a git hook, `git rebase --exec` and
@@ -322,6 +310,25 @@ func TestInstallToGreenLeavesTheCallersGitBindingAlone(t *testing.T) {
 	if after := gitCommitCount(t, operatorRepo); after != commitsBefore {
 		t.Errorf("the harness committed into the caller's repository: %s commits before, %s after", commitsBefore, after)
 	}
+}
+
+func operatorRepository(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{
+			"-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+			"-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "operator work",
+		},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = environWithoutGitBindings()
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git fixture: %v %s", err, out)
+		}
+	}
+	return repo
 }
 
 func gitCommitCount(t *testing.T, repo string) string {
@@ -346,29 +353,59 @@ func environWithoutGitBindings() []string {
 	return kept
 }
 
-func TestInstallToGreenResetsEveryGitBindingVariable(t *testing.T) {
-	root := installToGreenRoot(t)
-	binding, err := os.ReadFile(filepath.Join(root, "pkg", "gitenv", "gitenv.go"))
+func gitBindingNames(t *testing.T) []string {
+	t.Helper()
+	source, err := os.ReadFile(filepath.Join(installToGreenRoot(t), "pkg", "gitenv", "gitenv.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	block := regexp.MustCompile(`(?s)var bindingVars = \[\]string\{(.*?)\n\}`).FindSubmatch(binding)
+	block := regexp.MustCompile(`(?s)var bindingVars = \[\]string\{(.*?)\n\}`).FindSubmatch(source)
 	if block == nil {
 		t.Fatal("pkg/gitenv no longer declares bindingVars as a slice literal")
 	}
-	names := regexp.MustCompile(`"([A-Z_]+)"`).FindAllStringSubmatch(string(block[1]), -1)
+	var names []string
+	for _, match := range regexp.MustCompile(`"([A-Z_]+)"`).FindAllStringSubmatch(string(block[1]), -1) {
+		names = append(names, match[1])
+	}
 	if len(names) == 0 {
 		t.Fatal("pkg/gitenv bindingVars listed no variables")
 	}
+	return names
+}
 
-	harness, err := os.ReadFile(filepath.Join(root, "bin", "install-to-green.sh"))
-	if err != nil {
-		t.Fatal(err)
+func gitBindingValue(name, repo string) string {
+	switch name {
+	case "GIT_WORK_TREE", "GIT_PREFIX":
+		return repo
+	case "GIT_INDEX_FILE":
+		return filepath.Join(repo, ".git", "index")
+	case "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_QUARANTINE_PATH":
+		return filepath.Join(repo, ".git", "objects")
+	case "GIT_NAMESPACE":
+		return "probe"
+	default:
+		return filepath.Join(repo, ".git")
 	}
-	for _, name := range names {
-		if !strings.Contains(string(harness), name[1]) {
-			t.Errorf("the harness does not reset %s, which pkg/gitenv binds", name[1])
-		}
+}
+
+func TestInstallToGreenResetsEveryGitBindingVariable(t *testing.T) {
+	for _, name := range gitBindingNames(t) {
+		t.Run(name, func(t *testing.T) {
+			operatorRepo := operatorRepository(t)
+			commitsBefore := gitCommitCount(t, operatorRepo)
+			result := runInstallToGreen(t, installToGreenOptions{
+				stubRun: "green",
+				args:    []string{"--output", "json"},
+				env:     []string{name + "=" + gitBindingValue(name, operatorRepo)},
+			})
+			if result.err != nil {
+				t.Fatalf("harness failed with %s bound: %v\nstderr: %s", name, result.err, result.stderr)
+			}
+			if after := gitCommitCount(t, operatorRepo); after != commitsBefore {
+				t.Errorf("with %s bound the harness committed into the caller's repository: %s commits before, %s after",
+					name, commitsBefore, after)
+			}
+		})
 	}
 }
 
@@ -410,6 +447,25 @@ func TestInstallToGreenSeparatesAnUnreachableProxyFromASlowDemoPath(t *testing.T
 	if !strings.Contains(result.stderr, "nothing was measured") {
 		t.Errorf("the refusal does not say nothing was measured: %s", result.stderr)
 	}
+	var skipped struct {
+		Measured  bool   `json:"measured"`
+		Green     bool   `json:"green"`
+		Phase     string `json:"phase"`
+		StartedAt string `json:"started_at"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.stdout)), &skipped); err != nil {
+		t.Fatalf("a skipped measurement printed no record a caller can log: %v\ngot: %s", err, result.stdout)
+	}
+	if skipped.Measured || skipped.Green {
+		t.Errorf("the skipped record claims a measurement: %+v", skipped)
+	}
+	if skipped.Phase != "scaffold" {
+		t.Errorf("the skipped record names phase %q, want the phase that could not resolve", skipped.Phase)
+	}
+	if skipped.StartedAt == "" || skipped.Reason == "" {
+		t.Errorf("the skipped record carries no timestamp or reason: %+v", skipped)
+	}
 }
 
 func TestInstallToGreenFailsAnExplicitTargetAndNamesTheDominantPhase(t *testing.T) {
@@ -438,6 +494,12 @@ func TestInstallToGreenPointsACandidateBuildAtTheWorktreeSDK(t *testing.T) {
 	if !strings.Contains(string(harness), `mod edit -replace "github.com/sparkwing-dev/sparkwing=$ROOT"`) {
 		t.Error("a candidate build must scaffold against this worktree's SDK, not the released module its tag names")
 	}
+	if !strings.Contains(string(harness), `mod tidy`) {
+		t.Error("a candidate build must resolve the scaffolded module after the replace, or an added dependency fails the compile")
+	}
+	if !strings.Contains(string(harness), `scaffold_proxy=("GOPROXY=off")`) {
+		t.Error("a candidate build must not pay to download the published SDK its compile discards")
+	}
 	if !strings.Contains(string(harness), `grep -E '^v0\.[0-9]+\.[0-9]+$'`) {
 		t.Error("candidate tag selection must exclude prerelease and local candidate tags")
 	}
@@ -451,5 +513,70 @@ func TestInstallToGreenRemovesItsScratchTree(t *testing.T) {
 	}
 	if len(left) != 0 {
 		t.Errorf("harness left %d entries behind in its temporary directory", len(left))
+	}
+}
+
+// safety: a candidate that adds a dependency leaves the scaffolded module
+// without the go.sum entry for it, which is why build mode tidies after
+// pointing the module at the worktree. This fixture reproduces that failure
+// against the real toolchain rather than trusting the shape of the fix.
+func TestInstallToGreenTidiesSoACandidateDependencyResolves(t *testing.T) {
+	goBinary, err := exec.LookPath("go")
+	if err != nil {
+		t.Skipf("go is not on PATH: %v", err)
+	}
+	root := installToGreenRoot(t)
+	rootMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := regexp.MustCompile(`golang\.org/x/mod (v[^\s]+)`).FindSubmatch(rootMod)
+	if pin == nil {
+		t.Skip("this module no longer pins golang.org/x/mod, so the fixture has no warm dependency to use")
+	}
+	dependency := "golang.org/x/mod " + string(pin[1])
+
+	fixture := t.TempDir()
+	sdk := filepath.Join(fixture, "sdk")
+	scaffold := filepath.Join(fixture, "scaffold")
+	write := func(dir, name, content string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(sdk, "go.mod", "module example.invalid/sdk\n\ngo 1.24\n\nrequire "+dependency+"\n")
+	write(sdk, "sdk.go", "package sdk\n\nimport \"golang.org/x/mod/semver\"\n\nfunc Canonical(v string) string { return semver.Canonical(v) }\n")
+	write(scaffold, "go.mod", "module example.invalid/scaffold\n\ngo 1.24\n\nrequire example.invalid/sdk v0.0.1\n\nreplace example.invalid/sdk => ../sdk\n")
+	write(scaffold, "main.go", "package main\n\nimport \"example.invalid/sdk\"\n\nfunc main() { _ = sdk.Canonical(\"v1.0.0\") }\n")
+
+	run := func(dir string, args ...string) (string, error) {
+		cmd := exec.Command(goBinary, args...)
+		cmd.Dir = dir
+		cmd.Env = append(environWithoutGitBindings(), "GOWORK=off", "GOFLAGS=")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	if out, err := run(sdk, "mod", "tidy"); err != nil {
+		t.Skipf("the fixture SDK's dependency could not be resolved, so the failure cannot be staged: %v\n%s", err, out)
+	}
+
+	out, err := run(scaffold, "build", "-o", os.DevNull, ".")
+	if err == nil {
+		t.Skip("this toolchain builds a replaced module with no go.sum entry, so the failure build mode tidies against does not occur")
+	}
+	if !strings.Contains(out, "go.sum") && !strings.Contains(out, "updates to go.mod needed") {
+		t.Fatalf("the fixture failed for another reason than an unresolved candidate graph:\n%s", out)
+	}
+
+	if out, err := run(scaffold, "mod", "tidy"); err != nil {
+		t.Fatalf("go mod tidy could not resolve the candidate graph: %v\n%s", err, out)
+	}
+	if out, err := run(scaffold, "build", "-o", os.DevNull, "."); err != nil {
+		t.Fatalf("a candidate dependency still does not compile after the tidy build mode runs: %v\n%s", err, out)
 	}
 }
