@@ -1,8 +1,11 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,24 +44,33 @@ func TestRunIDFromArgs(t *testing.T) {
 }
 
 func TestRunsReadVerbsAcceptABareRunID(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv("SPARKWING_PROFILES", filepath.Join(home, "profiles.yaml"))
-	dir := t.TempDir()
-	restore, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(restore) })
-
+	const runID = "run-20260910-090000-0123456789abcdef"
 	for _, verb := range []string{"status", "errors"} {
-		var runErr error
-		captureStdout(t, func() { runErr = runJobs([]string{verb, "run-20260910-090000-0123456789abcdef"}) })
-		if runErr != nil && strings.Contains(runErr.Error(), "--run is required") {
-			t.Errorf("runs %s rejected a bare run id: %v", verb, runErr)
-		}
+		t.Run(verb, func(t *testing.T) {
+			var asked []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				asked = append(asked, r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"nodes":[]}`))
+			}))
+			t.Cleanup(srv.Close)
+
+			home := t.TempDir()
+			profiles := filepath.Join(home, "profiles.yaml")
+			body := "profiles:\n  prod:\n    controller:\n      url: " + srv.URL + "\n"
+			if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SPARKWING_PROFILES", profiles)
+			t.Setenv("SPARKWING_HOME", home)
+
+			// safety: status exits non-zero on a run with no terminal state, so the
+			// proof is the id reaching the controller, not the verb's exit.
+			var runErr error
+			captureStdout(t, func() { runErr = runJobs([]string{verb, runID, "--profile", "prod"}) })
+			if !slices.ContainsFunc(asked, func(path string) bool { return strings.Contains(path, runID) }) {
+				t.Fatalf("runs %s read %v, none of which names the run id it was given (err: %v)", verb, asked, runErr)
+			}
+		})
 	}
 }
