@@ -28,6 +28,10 @@ unlock.
   embedder serve a dashboard of its own. Leaving it nil keeps the embedded
   bundle and its existing check, and a bundle carrying no `index.html` at its
   root is refused at startup rather than served as a silent 404.
+- **dashboard:** The queue page lists connection-only leases in their own
+  "Connected (no resources held)" table, with its own count beside the holding
+  one. Those rows leave the holder table, so a lease appears in one table or
+  the other, and the page groups admission the way `sparkwing queue` does.
 
 ### Changed
 
@@ -46,13 +50,6 @@ unlock.
   active for the whole of that window and every later instant recorded
   `skipped-overlap` without firing. The window that question is asked with is
   now capped at 24h, the same one the miss decision reads.
-- **dashboard:** The queue page lists connection-only leases in their own
-  "Connected (no resources held)" table, with its own count beside the holding
-  one. Those rows leave the holder table, so a lease appears in one table or
-  the other, and the page groups admission the way `sparkwing queue` does.
-
-### Fixed
-
 - **dashboard:** The queue page counts a running pipeline once. Its
   zero-resource orchestration lease no longer adds to the "holding" figure
   beside the participant that holds the cores, which is the occupancy
