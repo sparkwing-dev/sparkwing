@@ -91,6 +91,8 @@ type Server struct {
 	routeProbeMux  *http.ServeMux
 	routeProbePub  *http.ServeMux
 
+	storage storageSample
+
 	localExecution bool
 }
 
@@ -952,6 +954,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
 
+	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
+	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
+	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
+
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
 	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsGrant)))
@@ -1118,6 +1124,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	go s.runReaper(ctx, 10*time.Second)
 	go s.runCronTick(ctx, cronTickOffer)
+	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)

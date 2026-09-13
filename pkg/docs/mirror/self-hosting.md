@@ -194,3 +194,82 @@ reach the repository with its configured Git credentials.
 **A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
+
+## Bound storage growth
+
+A controller keeps every event and every per-node metric sample forever until
+an operator sets a window. Retention is off on an existing install and stays
+off after an upgrade; nothing in this release turns it on for you.
+
+Read the current policy with `GET /api/v1/storage` and write it with
+`PUT /api/v1/storage/settings` (scope `admin`):
+
+```bash
+curl -sS -X PUT "$CONTROLLER/api/v1/storage/settings" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"event_retention_days":30,"node_metric_retention_days":14,
+       "database_alarm_bytes":8589934592,"default_tier":"free"}'
+```
+
+Every window is a whole number of days and zero is unbounded. An hourly timer
+removes the rows past their window, never a request. It removes them in
+batches of 5000 so a first sweep on a long-unbounded database does not hold
+one transaction over millions of rows, and it skips any run that has not
+finished, because a run still writing its own history keeps it however old.
+
+`database_alarm_bytes` sets the size worth a warning. Passing it logs a
+warning and sets `database.alarm` on `GET /api/v1/health`; the reported status
+does not change, so an alarm is a signal to read rather than a controller that
+stopped working. The health route answers without a token and so publishes the
+alarm alone: sizes and table names are on the `admin` view of
+`GET /api/v1/storage`.
+
+The size is sampled on the same timer. SQLite counts the pages it holds less
+the pages on its free list, so the sample falls as soon as a sweep removes the
+rows and an alarm clears without anyone reclaiming anything; the file keeps its
+size on disk until an operator runs `VACUUM`, which is the step that returns
+the space to the filesystem. Postgres sums `pg_total_relation_size` over its
+relations and names the largest.
+
+### Per-team storage quotas
+
+`default_tier` holds every principal without a quota row of its own to a
+tier's limits, and an empty default leaves them unlimited, which is what an
+install that never enabled quotas reads. The free tier allows ten megabytes
+per run, a gigabyte per month, and a thousand objects per run; the paid tier
+allows a gigabyte per run, a hundred gigabytes per month, and a hundred
+thousand objects per run.
+
+Read the byte limits narrowly on this release: they bound the bytes the
+controller itself stores, which is run-event payloads, and they do not bound
+artifact content. A runner writes artifact blobs straight to the object store,
+and the controller sees only the manifest digest, so `max_objects_per_run` is
+what bounds artifacts today, by capping how many manifests one run may
+publish. Counting artifact bytes needs the manifest to carry its entries'
+sizes, which it does not yet.
+
+Hold one team to a tier, or to limits of your own, with
+`PUT /api/v1/storage/quotas/{principal}` (scope `admin`):
+
+```bash
+curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"tier":"paid"}'
+```
+
+What counts is what the controller commits durably: a run event is charged its
+payload bytes, and a published artifact manifest is charged one object. Live
+logs are not charged, because the controller holds them in an in-memory ring
+and stores nothing. The team charged is the one the calling token's principal
+names, never a team named in the request, and the charge is written inside the
+same transaction as the write it pays for, so a write that fails is not billed
+and a retry pays once.
+
+A write past a limit is refused with `413` and a reason naming the limit, the
+team, what it has already stored and what the write asked for, which is what
+the CLI prints. Per-run totals are removed with their run, so a run that
+retention or an operator deletes stops counting against the per-run limit; the
+month's total outlives it deliberately, so a deleted run does not refund a
+spent month.

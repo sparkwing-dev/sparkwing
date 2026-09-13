@@ -132,6 +132,9 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` |
 | `GET` | `/api/v1/secrets/{name}` | `secrets.read` |
 | `GET` | `/api/v1/services` | `authenticated` |
+| `GET` | `/api/v1/storage` | `runs.read` |
+| `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
+| `PUT` | `/api/v1/storage/settings` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

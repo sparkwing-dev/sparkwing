@@ -84,7 +84,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	objectStore, objectStoreProblems := objectStoreHealth()
 	problems = append(problems, objectStoreProblems...)
 
-	resp := map[string]any{"status": "ok", "auth": authState, "object_store": objectStore}
+	resp := map[string]any{
+		"status": "ok", "auth": authState,
+		"object_store": objectStore, "database": s.storageHealth(),
+	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
@@ -594,7 +597,11 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 			}))
 		}
 	}
-	seq, err := s.store.AppendEvent(r.Context(), runID, body.NodeID, body.Kind, body.Payload)
+	seq, err := s.store.AppendEventCharged(r.Context(), chargedPrincipal(r),
+		runID, body.NodeID, body.Kind, body.Payload)
+	if writeStorageQuotaError(w, s.logger, err) {
+		return
+	}
 	if errors.Is(err, store.ErrLockHeld) {
 		writeError(w, http.StatusConflict, err)
 		return
@@ -1881,7 +1888,15 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.SetNodeArtifactManifest(r.Context(), runID, nodeID, body.ManifestDigest); err != nil {
+	if err := s.store.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
+		runID, nodeID, body.ManifestDigest); err != nil {
+		if writeStorageQuotaError(w, s.logger, err) {
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
