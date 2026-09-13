@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -282,8 +283,11 @@ func TestPeerSockets_SkipsAForeignSocketDirectory(t *testing.T) {
 
 func TestPeerSockets_PrunesADayOldEmptyDirectory(t *testing.T) {
 	base := socketBaseDir()
-	stale := filepath.Join(base, socketDirPrefix()+"stale1917aaaa")
-	fresh := filepath.Join(base, socketDirPrefix()+"fresh1917aaaa")
+	// safety: the base directory is shared by every test binary running as this
+	// user, so a fixed name makes two concurrent runs race on the same mkdir.
+	run := strconv.Itoa(os.Getpid())
+	stale := filepath.Join(base, socketDirPrefix()+"stale"+run)
+	fresh := filepath.Join(base, socketDirPrefix()+"fresh"+run)
 	for _, dir := range []string{stale, fresh} {
 		if err := os.Mkdir(dir, 0o700); err != nil {
 			t.Fatal(err)

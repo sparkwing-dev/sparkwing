@@ -387,6 +387,29 @@ unlock.
   run with `403` at the first readiness call and the node stayed pending. A node
   claim still cannot open a round, and an `admin` token reaches all three exactly
   as before.
+- **wingd:** Credit a first-seen process only where the scan can date its start
+  Admission computes grantable cores as the machine's capacity less the CPU it cannot
+  account for, so a tree whose CPU goes unattributed is charged to the machine and the
+  gate grants against the difference. A process the previous reading never listed was
+  credited its whole lifetime counter, which over-stated owned CPU after a holder was
+  re-held following an idle stretch. Each platform now dates a process against the
+  instant its scan began listing, and a tree holding a process the platform cannot date
+  reports no figure rather than a wrong one.
+
+- **wingd:** Refuse an uptime the machine cannot have reported
+  A `/proc/uptime` reading of `nan` parsed without error and dated every process at the
+  instant of the scan, because every comparison against a value that is not a number is
+  false and the age converted to zero. Every first-seen process on the host was then
+  credited its whole counter.
+
+- **cli:** Refuse a budget cap the daemon cannot hold a run to
+  `--budget nancores`, `nan%` and `nangb` parsed without error and produced a cap that
+  read as absent, so the daemon granted the whole machine with enforcement reporting
+  off. A memory size larger than a byte count holds, such as `8589934592gib`, became a
+  negative reserve, and one smaller than a byte rounded to no cap. These now fail at
+  parse with the reason. An existing configuration carrying such a value starts
+  refusing rather than silently running uncapped.
+
 - **wingd:** A nested run reattaching to a restored lease keeps its own
   identity. The `reattach` message carries an optional `run_id` and the daemon
   grants the member it names. Memberships previously went out in the lease's

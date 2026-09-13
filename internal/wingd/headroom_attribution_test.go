@@ -333,22 +333,41 @@ func TestRefreshHeadroom_AShortRunIsCreditedFromItsFirstReading(t *testing.T) {
 
 func TestRefreshHeadroom_ARunHeldSinceBeforeTheWindowIsNotCreditedOnSight(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
-	processes := map[int]ownedProcess{
-		4242: {parentPID: 1, identity: processIdentity{pid: 4242, startTicks: 7}, cpuSeconds: 2},
-	}
 	lastAt := now.Add(-time.Second)
+	born := map[int]ownedProcess{
+		4242: {
+			parentPID:  1,
+			identity:   processIdentity{pid: 4242, startTicks: 7},
+			cpuSeconds: 2,
+			startedAt:  lastAt.Add(100 * time.Millisecond),
+		},
+	}
 
 	held := []OwnedRoot{{PID: 4242, HeldSince: now.Add(-time.Hour)}}
-	byRoot, _ := ownedCPUByRoot(nil, processes, ownedProcessOwners(held, processes), held, lastAt, now, 8)
+	byRoot, _ := ownedCPUByRoot(nil, born, ownedProcessOwners(held, born), held, lastAt, lastAt, now, 8)
 	if _, figure := byRoot[4242]; figure {
 		t.Errorf("owned CPU by root = %v; want no figure: the run was held since long before this reading, so how much of its CPU belongs to the reading is unknowable",
 			byRoot)
 	}
 
 	fresh := []OwnedRoot{{PID: 4242, HeldSince: now.Add(-500 * time.Millisecond)}}
-	byRoot, _ = ownedCPUByRoot(nil, processes, ownedProcessOwners(fresh, processes), fresh, lastAt, now, 8)
+	byRoot, _ = ownedCPUByRoot(nil, born, ownedProcessOwners(fresh, born), fresh, lastAt, lastAt, now, 8)
 	if math.Abs(byRoot[4242]-2) > 0.0001 {
-		t.Errorf("owned CPU by root = %v, want 2.0: a run that began holding inside this reading ran all its CPU inside it", byRoot)
+		t.Errorf("owned CPU by root = %v, want 2.0: the run began holding inside this reading and its process began inside it too", byRoot)
+	}
+
+	older := map[int]ownedProcess{
+		4242: {
+			parentPID:  1,
+			identity:   processIdentity{pid: 4242, startTicks: 7},
+			cpuSeconds: 2,
+			startedAt:  now.Add(-time.Hour),
+		},
+	}
+	byRoot, _ = ownedCPUByRoot(nil, older, ownedProcessOwners(fresh, older), fresh, lastAt, lastAt, now, 8)
+	if figure, reported := byRoot[4242]; reported {
+		t.Errorf("owned CPU by root = %v; want no figure: beginning to hold a tree does not make the CPU it ran beforehand this window's, and crediting it over-states owned, which under-states external and over-admits",
+			figure)
 	}
 }
 

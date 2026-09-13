@@ -116,6 +116,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 }
 
 func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
+	scanStart := time.Now()
 	procs, ok := windowsProcesses()
 	if !ok {
 		return nil, false
@@ -134,14 +135,9 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 	if len(readable) == 0 {
 		return nil, true
 	}
-	processes := windowsOwnedProcesses(procs, children)
-	owners := ownedProcessOwners(readable, processes)
 	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, readable, s.lastAt, now, arbitratedCores)
-	s.last, s.lastAt = next, now
-	return byRoot, true
+	processes := windowsOwnedProcesses(procs, children, now)
+	return s.creditScan(processes, readable, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
 }
 
 func windowsProcesses() (map[int]windowsProc, bool) {
@@ -203,7 +199,7 @@ func windowsProcessChildren(processes map[int]windowsProc) map[int][]int {
 	return children
 }
 
-func windowsOwnedProcesses(processes map[int]windowsProc, children map[int][]int) map[int]ownedProcess {
+func windowsOwnedProcesses(processes map[int]windowsProc, children map[int][]int, now time.Time) map[int]ownedProcess {
 	parents := make(map[int]int, len(processes))
 	for parentPID, childPIDs := range children {
 		for _, childPID := range childPIDs {
@@ -219,6 +215,7 @@ func windowsOwnedProcesses(processes map[int]windowsProc, children map[int][]int
 			parentPID:  parents[processID],
 			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
 			cpuSeconds: proc.cpuSeconds,
+			startedAt:  windowsProcessStart(now, proc.startTicks),
 		}
 	}
 	return ownedProcesses
@@ -235,4 +232,15 @@ func windowsTreeMeasured(tree []int, processes map[int]windowsProc) bool {
 
 func windowsFiletimeTicks(value windows.Filetime) uint64 {
 	return uint64(value.HighDateTime)<<32 | uint64(value.LowDateTime)
+}
+
+func windowsProcessStart(now time.Time, startTicks uint64) time.Time {
+	if startTicks == 0 {
+		return time.Time{}
+	}
+	filetime := windows.Filetime{
+		LowDateTime:  uint32(startTicks & 0xFFFFFFFF),
+		HighDateTime: uint32(startTicks >> 32),
+	}
+	return processStartFromCreation(now, time.Unix(0, filetime.Nanoseconds()))
 }

@@ -76,12 +76,12 @@ func TestWindowsOwnedCPUDoesNotReattachAnOrphanToAReusedRootPID(t *testing.T) {
 		11: {parentPID: 10, startTicks: 100, cpuSeconds: 20, measured: true},
 		12: {parentPID: 10, startTicks: 300, cpuSeconds: 2, measured: true},
 	}
-	firstOwned := windowsOwnedProcesses(first, windowsProcessChildren(first))
+	firstOwned := windowsOwnedProcesses(first, windowsProcessChildren(first), firstAt)
 	identities := ownedProcessOwners(heldRoots(10), firstOwned)
 	if _, present := identities[processIdentity{pid: 11, startTicks: 100}]; present {
 		t.Fatal("the older orphan was attached to a root that reused its parent PID")
 	}
-	byRoot, previous := ownedCPUByRoot(nil, firstOwned, identities, heldRoots(10), firstAt.Add(-time.Second), firstAt, 8)
+	byRoot, previous := ownedCPUByRoot(nil, firstOwned, identities, heldRoots(10), firstAt.Add(-time.Second), firstAt.Add(-time.Second), firstAt, 8)
 	if _, figure := byRoot[10]; figure {
 		t.Fatal("the first sample reported CPU for a root with no baseline")
 	}
@@ -91,9 +91,9 @@ func TestWindowsOwnedCPUDoesNotReattachAnOrphanToAReusedRootPID(t *testing.T) {
 		11: {parentPID: 10, startTicks: 100, cpuSeconds: 120, measured: true},
 		12: {parentPID: 10, startTicks: 300, cpuSeconds: 4, measured: true},
 	}
-	secondOwned := windowsOwnedProcesses(second, windowsProcessChildren(second))
+	secondOwned := windowsOwnedProcesses(second, windowsProcessChildren(second), firstAt.Add(time.Second))
 	identities = ownedProcessOwners(heldRoots(10), secondOwned)
-	byRoot, _ = ownedCPUByRoot(previous, secondOwned, identities, heldRoots(10), firstAt.Add(time.Second).Add(-time.Second), firstAt.Add(time.Second), 8)
+	byRoot, _ = ownedCPUByRoot(previous, secondOwned, identities, heldRoots(10), firstAt.Add(time.Second).Add(-time.Second), firstAt.Add(time.Second).Add(-time.Second), firstAt.Add(time.Second), 8)
 	if byRoot[10] != 3 {
 		t.Fatalf("owned CPU by root = %v; want root plus valid child only", byRoot)
 	}

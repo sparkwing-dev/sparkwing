@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -131,12 +132,18 @@ func ParseBudget(s string) (Budget, error) {
 	return b, nil
 }
 
+// safety: every comparison against a NaN is false, so a bound written as a refusal
+// admits one, and the cap then reads as absent.
+func positiveFinite(n float64) bool {
+	return n > 0 && !math.IsInf(n, 0)
+}
+
 func parsePercent(tok string) (float64, error) {
 	n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "%"), 64)
 	if err != nil {
 		return 0, fmt.Errorf("budget: %q is not a percentage", tok)
 	}
-	if n <= 0 || n > 100 {
+	if !positiveFinite(n) || n > 100 {
 		return 0, fmt.Errorf("budget: percentage %q out of range; want (0, 100]", tok)
 	}
 	return n / 100, nil
@@ -154,7 +161,7 @@ func parseCoreCount(tok string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("budget: %q is not a core count, percentage, or memory size", tok)
 	}
-	if n <= 0 {
+	if !positiveFinite(n) {
 		return 0, fmt.Errorf("budget: cores %q must be positive", tok)
 	}
 	return n, nil
@@ -189,10 +196,13 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		if perr != nil {
 			return 0, false, fmt.Errorf("budget: %q is not a memory size", tok)
 		}
-		if n <= 0 {
-			return 0, false, fmt.Errorf("budget: memory %q must be positive", tok)
+		// safety: an admitted size must convert to a positive int64, and the conversion
+		// of one the target cannot hold is the architecture's choice, not Go's.
+		size := n * u.scale
+		if !positiveFinite(size) || size >= math.MaxInt64 || uint64(size) == 0 {
+			return 0, false, fmt.Errorf("budget: memory %q must be positive and hold in a byte count", tok)
 		}
-		return uint64(n * u.scale), true, nil
+		return uint64(size), true, nil
 	}
 	return 0, false, nil
 }

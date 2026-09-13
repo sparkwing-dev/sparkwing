@@ -1,8 +1,10 @@
 package wingd
 
 import (
+	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type cpuTotals struct {
@@ -72,4 +74,48 @@ func clampCores(cores, totalCores float64) float64 {
 		return totalCores
 	}
 	return cores
+}
+
+func parseProcUptime(data string) (float64, bool) {
+	fields := strings.Fields(data)
+	if len(fields) == 0 {
+		return 0, false
+	}
+	seconds, err := strconv.ParseFloat(fields[0], 64)
+	// safety: ParseFloat reads "nan" and "inf" without reporting an error.
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
+		return 0, false
+	}
+	return seconds, true
+}
+
+func processStartFromCreation(now, createdAt time.Time) time.Time {
+	age := now.Sub(createdAt)
+	if age < 0 {
+		return time.Time{}
+	}
+	return datedOrUndatable(now, age)
+}
+
+func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) time.Time {
+	if uptimeSeconds <= 0 {
+		return time.Time{}
+	}
+	// safety: a NaN age converts to a zero Duration, dating the process at the scan
+	// instant, so this admits rather than refuses.
+	age := uptimeSeconds - startSeconds
+	if age >= 0 {
+		return datedOrUndatable(now, time.Duration(age*float64(time.Second)))
+	}
+	return time.Time{}
+}
+
+func datedOrUndatable(now time.Time, age time.Duration) time.Time {
+	// safety: Go drops a monotonic reading that lands outside the range it survives,
+	// rather than failing, and a comparison without one falls back to the wall clock.
+	dated := now.Add(-age)
+	if dated == dated.Round(0) {
+		return time.Time{}
+	}
+	return dated
 }

@@ -28,7 +28,7 @@ func TestOwnedCPU_ReapedChildIsNotCountedAgainThroughParent(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-1) > 0.0001 {
@@ -47,7 +47,7 @@ func TestOwnedCPU_PIDReuseNeedsANewBaseline(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if _, figure := byRoot[10]; figure || usage != 0 {
@@ -65,11 +65,16 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 	processes := map[int]ownedProcess{
 		10: {parentPID: 1, identity: parent, cpuSeconds: 2},
-		11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1001}, cpuSeconds: 4},
+		11: {
+			parentPID:  10,
+			identity:   processIdentity{pid: 11, startTicks: 1001},
+			cpuSeconds: 4,
+			startedAt:  previousAt.Add(500 * time.Millisecond),
+		},
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, previousAt, now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-5) > 0.0001 {
@@ -81,25 +86,27 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 }
 
-func TestOwnedCPU_AProcessOlderThanTheWindowIsNotCreditedToIt(t *testing.T) {
+func TestOwnedCPU_AProcessCarryingMoreCPUThanTheWindowCouldHoldIsNotCredited(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
+	lastAt := now.Add(-time.Second)
+	born := lastAt.Add(100 * time.Millisecond)
 	cases := map[string]map[int]ownedProcess{
 		"a long-running process adopted into a tree just being watched": {
-			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 900}, cpuSeconds: 0.1},
-			11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1}, cpuSeconds: 3600},
+			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 900}, cpuSeconds: 0.1, startedAt: born},
+			11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1}, cpuSeconds: 3600, startedAt: born},
 		},
 		"a run reattaching after a restart, with no reading and a fresh hold": {
-			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 7}, cpuSeconds: 900},
+			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 7}, cpuSeconds: 900, startedAt: born},
 		},
 	}
 	for name, processes := range cases {
-		roots := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Second)}}
+		roots := []OwnedRoot{{PID: 10, HeldSince: lastAt}}
 		owners := ownedProcessOwners(roots, processes)
 
-		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now.Add(-time.Second), now, 8)
+		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, lastAt, lastAt, now, 8)
 
 		if _, figure := byRoot[10]; figure {
-			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold proves the process predates it, and crediting that total would understate external and over-admit",
+			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold cannot have run inside it whatever the process claims about its age, and crediting that total would understate external and over-admit",
 				name, byRoot)
 		}
 	}
@@ -131,7 +138,7 @@ func TestOwnedCPU_ARootWithoutItsOwnBaselineReportsNoFigure(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(7), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(7), now.Add(-time.Second), now, 8)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(7), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 
 	if _, figure := byRoot[7]; figure {
 		t.Fatalf("owned CPU by root = %v; want no figure for a root that re-execed: its own process has no baseline, so the tree's sum covers only the surviving child and is silently short",
@@ -172,7 +179,7 @@ func TestOwnedCPU_SumsEveryMeasuredProcessUnderOneRoot(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now.Add(-time.Second), now, 8)
 
 	if math.Abs(byRoot[10]-4) > 0.0001 {
 		t.Fatalf("owned CPU by root = %v; want the root's own 1 core plus its child's 3 summed into one tree, not the last one read", byRoot)
@@ -201,7 +208,12 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 	reheldAt := releasedAt.Add(time.Hour)
 	identity := processIdentity{pid: 10, startTicks: 1000}
 	process := func(cpuSeconds float64) map[int]ownedProcess {
-		return map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: cpuSeconds}}
+		return map[int]ownedProcess{10: {
+			parentPID:  1,
+			identity:   identity,
+			cpuSeconds: cpuSeconds,
+			startedAt:  firstAt.Add(time.Second),
+		}}
 	}
 	sampler := &ownedProcSampler{}
 	held := []OwnedRoot{{PID: 10, HeldSince: firstAt.Add(-time.Hour)}}
@@ -209,16 +221,22 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 	processes := process(50)
 	_, next := ownedCPUByRoot(
 		map[processIdentity]cpuSample{identity: {cpuSeconds: 40, at: firstAt}},
-		processes, ownedProcessOwners(held, processes), held, firstAt, releasedAt, 8)
-	sampler.last, sampler.lastAt = next, releasedAt
+		processes, ownedProcessOwners(held, processes), held, firstAt, firstAt, releasedAt, 8)
+	sampler.last, sampler.lastAt, sampler.seenSince = next, releasedAt, firstAt
 
 	sampler.forgetSamples(reheldAt)
 
-	processes = process(3650)
+	const reheldCounter, cores = 50.0, 8.0
+	reheldNow := reheldAt.Add(10 * time.Second)
+	if ceiling := reheldNow.Sub(sampler.lastAt).Seconds() * cores; reheldCounter > ceiling {
+		t.Fatalf("re-held counter %v is over the %v cores-seconds this window could hold, so the capacity bound refuses the credit and the date gate below decides nothing: lower the counter rather than letting this test pass for a reason it is not about",
+			reheldCounter, ceiling)
+	}
+	processes = process(reheldCounter)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
 		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
-		sampler.lastAt, reheldAt.Add(10*time.Second), 8)
+		sampler.lastAt, sampler.seenSince, reheldNow, cores)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("re-held tree was charged %v cores; want no figure, because the daemon watched none of the hour that CPU ran in",
@@ -234,7 +252,7 @@ func TestOwnedCPU_ATreeThatRanNothingReportsZeroRatherThanNoReading(t *testing.T
 	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 7}}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, previousAt, now, 8)
 
 	figure, reported := byRoot[10]
 	if !reported || figure != 0 {
@@ -267,12 +285,12 @@ func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
 			kept:     {cpuSeconds: 0, at: firstAt},
 			released: {cpuSeconds: 0, at: firstAt},
 		},
-		processes, ownedProcessOwners(both, processes), both, firstAt, secondAt, 8)
+		processes, ownedProcessOwners(both, processes), both, firstAt, firstAt, secondAt, 8)
 
 	processes = table(20, 90)
 	_, afterRelease := ownedCPUByRoot(
 		afterBoth, processes, ownedProcessOwners(onlyKept, processes),
-		onlyKept, secondAt, thirdAt, 8)
+		onlyKept, secondAt, secondAt, thirdAt, 8)
 
 	processes = table(30, 90)
 	rehold := []OwnedRoot{
@@ -281,6 +299,7 @@ func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
 	}
 	byRoot, _ := ownedCPUByRoot(
 		afterRelease, processes, ownedProcessOwners(rehold, processes), rehold,
+		thirdAt,
 		thirdAt, thirdAt.Add(10*time.Second), 8)
 
 	figure, reported := byRoot[20]
@@ -297,7 +316,7 @@ func TestOwnedCPU_ARootFirstSeenWithNoReadingBehindItGetsNoFigure(t *testing.T) 
 	held := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Hour)}}
 
 	byRoot, _ := ownedCPUByRoot(
-		nil, processes, ownedProcessOwners(held, processes), held, time.Time{}, now, 8)
+		nil, processes, ownedProcessOwners(held, processes), held, time.Time{}, time.Time{}, now, 8)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("root reported %v cores against no previous reading; want no figure, because the counter says nothing about when that CPU ran",
@@ -320,6 +339,7 @@ func TestOwnedProcSampler_AReadingWithNothingHeldEndsTheWindow(t *testing.T) {
 	rehold := []OwnedRoot{{PID: 10, HeldSince: time.Now()}}
 	byRoot, _ := ownedCPUByRoot(
 		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
+		sampler.lastAt,
 		sampler.lastAt, time.Now().Add(10*time.Second), 8)
 
 	if figure, reported := byRoot[10]; reported {
@@ -343,10 +363,290 @@ func TestOwnedCPU_ATreeWithAnUnreadableCounterReportsNoFigure(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, previousAt, now, 8)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("tree reported %v cores with one counter unreadable; want no figure, because the rest of the tree is short by an unknown amount and a short figure still subtracts from external",
 			figure)
+	}
+}
+
+func TestOwnedCPU_AProcessBornWhileTheLastReadingScannedIsStillCredited(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	lastAt := scanStart.Add(50 * time.Millisecond)
+	now := lastAt.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	previous := map[processIdentity]cpuSample{root: {cpuSeconds: 1, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 1, startedAt: scanStart.Add(-time.Hour)},
+		11: {parentPID: 10, identity: child, cpuSeconds: 3, startedAt: scanStart.Add(20 * time.Millisecond)},
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
+
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: it started after the previous reading began listing, so that reading could not have seen it and its absence is not evidence of age",
+			figure, reported)
+	}
+}
+
+func TestOwnedCPU_AProcessDatedOneTickBeforeTheScanKeepsItsCredit(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	lastAt := scanStart.Add(50 * time.Millisecond)
+	now := lastAt.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	previous := map[processIdentity]cpuSample{root: {cpuSeconds: 1, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 1, startedAt: scanStart.Add(-time.Hour)},
+		11: {
+			parentPID:  10,
+			identity:   child,
+			cpuSeconds: 3,
+			startedAt:  scanStart.Add(-5 * time.Millisecond),
+		},
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
+
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: a tick of dating resolution is not evidence the process predates the scan, and refusing it costs the whole tree its figure",
+			figure, reported)
+	}
+}
+
+func TestStartedInWindow_AdmitsOnlyAProcessThePreviousScanCouldNotHaveSeen(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	now := scanStart.Add(5 * time.Second)
+	for name, tc := range map[string]struct {
+		startedAt time.Time
+		seenSince time.Time
+		want      bool
+	}{
+		"undatable process":         {time.Time{}, scanStart, false},
+		"no previous scan":          {scanStart.Add(time.Second), time.Time{}, false},
+		"running before the scan":   {scanStart.Add(-time.Hour), scanStart, false},
+		"a tick before the scan":    {scanStart.Add(-5 * time.Millisecond), scanStart, true},
+		"two ticks before the scan": {scanStart.Add(-20 * time.Millisecond), scanStart, false},
+		// safety: written as literals, because a case expressed against the constant
+		// moves with it and pins nothing.
+		"exactly one clock tick before the scan": {scanStart.Add(-10 * time.Millisecond), scanStart, true},
+		"a nanosecond older than one clock tick": {scanStart.Add(-10*time.Millisecond - time.Nanosecond), scanStart, false},
+		"born during the scan":                   {scanStart.Add(time.Millisecond), scanStart, true},
+		"born inside the window":                 {now.Add(-time.Second), scanStart, true},
+		"dated after this reading":               {now.Add(time.Hour), scanStart, false},
+	} {
+		if got := startedInWindow(tc.startedAt, tc.seenSince, now); got != tc.want {
+			t.Errorf("%s: startedInWindow = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestParseProcUptime_RefusesAnythingItCannotRead(t *testing.T) {
+	if got, ok := parseProcUptime("343083.69 2724178.71\n"); !ok || got != 343083.69 {
+		t.Errorf("parseProcUptime = %v, %v; want the first field", got, ok)
+	}
+	if got, ok := parseProcUptime("12.5"); !ok || got != 12.5 {
+		t.Errorf("parseProcUptime with one field = %v, %v; want it read", got, ok)
+	}
+	for name, data := range map[string]string{
+		"empty":                 "",
+		"blank":                 "   \n",
+		"not a number":          "unknown 1\n",
+		"zero":                  "0 0\n",
+		"negative":              "-1 0\n",
+		"the IEEE not-a-number": "nan 0\n",
+		"positive infinity":     "inf 0\n",
+		"spelled-out infinity":  "Infinity 0\n",
+	} {
+		if got, ok := parseProcUptime(data); ok || got != 0 {
+			t.Errorf("%s: parseProcUptime = %v, %v; want refused, because a bad uptime dates every process wrongly rather than leaving it undated",
+				name, got, ok)
+		}
+	}
+}
+
+func TestOwnedCPU_ATreeWithAnUndatableProcessReportsNoFigure(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	lastAt := scanStart.Add(50 * time.Millisecond)
+	now := lastAt.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	previous := map[processIdentity]cpuSample{root: {cpuSeconds: 1, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 3, startedAt: scanStart.Add(-time.Hour)},
+		11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1001}, cpuSeconds: 2},
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
+
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("tree reported %v cores beside a process it could not date; want no figure, because the rest of the tree is short by an unknown amount and a short figure still subtracts from external",
+			figure)
+	}
+}
+
+func TestOwnedProcSampler_ASecondScanDatesAProcessFromWhenTheFirstBeganListing(t *testing.T) {
+	firstScanStart := time.Unix(100, 0)
+	firstNow := firstScanStart.Add(50 * time.Millisecond)
+	secondNow := firstNow.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	held := []OwnedRoot{{PID: 10, HeldSince: firstScanStart.Add(-time.Hour)}}
+	oldRoot := ownedProcess{parentPID: 1, identity: root, cpuSeconds: 1, startedAt: firstScanStart.Add(-time.Hour)}
+
+	sampler := &ownedProcSampler{}
+	sampler.creditScan(map[int]ownedProcess{10: oldRoot}, held, scanWindow{startedListingAt: firstScanStart, readAt: firstNow}, 8)
+
+	byRoot := sampler.creditScan(map[int]ownedProcess{
+		10: oldRoot,
+		11: {parentPID: 10, identity: child, cpuSeconds: 3, startedAt: firstScanStart.Add(20 * time.Millisecond)},
+	}, held, scanWindow{startedListingAt: firstNow, readAt: secondNow}, 8)
+
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: the scan it is missing from was already listing when the child began, so its absence there is not evidence of age",
+			figure, reported)
+	}
+}
+
+func TestOwnedProcSampler_ReHoldingAfterAnIdleStretchDatesFromWhenItStoppedWatching(t *testing.T) {
+	idleAt := time.Unix(100, 0)
+	scanStart := idleAt.Add(2 * time.Second)
+	now := scanStart.Add(50 * time.Millisecond)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	held := []OwnedRoot{{PID: 10, HeldSince: idleAt.Add(time.Second)}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 3, startedAt: idleAt.Add(time.Second)},
+	}
+
+	sampler := &ownedProcSampler{}
+	sampler.forgetSamples(idleAt)
+
+	byRoot := sampler.creditScan(processes, held, scanWindow{startedListingAt: scanStart, readAt: now}, 8)
+
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-3.0/2.05) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want its three CPU-seconds over the 2.05-second window: the sampler stopped watching at a known instant, and a run begun after that instant ran every one of those seconds inside the window",
+			figure, reported)
+	}
+}
+
+func TestProcessStartFromCreation_KeepsTheMonotonicReadingTheScanBoundsCarry(t *testing.T) {
+	now := time.Now()
+	createdAt := now.Add(-5 * time.Second).Round(0)
+
+	started := processStartFromCreation(now, createdAt)
+
+	if started.Round(0) != createdAt {
+		t.Fatalf("process dated %v; want the creation stamp %v, because the age is what the platform reported",
+			started.Round(0), createdAt)
+	}
+	if started == started.Round(0) {
+		t.Fatalf("process start %v carries no monotonic reading; want one, because a comparison against the scan bounds then falls back to the wall clock and a step larger than the dating slack moves the admit bound",
+			started)
+	}
+}
+
+func TestProcessStartFromCreation_RefusesAProcessCreatedAfterTheScan(t *testing.T) {
+	now := time.Now()
+
+	started := processStartFromCreation(now, now.Add(time.Second).Round(0))
+
+	if !started.IsZero() {
+		t.Fatalf("process dated %v; want no date, because a creation stamp after the scan is a clock the daemon cannot measure against",
+			started)
+	}
+}
+
+func TestFirstSightCredit_BoundsAFirstSeenTotalByTheArbitratedCapacity(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cpuSeconds, window, arbitratedCores, want float64
+		wantOK                                    bool
+	}{
+		"a total the arbitrated capacity could just have run": {8, 2, 4, 4, true},
+		"more than the arbitrated capacity could have run":    {8.5, 2, 4, 0, false},
+		"that same total under twice the capacity":            {8.5, 2, 8, 4.25, true},
+		"a window that stood still":                           {1, 0, 4, 0, false},
+		"no arbitrated capacity to bound it against":          {0, 2, 0, 0, false},
+	} {
+		got, ok := firstSightCredit(tc.cpuSeconds, tc.window, tc.arbitratedCores)
+		if ok != tc.wantOK || math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("%s: firstSightCredit(%v, %v, %v) = %v, %v; want %v, %v: the ceiling is the capacity admission arbitrates, and a looser one credits CPU that ran before the window while a tighter one drops a figure the tree earned",
+				name, tc.cpuSeconds, tc.window, tc.arbitratedCores, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+func TestProcessStartFromUptime_KeepsTheMonotonicReadingTheScanBoundsCarry(t *testing.T) {
+	now := time.Now()
+
+	started := processStartFromUptime(now, 3600, 60)
+
+	if started == started.Round(0) {
+		t.Fatalf("process start %v carries no monotonic reading; want one, because a comparison against the scan bounds then falls back to the wall clock and a step larger than the dating slack moves the admit bound",
+			started)
+	}
+	if got, want := now.Sub(started), 3540*time.Second; got != want {
+		t.Fatalf("process aged %v off the boot clock, want %v", got, want)
+	}
+}
+
+func TestProcessStartFromUptime_RefusesADateItCannotStandBehind(t *testing.T) {
+	now := time.Now()
+	for name, tc := range map[string]struct{ uptimeSeconds, startSeconds float64 }{
+		"unreadable uptime":              {0, 0},
+		"negative uptime":                {-1, 0},
+		"a start after the boot ran":     {10, 3600},
+		"an uptime that is not a number": {math.NaN(), 60},
+	} {
+		if got := processStartFromUptime(now, tc.uptimeSeconds, tc.startSeconds); !got.IsZero() {
+			t.Errorf("%s: process start = %v; want undated, so the tree goes unmeasured rather than credited on a bad date", name, got)
+		}
+	}
+}
+
+func TestOwnedCPU_ARecycledPIDDoesNotInheritTheDeadProcessBaseline(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	lastAt := now.Add(-time.Second)
+	dead := processIdentity{pid: 10, startTicks: 1}
+	previous := map[processIdentity]cpuSample{dead: {cpuSeconds: 5, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 2}, cpuSeconds: 99, startedAt: lastAt},
+	}
+	held := []OwnedRoot{{PID: 4242, HeldSince: lastAt}}
+
+	_, next := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, lastAt, now, 8)
+
+	if sample, carried := next[dead]; carried {
+		t.Fatalf("the dead identity carried forward %v CPU-seconds read off the process that reused its PID; want it dropped, because re-holding that tree would then charge the window a delta measured against a counter belonging to neither process",
+			sample.cpuSeconds)
+	}
+}
+
+func TestProcessStartFromCreation_RefusesACreationStampTooOldToKeepAMonotonicReading(t *testing.T) {
+	now := time.Now()
+	for name, createdAt := range map[string]time.Time{
+		// safety: a garbage FILETIME reaches these; the conversion clamps to 1677.
+		"past the range a duration holds":      time.Date(1700, 1, 1, 0, 0, 0, 0, time.UTC),
+		"inside the range a duration holds":    time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC),
+		"an age no source could have measured": {},
+	} {
+		if started := processStartFromCreation(now, createdAt); !started.IsZero() {
+			t.Fatalf("%s: process dated %v; want no date, because subtracting an age this wide lands outside the range a monotonic reading survives and the result silently carries none",
+				name, started)
+		}
+	}
+}
+
+func TestProcessStartFromUptime_RefusesAnUptimeTooWideToKeepAMonotonicReading(t *testing.T) {
+	const secondsIn200Years = 200 * 365 * 24 * 60 * 60
+
+	started := processStartFromUptime(time.Now(), secondsIn200Years, 0)
+
+	if !started.IsZero() {
+		t.Fatalf("process dated %v; want no date: no machine reports an uptime this wide, and the two dating paths answer the same way so neither grows a case the other lacks",
+			started)
 	}
 }
