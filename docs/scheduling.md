@@ -141,7 +141,8 @@ the next eligible runner takes it. A node with no `Prefers` falls back to
 with neither is claimed first-in-first-out as before.
 
 The rule reorders the queue and never widens it: `Requires` stays a hard filter,
-and a held node blocks nothing behind it. Three cases deliberately hold nothing
+and a held node blocks nothing behind it, because one poll reads past held
+nodes in ready order, up to 512 of them, to find the first it may take. Three cases deliberately hold nothing
 back, because each is a runner that cannot be counted on to take the node:
 
 - a runner whose claim carries no `capacity` block, which said nothing about
