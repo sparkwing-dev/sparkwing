@@ -229,8 +229,9 @@ func readMemAvailable() (uint64, bool) {
 }
 
 func linuxProcessStart(now time.Time, uptimeSeconds float64, startTicks uint64) time.Time {
-	// safety: start ticks and uptime both count from boot, so comparing them
-	// survives a wall-clock adjustment that would move a boot-time reading.
+	// safety: the returned time keeps now's monotonic reading, which is what makes
+	// a later comparison survive a clock adjustment. Rebuilding it from a wall
+	// value, or routing it through UTC or Round, strips that and nothing goes red.
 	if uptimeSeconds <= 0 {
 		return time.Time{}
 	}

@@ -240,10 +240,9 @@ func ownedCPUByRoot(
 		prior, seen := previous[identity]
 		if !seen {
 			if !startedInWindow(process.startedAt, seenSince, now) {
-				// safety: the daemon has no reading for this process and it was already
-				// running when the window opened, so its counter covers time nobody
-				// watched. Crediting the total would charge this window for CPU that ran
-				// outside it, and admission would grant against the difference.
+				// safety: crediting a counter that covers time nobody watched charges
+				// this window for CPU that ran outside it, and admission then grants
+				// against the difference.
 				unreadable[root] = struct{}{}
 				continue
 			}

@@ -240,8 +240,6 @@ func windowsFiletimeTicks(value windows.Filetime) uint64 {
 }
 
 func windowsProcessStart(startTicks uint64) time.Time {
-	// safety: a creation filetime counts hundred-nanosecond intervals from 1601,
-	// so it dates a process directly where linux needs the boot clock.
 	if startTicks == 0 {
 		return time.Time{}
 	}
