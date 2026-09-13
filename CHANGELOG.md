@@ -32,17 +32,25 @@ unlock.
   so a ten dollar top-up is a thousand credits. At the default rate a cloud
   runner second costs 0.02 credits, which is 72 credits ($0.72) an hour.
 - **controller:** A runner token the operator marked metered is checked and
-  charged; no other token is. `POST /api/v1/nodes/claim` answers `402` with
-  `"code": "insufficient_credits"` while the balance is below a minute of cloud
-  runner time, leaving the node ready and recording a `credits_blocked` event
-  on the waiting run. Each heartbeat from a metered token charges the seconds
-  since that node's previous charge; once the balance reaches zero the node
-  runs out a grace period (60 seconds by default) and the next heartbeat
-  answers `409`, which is how the runner cancels it, with a
-  `credits_exhausted` event naming why.
+  charged; no other token is. A metered claim reserves its first minute inside
+  the claim's own transaction, so concurrent runners cannot each claim against
+  the same balance; when the balance cannot cover it,
+  `POST /api/v1/nodes/claim` answers `402` with
+  `"code": "insufficient_credits"`, the node stays ready, and the waiting run
+  records a `credits_blocked` event. Each heartbeat charges the seconds since
+  that node's previous charge, and the finish charges the tail and refunds the
+  unused reservation, so a node that runs four seconds pays for four seconds.
+  No single charge bills more than the charge cap (30 seconds by default), and
+  a requeued node releases its charge window, so neither a controller outage
+  nor the gap between two attempts is billed. Once the balance reaches zero the
+  node runs out a grace period (60 seconds by default); the next heartbeat then
+  fails the node with the reason `credits_exhausted`, releases its claim, and
+  answers `409`, and the run records a `credits_exhausted` event naming why.
 - **cli:** `sparkwing cluster credits show`, `grant`, and `history` read the
-  balance and the day's burn, add free or paid credits, and list every movement
-  of the ledger newest first. `history -o json` emits one record per line.
+  balance, the rate, the charge cap and the day's burn, add free or paid
+  credits, and list every movement of the ledger newest first. `history
+  --limit` accepts up to 1000 rows of each kind and names the ceiling when
+  asked for more. `history -o json` emits one record per line.
 - **cli:** `sparkwing cluster tokens create --metered` mints a token whose node
   claims cost credits, and `sparkwing cluster tokens set-metered --prefix P
   --metered true|false` marks a token already in use, which is how a warm pool
@@ -52,10 +60,11 @@ unlock.
 - **store:** `CreateTokenWith` mints a token carrying `TokenOptions`,
   `SetTokenMetered` and `TokenMetered` read and write the metering marker, and
   `GrantCredits`, `CreditBalanceMicro`, `CreditState`, `ListCreditGrants`,
-  `ListCreditCharges`, `ChargeNodeCredits`, and `StartNodeMetering` carry the
-  ledger. Schema v35 adds the `credit_grants` and `credit_charges` tables and
-  two defaulted columns; the migration is additive and stamps no requirement,
-  so an older binary still opens the database.
+  `ListCreditCharges`, `ChargeNodeCredits`, `FinalizeNodeCredits`, and
+  `CancelNodeForExhaustedCredits` carry the ledger. A charge is a
+  `reservation`, `usage`, or `refund`. Schema v35 adds the `credit_grants` and
+  `credit_charges` tables and two defaulted columns; the migration is additive
+  and stamps no requirement, so an older binary still opens the database.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

@@ -3983,6 +3983,7 @@ components:
         charged_micro: {type: integer, format: int64}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop.: ''}
         burn_window_seconds: {type: integer, format: int64}
         burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
         exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
@@ -4002,12 +4003,13 @@ components:
     CreditCharge:
       x-sparkwing-go-type: pkg/controller.creditChargeJSON
       type: object
-      description: One interval of one node's execution on a metered runner.
+      description: One movement a metered node caused - the minute its claim reserved, an interval it ran, or the refund of a reservation it did not use.
       properties:
         id: {type: string}
         run_id: {type: string}
         node_id: {type: string}
         token_prefix: {type: string}
+        kind: {type: string, description: reservation, usage: '', or refund; a refund carries negative seconds and amount.: ''}
         seconds: {type: integer, format: int64}
         amount_micro: {type: integer, format: int64}
         charged_at: {type: integer, format: int64, description: Unix seconds.}

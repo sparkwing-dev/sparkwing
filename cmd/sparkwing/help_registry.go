@@ -2039,8 +2039,8 @@ var cmdTokensSetMetered = Command{
 minted, which is how a warm pool already running starts costing
 credits without a new credential. Metering is an operator
 decision: a runner's own labels never make its work billable.
-Claims by a metered token are refused while the balance is
-spent, and each heartbeat charges the seconds it covers.`,
+A claim by a metered token reserves a minute of cloud runner
+time and is refused when the balance cannot cover it.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
 		{Name: "metered", Argument: "BOOL", Desc: "true to charge this token's claims, false to stop", Required: true, Group: "Input"},
@@ -2057,10 +2057,11 @@ var cmdCredits = Command{
 	Synopsis: "Inspect and top up the prepaid credit balance",
 	Description: `Cloud runner time is prepaid. One hundred credits is one dollar,
 so a ten dollar top-up is a thousand credits. The balance is
-grants minus charges: a node is handed to a metered runner only
-while the balance covers a minute of its time, and each
-heartbeat charges the seconds it covers. Runners the operator
-did not mark metered are never charged.`,
+grants minus charges: a claim reserves a minute of cloud runner
+time before it is granted, heartbeats charge the seconds they
+cover, and the finish refunds whatever of the reservation the
+node did not use. Runners the operator did not mark metered are
+never charged.`,
 	SubcommandOrder: []string{"show", "grant", "history"},
 	Examples: []Example{
 		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
@@ -2073,10 +2074,11 @@ var cmdCreditsShow = Command{
 	Synopsis: "Print the balance, the rate, and the recent burn",
 	Description: `Prints the balance in credits, what was granted and charged, the
 price of a cloud runner second, the credits burned over the last
-day, and the grace period a running node gets after the balance
-reaches zero. A controller that was never granted anything reads
-a zero balance and charges nothing, because nothing is metered
-until an operator marks a token.`,
+day, the grace period a running node gets after the balance
+reaches zero, and the cap on what any one charge may bill. A
+controller that was never granted anything reads a zero balance
+and charges nothing, because nothing is metered until an
+operator marks a token.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -2111,11 +2113,14 @@ var cmdCreditsHistory = Command{
 	Path:     "sparkwing cluster credits history",
 	Synopsis: "List grants and charges, newest first",
 	Description: `Lists every movement of the ledger newest first: grants with
-their kind and reference, charges with the run, node, token
-prefix, and seconds they billed. Charges render negative because
-they take credits out. -o json emits one JSON record per line.`,
+their kind and reference, and the reservation a claim took, the
+usage an interval billed, and the refund of a reservation a node
+did not use, each with the run, node, token prefix and seconds
+it covered. Charges render negative because they take credits
+out and a refund renders positive. -o json emits one JSON record
+per line.`,
 	Flags: []FlagSpec{
-		{Name: "limit", Argument: "N", Desc: "Maximum rows of each kind (0 = the controller's default)", Group: "Filter"},
+		{Name: "limit", Argument: "N", Desc: "Maximum rows of each kind, up to 1000 (0 = the controller's default)", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},

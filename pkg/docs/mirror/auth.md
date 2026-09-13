@@ -24,14 +24,30 @@ is the only thing that decides whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
-`POST /api/v1/nodes/claim` from a metered token answers `402` with
-`"code": "insufficient_credits"` while the balance sits below a minute of cloud
-runner time at the current rate. The node stays ready, the run records a
-`credits_blocked` event, and the runner keeps polling. Every heartbeat from a
-metered token charges the seconds since that node's previous charge. Once the
-balance reaches zero the node keeps running for the grace period, after which
-the heartbeat answers `409` and the runner cancels the node; the run records a
-`credits_exhausted` event naming why.
+A claim by a metered token reserves its first minute inside the claim's own
+transaction. The reservation is what makes the check safe when several runners
+poll at once: each one's spend is visible to the next before either claim
+commits, so a balance that covers one minute hands out one node, not one per
+runner. When the balance cannot cover the reservation,
+`POST /api/v1/nodes/claim` answers `402` with `"code": "insufficient_credits"`,
+the node stays ready, the run records a `credits_blocked` event, and the runner
+keeps polling.
+
+Every heartbeat from a metered token charges the seconds since that node's
+previous charge, and the finish charges the tail the last heartbeat missed and
+refunds whatever is left of the reservation. A node that runs for four seconds
+therefore pays for four seconds. Two bounds apply. No single charge bills more
+than the charge cap (30 seconds by default), so a controller outage or a
+stalled heartbeat loop does not bill the gap it left behind. A node that is
+requeued -- its lease reaped, its runner lost, or its attempt reset for a retry
+-- releases its charge window, so the next attempt starts a fresh reservation
+and the idle time between attempts is never billed.
+
+Once the balance reaches zero the node keeps running for the grace period. The
+first heartbeat after that window fails the node with the failure reason
+`credits_exhausted`, releases its claim, and answers `409`, which is how the
+runner learns to stop. The run records a `credits_exhausted` event naming the
+balance and how long it had been spent.
 
 A token with no marker is neither checked nor charged, so a deployment that
 marks none bills nothing.
@@ -46,13 +62,15 @@ hour, so ten dollars buys just under fourteen hours.
 
 The balance is the sum of grants less the sum of charges, computed in SQL over
 the `credit_grants` and `credit_charges` tables. A grant is `free` or `paid`
-and records who added it and the payment it came from. A charge names the run,
-node, token prefix, and seconds it billed.
+and records who added it and the payment it came from. A charge is a
+`reservation` a claim took, the `usage` an interval billed, or the `refund` of
+a reservation a node did not use; each names the run, node, token prefix, and
+seconds it covered.
 
-`sparkwing cluster credits show` prints the balance, the rate, and the last
-day's burn. `sparkwing cluster credits grant --kind free|paid --amount N` adds
-credits and needs `admin`. `sparkwing cluster credits history` lists every
-movement newest first.
+`sparkwing cluster credits show` prints the balance, the rate, the charge cap
+and the last day's burn. `sparkwing cluster credits grant --kind free|paid
+--amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
+lists every movement newest first.
 
 ## Scopes
 

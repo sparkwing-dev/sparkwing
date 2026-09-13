@@ -22,6 +22,7 @@ func TestRenderCreditState(t *testing.T) {
 		ChargedMicro:       12_500_000,
 		RateMicroPerSecond: store.DefaultCreditRateMicro,
 		GraceSeconds:       60,
+		MaxChargeSeconds:   store.DefaultCreditMaxChargeSeconds,
 		BurnWindowSeconds:  86400,
 		BurnMicro:          12_500_000,
 		MicroPerCredit:     store.MicroCreditsPerCredit,
@@ -31,7 +32,7 @@ func TestRenderCreditState(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"987.50 credits", "1000.00 credits", "0.020000 credits", "BURN (24h)", "GRACE"} {
+	for _, want := range []string{"987.50 credits", "1000.00 credits", "0.020000 credits", "BURN (24h)", "GRACE", "CHARGE CAP"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("credit state output is missing %q:\n%s", want, out)
 		}
@@ -45,20 +46,37 @@ func TestCreditHistoryRowsMergeNewestFirst(t *testing.T) {
 			{ID: "grant-1", Kind: "paid", AmountMicro: 1_000_000_000, Reference: "pay_1", CreatedAt: 100},
 		},
 		Charges: []creditChargeResp{
-			{ID: "charge-1", RunID: "run-a", NodeID: "build", TokenPrefix: "swr_x", Seconds: 30, AmountMicro: 600_000, ChargedAt: 200},
+			{
+				ID: "charge-1", RunID: "run-a", NodeID: "build", TokenPrefix: "swr_x",
+				Kind: store.CreditChargeUsage, Seconds: 30, AmountMicro: 600_000, ChargedAt: 200,
+			},
+			{
+				ID: "charge-2", RunID: "run-a", NodeID: "build", TokenPrefix: "swr_x",
+				Kind: store.CreditChargeReservation, Seconds: 60, AmountMicro: 1_200_000, ChargedAt: 150,
+			},
+			{
+				ID: "charge-3", RunID: "run-a", NodeID: "build", TokenPrefix: "swr_x",
+				Kind: store.CreditChargeRefund, Seconds: -20, AmountMicro: -400_000, ChargedAt: 300,
+			},
 		},
 	})
-	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want 4", len(rows))
 	}
-	if rows[0].Type != "charge" {
-		t.Fatalf("newest row = %q, want the charge", rows[0].Type)
+	if rows[0].Type != store.CreditChargeRefund {
+		t.Fatalf("newest row = %q, want the refund", rows[0].Type)
 	}
-	if rows[0].AmountMicro != -600_000 {
-		t.Fatalf("charge amount = %d, want it negative", rows[0].AmountMicro)
+	if rows[0].AmountMicro != 400_000 {
+		t.Fatalf("refund renders %d, want credits coming back", rows[0].AmountMicro)
 	}
-	if rows[1].Type != "grant" || rows[1].AmountMicro != 1_000_000_000 {
-		t.Fatalf("grant row = %+v", rows[1])
+	if rows[1].Type != store.CreditChargeUsage || rows[1].AmountMicro != -600_000 {
+		t.Fatalf("usage row = %+v, want a negative amount", rows[1])
+	}
+	if rows[2].Type != store.CreditChargeReservation || rows[2].AmountMicro != -1_200_000 {
+		t.Fatalf("reservation row = %+v", rows[2])
+	}
+	if rows[3].Type != creditGrantRowType || rows[3].AmountMicro != 1_000_000_000 {
+		t.Fatalf("grant row = %+v", rows[3])
 	}
 
 	var buf bytes.Buffer
@@ -66,10 +84,21 @@ func TestCreditHistoryRowsMergeNewestFirst(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"charge", "grant", "run-a/build", "ref=pay_1", "-0.60"} {
+	for _, want := range []string{"usage", "reservation", "refund", "grant", "run-a/build", "ref=pay_1", "-0.60", "0.40"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("history output is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// A charge from a controller that predates the kind column still renders.
+func TestCreditHistoryRowsDefaultTheChargeKind(t *testing.T) {
+	t.Parallel()
+	rows := creditHistoryRows(creditHistoryResp{
+		Charges: []creditChargeResp{{ID: "charge-1", Seconds: 3, AmountMicro: 60_000, ChargedAt: 10}},
+	})
+	if len(rows) != 1 || rows[0].Type != store.CreditChargeUsage {
+		t.Fatalf("rows = %+v, want one usage row", rows)
 	}
 }
 

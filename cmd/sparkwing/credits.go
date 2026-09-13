@@ -45,6 +45,7 @@ type creditStateResp struct {
 	ChargedMicro       int64  `json:"charged_micro"`
 	RateMicroPerSecond int64  `json:"rate_micro_per_second"`
 	GraceSeconds       int64  `json:"grace_seconds"`
+	MaxChargeSeconds   int64  `json:"max_charge_seconds"`
 	BurnWindowSeconds  int64  `json:"burn_window_seconds"`
 	BurnMicro          int64  `json:"burn_micro"`
 	ExhaustedAt        *int64 `json:"exhausted_at,omitempty"`
@@ -94,6 +95,7 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 	fmt.Fprintf(tw, "BURN (%s)\t%s credits\n",
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
 	fmt.Fprintf(tw, "GRACE\t%ds after the balance reaches zero\n", state.GraceSeconds)
+	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", state.MaxChargeSeconds)
 	if state.ExhaustedAt != nil {
 		fmt.Fprintf(tw, "EXHAUSTED\t%s\n",
 			time.Unix(*state.ExhaustedAt, 0).UTC().Format("2006-01-02 15:04:05 UTC"))
@@ -182,6 +184,7 @@ type creditChargeResp struct {
 	RunID       string `json:"run_id"`
 	NodeID      string `json:"node_id"`
 	TokenPrefix string `json:"token_prefix"`
+	Kind        string `json:"kind"`
 	Seconds     int64  `json:"seconds"`
 	AmountMicro int64  `json:"amount_micro"`
 	ChargedAt   int64  `json:"charged_at"`
@@ -191,6 +194,8 @@ type creditHistoryResp struct {
 	Grants  []creditGrantResp  `json:"grants"`
 	Charges []creditChargeResp `json:"charges"`
 }
+
+const creditGrantRowType = "grant"
 
 type creditHistoryRow struct {
 	Type        string `json:"type"`
@@ -209,13 +214,18 @@ type creditHistoryRow struct {
 func runCreditsHistory(args []string) error {
 	fs := flag.NewFlagSet(cmdCreditsHistory.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	limit := fs.Int("limit", 0, "maximum rows of each kind (0 = the controller's default)")
+	limit := fs.Int("limit", 0,
+		fmt.Sprintf("maximum rows of each kind, up to %d (0 = the controller's default)", store.CreditHistoryMaxLimit))
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdCreditsHistory, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
+	}
+	if *limit > store.CreditHistoryMaxLimit {
+		return fmt.Errorf("credits history: --limit must not exceed %d rows of each kind",
+			store.CreditHistoryMaxLimit)
 	}
 	prof, err := resolveProfile(*on)
 	if err != nil {
@@ -247,13 +257,19 @@ func creditHistoryRows(history creditHistoryResp) []creditHistoryRow {
 	rows := make([]creditHistoryRow, 0, len(history.Grants)+len(history.Charges))
 	for _, g := range history.Grants {
 		rows = append(rows, creditHistoryRow{
-			Type: "grant", ID: g.ID, At: g.CreatedAt, AmountMicro: g.AmountMicro,
+			Type: creditGrantRowType, ID: g.ID, At: g.CreatedAt, AmountMicro: g.AmountMicro,
 			Kind: g.Kind, Reference: g.Reference, CreatedBy: g.CreatedBy,
 		})
 	}
 	for _, c := range history.Charges {
+		kind := c.Kind
+		if kind == "" {
+			kind = store.CreditChargeUsage
+		}
+		// safety: the ledger stores what a charge takes out, so the sign flips
+		// here and a refund reads as credits coming back.
 		rows = append(rows, creditHistoryRow{
-			Type: "charge", ID: c.ID, At: c.ChargedAt, AmountMicro: -c.AmountMicro,
+			Type: kind, ID: c.ID, At: c.ChargedAt, AmountMicro: -c.AmountMicro,
 			RunID: c.RunID, NodeID: c.NodeID, TokenPrefix: c.TokenPrefix, Seconds: c.Seconds,
 		})
 	}
@@ -279,7 +295,7 @@ func renderCreditHistory(w io.Writer, rows []creditHistoryRow) error {
 }
 
 func creditRowDetail(row creditHistoryRow) string {
-	if row.Type == "grant" {
+	if row.Type == creditGrantRowType {
 		detail := row.Kind
 		if row.Reference != "" {
 			detail += " ref=" + row.Reference
