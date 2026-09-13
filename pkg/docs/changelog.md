@@ -97,6 +97,11 @@ unlock.
   those hosts failed and no pipeline could compile. Other Unixes keep the `ps`
   path, and a process that exits mid-scan is a gap in the snapshot rather than
   a failed listing.
+- **cache:** A compile is judged on the compiler's own exit status even when the
+  process-group cleanup that follows it fails. A successful `go build` was
+  reported as a failed compile carrying no compiler output whenever the cleanup
+  could not read the process table; the cleanup failure is now a warning naming
+  the process group. A cancelled or failing compile reports as before.
 
 ## [v0.50.1] - 2026-09-13
 

@@ -29,12 +29,13 @@ func runToolchain(ctx context.Context, cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
+	group.SetDescendantProbe(toolchainDescendantProbe)
 	waited := make(chan error, 1)
 	go func() { waited <- group.Finish(context.WithoutCancel(ctx), procgroup.DefaultTerminationGrace) }()
 
 	select {
 	case waitErr := <-waited:
-		return waitErr
+		return toolchainResult(group, cmd, waitErr)
 	case <-ctx.Done():
 	}
 
@@ -51,6 +52,27 @@ func runToolchain(ctx context.Context, cmd *exec.Cmd) error {
 		// wait with nothing on stdout.
 	}
 	return ctx.Err()
+}
+
+// hack: a test replaces the platform descendant probe here to drive the cleanup
+// paths without a live process tree.
+var toolchainDescendantProbe func(group int, exited, session bool) (bool, error)
+
+// safety: the compiler has already exited by the time cleanup runs, so a
+// cleanup failure must not stand in for the build's own status. The group is
+// killed first because an unverified descendant still holding the output pipe
+// would otherwise park the wait.
+func toolchainResult(group *procgroup.Group, cmd *exec.Cmd, err error) error {
+	if err == nil || !errors.Is(err, procgroup.ErrCleanup) {
+		return err
+	}
+	if killErr := group.Kill(); killErr != nil {
+		slog.Default().Debug("toolchain group kill after cleanup failure", "group", group.ID(), "err", killErr)
+	}
+	result := cmd.Wait()
+	slog.Default().Warn("toolchain process group cleanup failed; judging the build on its own exit",
+		"group", group.ID(), "err", err)
+	return result
 }
 
 func runToolchainUngrouped(ctx context.Context, cmd *exec.Cmd) error {
