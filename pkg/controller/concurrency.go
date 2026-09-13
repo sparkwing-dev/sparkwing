@@ -20,7 +20,8 @@ type slotRunResolver func(http.ResponseWriter, *http.Request) (string, *http.Req
 
 func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := PrincipalFromContext(r.Context())
+		ctx := r.Context()
+		p, ok := PrincipalFromContext(ctx)
 		if !ok || p.HasScope(ScopeAdmin) {
 			next.ServeHTTP(w, r)
 			return
@@ -29,7 +30,7 @@ func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Ha
 		if !ok {
 			return
 		}
-		held, err := s.ownsRun(r.Context(), runID, claimIdentity(r))
+		held, err := s.ownsRun(ctx, runID, claimIdentity(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
