@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -479,7 +480,7 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 		}
 		return &prof, nil
 	case http.StatusNotFound:
-		return nil, unsupportedRoute(resp)
+		return nil, classifyNotFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -755,7 +756,7 @@ func (c *Client) DeleteRun(ctx context.Context, runID string) error {
 	case http.StatusNoContent:
 		return nil
 	case http.StatusNotFound:
-		return unsupportedRoute(resp)
+		return classifyNotFound(resp)
 	default:
 		return readHTTPError(resp)
 	}
@@ -1699,26 +1700,59 @@ const unsupportedRouteError = "unsupported"
 // caller degrades instead of reporting the resource missing.
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 
+// ErrForeignNotFound reports a 404 the controller did not write. Every 404 the
+// API serves carries a JSON body naming the error; one without it came from a
+// wrong base URL, something proxying the path, or a surface that does not
+// register the route, none of which mean the record is absent.
+var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
+
 // safety: every 404 in this package routes through notFound or
-// unsupportedRoute, so a route the controller does not register is never
+// classifyNotFound, so a route the controller does not register is never
 // reported as a missing row (or, for a delete, as success).
 func notFound(resp *http.Response) error {
-	if err := unsupportedRoute(resp); err != nil {
+	if err := classifyNotFound(resp); err != nil {
 		return err
 	}
 	return store.ErrNotFound
 }
 
-func unsupportedRoute(resp *http.Response) error {
-	if resp.StatusCode != http.StatusNotFound {
-		return nil
-	}
+// safety: a 404 carries three meanings, and only the controller's own error
+// body separates a missing row from a route it never registered or an answer
+// no controller wrote.
+func classifyNotFound(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var payload unsupportedRouteBody
-	if json.Unmarshal(body, &payload) != nil || payload.Error != unsupportedRouteError {
-		return nil
+	if json.Unmarshal(body, &payload) != nil || payload.Error == "" {
+		return fmt.Errorf("%w: %s answered 404 with %s; check the controller URL and anything answering in front of it",
+			ErrForeignNotFound, requestTarget(resp), describeForeignBody(body))
 	}
-	return controllerLacksRoute(payload.Route)
+	if payload.Error == unsupportedRouteError {
+		return controllerLacksRoute(payload.Route)
+	}
+	return nil
+}
+
+func requestTarget(resp *http.Response) string {
+	if resp.Request == nil || resp.Request.URL == nil {
+		return "the controller"
+	}
+	return resp.Request.URL.String()
+}
+
+func describeForeignBody(body []byte) string {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return "an empty body"
+	}
+	const keep = 120
+	if len(trimmed) > keep {
+		cut := keep
+		for cut > 0 && !utf8.Valid(trimmed[:cut]) {
+			cut--
+		}
+		trimmed = append(trimmed[:cut:cut], []byte("...")...)
+	}
+	return fmt.Sprintf("%q", trimmed)
 }
 
 type unsupportedRouteBody struct {

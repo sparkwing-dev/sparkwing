@@ -11,12 +11,14 @@ Inspect or refresh the local admission daemon
 The admission daemon starts on demand when a pipeline needs it. Status never
 starts one. Restart replaces only an answering daemon with this installed
 build, using the same drain, durable lease, and reattachment path as automatic
-version takeover; a stopped daemon stays stopped.
+version takeover; a stopped daemon stays stopped. Stop drains an answering
+daemon and launches no successor.
 
 ### Subcommands
 
 - `status` -- Report whether wingd is running and which build it serves
 - `restart` -- Refresh an answering wingd to this installed build
+- `stop` -- Drain an answering wingd and leave it stopped
 - `recover-state` -- Preserve unreadable daemon state after its holders stop
 
 ### Examples
@@ -27,6 +29,9 @@ sparkwing daemon status -o json
 
 # Refresh only if already running
 sparkwing daemon restart
+
+# Stop it and leave it stopped
+sparkwing daemon stop
 ```
 
 ## `sparkwing daemon recover-state`
@@ -123,4 +128,33 @@ continues serving with artifact routes disabled.
 ```sh
 # Machine-readable status
 sparkwing daemon status -o json
+```
+
+## `sparkwing daemon stop`
+
+Drain an answering wingd and leave it stopped
+
+Drains an answering daemon through the same wire request a restart uses, then
+waits for its admission socket to go quiet and its election lock to be
+released. No successor is launched, and the supervisor exits with the worker it
+started, so the pair stays down until the next run needs a daemon. An absent
+daemon is a no-op and exits zero.
+
+A run still holding admission finishes against the store it already opened.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
+| `--home DIR` | Sparkwing home whose daemon should stop |
+
+### Examples
+
+```sh
+# Stop this machine's daemon
+sparkwing daemon stop
+
+# Machine-readable result
+sparkwing daemon stop -o json
 ```

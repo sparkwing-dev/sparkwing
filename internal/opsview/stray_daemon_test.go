@@ -3,7 +3,9 @@ package opsview_test
 import (
 	"bytes"
 	"context"
+	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -157,6 +159,85 @@ func TestRenderDoctorPretty_ExplainsTheStrayDaemonTell(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{"v0.0.0", "no release carries", "temp directory", "/tmp/sparkwing-0-abc123def456/d.sock"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pretty output does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+func serveSilentSocket(t *testing.T, home string) string {
+	t.Helper()
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
+		t.Fatalf("socket path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		t.Fatalf("socket dir: %v", err)
+	}
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		select {
+		case <-done:
+		case <-time.After(strayTestWait):
+			t.Error("silent listener did not stop")
+		}
+		_ = os.RemoveAll(filepath.Dir(sock))
+	})
+	return sock
+}
+
+func faultedSockets(r opsview.DoctorReport) []string {
+	socks := make([]string, 0, len(r.FaultedPeers))
+	for _, p := range r.FaultedPeers {
+		socks = append(socks, p.Socket)
+	}
+	return socks
+}
+
+func TestDiagnose_NamesAPeerWhoseProbeFailed(t *testing.T) {
+	home := shortHome(t)
+	peer := shortHome(t)
+	sock := serveSilentSocket(t, peer)
+
+	report := diagnoseHome(t, home)
+	if !slices.Contains(faultedSockets(report), sock) {
+		t.Fatalf("faulted peers %v do not name the silent socket at %q", faultedSockets(report), sock)
+	}
+	if slices.Contains(straySockets(report), sock) {
+		t.Errorf("a peer that answered nothing was reported as a stray daemon: %q", sock)
+	}
+	if !report.Clean() {
+		t.Errorf("another home's wedged daemon made this home's report unclean: %+v", report)
+	}
+}
+
+func TestRenderDoctorPretty_ShowsAPeerWhoseProbeFailed(t *testing.T) {
+	r := opsview.DoctorReport{
+		FaultedPeers: []opsview.DoctorFaultedPeer{
+			{Socket: "/tmp/sparkwing-0-abc123def456/d.sock", Error: "probe: unexpected EOF"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"took the connection and then failed the handshake", "/tmp/sparkwing-0-abc123def456/d.sock", "probe: unexpected EOF"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pretty output does not mention %q:\n%s", want, out)
 		}

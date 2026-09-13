@@ -30,6 +30,77 @@ unlock.
   the cache name from the URL's basename, so a name nothing registered costs a
   failed request and a line on stderr rather than the clone.
 
+### Added
+
+- **cli:** `sparkwing configure init` reports whether the checkout it stands in
+  runs its declared git hooks, and names the command that arms them. It
+  installs nothing and changes no git configuration; a fresh clone simply no
+  longer has to guess whether its gates fire. The verdict is the same one
+  `sparkwing pipeline hooks survey` computes, and `-o json` carries it as a
+  `hooks` record.
+- **cli:** `sparkwing daemon stop` drains an answering admission daemon and
+  leaves it stopped. It uses the same wire drain a restart does, launches no
+  successor, and waits for the admission socket to go quiet and the election
+  lock to be released; the supervisor exits with the worker it started. An
+  absent daemon is a no-op and exits zero, and the report names the build that
+  was stopped. Every `daemon` report now carries a `stopped` boolean, so
+  `daemon status -o json` and `daemon restart -o json` gain the field too.
+- **cli:** `sparkwing runs status` and `sparkwing runs errors` take the run id as
+  a positional argument, so `sparkwing runs status run-20260910-...` works.
+  `--run` keeps working; passing both refuses.
+- **cli:** `sparkwing runs errors --profile NAME` reads a run held on that
+  profile's controller, and `-C/--sw-cd` re-anchors the profile search the way
+  it does on the other `runs` read verbs. It was the one read verb in the family
+  that could only read the local store.
+
+### Changed
+
+- **cli (Breaking):** `sparkwing pipeline sparks update --name NAME` refuses
+  instead of re-resolving every declared library. Resolution rebuilds the
+  overlay modfile from the whole manifest in one pass, so a single-library
+  update would drop the other libraries' resolved versions; the flag was
+  checked against the manifest and then discarded, so naming one library
+  re-resolved them all. See
+  [sparks update --name](docs/migrations/_unreleased.md#sparks-update---name).
+
+### Fixed
+
+- **cli:** `sparkwing -o json run PIPELINE` refuses instead of handing `-o json`
+  to the pipeline, which rejected it as an unknown flag. A run's stream is
+  pretty on a terminal and NDJSON when piped, and `SPARKWING_LOG_FORMAT`
+  overrides that; flags for the pipeline itself still go after `--`.
+- **controller/client:** A 404 is a missing record only when it carries the JSON
+  error body the controller writes. A 404 from a wrong base URL, something
+  proxying the path, or a surface that does not register the route now returns
+  `client.ErrForeignNotFound` naming the URL it asked, instead of
+  `store.ErrNotFound`. A pipeline pointed at the wrong controller read as a
+  pipeline that had never run and rebuilt everything on every run.
+- **cli:** `sparkwing pipeline publish --profile NAME` uploads to the backend
+  that profile serves pipeline binaries from -- its `cache.binaries` sub-spec
+  when it declares one, its cache surface otherwise. The flag was read for its
+  name and then discarded, so a publish that named a profile refused with an
+  error telling the operator to name a profile.
+- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
+  that takes the connection and then fails the handshake, with the probe error.
+  The sweep dropped every peer whose probe failed, so a machine holding wedged
+  peer daemons read as a machine holding none. The report carries them under
+  `faulted_peers`. A peer that never answered the dial, or that ran out of
+  doctor's budget, stays out of the report.
+
+### Removed
+
+- **cli:** The retired `dashboard` noun reads as an unknown subcommand. The
+  parsing that recognized the old spelling and named `sparkwing serve` carried
+  readers across [v0.49.0](docs/migrations/v0.49.0.md#serve-command), which
+  removed the command and whose guide carries the full command map.
+
+### Docs
+
+- **runs bounce:** The reference page no longer implies a bounce reaches a job
+  the in-cluster Kubernetes runner executes. The local runner is the only one
+  that consumes a pending bounce, whether the run's state lives locally or on a
+  controller; a job running as a Kubernetes Job keeps running and the page now
+  says to cancel and retry instead.
 ## [v0.50.0] - 2026-09-12
 
 ### Added

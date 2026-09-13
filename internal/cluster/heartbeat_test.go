@@ -64,7 +64,9 @@ func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 
 	ts, handler, _ := newTriggerHeartbeatServer(t)
 	handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "gone", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"gone"}`))
 	}))
 
 	cli := client.New(ts.URL, nil)

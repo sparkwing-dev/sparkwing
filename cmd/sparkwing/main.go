@@ -341,10 +341,10 @@ func removeEnv(env []string, key string) []string {
 }
 
 func runSparkwing(args []string) error {
-	if removedDashboardCommand(args) {
-		return errors.New("dashboard was removed; use sparkwing serve (for example, sparkwing serve start)")
+	args, err := moveRootOutput(args)
+	if err != nil {
+		return err
 	}
-	args = moveRootOutput(args)
 	if cmd, ok := commandHelp(args); ok {
 		requested, _, err := requestedOutput(args)
 		if err != nil {
@@ -667,7 +667,11 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		*runID = normalizeRunID(*runID)
+		id, idErr := runIDFromArgs(cmdJobsStatus.Path, fs.Args(), *runID)
+		if idErr != nil {
+			return idErr
+		}
+		*runID = normalizeRunID(id)
 		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs status")
 		if err != nil {
 			return err
@@ -749,6 +753,7 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -758,12 +763,26 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		*runID = normalizeRunID(*runID)
+		id, idErr := runIDFromArgs(cmdJobsErrors.Path, fs.Args(), *runID)
+		if idErr != nil {
+			return idErr
+		}
+		*runID = normalizeRunID(id)
 		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs errors")
 		if err != nil {
 			return err
 		}
 		emitJSON := resolvedFormat == "json"
+		if *profileName != "" {
+			prof, profileErr := resolveProfile(*profileName)
+			if profileErr != nil {
+				return profileErr
+			}
+			if err := requireController(prof, "runs errors"); err != nil {
+				return err
+			}
+			return orchestrator.JobErrorsRemote(contextValue, prof.ControllerURL(), prof.ControllerToken(), *runID, emitJSON, os.Stdout)
+		}
 		return orchestrator.JobErrors(contextValue, paths, *runID, emitJSON, os.Stdout)
 
 	case "consumer":
@@ -824,6 +843,21 @@ func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
 
 func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
+}
+
+func runIDFromArgs(path string, rest []string, flagValue string) (string, error) {
+	switch {
+	case len(rest) == 0 && flagValue == "":
+		return "", fmt.Errorf("%s: a run id is required, as --run RUN_ID or as a positional", path)
+	case len(rest) == 0:
+		return flagValue, nil
+	case len(rest) > 1:
+		return "", fmt.Errorf("%s: unexpected positional %q", path, rest[1])
+	case flagValue != "":
+		return "", fmt.Errorf("%s: run id given twice; pass it as --run or as a positional", path)
+	default:
+		return rest[0], nil
+	}
 }
 
 func normalizeRunID(id string) string {
