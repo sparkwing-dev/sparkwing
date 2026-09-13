@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -156,6 +157,7 @@ func run(args []string) error {
 			"has no work to hand out. The suggestion travels as a response header "+
 			"and a runner honors it only to poll less often, so an agent that "+
 			"ignores it keeps its configured cadence. Zero suggests nothing.")
+	readEgress := egress.Bind(fs, os.Getenv, egress.WithLogStreams)
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -166,6 +168,10 @@ func run(args []string) error {
 	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
 	if err != nil {
 		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
+	}
+	egressCfg, err := readEgress()
+	if err != nil {
+		return err
 	}
 	if *argonBudgetMB < 1 {
 		return fmt.Errorf("--argon2-memory-budget-mb must be at least 1")
@@ -290,7 +296,8 @@ func run(args []string) error {
 			ClaimsPerMinute:     *claimsPerMinute,
 			HeartbeatsPerMinute: *heartbeatsPerMinute,
 		}).
-		WithIdleClaimPoll(*idleClaimPoll)
+		WithIdleClaimPoll(*idleClaimPoll).
+		WithEgressMeter(egress.New(egressCfg))
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)

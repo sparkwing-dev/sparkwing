@@ -39,6 +39,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.write` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.write` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.write` |
+| `GET` | `/api/v1/egress` | `admin` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |

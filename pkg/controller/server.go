@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -62,6 +63,8 @@ type Server struct {
 	bootstrapClosed bool
 
 	artifactStore storage.ArtifactStore
+
+	egress *egress.Meter
 
 	cachePodURL  string
 	logsURL      string
@@ -814,8 +817,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog)), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog)), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
@@ -831,14 +834,14 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
-	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
-	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
+	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.metered(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
+	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.metered(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/register", requireScope(ScopeNodesClaim,
 		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheRegister))))
 	mux.Handle("GET /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
-		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit))))
+		s.metered(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
-		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit))))
+		s.metered(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 
@@ -895,6 +898,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))))
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
+
+	mux.Handle("GET /api/v1/egress", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEgressState)))
 
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
@@ -955,7 +960,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	}
 
 	if s.artifactStore != nil {
-		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleArtifactGet)))
+		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, s.metered(egress.ClassArtifact, http.HandlerFunc(s.handleArtifactGet))))
 	}
 
 	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
@@ -1140,6 +1145,8 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		s.logger.Info("concurrency reconcile promoted stranded waiters", "count", n)
 	}
 
+	s.loadEgressUsage(ctx)
+
 	go s.runReaper(ctx, 10*time.Second)
 	go s.runCreditSampler(ctx, creditSampleInterval)
 	go s.runCronTick(ctx, cronTickOffer)
@@ -1228,6 +1235,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.flushEgressUsage(ctx)
 			concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
 				CacheCap: s.concurrencyCacheCap,
 			})

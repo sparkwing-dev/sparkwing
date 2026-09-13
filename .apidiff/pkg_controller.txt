@@ -61,6 +61,8 @@ const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+const EgressBudgetCode = "egress_budget_exceeded"
+const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
@@ -207,6 +209,7 @@ type Server struct {
 func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
+func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
@@ -222,6 +225,7 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
+func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
@@ -263,6 +267,8 @@ const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (creditsCollector) Collect(ch chan<- prometheus.Metric)
+func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
@@ -273,6 +279,8 @@ func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
 func (l *liveLogs) Stats() (nodes int, bytes int64)
 func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
+func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric)
+func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc)
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
 func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (r *statusRecorder) WriteHeader(code int)
