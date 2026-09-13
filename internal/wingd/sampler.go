@@ -74,12 +74,9 @@ type OwnedCPUSampler interface {
 	// counts once, against its nearest ancestor root.
 	//
 	// Leave a root out of the map where no figure could be computed for it,
-	// and give it a zero only where it ran no measurable CPU. The two answers
-	// grant the same cores, so nothing catches them being swapped: a zero
-	// asserts an attribution that did not happen, which reports the daemon as
-	// measuring cleanly while the CPU it missed goes on being charged to the
-	// machine. What a wrong answer costs is the operator's signal, not the
-	// arithmetic.
+	// and give it a zero only where it ran no measurable CPU. Both answers
+	// grant the same cores, so a zero in place of an absence costs no capacity
+	// and reports the daemon as measuring cleanly while it is not.
 	//
 	// measured reports whether the host's process table was read at all.
 	// Return false where the read itself failed; it leaves byRoot empty and
@@ -91,12 +88,7 @@ type OwnedCPUSampler interface {
 	// cgroup limit where one caps them below the machine's core count, and the
 	// machine's otherwise. Bound a figure the sampler cannot otherwise justify
 	// against it, because no tree under that limit can have run more.
-	//
-	// A process the sampler has no previous reading for has run all of its
-	// CPU since the reading before this one, so its whole total belongs to
-	// this window rather than to no window at all. Where the sampler has no
-	// previous reading for the root either, HeldSince bounds that window
-	// instead; a zero HeldSince bounds nothing, and the root goes unmeasured.
+
 	CPUUsage(roots []OwnedRoot, arbitratedCores float64) (byRoot map[int]float64, measured bool)
 }
 
@@ -241,13 +233,8 @@ func ownedCPUByRoot(
 		wall := now.Sub(prior.at).Seconds()
 		delta := process.cpuSeconds - prior.cpuSeconds
 		if wall <= 0 || delta < 0 {
-			// safety: a counter that stood still or ran backwards is unreadable, and
-			// leaving the root absent charges the host for it. Reporting zero would
-			// subtract nothing from external, which is what over-admits.
 			continue
 		}
-		// A tree that ran nothing adds zero here, which is what puts it in the map
-		// as a measured zero rather than leaving it absent as an unread tree.
 		byRoot[root] += delta / wall
 	}
 	for root, cpuSeconds := range firstSight {
@@ -279,9 +266,6 @@ func measureUnownedSurvivors(
 		if !alive || process.identity != identity {
 			continue
 		}
-		// safety: this reading is what the sample must carry. Keeping the older one
-		// would leave its window open across every interval nobody held the tree, and
-		// re-holding would then charge the tree that whole stretch of CPU at once.
 		next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
 	}
 }

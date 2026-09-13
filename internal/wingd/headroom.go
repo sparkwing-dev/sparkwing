@@ -91,9 +91,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	if stat.CPUMeasured {
 		d.attribution.samples++
 		// safety: one reading is counted under one cause, worst first, so the
-		// counts stay disjoint. The readings that attributed are counted outright
-		// rather than left to subtraction, which would call a cause a later daemon
-		// adds a clean reading. A sampler that read nothing explains every run's
+		// counts stay disjoint. A sampler that read nothing explains every run's
 		// missing figure, so the per-run causes say nothing more.
 		switch {
 		case !ownedMeasured, impossible:

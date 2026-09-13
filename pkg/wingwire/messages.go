@@ -428,9 +428,8 @@ type ResourceState struct {
 type ExternalAttribution struct {
 	// Samples is how many host CPU readings the daemon has taken, the
 	// denominator the counts below are read against. A reading is counted
-	// under at most one of them, worst cause first. Read the readings that
-	// attributed cleanly off Attributed rather than by subtraction, which
-	// would count a cause this build has no field for as clean.
+	// under at most one of them, worst cause first. Attributed carries the
+	// readings that attributed cleanly.
 	Samples int64 `json:"samples"`
 	// SamplerUnreadable is how many readings the process sampler could not
 	// turn into a usable figure: it returned nothing, or it returned more
