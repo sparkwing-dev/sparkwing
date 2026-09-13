@@ -22,6 +22,40 @@ unlock.
 
 ### Added
 
+- **controller:** A prepaid credit ledger meters cloud runner time. Grants are
+  `free` or `paid` and record who added them and the payment they came from;
+  charges name the run, node, token prefix, and seconds they billed. The
+  balance is grants less charges, computed in SQL. `GET /api/v1/credits` and
+  `GET /api/v1/credits/history` read it on `runs.read` and
+  `POST /api/v1/credits/grants` adds to it on `admin`. Amounts are
+  micro-credits: a million is one credit and a hundred credits is one dollar,
+  so a ten dollar top-up is a thousand credits. At the default rate a cloud
+  runner second costs 0.02 credits, which is 72 credits ($0.72) an hour.
+- **controller:** A runner token the operator marked metered is checked and
+  charged; no other token is. `POST /api/v1/nodes/claim` answers `402` with
+  `"code": "insufficient_credits"` while the balance is below a minute of cloud
+  runner time, leaving the node ready and recording a `credits_blocked` event
+  on the waiting run. Each heartbeat from a metered token charges the seconds
+  since that node's previous charge; once the balance reaches zero the node
+  runs out a grace period (60 seconds by default) and the next heartbeat
+  answers `409`, which is how the runner cancels it, with a
+  `credits_exhausted` event naming why.
+- **cli:** `sparkwing cluster credits show`, `grant`, and `history` read the
+  balance and the day's burn, add free or paid credits, and list every movement
+  of the ledger newest first. `history -o json` emits one record per line.
+- **cli:** `sparkwing cluster tokens create --metered` mints a token whose node
+  claims cost credits, and `sparkwing cluster tokens set-metered --prefix P
+  --metered true|false` marks a token already in use, which is how a warm pool
+  already running starts being charged. `tokens list` gained a METERED column.
+  Metering is an operator decision recorded against the token: a runner's
+  self-asserted labels never make its work billable.
+- **store:** `CreateTokenWith` mints a token carrying `TokenOptions`,
+  `SetTokenMetered` and `TokenMetered` read and write the metering marker, and
+  `GrantCredits`, `CreditBalanceMicro`, `CreditState`, `ListCreditGrants`,
+  `ListCreditCharges`, `ChargeNodeCredits`, and `StartNodeMetering` carry the
+  ledger. Schema v35 adds the `credit_grants` and `credit_charges` tables and
+  two defaulted columns; the migration is additive and stamps no requirement,
+  so an older binary still opens the database.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

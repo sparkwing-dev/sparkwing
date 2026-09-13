@@ -15,6 +15,45 @@ The **prefix segment** is the first 12 characters of a raw token. It's
 a non-secret identifier used in `sparkwing cluster tokens list`, `revoke`, and
 audit logs. The remaining ~35 characters carry the secret entropy.
 
+## Metered runners
+
+A token carries a `metered` marker the operator sets, either at mint
+(`sparkwing cluster tokens create --metered`) or afterwards
+(`sparkwing cluster tokens set-metered --prefix P --metered true`). That marker
+is the only thing that decides whether the work a runner does costs credits.
+A claim-mode runner chooses its own labels, so a label saying "cloud" proves
+nothing and metering never reads one.
+
+`POST /api/v1/nodes/claim` from a metered token answers `402` with
+`"code": "insufficient_credits"` while the balance sits below a minute of cloud
+runner time at the current rate. The node stays ready, the run records a
+`credits_blocked` event, and the runner keeps polling. Every heartbeat from a
+metered token charges the seconds since that node's previous charge. Once the
+balance reaches zero the node keeps running for the grace period, after which
+the heartbeat answers `409` and the runner cancels the node; the run records a
+`credits_exhausted` event naming why.
+
+A token with no marker is neither checked nor charged, so a deployment that
+marks none bills nothing.
+
+## Credits
+
+Cloud runner time is prepaid. Amounts are stored in micro-credits: a million
+micro-credits is one credit, and a hundred credits is one dollar, so a ten
+dollar top-up is a thousand credits. At the default rate a cloud runner second
+costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
+hour, so ten dollars buys just under fourteen hours.
+
+The balance is the sum of grants less the sum of charges, computed in SQL over
+the `credit_grants` and `credit_charges` tables. A grant is `free` or `paid`
+and records who added it and the payment it came from. A charge names the run,
+node, token prefix, and seconds it billed.
+
+`sparkwing cluster credits show` prints the balance, the rate, and the last
+day's burn. `sparkwing cluster credits grant --kind free|paid --amount N` adds
+credits and needs `admin`. `sparkwing cluster credits history` lists every
+movement newest first.
+
 ## Scopes
 
 The scope constants live in `pkg/controller/auth.go`; the full route-to-scope
@@ -22,7 +61,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
@@ -32,7 +71,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready / revoke-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, node deps / status / mark-ready / revoke-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.

@@ -24,6 +24,7 @@ local dashboard with 'sparkwing serve'.
 - `gc` -- Sweep stale warm-PVC state
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
+- `credits` -- Inspect and top up the prepaid credit balance
 - `image` -- Rollout helpers for images referenced by a gitops repo
 - `webhooks` -- Inspect and replay GitHub webhooks
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
@@ -160,6 +161,117 @@ command narrows to one namespace.
 ```sh
 # Who holds and who's queued
 sparkwing cluster concurrency --namespace deploy-prod --profile prod
+```
+
+## `sparkwing cluster credits`
+
+Inspect and top up the prepaid credit balance
+
+Cloud runner time is prepaid. One hundred credits is one dollar,
+so a ten dollar top-up is a thousand credits. The balance is
+grants minus charges: a node is handed to a metered runner only
+while the balance covers a minute of its time, and each
+heartbeat charges the seconds it covers. Runners the operator
+did not mark metered are never charged.
+
+### Subcommands
+
+- `show` -- Print the balance, the rate, and the recent burn
+- `grant` -- Add free or paid credits to the ledger
+- `history` -- List grants and charges, newest first
+
+### Examples
+
+```sh
+# Read the balance and the burn
+sparkwing cluster credits show --profile prod
+
+# Load ten dollars
+sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+```
+
+## `sparkwing cluster credits grant`
+
+Add free or paid credits to the ledger
+
+Adds credits and records who added them, which kind they are, and
+the payment they came from. One hundred credits is one dollar.
+A grant that lifts the balance above zero lets metered runners
+claim again and stops the cancellation of nodes running on an
+empty balance. Requires the admin scope.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--kind KIND` | Grant kind: free \| paid (required) |
+| `--amount N` | Credits to add; 100 credits is one dollar (required) |
+| `--reference REF` | Payment id or operator note recorded with the grant |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Load ten dollars against a payment
+sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+
+# Hand out trial credits
+sparkwing cluster credits grant --kind free --amount 500 --profile prod
+```
+
+## `sparkwing cluster credits history`
+
+List grants and charges, newest first
+
+Lists every movement of the ledger newest first: grants with
+their kind and reference, charges with the run, node, token
+prefix, and seconds they billed. Charges render negative because
+they take credits out. -o json emits one JSON record per line.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--limit N` | Maximum rows of each kind (0 = the controller's default) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read the ledger
+sparkwing cluster credits history --profile prod
+
+# Sum today's charges
+sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
+```
+
+## `sparkwing cluster credits show`
+
+Print the balance, the rate, and the recent burn
+
+Prints the balance in credits, what was granted and charged, the
+price of a cloud runner second, the credits burned over the last
+day, and the grace period a running node gets after the balance
+reaches zero. A controller that was never granted anything reads
+a zero balance and charges nothing, because nothing is metered
+until an operator marks a token.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read the balance
+sparkwing cluster credits show --profile prod
+
+# Read the balance as JSON
+sparkwing cluster credits show --profile prod -o json
 ```
 
 ## `sparkwing cluster gc`
@@ -325,6 +437,7 @@ save it before leaving this command.
 - `revoke` -- Mark a token revoked
 - `lookup` -- Print metadata for a single token
 - `rotate` -- Mint a replacement token with a grace window
+- `set-metered` -- Mark an existing token as one credits pay for
 
 ## `sparkwing cluster tokens create`
 
@@ -343,6 +456,7 @@ this command exits it cannot be recovered.
 | `--principal NAME` | Name identifying the token holder (required) |
 | `--scope CSV` | Comma-separated scopes; use sparkwing docs read --topic auth for the supported set |
 | `--ttl DURATION` | Token lifetime (30d, 720h, and similar durations). 0 = never expires |
+| `--metered` | Mark the token as one whose node claims cost credits |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
@@ -353,6 +467,9 @@ sparkwing cluster tokens create --type service --principal deploy-bot --scope ru
 
 # Mint a user token that expires in 30 days
 sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod
+
+# Mint a metered cloud runner token
+sparkwing cluster tokens create --type runner --principal agent:cloud-pool --scope nodes.claim --metered --profile prod
 ```
 
 ## `sparkwing cluster tokens list`
@@ -459,6 +576,35 @@ window short.
 ```sh
 # Rotate a token with a 48h grace window
 sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
+```
+
+## `sparkwing cluster tokens set-metered`
+
+Mark an existing token as one credits pay for
+
+Sets or clears the metering marker on a token that is already
+minted, which is how a warm pool already running starts costing
+credits without a new credential. Metering is an operator
+decision: a runner's own labels never make its work billable.
+Claims by a metered token are refused while the balance is
+spent, and each heartbeat charges the seconds it covers.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--prefix PREFIX` | Non-secret token prefix (from 'tokens list') (required) |
+| `--metered BOOL` | true to charge this token's claims, false to stop (required) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Start charging the warm pool
+sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered true --profile prod
+
+# Stop charging a token
+sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered false --profile prod
 ```
 
 ## `sparkwing cluster users`
