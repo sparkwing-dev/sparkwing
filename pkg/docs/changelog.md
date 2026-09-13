@@ -314,6 +314,19 @@ unlock.
   poll used to print an error line. Revocation, rotation and the cache window
   behave as [docs/auth.md](docs/auth.md) describes.
 
+- **controller + logs:** A node keeps the log lines it writes after its
+  execution attempt closes. `POST
+  /api/v1/runs/{id}/nodes/{nodeID}/claim/validate` authorizes an append against
+  the claim the writer still holds rather than against the attempt still being
+  open, so the `node_end` line and anything an `AfterRun` hook writes now land.
+  Both the claim-mode runner and the trigger runner executing a node in process
+  used to get `409 held by another holder` on every node's closing append, log
+  `logs append rejected`, and finish the run green with a truncated log. An
+  append from a principal that does not hold the node claim, or whose claim
+  lease has lapsed, is still refused.
+- **orchestrator:** A rejected log append is reported as the log loss it is
+  rather than as `failing run`. The message used to promise a failure the run
+  did not take when the rejection arrived after the node's outcome was decided.
 - **controller:** The executor offer routes `mark-ready`, `revoke-ready` and
   `finalize-ready` take `runs.state` plus the live claim on the run's trigger,
   the gate `auto-retry/reset` already carried. They required `admin`, so a

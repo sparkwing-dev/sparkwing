@@ -329,7 +329,7 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 			}
 			l.mu.Unlock()
 			l.logger.Error(
-				"logs append rejected; failing run",
+				"logs append rejected; the rest of this node's log is lost",
 				"run_id", l.runID,
 				"node_id", l.nodeID,
 				"err", err,

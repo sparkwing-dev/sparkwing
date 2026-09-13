@@ -1630,6 +1630,9 @@ func validExecutionAttemptResult(outcome, reason string) bool {
 	}
 }
 
+// safety: an append is authorized by the claim the writer still holds, not by
+// its execution attempt still being open, because a node's closing lines land
+// after the executor closes the attempt.
 func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Request) {
 	hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
 	if hasNodeIdentity && hasTriggerIdentity {
@@ -1650,7 +1653,7 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		}
 		ordinal, parseErr := strconv.Atoi(r.Header.Get(store.AttemptOrdinalHeader))
 		if parseErr == nil && ordinal > 0 {
-			held, err = s.store.NodeExecutionAttemptIsLive(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
+			held, err = s.store.NodeExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
 		}
 	} else if hasTriggerIdentity {
 		generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
@@ -1665,7 +1668,7 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		} else {
 			ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
 			if ordinalErr == nil && ordinal > 0 {
-				held, err = s.store.TriggerExecutionAttemptIsLive(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
+				held, err = s.store.TriggerExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
 			}
 		}
 	} else {

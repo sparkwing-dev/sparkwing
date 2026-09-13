@@ -3038,19 +3038,22 @@ paths:
     post:
       x-sparkwing-scope: logs.write
       tags: [nodes]
-      summary: Validate a log writer's exact live execution attempt.
+      summary: Validate a log writer's exact execution attempt.
       description: |
         Internal controller-to-log-service fence check. The request must carry
         either the four `X-Sparkwing-Claim-*` headers plus a positive
         `X-Sparkwing-Attempt-Ordinal`, or a positive
         `X-Sparkwing-Trigger-Generation` and, except for `_compile`, an attempt
-        ordinal. Mixing node and trigger identities is rejected. Trusted
-        controller-internal calls bypass claim validation.
+        ordinal. Mixing node and trigger identities is rejected. The identity
+        must still hold the claim that opened the named attempt; the attempt
+        itself may already have finished, because a node writes its closing
+        lines after closing the attempt. Trusted controller-internal calls
+        bypass claim validation.
       responses:
-        "204": {description: Attempt is live. Empty body.}
+        "204": {description: The claim that opened the attempt is live. Empty body.}
         "400": {description: Node and trigger identities were combined.}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {description: "Missing, malformed, stale, expired, or finished identity."}
+        "409": {description: "Missing, malformed, stale, or expired identity."}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/execution-finish:
