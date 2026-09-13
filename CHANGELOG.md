@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
+  a socket the caller already holds, instead of binding the address
+  `WithMetricsAddr` names. A caller that lets the operating system assign the
+  port from `:0` hands the listener over, so nothing else can take that port
+  between the assignment and the bind. `ServeWith` closes the listener when it
+  returns, so a server configured this way serves once.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added
