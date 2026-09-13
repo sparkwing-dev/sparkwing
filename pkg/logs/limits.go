@@ -121,7 +121,7 @@ func (s *Server) WithStoreCeiling(cfg objectguard.CeilingConfig) *Server {
 	cfg.Subject = StoreCeilingSubject
 	cfg.Remedy = StoreCeilingRemedy
 	s.ceiling = objectguard.NewCeiling(cfg)
-	publishStoreCeiling(s.ceiling)
+	s.publishStoreCeiling(s.ceiling)
 	return s
 }
 

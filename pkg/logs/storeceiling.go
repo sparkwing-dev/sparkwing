@@ -141,14 +141,15 @@ func boolGauge(b bool) float64 {
 	return 0
 }
 
-func publishStoreCeiling(c *objectguard.Ceiling) {
+func (s *Server) publishStoreCeiling(c *objectguard.Ceiling) {
 	metricsCeiling.Store(c)
 	registerCeilingOne.Do(func() {
 		// safety: a duplicate registration means a second logs service in one process,
-		// which a test does and a deployment does not, so the first collector stands.
+		// which a test does and a deployment does not, so the first collector stands and
+		// the service serves without the gauges rather than refusing to start.
 		var already prometheus.AlreadyRegisteredError
 		if err := prometheus.Register(storeCeilingCollector{}); err != nil && !errors.As(err, &already) {
-			panic(err)
+			s.logger.Error("logs store", "op", "register store ceiling metrics", "err", err)
 		}
 	})
 }

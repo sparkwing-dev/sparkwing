@@ -155,43 +155,51 @@ func writeStoreCeilingJSON(w http.ResponseWriter, r *http.Request, body map[stri
 
 func initStoreCeilingMetrics() {
 	meter := otelutil.Meter("sparkwing-cache")
+	var failed error
+	gauge := func(name, description, unit string) metric.Int64ObservableGauge {
+		opts := []metric.Int64ObservableGaugeOption{metric.WithDescription(description)}
+		if unit != "" {
+			opts = append(opts, metric.WithUnit(unit))
+		}
+		g, err := meter.Int64ObservableGauge(name, opts...)
+		failed = errors.Join(failed, err)
+		return g
+	}
 
-	storeBytes, _ := meter.Int64ObservableGauge("sparkwing.cache.store_bytes",
-		metric.WithDescription("Bytes the cache store holds, counted per upload and replaced by each measurement"),
-		metric.WithUnit("By"))
-	storeObjects, _ := meter.Int64ObservableGauge("sparkwing.cache.store_objects",
-		metric.WithDescription("Files the cache store holds, counted per upload and replaced by each measurement"),
-		metric.WithUnit("{file}"))
-	storeCeilingBytes, _ := meter.Int64ObservableGauge("sparkwing.cache.store_ceiling_bytes",
-		metric.WithDescription("The configured byte ceiling; 0 while the store is unlimited"),
-		metric.WithUnit("By"))
-	storeCeilingObjects, _ := meter.Int64ObservableGauge("sparkwing.cache.store_ceiling_objects",
-		metric.WithDescription("The configured object ceiling; 0 while the count is unlimited"),
-		metric.WithUnit("{file}"))
-	frozen, _ := meter.Int64ObservableGauge("sparkwing.cache.store_ceiling_frozen",
-		metric.WithDescription("1 while the store is at its ceiling and uploads are refused"))
-	warning, _ := meter.Int64ObservableGauge("sparkwing.cache.store_ceiling_warning",
-		metric.WithDescription("1 while the store is past its warning mark"))
-	incomplete, _ := meter.Int64ObservableGauge("sparkwing.cache.store_ceiling_measurement_incomplete",
-		metric.WithDescription("1 while the last store measurement did not finish"))
-	refused, _ := meter.Int64ObservableGauge("sparkwing.cache.store_ceiling_refused",
-		metric.WithDescription("Uploads the store ceiling has refused"),
-		metric.WithUnit("{upload}"))
+	storeBytes := gauge("sparkwing.cache.store_bytes",
+		"Bytes the cache store holds, counted per upload and replaced by each measurement", "By")
+	storeObjects := gauge("sparkwing.cache.store_objects",
+		"Files the cache store holds, counted per upload and replaced by each measurement", "{file}")
+	ceilingBytes := gauge("sparkwing.cache.store_ceiling_bytes",
+		"The configured byte ceiling; 0 while the store is unlimited", "By")
+	ceilingObjects := gauge("sparkwing.cache.store_ceiling_objects",
+		"The configured object ceiling; 0 while the count is unlimited", "{file}")
+	frozen := gauge("sparkwing.cache.store_ceiling_frozen",
+		"1 while the store is at its ceiling and uploads are refused", "")
+	warning := gauge("sparkwing.cache.store_ceiling_warning",
+		"1 while the store is past its warning mark", "")
+	incomplete := gauge("sparkwing.cache.store_ceiling_measurement_incomplete",
+		"1 while the last store measurement did not finish", "")
+	refused := gauge("sparkwing.cache.store_ceiling_refused",
+		"Uploads the store ceiling has refused", "{upload}")
 
 	// safety: read at observation time from the ceiling itself, so the gauges cannot
 	// drift from the state the health route and the refusals report.
-	_, _ = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+	_, err := meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		state := storeCeiling.State()
 		o.ObserveInt64(storeBytes, state.Bytes)
 		o.ObserveInt64(storeObjects, state.Objects)
-		o.ObserveInt64(storeCeilingBytes, state.MaxBytes)
-		o.ObserveInt64(storeCeilingObjects, state.MaxObjects)
+		o.ObserveInt64(ceilingBytes, state.MaxBytes)
+		o.ObserveInt64(ceilingObjects, state.MaxObjects)
 		o.ObserveInt64(frozen, boolGauge(state.Frozen))
 		o.ObserveInt64(warning, boolGauge(state.Warning))
 		o.ObserveInt64(incomplete, boolGauge(state.Incomplete))
 		o.ObserveInt64(refused, int64(state.Refused))
 		return nil
-	}, storeBytes, storeObjects, storeCeilingBytes, storeCeilingObjects, frozen, warning, incomplete, refused)
+	}, storeBytes, storeObjects, ceilingBytes, ceilingObjects, frozen, warning, incomplete, refused)
+	if failed = errors.Join(failed, err); failed != nil {
+		log.Printf("warning: store ceiling metrics unavailable, so the ceiling shows only on /health: %v", failed)
+	}
 }
 
 func boolGauge(b bool) int64 {
