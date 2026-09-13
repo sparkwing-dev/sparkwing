@@ -31,6 +31,16 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Fixed
+
+- **dashboard:** A log line over 1 MiB says so. Such a line ends the scan for
+  the whole rest of the file, so `GET /api/v1/runs/{id}/logs/{node}` and the
+  live SSE tail stopped at it and still answered 200, and
+  `GET /api/v1/runs/{id}/logs/search` and `GET /api/v1/runs/grep` silently
+  stopped scanning that node. The two log routes now close with a notice
+  naming the limit and pointing at `format=raw`, which streams the log
+  unrendered and complete, and the two search routes carry `"truncated": true`.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.
