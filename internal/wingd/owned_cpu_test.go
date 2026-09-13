@@ -226,6 +226,9 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 
 	sampler.forgetSamples(reheldAt)
 
+	// safety: the counter stays under what the window could hold at these cores, so
+	// the capacity bound cannot refuse this credit. Raise it past that and the test
+	// passes without ever reaching the date gate it is about.
 	processes = process(50)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
@@ -381,8 +384,8 @@ func TestOwnedCPU_AProcessBornWhileTheLastReadingScannedIsStillCredited(t *testi
 
 	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
 
-	if figure, reported := byRoot[10]; !reported || figure <= 0 {
-		t.Fatalf("tree reports %v with a figure %v; want the child's CPU credited: it started after the previous reading began listing, so that reading could not have seen it and its absence is not evidence of age",
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: it started after the previous reading began listing, so that reading could not have seen it and its absence is not evidence of age",
 			figure, reported)
 	}
 }
@@ -407,8 +410,8 @@ func TestOwnedCPU_AProcessDatedOneTickBeforeTheScanKeepsItsCredit(t *testing.T) 
 
 	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
 
-	if figure, reported := byRoot[10]; !reported || figure <= 0 {
-		t.Fatalf("tree reports %v with a figure %v; want it credited: a tick of dating resolution is not evidence the process predates the scan, and refusing it costs the whole tree its figure",
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: a tick of dating resolution is not evidence the process predates the scan, and refusing it costs the whole tree its figure",
 			figure, reported)
 	}
 }
@@ -421,14 +424,14 @@ func TestStartedInWindow_AdmitsOnlyAProcessThePreviousScanCouldNotHaveSeen(t *te
 		seenSince time.Time
 		want      bool
 	}{
-		"undatable process":        {time.Time{}, scanStart, false},
-		"no previous scan":         {scanStart.Add(time.Second), time.Time{}, false},
-		"running before the scan":  {scanStart.Add(-time.Hour), scanStart, false},
-		"a tick before the scan":   {scanStart.Add(-5 * time.Millisecond), scanStart, true},
-		"a second before the scan": {scanStart.Add(-time.Second), scanStart, false},
-		"born during the scan":     {scanStart.Add(time.Millisecond), scanStart, true},
-		"born inside the window":   {now.Add(-time.Second), scanStart, true},
-		"dated after this reading": {now.Add(time.Hour), scanStart, false},
+		"undatable process":         {time.Time{}, scanStart, false},
+		"no previous scan":          {scanStart.Add(time.Second), time.Time{}, false},
+		"running before the scan":   {scanStart.Add(-time.Hour), scanStart, false},
+		"a tick before the scan":    {scanStart.Add(-5 * time.Millisecond), scanStart, true},
+		"two ticks before the scan": {scanStart.Add(-20 * time.Millisecond), scanStart, false},
+		"born during the scan":      {scanStart.Add(time.Millisecond), scanStart, true},
+		"born inside the window":    {now.Add(-time.Second), scanStart, true},
+		"dated after this reading":  {now.Add(time.Hour), scanStart, false},
 	} {
 		if got := startedInWindow(tc.startedAt, tc.seenSince, now); got != tc.want {
 			t.Errorf("%s: startedInWindow = %v, want %v", name, got, tc.want)

@@ -96,11 +96,8 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 	if !ok {
 		return nil, false
 	}
-	// safety: reading uptime first dates a process no later than its true start,
-	// so the read's own cost leans toward refusing a credit rather than granting
-	// one the window cannot justify.
-	uptime := linuxUptime()
 	now := time.Now()
+	uptime := linuxUptime()
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
 		processes[processID] = ownedProcess{
