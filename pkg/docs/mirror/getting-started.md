@@ -11,12 +11,12 @@ the network unplugged; see
 [offline after the first build](#offline-after-the-first-build) for what
 still needs it.
 
-**Sparkwing Cloud** is the hosted controller, in private preview. A
-controller gives a team one dashboard, one run history, and one queue: a
-triggered run waits there until an enrolled machine claims it, and fails
-with `queue_timeout` at the queue deadline when none does (see
-[scheduling.md](scheduling.md)). Until you have an invite, the same
-command connects this machine to a controller your team runs:
+**Sparkwing Cloud** is the hosted controller. A controller gives a team
+one dashboard, one run history, and one queue: a triggered run waits there
+until an enrolled machine claims it, and fails with `queue_timeout` at the
+queue deadline when none does (see [scheduling.md](scheduling.md)). The
+same command reaches any controller you can reach, including one your team
+runs:
 
 ```bash
 sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
@@ -192,7 +192,7 @@ without a default StorageClass needs are covered in
 ## Offline after the first build
 
 After one successful `sparkwing run` in a checkout, a pipeline whose
-sparks are pinned to exact tags runs with the network unplugged. After it, the same command is green on a plane: the Go
+sparks are pinned to exact tags runs with the network unplugged. The Go
 modules sit in the module cache, the compiled pipeline binary sits in
 `~/.sparkwing/cache/pipelines/`, and the run's state, logs, dashboard,
 and admission daemon are files and sockets on your own machine.
@@ -344,12 +344,10 @@ user-managed deploy targets, not local sparkwing deployments.
 
 ## Sparkwing Cloud
 
-Sparkwing Cloud is the hosted controller, in private preview. A controller
-owns the shared dashboard, run history, scheduling, webhooks, and tokens,
-and machines reach it over outbound HTTPS. The same command connects this
-machine to Sparkwing Cloud or to any other controller you can reach, so a
-team can run its own controller today and keep the command it already
-types.
+Sparkwing Cloud is the hosted controller. A controller owns the shared
+dashboard, run history, scheduling, webhooks, and tokens, and machines
+reach it over outbound HTTPS. The same command reaches any controller you
+can reach, Sparkwing Cloud and one your team runs alike.
 
 ```bash
 sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin

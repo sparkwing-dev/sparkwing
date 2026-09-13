@@ -19,7 +19,7 @@ enforces write preconditions (S3 today). Where it does not, cache
 reservation degrades to last-write-wins, while approvals and debug pauses
 report not-supported and need Postgres. Pipeline triggers report
 not-supported on a bucket whatever it supports, and need Postgres or a
-controller. See [shared object storage](#shared-object-storage-mode-2).
+controller. See [shared object storage](#shared-object-storage).
 
 The selection lives in the profile you run under -- each profile in
 `~/.config/sparkwing/profiles.yaml` carries a `state` / `cache` / `logs`
@@ -49,11 +49,10 @@ network once the first build has fetched its modules; see
 
 ## Sparkwing Cloud
 
-Sparkwing Cloud is the hosted controller, in private preview. A
-controller owns the shared dashboard, run history, scheduling, webhooks,
-and tokens; machines reach it over outbound HTTPS and hold no database
-credential. Until you have an invite, the same command connects to a
-controller your team runs:
+Sparkwing Cloud is the hosted controller. A controller owns the shared
+dashboard, run history, scheduling, webhooks, and tokens; machines reach
+it over outbound HTTPS and hold no database credential. The same command
+reaches any controller you can reach, including one your team runs:
 
 ```bash
 sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
@@ -62,7 +61,7 @@ sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 It stores the token you pass on stdin, writes the profile, and prints the
 dashboard URL. See
 [connecting to Sparkwing Cloud](getting-started.md#sparkwing-cloud) for
-the flags, and [hosted controller](#hosted-controller-mode-4) below for
+the flags, and [hosted controller](#hosted-controller) below for
 what the controller process does and how to run one.
 
 ## Advanced shapes
@@ -71,7 +70,7 @@ The rest of this page is for a team that runs its own bucket, database,
 or controller. Each shape is a profile away: pipeline code does not
 change.
 
-### Shared object storage (Mode 2)
+### Shared object storage
 
 Runners write their run state, cache blobs, and log streams to a
 shared object store. The dashboard reads from the same bucket. No
@@ -81,19 +80,19 @@ object store itself, through conditional-write compare-and-swap.
 For: a small team that wants cross-runner visibility (laptops, CI,
 GitHub Actions) without hosting a database.
 
-Where the bucket enforces write preconditions, Mode 2 coordinates
+Where the bucket enforces write preconditions, a bucket coordinates
 across runners with no database -- cache reservation, approvals, and
 debug pauses all work. Each is an object-store record mutated under
 compare-and-swap (S3
 `If-None-Match` / `If-Match`); a contended `.Memoize()` key elects one
 leader and the rest coalesce onto its output, the same
-exactly-one-runs shape as Mode 3.
+exactly-one-runs shape Postgres gives.
 
 Pipeline triggers are the exception, and CAS does not change it. The
 object-store backend enqueues a trigger and has no path that claims
 one, so `sparkwing.RunAndAwait` refuses with a not-supported error
-naming Mode 3 rather than waiting on a run that nothing starts. Run
-pipelines that spawn other pipelines under Mode 3 or Mode 4.
+naming Postgres rather than waiting on a run that nothing starts. Run
+pipelines that spawn other pipelines on Postgres or a controller.
 
 S3 is the object store that enforces these preconditions today. The
 `gcs` and `azure-blob` state types are recognized in configuration
@@ -103,13 +102,13 @@ endpoint once and, when it finds the guarantee missing, falls back to
 last-write-wins -- cache reservation degrades to "every runner
 computes and uploads to the same content-addressed key" (safe by
 construction), and approvals and debug pauses report not-supported,
-so reach for Mode 3 when you need them.
+so reach for Postgres when you need them.
 
 Tradeoff: coordination over one object is slower at the tail than a
 database row lock. A heavily-contended key serializes its acquires
 and releases as compare-and-swap retries against a single object; an
 uncontended key touches it once. When that tail latency matters,
-Mode 3's Postgres row locks are the upgrade.
+Postgres row locks are the upgrade.
 
 If a runner's object store is briefly unreachable, run state writes
 stage to a local SQLite outbox (`~/.sparkwing/outbox.db`, one per host,
@@ -167,7 +166,7 @@ Everything else is environment, and every runner needs it:
 
 Secrets are the exception to "no controller": the secrets surface
 takes `controller`, `filesystem`, `env`, or `none`, and has no
-object-store option. A Mode 2 team whose pipelines call `Secret()`
+object-store option. A bucket-only team whose pipelines call `Secret()`
 provisions those per host, or runs a controller for that surface
 alone.
 
@@ -187,11 +186,11 @@ trusted network. `--require-login` fails startup unless you also provide
 See [local-execution.md](local-execution.md#per-host-concurrency)
 for the host-local concurrency gate that caps how many `sparkwing run`
 processes a single machine admits at once. The gate is mode-agnostic
-but matters most in Mode 2, where the state backend doesn't
-incidentally serialize overlapping invocations the way the local path's SQLite
-does.
+but matters most on a shared bucket, where the state backend doesn't
+incidentally serialize overlapping invocations the way the local path's
+SQLite does.
 
-### Postgres and object storage (Mode 3)
+### Postgres and object storage
 
 Runners write run state to a shared Postgres database and caches /
 logs to a shared object store. The `.Memoize()` DSL routes through
@@ -208,7 +207,7 @@ host a controller process.
 Tradeoff: every runner needs Postgres credentials. The trust model
 is "anyone with DB creds can write run state." Suitable for owned
 infrastructure; not suitable for untrusted CI against shared infra
-(use Mode 4 for that).
+(use a controller for that).
 
 ```yaml
 # ~/.config/sparkwing/profiles.yaml
@@ -271,9 +270,8 @@ schema table holds. On startup:
 Only a breaking migration couples runner version to schema version, and
 `sparkwing_requirements` names exactly which one. Stagger those
 upgrades: upgrade every runner *before* you upgrade the database, or run
-mixed-version fleets briefly during a rollout. Mode 4 (hosted
-controller) is the alternative that decouples client and schema
-versions entirely.
+mixed-version fleets briefly during a rollout. A hosted controller is
+the alternative that decouples client and schema versions entirely.
 
 #### Testing against Postgres
 
@@ -299,7 +297,7 @@ You supply the VPC and private subnets; the module places the database
 into networking you already run. Its README covers the variables and how
 to point a runner at the result.
 
-### Hosted controller (Mode 4)
+### Hosted controller
 
 A central controller process owns Postgres + object-store credentials
 and serves the dashboard. Runners (including laptops) talk to it
@@ -363,10 +361,10 @@ runs logs --follow` read that ring while the node runs. The durable
 copy still goes to the bucket, and a read after the node finishes comes
 from there.
 
-The ring is memory, so it is bounded three ways: 512 KiB per node,
-64 MiB across every node together, and 1024 nodes holding a ring at
-once. Past the byte bounds the oldest bytes of the widest ring go first;
-past the node bound the ring of the node that wrote least recently is
+The ring is memory, bounded per node (512 KiB), across all nodes
+together (64 MiB), and by ring count (1024 nodes holding one at once).
+Past the byte bounds the oldest bytes of the widest ring go first; past
+the node bound the ring of the node that wrote least recently is
 released. A node's ring is released shortly after the node finishes, or
 after ten minutes of silence from a node that never reported finishing.
 `sparkwing-controller` takes all four bounds as `--live-log-node-kb`,
@@ -426,7 +424,7 @@ A practical decision order:
 2. **A team that wants one dashboard and one run history?**
    [Sparkwing Cloud](#sparkwing-cloud), or a controller your team runs.
 3. **Multiple people on S3, fine with bucket-dependent coordination?**
-   [Shared object storage](#shared-object-storage-mode-2) -- a bucket, a
+   [Shared object storage](#shared-object-storage) -- a bucket, a
    shared profile, and the per-runner environment that profile does not
    carry: `AWS_REGION`, credentials, and `SPARKWING_S3_ENDPOINT` for a
    non-AWS store. See
@@ -434,12 +432,12 @@ A practical decision order:
 4. **Expensive cacheable steps where you want reservation guaranteed
    regardless of bucket CAS support, or low tail latency under heavy
    contention?**
-   [Postgres and object storage](#postgres-and-object-storage-mode-3) --
+   [Postgres and object storage](#postgres-and-object-storage) --
    add a database on top of the bucket.
 5. **Untrusted runners (public CI, customer pipelines) or you don't
    want every runner holding DB credentials, and you want to host the
    controller yourself?**
-   [Hosted controller](#hosted-controller-mode-4).
+   [Hosted controller](#hosted-controller).
 
 You can move between shapes by editing a profile (or selecting a
 different one with `--profile`); pipeline code doesn't change.

@@ -8,10 +8,10 @@ these pages; the CLI ships them embedded too (`sparkwing docs read
 ## Where to start
 
 Sparkwing has two paths. **Local** is a program on your machine and the
-machines you own; **Sparkwing Cloud** is the hosted controller, in private
-preview, that gives a team one dashboard and one run history, and the
-command that connects to it also connects to a controller a team runs
-itself. [`getting-started.md`](getting-started.md) walks both.
+machines you own; **Sparkwing Cloud** is the hosted controller that gives a
+team one dashboard and one run history, and the command that connects to it
+reaches any controller you can reach, including one a team runs itself.
+[`getting-started.md`](getting-started.md) walks both.
 
 - **New here?** [`getting-started.md`](getting-started.md) -- install,
   scaffold, run, then connect to a controller.

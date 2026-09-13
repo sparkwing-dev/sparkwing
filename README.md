@@ -18,12 +18,11 @@ the network unplugged; `latest` pins, controller profiles, your own steps'
 downloads, and `sparkwing update` still need it
 ([the whole boundary](docs/getting-started.md#offline-after-the-first-build)).
 
-**Sparkwing Cloud.** The hosted controller, in private preview. A
-controller gives a team one dashboard, one run history, and one queue that
-enrolled machines claim from. `sparkwing cloud connect --controller URL
---token-stdin` stores the token you were given and writes the profile;
-until you have an invite, the same command points at a controller your
-team runs.
+**Sparkwing Cloud.** The hosted controller. A controller gives a team one
+dashboard, one run history, and one queue that enrolled machines claim
+from. `sparkwing cloud connect --controller URL --token-stdin` stores the
+token you were given and writes the profile, and reaches any controller you
+can reach, including one your team runs.
 
 Hosting your own bucket, database, or controller is an
 [advanced deployment](docs/getting-started.md#advanced-deployments), not a
