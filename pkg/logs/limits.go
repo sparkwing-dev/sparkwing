@@ -9,6 +9,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
+
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
 
 // TruncationMarker is the line the service appends once to a node log
@@ -84,6 +87,103 @@ func (s *Server) WithLimits(l Limits) *Server {
 	return s
 }
 
+// StoreCeilingSubject names the logs service's own store in a refusal.
+const StoreCeilingSubject = "the log store"
+
+// StoreCeilingRemedy is the operator instruction a refused append ends
+// with.
+const StoreCeilingRemedy = "Delete runs, or set --retention (SPARKWING_LOGS_RETENTION) so the sweeper does, " +
+	"until the next measurement puts the store under the ceiling; raise --max-store-bytes or " +
+	"--max-store-objects to accept more."
+
+// WithStoreCeiling bounds the whole log store, not one node or run: at
+// or above either ceiling the service refuses every append with 507
+// until a measurement finds the store back under it. A cfg with no
+// ceiling set, which is the default, never refuses an append.
+//
+// Call it before [Server.Handler]; it is not safe to call on a serving
+// Server.
+func (s *Server) WithStoreCeiling(cfg objectguard.CeilingConfig) *Server {
+	cfg.Subject = StoreCeilingSubject
+	cfg.Remedy = StoreCeilingRemedy
+	s.ceiling = objectguard.NewCeiling(cfg)
+	return s
+}
+
+// StoreCeiling reports the whole-store ceiling and what the service has
+// counted against it.
+func (s *Server) StoreCeiling() objectguard.CeilingState { return s.ceiling.State() }
+
+// MeasureStore walks the log store and folds the total into the
+// ceiling, which is what the sweeper does on the reconciliation
+// interval. It is a no-op while no ceiling is set.
+func (s *Server) MeasureStore(ctx context.Context) error {
+	return s.ceiling.ReconcileWith(ctx, func(context.Context) (objectguard.Usage, error) {
+		root, err := s.openRunsRoot()
+		if err != nil {
+			return objectguard.Usage{}, err
+		}
+		defer s.closeRoot(root, "measure store")
+		usage, err := storeUsage(root)
+		if err != nil {
+			return objectguard.Usage{}, err
+		}
+		return usage, nil
+	})
+}
+
+// safety: a close failure on a read-only walk changes no stored byte, so it is
+// logged rather than returned over a measurement that succeeded.
+func (s *Server) closeRoot(root *os.Root, op string) {
+	if err := root.Close(); err != nil {
+		s.logger.Error("logs store", "op", op, "err", err)
+	}
+}
+
+// perf: one walk of the store per reconciliation interval, never per append,
+// because the append path already knows what it wrote.
+func storeUsage(root *os.Root) (objectguard.Usage, error) {
+	d, err := root.Open(".")
+	if err != nil {
+		return objectguard.Usage{}, err
+	}
+	entries, err := d.ReadDir(-1)
+	_ = d.Close()
+	if err != nil {
+		return objectguard.Usage{}, err
+	}
+	usage := objectguard.Usage{ObservedAt: time.Now().UTC()}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		bytes, files := treeUsage(root, e.Name())
+		usage.Bytes += bytes
+		usage.Objects += files
+	}
+	return usage, nil
+}
+
+func treeUsage(root *os.Root, path string) (bytes, files int64) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return 0, 0
+	}
+	if !info.IsDir() {
+		return info.Size(), 1
+	}
+	entries, err := readDirAt(root, path)
+	if err != nil {
+		return 0, 0
+	}
+	for _, entry := range entries {
+		b, f := treeUsage(root, filepath.Join(path, entry.Name()))
+		bytes += b
+		files += f
+	}
+	return bytes, files
+}
+
 type inFlightBytes struct {
 	mu   sync.Mutex
 	held int64
@@ -124,10 +224,27 @@ type runTotals struct {
 }
 
 type runTotal struct {
-	mu     sync.Mutex
-	total  int64
-	seeded bool
-	inUse  int
+	mu          sync.Mutex
+	total       int64
+	seeded      bool
+	inUse       int
+	binaryNoted map[string]struct{}
+}
+
+// safety: the marker is written once per node log while the service holds the
+// run's state, so a node that keeps sending binary costs one line, not one per
+// append, and a text append between two binary ones does not earn a second.
+func (rt *runTotal) noteBinary(node string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if _, seen := rt.binaryNoted[node]; seen {
+		return false
+	}
+	if rt.binaryNoted == nil {
+		rt.binaryNoted = make(map[string]struct{})
+	}
+	rt.binaryNoted[node] = struct{}{}
+	return true
 }
 
 func (t *runTotals) acquire(runID string) *runTotal {
@@ -204,63 +321,92 @@ func (rt *runTotal) unreserve(n int64) {
 }
 
 // safety: the line cap is applied to the body before the node and run budgets
-// see it, so one unbroken line cannot spend a node's whole allowance.
+// see it, so one unbroken line cannot spend a node's whole allowance. A stored
+// line, marker included, never exceeds the cap, and one append earns at most one
+// marker however many of its lines ran long.
 func capLines(body []byte, limit int64) []byte {
 	if limit <= 0 || int64(len(body)) <= limit {
 		return body
 	}
+	keep := limit - int64(len(LineTruncationMarker))
+	marked := false
 	out := make([]byte, 0, len(body))
 	for len(body) > 0 {
 		line := body
-		rest := []byte(nil)
+		var rest []byte
 		if i := bytes.IndexByte(body, '\n'); i >= 0 {
 			line, rest = body[:i+1], body[i+1:]
 		}
-		if int64(len(line)) > limit {
-			out = append(out, line[:limit]...)
-			out = append(out, LineTruncationMarker...)
-		} else {
+		switch {
+		case int64(len(line)) <= limit:
 			out = append(out, line...)
+		case marked || keep <= 0:
+			// safety: a cap smaller than the marker cannot carry one, and a second
+			// marker in one append would spend the budget the cap just saved.
+			out = append(out, truncateRunes(line, limit-1)...)
+			out = append(out, '\n')
+		default:
+			out = append(out, truncateRunes(line, keep)...)
+			out = append(out, LineTruncationMarker...)
+			marked = true
 		}
 		body = rest
 	}
 	return out
 }
 
-// safety: bytes above 0x7f are left uncounted because they carry UTF-8 text,
-// so a log in any language is not mistaken for a binary.
+// safety: a line cut mid-rune would store a replacement character a reader
+// cannot tell from the pipeline's own output, so the cut backs off to a
+// boundary.
+func truncateRunes(line []byte, limit int64) []byte {
+	if limit <= 0 {
+		return nil
+	}
+	if int64(len(line)) <= limit {
+		return line
+	}
+	cut := int(limit)
+	for cut > 0 && !utf8.RuneStart(line[cut]) {
+		cut--
+	}
+	if r, size := utf8.DecodeLastRune(line[:cut]); r == utf8.RuneError && size == 1 {
+		cut--
+	}
+	if cut < 0 {
+		cut = 0
+	}
+	return line[:cut]
+}
+
+// safety: a byte above 0x7f counts as binary evidence only when it is not part
+// of a valid UTF-8 sequence, so text in any language is stored as sent while a
+// gzip or tar blob, which is mostly invalid UTF-8, is caught.
 func looksBinary(body []byte, ratio float64) bool {
 	if ratio <= 0 || len(body) == 0 {
 		return false
 	}
-	control := 0
-	for _, b := range body {
+	suspect := 0
+	for i := 0; i < len(body); {
+		b := body[i]
 		switch {
 		case b == '\t' || b == '\n' || b == '\v' || b == '\f' || b == '\r':
+			i++
 		case b < 0x20 || b == 0x7f:
-			control++
+			suspect++
+			i++
+		case b < 0x80:
+			i++
+		default:
+			r, size := utf8.DecodeRune(body[i:])
+			if r == utf8.RuneError && size <= 1 {
+				suspect++
+				i++
+				continue
+			}
+			i += size
 		}
 	}
-	return float64(control)/float64(len(body)) > ratio
-}
-
-// safety: the marker is written once per node log, so a node that keeps sending
-// binary costs one line rather than one line per append.
-func endsWithMarker(root *os.Root, name, marker string) bool {
-	f, err := root.Open(name)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil || info.Size() < int64(len(marker)) {
-		return false
-	}
-	buf := make([]byte, len(marker))
-	if _, err := f.ReadAt(buf, info.Size()-int64(len(marker))); err != nil {
-		return false
-	}
-	return string(buf) == marker
+	return float64(suspect)/float64(len(body)) > ratio
 }
 
 type appendPlan struct {
@@ -361,11 +507,13 @@ func (s *Server) StartSweeper(ctx context.Context) {
 	probing := s.limits.MinFreeBytes > 0
 	sweeping := s.limits.Retention > 0 && s.limits.SweepInterval > 0
 	if !probing && !sweeping {
+		s.startStoreCeiling(ctx)
 		return
 	}
 	if probing {
 		s.refreshFreeSpace()
 	}
+	s.startStoreCeiling(ctx)
 	go func() {
 		var probe, sweep <-chan time.Time
 		if probing {
@@ -387,6 +535,36 @@ func (s *Server) StartSweeper(ctx context.Context) {
 			case <-sweep:
 				if _, err := s.SweepOnce(time.Now()); err != nil {
 					s.logger.Error("logs sweep", "err", err)
+				}
+			}
+		}
+	}()
+}
+
+// safety: the first measurement runs before the service accepts appends, so a
+// store that is already over its ceiling refuses from the first request rather
+// than after the first interval.
+func (s *Server) startStoreCeiling(ctx context.Context) {
+	if !s.ceiling.Enforced() {
+		return
+	}
+	if err := s.MeasureStore(ctx); err != nil {
+		s.logger.Error("logs store", "op", "measure store", "err", err)
+	}
+	interval := s.ceiling.Reconcile()
+	if interval <= 0 {
+		return
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := s.MeasureStore(ctx); err != nil {
+					s.logger.Error("logs store", "op", "measure store", "err", err)
 				}
 			}
 		}
@@ -417,6 +595,7 @@ func (s *Server) SweepOnce(now time.Time) (int, error) {
 	// safety: a run written within a sweep of the cutoff waits one more, so a live append is not unlinked under it.
 	cutoff := now.Add(-s.limits.Retention).Add(-s.limits.SweepInterval)
 	removed := 0
+	ceilingSweep := false
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -430,6 +609,15 @@ func (s *Server) SweepOnce(now time.Time) (int, error) {
 		}
 		s.runTotals.forget(e.Name())
 		removed++
+		ceilingSweep = true
+	}
+	// safety: a sweep that deleted runs makes the counters wrong in the caller's
+	// favor, so the store is measured again rather than staying frozen on bytes
+	// that are gone.
+	if ceilingSweep && s.ceiling.Enforced() {
+		if err := s.MeasureStore(context.Background()); err != nil {
+			s.logger.Error("logs store", "op", "measure store", "err", err)
+		}
 	}
 	return removed, nil
 }

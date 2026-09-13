@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
 
 type truncatedBody struct {
@@ -256,5 +258,121 @@ func TestUncappedUploadsAreNotRefusedAsZeroByteOnes(t *testing.T) {
 	handleCache(w, req)
 	if w.Code != http.StatusCreated {
 		t.Errorf("cache archive status %d with the cap disabled, want 201", w.Code)
+	}
+}
+
+func frozenStore(t *testing.T, limit objectguard.CeilingLimit, usage objectguard.Usage) {
+	t.Helper()
+	previous := storeCeiling
+	t.Cleanup(func() { storeCeiling = previous })
+	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit:   limit,
+		Subject: storeCeilingSubject,
+		Remedy:  storeCeilingRemedy,
+	})
+	storeCeiling.Observe(usage)
+	if !storeCeiling.Frozen() {
+		t.Fatalf("the fixture left the store writable: %+v", storeCeiling.State())
+	}
+}
+
+func TestArtifactUploadIsRefusedWhileTheStoreIsOverItsCeiling(t *testing.T) {
+	oldDir := artifactsDir
+	artifactsDir = t.TempDir()
+	t.Cleanup(func() { artifactsDir = oldDir })
+	frozenStore(t, objectguard.CeilingLimit{MaxBytes: 1 << 10}, objectguard.Usage{Bytes: 4 << 10, Objects: 3})
+
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=out.bin", strings.NewReader("payload"))
+	w := httptest.NewRecorder()
+	handleArtifacts(w, req)
+
+	if w.Code != http.StatusInsufficientStorage {
+		t.Fatalf("status %d, want 507 while the store is frozen", w.Code)
+	}
+	for _, want := range []string{"storage ceiling reached", storeCeilingSubject, "1024", "--max-store-bytes"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("the refusal %q does not name %q", w.Body.String(), want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(artifactsDir, "job123", "out.bin")); !os.IsNotExist(err) {
+		t.Errorf("the refused upload was stored anyway: %v", err)
+	}
+}
+
+func TestCacheArchivePutIsRefusedWhileTheStoreIsOverItsCeiling(t *testing.T) {
+	oldDir := cacheDir
+	cacheDir = t.TempDir()
+	t.Cleanup(func() { cacheDir = oldDir })
+	frozenStore(t, objectguard.CeilingLimit{MaxObjects: 2}, objectguard.Usage{Bytes: 10, Objects: 9})
+
+	req := httptest.NewRequest(http.MethodPut, "/cache/deps-abc123", strings.NewReader("archive"))
+	w := httptest.NewRecorder()
+	handleCache(w, req)
+
+	if w.Code != http.StatusInsufficientStorage {
+		t.Fatalf("status %d, want 507 while the store is frozen", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "storage ceiling reached") {
+		t.Errorf("the refusal %q does not name the storage ceiling", w.Body.String())
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		t.Errorf("the refused archive left %q behind", e.Name())
+	}
+}
+
+func TestCacheReadsStayOpenWhileTheStoreIsFrozen(t *testing.T) {
+	oldDir := cacheDir
+	cacheDir = t.TempDir()
+	t.Cleanup(func() { cacheDir = oldDir })
+	if err := os.WriteFile(filepath.Join(cacheDir, "deps-abc123.tar.gz"), []byte("stored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frozenStore(t, objectguard.CeilingLimit{MaxBytes: 1}, objectguard.Usage{Bytes: 99})
+
+	req := httptest.NewRequest(http.MethodGet, "/cache/deps-abc123", nil)
+	w := httptest.NewRecorder()
+	handleCache(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d reading from a frozen store, want 200", w.Code)
+	}
+	if w.Body.String() != "stored" {
+		t.Errorf("read returned %q, want the stored archive", w.Body.String())
+	}
+}
+
+func TestStoreMeasurementCountsWhatTheServiceStored(t *testing.T) {
+	oldArtifacts, oldCache, oldUploads := artifactsDir, cacheDir, uploadsDir
+	oldCeiling := storeCeiling
+	artifactsDir, cacheDir, uploadsDir = t.TempDir(), t.TempDir(), t.TempDir()
+	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{MaxBytes: 1 << 20},
+	})
+	t.Cleanup(func() {
+		artifactsDir, cacheDir, uploadsDir = oldArtifacts, oldCache, oldUploads
+		storeCeiling = oldCeiling
+	})
+
+	if err := os.WriteFile(filepath.Join(cacheDir, "a.tar.gz"), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(artifactsDir, "job1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactsDir, "job1", "out.bin"), []byte("1234567"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	measureStore(t.Context())
+	state := storeCeiling.State()
+	if state.Bytes != 12 || state.Objects != 2 {
+		t.Errorf("measured %d bytes / %d objects, want 12/2", state.Bytes, state.Objects)
+	}
+	if state.ReconciledAt.IsZero() {
+		t.Error("the measurement recorded no time")
 	}
 }

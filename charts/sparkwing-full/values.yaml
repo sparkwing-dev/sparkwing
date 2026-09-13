@@ -118,9 +118,9 @@ controller:
   # bucket unlimited, which is the shipped behavior. See
   # docs/observability.md.
   bucketCeiling:
-    # Stored bytes above which object writes freeze.
+    # Stored bytes at or above which object writes freeze.
     maxBytes: ""
-    # Objects above which object writes freeze.
+    # Objects at or above which object writes freeze.
     maxObjects: ""
     # Stored bytes at which health reports a warning, refusing nothing.
     warnBytes: ""

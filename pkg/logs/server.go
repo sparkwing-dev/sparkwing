@@ -24,6 +24,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -42,6 +43,7 @@ type Server struct {
 	fileMode os.FileMode
 
 	limits    Limits
+	ceiling   *objectguard.Ceiling
 	appendMu  [appendLockShards]sync.Mutex
 	inFlight  inFlightBytes
 	runTotals runTotals
@@ -81,14 +83,15 @@ func newServer(root string, logger *slog.Logger, private bool) (*Server, error) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
+	s := &Server{
 		root:      root,
 		logger:    logger,
 		dirMode:   dirMode,
 		fileMode:  fileMode,
 		limits:    DefaultLimits(),
 		diskSpace: diskSpace,
-	}, nil
+	}
+	return s.WithStoreCeiling(objectguard.CeilingConfig{}), nil
 }
 
 // safety: sharding by stored file path keeps one slow file from serializing every other node's appends,
@@ -410,6 +413,9 @@ type ServeOptions struct {
 	// Limits bounds stored bytes, retention, and search work. The zero
 	// value takes [DefaultLimits].
 	Limits *Limits
+	// StoreCeiling bounds the whole log store. Its zero value leaves
+	// the store unlimited.
+	StoreCeiling objectguard.CeilingConfig
 }
 
 // ServeWith starts the HTTP listener described by opts and blocks
@@ -429,6 +435,7 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	if opts.Limits != nil {
 		s.WithLimits(*opts.Limits)
 	}
+	s.WithStoreCeiling(opts.StoreCeiling)
 	if opts.ControllerURL != "" {
 		s.WithControllerAuth(opts.ControllerURL, 60*time.Second)
 	}
@@ -451,6 +458,8 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 			"max_node_bytes", s.limits.MaxNodeBytes,
 			"max_line_bytes", s.limits.MaxLineBytes,
 			"binary_ratio", s.limits.BinaryRatio,
+			"max_store_bytes", s.ceiling.State().MaxBytes,
+			"max_store_objects", s.ceiling.State().MaxObjects,
 		)
 		errCh <- srv.ListenAndServe()
 	}()
@@ -590,6 +599,10 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
 		return
 	}
+	if err := s.ceiling.Allow(); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 
 	root, err := s.openRunsRoot()
 	if err != nil {
@@ -616,7 +629,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	defer lock.Unlock()
 
 	if looksBinary(body, s.limits.BinaryRatio) {
-		if endsWithMarker(root, name, BinaryDropMarker) {
+		if !rt.noteBinary(name) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -630,6 +643,9 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// safety: a file that did not exist before this append adds an object to the
+	// store ceiling's count; an append to an existing one adds only its bytes.
+	newFile := nodeSize(root, name) == 0
 	f, err := s.openAppend(root, name)
 	if err != nil {
 		rt.unreserve(int64(len(plan.write)))
@@ -642,13 +658,20 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "write node log", err)
 		return
 	}
+	stored := int64(len(plan.write))
 	if plan.marker {
 		if _, err := f.WriteString(TruncationMarker); err != nil {
 			s.storeError(w, "write node log", err)
 			return
 		}
 		rt.add(int64(len(TruncationMarker)))
+		stored += int64(len(TruncationMarker))
 	}
+	objects := int64(0)
+	if newFile {
+		objects = 1
+	}
+	s.ceiling.Record(stored, objects)
 	w.WriteHeader(http.StatusNoContent)
 }
 

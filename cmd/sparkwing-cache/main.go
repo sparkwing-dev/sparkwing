@@ -76,6 +76,25 @@ func run(args []string) error {
 	fs.Int64Var(&cfg.MaxCacheArchiveBytes, "max-cache-archive-bytes",
 		envInt64("SPARKWING_CACHE_MAX_ARCHIVE_BYTES", cfg.MaxCacheArchiveBytes),
 		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
+	fs.Int64Var(&cfg.MaxStoreBytes, "max-store-bytes",
+		envInt64("SPARKWING_CACHE_MAX_STORE_BYTES", cfg.MaxStoreBytes),
+		"stored bytes across the artifact, dependency-archive and upload trees at or above which every "+
+			"upload is refused with 507 naming the ceiling, until a measurement finds the store back "+
+			"under it. 0, the default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
+	fs.Int64Var(&cfg.MaxStoreObjects, "max-store-objects",
+		envInt64("SPARKWING_CACHE_MAX_STORE_OBJECTS", cfg.MaxStoreObjects),
+		"stored files across those trees at or above which every upload is refused with 507; 0 leaves the count unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_OBJECTS.")
+	fs.Int64Var(&cfg.WarnStoreBytes, "warn-store-bytes",
+		envInt64("SPARKWING_CACHE_WARN_STORE_BYTES", cfg.WarnStoreBytes),
+		"stored bytes at which /health reports the store as warning, which refuses nothing. Falls back to $SPARKWING_CACHE_WARN_STORE_BYTES.")
+	fs.Int64Var(&cfg.WarnStoreObjects, "warn-store-objects",
+		envInt64("SPARKWING_CACHE_WARN_STORE_OBJECTS", cfg.WarnStoreObjects),
+		"stored files at which /health reports the store as warning. Falls back to $SPARKWING_CACHE_WARN_STORE_OBJECTS.")
+	fs.DurationVar(&cfg.StoreReconcile, "store-reconcile",
+		envDuration("SPARKWING_CACHE_STORE_RECONCILE", cfg.StoreReconcile),
+		"how often the service walks its stored trees and replaces the running count with the measurement. "+
+			"Uploads are counted as they happen, so this walk is the only enumeration the ceiling costs; "+
+			"0 measures once at startup. Falls back to $SPARKWING_CACHE_STORE_RECONCILE.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
@@ -125,13 +144,20 @@ func envInt(name string, fallback int) int {
 	return fallback
 }
 
+// safety: a bound the operator misspelled must not decay into "unlimited" in
+// silence, so the service says which value it could not read.
 func envInt64(name string, fallback int64) int64 {
-	if v := os.Getenv(name); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
-			return n
-		}
+	v := os.Getenv(name)
+	if v == "" {
+		return fallback
 	}
-	return fallback
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		fmt.Fprintf(os.Stderr,
+			"sparkwing-cache: %s=%q is not a byte count; keeping %d\n", name, v, fallback)
+		return fallback
+	}
+	return n
 }
 
 func trimColon(s string) string {

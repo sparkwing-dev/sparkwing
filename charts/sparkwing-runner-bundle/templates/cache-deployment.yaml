@@ -48,10 +48,27 @@ spec:
           imagePullPolicy: {{ .Values.cache.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          {{- if .Values.cache.allowUnauthenticated }}
           args:
+            {{- if .Values.cache.allowUnauthenticated }}
             - --allow-unauthenticated
-          {{- end }}
+            {{- end }}
+            {{- $limits := .Values.cache.limits | default dict }}
+            {{- range $limit := list
+                  (dict "flag" "--max-artifact-bytes" "value" $limits.maxArtifactBytes)
+                  (dict "flag" "--max-cache-archive-bytes" "value" $limits.maxCacheArchiveBytes)
+                  (dict "flag" "--max-store-bytes" "value" $limits.maxStoreBytes)
+                  (dict "flag" "--max-store-objects" "value" $limits.maxStoreObjects)
+                  (dict "flag" "--warn-store-bytes" "value" $limits.warnStoreBytes)
+                  (dict "flag" "--warn-store-objects" "value" $limits.warnStoreObjects)
+                  (dict "flag" "--store-reconcile" "value" $limits.storeReconcile) }}
+            {{- $value := $limit.value }}
+            {{- if not (kindIs "invalid" $value) }}
+            {{- if ne (toString $value) "" }}
+            - {{ $limit.flag }}
+            - {{ $value | toString | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           env:
             - name: HOME
               value: /tmp

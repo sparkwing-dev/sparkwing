@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
@@ -53,6 +54,16 @@ type Config struct {
 	MaxArtifactBytes int64
 
 	MaxCacheArchiveBytes int64
+
+	MaxStoreBytes int64
+
+	MaxStoreObjects int64
+
+	WarnStoreBytes int64
+
+	WarnStoreObjects int64
+
+	StoreReconcile time.Duration
 }
 
 func DefaultConfig() Config {
@@ -70,6 +81,7 @@ func DefaultConfig() Config {
 
 		MaxArtifactBytes:     DefaultMaxArtifactBytes,
 		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
+		StoreReconcile:       objectguard.DefaultCeilingReconcile,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 	}
@@ -140,6 +152,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxArtifactBytes < 0 || cfg.MaxCacheArchiveBytes < 0 {
 		return nil, fmt.Errorf("cache: an object size cap must not be negative; pass 0 to accept an object of any size")
 	}
+	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
+		return nil, fmt.Errorf("cache: a store ceiling must not be negative; pass 0 to leave the store unlimited")
+	}
+	if cfg.StoreReconcile < 0 {
+		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
+	}
 
 	dataRoot = cfg.DataDir
 	repoDir = filepath.Join(cfg.DataDir, "repos")
@@ -163,9 +181,21 @@ func New(cfg Config) (*Server, error) {
 	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
 	maxArtifactBytes = cfg.MaxArtifactBytes
 	maxCacheArchiveBytes = cfg.MaxCacheArchiveBytes
+	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{
+			MaxBytes:    cfg.MaxStoreBytes,
+			MaxObjects:  cfg.MaxStoreObjects,
+			WarnBytes:   cfg.WarnStoreBytes,
+			WarnObjects: cfg.WarnStoreObjects,
+		},
+		Reconcile: cfg.StoreReconcile,
+		Subject:   storeCeilingSubject,
+		Remedy:    storeCeilingRemedy,
+	})
 
-	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes (0 means no cap)",
-		maxArtifactBytes, maxCacheArchiveBytes)
+	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
+		"and the whole store at %d bytes / %d objects (0 means no cap)",
+		maxArtifactBytes, maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
 
 	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -230,7 +260,12 @@ func New(cfg Config) (*Server, error) {
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	s.wg.Add(2)
+	measureStore(ctx)
+	s.wg.Add(3)
+	go func() {
+		defer s.wg.Done()
+		storeCeilingLoop(ctx)
+	}()
 	go func() {
 		defer s.wg.Done()
 		backgroundFetchLoop(ctx, s.cfg.FetchInterval)

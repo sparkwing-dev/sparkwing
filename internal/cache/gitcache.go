@@ -1378,6 +1378,10 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
+		if err := storeCeiling.Allow(); err != nil {
+			http.Error(w, err.Error(), http.StatusInsufficientStorage)
+			return
+		}
 		// safety: the cap is applied before the first byte reaches the volume, so an
 		// oversized archive costs a refusal rather than the disk it would have filled.
 		if maxCacheArchiveBytes > 0 {
@@ -1412,6 +1416,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
+		storeCeiling.Record(n, 1)
 		// #nosec G706 -- the cache key is pattern-validated
 		log.Printf("cache store: %s (%d bytes)", key, n)
 		w.WriteHeader(http.StatusCreated)
@@ -1476,6 +1481,10 @@ func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
+	if err := storeCeiling.Allow(); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 	artifactPath := r.URL.Query().Get("path")
 	if artifactPath == "" {
 		http.Error(w, "path query param required", http.StatusBadRequest)
@@ -1556,6 +1565,7 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
+	storeCeiling.Record(n, 1)
 	// #nosec G706 -- %q escapes control characters in the caller-supplied path
 	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
 	w.Header().Set("Content-Type", "application/json")
@@ -1676,6 +1686,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
+	if err := storeCeiling.Allow(); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBufferedBodyBytes))
 	if err != nil {
@@ -1696,6 +1710,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("warning: incremental upload failed, storing as-is: %v", err)
 		} else {
+			storeCeiling.Record(int64(size), 1)
 			log.Printf("describe: upload %s (incremental from %s, %d bytes)", id, short(base), size)
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONBody(w, r, map[string]any{"id": id, "size": size})
@@ -1710,6 +1725,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	storeCeiling.Record(int64(len(data)), 1)
 	log.Printf("describe: upload %s (%d bytes)", id, len(data))
 	w.Header().Set("Content-Type", "application/json")
 	writeJSONBody(w, r, map[string]any{"id": id, "size": len(data)})
