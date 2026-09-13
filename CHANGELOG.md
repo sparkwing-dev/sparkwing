@@ -20,28 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **wingd:** A nested run reattaching to a restored lease keeps its own
-  identity. The `reattach` message carries an optional `run_id` and the daemon
-  grants the member it names. Memberships previously went out in the lease's
-  own order, so a child that reconnected before its parent took the parent's
-  run id, and the child's crash then cancelled the still-running parent. A
-  client that sends no `run_id` is served exactly as before, so no protocol
-  floor moves; one that names a run the lease does not hold is now refused
-  rather than granted another member's identity.
-- **dashboard:** The queue page counts a running pipeline once. Its
-  zero-resource orchestration lease no longer adds to the "holding" figure
-  beside the participant that holds the cores, which is the occupancy
-  `sparkwing queue` reports. The capacity page still lists every lease in one
-  table.
-- **cli:** A schedule under `overlap: skip` no longer suppresses itself for
-  longer than a day. The tick asked whether the previous run was still active
-  using the declared catch-up window, so a run no consumer ever claimed read as
-  active for the whole of that window and every later instant recorded
-  `skipped-overlap` without firing. The window that question is asked with is
-  now capped at 24h, the same one the miss decision reads.
-
 ### Added
 
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
@@ -67,6 +45,14 @@ unlock.
 
 ### Fixed
 
+- **wingd:** A nested run reattaching to a restored lease keeps its own
+  identity. The `reattach` message carries an optional `run_id` and the daemon
+  grants the member it names. Memberships previously went out in the lease's
+  own order, so a child that reconnected before its parent took the parent's
+  run id, and the child's crash then cancelled the still-running parent. A
+  client that sends no `run_id` is served exactly as before, so no protocol
+  floor moves; one that names a run the lease does not hold is now refused
+  rather than granted another member's identity.
 - **config:** A pipeline's `on.push`, `on.pull_request` and `on.webhook`
   mappings reject a key outside their schema, naming the field and the line.
   `on: {webhook: {pathh: /review}}` loaded clean and exposed the pipeline on
@@ -82,15 +68,6 @@ unlock.
   "Connected (no resources held)" table, with its own count beside the holding
   one. Those rows leave the holder table, so a lease appears in one table or
   the other, and the page groups admission the way `sparkwing queue` does.
-
-### Changed
-
-- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
-  host override asking for more is evaluated with 24h: `sparkwing crons
-  install` warns at arm time, naming the schedule, the declared window and the
-  effective one, and `sparkwing crons show` prints the effective window in its
-  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
-  as before.
 - **cli:** A schedule under `overlap: skip` no longer suppresses itself for
   longer than a day. The tick asked whether the previous run was still active
   using the declared catch-up window, so a run no consumer ever claimed read as
