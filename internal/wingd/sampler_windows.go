@@ -219,6 +219,7 @@ func windowsOwnedProcesses(processes map[int]windowsProc, children map[int][]int
 			parentPID:  parents[processID],
 			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
 			cpuSeconds: proc.cpuSeconds,
+			startedAt:  windowsProcessStart(proc.startTicks),
 		}
 	}
 	return ownedProcesses
@@ -235,4 +236,17 @@ func windowsTreeMeasured(tree []int, processes map[int]windowsProc) bool {
 
 func windowsFiletimeTicks(value windows.Filetime) uint64 {
 	return uint64(value.HighDateTime)<<32 | uint64(value.LowDateTime)
+}
+
+// windowsProcessStart dates a process from its creation filetime, which counts
+// hundred-nanosecond intervals from the start of 1601.
+func windowsProcessStart(startTicks uint64) time.Time {
+	if startTicks == 0 {
+		return time.Time{}
+	}
+	filetime := windows.Filetime{
+		LowDateTime:  uint32(startTicks & 0xFFFFFFFF),
+		HighDateTime: uint32(startTicks >> 32),
+	}
+	return time.Unix(0, filetime.Nanoseconds())
 }

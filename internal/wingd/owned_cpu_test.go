@@ -65,11 +65,16 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 	processes := map[int]ownedProcess{
 		10: {parentPID: 1, identity: parent, cpuSeconds: 2},
-		11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1001}, cpuSeconds: 4},
+		11: {
+			parentPID:  10,
+			identity:   processIdentity{pid: 11, startTicks: 1001},
+			cpuSeconds: 4,
+			startedAt:  previousAt.Add(500 * time.Millisecond),
+		},
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-5) > 0.0001 {

@@ -136,6 +136,9 @@ type ownedProcess struct {
 	parentPID  int
 	identity   processIdentity
 	cpuSeconds float64
+	// startedAt is when the process began, or the zero time where this platform
+	// cannot date it.
+	startedAt time.Time
 }
 
 func ownersByNearestRoot(parentOf map[int]int, rootPIDs map[int]struct{}) map[int]int {
@@ -236,6 +239,14 @@ func ownedCPUByRoot(
 		}
 		prior, seen := previous[identity]
 		if !seen {
+			if !startedInWindow(process.startedAt, lastAt, now) {
+				// safety: the daemon has no reading for this process and it was already
+				// running when the window opened, so its counter covers time nobody
+				// watched. Crediting the total would charge this window for CPU that ran
+				// outside it, and admission would grant against the difference.
+				unreadable[root] = struct{}{}
+				continue
+			}
 			firstSight[root] += process.cpuSeconds
 			continue
 		}
@@ -311,6 +322,16 @@ func creditableRoots(
 		}
 	}
 	return creditable
+}
+
+// startedInWindow reports whether a process began inside the reading window, which
+// is what makes its whole counter attributable to that window. A platform that
+// cannot date a process answers no, and the tree goes unmeasured.
+func startedInWindow(startedAt, lastAt, now time.Time) bool {
+	if startedAt.IsZero() || lastAt.IsZero() {
+		return false
+	}
+	return !startedAt.Before(lastAt) && !startedAt.After(now)
 }
 
 func firstSightCredit(cpuSeconds, window, arbitratedCores float64) (float64, bool) {

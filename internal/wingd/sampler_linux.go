@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -95,12 +96,14 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 	if !ok {
 		return nil, false
 	}
+	boot := linuxBootTime()
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
 		processes[processID] = ownedProcess{
 			parentPID:  proc.parentPID,
 			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
 			cpuSeconds: proc.selfCPUSeconds,
+			startedAt:  linuxProcessStart(boot, proc.startTicks),
 		}
 	}
 	owners := ownedProcessOwners(roots, processes)
@@ -224,3 +227,41 @@ func readMemAvailable() (uint64, bool) {
 	}
 	return 0, false
 }
+
+// linuxProcessStart dates a process from the boot instant its start ticks count
+// from. A zero boot time leaves the process undated rather than dated wrongly.
+func linuxProcessStart(boot time.Time, startTicks uint64) time.Time {
+	if boot.IsZero() {
+		return time.Time{}
+	}
+	return boot.Add(time.Duration(float64(startTicks) / linuxClockTicks * float64(time.Second)))
+}
+
+// linuxBootTime reads the instant the kernel counts process start ticks from.
+// The value is fixed for the life of the machine, so it is read once.
+func linuxBootTime() time.Time {
+	bootTimeOnce.Do(func() {
+		data, err := os.ReadFile("/proc/stat")
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			seconds, ok := strings.CutPrefix(line, "btime ")
+			if !ok {
+				continue
+			}
+			epoch, err := strconv.ParseInt(strings.TrimSpace(seconds), 10, 64)
+			if err != nil {
+				return
+			}
+			bootTime = time.Unix(epoch, 0)
+			return
+		}
+	})
+	return bootTime
+}
+
+var (
+	bootTimeOnce sync.Once
+	bootTime     time.Time
+)
