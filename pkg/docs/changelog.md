@@ -40,6 +40,12 @@ unlock.
 
 ### Fixed
 
+- **controller/client:** A 404 is a missing record only when it carries the JSON
+  error body the controller writes. A 404 from a wrong base URL, something
+  proxying the path, or a surface that does not register the route now returns
+  `client.ErrForeignNotFound` naming the URL it asked, instead of
+  `store.ErrNotFound`. A pipeline pointed at the wrong controller read as a
+  pipeline that had never run and rebuilt everything on every run.
 - **cli:** `sparkwing pipeline sparks update --name NAME` refuses instead of
   updating every declared library. Resolution rebuilds the overlay modfile from
   the whole manifest in one pass, so a single-library update would drop the
