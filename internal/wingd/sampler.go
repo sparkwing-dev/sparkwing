@@ -331,7 +331,7 @@ func startedInWindow(startedAt, seenSince, now time.Time) bool {
 	// that reading could have listed it, so the bound is when its scan began, minus
 	// a clock tick because a start time and an uptime both floor to one. A platform
 	// that cannot date a process answers no and its tree goes unmeasured.
-	if startedAt.IsZero() || seenSince.IsZero() {
+	if seenSince.IsZero() {
 		return false
 	}
 	return !startedAt.Before(seenSince.Add(-processDatingSlack)) && !startedAt.After(now)

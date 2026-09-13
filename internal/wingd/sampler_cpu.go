@@ -73,3 +73,15 @@ func clampCores(cores, totalCores float64) float64 {
 	}
 	return cores
 }
+
+func parseProcUptime(data string) (float64, bool) {
+	fields := strings.Fields(data)
+	if len(fields) == 0 {
+		return 0, false
+	}
+	seconds, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil || seconds <= 0 {
+		return 0, false
+	}
+	return seconds, true
+}

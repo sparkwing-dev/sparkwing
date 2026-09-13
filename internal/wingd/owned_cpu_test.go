@@ -86,25 +86,27 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 }
 
-func TestOwnedCPU_AProcessOlderThanTheWindowIsNotCreditedToIt(t *testing.T) {
+func TestOwnedCPU_AProcessCarryingMoreCPUThanTheWindowCouldHoldIsNotCredited(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
+	lastAt := now.Add(-time.Second)
+	born := lastAt.Add(100 * time.Millisecond)
 	cases := map[string]map[int]ownedProcess{
 		"a long-running process adopted into a tree just being watched": {
-			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 900}, cpuSeconds: 0.1},
-			11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1}, cpuSeconds: 3600},
+			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 900}, cpuSeconds: 0.1, startedAt: born},
+			11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1}, cpuSeconds: 3600, startedAt: born},
 		},
 		"a run reattaching after a restart, with no reading and a fresh hold": {
-			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 7}, cpuSeconds: 900},
+			10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 7}, cpuSeconds: 900, startedAt: born},
 		},
 	}
 	for name, processes := range cases {
-		roots := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Second)}}
+		roots := []OwnedRoot{{PID: 10, HeldSince: lastAt}}
 		owners := ownedProcessOwners(roots, processes)
 
-		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now.Add(-time.Second), now.Add(-time.Second), now, 8)
+		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, lastAt, lastAt, now, 8)
 
 		if _, figure := byRoot[10]; figure {
-			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold proves the process predates it, and crediting that total would understate external and over-admit",
+			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold cannot have run inside it whatever the process claims about its age, and crediting that total would understate external and over-admit",
 				name, byRoot)
 		}
 	}
@@ -403,5 +405,68 @@ func TestOwnedCPU_AProcessDatedOneTickBeforeTheScanKeepsItsCredit(t *testing.T) 
 	if figure, reported := byRoot[10]; !reported || figure <= 0 {
 		t.Fatalf("tree reports %v with a figure %v; want it credited: a tick of dating resolution is not evidence the process predates the scan, and refusing it costs the whole tree its figure",
 			figure, reported)
+	}
+}
+
+func TestStartedInWindow_AdmitsOnlyAProcessThePreviousScanCouldNotHaveSeen(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	now := scanStart.Add(5 * time.Second)
+	for name, tc := range map[string]struct {
+		startedAt time.Time
+		seenSince time.Time
+		want      bool
+	}{
+		"undatable process":        {time.Time{}, scanStart, false},
+		"no previous scan":         {scanStart.Add(time.Second), time.Time{}, false},
+		"running before the scan":  {scanStart.Add(-time.Hour), scanStart, false},
+		"a tick before the scan":   {scanStart.Add(-processDatingSlack / 2), scanStart, true},
+		"born during the scan":     {scanStart.Add(time.Millisecond), scanStart, true},
+		"born inside the window":   {now.Add(-time.Second), scanStart, true},
+		"dated after this reading": {now.Add(time.Hour), scanStart, false},
+	} {
+		if got := startedInWindow(tc.startedAt, tc.seenSince, now); got != tc.want {
+			t.Errorf("%s: startedInWindow = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestParseProcUptime_RefusesAnythingItCannotRead(t *testing.T) {
+	if got, ok := parseProcUptime("343083.69 2724178.71\n"); !ok || got != 343083.69 {
+		t.Errorf("parseProcUptime = %v, %v; want the first field", got, ok)
+	}
+	if got, ok := parseProcUptime("12.5"); !ok || got != 12.5 {
+		t.Errorf("parseProcUptime with one field = %v, %v; want it read", got, ok)
+	}
+	for name, data := range map[string]string{
+		"empty":        "",
+		"blank":        "   \n",
+		"not a number": "unknown 1\n",
+		"zero":         "0 0\n",
+		"negative":     "-1 0\n",
+	} {
+		if got, ok := parseProcUptime(data); ok || got != 0 {
+			t.Errorf("%s: parseProcUptime = %v, %v; want refused, because a bad uptime dates every process wrongly rather than leaving it undated",
+				name, got, ok)
+		}
+	}
+}
+
+func TestOwnedCPU_ATreeWithAnUndatableProcessReportsNoFigure(t *testing.T) {
+	scanStart := time.Unix(100, 0)
+	lastAt := scanStart.Add(50 * time.Millisecond)
+	now := lastAt.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	previous := map[processIdentity]cpuSample{root: {cpuSeconds: 1, at: lastAt}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 3, startedAt: scanStart.Add(-time.Hour)},
+		11: {parentPID: 10, identity: processIdentity{pid: 11, startTicks: 1001}, cpuSeconds: 2},
+	}
+	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, ownedProcessOwners(held, processes), held, lastAt, scanStart, now, 8)
+
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("tree reported %v cores beside a process it could not date; want no figure, because the rest of the tree is short by an unknown amount and a short figure still subtracts from external",
+			figure)
 	}
 }

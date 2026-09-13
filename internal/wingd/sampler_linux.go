@@ -248,13 +248,9 @@ func linuxUptime() float64 {
 	if err != nil {
 		return 0
 	}
-	seconds, _, ok := strings.Cut(strings.TrimSpace(string(data)), " ")
+	seconds, ok := parseProcUptime(string(data))
 	if !ok {
-		seconds = strings.TrimSpace(string(data))
-	}
-	value, err := strconv.ParseFloat(seconds, 64)
-	if err != nil {
 		return 0
 	}
-	return value
+	return seconds
 }
