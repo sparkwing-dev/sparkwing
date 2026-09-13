@@ -385,7 +385,7 @@ func hookIndex() string {
 	if path == "" {
 		return ""
 	}
-	// #nosec G703 -- naming this index already requires running as this user, so it crosses no privilege boundary
+	// #nosec G703 -- the path comes from this process's own environment, and names what the gate judges
 	if _, err := os.Stat(path); err != nil {
 		return ""
 	}
