@@ -20,14 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Changed
-
-- **cli:** `sparkwing queue` names the soft-core allowance when cores in use
-  exceed a host resource's capacity. The human view states the bound the
-  allowance has -- a run priced from an estimate is admitted only while cores in
-  use sit at or below capacity less reserved and external, so at most one grant
-  crosses the line -- and lists the holders priced from estimates rather than
-  pins. Machine output is unchanged.
 ### Added
 
 - **localws:** `Options.Bundle` serves a caller-supplied dashboard bundle in
@@ -43,6 +35,12 @@ unlock.
 
 ### Changed
 
+- **cli:** `sparkwing queue` names the soft-core allowance when cores in use
+  exceed a host resource's capacity. The human view states the bound the
+  allowance has -- a run priced from an estimate is admitted only while cores in
+  use sit at or below capacity less reserved and external, so at most one grant
+  crosses the line -- and lists the holders priced from estimates rather than
+  pins. Machine output is unchanged.
 - **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
   host override asking for more is evaluated with 24h: `sparkwing crons
   install` warns at arm time, naming the schedule, the declared window and the
