@@ -73,11 +73,10 @@ unlock.
 
 ### Removed
 
-- **cli (Breaking):** The retired `dashboard` noun lost the parsing and
-  migration message it kept after v0.49.0 removed the command. It reads as an
-  unknown subcommand. `sparkwing serve` is the supported command group; see
-  [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
-  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map.
+- **cli:** The retired `dashboard` noun reads as an unknown subcommand. The
+  parsing that recognized the old spelling and named `sparkwing serve` carried
+  readers across [v0.49.0](docs/migrations/v0.49.0.md#serve-command), which
+  removed the command and whose guide carries the full command map.
 
 ### Docs
 
@@ -86,7 +85,6 @@ unlock.
   that consumes a pending bounce, whether the run's state lives locally or on a
   controller; a job running as a Kubernetes Job keeps running and the page now
   says to cancel and retry instead.
-
 ## [v0.50.0] - 2026-09-12
 
 ### Added
