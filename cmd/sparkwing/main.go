@@ -344,7 +344,10 @@ func runSparkwing(args []string) error {
 	if removedDashboardCommand(args) {
 		return errors.New("dashboard was removed; use sparkwing serve (for example, sparkwing serve start)")
 	}
-	args = moveRootOutput(args)
+	args, err := moveRootOutput(args)
+	if err != nil {
+		return err
+	}
 	if cmd, ok := commandHelp(args); ok {
 		requested, _, err := requestedOutput(args)
 		if err != nil {

@@ -162,9 +162,39 @@ func TestOutputContractKeepsFlagValues(t *testing.T) {
 	}
 }
 
-func TestRootOutputStaysBeforeChildBoundary(t *testing.T) {
-	arguments := moveRootOutput([]string{"-o", "pretty", "run", "pipeline", "--", "--output", "child"})
-	expected := []string{"run", "pipeline", "-o", "pretty", "--", "--output", "child"}
+func TestRootOutputNeverReachesThePipeline(t *testing.T) {
+	for _, verb := range [][]string{
+		{"-o", "pretty", "run", "pipeline", "--", "--output", "child"},
+		{"-o", "json", "run", "pipeline"},
+		{"--output=json", "pipeline", "run", "pipeline"},
+	} {
+		arguments, err := moveRootOutput(verb)
+		if err == nil {
+			t.Fatalf("%q: root output survived as %q; want a refusal", verb, arguments)
+		}
+		if !strings.Contains(err.Error(), "-o/--output does not select a run's stream") {
+			t.Fatalf("%q: err = %v", verb, err)
+		}
+	}
+}
+
+func TestRootOutputStillReachesRunHelp(t *testing.T) {
+	arguments, err := moveRootOutput([]string{"-o", "json", "run", "--help"})
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	expected := []string{"run", "-o", "json", "--help"}
+	if !slices.Equal(arguments, expected) {
+		t.Fatalf("got %q, want %q", arguments, expected)
+	}
+}
+
+func TestRootOutputStillMovesForOtherVerbs(t *testing.T) {
+	arguments, err := moveRootOutput([]string{"-o", "json", "runs", "list"})
+	if err != nil {
+		t.Fatalf("runs list: %v", err)
+	}
+	expected := []string{"runs", "list", "-o", "json"}
 	if !slices.Equal(arguments, expected) {
 		t.Fatalf("got %q, want %q", arguments, expected)
 	}

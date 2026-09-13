@@ -40,6 +40,10 @@ unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing -o json run PIPELINE` refuses instead of handing `-o json`
+  to the pipeline, which rejected it as an unknown flag. A run's stream is
+  pretty on a terminal and NDJSON when piped, and `SPARKWING_LOG_FORMAT`
+  overrides that; flags for the pipeline itself still go after `--`.
 - **controller/client:** A 404 is a missing record only when it carries the JSON
   error body the controller writes. A 404 from a wrong base URL, something
   proxying the path, or a surface that does not register the route now returns
