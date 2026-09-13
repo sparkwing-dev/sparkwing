@@ -1263,7 +1263,7 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 		}
 		return ExecutorClaimRoundResult{Pending: true}, nil
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at = NULL, offer_started_at = NULL
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone, runID, nodeID)
 	if err != nil {
 		return ExecutorClaimRoundResult{}, err
