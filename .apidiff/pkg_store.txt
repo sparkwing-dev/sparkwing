@@ -191,6 +191,20 @@ type CreditGrant struct {
 const CreditGrantFree = "free"
 const CreditGrantPaid = "paid"
 const CreditHistoryMaxLimit = 1000
+type CreditLedgerTotals struct {
+	BalanceMicro int64
+
+	GrantedFreeMicro int64
+	GrantedPaidMicro int64
+
+	ReservedMicro int64
+
+	ChargedMicro int64
+
+	RefundedMicro int64
+
+	SettledSeconds int64
+}
 type CreditState struct {
 	GrantedMicro       int64
 	ChargedMicro       int64
@@ -326,6 +340,13 @@ func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
 func DisplayProfileKey(key string) string
+type EgressUsage struct {
+	Principal string
+
+	Month     string
+	Bytes     int64
+	UpdatedAt time.Time
+}
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
@@ -549,6 +570,9 @@ const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
 const MaxRunListLimit = 1000
+const MeteringFree
+const MeteringPaid
+const MeteringUnknown NodeMetering = iota
 type MetricSample struct {
 	TS            time.Time
 	CPUMillicores int64
@@ -666,6 +690,14 @@ type NodeDispatch struct {
 	SecretRedactions int
 	RedactedKeys     []byte
 }
+type NodeMetering int
+type NodeSettlement struct {
+	Seconds          float64
+	ClaimTokenPrefix string
+	Metering         NodeMetering
+
+	ChargeWindowOpen bool
+}
 const NodeStatusApprovalPending = "approval_pending"
 type NodeStep struct {
 	RunID       string
@@ -779,6 +811,12 @@ type ProfileSample struct {
 	SustainedCores  float64
 	PeakMemoryBytes int64
 }
+const QueueStateApprovalPending = "approval_pending"
+const QueueStateClaimed = "claimed"
+const QueueStateReady = "ready"
+const QueueStateRunning = "running"
+const QueueStateWaiting = "waiting"
+func QueueStates() []string
 func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
 func RedactedRun(run *Run) *Run
@@ -998,6 +1036,7 @@ func (s *Store) CoordinatorID(ctx context.Context) (string, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
 func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error)
 func (s *Store) CountDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
+func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error)
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
 func (s *Store) CountUsers() (int, error)
@@ -1018,6 +1057,7 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
+func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
@@ -1085,6 +1125,7 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGran
 func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error)
 func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
+func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUsage, err error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
@@ -1116,6 +1157,7 @@ func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
+func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
 func (s *Store) OldestWaitingReadyNode(ctx context.Context) (runID, nodeID string, err error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
@@ -1130,12 +1172,14 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
+func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
+func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) error
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
