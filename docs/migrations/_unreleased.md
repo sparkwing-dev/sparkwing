@@ -17,3 +17,20 @@ one is the file its URL implies.
 - **Gotchas:** the old path still runs, so a stale command installs the CLI
   rather than failing. Self-hosting instructions that pipe answers into
   `install/install.sh` need the new path.
+
+## External source gained a third value
+
+- **Before:** `ResourceState.ExternalSource` was `measured` or `unmeasured`, so
+  a consumer could switch on the two and cover the field.
+- **After:** it is also `unattributed` -- a real host reading that carries some
+  of sparkwing's own runs' CPU. Branch on `unmeasured` and treat every other
+  named value as a real reading. An empty value means the daemon predates the
+  field, so whether the figure was measured is unknown.
+- **Why:** the set is open. A consumer switching on the values one build knows
+  renders a later one as its fallback, and the fallback that reads as safe --
+  "measured" -- is the one that hides a figure the daemon could not stand
+  behind.
+- **Gotchas:** a switch with no default renders `unattributed` as nothing at
+  all. Read `QueueState.ExternalAttribution` for how often the daemon could not
+  attribute and why, and take the clean count from its `attributed` field
+  rather than by subtracting the fault counts from `samples`.

@@ -90,13 +90,10 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
-	if len(roots) == 0 {
-		return 0, true
-	}
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
 	procs, ok := linuxProcesses()
 	if !ok {
-		return 0, false
+		return nil, false
 	}
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
@@ -106,13 +103,13 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
 			cpuSeconds: proc.selfCPUSeconds,
 		}
 	}
-	owned := ownedProcessIdentities(roots, processes)
+	owners := ownedProcessOwners(roots, processes)
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fraction, measured, next := ownedCPUFromProcesses(s.last, processes, owned, now)
-	s.last = next
-	return fraction, measured
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, now, arbitratedCores)
+	s.last, s.lastAt = next, now
+	return byRoot, true
 }
 
 type linuxProc struct {

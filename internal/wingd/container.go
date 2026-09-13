@@ -60,6 +60,19 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	return cores, memBytes
 }
 
+// arbitratedCores is the core count this daemon's runs execute on: a cgroup
+// limit where one caps them below the machine's, and the machine's capacity
+// otherwise.
+func (s *containerSensor) arbitratedCores(hostCores float64) float64 {
+	if s == nil {
+		return hostCores
+	}
+	if cores, _ := s.capacityLimits(); cores > 0 && cores < hostCores {
+		return cores
+	}
+	return hostCores
+}
+
 func (s *containerSensor) apply(stat HostStat) HostStat {
 	if s == nil {
 		return stat

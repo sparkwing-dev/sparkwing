@@ -79,53 +79,26 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
-	if len(roots) == 0 {
-		return 0, true
-	}
-	procs, ok := darwinProcesses()
-	if !ok {
-		return 0, false
-	}
-	children := map[int][]int{}
-	byPID := map[int]struct{}{}
-	for _, proc := range procs {
-		processID := int(proc.Proc.P_pid)
-		byPID[processID] = struct{}{}
-		children[int(proc.Eproc.Ppid)] = append(children[int(proc.Eproc.Ppid)], processID)
-	}
-	owned := map[int]struct{}{}
-	for _, root := range roots {
-		if _, ok := byPID[root]; !ok {
-			continue
-		}
-		for _, processID := range collectSubtree(root, children) {
-			owned[processID] = struct{}{}
-		}
-	}
-	pids := make([]int, 0, len(owned))
-	for processID := range owned {
-		pids = append(pids, processID)
-	}
-	cpu, ok := darwinProcessCPUFractions(pids)
-	if !ok {
-		return 0, false
-	}
-	var fraction float64
-	for _, usage := range cpu {
-		fraction += usage
-	}
-	return fraction, true
+func (s *ownedProcSampler) sampleOwned([]OwnedRoot, float64) (map[int]float64, bool) {
+	// Darwin attributes owned CPU from the paired host sampler, which reads one
+	// process table for host busy and owned CPU together. This path answers for a
+	// host sampler that cannot pair, and it has no second way to measure.
+	return nil, false
 }
 
-func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool, error) {
+// safety: the paired path is reached through a type assertion, so a signature
+// that drifts from the interface fails no build -- it silently stops matching
+// and darwin loses the single snapshot host busy and owned must share.
+var _ pairedHostOwnedSampler = (*platformSampler)(nil)
+
+func (p *platformSampler) SampleWithOwned(roots []OwnedRoot, arbitratedCores float64) (HostStat, map[int]float64, bool, error) {
 	stat, err := sampleHost()
 	if err != nil {
-		return stat, 0, false, err
+		return stat, nil, false, err
 	}
 	snapshot, ok := darwinProcessCPUSnapshot()
 	if !ok {
-		return stat, 0, false, nil
+		return stat, nil, false, nil
 	}
 
 	now := time.Now()
@@ -140,7 +113,10 @@ func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool,
 		previous,
 		elapsedSeconds,
 		roots,
+		previousAt,
+		now,
 		stat.TotalCores,
+		arbitratedCores,
 	)
 	stat.BusyCores = host
 	stat.CPUMeasured = hostMeasured

@@ -30,6 +30,7 @@ import {
   groupHolders,
   hasDaemon,
   humanBytes,
+  isHostResource,
   queueLifecycleHolders,
   queueRowID,
   resourceAvailable,
@@ -436,18 +437,27 @@ function HostSection({
 
 function ExternalCell({ r }: { r: QueueResource }) {
   const label = externalCell(r, fmtAmount);
-  if (!r.external_source) return <>{label}</>;
+  if (!isHostResource(r.key)) return <>{label}</>;
   return (
-    <Tooltip
-      content={
-        r.external_source === "unmeasured"
-          ? "No host sensor for this dimension; nothing was subtracted for external load"
-          : "Measured from the host, outside sparkwing"
-      }
-    >
+    <Tooltip content={externalSourceTooltip(r.external_source ?? "")}>
       <span className="cursor-default">{label}</span>
     </Tooltip>
   );
+}
+
+function externalSourceTooltip(source: string): string {
+  switch (source) {
+    case "":
+      return "This daemon predates the field that says where the figure came from, so whether it was measured is unknown";
+    case "unmeasured":
+      return "No host sensor for this dimension; nothing was subtracted for external load";
+    case "measured":
+      return "Measured from the host, outside sparkwing";
+    case "unattributed":
+      return "Measured from the host, but recent readings carry some of sparkwing's own runs' CPU, so external reads high and available reads low by it";
+    default:
+      return `Measured from the host, reported as "${source}" -- a provenance this page does not know`;
+  }
 }
 
 function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {
