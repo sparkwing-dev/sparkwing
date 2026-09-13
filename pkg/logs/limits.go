@@ -182,17 +182,17 @@ func storeUsage(ctx context.Context, root *os.Root) (objectguard.Usage, error) {
 }
 
 func treeUsage(ctx context.Context, root *os.Root, path string) (bytes, files int64, partial bool) {
-	// safety: the check sits on each directory rather than each file, so a deep
-	// tree is abandoned promptly without a context read per log file.
-	if ctx.Err() != nil {
-		return 0, 0, true
-	}
 	info, err := root.Stat(path)
 	if err != nil {
 		return 0, 0, false
 	}
 	if !info.IsDir() {
 		return info.Size(), 1, false
+	}
+	// safety: the check sits on each directory rather than each file, so a deep
+	// tree is abandoned promptly without a context read per log file.
+	if ctx.Err() != nil {
+		return 0, 0, true
 	}
 	entries, err := readDirAt(root, path)
 	if err != nil {

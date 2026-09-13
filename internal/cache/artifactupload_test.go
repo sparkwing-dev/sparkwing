@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -622,4 +623,48 @@ func TestStoreCeilingThawRefusalNamesTheMeasureRoute(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "/admin/store-ceiling/measure") {
 		t.Errorf("the refusal %q does not name the route that does work", w.Body.String())
 	}
+}
+
+func TestMeasureRequestDuringAWalkIsNotDropped(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64},
+		Reconcile: time.Hour,
+	})
+	// safety: a wide tree makes the first walk long enough that the second request
+	// lands inside it, which is the case a dropped request would lose.
+	for i := range 2000 {
+		name := filepath.Join(cacheDir, fmt.Sprintf("filler-%04d.tar.gz", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blob := filepath.Join(cacheDir, "big.tar.gz")
+	if err := os.WriteFile(blob, []byte(strings.Repeat("x", 256)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	measureStore(t.Context())
+	if !storeCeiling.Frozen() {
+		t.Fatalf("the store did not freeze: %+v", storeCeiling.State())
+	}
+
+	first := httptest.NewRecorder()
+	handleStoreCeilingMeasure(first, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/measure", nil))
+
+	for _, name := range []string{blob} {
+		if err := os.Remove(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 2000 {
+		if err := os.Remove(filepath.Join(cacheDir, fmt.Sprintf("filler-%04d.tar.gz", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	second := httptest.NewRecorder()
+	handleStoreCeilingMeasure(second, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/measure", nil))
+	if second.Code != http.StatusAccepted {
+		t.Fatalf("second measure status %d, want 202", second.Code)
+	}
+
+	waitUntil(t, "the emptied store thaws", func() bool { return !storeCeiling.Frozen() })
 }

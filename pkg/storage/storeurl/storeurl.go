@@ -146,9 +146,6 @@ const SDKMaxAttempts = 4
 // slow failure cannot stretch one call past a caller's patience.
 const SDKMaxBackoff = 5 * time.Second
 
-// safety: the only S3 client this repository constructs, so every object-store
-// request passes the process-wide request budget and the SDK retryer is capped
-// in exactly one place.
 // OpenMeasurementStore opens raw for measurement alone: reading the
 // store's own total, never serving it. maxPages bounds how many
 // listings one measurement spends; zero takes the backend's default.
@@ -179,6 +176,9 @@ func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storag
 	return store, nil
 }
 
+// safety: the only S3 client this repository constructs, so a budgeted caller's
+// requests all pass the process-wide request budget and the SDK retryer is
+// capped in exactly one place.
 func newS3Client(ctx context.Context, budgeted bool) (*awss3.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRetryer(func() aws.Retryer {
 		return retry.NewStandard(func(o *retry.StandardOptions) {

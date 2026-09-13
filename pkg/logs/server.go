@@ -46,7 +46,7 @@ type Server struct {
 	limits    Limits
 	ceiling   *objectguard.Ceiling
 	sweepCtx  atomic.Pointer[context.Context]
-	measuring atomic.Bool
+	measuring objectguard.Coalescer
 	appendMu  [appendLockShards]sync.Mutex
 	inFlight  inFlightBytes
 	runTotals runTotals

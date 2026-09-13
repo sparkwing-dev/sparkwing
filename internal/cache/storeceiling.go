@@ -96,8 +96,8 @@ func treeUsage(ctx context.Context, dir string) (bytes, files int64, partial boo
 // safety: the walk outlives the request that asked for it, so a caller who hangs
 // up does not abandon a measurement half way and leave the total wrong.
 var (
-	measureCtx      atomic.Pointer[context.Context]
-	measureInFlight atomic.Bool
+	measureCtx  atomic.Pointer[context.Context]
+	measureOnce objectguard.Coalescer
 )
 
 func setMeasureContext(ctx context.Context) { measureCtx.Store(&ctx) }
@@ -109,17 +109,11 @@ func serviceContext() context.Context {
 	return context.Background()
 }
 
-// safety: a burst of admin calls costs one walk, because a second measurement
-// would read the same trees and race the first one's total.
+// safety: a burst of admin calls costs one walk, and a call the running walk
+// turned away still earns a repeat, because that walk may already have passed
+// the directory the caller just emptied.
 func measureStoreAsync() bool {
-	if !measureInFlight.CompareAndSwap(false, true) {
-		return false
-	}
-	go func() {
-		defer measureInFlight.Store(false)
-		measureStore(serviceContext())
-	}()
-	return true
+	return measureOnce.Go(func() { measureStore(serviceContext()) })
 }
 
 // safety: one shape for the ceiling wherever it is read, so the health route and

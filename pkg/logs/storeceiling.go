@@ -45,24 +45,23 @@ func (s *Server) storeCeilingHealth() (map[string]any, []string) {
 
 const rfc3339 = "2006-01-02T15:04:05Z07:00"
 
-// safety: the walk outlives the delete that triggered it, on the service's own
-// context rather than the request's, so a caller who hangs up neither abandons
-// the measurement nor pays for it in latency. One walk at a time: a burst of
-// deletes costs one.
+// safety: the walk runs on the service's context rather than the request's, so a
+// caller who hangs up neither abandons it nor waits for it; the coalescer keeps
+// one walk in flight and repeats it for a delete that walk turned away.
 func (s *Server) remeasureAfterDelete() {
 	if !s.ceiling.Enforced() {
 		return
 	}
-	if !s.measuring.CompareAndSwap(false, true) {
-		return
-	}
-	go func() {
-		defer s.measuring.Store(false)
+	s.measuring.Go(func() {
 		if err := s.MeasureStore(s.sweepContext()); err != nil {
 			s.logger.Error("logs store", "op", "measure store", "err", err)
 		}
-	}()
+	})
 }
+
+// MeasuringStore reports whether a background store measurement is in
+// flight, which is what a caller waits on after a delete.
+func (s *Server) MeasuringStore() bool { return s.measuring.Running() }
 
 var (
 	// safety: one logs service runs per process, so the collector reads that

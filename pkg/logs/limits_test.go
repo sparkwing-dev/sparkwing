@@ -913,6 +913,53 @@ func TestLogs_DeletingARunRemeasuresAndThawsTheStore(t *testing.T) {
 	}
 }
 
+func TestLogs_ADeleteDuringAWalkStillClearsTheFreeze(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 4096},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+
+	// safety: a wide run makes the first walk long enough that the second delete
+	// lands inside it, which is the case a dropped request would lose.
+	for i := range 400 {
+		node := fmt.Sprintf("step-%03d", i)
+		if err := fix.client.Append(ctx, "run-wide", node, []byte("filler\n")); err != nil {
+			t.Fatalf("append %s: %v", node, err)
+		}
+	}
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 4096)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if !fix.server.StoreCeiling().Frozen {
+		t.Fatal("the store did not freeze")
+	}
+
+	if err := fix.client.DeleteRun(ctx, "run-wide"); err != nil {
+		t.Fatalf("delete run-wide: %v", err)
+	}
+	if err := fix.client.DeleteRun(ctx, "run-1"); err != nil {
+		t.Fatalf("delete run-1: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !fix.server.StoreCeiling().Frozen && !fix.server.MeasuringStore() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if state := fix.server.StoreCeiling(); state.Frozen {
+		t.Fatalf("the second delete was lost to the running walk: %+v", state)
+	}
+	if err := fix.client.Append(ctx, "run-2", "step-a", []byte("after\n")); err != nil {
+		t.Errorf("append after both deletes: %v", err)
+	}
+}
+
 func TestLogs_MeasurementStopsWhenItsContextDoes(t *testing.T) {
 	fix := newCeilingServer(t, objectguard.CeilingConfig{
 		Limit:     objectguard.CeilingLimit{MaxBytes: 1 << 20},

@@ -582,7 +582,9 @@ these as `cache.limits.*` and `logs.limits.*`.
 
 Neither service waits out the interval to recover. Deleting a run with
 `DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
-`--retention`, measures the log store again on the spot. The cache
+`--retention`, starts a fresh measurement of the log store, so appends
+resume shortly after the delete answers rather than at the end of the
+interval. The cache
 serves no delete of its own, so it carries two bearer-gated admin
 routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
 what turns freeing space on the volume into uploads flowing again, and
@@ -592,4 +594,6 @@ and walks off the request path, so the caller pays no latency for a
 large store and a disconnect cannot abandon the walk; one runs at a
 time. The thaw is refused with `409` when no measurement is scheduled,
 and the refusal points at the measure route. Deleting a run on the logs
-service triggers the same off-request walk.
+service triggers the same off-request walk. Neither service drops a
+request that arrives while a walk is running: it re-runs once when that
+walk finishes, so a delete the walk had already passed still lands.
