@@ -453,6 +453,10 @@ var productTestUnset = []string{
 	wingwire.LeaseTokenEnv,
 	wingwire.ChildLeaseTokenEnv,
 	"GIT_INDEX_FILE",
+	// safety: a node process carries this run's home, which for an ordinary
+	// gate is the operator's own. A test binary that inherits it opens the
+	// real runs store instead of the sandbox internal/paths gives it.
+	"SPARKWING_HOME",
 }
 
 func withoutInherited(cmd string, names []string) string {
