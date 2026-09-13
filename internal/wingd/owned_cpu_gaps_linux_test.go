@@ -37,7 +37,7 @@ func TestLinuxProcess_RefusesAStatLineEndingBeforeTheStartTicks(t *testing.T) {
 func TestLinuxOwnedProcesses_CreditsAProcessItsOwnCPUAndNotItsTreeTotal(t *testing.T) {
 	now := time.Now()
 	procs := map[int]linuxProc{
-		10: {parentPID: 1, startTicks: 600, selfCPUSeconds: 5, cpuSeconds: 14},
+		10: {parentPID: 7, startTicks: 600, selfCPUSeconds: 5, cpuSeconds: 14},
 	}
 
 	processes := linuxOwnedProcesses(procs, now, 3600)
@@ -49,8 +49,8 @@ func TestLinuxOwnedProcesses_CreditsAProcessItsOwnCPUAndNotItsTreeTotal(t *testi
 	if processes[10].identity != (processIdentity{pid: 10, startTicks: 600}) {
 		t.Errorf("owned process identity = %v, want pid 10 at start ticks 600", processes[10].identity)
 	}
-	if got := processes[10].parentPID; got != 1 {
-		t.Errorf("owned process parent PID = %v, want 1: the parent is what walks this process up to a root, so one wired to the wrong parent is credited against a tree it never ran under",
+	if got := processes[10].parentPID; got != 7 {
+		t.Errorf("owned process parent PID = %v, want 7: the parent is what walks this process up to a root, so one wired to the wrong parent is credited against a tree it never ran under",
 			got)
 	}
 	if got, want := processes[10].startedAt, now.Add(-3594*time.Second); !got.Equal(want) {

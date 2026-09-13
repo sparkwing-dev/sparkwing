@@ -95,3 +95,27 @@ func TestDarwinCPUSnapshot_CreditsOnSightOnlyARootHeldInsideTheWindow(t *testing
 		}
 	}
 }
+
+func TestOwnedCPU_AMeasuredTreeLosesItsFigureWhenAFirstSeenChildOverrunsTheCeiling(t *testing.T) {
+	previousAt := time.Unix(100, 0)
+	now := previousAt.Add(time.Second)
+	rootIdentity := processIdentity{pid: 10, startTicks: 100}
+	childIdentity := processIdentity{pid: 11, startTicks: 200}
+	held := []OwnedRoot{{PID: 10, HeldSince: previousAt.Add(-time.Hour)}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: rootIdentity, cpuSeconds: 4, startedAt: previousAt.Add(-time.Hour)},
+		// safety: the child is first seen and carries more CPU than one second at
+		// eight cores could hold, so its own credit is refused.
+		11: {parentPID: 10, identity: childIdentity, cpuSeconds: 900, startedAt: previousAt.Add(500 * time.Millisecond)},
+	}
+	previous := map[processIdentity]cpuSample{rootIdentity: {cpuSeconds: 2, at: previousAt}}
+
+	byRoot, _ := ownedCPUByRoot(
+		previous, processes, ownedProcessOwners(held, processes), held,
+		previousAt, previousAt, now, 8)
+
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("tree reports %v cores; want no figure at all: the root's own delta is measured, but a figure short by however much the child ran still subtracts from external, and admission grants against the difference",
+			figure)
+	}
+}

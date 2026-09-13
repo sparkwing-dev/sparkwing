@@ -33,6 +33,12 @@ func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 		_ = child.Wait()
 	}()
 
+	// safety: the ceiling a first-sight credit is bounded by is the window times the
+	// cores, and a container scan of a sparse /proc closes in microseconds. Holding the
+	// window open past one clock tick keeps the capacity bound from deciding here, so a
+	// red reports the dating this test is about.
+	time.Sleep(50 * time.Millisecond)
+
 	byRoot, ok := sampler.sampleOwnedFrom(time.Now, roots, cores)
 	if !ok {
 		t.Fatal("the second scan could not list this machine's processes")
