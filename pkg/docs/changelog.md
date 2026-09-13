@@ -24,6 +24,12 @@ unlock.
 
 ### Added
 
+- **api:** `pkg/gitenv` carries a git hook's index binding across the unbinding
+  that keeps it from reaching the commands a hook runs. `Unbind` records the
+  path, `GateIndex` hands it back to the one command that should read the
+  staged content, and `ShellUnbind` is the same for a hook that runs before
+  this process does. It was internal, so a pipeline job that needed the same
+  answer carried its own copy.
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
 - **admission:** `sparkwing queue` reports how many host CPU readings the daemon
   could not separate its own runs' work out of, over how many it took, through

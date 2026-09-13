@@ -1,3 +1,11 @@
+// Package gitenv carries a git hook's index binding across the unbinding that
+// keeps it from reaching the commands a hook runs.
+//
+// A hook inherits GIT_INDEX_FILE naming the index the commit is being built
+// in. Leaving it bound lets any git command a hook runs write into that
+// commit, so it is unbound; but a check that wants to see the staged content
+// still needs it. Unbind records the path under [GateIndexVar], and GateIndex
+// hands it back to the one command that should see it.
 package gitenv
 
 import (
@@ -18,8 +26,13 @@ var bindingVars = []string{
 	"GIT_QUARANTINE_PATH",
 }
 
+// GateIndexVar names the environment variable holding the hook's index path
+// after [Unbind] has removed the binding git itself acts on.
 const GateIndexVar = "SPARKWING_GATE_INDEX"
 
+// Unbind records the hook's index path under [GateIndexVar] and removes every
+// variable git binds a working context with, so a command run from here reads
+// the repository rather than the commit under construction.
 func Unbind() {
 	if index := os.Getenv("GIT_INDEX_FILE"); index != "" {
 		if abs, err := filepath.Abs(index); err == nil {
@@ -32,6 +45,9 @@ func Unbind() {
 	}
 }
 
+// GateIndex reports the recorded index path, or empty where no hook recorded
+// one or the file it named is gone. Bind it to the single command that should
+// read the staged content rather than exporting it.
 func GateIndex() string {
 	path := os.Getenv(GateIndexVar)
 	if path == "" {
@@ -44,6 +60,8 @@ func GateIndex() string {
 	return path
 }
 
+// ShellUnbind is Unbind as shell, for a hook that runs before this process
+// does.
 func ShellUnbind() string {
 	return "if [ -n \"${GIT_INDEX_FILE:-}\" ]; then\n" +
 		"\tcase \"$GIT_INDEX_FILE\" in\n" +

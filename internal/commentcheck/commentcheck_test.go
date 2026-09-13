@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
 func TestCheckFile_AllowsDocAndTagsRejectsNarration(t *testing.T) {

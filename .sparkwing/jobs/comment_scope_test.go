@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
 func commentFixtureRepo(t *testing.T) string {
@@ -15,7 +17,7 @@ func commentFixtureRepo(t *testing.T) string {
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/"+gateBaselineRef, "HEAD")
 	unsetForTest(t, "GIT_INDEX_FILE")
-	unsetForTest(t, gateIndexVar)
+	unsetForTest(t, gitenv.GateIndexVar)
 	return root
 }
 
@@ -73,7 +75,7 @@ func TestCommentStepReadsTheIndexTheCommitIsBeingBuiltIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	runTestGitWithIndex(t, root, index, "add", "internal/pending.go")
-	t.Setenv(gateIndexVar, index)
+	t.Setenv(gitenv.GateIndexVar, index)
 
 	command, _, err := commentCheckCommand(context.Background())
 	if err != nil {
@@ -88,7 +90,7 @@ func TestCommentStepLetsACallerBindItsOwnIndex(t *testing.T) {
 	commentFixtureRepo(t)
 	bound := filepath.Join(t.TempDir(), "caller-index")
 	t.Setenv("GIT_INDEX_FILE", bound)
-	t.Setenv(gateIndexVar, filepath.Join(t.TempDir(), "gate-index"))
+	t.Setenv(gitenv.GateIndexVar, filepath.Join(t.TempDir(), "gate-index"))
 
 	if got := hookIndex(); got != "" {
 		t.Fatalf("hookIndex() = %q; it overrode the index the caller bound at %s", got, bound)

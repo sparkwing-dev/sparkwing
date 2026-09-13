@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
 var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):[[:space:]]*\S`)

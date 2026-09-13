@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -381,15 +383,7 @@ func hookIndex() string {
 	if os.Getenv("GIT_INDEX_FILE") != "" {
 		return ""
 	}
-	path := os.Getenv(gateIndexVar)
-	if path == "" {
-		return ""
-	}
-	// #nosec G703 -- the path comes from this process's own environment, and names what the gate judges
-	if _, err := os.Stat(path); err != nil {
-		return ""
-	}
-	return path
+	return gitenv.GateIndex()
 }
 
 func splitNULNames(out string) []string {
@@ -447,8 +441,6 @@ func checkDocsMirror(ctx context.Context) error {
 	}
 	return nil
 }
-
-const gateIndexVar = "SPARKWING_GATE_INDEX"
 
 var productTestUnset = []string{
 	wingwire.LeaseTokenEnv,
