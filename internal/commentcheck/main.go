@@ -378,7 +378,9 @@ func firstLine(text string) string {
 }
 
 func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool, error) {
-	args := []string{"diff", "--unified=0", "--no-color"}
+	// safety: git quotes a path holding a non-ASCII byte unless core.quotePath
+	// is off, and a quoted +++ header drops that file from the scope unjudged.
+	args := []string{"-c", "core.quotePath=false", "diff", "--unified=0", "--no-color"}
 	var index string
 	if staged {
 		index = stagedIndex()
