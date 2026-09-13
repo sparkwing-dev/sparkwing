@@ -48,6 +48,13 @@ unlock.
   script `https://sparkwing.dev/install.sh` serves. The runner service
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
+- **cli (Breaking):** `sparkwing pipeline sparks update --name NAME` refuses
+  instead of re-resolving every declared library. Resolution rebuilds the
+  overlay modfile from the whole manifest in one pass, so a single-library
+  update would drop the other libraries' resolved versions; the flag was
+  checked against the manifest and then discarded, so naming one library
+  re-resolved them all. See
+  [sparks update --name](docs/migrations/_unreleased.md#sparks-update---name).
 
 ### Fixed
 
@@ -61,12 +68,6 @@ unlock.
   `client.ErrForeignNotFound` naming the URL it asked, instead of
   `store.ErrNotFound`. A pipeline pointed at the wrong controller read as a
   pipeline that had never run and rebuilt everything on every run.
-- **cli:** `sparkwing pipeline sparks update --name NAME` refuses instead of
-  updating every declared library. Resolution rebuilds the overlay modfile from
-  the whole manifest in one pass, so a single-library update would drop the
-  other libraries' resolved versions. The flag was checked against the manifest
-  and then discarded, so naming one library re-resolved them all. Give a library
-  an exact `version:` in `.sparkwing/sparkwing.yaml` to hold it still.
 - **cli:** `sparkwing pipeline publish --profile NAME` uploads to the backend
   that profile serves pipeline binaries from -- its `cache.binaries` sub-spec
   when it declares one, its cache surface otherwise. The flag was read for its

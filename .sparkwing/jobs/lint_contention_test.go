@@ -170,3 +170,17 @@ func TestDescribeLintFailureSeparatesTheLinterOwnTimeoutFromFindings(t *testing.
 		t.Fatalf("a timeout was reported as contention: %s", got)
 	}
 }
+
+func TestDescribeLintFailureDoesNotExcuseAFindingThatEchoesTheTimeoutText(t *testing.T) {
+	err := &sparkwing.ExecError{
+		Command:  "golangci-lint run ./...",
+		Stdout:   "lint_contention.go:19:7: const golangciTimeout = \"Timeout exceeded\" (unused)\n",
+		ExitCode: 1,
+	}
+
+	got := describeLintFailure(context.Background(), time.Second, err)
+
+	if strings.Contains(got, "could not finish") {
+		t.Fatalf("a finding quoting the timeout text was excused as an unfinished run: %s", got)
+	}
+}

@@ -27,10 +27,10 @@ func TestEveryHelperRefusesA404NoControllerWrote(t *testing.T) {
 	srv := foreignNotFoundServer(t)
 	for _, tc := range clientCalls() {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.call(context.Background(), client.New(srv.URL, srv.Client()))
 			if tc.name == "CreateRun" {
-				return
+				t.Skip("CreateRun reports any unexpected status through readHTTPError and never maps 404 to a missing record")
 			}
+			err := tc.call(context.Background(), client.New(srv.URL, srv.Client()))
 			if errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("%s read a 404 the controller did not write as a missing record: %v", tc.name, err)
 			}

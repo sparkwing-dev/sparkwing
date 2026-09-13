@@ -458,7 +458,9 @@ func runSparksUpdate(args []string) error {
 		return fmt.Errorf("spark update: %s has no libraries", path)
 	}
 	if *name != "" {
-		return fmt.Errorf("spark update: --name is not supported. Resolution rebuilds the overlay from every declared library at once, so updating %q alone would drop the other libraries' resolved versions. Pin it by setting its version: in %s, then run `sparkwing pipeline sparks update`", *name, path)
+		return fmt.Errorf("spark update: --name is not supported. Resolution rebuilds the overlay from the whole manifest, "+
+			"so updating %q alone would drop the other libraries' resolved versions.\n"+
+			"Give it an exact version: in %s to hold it still, then run `sparkwing pipeline sparks update`", *name, path)
 	}
 	ctx := context.Background()
 	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)

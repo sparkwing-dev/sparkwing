@@ -1699,15 +1699,15 @@ const unsupportedRouteError = "unsupported"
 // caller degrades instead of reporting the resource missing.
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 
-// safety: every 404 in this package routes through notFound or
-// unsupportedRoute, so a route the controller does not register is never
-// reported as a missing row (or, for a delete, as success).
 // ErrForeignNotFound reports a 404 the controller did not write. Every 404 the
 // API serves carries a JSON body naming the error; one without it came from a
 // wrong base URL, something proxying the path, or a surface that does not
 // register the route, none of which mean the record is absent.
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
 
+// safety: every 404 in this package routes through notFound or
+// classifyNotFound, so a route the controller does not register is never
+// reported as a missing row (or, for a delete, as success).
 func notFound(resp *http.Response) error {
 	if err := classifyNotFound(resp); err != nil {
 		return err

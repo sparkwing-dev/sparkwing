@@ -1691,7 +1691,7 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store)", Group: "Storage"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its logs + cache surfaces)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Storage"},

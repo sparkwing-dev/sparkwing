@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -187,19 +188,47 @@ func resolveArtifactStore(ctx context.Context, profileName, urlFlag string) (sto
 	if profileName == "" {
 		return nil, "", errors.New("pipeline publish: no artifact-store configured. Pass --profile PROFILE (with a cache surface) or --artifact-store URL")
 	}
-	p, err := resolveProfileFlag(profileName)
+	p, err := resolveProfile(profileName)
 	if err != nil {
 		return nil, "", err
 	}
 	spec := p.Surfaces().BinaryCache()
+	if spec == nil && p.ControllerURL() != "" {
+		spec = &backends.Spec{Type: backends.TypeController, Controller: p.Name}
+	}
 	if spec == nil {
-		return nil, "", fmt.Errorf("pipeline publish: profile %q declares no cache surface. Pass --artifact-store URL", profileName)
+		return nil, "", fmt.Errorf("pipeline publish: profile %q serves binaries from nowhere -- it declares neither a cache surface nor a controller. Pass --artifact-store URL", profileName)
+	}
+	location, err := artifactStoreURL(p, *spec)
+	if err != nil {
+		return nil, "", err
 	}
 	store, err := storeurl.OpenArtifactStoreFromSpec(ctx, *spec, controllerLookup(p))
 	if err != nil {
 		return nil, "", fmt.Errorf("open artifact-store: %w", err)
 	}
-	return store, profile.SpecString(spec), nil
+	return store, location, nil
+}
+
+// safety: the reported location is the same URL vocabulary --artifact-store
+// accepts, so what publish prints can be handed back to the flag.
+func artifactStoreURL(p *profile.Profile, spec backends.Spec) (string, error) {
+	switch spec.Type {
+	case backends.TypeFilesystem:
+		return "fs://" + spec.Path, nil
+	case backends.TypeS3:
+		location := "s3://" + spec.Bucket
+		if prefix := strings.Trim(spec.Prefix, "/"); prefix != "" {
+			location += "/" + prefix
+		}
+		return location, nil
+	case backends.TypeController:
+		if url := p.ControllerURL(); url != "" {
+			return url, nil
+		}
+	}
+	return "", fmt.Errorf("pipeline publish: profile %q serves binaries from %s, which has no artifact-store URL. Pass --artifact-store URL",
+		p.Name, profile.SpecString(&spec))
 }
 
 func renderPublishResults(rows []publishedBinary, format string) error {

@@ -32,7 +32,7 @@ type daemonReport struct {
 	Healthy             bool     `json:"healthy"`
 	Draining            bool     `json:"draining"`
 	Restarted           bool     `json:"restarted"`
-	Stopped             bool     `json:"stopped,omitempty"`
+	Stopped             bool     `json:"stopped"`
 	HoldersRemaining    int      `json:"holders_remaining,omitempty"`
 	BinaryVersion       string   `json:"binary_version,omitempty"`
 	RunningRevision     string   `json:"running_revision,omitempty"`
@@ -418,7 +418,11 @@ func emitDaemonReport(report daemonReport, output string) error {
 		return nil
 	case "pretty", "":
 		if report.Stopped {
-			fmt.Fprintf(os.Stdout, "wingd %s is stopped\n", report.PreviousVersion)
+			was := ""
+			if report.PreviousVersion != "" {
+				was = " (was " + report.PreviousVersion + ")"
+			}
+			fmt.Fprintf(os.Stdout, "wingd is stopped%s\n", was)
 			if report.HoldersRemaining > 0 {
 				fmt.Fprintf(os.Stdout, "%d holder(s) were still admitted when it drained\n", report.HoldersRemaining)
 			}

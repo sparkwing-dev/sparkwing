@@ -74,7 +74,7 @@ Stops the verified owned instance, then starts the invoked binary. Preserves eff
 | `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
-| `--profile PROFILE` | Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store) |
+| `--profile PROFILE` | Profile from ~/.config/sparkwing/profiles.yaml (uses its logs + cache surfaces) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
 | `--artifact-store URL` | Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
 | `--read-only` | Reject writes on /api/v1/* (auth + webhooks remain open) |
@@ -114,7 +114,7 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 | `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
-| `--profile PROFILE` | Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store) |
+| `--profile PROFILE` | Profile from ~/.config/sparkwing/profiles.yaml (uses its logs + cache surfaces) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
 | `--artifact-store URL` | Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
 | `--read-only` | Reject writes on /api/v1/* (auth + webhooks remain open) |
