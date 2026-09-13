@@ -40,6 +40,7 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
+func (c *Client) AppendNodeLiveLog(ctx context.Context, runID, nodeID string, data []byte) error
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
@@ -138,6 +139,7 @@ func (c *Client) PauseCron(ctx context.Context, name string) (*crons.ScheduleVie
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
 func (c *Client) PutCronRepo(ctx context.Context, req CronRepoRequest) (*CronReposResponse, error)
+func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (*LiveLogChunk, error)
 func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
 func (c *Client) RecordContention(ctx context.Context, pipeline string) error
 func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
@@ -161,6 +163,7 @@ func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md s
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
 func (c *Client) Token() string
 func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
@@ -241,6 +244,15 @@ type HeartbeatSlotResponse struct {
 }
 type HeartbeatStatus struct {
 	CancelRequested bool
+}
+type LiveLogChunk struct {
+	Start int64
+
+	Next int64
+
+	Data string
+
+	Done bool
 }
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client

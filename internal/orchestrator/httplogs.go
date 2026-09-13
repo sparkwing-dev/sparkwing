@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -22,6 +24,7 @@ import (
 type HTTPLogs struct {
 	client storage.LogStore
 	logger *slog.Logger
+	live   LiveLogSink
 }
 
 func NewHTTPLogs(baseURL string, httpClient *http.Client, logger *slog.Logger) *HTTPLogs {
@@ -43,6 +46,16 @@ func NewLogStoreBackend(s storage.LogStore, logger *slog.Logger) *HTTPLogs {
 		logger = slog.Default()
 	}
 	return &HTTPLogs{client: s, logger: logger}
+}
+
+// WithLiveSink mirrors every line to sink for the controller's live
+// view, on top of the durable write. A durable surface that already
+// serves a live read keeps sink unused.
+func (h *HTTPLogs) WithLiveSink(sink LiveLogSink) *HTTPLogs {
+	if sink != nil && !liveLogsRedundant(h.client) {
+		h.live = sink
+	}
+	return h
 }
 
 var _ LogBackend = (*HTTPLogs)(nil)
@@ -73,8 +86,9 @@ func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delega
 	if !requiresAttempt {
 		attempt, _ = store.ExecutionAttemptOrdinalFromContext(ctx)
 	}
-	return &httpNodeLog{
-		ctx:             context.WithoutCancel(ctx),
+	nodeCtx := context.WithoutCancel(ctx)
+	l := &httpNodeLog{
+		ctx:             nodeCtx,
 		client:          h.client,
 		logger:          h.logger,
 		runID:           runID,
@@ -82,7 +96,17 @@ func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delega
 		delegate:        delegate,
 		requiresAttempt: requiresAttempt,
 		attempt:         attempt,
-	}, nil
+	}
+	if h.live != nil {
+		l.live = logbatch.New(
+			&liveLogStore{sink: h.live, ctx: nodeCtx},
+			logbatch.WithFlushInterval(liveLogFlushInterval),
+			logbatch.WithBufferThreshold(liveLogFlushBytes),
+			logbatch.WithMaxObjects(math.MaxInt32),
+			logbatch.WithMaxBytes(math.MaxInt64),
+		)
+	}
+	return l, nil
 }
 
 type httpNodeLog struct {
@@ -94,6 +118,8 @@ type httpNodeLog struct {
 	runID           string
 	nodeID          string
 	delegate        sparkwing.Logger
+	live            *logbatch.Store
+	liveFailed      bool
 	closed          bool
 	requiresAttempt bool
 	attempt         int
@@ -181,6 +207,30 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	l.appendWithRetry(payload)
+	l.appendLive(payload)
+}
+
+// safety: a live view that cannot be written is reported once and then
+// left alone. The durable copy is the record, so losing the live tail
+// must never fail the node.
+func (l *httpNodeLog) appendLive(payload []byte) {
+	if l.live == nil {
+		return
+	}
+	if err := l.live.Append(l.ctx, l.runID, l.nodeID, payload); err != nil {
+		l.mu.Lock()
+		first := !l.liveFailed
+		l.liveFailed = true
+		l.mu.Unlock()
+		if first {
+			l.logger.Warn(
+				"live log mirror unavailable; the durable copy is unaffected",
+				"run_id", l.runID,
+				"node_id", l.nodeID,
+				"err", err,
+			)
+		}
+	}
 }
 
 func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
@@ -320,6 +370,9 @@ func (l *httpNodeLog) Close() error {
 	}
 	ctx, cancel := context.WithTimeout(l.ctx, httpNodeLogFinishTimeout)
 	defer cancel()
+	if l.live != nil {
+		_ = l.live.Close()
+	}
 	return storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
 }
 

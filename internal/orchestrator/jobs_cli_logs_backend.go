@@ -169,7 +169,16 @@ func streamNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID 
 			continue
 		}
 		if rc == nil {
-			pollNodeViaBackend(ctx, b, runID, nodeID, multi, mu, out)
+			// safety: an object-store logs surface has no live read, so a
+			// running node is followed through the controller's ring and
+			// only a node with no ring falls back to polling the bucket.
+			live, liveErr := backend.StreamLiveLog(ctx, b, runID, nodeID, 0)
+			if liveErr != nil || live == nil {
+				pollNodeViaBackend(ctx, b, runID, nodeID, multi, mu, out)
+				return
+			}
+			copyNodeStream(ctx, live, nodeID, multi, mu, out)
+			_ = live.Close()
 			return
 		}
 		copyNodeStream(ctx, rc, nodeID, multi, mu, out)

@@ -64,3 +64,24 @@ func (b *ClientBackend) StreamNodeLog(ctx context.Context, runID, nodeID string)
 	}
 	return b.logStore.Stream(ctx, runID, nodeID)
 }
+
+var _ LiveLogReader = (*ClientBackend)(nil)
+
+// safety: the live ring is an accelerator over the durable copy, so a
+// controller that cannot answer reads as "no live log" and the caller
+// falls back rather than failing the read.
+func (b *ClientBackend) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error) {
+	rc, err := b.c.StreamNodeLiveLog(ctx, runID, nodeID, since)
+	if err != nil {
+		return nil, nil
+	}
+	return rc, nil
+}
+
+func (b *ClientBackend) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) ([]byte, int64, bool, bool, error) {
+	chunk, err := b.c.ReadNodeLiveLog(ctx, runID, nodeID, since)
+	if err != nil || chunk == nil {
+		return nil, 0, false, false, nil
+	}
+	return []byte(chunk.Data), chunk.Next, chunk.Done, true, nil
+}

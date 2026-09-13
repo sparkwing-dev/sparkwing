@@ -316,6 +316,25 @@ the controller and the logs service on a single mux. When it is wrong,
 every append gets a 404 and the run fails naming the missing service,
 rather than losing the lines silently.
 
+### Watching a run live without the logs service
+
+A deployment whose `logs:` surface is an object store has no live read:
+an object appears only once a batch is flushed, and the store serves no
+tail. The controller closes that gap. A node's runner mirrors its lines
+to the controller as it writes them, the controller holds the last
+512 KiB per running node in memory, and the dashboard and `sparkwing
+runs logs --follow` read that ring while the node runs. The durable
+copy still goes to the bucket, and a read after the node finishes comes
+from there.
+
+The ring is memory, so it is bounded twice: 512 KiB per node and 64 MiB
+across every node together, with the oldest bytes of the widest ring
+dropped first. A node's ring is released shortly after the node
+finishes, or after ten minutes of silence from a node that never
+reported finishing. `sparkwing-controller` takes all three bounds as
+flags. A deployment that runs `sparkwing-logs` keeps its own live
+stream and mirrors nothing.
+
 ## Forcing local mode for a single run
 
 `sparkwing run <pipeline> --sw-local-only` ignores the shared surfaces in any

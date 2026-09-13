@@ -71,6 +71,16 @@ func run(args []string) error {
 			"admits %d at a time and the rest queue.",
 			store.Argon2HashBytes>>20,
 			store.Argon2Concurrency(store.DefaultArgon2MemoryBudget)))
+	liveLogNodeKB := fs.Int("live-log-node-kb", controller.DefaultLiveLogNodeBytes>>10,
+		"kilobytes of each running node's log the controller keeps in memory for "+
+			"live readers. This is the live view for a deployment whose logs surface "+
+			"is an object store; the durable copy is unaffected.")
+	liveLogTotalMB := fs.Int("live-log-total-mb", int(controller.DefaultLiveLogTotalBytes>>20),
+		"megabytes of live log buffers across every running node together. Past it "+
+			"the controller drops the oldest bytes of the widest buffer.")
+	liveLogIdle := fs.Duration("live-log-idle", controller.DefaultLiveLogIdleTimeout,
+		"how long a node that stopped writing without reporting that it finished "+
+			"keeps its live log buffer.")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -138,7 +148,8 @@ func run(args []string) error {
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
 		WithCacheURL(*cacheURL).
-		WithMetricsAddr(*metricsAddr)
+		WithMetricsAddr(*metricsAddr).
+		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogIdle)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)

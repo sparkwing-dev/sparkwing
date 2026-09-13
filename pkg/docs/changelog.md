@@ -22,6 +22,19 @@ unlock.
 
 ### Added
 
+- **controller + web:** A run is watchable live even when its logs surface is
+  an object store. The node's runner mirrors its lines to the controller, which
+  holds the last 512 KiB of each running node in memory and serves it over
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream` (server-sent events) and
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/logs?since=<offset>` (JSON). The
+  dashboard and `sparkwing runs logs --follow` read that ring while a node runs
+  and the durable copy afterwards; both used to poll the bucket or answer 501.
+  The runner posts batches to `POST /api/v1/runs/{id}/nodes/{nodeID}/logs`
+  under scope `runs.state`, gated on the node's live claim like every other
+  node write. Buffers are bounded per node and across nodes together, and
+  `sparkwing-controller` takes `--live-log-node-kb`, `--live-log-total-mb` and
+  `--live-log-idle`. A deployment running `sparkwing-logs` keeps its own live
+  stream and mirrors nothing.
 - **logs:** An `s3` logs surface coalesces a node's lines into one object
   per flush instead of one object per line. A flush lands when the buffer
   reaches `batch_bytes` (256 KiB), when `batch_interval` (2s) elapses, when

@@ -272,6 +272,9 @@ func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore
 	if logs == nil {
 		logs = NewHTTPLogsWithToken(remoteLogsURL(c), nil, c.Token(), nil)
 	}
+	if h, ok := logs.(*HTTPLogs); ok {
+		logs = h.WithLiveSink(c)
+	}
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
 	}

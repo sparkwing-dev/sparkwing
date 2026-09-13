@@ -70,6 +70,8 @@ type Server struct {
 
 	runnerHeadroom *runnerHeadroomRegistry
 
+	liveLogs *liveLogs
+
 	assistedRunID string
 	draining      atomic.Bool
 
@@ -176,6 +178,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		sessionMaxLifetime:  DefaultSessionMaxLifetime,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
+		liveLogs:            newLiveLogs(),
 		cronHolder:          defaultCronHolder(),
 	}
 }
@@ -253,6 +256,23 @@ func (s *Server) WithCacheCredentials(url, token string) *Server {
 // onto its own address, so /metrics is reachable only from wherever
 // that address is bound and never through the public ingress. Empty
 // keeps /metrics on the main listener.
+// WithLiveLogLimits sizes the in-memory live log buffers: perNodeBytes
+// per running node, totalBytes across every node together, and idle
+// before a node that stopped writing without finishing is released.
+// A non-positive argument keeps that limit's default.
+func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, idle time.Duration) *Server {
+	if perNodeBytes > 0 {
+		s.liveLogs.perNodeBytes = perNodeBytes
+	}
+	if totalBytes > 0 {
+		s.liveLogs.totalBytes = totalBytes
+	}
+	if idle > 0 {
+		s.liveLogs.idle = idle
+	}
+	return s
+}
+
 func (s *Server) WithMetricsAddr(addr string) *Server {
 	s.metricsAddr = addr
 	return s
@@ -737,6 +757,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleWriteNodeDispatch))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
+
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog))))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog)), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog)), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
