@@ -383,7 +383,7 @@ func TestNewHonorsExplicitOwnedCPUSamplerWithDefaultHost(t *testing.T) {
 
 func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0)
-	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "200000 100000"}))
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "100000 100000"}))
 	owned := &fixedOwnedCPUSampler{fraction: 1, measured: true}
 	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true}}
 	d.ownedSampler = owned
@@ -391,8 +391,29 @@ func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *te
 
 	d.refreshHeadroom()
 
-	if owned.arbitratedCores != 2 {
-		t.Fatalf("owned sampler was bounded at %v cores; want the container's 2, because the clamp that produces it runs after the sample and a bound at the machine's count admits against cores nobody can grant",
+	if owned.arbitratedCores != 1 {
+		t.Fatalf("owned sampler was bounded at %v cores; want the container's 1, because the clamp that produces it runs after the sample and a bound at the machine's count admits against cores nobody can grant",
 			owned.arbitratedCores)
+	}
+}
+
+// The paired sampler is the one darwin runs, so the bound has to reach it too.
+func TestRefreshHeadroom_PairedSamplerIsBoundedByTheContainerLimitToo(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0)
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "100000 100000"}))
+	paired := &pairedHostSampler{
+		stat:     HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true},
+		owned:    1,
+		measured: true,
+	}
+	d.sampler = paired
+	d.ownedSampler = nil
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+
+	d.refreshHeadroom()
+
+	if paired.arbitratedCores != 1 {
+		t.Fatalf("paired sampler was bounded at %v cores; want the container's 1: darwin takes this branch, so a bound that reaches only the split path leaves the platform unbounded",
+			paired.arbitratedCores)
 	}
 }

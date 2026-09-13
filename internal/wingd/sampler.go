@@ -197,10 +197,10 @@ func ownedProcessOwners(roots []OwnedRoot, processes map[int]ownedProcess) map[p
 // forgetSamples drops what the sampler measured and moves its clock to now, so
 // the next reading it takes is measured against the moment it resumed rather
 // than against a reading taken before a stretch it sat out.
-func (s *ownedProcSampler) forgetSamples() {
+func (s *ownedProcSampler) forgetSamples(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.last, s.lastAt = nil, time.Now()
+	s.last, s.lastAt = nil, now
 }
 
 func ownedCPUByRoot(

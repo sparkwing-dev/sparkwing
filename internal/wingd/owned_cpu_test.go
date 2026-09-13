@@ -195,35 +195,37 @@ func TestOwnedCPU_OverlappingRootsCountTheirUnionOnce(t *testing.T) {
 	}
 }
 
-func TestOwnedCPU_ReholdingATreeIsNotChargedForTheGapItWasNotHeld(t *testing.T) {
+func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *testing.T) {
 	firstAt := time.Unix(100, 0)
 	releasedAt := firstAt.Add(10 * time.Second)
-	reheldAt := releasedAt.Add(10 * time.Second)
+	reheldAt := releasedAt.Add(time.Hour)
 	identity := processIdentity{pid: 10, startTicks: 1000}
 	process := func(cpuSeconds float64) map[int]ownedProcess {
 		return map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: cpuSeconds}}
 	}
+	sampler := &ownedProcSampler{}
 	held := []OwnedRoot{{PID: 10, HeldSince: firstAt.Add(-time.Hour)}}
 
 	processes := process(50)
-	_, afterFirst := ownedCPUByRoot(
+	_, next := ownedCPUByRoot(
 		map[processIdentity]cpuSample{identity: {cpuSeconds: 40, at: firstAt}},
 		processes, ownedProcessOwners(held, processes), held, firstAt, releasedAt, 8)
+	sampler.last, sampler.lastAt = next, releasedAt
 
-	// Nobody holds the tree, and across that stretch it burns six cores' worth.
-	processes = process(110)
-	_, afterRelease := ownedCPUByRoot(afterFirst, processes, nil, nil, releasedAt, reheldAt, 8)
+	// The run is released. This is the reading the sampler takes with nothing
+	// held, during which the tree goes on burning an hour of CPU.
+	sampler.forgetSamples(reheldAt)
 
-	// It is held again, and runs nothing at all while held.
-	processes = process(110)
+	// Held again, and idle for the whole window it is held.
+	processes = process(3650)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
-		afterRelease, processes, ownedProcessOwners(rehold, processes), rehold,
-		reheldAt, reheldAt.Add(10*time.Second), 8)
+		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
+		sampler.lastAt, reheldAt.Add(10*time.Second), 8)
 
-	if byRoot[10] != 0 {
-		t.Fatalf("re-held tree CPU = %v cores; want none, because it ran none while held and the daemon cannot charge it for a stretch nobody held it",
-			byRoot[10])
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("re-held tree was charged %v cores; want no figure, because the daemon watched none of the hour that CPU ran in",
+			figure)
 	}
 }
 
@@ -318,7 +320,7 @@ func TestOwnedProcSampler_ForgettingSamplesStopsAGapBecomingARate(t *testing.T) 
 	sampler.lastAt = firstAt
 
 	// Nothing is held, which is the reading that froze the clock with the samples.
-	sampler.forgetSamples()
+	sampler.forgetSamples(time.Now())
 
 	if sampler.last != nil {
 		t.Error("samples survived a reading with nothing held, so a later rate can still span the gap")

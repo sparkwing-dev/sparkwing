@@ -119,6 +119,10 @@ func TestRefreshHeadroom_CountsEveryAttributedSample(t *testing.T) {
 	if got.Samples != 3 {
 		t.Errorf("samples = %d, want 3: the denominator counts every readable host reading", got.Samples)
 	}
+	if got.Attributed != 3 {
+		t.Errorf("attributed = %d, want 3: operators are told to read clean readings off this rather than by subtraction, so a count stuck at zero reports every reading as faulty",
+			got.Attributed)
+	}
 	if got.SamplerUnreadable != 0 || got.RunsWithoutProcess != 0 || got.RunsAwaitingMeasure != 0 {
 		t.Errorf("attribution = %+v, want every fault count at zero", got)
 	}

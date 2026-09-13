@@ -187,7 +187,10 @@ func TestExternalAttributionNote_IsSilentWhenExternalIsIgnored(t *testing.T) {
 
 func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
 	qs := wingwire.QueueState{
-		ExternalAttribution: &wingwire.ExternalAttribution{Samples: 900},
+		ExternalAttribution: &wingwire.ExternalAttribution{
+			Samples: 900, Attributed: 880, SamplerUnreadable: 2,
+			RunsWithoutProcess: 3, RunsProcessGone: 5, RunsAwaitingMeasure: 10,
+		},
 	}
 	var out strings.Builder
 	if err := opsview.RenderQueue(&out, qs, "plain"); err != nil {
@@ -195,11 +198,11 @@ func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
 	}
 	for _, want := range []string{
 		"external-attribution-samples\t900\n",
-		"external-attribution-attributed\t0\n",
-		"external-attribution-sampler-unreadable\t0\n",
-		"external-attribution-runs-without-process\t0\n",
-		"external-attribution-runs-process-gone\t0\n",
-		"external-attribution-runs-awaiting-measure\t0\n",
+		"external-attribution-attributed\t880\n",
+		"external-attribution-sampler-unreadable\t2\n",
+		"external-attribution-runs-without-process\t3\n",
+		"external-attribution-runs-process-gone\t5\n",
+		"external-attribution-runs-awaiting-measure\t10\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("plain output = %q, want the row %q: a machine reader needs the denominator even when nothing went wrong, and one row per count so a later count is additive",

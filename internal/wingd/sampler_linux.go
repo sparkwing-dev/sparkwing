@@ -96,7 +96,7 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 		// Keeping either across a stretch with nothing held would leave this
 		// window open across intervals nobody was watching a tree, and holding
 		// one again would charge it that whole stretch in a single reading.
-		s.forgetSamples()
+		s.forgetSamples(time.Now())
 		return nil, true
 	}
 	procs, ok := linuxProcesses()
