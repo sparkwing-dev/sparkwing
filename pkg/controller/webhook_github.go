@@ -363,6 +363,13 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		Repo:   payload.Repository.FullName,
 	}
 
+	if s.githubDeliveryAlreadyRan(w, r, pipeline, delivery, body) {
+		return
+	}
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github push") {
+		return
+	}
+
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
@@ -386,6 +393,8 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return
 	}
+
+	s.recordQueueActivity(time.Now())
 
 	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
 		RunID:    runID,
@@ -482,6 +491,13 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	}
 	trigger.PullRequest = sparkwing.PullRequestFromEnv(triggerEnv)
 
+	if s.githubDeliveryAlreadyRan(w, r, pipeline, delivery, body) {
+		return
+	}
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github pull_request") {
+		return
+	}
+
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
@@ -509,6 +525,8 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	pendingStatus := s.reserveGitHubCommitStatus(r.Context(), runID, "pending")
 	dispatchAccepted := false
 	defer func() { pendingStatus(dispatchAccepted) }()
+	s.recordQueueActivity(time.Now())
+
 	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
 		RunID:    runID,
 		Pipeline: pipeline,
@@ -536,6 +554,30 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		RunID:  runID,
 		Status: "dispatched",
 	})
+}
+
+// safety: a redelivery is answered with the run it already started before
+// anything is charged, so GitHub retrying a timeout never spends the cap.
+func (s *Server) githubDeliveryAlreadyRan(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) bool {
+	existing, err := s.store.FindTriggerByWebhookReplay(
+		r.Context(), githubWebhookReplayKey(pipeline, body), delivery)
+	if err != nil || existing == nil {
+		return false
+	}
+	s.logger.Warn("github delivery deduplicated",
+		"principal", githubFloodKey(pipeline, ""), "pipeline", pipeline, "delivery", delivery,
+		"reason", "the delivery id or body digest already started a run", "run_id", existing.ID)
+	writeJSON(w, http.StatusConflict, triggerResp{RunID: existing.ID, Status: "duplicate"})
+	return true
+}
+
+// safety: a delivery carries no principal, so the repository it names is the
+// closest thing it has to an owner and a delivery naming none falls back to its pipeline.
+func githubFloodKey(pipeline, repo string) string {
+	if repo != "" {
+		return "github:" + strings.ToLower(repo)
+	}
+	return "github-pipeline:" + pipeline
 }
 
 func verifyGitHubSignature(header string, body []byte, secret string) bool {

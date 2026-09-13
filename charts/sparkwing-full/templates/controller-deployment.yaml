@@ -101,6 +101,24 @@ spec:
             {{- with .Values.controller.placementLiveness }}
             - {{ printf "--placement-liveness=%s" . | quote }}
             {{- end }}
+            {{- with .Values.controller.maxRunsPerPrincipalHour }}
+            - {{ printf "--max-runs-per-principal-hour=%d" (int .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.shedQueueDepth }}
+            - {{ printf "--shed-queue-depth=%d" (int .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.triggerDedupeWindow }}
+            - {{ printf "--trigger-dedupe-window=%s" . | quote }}
+            {{- end }}
+            {{- with .Values.controller.claimsPerRunnerMinute }}
+            - {{ printf "--claims-per-runner-minute=%d" (int .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.heartbeatsPerRunnerMinute }}
+            - {{ printf "--heartbeats-per-runner-minute=%d" (int .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.idleClaimPoll }}
+            - {{ printf "--idle-claim-poll=%s" . | quote }}
+            {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
             {{- end }}

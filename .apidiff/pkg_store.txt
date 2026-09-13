@@ -90,6 +90,7 @@ type ClaimPlacement struct {
 	Live []RunnerPresence
 }
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
+const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
@@ -857,6 +858,7 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+const RunnerIdentityHeader = "X-Sparkwing-Runner"
 type RunnerPresence struct {
 	Name string
 

@@ -527,6 +527,25 @@ load signal, so the runner waits the header out, capped at 30 seconds,
 and logs it at debug with at most one warning a minute. It does not
 fail the poll or the node.
 
+A claim that finds no work can also name the interval the runner should
+wait before polling again, in the `X-Sparkwing-Poll-After` header. The
+controller widens what it suggests with how long it has had no work,
+up to `--idle-claim-poll` (default 5s), and stops suggesting anything the
+moment work arrives or is handed out, so a queue that fills returns its
+fleet to full cadence on the next poll. A runner caps what it accepts at
+8 seconds whatever the header says, and the controller refuses to start
+unless two of the longest wait its suggestion permits, spread included,
+still fit inside `--placement-hold` and `--placement-liveness`, because a
+runner silent past those windows stops counting as live for local-first
+placement. The header is advice a
+runner may only widen its own cadence to: it never polls faster than it
+was configured to, it spreads its return with jitter so a fleet advised
+together does not come back together, and a runner that ignores the
+header polls exactly as often as it always did. A host's own admission
+daemon and the loopback controller suggest nothing: they serve one
+machine's runs, where a widened idle poll costs pickup latency and
+protects no fleet.
+
 ## How long revocation takes to bite
 
 The verified-token cache holds an answer for 60 seconds, keyed by the

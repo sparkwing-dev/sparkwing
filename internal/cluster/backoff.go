@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"errors"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -14,14 +13,24 @@ const (
 	maxClaimBackoff = 30 * time.Second
 
 	shedWarnInterval = time.Minute
+
+	// safety: a runner silent past the controller's placement hold drops out of
+	// local-first placement, so the invitation to poll less often is bounded here too.
+	maxAdvisedPoll = 8 * time.Second
 )
 
+// safety: a 429 is backpressure exactly as a 503 is, so a loop that repolled
+// at its own cadence through one would keep spending the budget it just drained.
+// safety: a Retry-After the server rounded to nothing would otherwise spin a
+// heartbeat loop, so every shed beat waits at least this long.
+var minShedBackoff = time.Second
+
 func unavailableBackoff(err error, floor time.Duration) (time.Duration, bool) {
-	var shed *client.UnavailableError
-	if !errors.As(err, &shed) {
+	after, ok := client.LoadSignal(err)
+	if !ok {
 		return 0, false
 	}
-	wait := shed.RetryAfter
+	wait := after
 	if wait < floor {
 		wait = floor
 	}
@@ -39,6 +48,26 @@ func backoffJitter(wait time.Duration) time.Duration {
 		return 0
 	}
 	return time.Duration(rand.Int64N(int64(wait/4) + 1))
+}
+
+type pollAdvisor interface {
+	PollAdvice() time.Duration
+}
+
+// safety: the controller's suggestion only ever widens the configured cadence, so an agent never polls
+// faster than its operator asked for, and the spread keeps a fleet advised together from returning together.
+func advisedPoll(configured time.Duration, advisor pollAdvisor) time.Duration {
+	if advisor == nil {
+		return configured
+	}
+	advised := advisor.PollAdvice()
+	if advised > maxAdvisedPoll {
+		advised = maxAdvisedPoll
+	}
+	if advised <= configured {
+		return configured
+	}
+	return advised + backoffJitter(advised)
 }
 
 type shedLog struct {

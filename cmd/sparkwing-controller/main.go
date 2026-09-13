@@ -120,6 +120,42 @@ func run(args []string) error {
 	placementLiveness := fs.Duration("placement-liveness", 30*time.Second,
 		"how recently a claim-mode runner must have polled for a claim to count "+
 			"as live for the hold above")
+	maxRunsPerPrincipalHour := fs.Int("max-runs-per-principal-hour", 0,
+		"cap on the runs one principal may create in a rolling hour. A webhook "+
+			"delivery counts against the repository it names. Past the cap the "+
+			"controller answers 429 with a Retry-After and logs the principal and "+
+			"the reason. The budget lives in controller memory, so a restart "+
+			"refills every principal. Zero is unlimited.")
+	shedQueueDepth := fs.Int("shed-queue-depth", 0,
+		"pending-trigger depth past which a new webhook delivery or API "+
+			"submission is shed with 503 and a Retry-After rather than queued. "+
+			"Zero never sheds.")
+	triggerDedupeWindow := fs.Duration("trigger-dedupe-window", 0,
+		"how long a content-identical API submission answers with the run the "+
+			"first one started instead of starting a second. GitHub deliveries "+
+			"are deduped by delivery id and body digest regardless. Zero dedupes "+
+			"no API submission.")
+	claimsPerMinute := fs.Int("claims-per-runner-minute", 0,
+		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
+			"minute, keyed on the token prefix together with the runner the "+
+			"request names. Past it a claim is answered 429 with a Retry-After "+
+			"naming the refill delay. Zero is unlimited. Size it as %d x the "+
+			"agent's max_concurrent: each offer slot polls under the agent's one "+
+			"name and spends a preparation plus an offer per round at the 500ms "+
+			"cadence, so a 1-slot agent wants %d and an 8-slot agent %d.",
+			controller.RecommendedClaimsPerMinute,
+			controller.RecommendedClaimsPerMinuteForSlots(1),
+			controller.RecommendedClaimsPerMinuteForSlots(8)))
+	heartbeatsPerMinute := fs.Int("heartbeats-per-runner-minute", 0,
+		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
+			"rolling minute. The agent liveness heartbeat is never budgeted. "+
+			"Zero is unlimited; %d suits the cadence the shipped runners "+
+			"heartbeat at.", controller.RecommendedHeartbeatsPerMinute))
+	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
+		"widest poll interval this controller suggests to a claim loop while it "+
+			"has no work to hand out. The suggestion travels as a response header "+
+			"and a runner honors it only to poll less often, so an agent that "+
+			"ignores it keeps its configured cadence. Zero suggests nothing.")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -145,6 +181,24 @@ func run(args []string) error {
 	}
 	if *liveLogIdle <= 0 {
 		return fmt.Errorf("--live-log-idle must be positive")
+	}
+	if *maxRunsPerPrincipalHour < 0 {
+		return fmt.Errorf("--max-runs-per-principal-hour cannot be negative")
+	}
+	if *shedQueueDepth < 0 {
+		return fmt.Errorf("--shed-queue-depth cannot be negative")
+	}
+	if *triggerDedupeWindow < 0 {
+		return fmt.Errorf("--trigger-dedupe-window cannot be negative")
+	}
+	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
+		return fmt.Errorf("--claims-per-runner-minute and --heartbeats-per-runner-minute cannot be negative")
+	}
+	if *idleClaimPoll < 0 {
+		return fmt.Errorf("--idle-claim-poll cannot be negative")
+	}
+	if err := checkIdleClaimPoll(*idleClaimPoll, *placementHold, *placementLiveness); err != nil {
+		return err
 	}
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
@@ -226,7 +280,17 @@ func run(args []string) error {
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
-		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness)
+		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
+		WithFloodPolicy(controller.FloodPolicy{
+			RunsPerPrincipalHour: *maxRunsPerPrincipalHour,
+			ShedQueueDepth:       *shedQueueDepth,
+			DedupeWindow:         *triggerDedupeWindow,
+		}).
+		WithRequestBudget(controller.RequestBudget{
+			ClaimsPerMinute:     *claimsPerMinute,
+			HeartbeatsPerMinute: *heartbeatsPerMinute,
+		}).
+		WithIdleClaimPoll(*idleClaimPoll)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
@@ -254,6 +318,31 @@ func run(args []string) error {
 		checkStorageClasses(ctx, kcli, *poolNamespace)
 	}
 	return controller.ServeWith(ctx, srv, *addr)
+}
+
+// safety: a runner honoring a suggestion longer than these windows stops
+// counting as live, and local-first placement silently stops preferring it.
+// The margin is a whole second poll, not a hair, because a runner that wakes
+// one request late must still land inside the window.
+const idleClaimPollMargin = 2
+
+func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
+	longest := controller.LongestHonoredIdlePoll(idle)
+	for _, w := range []struct {
+		flag  string
+		value time.Duration
+	}{
+		{"--placement-hold", hold},
+		{"--placement-liveness", liveness},
+	} {
+		if w.value > 0 && longest*idleClaimPollMargin > w.value {
+			return fmt.Errorf(
+				"--idle-claim-poll %s stretches to %s once a runner spreads it, and %d of those do not fit in %s %s; "+
+					"lower the suggestion or raise that window",
+				idle, longest, idleClaimPollMargin, w.flag, w.value)
+		}
+	}
+	return nil
 }
 
 func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespace string) {

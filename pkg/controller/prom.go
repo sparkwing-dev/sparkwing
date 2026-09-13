@@ -73,6 +73,14 @@ var (
 		[]string{"route", "method"},
 	)
 
+	principalThrottledTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sparkwing_principal_throttled_total",
+			Help: "Requests refused by a per-principal request budget, by route class (claim, heartbeat).",
+		},
+		[]string{"route_class"},
+	)
+
 	authTokenCacheTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_auth_token_cache_total",
@@ -88,6 +96,10 @@ const (
 	authCacheCoalesced = "coalesced"
 )
 
+func observePrincipalThrottled(class string) {
+	principalThrottledTotal.WithLabelValues(class).Inc()
+}
+
 func observeAuthCache(result string) {
 	authTokenCacheTotal.WithLabelValues(result).Inc()
 }
@@ -102,6 +114,7 @@ func init() {
 		httpRequestsTotal,
 		httpRequestDurationSeconds,
 		authTokenCacheTotal,
+		principalThrottledTotal,
 		objectStoreCollector{},
 		hashingBudgetCollector{},
 		collectors.NewGoCollector(),

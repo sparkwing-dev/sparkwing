@@ -187,3 +187,44 @@ func TestParseTrustedProxyCIDRs(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowWithRetry_NamesTheRealRefillAndLengthensUnderPressure(t *testing.T) {
+	l := New(2, time.Minute)
+	start := time.Now()
+
+	for i := range 2 {
+		ok, wait := l.AllowWithRetry("runner", start)
+		if !ok || wait != 0 {
+			t.Fatalf("attempt %d: allowed=%v wait=%s, want allowed with no wait", i, ok, wait)
+		}
+	}
+
+	ok, first := l.AllowWithRetry("runner", start)
+	if ok {
+		t.Fatal("a third attempt inside the window was allowed")
+	}
+	if first < 30*time.Second {
+		t.Errorf("wait=%s; a bucket of 2 a minute refills one token in 30s", first)
+	}
+
+	_, second := l.AllowWithRetry("runner", start)
+	if second <= first {
+		t.Errorf("wait did not lengthen under pressure: %s then %s", first, second)
+	}
+}
+
+func TestAllowWithRetry_BoundsTheDebtOneKeyCanBuild(t *testing.T) {
+	l := New(4, time.Minute)
+	start := time.Now()
+	for range 4 {
+		l.AllowWithRetry("runner", start)
+	}
+	var longest time.Duration
+	for range 200 {
+		_, wait := l.AllowWithRetry("runner", start)
+		longest = max(longest, wait)
+	}
+	if longest > 2*time.Minute {
+		t.Errorf("longest wait=%s; a capped debt cannot exceed a window plus its own refill", longest)
+	}
+}

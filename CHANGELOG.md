@@ -50,6 +50,62 @@ unlock.
   tables plus timestamp indexes on `events` and `node_metrics`, and declares
   no requirement, so a binary predating it still opens the database.
 
+- **controller:** Trigger flood control bounds how many runs a burst of webhook
+  deliveries or API submissions can create.
+  `sparkwing-controller --max-runs-per-principal-hour N` (chart
+  `controller.maxRunsPerPrincipalHour`) caps the runs one principal may create
+  in a rolling hour, counting a webhook delivery against the repository it
+  names; past the cap a submission is answered `429` with a `Retry-After`
+  naming the real refill delay, which lengthens while a caller keeps knocking.
+  The budget lives in controller memory, so a restart refills every principal.
+  `--shed-queue-depth N` (chart `controller.shedQueueDepth`) sheds a submission
+  with `503` and `Retry-After` once pending triggers reach N.
+  `--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`) answers a
+  content-identical `POST /api/v1/triggers` submission inside D with `409` and
+  the run the first one started; the digest covers the submitting principal, so
+  one tenant is never handed another's run id. Deduplication runs ahead of the
+  shed and the cap, so a GitHub redelivery gets its original run rather than a
+  refusal and never spends the submitter's budget. All three default to off, so
+  a controller that names none behaves as before, and every refusal is logged at
+  warn with the principal and the reason rather than dropped.
+- **controller:** Optional per-runner request budgets on the claim and heartbeat
+  routes. `--claims-per-runner-minute` and `--heartbeats-per-runner-minute`
+  (chart `controller.claimsPerRunnerMinute`,
+  `controller.heartbeatsPerRunnerMinute`) bound what one runner spends a minute,
+  keyed on the token prefix together with the runner the controller derives from
+  the route, falling back to the runner's own `X-Sparkwing-Runner` identity on
+  the three claim routes that name none, so a fleet sharing one token is
+  budgeted runner by runner. It bounds a cooperating runner, not a holder of a
+  valid token that varies its identity. `client.Client.WithRunnerIdentity` sets
+  the value a runner sends and `RunnerIdentity` reads it back;
+  `controller.RecommendedClaimsPerMinuteForSlots` computes the budget an agent
+  of a given `max_concurrent` wants, since its offer slots all poll under the
+  agent's one name. Both default to zero,
+  which is unlimited; 1200 of each suits the cadence the shipped runners use.
+  The agent liveness heartbeat is never budgeted, because losing it tears down
+  an agent and every node under it. Past a budget the route answers `429` with a
+  `Retry-After` and `sparkwing_principal_throttled_total{route_class}` counts
+  it.
+- **runner:** A `429` carrying a `Retry-After` is now backpressure rather than a
+  failure, the way a `503` already was. `client.RateLimitedError` and
+  `client.LoadSignal` expose it; the claim, node-heartbeat and trigger-heartbeat
+  loops wait the header out instead of repolling at their own cadence, and an
+  agent's liveness heartbeat survives a shed one, failing only once silence
+  passes its lease window.
+- **controller + runner:** A claim that finds no work can name the interval the
+  runner should wait before polling again, in the `X-Sparkwing-Poll-After`
+  response header. `--idle-claim-poll D` (chart `controller.idleClaimPoll`,
+  default 5s) caps what the controller suggests, which widens with how long it
+  has had no work and clears the moment work arrives or is handed out; zero
+  suggests nothing. A runner honors the suggestion only to poll less often,
+  spreads its return with jitter, and accepts at most 8s however long the
+  header names. The controller refuses to start unless two of the longest wait
+  its suggestion permits fit inside `--placement-hold` and
+  `--placement-liveness`.
+  `client.Client.PollAdvice` reports the last suggestion a claim carried back.
+  A host's own admission daemon and the loopback controller suggest nothing and
+  budget nothing, because a widened idle poll there costs pickup latency and
+  their unauthenticated callers would share one bucket.
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and

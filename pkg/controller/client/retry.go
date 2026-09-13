@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"net/http"
 	"strconv"
@@ -69,6 +70,21 @@ func retryAfter(resp *http.Response) (time.Duration, bool) {
 	return wait + retryJitter(wait), true
 }
 
+// LoadSignal reports the delay a server named when it answered a request with
+// a 429 or a 503 it invited the caller to repeat. A loop that polls treats
+// such an answer as backpressure, waiting the delay out rather than failing.
+func LoadSignal(err error) (time.Duration, bool) {
+	var shed *UnavailableError
+	if errors.As(err, &shed) {
+		return shed.RetryAfter, true
+	}
+	var limited *RateLimitedError
+	if errors.As(err, &limited) {
+		return limited.RetryAfter, true
+	}
+	return 0, false
+}
+
 func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 	raw := resp.Header.Get("Retry-After")
 	if raw == "" {
@@ -97,6 +113,22 @@ type UnavailableError struct {
 func (e *UnavailableError) Error() string { return e.Err.Error() }
 
 func (e *UnavailableError) Unwrap() error { return e.Err }
+
+// RateLimitedError reports a 429 the server answered with a Retry-After.
+// Like [UnavailableError] it is a load signal rather than a failure of the
+// request: a claim or heartbeat loop waits RetryAfter and polls again.
+// Unwrap yields the plain controller error.
+type RateLimitedError struct {
+	// RetryAfter is the delay the server asked for, as it sent it.
+	RetryAfter time.Duration
+	// Err is the error the same response would have produced without
+	// the header.
+	Err error
+}
+
+func (e *RateLimitedError) Error() string { return e.Err.Error() }
+
+func (e *RateLimitedError) Unwrap() error { return e.Err }
 
 // safety: the spread is added to the server's delay rather than drawn across
 // it, because a caller that woke early would answer an invitation the server
