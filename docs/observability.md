@@ -566,12 +566,12 @@ shape, where no budget is set anyway.
 A runner pool shares one token, so twenty pods are one principal. The
 byte budget is keyed on the principal deliberately: the bill is the
 team's, however many pods spent it. The **concurrency caps are not**.
-They are keyed on the pod behind the request, taken from
-`X-Sparkwing-Runner` when a client sends one and otherwise from the
-claim-holder header a runner already carries, falling back to the
-principal only when nothing names a pod. A cap of eight keyed on the
-principal would refuse twelve of a twenty-pod pool while the byte budget
-sat untouched.
+They are keyed on the pod behind the request, taken from the
+`X-Sparkwing-Runner` identity the shipped runners already set for the
+controller's claim budgets, then from the claim-holder header, falling
+back to the principal only when nothing names a pod. A cap of eight keyed
+on the principal would refuse twelve of a twenty-pod pool while the byte
+budget sat untouched.
 
 That identity is cooperative: a caller that invents a pod name gets its
 own slots. The concurrency caps therefore bound an honest pool's burst
@@ -606,11 +606,18 @@ nothing, because it is not the download the budget is for.
 
 A budget is checked before a response starts, not during it, so a
 principal at zero can still finish whatever it already has in flight.
-The concurrency caps are what bound that overshoot: the most one caller
-can take past its monthly budget is `--egress-max-downloads` plus
-`--egress-max-log-streams` times the largest object those routes serve,
-multiplied by the pods behind the bearer, since each pod holds its own
-slots. Leave the caps unlimited and the overshoot is unbounded.
+The concurrency caps bound that overshoot only as far as they reach. The
+most a team can take past its monthly budget is
+
+    (--egress-max-downloads + --egress-max-log-streams)
+      x  the largest object those slotted routes serve
+      x  the number of pods behind the bearer
+
+because each pod holds its own slots, plus whatever the gitcache proxy
+routes serve, which hold no slot at all. A caller that invents pod names
+multiplies the pod count itself, so treat the formula as the bound on an
+honest fleet and the byte budget as the bound on the rest. Leave the caps
+unlimited and the overshoot is unbounded.
 
 ### Persistence and history
 
