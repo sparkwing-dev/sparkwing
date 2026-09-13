@@ -221,6 +221,7 @@ func (s *Store) Append(ctx context.Context, runID, nodeID string, data []byte) e
 		return nil
 	}
 	key := nodeKey{runID, nodeID}
+	//nolint:contextcheck // the flush loop belongs to the store, so one caller's context must not end every other node's buffer.
 	nb, err := s.bufFor(key)
 	if err != nil {
 		return err
