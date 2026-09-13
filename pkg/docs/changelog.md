@@ -108,38 +108,30 @@ unlock.
   their unauthenticated callers would share one bucket.
 - **controller + logs + cache:** Egress budgets bound the bytes each
   service sends to clients: artifact and cache-archive downloads, log
-  reads, the live log stream, and git proxy fetches.
-  `--egress-monthly-bytes` (env `SPARKWING_EGRESS_MONTHLY_BYTES`) refuses
-  one principal's downloads past a UTC-month byte total with `429`, a
-  `Retry-After` naming the wait until the month rolls, and a body whose
-  `error` member says who spent what against which limit.
-  `--egress-daily-alarm-bytes` (env `SPARKWING_EGRESS_DAILY_ALARM_BYTES`)
-  refuses nothing and raises an alarm the service reports as
-  `egress.alarm` on `GET /api/v1/health`, as a line in `problems`, and as
-  a `warn` log line carrying `day_bytes` and `threshold_bytes`.
-  `--egress-max-log-streams` (env `SPARKWING_EGRESS_MAX_LOG_STREAMS`) caps
-  the live log streams one principal holds open on the controller and the
-  logs service. Every budget defaults to unlimited, so a deployment that
-  sets none serves what it served before. Counting is in memory; the
-  controller writes each principal's month total to schema v38's
-  `egress_usage` table on its maintenance sweep and reloads it at startup,
-  so no response costs a store write and a restart resumes the month. `GET
-  /api/v1/egress` (scope `admin`) reports the budgets, the day and month
-  totals, the alarm, and the principals that have downloaded the most.
-  Documented under [Egress budgets](docs/observability.md#egress-budgets).
-- **runner + chart:** A runner pool can keep its Go caches across pod
-  restarts and warm them at startup. `runner.goCache.persistence.enabled`
-  mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
-  `GOMODCACHE`, off by default; every replica mounts that claim, so the
-  StorageClass must serve `ReadWriteMany` above one replica and the chart
-  refuses to render otherwise. `sparkwing-runner runner --warm-modules`
-  (env `SPARKWING_WARM_MODULES`, chart `runner.goCache.warmModules`)
-  downloads modules into `GOMODCACHE` while the claim loop starts and
-  defaults to the Sparkwing SDK at the runner's own version; `off` warms
-  nothing. The runner also logs `binary_cache` (`local`, `remote`, or
-  `compiled`) and `build_ms` for each pipeline binary it readies, so the
-  cost of a cold compile is visible per run. `runner.maxClaimsBeforeRestart`
-  is unchanged.
+  reads, the live log stream, and git proxy fetches. On the controller and
+  the logs service, `--egress-monthly-bytes` refuses one principal's
+  downloads past a UTC-month byte total with `429`, a `Retry-After` naming
+  the wait until the month rolls, and a body whose `error` member says who
+  spent what against which limit; `--egress-max-downloads` and
+  `--egress-max-log-streams` cap what one principal holds open at once,
+  which is what bounds how far a burst carries it past the byte budget.
+  `--egress-daily-alarm-bytes` refuses nothing on any service and raises an
+  alarm reported as `egress.alarm` on the health route, as a line in
+  `problems`, and as a `warn` log line carrying `day_bytes` and
+  `threshold_bytes`. The cache meters and alarms but never refuses, because
+  it authenticates one shared token and a refusal there would fall on every
+  runner at once; its health says so with `egress.enforced: false`. Each
+  service reads its own `SPARKWING_<SERVICE>_EGRESS_<BUDGET>` variables, so
+  one value on a shared ConfigMap cannot apply the same cap three times. A
+  `HEAD` and an error body are charged nothing. Every budget defaults to
+  unlimited, so a deployment that sets none serves what it served before.
+  Counting is in memory; the controller writes each principal's month total
+  to schema v38's `egress_usage` table on its maintenance sweep, reloads it
+  at startup, and prunes past thirteen months, so no response costs a store
+  write and a restart resumes the month. `GET /api/v1/egress` (scope
+  `admin`) reports the budgets, the day and month totals, the alarm, and the
+  principals that have downloaded the most. Documented under [Egress
+  budgets](docs/observability.md#egress-budgets).
 - **cli:** `sparkwing cloud connect --controller URL` joins a controller in one
   command, so connecting no longer means editing `profiles.yaml` by hand. It
   verifies the controller answers, mints a user token scoped to `runs.read`,
