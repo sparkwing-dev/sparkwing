@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,22 @@ func TestRetiredDashboardNounCannotPerformServiceActions(t *testing.T) {
 				t.Fatalf("retired noun: %v stdout=%q stderr=%q", err, out, errs.String())
 			}
 			assertNoServiceState(t, filepath.Join(cmd.Dir, "state"))
+
+			inventedArgs := append([]string(nil), args...)
+			for i, arg := range inventedArgs {
+				if arg == "dashboard" {
+					inventedArgs[i] = "nosuchnoun"
+				}
+			}
+			invented := outputContractCommand(t, inventedArgs...)
+			var inventedErrs bytes.Buffer
+			invented.Stderr = &inventedErrs
+			inventedOut, inventedErr := invented.Output()
+			if fmt.Sprint(err) != fmt.Sprint(inventedErr) || !bytes.Equal(out, inventedOut) ||
+				strings.ReplaceAll(errs.String(), `"dashboard"`, `"nosuchnoun"`) != inventedErrs.String() {
+				t.Fatalf("retired noun still answers differently from an invented one:\n%v %q\n---\n%v %q",
+					err, errs.String(), inventedErr, inventedErrs.String())
+			}
 		})
 	}
 	for _, verb := range []string{"help", "--help", "-h"} {

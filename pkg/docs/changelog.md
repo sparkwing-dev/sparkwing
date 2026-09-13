@@ -23,9 +23,9 @@ unlock.
 ### Removed
 
 - **cli:** The retired `dashboard` noun reads as an unknown subcommand. The
-  parsing that recognized it and named `sparkwing serve` is gone. See
-  [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
-  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map.
+  parsing that recognized the old spelling and named `sparkwing serve` carried
+  readers across [v0.49.0](docs/migrations/v0.49.0.md#serve-command), which
+  removed the command and whose guide carries the full command map.
 
 ## [v0.50.0] - 2026-09-12
 

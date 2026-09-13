@@ -36,7 +36,7 @@ Any of the following on covered surfaces:
 
 ## Removal procedure
 
-Pre-1.0, a covered symbol is removed outright in the release that replaces it. The removal ships as a `### Removed` (or `### Changed`) CHANGELOG entry carrying a `(Breaking)` marker inside the bold scope, linked to an H2 in `docs/migrations/v<X.Y.Z>.md` with before/after code. Where the removed spelling can still be typed -- a retired CLI flag, a retired config file -- the release that removes it recognizes the old spelling and fails with an error naming the replacement and the migration guide, rather than accepting it with a warning. That recognition is a reading aid, not a deprecation window: the symbol is already gone, and a later release drops the recognition too, after which the old spelling reads as unknown.
+Pre-1.0, a covered symbol is removed outright in the release that replaces it. The removal ships as a `### Removed` (or `### Changed`) CHANGELOG entry carrying a `(Breaking)` marker inside the bold scope, linked to an H2 in `docs/migrations/v<X.Y.Z>.md` with before/after code. Where the removed spelling can still be typed -- a retired CLI flag, a retired config file -- the release that removes it recognizes the old spelling and fails with an error naming the replacement and the migration guide, rather than accepting it with a warning. That recognition is a reading aid, not a deprecation window: the symbol is already gone, and the recognition is itself removable, after which the old spelling reads as unknown.
 
 ## Pre-1.0 caveat
 
