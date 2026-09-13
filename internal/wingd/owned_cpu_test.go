@@ -212,11 +212,8 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 		processes, ownedProcessOwners(held, processes), held, firstAt, releasedAt, 8)
 	sampler.last, sampler.lastAt = next, releasedAt
 
-	// The run is released. This is the reading the sampler takes with nothing
-	// held, during which the tree goes on burning an hour of CPU.
 	sampler.forgetSamples(reheldAt)
 
-	// Held again, and idle for the whole window it is held.
 	processes = process(3650)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
@@ -272,14 +269,11 @@ func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
 		},
 		processes, ownedProcessOwners(both, processes), both, firstAt, secondAt, 8)
 
-	// Only one root is released. The other keeps the sampler running, so the
-	// released tree is still seen every reading.
 	processes = table(20, 90)
 	_, afterRelease := ownedCPUByRoot(
 		afterBoth, processes, ownedProcessOwners(onlyKept, processes),
 		onlyKept, secondAt, thirdAt, 8)
 
-	// It is held again and runs nothing while held.
 	processes = table(30, 90)
 	rehold := []OwnedRoot{
 		{PID: 10, HeldSince: firstAt.Add(-time.Hour)},
@@ -302,7 +296,6 @@ func TestOwnedCPU_ARootFirstSeenWithNoReadingBehindItGetsNoFigure(t *testing.T) 
 	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 305}}
 	held := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Hour)}}
 
-	// A zero lastAt is what a sampler that has taken no reading carries.
 	byRoot, _ := ownedCPUByRoot(
 		nil, processes, ownedProcessOwners(held, processes), held, time.Time{}, now, 8)
 
@@ -319,12 +312,10 @@ func TestOwnedProcSampler_AReadingWithNothingHeldEndsTheWindow(t *testing.T) {
 	sampler.last = map[processIdentity]cpuSample{identity: {cpuSeconds: 0, at: firstAt}}
 	sampler.lastAt = firstAt
 
-	// The entry point the daemon calls when it holds nothing.
 	if _, measured := sampler.CPUUsage(nil, 8); !measured {
 		t.Fatal("a reading with nothing held reported the host unreadable; nothing failed to be read")
 	}
 
-	// The tree burned an hour of CPU unheld, then is held again.
 	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 3600}}
 	rehold := []OwnedRoot{{PID: 10, HeldSince: time.Now()}}
 	byRoot, _ := ownedCPUByRoot(
@@ -346,7 +337,6 @@ func TestOwnedCPU_ATreeWithAnUnreadableCounterReportsNoFigure(t *testing.T) {
 		root:  {cpuSeconds: 50, at: previousAt},
 		child: {cpuSeconds: 0, at: previousAt},
 	}
-	// The root's counter ran backwards; the child measured two cores cleanly.
 	processes := map[int]ownedProcess{
 		10: {parentPID: 1, identity: root, cpuSeconds: 3},
 		11: {parentPID: 10, identity: child, cpuSeconds: 2},

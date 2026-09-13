@@ -295,7 +295,6 @@ func TestDarwinCPUSnapshotMalformedInputIsUnmeasured(t *testing.T) {
 func TestDarwinCPUSnapshotGivesNoFigureForABackwardsCounter(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	lastAt := now.Add(-10 * time.Second)
-	// pid 101 measures cleanly, so the tree has a figure for the void to remove.
 	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 8:20.00\n101 100 0:00.00\n")
 	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:03.00\n101 100 0:10.00\n")
 	roots := []OwnedRoot{{PID: 100, HeldSince: now.Add(-time.Hour)}}
@@ -317,7 +316,6 @@ func TestDarwinCPUSnapshot_OwnedIsBoundedByTheArbitratedCoresNotTheMachine(t *te
 	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 1:00.00\n")
 	roots := []OwnedRoot{{PID: 100, HeldSince: now.Add(-time.Hour)}}
 
-	// A 16-core machine, a 2-core container, and a tree that measured six cores.
 	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, roots, lastAt, now, 16, 2)
 
 	if figure := byRoot[100]; figure != 2 {

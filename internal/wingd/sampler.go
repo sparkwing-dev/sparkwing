@@ -68,30 +68,28 @@ type OwnedRoot struct {
 	HeldSince time.Time
 }
 
+// OwnedCPUSampler reports the CPU each held run's process tree ran, keyed by
+// the root pid the caller asked about. A process under more than one root
+// counts once, against its nearest ancestor root.
+//
+// An implementation leaves a root out of the map where no figure could be
+// computed for it, and gives it a zero only where it ran no measurable CPU.
+// Both answers grant the same cores, so a zero in place of an absence costs no
+// capacity and reports the daemon as measuring cleanly while it is not.
+//
+// measured reports whether the host's process table was read at all. It is
+// false where the read failed, and also where the platform has no way to
+// measure owned CPU; either leaves byRoot empty and says nothing about any
+// individual root. A platform answering false forever states a capability
+// rather than a fault on the box, so a count tracking every reading there is
+// the expected shape. An empty map with measured true says the table was read
+// and every root in it was individually unreadable, a different fault.
+//
+// arbitratedCores is the capacity these runs physically execute on: a cgroup
+// limit where one caps them below the machine's core count, and the machine's
+// otherwise. An implementation bounds a figure it cannot otherwise justify
+// against it, because no tree under that limit can have run more.
 type OwnedCPUSampler interface {
-	// CPUUsage reports the CPU each root's process tree ran, keyed by the
-	// root pid the caller asked about. A process under more than one root
-	// counts once, against its nearest ancestor root.
-	//
-	// Leave a root out of the map where no figure could be computed for it,
-	// and give it a zero only where it ran no measurable CPU. Both answers
-	// grant the same cores, so a zero in place of an absence costs no capacity
-	// and reports the daemon as measuring cleanly while it is not.
-	//
-	// measured reports whether the host's process table was read at all.
-	// Return false where the read failed, and also where this platform has no
-	// way to measure owned CPU at all; either leaves byRoot empty and says
-	// nothing about any individual root. A platform answering false forever is
-	// stating a capability rather than reporting a fault on the box, so a count
-	// tracking every reading there is the expected shape. An empty map with measured true
-	// says the table was read and every root in it was individually
-	// unreadable, which is counted as a different fault.
-	//
-	// arbitratedCores is the capacity these runs physically execute on: a
-	// cgroup limit where one caps them below the machine's core count, and the
-	// machine's otherwise. Bound a figure the sampler cannot otherwise justify
-	// against it, because no tree under that limit can have run more.
-
 	CPUUsage(roots []OwnedRoot, arbitratedCores float64) (byRoot map[int]float64, measured bool)
 }
 
@@ -197,10 +195,9 @@ func ownedProcessOwners(roots []OwnedRoot, processes map[int]ownedProcess) map[p
 	return owners
 }
 
-// forgetSamples drops what the sampler measured and moves its clock to now, so
-// the next reading it takes is measured against the moment it resumed rather
-// than against a reading taken before a stretch it sat out.
 func (s *ownedProcSampler) forgetSamples(now time.Time) {
+	// safety: the samples and the clock they are read against move together, so
+	// no later window can span a stretch this sampler sat out.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.last, s.lastAt = nil, now
@@ -269,15 +266,14 @@ func ownedCPUByRoot(
 	return byRoot, next
 }
 
-// measureUnownedSurvivors keeps measuring a process the daemon has stopped
-// owning but that is still running, so re-holding its tree charges it the CPU
-// this reading covers rather than everything it ran while nobody held it.
 func measureUnownedSurvivors(
 	previous map[processIdentity]cpuSample,
 	processes map[int]ownedProcess,
 	next map[processIdentity]cpuSample,
 	now time.Time,
 ) {
+	// safety: a process the daemon stopped owning is still measured while it
+	// runs, so re-holding its tree charges only the CPU this reading covers.
 	for identity := range previous {
 		if _, taken := next[identity]; taken {
 			continue

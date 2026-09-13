@@ -80,9 +80,9 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 }
 
 func (s *ownedProcSampler) sampleOwned([]OwnedRoot, float64) (map[int]float64, bool) {
-	// Darwin attributes owned CPU from the paired host sampler, which reads one
-	// process table for host busy and owned CPU together. This path answers for a
-	// host sampler that cannot pair, and it has no second way to measure.
+	// safety: darwin attributes owned CPU from the paired host sampler's single
+	// process table. This path serves a host sampler that cannot pair, and has
+	// no second way to measure.
 	return nil, false
 }
 
