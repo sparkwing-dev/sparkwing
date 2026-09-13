@@ -31,6 +31,21 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Fixed
+
+- **config:** A pipeline's `on:` and `guards:` mappings reject a key outside
+  their schema, naming the field and the line. Only the pipeline entry's own
+  keys were checked before, so `on: {pre-commit: {}}` loaded clean and
+  installed no hook, and `guards: {rejct: [...]}` loaded clean and dropped the
+  reject fence. Keys nested deeper, such as `on.push.branches`, are still
+  matched loosely.
+### Removed
+
+- **web:** The analytics page drops its three unbuilt sections
+  Slowest pipelines, failure clustering, and agent utilization rendered
+  placeholder text for views the dashboard does not build. The trend charts
+  stay.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.

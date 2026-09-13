@@ -1196,6 +1196,20 @@ test("keeps every public dashboard navigation target routable", async ({
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toHaveCount(0);
 });
 
+test("promises no analytics section the product does not have", async ({
+  page,
+}) => {
+  await installMockAPI(page);
+  await page.goto("/analytics");
+  await expect(
+    page.getByRole("heading", { name: "Analytics", exact: true, level: 1 }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Trends", exact: true, level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByText(/Coming soon/i)).toHaveCount(0);
+});
+
 test("allocates collision-free ports for parallel static servers", async () => {
   const [first, second] = await Promise.all([
     startStaticDashboard(),
