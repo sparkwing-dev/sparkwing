@@ -3243,7 +3243,7 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	if err := s.createRunTx(ctx, tx, r); err != nil {
 		return err
 	}
@@ -3259,7 +3259,7 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	if err := createTriggerTx(ctx, tx, t); err != nil {
 		return err
 	}
@@ -6151,7 +6151,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	if err := createTriggerTx(ctx, tx, t); err != nil {
 		return err
 	}
