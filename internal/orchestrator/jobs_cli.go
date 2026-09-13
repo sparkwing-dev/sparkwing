@@ -601,13 +601,17 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	for _, n := range nodes {
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
-		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
+		placement := placementLine(n)
+		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || placement != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
 		fmt.Fprintf(out, "    %s\n", color.Bold(n.NodeID+":"))
 		if n.StatusDetail != "" {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("↳"), n.StatusDetail)
+		}
+		if placement != "" {
+			fmt.Fprintf(out, "      %s %s\n", color.Dim("placement:"), placement)
 		}
 		for _, a := range annotations {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("@"), a)
@@ -635,6 +639,22 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 				writeIndentedSummary(out, "        ", s.Summary)
 			}
 		}
+	}
+}
+
+// safety: a node nobody preferred has no placement story worth a line, and an
+// unclaimed one has no runner to name yet.
+func placementLine(n *store.Node) string {
+	if n.ClaimedBy == "" {
+		return ""
+	}
+	switch n.PlacementReason {
+	case store.PlacementPreferred:
+		return n.ClaimedBy + " (preferred)"
+	case store.PlacementFallback:
+		return n.ClaimedBy + " (fallback after the local-first hold)"
+	default:
+		return ""
 	}
 }
 

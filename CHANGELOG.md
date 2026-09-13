@@ -22,6 +22,22 @@ unlock.
 
 ### Added
 
+- **controller:** Local-first placement on the claim path. A node is held back
+  from a claim-mode runner whose labels do not satisfy its `Prefers` while a
+  runner that does satisfy them polled inside `--placement-liveness` (default
+  30s) and its last report left it a free slot. The hold runs `--placement-hold`
+  (default 20s) from the node's ready time, after which any eligible runner
+  takes it. `--default-prefer-labels` supplies a preference for nodes whose plan
+  declares none; empty, its default, leaves those nodes first-in-first-out.
+  `Requires` is unchanged: preferences reorder the claim queue and never widen
+  it. Each claim stamps `placement_reason` (`preference`, `fallback`, `none`) on
+  the node and writes a `node_placed` event, and `sparkwing runs status` names
+  the runner and the reason under a node the preference decided.
+- **controller + runner:** `POST /api/v1/nodes/claim` accepts a `capacity`
+  object carrying the runner's `max_concurrent` and `active_claims`, which
+  `pkg/controller/client.Client.ClaimNodeWithCapacity` sends and the agents view
+  reports for a claim-mode runner alongside the labels it asserted. A saturated
+  runner holds no node back for itself.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

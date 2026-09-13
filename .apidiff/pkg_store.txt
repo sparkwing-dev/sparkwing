@@ -81,6 +81,14 @@ type ClaimIdentity struct {
 	TokenPrefix string
 }
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
+type ClaimPlacement struct {
+	DefaultPrefers []string
+
+	Hold time.Duration
+
+	Live []RunnerPresence
+}
+func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
@@ -507,6 +515,8 @@ type Node struct {
 	AvoidExecutorID          string
 	AvoidUntil               *time.Time
 
+	PlacementReason string
+
 	NeedsLabels []string
 
 	PrefersLabels []string
@@ -639,6 +649,9 @@ type PipelineProfile struct {
 
 	PrevSustainedCores float64
 }
+const PlacementFallback = "fallback"
+const PlacementNone = "none"
+const PlacementPreferred = "preference"
 const PrefixLen = 12
 type ProfileObservation struct {
 	Duration        time.Duration
@@ -740,6 +753,11 @@ type RunFilter struct {
 	Limit          int
 	ParentRunID    string
 	RootOnly       bool
+}
+type RunnerPresence struct {
+	Name       string
+	Labels     []string
+	AtCapacity bool
 }
 type SchemaRequirement struct {
 	Name    string
@@ -1098,6 +1116,7 @@ type WaiterResolution struct {
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
+func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context

@@ -58,3 +58,40 @@ func TestRenderNodesWithSteps_SuccessNodeWithoutSummaryIsCollapsed(t *testing.T)
 		t.Errorf("unexpected summary section for vanilla success node:\n%s", buf.String())
 	}
 }
+
+func TestRenderNodesWithSteps_NamesWhereAPreferredNodeRan(t *testing.T) {
+	nodes := []*store.Node{{
+		NodeID: "build", Status: "running", ClaimedBy: "runner:laptop:1",
+		PlacementReason: store.PlacementPreferred,
+	}}
+	var buf bytes.Buffer
+	renderNodesWithSteps(&buf, nodes, nil, false)
+	got := buf.String()
+	if !strings.Contains(got, "placement:") || !strings.Contains(got, "runner:laptop:1 (preferred)") {
+		t.Errorf("missing placement line:\n%s", got)
+	}
+}
+
+func TestRenderNodesWithSteps_NamesTheFallbackRunner(t *testing.T) {
+	nodes := []*store.Node{{
+		NodeID: "build", Status: "running", ClaimedBy: "runner:cloudpod:1",
+		PlacementReason: store.PlacementFallback,
+	}}
+	var buf bytes.Buffer
+	renderNodesWithSteps(&buf, nodes, nil, false)
+	if !strings.Contains(buf.String(), "fallback after the local-first hold") {
+		t.Errorf("missing fallback placement line:\n%s", buf.String())
+	}
+}
+
+func TestRenderNodesWithSteps_UnpreferredNodeStaysCollapsed(t *testing.T) {
+	nodes := []*store.Node{{
+		NodeID: "build", Status: "done", Outcome: "success",
+		ClaimedBy: "runner:cloudpod:1", PlacementReason: store.PlacementNone,
+	}}
+	var buf bytes.Buffer
+	renderNodesWithSteps(&buf, nodes, nil, false)
+	if strings.Contains(buf.String(), "placement:") {
+		t.Errorf("unexpected placement line for an unpreferred node:\n%s", buf.String())
+	}
+}
