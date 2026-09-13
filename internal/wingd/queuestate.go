@@ -59,7 +59,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			Held:           heldCores,
 			Reserved:       d.reservedCores,
 			External:       d.externalCores,
-			ExternalSource: externalSource(d.cpuMeasured),
+			ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributed),
 			Available:      grantCores,
 		},
 		wingwire.ResourceState{
@@ -77,6 +77,14 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 	if !d.measuredAt.IsZero() {
 		qs.ExternalMeasurementAgeMS = d.now().Sub(d.measuredAt).Milliseconds()
+	}
+	qs.ExternalAttribution = &wingwire.ExternalAttribution{
+		Samples:             d.attribution.samples,
+		SamplerUnreadable:   d.attribution.samplerUnreadable,
+		RunsWithoutProcess:  d.attribution.runsWithoutProcess,
+		RunsAwaitingMeasure: d.attribution.runsAwaitingMeasure,
+		RunsProcessGone:     d.attribution.runsProcessGone,
+		Attributed:          d.attribution.attributed,
 	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{
@@ -571,6 +579,13 @@ func minU64(a, b uint64) uint64 {
 	return b
 }
 
+func coresExternalSource(measured, attributed bool) string {
+	if measured && !attributed {
+		return wingwire.ExternalUnattributed
+	}
+	return externalSource(measured)
+}
+
 func externalSource(measured bool) string {
 	if measured {
 		return wingwire.ExternalMeasured
@@ -637,7 +652,7 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 		extCores, extMem = 0, 0
 	}
 	avail := map[string]wingwire.ResourceState{
-		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: externalSource(d.cpuMeasured)},
+		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributed)},
 		"memory": {Key: "memory", Available: grantMem, External: extMem, ExternalSource: externalSource(d.memMeasured)},
 	}
 	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)

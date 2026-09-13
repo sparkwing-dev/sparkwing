@@ -907,6 +907,43 @@
           ]
         },
         {
+          "name": "external_attribution",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "samples",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "sampler_unreadable",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "runs_without_process",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "runs_process_gone",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "runs_awaiting_measure",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "attributed",
+              "kind": "int64",
+              "omitempty": false
+            }
+          ]
+        },
+        {
           "name": "runners",
           "kind": "[]struct",
           "omitempty": true,
