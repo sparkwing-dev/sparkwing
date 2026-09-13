@@ -190,7 +190,7 @@ var homeRules = []homeRule{
 		pattern: homeEnvRead,
 		allowed: map[string]string{
 			"internal/paths/paths.go":      "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
-			"pkg/storage/storeurl/spec.go": "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the same rule including the redirect",
+			"pkg/storage/storeurl/spec.go": "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the sandbox redirect",
 		},
 		advice: "Call internal/paths.DefaultPaths() instead, which honors SPARKWING_HOME the same way and adds the test-sandbox redirect that keeps a test binary out of the developer's real ~/.sparkwing.",
 	},
@@ -199,7 +199,7 @@ var homeRules = []homeRule{
 		pattern: homeDirJoin,
 		allowed: map[string]string{
 			"internal/paths/paths.go":             "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
-			"pkg/storage/storeurl/spec.go":        "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the same rule including the redirect",
+			"pkg/storage/storeurl/spec.go":        "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the sandbox redirect",
 			"internal/configguard/configguard.go": "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
 		},
 		advice: "Call internal/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
@@ -453,6 +453,10 @@ var productTestUnset = []string{
 	wingwire.LeaseTokenEnv,
 	wingwire.ChildLeaseTokenEnv,
 	"GIT_INDEX_FILE",
+	// safety: a node process carries this run's home, which for an ordinary
+	// gate is the operator's own. A test binary that inherits it opens the
+	// real runs store instead of the sandbox internal/paths gives it.
+	"SPARKWING_HOME",
 }
 
 func withoutInherited(cmd string, names []string) string {

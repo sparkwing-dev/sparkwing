@@ -28,6 +28,27 @@ func TestResolveHostBin_EnvOutranksPath(t *testing.T) {
 }
 
 func TestResolveHostBin_FallsBackToPath(t *testing.T) {
+	fake := fakeSparkwingOnPath(t)
+	bin, fromEnv, ok := resolveHostBin(false)
+	if !ok || bin != fake || fromEnv {
+		t.Fatalf("resolveHostBin() = %q, fromEnv=%v, ok=%v; want %q from PATH", bin, fromEnv, ok, fake)
+	}
+}
+
+func TestResolveHostBin_IgnoresPathUnderTest(t *testing.T) {
+	fake := fakeSparkwingOnPath(t)
+	bin, _, ok := ResolveHostBin()
+	if ok {
+		t.Fatalf("ResolveHostBin() = %q from PATH inside a test binary; a gate puts a sparkwing there and the "+
+			"daemon it hosts is the operator's", bin)
+	}
+	if _, ok := HostSpawn(); ok {
+		t.Fatalf("HostSpawn() resolved %q from PATH inside a test binary", fake)
+	}
+}
+
+func fakeSparkwingOnPath(t *testing.T) string {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the PATH fixture below builds a unix executable")
 	}
@@ -38,10 +59,7 @@ func TestResolveHostBin_FallsBackToPath(t *testing.T) {
 		t.Fatalf("write fake sparkwing: %v", err)
 	}
 	t.Setenv("PATH", dir)
-	bin, fromEnv, ok := ResolveHostBin()
-	if !ok || bin != fake || fromEnv {
-		t.Fatalf("ResolveHostBin() = %q, fromEnv=%v, ok=%v; want %q from PATH", bin, fromEnv, ok, fake)
-	}
+	return fake
 }
 
 func TestResolveHostBin_NothingResolvesReportsFalse(t *testing.T) {
