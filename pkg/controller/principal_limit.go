@@ -24,6 +24,16 @@ const (
 	RecommendedHeartbeatsPerMinute = 1200
 )
 
+// RecommendedClaimsPerMinuteForSlots returns the claim budget suggested for a
+// runner working slots offer slots at once. An enrolled agent's slots all poll
+// under the agent's one name, and each slot spends a preparation and an offer
+// per round at the 500ms cadence, so its budget is the per-runner
+// recommendation multiplied by its max_concurrent. Fewer than one slot is read
+// as one.
+func RecommendedClaimsPerMinuteForSlots(slots int) int {
+	return RecommendedClaimsPerMinute * max(slots, 1)
+}
+
 // RequestBudget is how many requests one runner may make per rolling minute to
 // the claim routes and to the heartbeat routes. Zero in either field leaves
 // that class unlimited, which is what a controller starts with.

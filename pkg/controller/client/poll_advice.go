@@ -34,15 +34,25 @@ func (c *Client) recordPollAdvice(resp *http.Response) {
 // runner, so a fleet sharing one token sets distinct identities and a single
 // runner keeps one across its whole run. A per-request value would hand the
 // runner a fresh budget on every poll and grow the controller's bucket table
-// at the fleet's poll rate. It returns the same client for chaining.
+// at the fleet's poll rate. It returns the same client for chaining, and is
+// safe to call after the client is already serving requests.
 func (c *Client) WithRunnerIdentity(id string) *Client {
-	c.runnerIdentity = id
+	c.runnerIdentity.Store(&id)
 	return c
 }
 
+// RunnerIdentity reports the identity this client sends, or the empty string
+// when it sends none.
+func (c *Client) RunnerIdentity() string {
+	if id := c.runnerIdentity.Load(); id != nil {
+		return *id
+	}
+	return ""
+}
+
 func (c *Client) setRunnerIdentity(req *http.Request) {
-	if c.runnerIdentity != "" {
-		req.Header.Set(store.RunnerIdentityHeader, c.runnerIdentity)
+	if id := c.RunnerIdentity(); id != "" {
+		req.Header.Set(store.RunnerIdentityHeader, id)
 	}
 }
 

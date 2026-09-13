@@ -254,7 +254,9 @@ rolling minute. Both default to zero, which is unlimited: an operator
 opts in. 1200 of each suits the cadence the shipped runners use -- a pool
 runner claims every 500ms, or 120 a minute, and a node heartbeat runs
 every 3s. An enrolled agent's offer slots all poll under the agent's one
-name, so size its claim budget for `max_concurrent` pollers, not one.
+name, and each slot spends a preparation plus an offer per round, so its
+claim budget is 1200 x `max_concurrent`: 1200 for one slot, 9600 for
+eight. `controller.RecommendedClaimsPerMinuteForSlots` computes it.
 
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the

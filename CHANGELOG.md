@@ -49,7 +49,10 @@ unlock.
   the three claim routes that name none, so a fleet sharing one token is
   budgeted runner by runner. It bounds a cooperating runner, not a holder of a
   valid token that varies its identity. `client.Client.WithRunnerIdentity` sets
-  the value a runner sends, once per process. Both default to zero,
+  the value a runner sends and `RunnerIdentity` reads it back;
+  `controller.RecommendedClaimsPerMinuteForSlots` computes the budget an agent
+  of a given `max_concurrent` wants, since its offer slots all poll under the
+  agent's one name. Both default to zero,
   which is unlimited; 1200 of each suits the cadence the shipped runners use.
   The agent liveness heartbeat is never budgeted, because losing it tears down
   an agent and every node under it. Past a budget the route answers `429` with a

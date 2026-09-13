@@ -26,9 +26,7 @@ type Client struct {
 	token   string
 	http    *http.Client
 
-	// safety: set once before the client is shared, so the claim loops that
-	// read it concurrently never race a write.
-	runnerIdentity string
+	runnerIdentity atomic.Pointer[string]
 
 	pollAdvice atomic.Int64
 }
@@ -1138,6 +1136,7 @@ func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim,
 		return ExecutorClaimOfferResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setRunnerIdentity(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return ExecutorClaimOfferResult{}, err
