@@ -2,11 +2,16 @@ package web
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestRenderJSONL_FormatsRecord(t *testing.T) {
@@ -169,5 +174,117 @@ func TestServeLogStreamKeepsNDJSONEventsRaw(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Body.String(), "tests") || !strings.Contains(ansi.Body.String(), "PASS browser") {
 		t.Fatalf("ansi stream lost pretty-rendered content:\n%s", ansi.Body.String())
+	}
+}
+
+func TestRenderJSONL_MarksTruncationAfterOverLongLine(t *testing.T) {
+	in := []byte("{\"msg\":\"first\"}\n" + strings.Repeat("x", 2<<20) + "\n{\"msg\":\"last\"}\n")
+	var out bytes.Buffer
+	renderJSONL(in, &out, formatPlain)
+	got := out.String()
+	if !strings.Contains(got, "first") {
+		t.Fatalf("lines before the over-long line were dropped: %q", got)
+	}
+	if !strings.Contains(got, logTruncationNotice) {
+		t.Fatalf("no truncation notice after an over-long line: %q", got)
+	}
+}
+
+func TestStreamPrettySSE_MarksTruncationAfterOverLongLine(t *testing.T) {
+	in := "data: {\"msg\":\"first\"}\n\ndata: " + strings.Repeat("x", 2<<20) + "\n\ndata: {\"msg\":\"last\"}\n\n"
+	var out bytes.Buffer
+	streamPrettySSE(strings.NewReader(in), &out, func() error { return nil }, formatPlain)
+	got := out.String()
+	if !strings.Contains(got, "first") {
+		t.Fatalf("frames before the over-long line were dropped: %q", got)
+	}
+	if !strings.Contains(got, logTruncationNotice) {
+		t.Fatalf("no truncation notice after an over-long frame: %q", got)
+	}
+}
+
+func TestRenderJSONL_NoTruncationNoticeOnOrdinaryInput(t *testing.T) {
+	in := []byte("{\"msg\":\"first\"}\n{\"msg\":\"last\"}\n")
+	var out bytes.Buffer
+	renderJSONL(in, &out, formatPlain)
+	if strings.Contains(out.String(), logTruncationNotice) {
+		t.Fatalf("truncation notice on a complete render: %q", out.String())
+	}
+}
+
+type errAfterReader struct {
+	rest []byte
+	err  error
+}
+
+func (r *errAfterReader) Read(p []byte) (int, error) {
+	if len(r.rest) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.rest)
+	r.rest = r.rest[n:]
+	return n, nil
+}
+
+func TestStreamPrettySSE_NoTruncationNoticeOnAReadError(t *testing.T) {
+	src := &errAfterReader{rest: []byte("data: {\"msg\":\"first\"}\n\n"), err: context.Canceled}
+	var out bytes.Buffer
+	streamPrettySSE(src, &out, func() error { return nil }, formatPlain)
+	got := out.String()
+	if !strings.Contains(got, "first") {
+		t.Fatalf("frames before the read error were dropped: %q", got)
+	}
+	if strings.Contains(got, logTruncationNotice) {
+		t.Fatalf("a read error was reported as a truncated line: %q", got)
+	}
+}
+
+func TestRunLogsSearch_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
+	content := []byte("{\"msg\":\"needle first\"}\n" + strings.Repeat("x", 2<<20) + "\n{\"msg\":\"needle last\"}\n")
+	b := &fakeBackend{
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return content, nil },
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/r/logs/search?q=needle", nil)
+	req.SetPathValue("id", "r")
+	rec := httptest.NewRecorder()
+	runLogsSearchHandler(b)(rec, req)
+	var body struct {
+		Total     int  `json:"total"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	}
+	if !body.Truncated {
+		t.Errorf("search did not report that it stopped scanning: %s", rec.Body.String())
+	}
+	if body.Total != 1 {
+		t.Errorf("expected the one match before the over-long line, got %d", body.Total)
+	}
+}
+
+func TestRunsGrep_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
+	content := []byte("{\"msg\":\"needle first\"}\n" + strings.Repeat("x", 2<<20) + "\n{\"msg\":\"needle last\"}\n")
+	b := &fakeBackend{
+		listRuns:    func(store.RunFilter) ([]*store.Run, error) { return []*store.Run{{ID: "r"}}, nil },
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "n"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return content, nil },
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle", nil)
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, req)
+	var body struct {
+		Total     int  `json:"total"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	}
+	if !body.Truncated {
+		t.Errorf("grep did not report that it stopped scanning: %s", rec.Body.String())
+	}
+	if body.Total != 1 {
+		t.Errorf("expected the one match before the over-long line, got %d", body.Total)
 	}
 }
