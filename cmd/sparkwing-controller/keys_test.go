@@ -44,6 +44,16 @@ func TestLoadBootstrapAdminToken(t *testing.T) {
 		}
 	})
 
+	t.Run("environment entry is cleared once read", func(t *testing.T) {
+		t.Setenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN", token)
+		if _, err := loadBootstrapAdminToken(""); err != nil {
+			t.Fatalf("loadBootstrapAdminToken: %v", err)
+		}
+		if got := os.Getenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN"); got != "" {
+			t.Fatalf("SPARKWING_BOOTSTRAP_ADMIN_TOKEN still set to %q after the read", got)
+		}
+	})
+
 	t.Run("unset", func(t *testing.T) {
 		got, err := loadBootstrapAdminToken("")
 		if err != nil {
@@ -127,6 +137,19 @@ func TestLoadSecretsCipher_PreviousKey(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "previous secrets key") {
 			t.Fatalf("err = %v, want it to name the previous key", err)
+		}
+	})
+
+	t.Run("environment entries are cleared once read", func(t *testing.T) {
+		t.Setenv("SPARKWING_SECRETS_KEY", encode(key))
+		t.Setenv("SPARKWING_SECRETS_PREVIOUS_KEY", encode(previous))
+		if _, err := loadSecretsCipher("", ""); err != nil {
+			t.Fatalf("loadSecretsCipher: %v", err)
+		}
+		for _, name := range []string{"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY"} {
+			if got := os.Getenv(name); got != "" {
+				t.Fatalf("%s still set to %q after the read", name, got)
+			}
 		}
 	})
 

@@ -268,3 +268,20 @@ neither is set (the fully unauthenticated bootstrap install).
 {{- index .Values "sparkwing-runner-bundle" "controller" "tokenSecret" "key" -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Mount points for the controller's credential Secrets. Each holds one
+Secret, so the file name inside is the Secret's key and the flag that
+names it is built from both.
+*/}}
+{{- define "sparkwing-full.controller.secretsKeyDir" -}}
+/etc/sparkwing/secrets-key
+{{- end }}
+
+{{- define "sparkwing-full.controller.secretsPreviousKeyDir" -}}
+/etc/sparkwing/secrets-previous-key
+{{- end }}
+
+{{- define "sparkwing-full.controller.bootstrapAdminTokenDir" -}}
+/etc/sparkwing/bootstrap-admin-token
+{{- end }}

@@ -27,7 +27,9 @@ unlock.
   admin token before the listener binds, so a provisioned controller never
   serves a request unauthenticated and `--require-auth` is satisfied on a first
   start. Only the token's argon2 hash reaches the database, under the principal
-  `bootstrap:admin`. A tokens table that already holds a row is left alone. The
+  `bootstrap:admin`. A tokens table holding a token that still authenticates is
+  left alone; one holding only revoked or expired rows is bootstrapped again,
+  which recovers a cluster whose last credential was revoked or ran out. The
   value has to carry a minted token's shape, `swu_` followed by at least 28
   characters. `charts/sparkwing-full` gains
   `controller.bootstrapAdminToken.name` and `controller.requireAuth`.
@@ -40,9 +42,13 @@ unlock.
   transaction, after which the previous key can be dropped. A value the
   controller was holding as plaintext comes out encrypted, which turns
   encryption on for an existing database without re-setting each secret.
+  A row that opens under no configured key keeps the bytes it had and is named
+  in the response, so one unreadable value costs the others nothing.
   Encryption stays opt-in: a controller with no key configured is unchanged and
   the rotate route answers `400`. `charts/sparkwing-full` gains
-  `controller.secretsPreviousKey.name`.
+  `controller.secretsPreviousKey.name`, and now delivers the encryption keys and
+  the bootstrap token as mounted files rather than environment variables; the
+  controller clears either variable from its environment as it reads it.
 - **pkg/store:** `Store.CreateTokenIfNoneExist` writes a caller-supplied token
   when the tokens table is empty, checking and inserting in one transaction, and
   `Store.RotateSecretValues` rewrites every secret row's stored value through a

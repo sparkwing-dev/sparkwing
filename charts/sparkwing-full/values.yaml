@@ -135,10 +135,13 @@ controller:
     name: ""
     key: token
 
-  # Refuse to start when the tokens table is empty, which turns an
+  # Refuse to start when no live token exists, which turns an
   # accidentally open controller into a failed rollout instead of a
-  # running hole. Set bootstrapAdminToken alongside it on a fresh
-  # install, or the pod has no way to reach a non-empty table.
+  # running hole. An upgrade of a cluster that already holds a token
+  # needs nothing else. A fresh install needs bootstrapAdminToken set
+  # alongside it, or the pod crash-loops with no way to mint the first
+  # token; the render does not refuse that pairing, because it cannot
+  # see what the state DB already holds.
   requireAuth: false
 
   # State DB lives on a PVC. Single-instance, so RWO is fine.

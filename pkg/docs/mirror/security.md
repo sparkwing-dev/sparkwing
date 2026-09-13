@@ -278,8 +278,14 @@ cipher (`internal/secrets`) before they hit the database. With no key
 configured the controller stores secret values as plaintext and logs a
 warning at startup. Provide the key via:
 
-- `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
-- `--secrets-key-file <path>` -- a file holding the raw or base64 key.
+- `--secrets-key-file <path>` -- a file holding the raw or base64 key, or
+- `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key.
+
+Prefer the file. The chart mounts `controller.secretsKey` as a file and
+renders the flag, because an environment entry is readable through
+`/proc` and is inherited by anything the container execs. The controller
+clears either variable from its own environment as soon as it reads it,
+so a value supplied that way does not outlive startup.
 
 Each envelope is bound to the fields of the row that decide who may
 read it: the secret name, the owning repository (empty for an unscoped
@@ -300,8 +306,8 @@ A stored envelope carries no key id, so the controller opens it by
 trying the keys it holds. Name the key values were sealed under before
 the current one and it becomes a read-only fallback:
 
-- `SPARKWING_SECRETS_PREVIOUS_KEY`, or
-- `--secrets-previous-key-file <path>`.
+- `--secrets-previous-key-file <path>`, or
+- `SPARKWING_SECRETS_PREVIOUS_KEY`.
 
 A value that does not open under the current key is tried against that
 one, which keeps every value readable across a key change. Close the
@@ -309,11 +315,17 @@ window with `sparkwing secrets rotate --profile <name>`
 (`POST /api/v1/secrets/rotate`, admin): it opens every row with the keys
 the controller holds and writes it back sealed and bound under the
 current key, in one transaction, so the rotation lands for the whole
-table or for none of it. Once it reports its count, drop the previous
-key and restart. The same command turns encryption on for a database
-that already holds plaintext values, which come out encrypted with no
-re-set by hand. A row that opens under neither key answers `500` and
-leaves every row as it was.
+table or for none of it. The same command turns encryption on for a
+database that already holds plaintext values, which come out encrypted
+with no re-set by hand.
+
+A row that opens under neither key keeps the bytes it had and is named
+in the response, which is what a value written as plaintext before
+encryption was enabled looks like when it happens to start with an
+envelope prefix. The rest of the table still rotates. `sparkwing secrets
+rotate` lists those rows; re-set each one, or name the key it was sealed
+under, and rotate again. Drop the previous key once a rotation reports
+nothing skipped.
 
 Configure the keys in this order for a key change: mount the new key as
 `secretsKey` and the outgoing one as `secretsPreviousKey`, restart,
@@ -564,10 +576,18 @@ failure.
   like a minted token -- `swu_` followed by at least 28 characters, for
   example `printf 'swu_%s' "$(openssl rand -hex 24)"` -- because a
   bearer lookup selects on that prefix. The chart mounts it from
-  `controller.bootstrapAdminToken.name` and renders `--require-auth`
-  from `controller.requireAuth`. Without it, minting the first token
-  needs the controller open, so enable auth by creating an admin token
-  through that window and restarting.
+  `controller.bootstrapAdminToken.name` as a file, renders the flag, and
+  renders `--require-auth` from `controller.requireAuth`. Without it,
+  minting the first token needs the controller open, so enable auth by
+  creating an admin token through that window and restarting.
+- **Know what the bootstrap flag treats as an empty table.** It writes
+  when no token *authenticates*: every row is revoked, expired, or the
+  table is empty. That is what recovers a cluster whose only credential
+  was revoked or ran out, and it is also why revoking the bootstrap
+  token while its Secret stays mounted recreates the same credential on
+  the next restart. Unmount the Secret (clear
+  `controller.bootstrapAdminToken.name`) before revoking, or mint a
+  replacement admin token first so the table still holds a live one.
 - **Point the logs service at a controller.** Without `--controller`
   (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
   anything that reaches its Service can read, forge, and delete every

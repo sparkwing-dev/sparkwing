@@ -350,6 +350,9 @@ type renderedVolumeMount struct {
 type renderedVolume struct {
 	Name     string         `yaml:"name"`
 	EmptyDir map[string]any `yaml:"emptyDir"`
+	Secret   *struct {
+		SecretName string `yaml:"secretName"`
+	} `yaml:"secret"`
 }
 
 type renderedContainer struct {
@@ -2146,5 +2149,106 @@ func TestFullChartCarriesTheJobCeiling(t *testing.T) {
 		"sparkwing-runner-bundle.runner.jobCeiling.cpu=8")
 	if !strings.Contains(rendered, "SPARKWING_K8S_CPU_CEILING") {
 		t.Error("flagship chart carries no job ceiling env; the vendored sub-chart may be stale")
+	}
+}
+
+func secretVolume(volumes []renderedVolume, name string) string {
+	for _, volume := range volumes {
+		if volume.Name == name && volume.Secret != nil {
+			return volume.Secret.SecretName
+		}
+	}
+	return ""
+}
+
+func TestFullChartCarriesControllerCredentialsAsFiles(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		set    string
+		flag   string
+		volume string
+		mount  string
+		env    string
+	}{
+		{
+			name:   "secrets key",
+			set:    "controller.secretsKey.name=sparkwing-secrets-key",
+			flag:   "--secrets-key-file=/etc/sparkwing/secrets-key/key",
+			volume: "secrets-key",
+			mount:  "/etc/sparkwing/secrets-key",
+			env:    "SPARKWING_SECRETS_KEY",
+		},
+		{
+			name:   "previous secrets key",
+			set:    "controller.secretsPreviousKey.name=sparkwing-secrets-key-old",
+			flag:   "--secrets-previous-key-file=/etc/sparkwing/secrets-previous-key/key",
+			volume: "secrets-previous-key",
+			mount:  "/etc/sparkwing/secrets-previous-key",
+			env:    "SPARKWING_SECRETS_PREVIOUS_KEY",
+		},
+		{
+			name:   "bootstrap admin token",
+			set:    "controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin",
+			flag:   "--bootstrap-admin-token-file=/etc/sparkwing/bootstrap-admin-token/token",
+			volume: "bootstrap-admin-token",
+			mount:  "/etc/sparkwing/bootstrap-admin-token",
+			env:    "SPARKWING_BOOTSTRAP_ADMIN_TOKEN",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sets := []string{test.set}
+			if test.volume == "secrets-previous-key" {
+				sets = append(sets, "controller.secretsKey.name=sparkwing-secrets-key")
+			}
+			rendered := helmRender(t, "./sparkwing-full",
+				"templates/controller-deployment.yaml", "sparkwing", sets...)
+			container := runnerContainer(t, rendered)
+			if !slices.Contains(container.Args, test.flag) {
+				t.Fatalf("args = %+v, want %s", container.Args, test.flag)
+			}
+			if !hasMount(container.VolumeMounts, test.volume, test.mount) {
+				t.Fatalf("volume mounts = %+v, want %s at %s", container.VolumeMounts, test.volume, test.mount)
+			}
+			secretName := strings.TrimPrefix(test.set[strings.Index(test.set, "=")+1:], "")
+			if got := secretVolume(deploymentDocument(t, rendered).Spec.Template.Spec.Volumes, test.volume); got != secretName {
+				t.Fatalf("volume %s reads Secret %q, want %q", test.volume, got, secretName)
+			}
+			for _, e := range container.Env {
+				if e.Name == test.env {
+					t.Fatalf("%s still reaches the container as an environment variable", test.env)
+				}
+			}
+		})
+	}
+}
+
+func TestFullChartRendersRequireAuth(t *testing.T) {
+	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing"))
+	if slices.Contains(container.Args, "--require-auth") {
+		t.Fatalf("args = %+v, want no --require-auth by default", container.Args)
+	}
+	container = runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing", "controller.requireAuth=true"))
+	if !slices.Contains(container.Args, "--require-auth") {
+		t.Fatalf("args = %+v, want --require-auth", container.Args)
+	}
+}
+
+func TestFullChartRefusesAPreviousSecretsKeyWithoutACurrentOne(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.secretsPreviousKey.name=sparkwing-secrets-key-old")
+	if !strings.Contains(out, "controller.secretsKey.name") {
+		t.Fatalf("render error does not name the missing current key:\n%s", out)
+	}
+}
+
+func TestFullChartRendersRequireAuthWithoutABootstrapToken(t *testing.T) {
+	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing", "controller.requireAuth=true"))
+	for _, arg := range container.Args {
+		if strings.HasPrefix(arg, "--bootstrap-admin-token-file") {
+			t.Fatalf("args = %+v, want no bootstrap token flag", container.Args)
+		}
 	}
 }

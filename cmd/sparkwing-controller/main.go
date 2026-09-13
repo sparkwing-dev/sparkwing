@@ -275,7 +275,9 @@ func loadSecretsCipher(keyFile, previousKeyFile string) (*secrets.Cipher, error)
 }
 
 func loadSecretsKey(envName, filePath string) ([]byte, error) {
-	if v := os.Getenv(envName); v != "" {
+	v := os.Getenv(envName)
+	clearEnv(envName)
+	if v != "" {
 		key, err := secrets.DecodeKey(v)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", envName, err)
@@ -301,7 +303,9 @@ func loadSecretsKey(envName, filePath string) ([]byte, error) {
 
 // safety: a trailing newline from a mounted file or a heredoc is editor noise, not part of the credential.
 func loadBootstrapAdminToken(filePath string) (string, error) {
-	if v := strings.TrimSpace(os.Getenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN")); v != "" {
+	fromEnv := os.Getenv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN")
+	clearEnv("SPARKWING_BOOTSTRAP_ADMIN_TOKEN")
+	if v := strings.TrimSpace(fromEnv); v != "" {
 		return v, nil
 	}
 	if filePath == "" {
@@ -316,6 +320,13 @@ func loadBootstrapAdminToken(filePath string) (string, error) {
 		return "", fmt.Errorf("%s is empty", filePath)
 	}
 	return token, nil
+}
+
+// safety: a credential left in the environment reaches every child process and anything that reads /proc.
+func clearEnv(name string) {
+	if err := os.Unsetenv(name); err != nil {
+		fmt.Fprintf(os.Stderr, "sparkwing-controller: could not clear %s from the environment: %v\n", name, err)
+	}
 }
 
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
