@@ -48,9 +48,6 @@ unlock.
   "Connected (no resources held)" table, with its own count beside the holding
   one. Those rows leave the holder table, so a lease appears in one table or
   the other, and the page groups admission the way `sparkwing queue` does.
-
-### Fixed
-
 - **dashboard:** The queue page counts a running pipeline once. Its
   zero-resource orchestration lease no longer adds to the "holding" figure
   beside the participant that holds the cores, which is the occupancy
