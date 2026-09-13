@@ -522,6 +522,7 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.finalizeMeteredNode(r, runID, nodeID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1417,10 +1418,6 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	metered, allowed := s.meteredClaimAllowed(w, r)
-	if !allowed {
-		return
-	}
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	if body.ExecutorName != "" {
 		if body.RunID == "" || body.NodeID == "" || body.ReservationID == "" || body.ResourceDigest == "" || body.Slot < 0 {
@@ -1450,6 +1447,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
 		})
 		if err != nil {
+			if s.writeCreditsRefusal(w, r, err) {
+				return
+			}
 			if writeExecutionAdmissionError(w, err) {
 				return
 			}
@@ -1474,9 +1474,6 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if metered {
-			s.startMetering(r, result.Node)
-		}
 		writeClaimedNode(w, r, s, result.Node)
 		return
 	}
@@ -1495,11 +1492,11 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if s.writeCreditsRefusal(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
-	}
-	if metered {
-		s.startMetering(r, n)
 	}
 	writeClaimedNode(w, r, s, n)
 }
@@ -1583,6 +1580,7 @@ func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.finalizeMeteredNode(r, r.PathValue("id"), r.PathValue("nodeID"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

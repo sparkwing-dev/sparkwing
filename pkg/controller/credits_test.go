@@ -85,6 +85,24 @@ func creditsRequest(t *testing.T, method, url, token string, body any) (int, []b
 	return resp.StatusCode, out
 }
 
+func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
+	t.Helper()
+	if _, err := st.DB().Exec(
+		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), runID, nodeID); err != nil {
+		t.Fatalf("rewind the charge window: %v", err)
+	}
+}
+
+func ageExhaustionStamp(t *testing.T, st *store.Store, at time.Time) {
+	t.Helper()
+	if _, err := st.DB().Exec(
+		`UPDATE sparkwing_meta SET value = ? WHERE key = 'credit_exhausted_at'`,
+		at.UnixNano()); err != nil {
+		t.Fatalf("age the exhaustion stamp: %v", err)
+	}
+}
+
 func TestCredits_UnmeteredTokenClaimsAndIsNeverCharged(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	ctx := context.Background()
@@ -182,11 +200,7 @@ func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
 
 	// safety: the claim anchors the charge window, so rewinding it makes the
 	// next heartbeat cover a known interval.
-	if _, err := f.store.DB().Exec(
-		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().Add(-30*time.Second).UnixNano(), "run-paid", "build"); err != nil {
-		t.Fatalf("rewind charge window: %v", err)
-	}
+	setNodeChargeWindow(t, f.store, "run-paid", "build", time.Now().Add(-30*time.Second))
 
 	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
@@ -199,27 +213,44 @@ func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list charges: %v", err)
 	}
-	if len(charges) != 1 {
-		t.Fatalf("charges = %d, want 1", len(charges))
+	usage := creditChargesOfKind(charges, store.CreditChargeUsage)
+	if len(usage) != 1 {
+		t.Fatalf("usage charges = %d, want 1 beside the claim reservation", len(usage))
 	}
-	if charges[0].Seconds < 29 || charges[0].Seconds > 31 {
-		t.Fatalf("charged %d seconds, want about 30", charges[0].Seconds)
+	if usage[0].Seconds < 29 || usage[0].Seconds > 31 {
+		t.Fatalf("charged %d seconds, want about 30", usage[0].Seconds)
 	}
-	if charges[0].TokenPrefix != f.prefix {
-		t.Fatalf("charge token prefix = %q, want %q", charges[0].TokenPrefix, f.prefix)
+	if usage[0].TokenPrefix != f.prefix {
+		t.Fatalf("charge token prefix = %q, want %q", usage[0].TokenPrefix, f.prefix)
 	}
-	if charges[0].RunID != "run-paid" || charges[0].NodeID != "build" {
-		t.Fatalf("charge names %s/%s", charges[0].RunID, charges[0].NodeID)
+	if usage[0].RunID != "run-paid" || usage[0].NodeID != "build" {
+		t.Fatalf("charge names %s/%s", usage[0].RunID, usage[0].NodeID)
 	}
+	if len(creditChargesOfKind(charges, store.CreditChargeReservation)) != 1 {
+		t.Fatalf("the claim did not reserve: %+v", charges)
+	}
+}
+
+func creditChargesOfKind(charges []store.CreditCharge, kind string) []store.CreditCharge {
+	var out []store.CreditCharge
+	for _, c := range charges {
+		if c.Kind == kind {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	// safety: enough to pass the claim floor and no more, so the first
-	// heartbeat spends it.
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree,
-		2*store.MicroCreditsPerCredit, "", "root"); err != nil {
+	floor, err := f.store.CreditClaimFloorMicro(ctx)
+	if err != nil {
+		t.Fatalf("floor: %v", err)
+	}
+	// safety: exactly one reservation, so the first heartbeat past it spends
+	// the balance.
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, floor, "", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.SetCreditGraceSeconds(ctx, 1); err != nil {
@@ -239,24 +270,32 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	})
 
-	// safety: spend the balance, then let the grace period elapse.
-	if _, err := f.store.DB().Exec(
-		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().Add(-200*time.Second).UnixNano(), "run-run-dry", "build"); err != nil {
-		t.Fatalf("rewind charge window: %v", err)
-	}
+	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-30*time.Second))
 	if err := c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil); err != nil {
 		t.Fatalf("first heartbeat: %v", err)
 	}
-	if _, err := f.store.DB().Exec(
-		`UPDATE sparkwing_meta SET value = ? WHERE key = 'credit_exhausted_at'`,
-		time.Now().Add(-time.Minute).UnixNano()); err != nil {
-		t.Fatalf("age the exhaustion stamp: %v", err)
-	}
+	ageExhaustionStamp(t, f.store, time.Now().Add(-time.Minute))
+	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-2*time.Second))
+
 	err = c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("heartbeat after the grace period = %v, want ErrLockHeld", err)
 	}
+
+	node, err := f.store.GetNode(ctx, "run-run-dry", "build")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Status != "done" || node.Outcome != "failed" {
+		t.Fatalf("node = %s/%s, want the cancellation to have landed", node.Status, node.Outcome)
+	}
+	if node.FailureReason != store.FailureCreditsExhausted {
+		t.Fatalf("failure reason = %q, want %q", node.FailureReason, store.FailureCreditsExhausted)
+	}
+	if node.Claimed {
+		t.Fatal("the cancelled node is still claimed, so it waits out its lease")
+	}
+
 	events, err := f.store.ListEventsAfter(ctx, "run-run-dry", 0, 50)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
@@ -272,6 +311,57 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	}
 }
 
+// A node that finishes between heartbeats pays for the seconds it ran and
+// nothing more, because the finish settles the tail and refunds the rest of
+// the claim reservation.
+func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	before, err := f.store.CreditBalanceMicro(ctx)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	c := client.NewWithToken(f.url, nil, f.runner)
+	seedRunNode(t, f.store, "run-brief", "build")
+	if err := f.store.MarkNodeReady(ctx, "run-brief", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
+
+	// safety: the claim reserved through claim+60s; placing that instant 56
+	// seconds out is a node claimed four seconds ago, finishing before the
+	// first heartbeat would have fired.
+	setNodeChargeWindow(t, f.store, "run-brief", "build",
+		time.Now().Add(time.Duration(store.CreditClaimFloorSeconds-4)*time.Second))
+	if err := c.StartNode(claimCtx, "run-brief", "build"); err != nil {
+		t.Fatalf("start node: %v", err)
+	}
+	if err := c.FinishNode(claimCtx, "run-brief", "build", "success", "", nil); err != nil {
+		t.Fatalf("finish node: %v", err)
+	}
+
+	after, err := f.store.CreditBalanceMicro(ctx)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	spent := before - after
+	want := int64(4) * store.DefaultCreditRateMicro
+	if diff := spent - want; diff > store.DefaultCreditRateMicro || diff < -store.DefaultCreditRateMicro {
+		t.Fatalf("spent %d for four seconds of work, want %d within one second", spent, want)
+	}
+}
+
 func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	f := newCreditsFixture(t, false)
 
@@ -283,6 +373,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 		BalanceMicro       int64 `json:"balance_micro"`
 		RateMicroPerSecond int64 `json:"rate_micro_per_second"`
 		GraceSeconds       int64 `json:"grace_seconds"`
+		MaxChargeSeconds   int64 `json:"max_charge_seconds"`
 		MicroPerCredit     int64 `json:"micro_per_credit"`
 		CreditsPerDollar   int64 `json:"credits_per_dollar"`
 	}
@@ -297,6 +388,9 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 	if state.GraceSeconds != store.DefaultCreditGraceSeconds {
 		t.Fatalf("grace = %d, want %d", state.GraceSeconds, store.DefaultCreditGraceSeconds)
+	}
+	if state.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
+		t.Fatalf("charge cap = %d, want %d", state.MaxChargeSeconds, store.DefaultCreditMaxChargeSeconds)
 	}
 	if state.MicroPerCredit != store.MicroCreditsPerCredit || state.CreditsPerDollar != store.CreditsPerDollar {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
@@ -344,6 +438,15 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 	if len(history.Charges) != 0 {
 		t.Fatalf("charges = %d, want 0", len(history.Charges))
+	}
+
+	status, body = creditsRequest(t, http.MethodGet,
+		f.url+"/api/v1/credits/history?limit=5000", f.readonly, nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("history above the limit ceiling = %d: %s", status, body)
+	}
+	if !bytes.Contains(body, []byte("1000")) {
+		t.Fatalf("the refusal does not name the ceiling: %s", body)
 	}
 }
 

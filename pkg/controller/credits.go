@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,6 +21,7 @@ type creditStateJSON struct {
 	ChargedMicro       int64  `json:"charged_micro"`
 	RateMicroPerSecond int64  `json:"rate_micro_per_second"`
 	GraceSeconds       int64  `json:"grace_seconds"`
+	MaxChargeSeconds   int64  `json:"max_charge_seconds"`
 	BurnWindowSeconds  int64  `json:"burn_window_seconds"`
 	BurnMicro          int64  `json:"burn_micro"`
 	ExhaustedAt        *int64 `json:"exhausted_at,omitempty"`
@@ -41,6 +43,7 @@ type creditChargeJSON struct {
 	RunID       string `json:"run_id"`
 	NodeID      string `json:"node_id"`
 	TokenPrefix string `json:"token_prefix"`
+	Kind        string `json:"kind"`
 	Seconds     int64  `json:"seconds"`
 	AmountMicro int64  `json:"amount_micro"`
 	ChargedAt   int64  `json:"charged_at"`
@@ -69,6 +72,7 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 		ChargedMicro:       state.ChargedMicro,
 		RateMicroPerSecond: state.RateMicroPerSecond,
 		GraceSeconds:       state.GraceSeconds,
+		MaxChargeSeconds:   state.MaxChargeSeconds,
 		BurnWindowSeconds:  int64(creditsBurnWindow.Seconds()),
 		BurnMicro:          state.BurnMicro,
 		MicroPerCredit:     store.MicroCreditsPerCredit,
@@ -118,6 +122,11 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, errors.New("limit must be a non-negative integer"))
 			return
 		}
+		if v > store.CreditHistoryMaxLimit {
+			writeError(w, http.StatusBadRequest, fmt.Errorf(
+				"limit must not exceed %d rows of each kind", store.CreditHistoryMaxLimit))
+			return
+		}
 		limit = v
 	}
 	grants, err := s.store.ListCreditGrants(r.Context(), limit)
@@ -140,7 +149,7 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 	for _, c := range charges {
 		out.Charges = append(out.Charges, creditChargeJSON{
 			ID: c.ID, RunID: c.RunID, NodeID: c.NodeID, TokenPrefix: c.TokenPrefix,
-			Seconds: c.Seconds, AmountMicro: c.AmountMicro, ChargedAt: c.ChargedAt.Unix(),
+			Kind: c.Kind, Seconds: c.Seconds, AmountMicro: c.AmountMicro, ChargedAt: c.ChargedAt.Unix(),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -166,43 +175,24 @@ type creditsRefusalJSON struct {
 // heartbeat the ledger refused.
 const CreditsRefusedCode = "insufficient_credits"
 
-// safety: a false second result means the 402 refusal is already written, and a
-// token the operator never marked metered is neither checked nor charged.
-func (s *Server) meteredClaimAllowed(w http.ResponseWriter, r *http.Request) (metered, allowed bool) {
-	prefix := claimIdentity(r).TokenPrefix
-	if prefix == "" {
-		return false, true
+// safety: the refusal is a standing condition, so it is recorded once against
+// the run whose node is waiting rather than on every poll.
+func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
+	if !errors.Is(err, store.ErrInsufficientCredits) {
+		return false
 	}
-	ctx := r.Context()
-	metered, err := s.store.TokenMetered(ctx, prefix)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return false, false
+	refusal := creditsRefusalJSON{
+		Error: store.ErrInsufficientCredits.Error(),
+		Code:  CreditsRefusedCode,
 	}
-	if !metered {
-		return false, true
+	var shortfall *store.InsufficientCreditsError
+	if errors.As(err, &shortfall) {
+		refusal.BalanceMicro = shortfall.BalanceMicro
+		refusal.RequiredMicro = shortfall.RequiredMicro
 	}
-	balance, err := s.store.CreditBalanceMicro(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return true, false
-	}
-	required, err := s.store.CreditClaimFloorMicro(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return true, false
-	}
-	if balance >= required {
-		return true, true
-	}
-	s.noteCreditsBlocked(r, balance, required)
-	writeJSON(w, http.StatusPaymentRequired, creditsRefusalJSON{
-		Error:         store.ErrInsufficientCredits.Error(),
-		Code:          CreditsRefusedCode,
-		BalanceMicro:  balance,
-		RequiredMicro: required,
-	})
-	return true, false
+	s.noteCreditsBlocked(r, refusal.BalanceMicro, refusal.RequiredMicro)
+	writeJSON(w, http.StatusPaymentRequired, refusal)
+	return true
 }
 
 // safety: the poller asks twice a second, so the waiting run records the
@@ -232,53 +222,86 @@ func (s *Server) noteCreditsBlocked(r *http.Request, balance, required int64) {
 	}
 }
 
-// safety: anchoring at the claim bills the first heartbeat from the claim
-// rather than from itself.
-func (s *Server) startMetering(r *http.Request, n *store.Node) {
-	if n == nil {
-		return
-	}
-	if err := s.store.StartNodeMetering(r.Context(), n.RunID, n.NodeID, time.Now()); err != nil {
-		s.logger.Warn("anchoring a metered node's charge window failed",
-			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
-	}
-}
-
 // safety: a token the operator never marked metered is never charged, so an
 // install with no metered token behaves as it did before the ledger existed.
-func (s *Server) chargeMeteredHeartbeat(r *http.Request, runID, nodeID string) (stop bool) {
+func (s *Server) meteredTokenPrefix(r *http.Request) string {
 	prefix := claimIdentity(r).TokenPrefix
+	if prefix == "" {
+		return ""
+	}
+	metered, err := s.store.TokenMetered(r.Context(), prefix)
+	if err != nil || !metered {
+		return ""
+	}
+	return prefix
+}
+
+// safety: a balance spent past the grace period cancels the node in this same
+// request, so the run records why instead of waiting out the lease.
+func (s *Server) chargeMeteredHeartbeat(r *http.Request, runID, nodeID string) (stop bool) {
+	prefix := s.meteredTokenPrefix(r)
 	if prefix == "" {
 		return false
 	}
 	ctx := r.Context()
-	metered, err := s.store.TokenMetered(ctx, prefix)
-	if err != nil || !metered {
-		return false
-	}
 	res, err := s.store.ChargeNodeCredits(ctx, runID, nodeID, prefix, time.Now())
 	if err != nil {
 		s.logger.Warn("charging a metered node failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
 		return false
 	}
+	if res.ForgivenSeconds > 0 {
+		s.logger.Warn("charge cap engaged; the gap since the previous charge is not billed",
+			"run_id", runID, "node_id", nodeID, "forgiven_s", res.ForgivenSeconds)
+	}
 	if !res.Cancel {
 		return false
 	}
+	s.cancelForExhaustedCredits(r, runID, nodeID, prefix, res)
+	return true
+}
+
+func (s *Server) cancelForExhaustedCredits(
+	r *http.Request, runID, nodeID, prefix string, res store.CreditChargeResult,
+) {
+	ctx := r.Context()
 	payload, err := json.Marshal(map[string]any{
 		"balance_micro":   res.BalanceMicro,
 		"exhausted_for_s": int64(res.ExhaustedFor.Seconds()),
 	})
 	if err != nil {
-		return true
+		payload = nil
 	}
 	if _, err := s.store.AppendEventOnce(ctx, runID, nodeID, store.EventKindCreditsExhausted, payload); err != nil {
 		s.logger.Warn("recording an exhausted-credit cancellation failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
 	}
-	s.logger.Warn("cancelling a node: the credit balance stayed spent past the grace period",
+	if err := s.store.CancelNodeForExhaustedCredits(ctx, runID, nodeID, prefix, time.Now()); err != nil {
+		s.logger.Error("cancelling a node for exhausted credits failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return
+	}
+	s.logger.Warn("cancelled a node: the credit balance stayed spent past the grace period",
 		"run_id", runID, "node_id", nodeID,
 		"balance_micro", res.BalanceMicro,
 		"exhausted_for_s", int64(res.ExhaustedFor.Seconds()))
-	return true
+}
+
+// safety: without this the tail between the last heartbeat and the finish is
+// free, and the unused part of the claim reservation is never refunded.
+func (s *Server) finalizeMeteredNode(r *http.Request, runID, nodeID string) {
+	prefix := s.meteredTokenPrefix(r)
+	if prefix == "" {
+		return
+	}
+	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, prefix, time.Now())
+	if err != nil {
+		s.logger.Warn("settling a metered node failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return
+	}
+	if res.ForgivenSeconds > 0 {
+		s.logger.Warn("charge cap engaged at finish; the gap since the previous charge is not billed",
+			"run_id", runID, "node_id", nodeID, "forgiven_s", res.ForgivenSeconds)
+	}
 }
