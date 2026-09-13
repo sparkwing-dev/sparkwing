@@ -26,6 +26,7 @@ var ErrListNotSupported = errors.New("storage: list not supported")
 var ErrNotFound = errors.New("storage: not found")
 var ErrNotSupported = errors.New("storage: operation not supported")
 var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
+func FlushNode(ctx context.Context, store LogStore, runID, nodeID string) error
 type LogStore interface {
 	Append(ctx context.Context, runID, nodeID string, data []byte) error
 
@@ -36,6 +37,9 @@ type LogStore interface {
 	Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 
 	DeleteRun(ctx context.Context, runID string) error
+}
+type NodeFlusher interface {
+	FlushNode(ctx context.Context, runID, nodeID string) error
 }
 type ReadOpts struct {
 	Tail  int

@@ -1,0 +1,24 @@
+# pkg/storage/logbatch
+
+const DefaultBufferThreshold = 256 << 10
+const DefaultFlushInterval = 2 * time.Second
+const DefaultMaxBytes = 64 << 20
+const DefaultMaxObjects = 2000
+const DropMarkerPrefix = "log cap reached; dropped "
+var ErrClosed = errors.New("logbatch: store is closed")
+func New(delegate storage.LogStore, opts ...Option) *Store
+type Option func(*Store)
+type Store struct {
+}
+func (s *Store) Append(ctx context.Context, runID, nodeID string, data []byte) error
+func (s *Store) Close() error
+func (s *Store) Delegate() storage.LogStore
+func (s *Store) DeleteRun(ctx context.Context, runID string) error
+func (s *Store) FlushNode(ctx context.Context, runID, nodeID string) error
+func (s *Store) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
+func (s *Store) ReadRun(ctx context.Context, runID string) ([]byte, error)
+func (s *Store) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
+func WithBufferThreshold(n int) Option
+func WithFlushInterval(d time.Duration) Option
+func WithMaxBytes(n int64) Option
+func WithMaxObjects(n int) Option
