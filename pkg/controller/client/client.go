@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -24,6 +25,8 @@ type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	pollAdvice atomic.Int64
 }
 
 // New constructs a Client targeting the given controller base URL.
@@ -798,6 +801,7 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 		return nil, err
 	}
 	defer resp.Body.Close()
+	c.recordPollAdvice(resp)
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -1210,6 +1214,7 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 		return nil, err
 	}
 	defer resp.Body.Close()
+	c.recordPollAdvice(resp)
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var n store.Node

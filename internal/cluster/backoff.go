@@ -14,6 +14,10 @@ const (
 	maxClaimBackoff = 30 * time.Second
 
 	shedWarnInterval = time.Minute
+
+	// safety: a controller naming an implausible interval would park a runner
+	// for it, so the invitation to poll less often is bounded here too.
+	maxAdvisedPoll = 60 * time.Second
 )
 
 func unavailableBackoff(err error, floor time.Duration) (time.Duration, bool) {
@@ -39,6 +43,26 @@ func backoffJitter(wait time.Duration) time.Duration {
 		return 0
 	}
 	return time.Duration(rand.Int64N(int64(wait/4) + 1))
+}
+
+type pollAdvisor interface {
+	PollAdvice() time.Duration
+}
+
+// safety: the controller's suggestion only ever widens the configured cadence, so an agent never polls
+// faster than its operator asked for, and the spread keeps a fleet advised together from returning together.
+func advisedPoll(configured time.Duration, advisor pollAdvisor) time.Duration {
+	if advisor == nil {
+		return configured
+	}
+	advised := advisor.PollAdvice()
+	if advised > maxAdvisedPoll {
+		advised = maxAdvisedPoll
+	}
+	if advised <= configured {
+		return configured
+	}
+	return advised + backoffJitter(advised)
 }
 
 type shedLog struct {

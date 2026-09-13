@@ -35,6 +35,12 @@ type Server struct {
 
 	loginLimit *loginLimiter
 
+	flood         *floodControl
+	requestBudget *principalBudget
+
+	idleClaimPoll  time.Duration
+	lastClaimAward atomic.Int64
+
 	githubWebhookSecret  string
 	githubWebhook        GitHubWebhookConfig
 	githubCommitStatuses *githubCommitStatusReporter
@@ -102,6 +108,9 @@ type Server struct {
 // cannot forge attribution or ordinals on a node it never ran.
 func (s *Server) WithLocalExecution() *Server {
 	s.localExecution = true
+	// safety: a host's own controller serves one machine's runs, where a widened
+	// idle poll costs pickup latency and protects no fleet.
+	s.idleClaimPoll = 0
 	return s
 }
 
@@ -173,7 +182,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
+	srv := &Server{
 		store:               st,
 		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
@@ -185,7 +194,11 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		liveLogs:            newLiveLogs(),
 		runnerPresence:      newRunnerPresenceRegistry(),
 		cronHolder:          defaultCronHolder(),
+		requestBudget:       newPrincipalBudget(DefaultRequestBudget()),
+		idleClaimPoll:       DefaultMaxIdleClaimPoll,
 	}
+	srv.recordClaimAward(time.Now())
+	return srv
 }
 
 type placementPolicy struct {
@@ -803,13 +816,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
-	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat))))
+	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.heartbeatBudgeted(s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat)))))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimSpecificTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
@@ -828,7 +841,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
 	mux.Handle("PUT /api/v1/agents/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEnrollAgent)))
-	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatAgent)))
+	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatAgent))))
 
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
@@ -880,8 +893,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
 
-	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))
-	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePrepareNodeClaim)))
+	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNode))))
+	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handlePrepareNodeClaim))))
 	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
 	// to the live claim on the run's trigger rather than to the scope alone. A node claim
 	// never satisfies them, which keeps a runner from skipping its node's dependencies.
@@ -889,11 +902,11 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleResetNodeForAutoRetry))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleRevokeNodeReady))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinalizeNodeReady))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatNodeClaim))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
+	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat))))

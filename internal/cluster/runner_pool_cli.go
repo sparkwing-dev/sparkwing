@@ -146,6 +146,9 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		"auth", cfg.Token != "",
 	)
 
+	advisor, _ := claimer.(pollAdvisor)
+	idlePoll := func() time.Duration { return advisedPoll(cfg.PollInterval, advisor) }
+
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	sharedSlots := cfg.SharedSlots
 	var wg sync.WaitGroup
@@ -237,7 +240,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 				<-sharedSlots
 			}
 			observeClaimOutcome("empty")
-			sleepOrCancel(ctx, cfg.PollInterval)
+			sleepOrCancel(ctx, idlePoll())
 			continue
 		}
 		observeClaimOutcome("claimed")

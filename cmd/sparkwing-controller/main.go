@@ -120,6 +120,32 @@ func run(args []string) error {
 	placementLiveness := fs.Duration("placement-liveness", 30*time.Second,
 		"how recently a claim-mode runner must have polled for a claim to count "+
 			"as live for the hold above")
+	maxRunsPerPrincipalHour := fs.Int("max-runs-per-principal-hour", 0,
+		"cap on the runs one principal may create in a rolling hour. A webhook "+
+			"delivery counts against the repository it names. Past the cap the "+
+			"controller answers 429 with a Retry-After and logs the principal and "+
+			"the reason. Zero is unlimited.")
+	shedQueueDepth := fs.Int("shed-queue-depth", 0,
+		"pending-trigger depth past which a new webhook delivery or API "+
+			"submission is shed with 503 and a Retry-After rather than queued. "+
+			"Zero never sheds.")
+	triggerDedupeWindow := fs.Duration("trigger-dedupe-window", 0,
+		"how long a content-identical API submission answers with the run the "+
+			"first one started instead of starting a second. GitHub deliveries "+
+			"are deduped by delivery id and body digest regardless. Zero dedupes "+
+			"no API submission.")
+	claimsPerMinute := fs.Int("claims-per-principal-minute", controller.DefaultClaimsPerMinute,
+		"per-principal request budget on the claim routes, per rolling minute. "+
+			"Past it a claim is answered 429 with a Retry-After. Zero is unlimited.")
+	heartbeatsPerMinute := fs.Int("heartbeats-per-principal-minute", controller.DefaultHeartbeatsPerMinute,
+		"per-principal request budget on the heartbeat routes, per rolling "+
+			"minute. Past it a heartbeat is answered 429 with a Retry-After. "+
+			"Zero is unlimited.")
+	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
+		"widest poll interval this controller suggests to a claim loop while it "+
+			"has no work to hand out. The suggestion travels as a response header "+
+			"and a runner honors it only to poll less often, so an agent that "+
+			"ignores it keeps its configured cadence. Zero suggests nothing.")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -145,6 +171,21 @@ func run(args []string) error {
 	}
 	if *liveLogIdle <= 0 {
 		return fmt.Errorf("--live-log-idle must be positive")
+	}
+	if *maxRunsPerPrincipalHour < 0 {
+		return fmt.Errorf("--max-runs-per-principal-hour cannot be negative")
+	}
+	if *shedQueueDepth < 0 {
+		return fmt.Errorf("--shed-queue-depth cannot be negative")
+	}
+	if *triggerDedupeWindow < 0 {
+		return fmt.Errorf("--trigger-dedupe-window cannot be negative")
+	}
+	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
+		return fmt.Errorf("--claims-per-principal-minute and --heartbeats-per-principal-minute cannot be negative")
+	}
+	if *idleClaimPoll < 0 {
+		return fmt.Errorf("--idle-claim-poll cannot be negative")
 	}
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
@@ -226,7 +267,17 @@ func run(args []string) error {
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
-		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness)
+		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
+		WithFloodPolicy(controller.FloodPolicy{
+			RunsPerPrincipalHour: *maxRunsPerPrincipalHour,
+			ShedQueueDepth:       *shedQueueDepth,
+			DedupeWindow:         *triggerDedupeWindow,
+		}).
+		WithRequestBudget(controller.RequestBudget{
+			ClaimsPerMinute:     *claimsPerMinute,
+			HeartbeatsPerMinute: *heartbeatsPerMinute,
+		}).
+		WithIdleClaimPoll(*idleClaimPoll)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)

@@ -107,6 +107,32 @@ controller:
   # live for the hold above. Empty keeps the controller default of 30s.
   placementLiveness: ""
 
+  # Runs one principal may create in a rolling hour. A webhook delivery counts
+  # against the repository it names. Past the cap the controller answers 429
+  # with a Retry-After. 0 is unlimited.
+  maxRunsPerPrincipalHour: 0
+
+  # Pending-trigger depth past which a new webhook delivery or API submission is
+  # shed with 503 and a Retry-After rather than queued. 0 never sheds.
+  shedQueueDepth: 0
+
+  # How long a content-identical API submission answers with the run the first
+  # one started instead of starting a second, for example "10m". GitHub
+  # deliveries are deduped by delivery id and body digest regardless. Empty
+  # dedupes no API submission.
+  triggerDedupeWindow: ""
+
+  # Per-principal request budgets on the claim and heartbeat routes, per rolling
+  # minute. Empty keeps the controller defaults, which a fleet of fifty runners
+  # claiming once a second stays well inside.
+  claimsPerPrincipalMinute: ""
+  heartbeatsPerPrincipalMinute: ""
+
+  # Widest poll interval the controller suggests to a claim loop while it has no
+  # work, for example "15s". A runner honors it only to poll less often. Empty
+  # keeps the controller default of 15s.
+  idleClaimPoll: ""
+
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""

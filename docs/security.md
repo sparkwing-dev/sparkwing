@@ -202,6 +202,52 @@ request to materialize every row with its plan, args, and payload blobs.
 bearer; any valid token satisfies it, and every client that consumes it
 already holds one.
 
+## Flood control
+
+A push storm, a bot opening hundreds of pull requests, or a misconfigured
+hook delivers thousands of events in minutes, and each one costs a run, a
+log object, and a row. Three controller settings bound what one burst can
+create. All three default to off, so a controller that names none admits
+what it always did.
+
+`--max-runs-per-principal-hour N` (chart
+`controller.maxRunsPerPrincipalHour`) caps the runs one principal may
+create in a rolling hour. An authenticated submission spends its own
+token's budget; a webhook delivery carries no principal, so it spends the
+budget of the repository it names. Past the cap the controller answers
+`429` with a `Retry-After` naming the refill interval.
+
+`--shed-queue-depth N` (chart `controller.shedQueueDepth`) answers `503`
+with a `Retry-After` once pending triggers reach N, which is the outer
+bound on how deep a backlog one burst can grow. The depth is read at most
+once a second, because a flood asks for it far faster than it changes.
+
+`--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`)
+answers a content-identical `POST /api/v1/triggers` submission inside D
+with `409` and the run the first one started. A GitHub redelivery is
+deduped regardless: the store holds one trigger per delivery id and one
+per body digest, so a retried delivery answers `409` naming the original
+run whatever this window says.
+
+Every refusal is a status a caller can act on and a line in the
+controller log at warn naming the principal and the reason. Nothing is
+dropped silently.
+
+## Per-principal request budgets
+
+The claim and heartbeat routes carry a budget of their own, because a
+looping runner reaches them thousands of times a minute without ever
+failing authentication. `--claims-per-principal-minute` and
+`--heartbeats-per-principal-minute` (chart
+`controller.claimsPerPrincipalMinute`,
+`controller.heartbeatsPerPrincipalMinute`) bound what one principal
+spends per rolling minute; past a budget the route answers `429` with a
+`Retry-After` and `sparkwing_principal_throttled_total{route_class}`
+counts it. The defaults clear a fleet of fifty runners claiming once a
+second and heartbeating every five with room to spare, so they bound a
+misbehaving runner rather than a working one. Zero leaves a route class
+unlimited.
+
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the

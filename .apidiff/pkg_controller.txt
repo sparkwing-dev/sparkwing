@@ -52,15 +52,26 @@ type Cipher interface {
 }
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
+const DefaultClaimsPerMinute = 12000
+const DefaultHeartbeatsPerMinute = 6000
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
 const DefaultLiveLogTotalBytes = 64 << 20
+const DefaultMaxIdleClaimPoll = 15 * time.Second
+func DefaultRequestBudget() RequestBudget
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
+type FloodPolicy struct {
+	RunsPerPrincipalHour int
+
+	ShedQueueDepth int
+
+	DedupeWindow time.Duration
+}
 type GitHubWebhookBinding struct {
 	Repos  []string
 	Secret string
@@ -162,6 +173,10 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
+type RequestBudget struct {
+	ClaimsPerMinute     int
+	HeartbeatsPerMinute int
+}
 type RunRequest struct {
 	RunID       string
 	Pipeline    string
@@ -204,9 +219,11 @@ func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
+func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
+func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
@@ -216,6 +233,7 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
+func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server

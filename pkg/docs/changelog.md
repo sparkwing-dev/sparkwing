@@ -22,6 +22,39 @@ unlock.
 
 ### Added
 
+- **controller:** Trigger flood control bounds how many runs a burst of webhook
+  deliveries or API submissions can create.
+  `sparkwing-controller --max-runs-per-principal-hour N` (chart
+  `controller.maxRunsPerPrincipalHour`) caps the runs one principal may create
+  in a rolling hour, counting a webhook delivery against the repository it
+  names; past the cap a submission is answered `429` with `Retry-After`.
+  `--shed-queue-depth N` (chart `controller.shedQueueDepth`) sheds a submission
+  with `503` and `Retry-After` once pending triggers reach N.
+  `--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`) answers a
+  content-identical `POST /api/v1/triggers` submission inside D with `409` and
+  the run the first one started, the way a GitHub redelivery is already answered
+  from its delivery id and body digest. All three default to off, so a
+  controller that names none behaves as before, and every refusal is logged at
+  warn with the principal and the reason rather than dropped.
+- **controller:** Per-principal request budgets on the claim and heartbeat
+  routes. `--claims-per-principal-minute` and
+  `--heartbeats-per-principal-minute` (chart
+  `controller.claimsPerPrincipalMinute`,
+  `controller.heartbeatsPerPrincipalMinute`) bound what one principal can spend
+  a minute; past a budget the route answers `429` with `Retry-After` and
+  `sparkwing_principal_throttled_total{route_class}` counts it. The defaults
+  clear a fleet of fifty runners claiming once a second and heartbeating every
+  five with room to spare. Zero leaves a route class unlimited.
+- **controller + runner:** A claim that finds no work can name the interval the
+  runner should wait before polling again, in the `X-Sparkwing-Poll-After`
+  response header. `--idle-claim-poll D` (chart `controller.idleClaimPoll`,
+  default 15s) caps what the controller suggests, which widens with how long it
+  has had no work to hand out; zero suggests nothing. A runner honors the
+  suggestion only to poll less often and spreads its return with jitter, so a
+  runner that ignores the header keeps the cadence it was configured with.
+  `client.Client.PollAdvice` reports the last suggestion a claim carried back.
+  A host's own admission daemon and the loopback controller suggest nothing,
+  because a widened idle poll there costs pickup latency and protects no fleet.
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and

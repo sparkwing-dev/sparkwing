@@ -363,6 +363,10 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		Repo:   payload.Repository.FullName,
 	}
 
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github push") {
+		return
+	}
+
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
@@ -482,6 +486,10 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	}
 	trigger.PullRequest = sparkwing.PullRequestFromEnv(triggerEnv)
 
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github pull_request") {
+		return
+	}
+
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
@@ -536,6 +544,15 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		RunID:  runID,
 		Status: "dispatched",
 	})
+}
+
+// safety: a delivery carries no principal, so the repository it names is the
+// closest thing it has to an owner and a delivery naming none falls back to its pipeline.
+func githubFloodKey(pipeline, repo string) string {
+	if repo != "" {
+		return "github:" + strings.ToLower(repo)
+	}
+	return "github-pipeline:" + pipeline
 }
 
 func verifyGitHubSignature(header string, body []byte, secret string) bool {

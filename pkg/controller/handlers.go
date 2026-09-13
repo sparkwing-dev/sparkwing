@@ -802,7 +802,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.admitTrigger(r.Context(), triggerIntake{
+	intake := triggerIntake{
 		RunID:         runID,
 		Pipeline:      body.Pipeline,
 		Args:          body.Args,
@@ -815,7 +815,19 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RetryOf:       body.RetryOf,
 		RepoInherited: repoInherited,
 		At:            time.Now(),
-	}); err != nil {
+	}
+
+	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "pipeline:"+body.Pipeline), body.Trigger.Source) {
+		return
+	}
+	release, original, duplicate := s.claimSubmissionDigest(intake)
+	if duplicate {
+		writeJSON(w, http.StatusConflict, triggerResp{RunID: original, Status: "duplicate"})
+		return
+	}
+
+	if err := s.admitTrigger(r.Context(), intake); err != nil {
+		release()
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -824,6 +836,23 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RunID:  runID,
 		Status: "dispatched",
 	})
+}
+
+// safety: the digest is reserved before the run is created, so two simultaneous
+// identical submissions cannot both start one; the release undoes a reservation no run followed.
+func (s *Server) claimSubmissionDigest(in triggerIntake) (release func(), original string, duplicate bool) {
+	if s.flood == nil || s.flood.dedupe == nil {
+		return func() {}, "", false
+	}
+	digest := submissionDigest(in)
+	if original, found := s.flood.dedupe.claim(digest, in.RunID, in.At); found {
+		s.logger.Warn("trigger deduplicated",
+			"principal", in.Source, "pipeline", in.Pipeline,
+			"reason", "an identical submission is already inside the dedupe window",
+			"run_id", original)
+		return func() {}, original, true
+	}
+	return func() { s.flood.dedupe.forget(digest) }, "", false
 }
 
 // safety: Env arrives sanitized; a caller inside the process supplies only keys
@@ -1127,12 +1156,14 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.writeClaimPollAdvice(w)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.recordClaimAward(time.Now())
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -1480,6 +1511,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+				s.writeClaimPollAdvice(w)
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -1491,6 +1523,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "pending")
 			} else {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+				s.writeClaimPollAdvice(w)
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -1517,6 +1550,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.writeClaimPollAdvice(w)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -1531,6 +1565,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
+	s.recordClaimAward(time.Now())
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
 		pipeline = run.Pipeline

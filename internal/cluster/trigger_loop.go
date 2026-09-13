@@ -129,7 +129,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		}
 		if trigger == nil {
 			<-sem
-			sleepOrCancel(ctx, opts.Poll)
+			sleepOrCancel(ctx, advisedPoll(opts.Poll, cli))
 			continue
 		}
 		logger.Info("trigger loop: claimed",
