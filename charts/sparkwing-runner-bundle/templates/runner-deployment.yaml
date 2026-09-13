@@ -1,5 +1,7 @@
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
+{{- $goCache := .Values.runner.goCache.persistence.enabled -}}
+{{- $goCacheMounts := list (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gocache" "subPath" "gocache") (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gomodcache" "subPath" "gomodcache") -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -60,9 +62,17 @@ spec:
           args:
             - {{ printf "%d:%d" (int .Values.podSecurityContext.runAsUser) (int .Values.podSecurityContext.fsGroup) | quote }}
             - "/tmp/sparkwing"
+            {{- if $goCache }}
+            {{- range $goCacheMounts }}
+            - {{ .mountPath | quote }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
+            {{- if $goCache }}
+            {{- toYaml $goCacheMounts | nindent 12 }}
+            {{- end }}
       {{- end }}
       containers:
         - name: runner
@@ -111,6 +121,9 @@ spec:
             {{- end }}
             {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
             - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}
+            {{- end }}
+            {{- with .Values.runner.goCache.warmModules }}
+            - {{ printf "--warm-modules=%s" (join "," .) | quote }}
             {{- end }}
           {{- if gt (int .Values.runner.metricsPort) 0 }}
           ports:
@@ -169,6 +182,9 @@ spec:
               mountPath: /tmp
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
+            {{- if $goCache }}
+            {{- toYaml $goCacheMounts | nindent 12 }}
+            {{- end }}
             {{- with .Values.runner.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -177,6 +193,11 @@ spec:
           emptyDir: {}
         - name: sparkwing-home
           emptyDir: {}
+        {{- if $goCache }}
+        - name: go-cache
+          persistentVolumeClaim:
+            claimName: {{ include "sparkwing-runner-bundle.runner.goCacheClaim" . }}
+        {{- end }}
         {{- with .Values.runner.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

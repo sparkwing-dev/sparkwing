@@ -122,6 +122,44 @@ runner:
     cpu: ""
     memory: ""
 
+  # Go build and module caches. The runner compiles a repository's
+  # pipeline on the first claim of each source hash and publishes the
+  # binary to the cache service, so every source change pays one compile:
+  # three to five minutes on a two-CPU pod from empty Go caches. Both
+  # settings below shorten that compile.
+  goCache:
+    # Modules the runner downloads into GOMODCACHE at startup, passed as
+    # --warm-modules. Empty warms the Sparkwing SDK at the runner image's
+    # own version, which is most of a pipeline's dependency graph. Each
+    # entry may carry an @version ("example.com/mod@v1.2.3", and
+    # similar); a bare path resolves at download time. ["off"] starts the
+    # pool with no warm.
+    warmModules: []
+
+    persistence:
+      # true mounts a PersistentVolumeClaim over GOCACHE and GOMODCACHE,
+      # so the caches outlive the pod that filled them.
+      # runner.maxClaimsBeforeRestart restarts a pod often, and every
+      # restart that reschedules it starts from empty caches without
+      # this. Off by default: it needs a StorageClass, and a claim no
+      # class can bind leaves the whole pool Pending.
+      enabled: false
+      # Mount this pre-created claim instead of one the chart creates.
+      existingClaim: ""
+      size: 20Gi
+      # Empty = the cluster default StorageClass.
+      storageClassName: ""
+      # Every runner replica mounts the one claim, so the class must
+      # serve ReadWriteMany whenever runner.replicas is above 1; the
+      # chart refuses to render otherwise. The go command locks both
+      # caches and addresses their contents by hash, so replicas sharing
+      # them is safe and one pod's compile warms the pool.
+      accessModes:
+        - ReadWriteMany
+      # helm uninstall keeps the claim (annotation
+      # helm.sh/resource-policy=keep). false deletes it with the release.
+      keepOnUninstall: true
+
   # Optional Pod-level scheduling controls. Empty = no constraints.
   nodeSelector: {}
   tolerations: []

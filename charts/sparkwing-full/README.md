@@ -295,6 +295,8 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
 | `sparkwing-runner-bundle.runner.automountServiceAccountToken` | Mount the runner pod's API token for `k8s` or `warm` trigger execution. | `false` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
+| `sparkwing-runner-bundle.runner.goCache.persistence.enabled` | Mount a PVC over the runner's `GOCACHE` and `GOMODCACHE`. | `false` |
+| `sparkwing-runner-bundle.runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at runner startup. | `[]` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
 The automatic controller URL follows the chart's default resource names. If

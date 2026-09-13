@@ -1,0 +1,22 @@
+{{- if and .Values.runner.goCache.persistence.enabled (not .Values.runner.goCache.persistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sparkwing-runner-bundle.runner.goCacheClaim" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "runner") | nindent 4 }}
+  {{- if .Values.runner.goCache.persistence.keepOnUninstall }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.runner.goCache.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.runner.goCache.persistence.size | quote }}
+  {{- if .Values.runner.goCache.persistence.storageClassName }}
+  storageClassName: {{ .Values.runner.goCache.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}

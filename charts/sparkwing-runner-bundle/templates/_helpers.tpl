@@ -129,6 +129,19 @@ distinct under one release.
 {{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "runner") }}
 {{- end }}
 
+{{/*
+Claim backing the runner's Go caches: an operator-supplied one wins,
+otherwise the chart's own. Its own name reserves the suffix the same way
+component names do, so a long release still yields a valid DNS label.
+*/}}
+{{- define "sparkwing-runner-bundle.runner.goCacheClaim" -}}
+{{- if .Values.runner.goCache.persistence.existingClaim -}}
+{{- .Values.runner.goCache.persistence.existingClaim -}}
+{{- else -}}
+{{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "runner-gocache") -}}
+{{- end }}
+{{- end }}
+
 {{- define "sparkwing-runner-bundle.cache.fullname" -}}
 {{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "cache") }}
 {{- end }}
