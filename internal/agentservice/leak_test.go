@@ -1,4 +1,4 @@
-package runnersvc
+package agentservice
 
 import (
 	"testing"

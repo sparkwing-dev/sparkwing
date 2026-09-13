@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cluster"
-	"github.com/sparkwing-dev/sparkwing/internal/runnersvc"
+	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -58,8 +58,8 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 		failExec: map[string]string{},
 		binary:   "/usr/local/bin/sparkwing-runner",
 	}
-	t.Cleanup(swapRunnerServiceHost(func(configPath string) (runnersvc.Host, error) {
-		return runnersvc.Host{
+	t.Cleanup(swapRunnerServiceHost(func(configPath string) (agentservice.Host, error) {
+		return agentservice.Host{
 			GOOS:       "linux",
 			Home:       home,
 			ConfigHome: filepath.Join(home, ".config"),
@@ -80,7 +80,7 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	return f
 }
 
-func swapRunnerServiceHost(fn func(string) (runnersvc.Host, error)) func() {
+func swapRunnerServiceHost(fn func(string) (agentservice.Host, error)) func() {
 	prev := runnerServiceHost
 	runnerServiceHost = fn
 	return func() { runnerServiceHost = prev }
@@ -131,7 +131,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("config mode = %04o, want 0600", info.Mode().Perm())
 	}
-	raw, err := cluster.LoadAgentConfig(f.config)
+	raw, err := agentconfig.Load(f.config)
 	if err != nil {
 		t.Fatalf("the written config does not load: %v", err)
 	}
@@ -150,11 +150,11 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if !strings.HasPrefix(raw.Token, minted.Prefix) {
 		t.Error("the config does not carry the minted token")
 	}
-	cfg, err := cluster.ValidateAgentConfig(*raw)
+	cfg, err := agentconfig.Validate(*raw)
 	if err != nil {
 		t.Fatalf("the written config does not validate: %v", err)
 	}
-	if err := cluster.CheckEnrolledExecutionAvailable(cfg, false); err != nil {
+	if err := agentconfig.CheckEnrolledExecutionAvailable(cfg, false); err != nil {
 		t.Fatalf("the written config would be refused at startup: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 			t.Fatalf("first add: %v", err)
 		}
 	})
-	first, err := cluster.LoadAgentConfig(f.config)
+	first, err := agentconfig.Load(f.config)
 	if err != nil {
 		t.Fatalf("load after the first add: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 			t.Fatalf("second add --force: %v", err)
 		}
 	})
-	second, err := cluster.LoadAgentConfig(f.config)
+	second, err := agentconfig.Load(f.config)
 	if err != nil {
 		t.Fatalf("load after the second add: %v", err)
 	}
