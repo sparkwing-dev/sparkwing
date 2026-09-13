@@ -2,9 +2,12 @@ package jobs
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
@@ -21,6 +24,52 @@ func TestActionlintCommandIsPinned(t *testing.T) {
 	const want = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
 	if actionlintCommand != want {
 		t.Fatalf("actionlint command = %q, want exactly %q", actionlintCommand, want)
+	}
+}
+
+func TestInstallToGreenHarnessRunsOnTheCheckoutAndRecordsRatherThanGates(t *testing.T) {
+	const want = "bash bin/install-to-green.sh --build --output json"
+	if installToGreenCommand != want {
+		t.Fatalf("install-to-green command = %q, want exactly %q", installToGreenCommand, want)
+	}
+	if _, err := os.Stat(filepath.Join("..", "..", "bin", "install-to-green.sh")); err != nil {
+		t.Fatalf("the release lane runs a harness that is not in the checkout: %v", err)
+	}
+}
+
+func TestInstallToGreenRecordsAnUnreachableProxyAsSkippedAndFailsEverythingElse(t *testing.T) {
+	record := `{"total_seconds":45.2,"green":true}`
+	logged, measured, err := installToGreenOutcome(record+"\n", nil)
+	if err != nil {
+		t.Fatalf("a measured run must not fail the lane: %v", err)
+	}
+	if !measured {
+		t.Error("a run that produced a record was not counted as measured")
+	}
+	if logged != record {
+		t.Errorf("the lane logged %q, want the harness record %q", logged, record)
+	}
+
+	skipped := `{"measured":false,"green":false,"phase":"scaffold","started_at":"2026-09-13T21:26:05Z","reason":"could not reach the module proxy"}`
+	unreachable := &sparkwing.ExecError{
+		Command:  installToGreenCommand,
+		Stdout:   skipped + "\n",
+		ExitCode: installToGreenUnavailable,
+	}
+	logged, measured, err = installToGreenOutcome("", unreachable)
+	if err != nil {
+		t.Fatalf("an unreachable proxy must not fail the lane: %v", err)
+	}
+	if measured {
+		t.Error("an unreachable proxy was counted as a measurement")
+	}
+	if logged != skipped {
+		t.Errorf("the lane logged %q, want the harness record naming the phase and the time", logged)
+	}
+
+	notGreen := &sparkwing.ExecError{Command: installToGreenCommand, ExitCode: 1}
+	if _, _, err := installToGreenOutcome("", notGreen); err == nil {
+		t.Error("a demo path that never reached green passed the lane")
 	}
 }
 
