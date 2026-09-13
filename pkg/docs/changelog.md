@@ -22,6 +22,34 @@ unlock.
 
 ### Added
 
+- **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
+  a socket the caller already holds, instead of binding the address
+  `WithMetricsAddr` names. A caller that lets the operating system assign the
+  port from `:0` hands the listener over, so nothing else can take that port
+  between the assignment and the bind. `ServeWith` closes the listener when it
+  returns, so a server configured this way serves once.
+
+### Changed
+
+- **config (Breaking):** A trigger key under `on:` that carries no value is
+  refused, naming the key and the line. `pre_commit:` with no body yielded no
+  trigger and installed no hook, which read as working. Give every trigger a
+  body: `pre_commit: {}` for one with no options, and a mapping of options for
+  the rest. `on:` itself may still be empty.
+- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
+  host override asking for more is evaluated with 24h: `sparkwing crons
+  install` warns at arm time, naming the schedule, the declared window and the
+  effective one, and `sparkwing crons show` prints the effective window in its
+  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
+  as before.
+
+### Fixed
+
+- **config:** A pipeline's `on.push`, `on.pull_request` and `on.webhook`
+  mappings reject a key outside their schema, naming the field and the line.
+  `on: {webhook: {pathh: /review}}` loaded clean and exposed the pipeline on
+  the empty path. Keys under `on.pre_commit`, `on.pre_push` and
+  `on.post_commit` are still matched loosely.
 - **localws:** `Options.Bundle` serves a caller-supplied dashboard bundle in
   place of the one embedded in the binary. A source build embeds no bundle, so
   `Run` previously refused to start; supplying an `fs.FS` lets a test or an

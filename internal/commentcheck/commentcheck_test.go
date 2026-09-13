@@ -561,6 +561,25 @@ func TestScopedAdds_StagedIgnoresUntrackedFiles(t *testing.T) {
 	}
 }
 
+func TestScopedAdds_SeesAFileGitWouldQuote(t *testing.T) {
+	repo := newGatedRepo(t)
+	gate := gateIndexOf(t, repo)
+	name := "caf\u00e9.go"
+	writeSource(t, filepath.Join(repo, name), "package p\n\nfunc f() {\n\t// narrate the quoted file\n}\n")
+	gitWith(t, repo, gate, "add", name)
+
+	t.Setenv("GIT_INDEX_FILE", "")
+	t.Setenv(gitenv.GateIndexVar, gate)
+
+	added, err := scopedAdds(repo, true, "")
+	if err != nil {
+		t.Fatalf("scopedAdds: %v", err)
+	}
+	if !added[name][4] {
+		t.Errorf("the staged diff reported %v; a comment in a path git quotes goes unjudged", added)
+	}
+}
+
 func TestScan_FailsAFileItCannotParse(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package widget\n\nfunc Broken( {\n"), 0o644); err != nil {
