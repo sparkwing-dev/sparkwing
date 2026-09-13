@@ -443,7 +443,7 @@ func forEachGoModule(ctx context.Context, label, cmd string, unset []string) err
 		command := strings.TrimSuffix(cmd, "./...") + strings.Join(packages, " ")
 		script := withoutInherited(fmt.Sprintf("cd %q && %s", dir, command), unset)
 		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", dir, err))
+			failures = append(failures, describeModuleFailure(dir, err))
 		}
 	}
 	if len(failures) == 0 {
@@ -451,6 +451,42 @@ func forEachGoModule(ctx context.Context, label, cmd string, unset []string) err
 	}
 	return fmt.Errorf("%s failed in %d module(s):\n  - %s",
 		label, len(failures), strings.Join(failures, "\n  - "))
+}
+
+const maxNamedTestFailures = 25
+
+// safety: the summary is bounded from its head, so the names go first or a
+// hosted runner keeps nothing but the module that failed.
+func describeModuleFailure(dir string, err error) string {
+	named := failedTestNames(err)
+	if len(named) == 0 {
+		return fmt.Sprintf("%s: %v", dir, err)
+	}
+	return fmt.Sprintf("%s: %s\n%v", dir, strings.Join(named, "\n"), err)
+}
+
+func failedTestNames(err error) []string {
+	var execErr *sparkwing.ExecError
+	if !errors.As(err, &execErr) {
+		return nil
+	}
+	var out []string
+	truncated := false
+	for _, line := range strings.Split(execErr.Stdout+"\n"+execErr.Stderr, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "--- FAIL: ") && !strings.HasPrefix(line, "FAIL\t") {
+			continue
+		}
+		if len(out) == maxNamedTestFailures {
+			truncated = true
+			break
+		}
+		out = append(out, line)
+	}
+	if truncated {
+		out = append(out, fmt.Sprintf("… more than %d failures; read the run log for the rest", maxNamedTestFailures))
+	}
+	return out
 }
 
 func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string, error) {
