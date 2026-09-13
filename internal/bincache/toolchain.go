@@ -35,6 +35,7 @@ func runToolchain(ctx context.Context, cmd *exec.Cmd) error {
 
 	select {
 	case waitErr := <-waited:
+		//nolint:contextcheck // Group.Kill owns its own bounded process-table read and has no caller-context variant.
 		return toolchainResult(group, cmd, waitErr)
 	case <-ctx.Done():
 	}
