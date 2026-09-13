@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -59,7 +60,10 @@ func NewArtifactStore(bucket, prefix string, client API) *ArtifactStore {
 	}
 }
 
-var _ storage.ArtifactStore = (*ArtifactStore)(nil)
+var (
+	_ storage.ArtifactStore = (*ArtifactStore)(nil)
+	_ storage.UsageReporter = (*ArtifactStore)(nil)
+)
 
 func (s *ArtifactStore) artifactKey(key string) string {
 	if s.Prefix == "" {
@@ -154,6 +158,36 @@ func (s *ArtifactStore) List(ctx context.Context, prefix string) ([]string, erro
 		token = page.NextContinuationToken
 	}
 	return out, nil
+}
+
+// Usage totals the objects under the store's prefix with one paginated
+// listing. A bucket of a million objects costs a thousand LIST
+// requests, so callers measure on a schedule rather than per write.
+func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error) {
+	var token *string
+	var usage storage.StoreUsage
+	for {
+		page, err := s.Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.Bucket),
+			Prefix:            aws.String(s.Prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return storage.StoreUsage{}, fmt.Errorf("s3 usage %s: %w", s.Bucket, err)
+		}
+		for _, obj := range page.Contents {
+			usage.Objects++
+			if obj.Size != nil {
+				usage.Bytes += *obj.Size
+			}
+		}
+		if page.IsTruncated == nil || !*page.IsTruncated {
+			break
+		}
+		token = page.NextContinuationToken
+	}
+	usage.ObservedAt = time.Now().UTC()
+	return usage, nil
 }
 
 func isNotFound(err error) bool {

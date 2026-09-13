@@ -409,10 +409,17 @@ clears when its day window rolls (day, the default) or waits for an
 operator (manual). A local process that must finish past a tripped
 budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
 
+The same breaker carries the bucket ceiling. A controller started with
+--max-bucket-bytes or --max-bucket-objects measures the bucket on an
+interval, freezes object writes once it holds more than the ceiling,
+and reports the freeze on health and as
+sparkwing_object_store_bucket_ceiling_frozen. Buckets are unlimited by
+default.
+
 ### Subcommands
 
 - `status` -- Show the controller's object-store request budget
-- `reset-breaker` -- Clear a tripped object-store request budget
+- `reset-breaker` -- Clear a tripped object-store budget or ceiling freeze
 
 ### Examples
 
@@ -423,12 +430,14 @@ sparkwing cluster object-store reset-breaker --profile prod
 
 ## `sparkwing cluster object-store reset-breaker`
 
-Clear a tripped object-store request budget
+Clear a tripped object-store budget or ceiling freeze
 
-Clears every tripped request class on the selected controller and
-resets its per-minute and per-day window counters, then prints the
-budget as it stands. Lifetime request and trip totals survive, so the
-metrics keep their history.
+Clears every tripped request class on the selected controller, resets
+its per-minute and per-day window counters, and thaws a frozen bucket
+ceiling, then prints the budget as it stands. Lifetime request and trip
+totals survive, so the metrics keep their history. A thawed bucket that
+is still over its ceiling freezes again at the next measurement, so a
+thaw buys the window to delete objects or raise the ceiling.
 
 Reach for this after fixing what caused the trip. A budget that keeps
 tripping wants a larger limit or a caller that stops retrying, not a
@@ -457,8 +466,9 @@ Show the controller's object-store request budget
 
 Prints each request class with its per-minute rate, its per-day budget,
 how much of each window the controller has spent, how many times the
-class has tripped, and whether it is refusing requests now. Changes
-nothing.
+class has tripped, and whether it is refusing requests now, followed by
+the bucket ceiling: what the bucket holds, the ceilings it is held to,
+and whether object writes are frozen. Changes nothing.
 
 Hits GET /api/v1/object-store/breaker on the selected profile's
 controller, which needs an admin-scoped token.

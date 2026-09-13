@@ -161,3 +161,59 @@ func TestBudgetBoundsAHotLoopAgainstAFailingBucket(t *testing.T) {
 		t.Fatalf("%d requests reached the bucket over the window, want the budget of %d", got, budget)
 	}
 }
+
+func TestBudgetCountsWrittenBytesTowardTheCeiling(t *testing.T) {
+	endpoint, _ := bucketThatFails(t, 0)
+	cfg := testConfig(100, 0)
+	cfg.Ceiling = objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 1 << 20}}
+	l := objectguard.New(cfg)
+	client := guardedClient(t, endpoint, l, 2)
+
+	body := strings.Repeat("x", 512)
+	if _, err := client.PutObject(context.Background(), &awss3.PutObjectInput{
+		Bucket: aws.String("b"),
+		Key:    aws.String("k"),
+		Body:   strings.NewReader(body),
+	}); err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+
+	state := l.State().Ceiling
+	if state.Bytes != int64(len(body)) {
+		t.Errorf("the ceiling counted %d bytes for a %d-byte write", state.Bytes, len(body))
+	}
+	if state.Objects != 1 {
+		t.Errorf("the ceiling counted %d objects for one write, want 1", state.Objects)
+	}
+}
+
+func TestBudgetRefusesAWriteAboveTheCeilingBeforeItReachesTheBucket(t *testing.T) {
+	endpoint, hits := bucketThatFails(t, 0)
+	cfg := testConfig(100, 0)
+	cfg.Ceiling = objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 100}}
+	l := objectguard.New(cfg)
+	l.Ceiling().Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
+	client := guardedClient(t, endpoint, l, 2)
+
+	_, err := client.PutObject(context.Background(), &awss3.PutObjectInput{
+		Bucket: aws.String("b"),
+		Key:    aws.String("k"),
+		Body:   strings.NewReader("hello"),
+	})
+	if err == nil {
+		t.Fatal("a write above the bucket ceiling reached the store")
+	}
+	if !strings.Contains(err.Error(), "bucket ceiling") {
+		t.Errorf("refusal %q does not name the bucket ceiling", err)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Errorf("the refused write still sent %d requests to the bucket", got)
+	}
+
+	if _, err := client.GetObject(context.Background(), &awss3.GetObjectInput{
+		Bucket: aws.String("b"),
+		Key:    aws.String("k"),
+	}); err != nil {
+		t.Errorf("a frozen bucket refused a read: %v", err)
+	}
+}

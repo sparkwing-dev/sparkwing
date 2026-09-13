@@ -111,6 +111,25 @@ controller:
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""
 
+  # Ceilings on the whole object store. Above either maximum the
+  # controller freezes object writes: reads and deletes keep working,
+  # health reports the freeze, and `sparkwing cluster object-store
+  # reset-breaker` thaws it until the next measurement. Empty leaves the
+  # bucket unlimited, which is the shipped behavior. See
+  # docs/observability.md.
+  bucketCeiling:
+    # Stored bytes above which object writes freeze.
+    maxBytes: ""
+    # Objects above which object writes freeze.
+    maxObjects: ""
+    # Stored bytes at which health reports a warning, refusing nothing.
+    warnBytes: ""
+    # Objects at which health reports a warning.
+    warnObjects: ""
+    # Gap between bucket measurements (default 1h); "0" measures once at
+    # startup and then relies on the running count.
+    reconcile: ""
+
   cache:
     # Which sparkwing-cache the controller's gitcache proxy forwards
     # to, so off-cluster callers can clone and seed through

@@ -217,6 +217,42 @@ var (
 		"1 while an object-store request class is refusing requests, 0 otherwise. Sampled at scrape time.",
 		[]string{"class"}, nil,
 	)
+
+	objectStoreBucketBytesDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_bytes",
+		"Bytes the bucket holds, counted as writes happen and replaced by each measured total.",
+		nil, nil,
+	)
+
+	objectStoreBucketObjectsDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_objects",
+		"Objects the bucket holds, counted as writes happen and replaced by each measured total.",
+		nil, nil,
+	)
+
+	objectStoreCeilingDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_ceiling",
+		"The configured bucket ceiling, by the unit it bounds. Absent while the bucket is unlimited.",
+		[]string{"unit"}, nil,
+	)
+
+	objectStoreCeilingFrozenDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_ceiling_frozen",
+		"1 while the bucket sits above its ceiling and object writes are refused, 0 otherwise. Sampled at scrape time.",
+		nil, nil,
+	)
+
+	objectStoreCeilingFreezesDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_ceiling_freezes_total",
+		"Times the bucket crossed its ceiling and began refusing object writes.",
+		nil, nil,
+	)
+
+	objectStoreCeilingRefusedDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_ceiling_refused_total",
+		"Object writes the bucket ceiling refused.",
+		nil, nil,
+	)
 )
 
 // safety: read at scrape time rather than mirrored, so the limiter stays the
@@ -228,6 +264,12 @@ func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- objectStoreRequestsDesc
 	ch <- objectStoreTripsDesc
 	ch <- objectStoreTrippedDesc
+	ch <- objectStoreBucketBytesDesc
+	ch <- objectStoreBucketObjectsDesc
+	ch <- objectStoreCeilingDesc
+	ch <- objectStoreCeilingFrozenDesc
+	ch <- objectStoreCeilingFreezesDesc
+	ch <- objectStoreCeilingRefusedDesc
 }
 
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
@@ -235,7 +277,9 @@ func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
 	if err != nil {
 		return
 	}
-	for _, c := range limiter.State().Classes {
+	state := limiter.State()
+	collectCeiling(ch, state.Ceiling)
+	for _, c := range state.Classes {
 		class := string(c.Class)
 		ch <- prometheus.MustNewConstMetric(objectStoreRequestsDesc, prometheus.CounterValue, float64(c.Allowed), class, "allowed")
 		ch <- prometheus.MustNewConstMetric(objectStoreRequestsDesc, prometheus.CounterValue, float64(c.Refused), class, "refused")
@@ -246,6 +290,26 @@ func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 		ch <- prometheus.MustNewConstMetric(objectStoreTrippedDesc, prometheus.GaugeValue, tripped, class)
 	}
+}
+
+// safety: the ceiling gauges are emitted even while the bucket is unlimited, so
+// an alert on a frozen bucket keeps a series to evaluate against.
+func collectCeiling(ch chan<- prometheus.Metric, c objectguard.CeilingState) {
+	ch <- prometheus.MustNewConstMetric(objectStoreBucketBytesDesc, prometheus.GaugeValue, float64(c.Bytes))
+	ch <- prometheus.MustNewConstMetric(objectStoreBucketObjectsDesc, prometheus.GaugeValue, float64(c.Objects))
+	if c.MaxBytes > 0 {
+		ch <- prometheus.MustNewConstMetric(objectStoreCeilingDesc, prometheus.GaugeValue, float64(c.MaxBytes), "bytes")
+	}
+	if c.MaxObjects > 0 {
+		ch <- prometheus.MustNewConstMetric(objectStoreCeilingDesc, prometheus.GaugeValue, float64(c.MaxObjects), "objects")
+	}
+	frozen := 0.0
+	if c.Frozen {
+		frozen = 1
+	}
+	ch <- prometheus.MustNewConstMetric(objectStoreCeilingFrozenDesc, prometheus.GaugeValue, frozen)
+	ch <- prometheus.MustNewConstMetric(objectStoreCeilingFreezesDesc, prometheus.CounterValue, float64(c.Freezes))
+	ch <- prometheus.MustNewConstMetric(objectStoreCeilingRefusedDesc, prometheus.CounterValue, float64(c.Refused))
 }
 
 var authHashingRejectedDesc = prometheus.NewDesc(

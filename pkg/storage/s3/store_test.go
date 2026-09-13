@@ -216,3 +216,64 @@ func TestArtifactStore_List(t *testing.T) {
 		}
 	}
 }
+
+func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
+	t.Parallel()
+	client, closer := fakeS3(t)
+	defer closer()
+
+	s := NewArtifactStore(testBucket, "cache", client)
+	ctx := context.Background()
+
+	usage, err := s.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage on an empty store: %v", err)
+	}
+	if usage.Bytes != 0 || usage.Objects != 0 {
+		t.Fatalf("empty store measures %d bytes / %d objects, want 0/0", usage.Bytes, usage.Objects)
+	}
+
+	for key, body := range map[string]string{"a": "hello", "b": "worldly"} {
+		if err := s.Put(ctx, key, strings.NewReader(body)); err != nil {
+			t.Fatalf("Put %s: %v", key, err)
+		}
+	}
+
+	usage, err = s.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if usage.Objects != 2 {
+		t.Errorf("measured %d objects, want 2", usage.Objects)
+	}
+	if want := int64(len("hello") + len("worldly")); usage.Bytes != want {
+		t.Errorf("measured %d bytes, want %d", usage.Bytes, want)
+	}
+	if usage.ObservedAt.IsZero() {
+		t.Error("a measurement carries no observation time")
+	}
+}
+
+func TestArtifactStore_UsageIgnoresAnotherPrefix(t *testing.T) {
+	t.Parallel()
+	client, closer := fakeS3(t)
+	defer closer()
+
+	ctx := context.Background()
+	mine := NewArtifactStore(testBucket, "mine", client)
+	theirs := NewArtifactStore(testBucket, "theirs", client)
+	if err := mine.Put(ctx, "k", strings.NewReader("1234")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := theirs.Put(ctx, "k", strings.NewReader("123456789")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	usage, err := mine.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if usage.Objects != 1 || usage.Bytes != 4 {
+		t.Errorf("prefixed store measures %d bytes / %d objects, want 4/1", usage.Bytes, usage.Objects)
+	}
+}

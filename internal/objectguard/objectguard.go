@@ -120,6 +120,9 @@ type Config struct {
 	Enabled bool
 	Limits  map[Class]Limit
 	Reset   TripReset
+	// Ceiling bounds the whole bucket rather than the request rate.
+	// Its zero value leaves the bucket unlimited.
+	Ceiling CeilingConfig
 }
 
 // Default budgets. The per-minute rates sit an order of magnitude above
@@ -179,6 +182,9 @@ type State struct {
 	Reset   TripReset    `json:"reset"`
 	Tripped bool         `json:"tripped"`
 	Classes []ClassState `json:"classes"`
+	// Ceiling is the bucket-size freeze, which refuses object writes
+	// for a reason of its own.
+	Ceiling CeilingState `json:"ceiling"`
 }
 
 type classCounters struct {
@@ -205,6 +211,7 @@ type Limiter struct {
 	enabled  bool
 	reset    TripReset
 	counters map[Class]*classCounters
+	ceiling  *Ceiling
 	now      func() time.Time
 }
 
@@ -215,6 +222,7 @@ func New(cfg Config) *Limiter {
 		enabled:  cfg.Enabled,
 		reset:    cfg.Reset,
 		counters: make(map[Class]*classCounters, len(Classes())),
+		ceiling:  NewCeiling(cfg.Ceiling),
 		now:      time.Now,
 	}
 	if l.reset == "" {
@@ -224,6 +232,23 @@ func New(cfg Config) *Limiter {
 		l.counters[c] = &classCounters{limit: cfg.Limits[c]}
 	}
 	return l
+}
+
+// Ceiling is the bucket-size ceiling this limiter enforces alongside
+// its request budgets.
+func (l *Limiter) Ceiling() *Ceiling { return l.ceiling }
+
+// RecordWrite folds one completed request into the bucket ceiling's
+// incremental counters. A write adds its bytes and its object; a
+// deletion gives the object back and leaves the bytes for the next
+// reconciliation to correct.
+func (l *Limiter) RecordWrite(c Class, bytes int64) {
+	switch c {
+	case ClassPut:
+		l.ceiling.Record(bytes, 1)
+	case ClassDelete:
+		l.ceiling.Record(0, -1)
+	}
 }
 
 // Allow records one request of class c and reports whether it may
@@ -239,6 +264,14 @@ func (l *Limiter) Allow(c Class) error {
 	}
 	now := l.now().UTC()
 	l.rollWindows(st, now)
+
+	// safety: only writes freeze, because deleting objects is how a bucket over
+	// its ceiling gets back under one.
+	if c == ClassPut && l.enabled {
+		if err := l.ceiling.Allow(); err != nil {
+			return err
+		}
+	}
 
 	if st.tripped && l.enabled {
 		st.refused++
@@ -363,7 +396,7 @@ func (l *Limiter) State() State {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now().UTC()
-	out := State{Enabled: l.enabled, Reset: l.reset}
+	out := State{Enabled: l.enabled, Reset: l.reset, Ceiling: l.ceiling.State()}
 	for _, c := range Classes() {
 		st := l.counters[c]
 		if st == nil {

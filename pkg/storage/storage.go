@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 )
 
 // ErrNotFound is returned by Get / Has-style reads when the requested
@@ -115,6 +116,38 @@ type ConditionalWriter interface {
 func Conditional(store ArtifactStore) (ConditionalWriter, bool) {
 	cw, ok := store.(ConditionalWriter)
 	return cw, ok
+}
+
+// StoreUsage is how much a store holds: its total stored bytes and the
+// number of objects those bytes sit in, measured at ObservedAt.
+type StoreUsage struct {
+	Bytes      int64
+	Objects    int64
+	ObservedAt time.Time
+}
+
+// UsageReporter is the optional capability an [ArtifactStore] exposes
+// when it can total its own contents. Measuring means enumerating the
+// store, which object stores bill per thousand keys, so a caller
+// measures on a schedule and never per request.
+//
+// Reach it through [Usage], which reports false for a store that
+// cannot total itself.
+type UsageReporter interface {
+	// Usage totals everything the store holds under its configured
+	// prefix.
+	Usage(ctx context.Context) (StoreUsage, error)
+}
+
+// Usage totals what store holds, and reports false for a backend that
+// cannot measure itself.
+func Usage(ctx context.Context, store ArtifactStore) (StoreUsage, bool, error) {
+	r, ok := store.(UsageReporter)
+	if !ok {
+		return StoreUsage{}, false, nil
+	}
+	u, err := r.Usage(ctx)
+	return u, true, err
 }
 
 // NodeFlusher is the optional capability a [LogStore] exposes when it

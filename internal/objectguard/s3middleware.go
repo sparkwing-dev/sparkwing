@@ -7,6 +7,7 @@ import (
 	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // MiddlewareID names the budget middleware in an S3 client's stack.
@@ -43,7 +44,21 @@ func (m *budgetMiddleware) HandleFinalize(
 	if err := m.limiter.Allow(class); err != nil {
 		return middleware.FinalizeOutput{}, middleware.Metadata{}, fmt.Errorf("%s: %w", awsmiddleware.GetOperationName(ctx), err)
 	}
-	return next.HandleFinalize(ctx, in)
+	out, metadata, err := next.HandleFinalize(ctx, in)
+	if err == nil {
+		m.limiter.RecordWrite(class, requestBodyBytes(in))
+	}
+	return out, metadata, err
+}
+
+// perf: the bucket total grows by what this attempt carried, so the ceiling
+// never lists the bucket to learn a write happened.
+func requestBodyBytes(in middleware.FinalizeInput) int64 {
+	req, ok := in.Request.(*smithyhttp.Request)
+	if !ok || req.Request == nil || req.ContentLength < 0 {
+		return 0
+	}
+	return req.ContentLength
 }
 
 // ClassForOperation maps an S3 operation name to the class the object

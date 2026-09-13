@@ -340,6 +340,12 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_requests_total` | Counter | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
 | `sparkwing_object_store_trips_total` | Counter | Times a request class exhausted its budget and began refusing requests |
 | `sparkwing_object_store_tripped` | Gauge | 1 while a request class is refusing requests |
+| `sparkwing_object_store_bucket_bytes` | Gauge | Bytes the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_objects` | Gauge | Objects the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_ceiling` | Gauge | The configured ceiling, by `unit` (`bytes`, `objects`). Absent while the bucket is unlimited |
+| `sparkwing_object_store_bucket_ceiling_frozen` | Gauge | 1 while the bucket is over its ceiling and object writes are refused |
+| `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | Times the bucket crossed its ceiling and began refusing object writes |
+| `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | Object writes the ceiling refused |
 
 The `route` label is the pattern the controller registered the request
 against, so every path parameter reaches Prometheus in its declared form
@@ -427,7 +433,61 @@ sparkwing cluster object-store status --profile prod
 sparkwing cluster object-store reset-breaker --profile prod
 ```
 
-A reset clears every tripped class and both window counters; lifetime
-request and trip totals survive so the metrics keep their history. A
-budget that keeps tripping wants a larger limit or a caller that stops
-retrying, not a repeated reset.
+A reset clears every tripped class and both window counters, and thaws a
+frozen bucket ceiling; lifetime request and trip totals survive so the
+metrics keep their history. A budget that keeps tripping wants a larger
+limit or a caller that stops retrying, not a repeated reset.
+
+## Object-store bucket ceiling
+
+Per-team quotas bound each team; a thousand teams under quota still add
+up, and one quota bug reaches every team at once. The bucket ceiling
+bounds the total. The controller holds the whole object store to a byte
+ceiling and an object-count ceiling, and freezes object writes above
+either one: existing runs finish, further writes are refused with an
+error naming the ceiling and the measurement, and health reports the
+freeze. Reads and deletes keep working, because deleting is how a bucket
+gets back under its ceiling.
+
+Buckets are unlimited by default, so an install that sets nothing sees
+no change. Set the ceilings on the controller:
+
+| Flag | Environment | Meaning |
+|--------|------|-------------|
+| `--max-bucket-bytes` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | Stored bytes above which object writes freeze |
+| `--max-bucket-objects` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | Objects above which object writes freeze |
+| `--warn-bucket-bytes` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | Stored bytes at which health reports a warning |
+| `--warn-bucket-objects` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | Objects at which health reports a warning |
+| `--bucket-reconcile` | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | Gap between bucket measurements, hourly by default |
+
+Counting costs nothing per request. Every write the process sends adds
+its own bytes to a running total, and the controller replaces that total
+with a measured one on the reconciliation interval, because the running
+count drifts: an overwrite counts its key twice and a delete cannot know
+what it removed. The measurement is one paginated listing of the
+artifact store, which object stores bill per thousand keys, so an
+install that wants the ceiling without the listing sets
+`--bucket-reconcile 0` and accepts the drift. A backend that cannot
+total itself leaves the running count in place.
+
+`GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
+`warning` alone, because that route answers without a token; the totals
+and the ceilings sit behind the admin-scoped
+`GET /api/v1/object-store/breaker` and on `sparkwing cluster
+object-store status`. Alarm on
+`sparkwing_object_store_bucket_ceiling_frozen` for the freeze and on
+`sparkwing_object_store_bucket_bytes` against
+`sparkwing_object_store_bucket_ceiling` for the approach; S3 publishes
+`BucketSizeBytes` and `NumberOfObjects` daily at no charge, which is the
+same signal from the account side.
+
+Clearing a freeze is an operator decision:
+
+```bash
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+That thaws the bucket until the next measurement, which freezes it again
+while the bucket stays over the ceiling. Raise the ceiling on the
+controller to keep writes flowing, or delete objects until the
+measurement falls back under it.

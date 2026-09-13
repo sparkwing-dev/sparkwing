@@ -105,6 +105,7 @@ func renderObjectStoreBreaker(state *client.ObjectStoreBreaker) error {
 	if len(state.Cleared) > 0 {
 		fmt.Printf("cleared: %v\n", state.Cleared)
 	}
+	renderObjectStoreCeiling(state.Ceiling, state.Thawed)
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "CLASS\tPER-MINUTE\tPER-DAY\tMINUTE USED\tDAY USED\tTRIPS\tTRIPPED")
 	for _, c := range state.Classes {
@@ -112,4 +113,22 @@ func renderObjectStoreBreaker(state *client.ObjectStoreBreaker) error {
 			c.Class, c.PerMinute, c.PerDay, c.MinuteUsed, c.DayUsed, c.Trips, c.Tripped)
 	}
 	return tw.Flush()
+}
+
+func renderObjectStoreCeiling(c client.ObjectStoreCeiling, thawed bool) {
+	if !c.Enforced {
+		fmt.Println("ceiling: unlimited")
+		return
+	}
+	fmt.Printf("ceiling: frozen=%t warning=%t bytes=%d/%d objects=%d/%d\n",
+		c.Frozen, c.Warning, c.Bytes, c.MaxBytes, c.Objects, c.MaxObjects)
+	if c.Frozen {
+		fmt.Printf("ceiling frozen on %s since %s\n", c.FrozenReason, c.FrozenAt.Format(time.RFC3339))
+	}
+	if !c.ReconciledAt.IsZero() {
+		fmt.Printf("ceiling measured at %s every %s\n", c.ReconciledAt.Format(time.RFC3339), c.Reconcile)
+	}
+	if thawed {
+		fmt.Println("thawed: the bucket ceiling freeze was cleared")
+	}
 }

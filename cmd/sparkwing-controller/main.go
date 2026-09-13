@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -120,6 +121,29 @@ func run(args []string) error {
 	placementLiveness := fs.Duration("placement-liveness", 30*time.Second,
 		"how recently a claim-mode runner must have polled for a claim to count "+
 			"as live for the hold above")
+	ceilingDefaults, cerr := objectguard.ConfigFromEnv(os.Getenv)
+	if cerr != nil {
+		return cerr
+	}
+	maxBucketBytes := fs.Int64("max-bucket-bytes", ceilingDefaults.Ceiling.Limit.MaxBytes,
+		"stored bytes across the whole object store above which the controller freezes "+
+			"object writes: existing runs finish, new writes are refused naming the ceiling, "+
+			"and health reports the freeze. 0, the default, leaves the bucket unlimited "+
+			"(env: SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES)")
+	maxBucketObjects := fs.Int64("max-bucket-objects", ceilingDefaults.Ceiling.Limit.MaxObjects,
+		"objects across the whole object store above which the controller freezes object "+
+			"writes; 0 leaves the count unlimited (env: SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS)")
+	warnBucketBytes := fs.Int64("warn-bucket-bytes", ceilingDefaults.Ceiling.Limit.WarnBytes,
+		"stored bytes at which health reports the bucket as warning, which refuses nothing; "+
+			"0 disables the warning (env: SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES)")
+	warnBucketObjects := fs.Int64("warn-bucket-objects", ceilingDefaults.Ceiling.Limit.WarnObjects,
+		"objects at which health reports the bucket as warning; 0 disables the warning "+
+			"(env: SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS)")
+	bucketReconcile := fs.Duration("bucket-reconcile", ceilingDefaults.Ceiling.Reconcile,
+		"how often the controller measures the whole bucket and replaces the running "+
+			"count with the measurement. Writes are counted as they happen, so this "+
+			"listing is the only enumeration the ceiling costs; 0 measures once at "+
+			"startup and never again (env: SPARKWING_OBJECT_STORE_BUCKET_RECONCILE)")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -151,6 +175,17 @@ func run(args []string) error {
 			*liveLogNodeKB, *liveLogTotalMB)
 	}
 	store.SetArgon2MemoryBudget(int64(*argonBudgetMB) << 20)
+	if err := applyBucketCeiling(objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{
+			MaxBytes:    *maxBucketBytes,
+			MaxObjects:  *maxBucketObjects,
+			WarnBytes:   *warnBucketBytes,
+			WarnObjects: *warnBucketObjects,
+		},
+		Reconcile: *bucketReconcile,
+	}); err != nil {
+		return err
+	}
 
 	emitStartupProvenance(os.Stderr)
 
@@ -409,4 +444,30 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kube config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
+}
+
+// safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.
+func applyBucketCeiling(cfg objectguard.CeilingConfig) error {
+	for name, n := range map[string]int64{
+		"--max-bucket-bytes":    cfg.Limit.MaxBytes,
+		"--max-bucket-objects":  cfg.Limit.MaxObjects,
+		"--warn-bucket-bytes":   cfg.Limit.WarnBytes,
+		"--warn-bucket-objects": cfg.Limit.WarnObjects,
+	} {
+		if n < 0 {
+			return fmt.Errorf("%s must not be negative; pass 0 to leave the bucket unlimited", name)
+		}
+	}
+	if cfg.Reconcile < 0 {
+		return fmt.Errorf("--bucket-reconcile must not be negative; pass 0 to measure the bucket only at startup")
+	}
+	if cfg.Reconcile == 0 {
+		cfg.Reconcile = -1
+	}
+	limiter, err := objectguard.Shared()
+	if err != nil {
+		return err
+	}
+	limiter.Ceiling().Configure(cfg)
+	return nil
 }
