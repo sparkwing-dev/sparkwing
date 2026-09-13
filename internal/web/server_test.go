@@ -77,14 +77,14 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = ln.Close() })
 	addr := ln.Addr().String()
-	_ = ln.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	var serveErr error
 	go func() {
-		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{Bundle: fixtureShell()})
+		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{Bundle: fixtureShell(), Listener: ln})
 		close(done)
 	}()
 	var stopOnce sync.Once
