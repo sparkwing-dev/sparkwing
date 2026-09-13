@@ -111,7 +111,7 @@ type DoctorReport struct {
 
 	StrayDaemons []DoctorStrayDaemon `json:"stray_daemons,omitempty"`
 
-	UnreachablePeers []DoctorUnreachablePeer `json:"unreachable_peers,omitempty"`
+	FaultedPeers []DoctorFaultedPeer `json:"faulted_peers,omitempty"`
 
 	InstallConflict *DoctorInstallConflict `json:"install_conflict,omitempty"`
 
@@ -223,11 +223,10 @@ type DoctorStrayDaemon struct {
 	Version string `json:"version"`
 }
 
-// DoctorUnreachablePeer is a daemon socket belonging to another sparkwing
-// home that took the connection and then failed the handshake. The sweep
-// records it so a machine holding wedged peer daemons does not read as one
-// holding none.
-type DoctorUnreachablePeer struct {
+// DoctorFaultedPeer is a daemon socket belonging to another sparkwing home
+// that took the connection and then failed the handshake. The sweep records it
+// so a machine holding wedged peer daemons reads as one holding them.
+type DoctorFaultedPeer struct {
 	Socket string `json:"socket"`
 
 	Error string `json:"error"`
@@ -820,8 +819,8 @@ func diagnoseStrayDaemons(ctx context.Context, home string, report *DoctorReport
 		info, err := wingdclient.Probe(ctx, sock)
 		if err != nil {
 			if fault := confirmedPeerFault(ctx, sock, err); fault != nil {
-				report.UnreachablePeers = append(report.UnreachablePeers,
-					DoctorUnreachablePeer{Socket: sock, Error: fault.Error()})
+				report.FaultedPeers = append(report.FaultedPeers,
+					DoctorFaultedPeer{Socket: sock, Error: fault.Error()})
 			}
 			continue
 		}
@@ -841,7 +840,9 @@ func confirmedPeerFault(ctx context.Context, sock string, err error) error {
 	if !acceptedThenFailed(ctx, err) {
 		return nil
 	}
-	if _, second := wingdclient.Probe(ctx, sock); !acceptedThenFailed(ctx, second) {
+	probeCtx, cancel := probeBudget(ctx)
+	defer cancel()
+	if _, second := wingdclient.Probe(probeCtx, sock); !acceptedThenFailed(ctx, second) {
 		return nil
 	}
 	return err
@@ -853,6 +854,7 @@ func acceptedThenFailed(ctx context.Context, err error) bool {
 	}
 	return !errors.Is(err, wingdclient.ErrNoDaemon) &&
 		!errors.Is(err, wingdclient.ErrDaemonUnreachable) &&
+		!errors.Is(err, os.ErrDeadlineExceeded) &&
 		!errors.Is(err, context.DeadlineExceeded) &&
 		!errors.Is(err, context.Canceled)
 }
@@ -1526,7 +1528,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "machine_budget\t%s\t%s\t%d\n", budgetSource, budgetOrigin, ignoreExternal)
 	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
-	fmt.Fprintf(w, "unreachable_peers\t%d\n", len(r.UnreachablePeers))
+	fmt.Fprintf(w, "faulted_peers\t%d\n", len(r.FaultedPeers))
 	competing := 0
 	if r.InstallConflict != nil {
 		competing = len(r.InstallConflict.Competing)
@@ -1556,7 +1558,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		renderStandaloneStores(w, r)
 		renderUngatedRepos(w, r)
 		renderStrayDaemons(w, r)
-		renderUnreachablePeers(w, r)
+		renderFaultedPeers(w, r)
 		return nil
 	}
 	renderInstallConflict(w, r)
@@ -1660,7 +1662,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	renderToolchains(w, r)
 	renderStandaloneStores(w, r)
 	renderStrayDaemons(w, r)
-	renderUnreachablePeers(w, r)
+	renderFaultedPeers(w, r)
 	return nil
 }
 
@@ -1879,8 +1881,8 @@ func standaloneAge(t time.Time) string {
 	}
 }
 
-func renderUnreachablePeers(w io.Writer, r DoctorReport) {
-	for _, p := range r.UnreachablePeers {
+func renderFaultedPeers(w io.Writer, r DoctorReport) {
+	for _, p := range r.FaultedPeers {
 		fmt.Fprintf(w, "\nwarning: an admission daemon for another sparkwing home took the connection and then failed the handshake\n"+
 			"  every run that home arbitrates waits on this socket, and it is not this machine's resident daemon, so nothing here repairs it. Stop that process from the home that owns it\n"+
 			"  socket: %s\n"+

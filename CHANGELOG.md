@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
+  that takes the connection and then fails the handshake, with the probe error.
+  The sweep dropped every peer whose probe failed, so a machine holding wedged
+  peer daemons read as a machine holding none. The report carries them under
+  `faulted_peers`. A peer that never answered the dial, or that ran out of
+  doctor's budget, stays out of the report.
+
 ## [v0.50.0] - 2026-09-12
 
 ### Added
@@ -149,15 +158,6 @@ unlock.
   Slowest pipelines, failure clustering, and agent utilization rendered
   placeholder text for views the dashboard does not build. The trend charts
   stay.
-
-### Fixed
-
-- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
-  that takes the connection and then fails the handshake, with the probe error.
-  The sweep dropped every peer whose probe failed, so a machine holding wedged
-  peer daemons read as a machine holding none. The report carries them under
-  `unreachable_peers`. A peer that never answered the dial, or that ran out of
-  doctor's budget, stays out of the report.
 
 ### Security
 

@@ -201,9 +201,9 @@ func serveSilentSocket(t *testing.T, home string) string {
 	return sock
 }
 
-func unreachableSockets(r opsview.DoctorReport) []string {
-	socks := make([]string, 0, len(r.UnreachablePeers))
-	for _, p := range r.UnreachablePeers {
+func faultedSockets(r opsview.DoctorReport) []string {
+	socks := make([]string, 0, len(r.FaultedPeers))
+	for _, p := range r.FaultedPeers {
 		socks = append(socks, p.Socket)
 	}
 	return socks
@@ -215,8 +215,8 @@ func TestDiagnose_NamesAPeerWhoseProbeFailed(t *testing.T) {
 	sock := serveSilentSocket(t, peer)
 
 	report := diagnoseHome(t, home)
-	if !slices.Contains(unreachableSockets(report), sock) {
-		t.Fatalf("unreachable peers %v do not name the silent socket at %q", unreachableSockets(report), sock)
+	if !slices.Contains(faultedSockets(report), sock) {
+		t.Fatalf("faulted peers %v do not name the silent socket at %q", faultedSockets(report), sock)
 	}
 	if slices.Contains(straySockets(report), sock) {
 		t.Errorf("a peer that answered nothing was reported as a stray daemon: %q", sock)
@@ -228,7 +228,7 @@ func TestDiagnose_NamesAPeerWhoseProbeFailed(t *testing.T) {
 
 func TestRenderDoctorPretty_ShowsAPeerWhoseProbeFailed(t *testing.T) {
 	r := opsview.DoctorReport{
-		UnreachablePeers: []opsview.DoctorUnreachablePeer{
+		FaultedPeers: []opsview.DoctorFaultedPeer{
 			{Socket: "/tmp/sparkwing-0-abc123def456/d.sock", Error: "probe: unexpected EOF"},
 		},
 	}
