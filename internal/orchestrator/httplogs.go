@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -140,7 +141,7 @@ var (
 
 var httpNodeLogDropCooldown = 5 * time.Second
 
-const httpNodeLogFinishTimeout = 30 * time.Second
+const httpNodeLogFinishTimeout = 10 * time.Second
 
 const httpNodeLogPendingLimit = 4 << 20
 
@@ -287,9 +288,11 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 		}
 	}
 	if len(payload) == 0 {
+		l.collectFlushLosses()
 		return
 	}
 	l.appendBoundWithRetry(ordinal, payload)
+	l.collectFlushLosses()
 }
 
 func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
@@ -357,7 +360,10 @@ func (l *httpNodeLog) dropSuppressed() bool {
 
 // Close hands the node's last lines to the store. A batching store
 // holds them until something asks for them, and the node finishing is
-// that something; a write-through store has nothing left to do.
+// that something; a write-through store has nothing left to do. It
+// blocks for at most the live mirror's flush budget plus the durable
+// one, twenty seconds in all, and holds the node's write lock while it
+// does, so the node reports terminal only once its log is complete.
 func (l *httpNodeLog) Close() error {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
@@ -373,7 +379,25 @@ func (l *httpNodeLog) Close() error {
 	if l.live != nil {
 		_ = l.live.Close()
 	}
-	return storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
+	err := storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
+	l.collectFlushLosses()
+	return err
+}
+
+// safety: a buffering store writes many lines per request, so one failed
+// request loses a whole batch. Folding that into the node's own count is
+// what makes the batch visible to the logs_drop event.
+func (l *httpNodeLog) collectFlushLosses() {
+	lines, bytes := storage.FlushLosses(l.client, l.runID, l.nodeID)
+	if lines == 0 {
+		return
+	}
+	l.mu.Lock()
+	l.dropCount += lines
+	if l.dropReason == "" {
+		l.dropReason = fmt.Sprintf("a failed log flush discarded %d line(s), %d byte(s)", lines, bytes)
+	}
+	l.mu.Unlock()
 }
 
 func (l *httpNodeLog) Fatal() error {

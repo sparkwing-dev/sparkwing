@@ -385,3 +385,50 @@ func waitFor(t *testing.T, limit time.Duration, cond func() bool) {
 	}
 	t.Fatal("condition never held")
 }
+
+func TestLostOnFlushAccountsForADiscardedBatch(t *testing.T) {
+	t.Parallel()
+	delegate := newCountingStore()
+	s := logbatch.New(delegate,
+		logbatch.WithBufferThreshold(1<<20),
+		logbatch.WithFlushInterval(time.Hour))
+	defer closeStore(t, s)
+
+	ctx := t.Context()
+	for i := range 4 {
+		if err := s.Append(ctx, "run-1", "build", line(i)); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	delegate.fail(errors.New("bucket unreachable"))
+	if err := s.FlushNode(ctx, "run-1", "build"); err == nil {
+		t.Fatal("FlushNode succeeded against an unreachable delegate")
+	}
+	lines, bytes := s.LostOnFlush("run-1", "build")
+	if lines != 4 {
+		t.Fatalf("lost lines = %d, want 4", lines)
+	}
+	if bytes != int64(len(line(0))*4) {
+		t.Fatalf("lost bytes = %d, want %d", bytes, len(line(0))*4)
+	}
+	if again, _ := s.LostOnFlush("run-1", "build"); again != 0 {
+		t.Fatalf("lost lines reported twice: %d", again)
+	}
+}
+
+func TestLostOnFlushIsZeroForAHealthyStore(t *testing.T) {
+	t.Parallel()
+	delegate := newCountingStore()
+	s := logbatch.New(delegate, logbatch.WithFlushInterval(time.Hour))
+	defer closeStore(t, s)
+
+	if err := s.Append(t.Context(), "run-1", "build", line(1)); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := s.FlushNode(t.Context(), "run-1", "build"); err != nil {
+		t.Fatalf("FlushNode: %v", err)
+	}
+	if lines, bytes := s.LostOnFlush("run-1", "build"); lines != 0 || bytes != 0 {
+		t.Fatalf("healthy store reported %d line(s), %d byte(s) lost", lines, bytes)
+	}
+}

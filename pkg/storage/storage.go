@@ -141,6 +141,30 @@ func FlushNode(ctx context.Context, store LogStore, runID, nodeID string) error 
 	return f.FlushNode(ctx, runID, nodeID)
 }
 
+// FlushLossReporter is the optional capability a buffering [LogStore]
+// exposes to account for what a failed flush discarded. A buffering
+// store writes many lines per request, so one failed request loses a
+// whole batch; a write-through store loses one line and its caller
+// already sees the error.
+//
+// Reach it through [FlushLosses], which reports zero for a store that
+// does not buffer.
+type FlushLossReporter interface {
+	// LostOnFlush returns the lines and bytes discarded for one node
+	// since the last call, and zeroes the counters.
+	LostOnFlush(runID, nodeID string) (lines int, bytes int64)
+}
+
+// FlushLosses reports what store discarded for one node since the last
+// call, and zero for a store that writes each append through.
+func FlushLosses(store LogStore, runID, nodeID string) (lines int, bytes int64) {
+	r, ok := store.(FlushLossReporter)
+	if !ok {
+		return 0, 0
+	}
+	return r.LostOnFlush(runID, nodeID)
+}
+
 // ReadOpts narrows a log read server-side. Zero values disable
 // individual filters; an empty ReadOpts returns the full log.
 type ReadOpts struct {

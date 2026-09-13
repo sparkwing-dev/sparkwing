@@ -48,7 +48,7 @@ const DefaultMaxObjects = 2000
 // DefaultMaxBytes caps how many log bytes one node writes.
 const DefaultMaxBytes = 64 << 20
 
-const flushTimeout = 30 * time.Second
+const flushTimeout = 10 * time.Second
 
 // ErrClosed is returned by Append after Close.
 var ErrClosed = errors.New("logbatch: store is closed")
@@ -108,6 +108,7 @@ type Store struct {
 
 	mu      sync.Mutex
 	nodes   map[nodeKey]*nodeBuf
+	lost    map[nodeKey]nodeLoss
 	closed  bool
 	started bool
 
@@ -120,13 +121,20 @@ type nodeKey struct {
 	node string
 }
 
+type nodeLoss struct {
+	lines int
+	bytes int64
+}
+
 type nodeBuf struct {
-	mu      sync.Mutex
-	buf     []byte
-	objects int
-	bytes   int64
-	dropped int
-	lastErr error
+	mu        sync.Mutex
+	buf       []byte
+	objects   int
+	bytes     int64
+	dropped   int
+	lostLines int
+	lostBytes int64
+	lastErr   error
 }
 
 // New wraps delegate so appends coalesce into one object per flush.
@@ -141,6 +149,7 @@ func New(delegate storage.LogStore, opts ...Option) *Store {
 		maxObjects:    DefaultMaxObjects,
 		maxBytes:      DefaultMaxBytes,
 		nodes:         map[nodeKey]*nodeBuf{},
+		lost:          map[nodeKey]nodeLoss{},
 		stop:          make(chan struct{}),
 		done:          make(chan struct{}),
 	}
@@ -154,6 +163,47 @@ var (
 	_ storage.LogStore = (*Store)(nil)
 	_ io.Closer        = (*Store)(nil)
 )
+
+// LostOnFlush reports what a failed flush discarded for one node since
+// the last call, and zeroes the counters. A batch a flush loses is not
+// retried, so this is the only account of it; the writer folds it into
+// the node's own dropped-line count.
+func (s *Store) LostOnFlush(runID, nodeID string) (lines int, bytes int64) {
+	key := nodeKey{runID, nodeID}
+	s.mu.Lock()
+	nb := s.nodes[key]
+	if held, ok := s.lost[key]; ok {
+		lines, bytes = held.lines, held.bytes
+		delete(s.lost, key)
+	}
+	s.mu.Unlock()
+	if nb == nil {
+		return lines, bytes
+	}
+	nb.mu.Lock()
+	defer nb.mu.Unlock()
+	lines += nb.lostLines
+	bytes += nb.lostBytes
+	nb.lostLines, nb.lostBytes = 0, 0
+	return lines, bytes
+}
+
+// safety: FlushNode and Close drop the buffer, so what a failed flush
+// lost has to outlive it or the writer never hears about the batch.
+func (s *Store) retainLoss(key nodeKey, nb *nodeBuf) {
+	if nb.lostLines == 0 && nb.lostBytes == 0 {
+		return
+	}
+	s.mu.Lock()
+	held := s.lost[key]
+	held.lines += nb.lostLines
+	held.bytes += nb.lostBytes
+	s.lost[key] = held
+	s.mu.Unlock()
+	nb.lostLines, nb.lostBytes = 0, 0
+}
+
+var _ storage.FlushLossReporter = (*Store)(nil)
 
 // Delegate returns the wrapped store, so a caller holding the batcher
 // can still reach a capability the batcher does not forward.
@@ -215,6 +265,7 @@ func (s *Store) FlushNode(ctx context.Context, runID, nodeID string) error {
 	if merr := s.writeDropMarker(ctx, key, nb); merr != nil && err == nil {
 		err = merr
 	}
+	s.retainLoss(key, nb)
 	return err
 }
 
@@ -248,6 +299,11 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	for key := range s.nodes {
 		if key.run == runID {
 			delete(s.nodes, key)
+		}
+	}
+	for key := range s.lost {
+		if key.run == runID {
+			delete(s.lost, key)
 		}
 	}
 	s.mu.Unlock()
@@ -292,6 +348,7 @@ func (s *Store) Close() error {
 			firstErr = err
 		}
 		nb.mu.Unlock()
+		s.retainLoss(key, nb)
 	}
 	return firstErr
 }
@@ -369,6 +426,8 @@ func (s *Store) flushLocked(ctx context.Context, key nodeKey, nb *nodeBuf) error
 	data := nb.buf
 	nb.buf = nil
 	if err := s.delegate.Append(ctx, key.run, key.node, data); err != nil {
+		nb.lostLines += countLines(data)
+		nb.lostBytes += int64(len(data))
 		return fmt.Errorf("logbatch flush %s/%s: %w", key.run, key.node, err)
 	}
 	nb.objects++
