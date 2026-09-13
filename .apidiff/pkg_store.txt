@@ -69,6 +69,7 @@ const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
 func Argon2Concurrency(budget int64) int
 const Argon2HashBytes = int64(argonMemory) << 10
+func Argon2Shed() int64
 func Argon2Slots() int
 const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const BounceBounced = "bounced"

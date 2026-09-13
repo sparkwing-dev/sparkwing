@@ -339,6 +339,13 @@ type TriggerResponse struct {
 	RunID  string
 	Status string
 }
+type UnavailableError struct {
+	RetryAfter time.Duration
+
+	Err error
+}
+func (e *UnavailableError) Error() string
+func (e *UnavailableError) Unwrap() error
 const UnavailableRetries = 3
 type WaiterHolder struct {
 	HolderID       string

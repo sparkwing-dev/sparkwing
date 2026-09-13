@@ -511,7 +511,27 @@ only runs on cold lookups. Concurrent hashing is capped by a memory
 budget, and a hash that waits more than 250ms for a slot is shed with
 `503` and a `Retry-After` instead of queueing.
 
+Requests that arrive while one token is being verified wait on that
+verification rather than starting one of their own, so a fleet polling
+the claim routes costs one hash per token per cache window however many
+runners poll and however often. `sparkwing_auth_token_cache_total`
+counts verifications by how the cache answered them (`hit`, `miss`,
+`coalesced`) and `sparkwing_auth_hashing_rejected_total` counts the
+hashes the memory budget shed; a climbing rejection count on ordinary
+polling means the window is too short or the budget too small.
+
+A claim or heartbeat that is answered `503` with a `Retry-After` is a
+load signal, so the runner waits the header out, capped at 30 seconds,
+and logs it at debug with at most one warning a minute. It does not
+fail the poll or the node.
+
 ## How long revocation takes to bite
+
+The verified-token cache holds an answer for 60 seconds, keyed by the
+token's public prefix and a SHA-256 of the whole credential, so the raw
+token is never held in controller memory between requests. That window
+is the outer bound on how long a revocation the replica did not serve
+takes to bite.
 
 Revoking a token, rotating one, and deleting a user all drop the
 affected prefixes from the controller replica that served the request,

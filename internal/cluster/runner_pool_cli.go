@@ -154,6 +154,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// safety: a spent credit balance persists across every poll, so the log
 	// says so once rather than twice a second until it is topped up.
 	creditsLogged := false
+	shed := newShedLog(shedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
@@ -211,6 +212,17 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 						"err", err, "source", cfg.SourceName)
 				}
 				sleepOrCancel(ctx, cfg.PollInterval)
+				continue
+			}
+			if wait, ok := unavailableBackoff(err, cfg.PollInterval); ok {
+				observeClaimOutcome("unavailable")
+				logger.Debug("claim shed by the controller; backing off",
+					"err", err, "retry_after", wait, "source", cfg.SourceName)
+				if shed.due() {
+					logger.Warn("controller is shedding claims; polling more slowly",
+						"err", err, "retry_after", wait, "source", cfg.SourceName)
+				}
+				sleepOrCancel(ctx, wait)
 				continue
 			}
 			observeClaimOutcome("error")
@@ -509,6 +521,7 @@ func runPoolHeartbeat(
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	lastOK := time.Now()
+	shed := newShedLog(shedWarnInterval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -539,6 +552,19 @@ func runPoolHeartbeat(
 					"err", err)
 				killNode()
 				return
+			}
+			if wait, ok := unavailableBackoff(err, 0); ok {
+				logger.Debug(source+" heartbeat shed by the controller; backing off",
+					"run_id", runID, "node_id", nodeID,
+					"retry_after", wait, "err", err)
+				if shed.due() {
+					logger.Warn(source+" heartbeat: controller is shedding heartbeats",
+						"run_id", runID, "node_id", nodeID,
+						"retry_after", wait, "err", err,
+						"silence", silence.Round(time.Second))
+				}
+				sleepOrCancel(ctx, wait)
+				continue
 			}
 			logger.Warn(source+" heartbeat failed",
 				"run_id", runID, "node_id", nodeID,

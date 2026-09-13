@@ -93,6 +93,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	sem := make(chan struct{}, opts.MaxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	shed := newShedLog(shedWarnInterval)
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -111,6 +112,16 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			<-sem
 			if errors.Is(err, context.Canceled) {
 				return nil
+			}
+			if wait, ok := unavailableBackoff(err, opts.Poll); ok {
+				logger.Debug("trigger loop: claim shed by the controller; backing off",
+					"err", err, "retry_after", wait)
+				if shed.due() {
+					logger.Warn("trigger loop: controller is shedding claims; polling more slowly",
+						"err", err, "retry_after", wait)
+				}
+				sleepOrCancel(ctx, wait)
+				continue
 			}
 			logger.Error("trigger loop: claim failed", "err", err)
 			sleepOrCancel(ctx, opts.Poll)
@@ -468,6 +479,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 	t := time.NewTicker(triggerHeartbeatInterval)
 	defer t.Stop()
 	lastOK := time.Now()
+	shed := newShedLog(shedWarnInterval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -497,6 +509,17 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 					"err", err)
 				killChild()
 				return triggerClaimSilenced
+			}
+			if wait, ok := unavailableBackoff(err, 0); ok {
+				logger.Debug("trigger loop: heartbeat shed by the controller; backing off",
+					"trigger_id", triggerID, "retry_after", wait, "err", err)
+				if shed.due() {
+					logger.Warn("trigger loop: controller is shedding heartbeats",
+						"trigger_id", triggerID, "retry_after", wait, "err", err,
+						"silence", silence.Round(time.Second))
+				}
+				sleepOrCancel(ctx, wait)
+				continue
 			}
 			logger.Warn("trigger loop: heartbeat failed",
 				"trigger_id", triggerID,

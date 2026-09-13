@@ -247,14 +247,14 @@ func TestInvalidate_LeavesOtherPrefixesCached(t *testing.T) {
 	}
 
 	a.Invalidate(tokA.Prefix)
-	if _, ok := a.cache.Load(rawA); ok {
+	if _, ok := a.cache.Load(authCacheKey(rawA)); ok {
 		t.Fatalf("Invalidate left the revoked prefix cached")
 	}
-	if _, ok := a.cache.Load(rawB); !ok {
+	if _, ok := a.cache.Load(authCacheKey(rawB)); !ok {
 		t.Fatalf("Invalidate dropped an unrelated prefix %q", tokB.Prefix)
 	}
 	a.Invalidate("")
-	if _, ok := a.cache.Load(rawB); !ok {
+	if _, ok := a.cache.Load(authCacheKey(rawB)); !ok {
 		t.Fatalf("Invalidate(\"\") cleared the cache")
 	}
 }

@@ -335,6 +335,7 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 	if offerPoll <= 0 || offerPoll > 500*time.Millisecond {
 		offerPoll = 500 * time.Millisecond
 	}
+	shed := newShedLog(shedWarnInterval)
 	for ctx.Err() == nil {
 		prepareCtx, cancelPrepare := context.WithTimeout(ctx, executorClaimRequestTimeout)
 		preparationSink := executionpolicy.NewPreparationSink()
@@ -343,6 +344,16 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 		cancelPrepare()
 		if err != nil {
 			if ctx.Err() == nil {
+				if wait, ok := unavailableBackoff(err, cfg.Poll); ok {
+					logger.Debug("executor claim preparation shed by the controller; backing off",
+						"err", err, "retry_after", wait, "slot", slot)
+					if shed.due() {
+						logger.Warn("controller is shedding executor claims; polling more slowly",
+							"err", err, "retry_after", wait, "slot", slot)
+					}
+					sleepOrCancel(ctx, wait)
+					continue
+				}
 				logger.Error("executor claim preparation failed", "err", err, "slot", slot)
 				sleepOrCancel(ctx, cfg.Poll)
 			}
@@ -403,6 +414,16 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 			cancelRequest()
 			if err != nil {
 				if offerCtx.Err() == nil {
+					if wait, ok := unavailableBackoff(err, offerPoll); ok {
+						logger.Debug("executor claim offer shed by the controller; backing off",
+							"err", err, "retry_after", wait, "slot", slot)
+						if shed.due() {
+							logger.Warn("controller is shedding executor claims; polling more slowly",
+								"err", err, "retry_after", wait, "slot", slot)
+						}
+						sleepOrCancel(offerCtx, wait)
+						continue
+					}
 					logger.Error("executor claim offer failed", "err", err, "slot", slot)
 					sleepOrCancel(offerCtx, offerPoll)
 				}
