@@ -91,8 +91,17 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gateContracts := sparkwing.Job(plan, "gate-contracts", &checkContractsJob{RepoDir: repoDir})
 	gateContracts.Needs(clean, validate, published, gateLineage)
 
+	// safety: the broad suite compiles the embedded dashboard, which lives in a
+	// gitignored directory a clean checkout does not carry. Producing it here rather
+	// than assuming it names the missing input instead of failing inside a test.
+	webBundle := sparkwing.Job(plan, "build-web-bundle", func(ctx context.Context) error {
+		_, err := sparkwing.Exec(ctx, "bash", sparkwing.Path("bin/build-web.sh")).Run()
+		return err
+	})
+	webBundle.Needs(clean)
+
 	gateBroad := sparkwing.Job(plan, "gate-broad", &Gate{})
-	gateBroad.Needs(clean, gateContracts)
+	gateBroad.Needs(clean, gateContracts, webBundle)
 
 	gatePreRelease := sparkwing.Job(plan, "gate-pre-release", func(ctx context.Context) error {
 		return (&PreRelease{AllowReleaseLineSelfReplace: true}).run(ctx)

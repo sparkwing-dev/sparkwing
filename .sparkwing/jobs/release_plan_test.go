@@ -259,3 +259,11 @@ func TestReleaseRefusesAnUnpublishedBranchBeforeTheExpensiveGates(t *testing.T) 
 		}
 	}
 }
+
+func TestReleasePlan_BuildsTheEmbeddedDashboardBeforeTheBroadSuite(t *testing.T) {
+	plan := releasePlan(t)
+
+	if !ancestors(t, plan, "gate-broad")["build-web-bundle"] {
+		t.Error("gate-broad must depend on build-web-bundle: the broad suite compiles the embedded dashboard, which lives in a gitignored directory, so a clean checkout fails inside a test that names neither the bundle nor the remedy")
+	}
+}
