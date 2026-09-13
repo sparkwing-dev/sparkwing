@@ -487,8 +487,12 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 			// safety: Windows holds an open handle on a process's working
 			// directory, and the exec path leaves it inside the worktree being
 			// removed.
-			if chdirErr := os.Chdir(repoRoot); chdirErr != nil {
-				slog.Warn("could not leave the temporary worktree", "path", repoRoot, "error", chdirErr)
+			if wd, wdErr := os.Getwd(); wdErr == nil {
+				if rel, relErr := filepath.Rel(temporaryDir, wd); relErr == nil && !strings.HasPrefix(rel, "..") {
+					if chdirErr := os.Chdir(repoRoot); chdirErr != nil {
+						slog.Warn("could not leave the temporary worktree", "path", repoRoot, "error", chdirErr)
+					}
+				}
 			}
 			if cleanupErr := exec.Command("git", "-C", repoRoot,
 				"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
