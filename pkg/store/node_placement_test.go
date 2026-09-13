@@ -445,3 +445,33 @@ func TestClaimPlacement_HeldPollCostsOneRead(t *testing.T) {
 		t.Fatal("a held poll claimed a node")
 	}
 }
+
+// A row whose labels will not decode carries hard requirements nobody can read,
+// so no runner takes it and the queue deadline is what fails it.
+func TestClaimPlacement_CandidateWithUndecodableLabelsIsPassedOver(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedPreferringNode(t, s, "run-1", "corrupt", nil)
+	seedPreferringNode(t, s, "run-2", "sound", nil)
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE nodes SET needs_labels = ? WHERE run_id = ? AND node_id = ?`),
+		[]byte(`{"not":"a list"`), "run-1", "corrupt",
+	); err != nil {
+		t.Fatalf("corrupt the label column: %v", err)
+	}
+
+	n, err := s.ClaimNextReadyNode(ctx, cloudRunner, "runner:cloud:1", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("claim past the undecodable row: %v", err)
+	}
+	if n.NodeID != "sound" {
+		t.Fatalf("claimed node = %q, want the row whose labels decode", n.NodeID)
+	}
+	left, err := s.GetNode(ctx, "run-1", "corrupt")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if left.Claimed {
+		t.Fatal("a row whose requirements cannot be read was claimed anyway")
+	}
+}

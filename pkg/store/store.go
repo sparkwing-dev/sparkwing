@@ -5093,7 +5093,7 @@ func (s *Store) readClaimCandidates(ctx context.Context, coordinatorID string, a
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsOrLog(rows)
 	var out []claimCandidate
 	for rows.Next() {
 		var candidate claimCandidate
@@ -5112,11 +5112,9 @@ func (s *Store) readClaimCandidates(ctx context.Context, coordinatorID string, a
 			// ready_at to run its hold from, which a bump may since have moved.
 			candidate.holdFrom = &t
 		}
-		if len(needsJSON) > 0 {
-			_ = json.Unmarshal(needsJSON, &candidate.needs)
-		}
-		if len(prefersJSON) > 0 {
-			_ = json.Unmarshal(prefersJSON, &candidate.prefers)
+		if !decodeCandidateLabels(candidate.runID, candidate.nodeID, needsJSON, &candidate.needs) ||
+			!decodeCandidateLabels(candidate.runID, candidate.nodeID, prefersJSON, &candidate.prefers) {
+			continue
 		}
 		out = append(out, candidate)
 	}
@@ -5124,6 +5122,37 @@ func (s *Store) readClaimCandidates(ctx context.Context, coordinatorID string, a
 		return nil, err
 	}
 	return out, rows.Close()
+}
+
+// safety: a rollback after a successful commit reports ErrTxDone, which is the
+// ordinary path; any other failure lost a cleanup and is worth a line.
+func rollbackOrLog(tx *storeTx) {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		slog.Warn("rolling back a store transaction failed", "err", err)
+	}
+}
+
+// safety: closes the cursor on an early return, where the caller's own Close
+// never runs; a second close after that one reports nothing.
+func closeRowsOrLog(rows *sql.Rows) {
+	if err := rows.Close(); err != nil {
+		slog.Warn("closing a store row cursor failed", "err", err)
+	}
+}
+
+// safety: the same column carries a node's hard requirements, so a row whose
+// labels will not decode is passed over rather than claimed as unconstrained.
+// It waits, and the queue deadline fails it where an operator can see it.
+func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		slog.Warn("skipping a claim candidate whose labels will not decode",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return false
+	}
+	return true
 }
 
 // safety: moves the nodes this runner's labels rule out behind the clock so
@@ -5136,7 +5165,7 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	for _, key := range keys {
 		if _, err := tx.ExecContext(
 			ctx,
@@ -5159,7 +5188,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return nil, err
 	}
