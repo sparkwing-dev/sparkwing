@@ -359,8 +359,8 @@ the controller announces along with the same probes `sparkwing configure
 profiles test` runs. The admin token is never stored. Nothing here asks you to
 edit YAML.
 
-The profile is named after the controller host - `api-sparkwing-example` above
-- unless you pass `--name`. Pass a token someone minted for you with
+The profile is named after the controller host (`api-sparkwing-example`
+above) unless you pass `--name`. Pass a token someone minted for you with
 `--token-stdin` instead of `--admin-token-stdin`. An existing profile of that
 name is replaced only with `--force`, because the token it holds stays live
 until it is revoked.
