@@ -3600,7 +3600,7 @@ for an exact pin it is a no-op.
 
 The overlay is rebuilt from the whole manifest in one pass, so
 there is no single-library update: --name is refused. To hold
-one library still, give it an exact version: in
+one library still, pin its "version:" field in
 .sparkwing/sparkwing.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Refused; update re-resolves every declared library", Group: "Input"},

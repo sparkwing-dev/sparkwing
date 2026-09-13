@@ -460,7 +460,7 @@ func runSparksUpdate(args []string) error {
 	if *name != "" {
 		return fmt.Errorf("spark update: --name is not supported. Resolution rebuilds the overlay from the whole manifest, "+
 			"so updating %q alone would drop the other libraries' resolved versions.\n"+
-			"Give it an exact version: in %s to hold it still, then run `sparkwing pipeline sparks update`", *name, path)
+			"Pin its \"version:\" field in %s to hold it still, then run `sparkwing pipeline sparks update`", *name, path)
 	}
 	ctx := context.Background()
 	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
