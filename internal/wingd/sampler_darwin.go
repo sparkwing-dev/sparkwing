@@ -79,8 +79,13 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, totalCores float64) (map[int]float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
 	if len(roots) == 0 {
+		// safety: the samples and the clock they are read against move together.
+		// Keeping either across a stretch with nothing held would leave this
+		// window open across intervals nobody was watching a tree, and holding
+		// one again would charge it that whole stretch in a single reading.
+		s.forgetSamples()
 		return nil, true
 	}
 	procs, ok := darwinProcesses()
@@ -115,12 +120,17 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, totalCores float64) (m
 		byRoot[ownerByPID[processID]] += usage
 	}
 	for root, owned := range byRoot {
-		byRoot[root] = clampCores(owned, totalCores)
+		byRoot[root] = clampCores(owned, arbitratedCores)
 	}
 	return byRoot, true
 }
 
-func (p *platformSampler) SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
+// safety: the paired path is reached through a type assertion, so a signature
+// that drifts from the interface fails no build -- it silently stops matching
+// and darwin loses the single snapshot host busy and owned must share.
+var _ pairedHostOwnedSampler = (*platformSampler)(nil)
+
+func (p *platformSampler) SampleWithOwned(roots []OwnedRoot, arbitratedCores float64) (HostStat, map[int]float64, bool, error) {
 	stat, err := sampleHost()
 	if err != nil {
 		return stat, nil, false, err
@@ -145,6 +155,7 @@ func (p *platformSampler) SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]
 		previousAt,
 		now,
 		stat.TotalCores,
+		arbitratedCores,
 	)
 	stat.BusyCores = host
 	stat.CPUMeasured = hostMeasured

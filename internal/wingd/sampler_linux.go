@@ -90,8 +90,13 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, totalCores float64) (map[int]float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
 	if len(roots) == 0 {
+		// safety: the samples and the clock they are read against move together.
+		// Keeping either across a stretch with nothing held would leave this
+		// window open across intervals nobody was watching a tree, and holding
+		// one again would charge it that whole stretch in a single reading.
+		s.forgetSamples()
 		return nil, true
 	}
 	procs, ok := linuxProcesses()
@@ -110,7 +115,7 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, totalCores float64) (m
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, now, totalCores)
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, now, arbitratedCores)
 	s.last, s.lastAt = next, now
 	return byRoot, true
 }

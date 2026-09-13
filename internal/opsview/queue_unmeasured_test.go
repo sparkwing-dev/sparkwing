@@ -194,7 +194,7 @@ func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	for _, want := range []string{
-		"external-attribution-readings\t900\n",
+		"external-attribution-samples\t900\n",
 		"external-attribution-attributed\t0\n",
 		"external-attribution-sampler-unreadable\t0\n",
 		"external-attribution-runs-without-process\t0\n",

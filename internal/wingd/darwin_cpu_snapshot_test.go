@@ -29,7 +29,7 @@ func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	host, hostMeasured, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10, 11), snapshotLastAt, snapshotNow, 8)
+	host, hostMeasured, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10, 11), snapshotLastAt, snapshotNow, 8, 8)
 
 	if !hostMeasured || math.Abs(host-3) > 0.0001 {
 		t.Fatalf("host CPU = %v, measured %v; want 3 cores", host, hostMeasured)
@@ -61,7 +61,7 @@ func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	host, hostMeasured, _, _ := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8)
+	host, hostMeasured, _, _ := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8, 8)
 
 	if !hostMeasured {
 		t.Fatal("two readings must report measured")
@@ -77,7 +77,7 @@ func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
 		t.Fatal("parse snapshot failed")
 	}
 
-	host, hostMeasured, _, ownedMeasured := darwinCPUFromSnapshot(current, nil, 0, nil, snapshotLastAt, snapshotNow, 8)
+	host, hostMeasured, _, ownedMeasured := darwinCPUFromSnapshot(current, nil, 0, nil, snapshotLastAt, snapshotNow, 8, 8)
 
 	if hostMeasured || ownedMeasured || host != 0 {
 		t.Fatalf("first tick reported host=%v measured=%v; want an unmeasured reading", host, hostMeasured)
@@ -94,7 +94,7 @@ func TestDarwinCPUSnapshotIgnoresABackwardsPID(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	host, hostMeasured, _, _ := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8)
+	host, hostMeasured, _, _ := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8, 8)
 
 	if !hostMeasured || host != 0 {
 		t.Fatalf("host CPU = %v; a PID whose CPU went backwards was recycled and carries no usable interval", host)
@@ -111,7 +111,7 @@ func TestDarwinCPUSnapshotCountsANewbornInHostCPU(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	host, hostMeasured, _, _ := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8)
+	host, hostMeasured, _, _ := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8, 8)
 
 	if !hostMeasured || math.Abs(host-2) > 0.0001 {
 		t.Fatalf("host CPU = %v, want 2: a process absent from the previous snapshot ran its 20 seconds of CPU inside this 10 second window, and leaving it out understates how busy the host was, which is the understatement that lets a run's own work exceed it",
@@ -129,7 +129,7 @@ func TestDarwinCPUSnapshotSumsEveryProcessUnderOneRoot(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8, 8)
 
 	if !ownedMeasured || math.Abs(byRoot[10]-6) > 0.0001 {
 		t.Fatalf("owned CPU by root = %v, measured %v; want the root's 1 core plus its child's 2 and grandchild's 3 summed into one tree, not the last process read",
@@ -148,7 +148,7 @@ func TestDarwinCPUSnapshotWillNotCreditCPUTheWindowCouldNotHold(t *testing.T) {
 	}
 	roots := []OwnedRoot{{PID: 10, HeldSince: snapshotNow.Add(-2 * time.Second)}}
 
-	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 2, roots, snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 2, roots, snapshotLastAt, snapshotNow, 8, 8)
 
 	if _, figure := byRoot[10]; figure {
 		t.Fatalf("owned CPU by root = %v; want no figure: an hour of CPU cannot have been run inside a two-second window, so that process joined the tree rather than starting in it and its tree's figure cannot stand",
@@ -166,7 +166,7 @@ func TestDarwinCPUSnapshotGivesAnIdleRootAZeroFigure(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8, 8)
 
 	figure, present := byRoot[10]
 	if !ownedMeasured || !present || figure != 0 {
@@ -185,7 +185,7 @@ func TestDarwinCPUSnapshotStaleParentPIDDoesNotResurrectAMissingRoot(t *testing.
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8, 8)
 
 	if len(byRoot) != 0 {
 		t.Fatalf("owned CPU by root = %v; want none: pid 10 is gone, so a survivor still naming it as its parent must not be credited to a root this daemon cannot see",
@@ -203,7 +203,7 @@ func TestDarwinCPUSnapshotCreditsNothingToARootItCannotSee(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8, 8)
 
 	if !ownedMeasured {
 		t.Fatal("measured = false; want true: the snapshot was read, and one absent root is that root's key, not the whole reading")
@@ -223,7 +223,7 @@ func TestDarwinCPUSnapshotWithNoRootsReadsTheHostAndOwnsNothing(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, nil, snapshotLastAt, snapshotNow, 8, 8)
 
 	if !ownedMeasured || len(byRoot) != 0 {
 		t.Fatalf("owned CPU = %v, measured %v; want a read that owns nothing: a daemon holding no run must not warn on every reading it takes",
@@ -241,7 +241,7 @@ func TestDarwinCPUSnapshotMissingRootCreditsNoOwnedCPU(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10), snapshotLastAt, snapshotNow, 8, 8)
 
 	if !ownedMeasured || len(byRoot) != 0 {
 		t.Fatalf("owned CPU = %v, measured %v; want a read that credits the missing root nothing rather than refusing every other root's figure",
@@ -259,7 +259,7 @@ func TestDarwinCPUSnapshotKeepsTheRootsItStillSees(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10, 20), snapshotLastAt, snapshotNow, 8)
+	_, _, byRoot, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, watchedRoots(10, 20), snapshotLastAt, snapshotNow, 8, 8)
 
 	if !ownedMeasured || math.Abs(byRoot[10]-1) > 0.0001 {
 		t.Fatalf("owned CPU by root = %v, measured %v; want root 10's measured core kept: a run that finished must not cost the daemon the measurement of the run still working",
@@ -299,7 +299,7 @@ func TestDarwinCPUSnapshotGivesNoFigureForABackwardsCounter(t *testing.T) {
 	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:03.00\n")
 	roots := []OwnedRoot{{PID: 100, HeldSince: now.Add(-time.Hour)}}
 
-	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, roots, lastAt, now, 8)
+	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, roots, lastAt, now, 8, 8)
 
 	if figure, reported := byRoot[100]; reported {
 		t.Fatalf("backwards counter reported %v cores; want no figure, because reporting zero subtracts nothing from external and admits against CPU the daemon never measured",

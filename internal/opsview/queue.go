@@ -142,7 +142,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 			key   string
 			count int64
 		}{
-			{"readings", a.Samples},
+			{"samples", a.Samples},
 			{"attributed", a.Attributed},
 			{"sampler-unreadable", a.SamplerUnreadable},
 			{"runs-without-process", a.RunsWithoutProcess},

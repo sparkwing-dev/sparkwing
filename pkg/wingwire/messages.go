@@ -463,7 +463,10 @@ type ExternalAttribution struct {
 	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
 	// Attributed is how many readings located every holding run's CPU and
 	// subtracted it, which is the condition the other counts are absences
-	// of. It is carried rather than left to be worked out by subtraction,
+	// of. A reading taken while nothing was holding counts here too, having no
+	// run to miss, so this over Samples is the share of readings that charged
+	// nothing to the machine rather than a score for the sampler on a busy
+	// box. It is carried rather than left to be worked out by subtraction,
 	// because a later daemon may count a cause this build has no field for
 	// and a subtraction would then report those readings as clean.
 	Attributed int64 `json:"attributed"`

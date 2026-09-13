@@ -87,17 +87,17 @@ type OwnedCPUSampler interface {
 	// says the table was read and every root in it was individually
 	// unreadable, which is counted as a different fault.
 	//
-	// totalCores is the capacity admission divides up, which is a container's
-	// limit where one is set below the machine's. Bound a figure the sampler
-	// cannot otherwise justify against it rather than against the machine,
-	// since cores above it are not the daemon's to hand out.
+	// arbitratedCores is the capacity these runs physically execute on: a
+	// cgroup limit where one caps them below the machine's core count, and the
+	// machine's otherwise. Bound a figure the sampler cannot otherwise justify
+	// against it, because no tree under that limit can have run more.
 	//
 	// A process the sampler has no previous reading for has run all of its
 	// CPU since the reading before this one, so its whole total belongs to
 	// this window rather than to no window at all. Where the sampler has no
 	// previous reading for the root either, HeldSince bounds that window
 	// instead; a zero HeldSince bounds nothing, and the root goes unmeasured.
-	CPUUsage(roots []OwnedRoot, totalCores float64) (byRoot map[int]float64, measured bool)
+	CPUUsage(roots []OwnedRoot, arbitratedCores float64) (byRoot map[int]float64, measured bool)
 }
 
 type ownedProcSampler struct {
@@ -111,8 +111,8 @@ func newOwnedCPUSampler() *ownedProcSampler {
 	return &ownedProcSampler{last: map[processIdentity]cpuSample{}}
 }
 
-func (s *ownedProcSampler) CPUUsage(roots []OwnedRoot, totalCores float64) (map[int]float64, bool) {
-	return s.sampleOwned(roots, totalCores)
+func (s *ownedProcSampler) CPUUsage(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
+	return s.sampleOwned(roots, arbitratedCores)
 }
 
 func newProcSampler() *procSampler {
@@ -194,6 +194,15 @@ func ownedProcessOwners(roots []OwnedRoot, processes map[int]ownedProcess) map[p
 	return owners
 }
 
+// forgetSamples drops what the sampler measured and moves its clock to now, so
+// the next reading it takes is measured against the moment it resumed rather
+// than against a reading taken before a stretch it sat out.
+func (s *ownedProcSampler) forgetSamples() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last, s.lastAt = nil, time.Now()
+}
+
 func ownedCPUByRoot(
 	previous map[processIdentity]cpuSample,
 	processes map[int]ownedProcess,
@@ -201,9 +210,16 @@ func ownedCPUByRoot(
 	roots []OwnedRoot,
 	lastAt time.Time,
 	now time.Time,
-	totalCores float64,
+	arbitratedCores float64,
 ) (map[int]float64, map[processIdentity]cpuSample) {
-	window := now.Sub(lastAt).Seconds()
+	// safety: with no reading behind it there is no window, and a process's
+	// counter says nothing about when its CPU ran. Leaving the window at zero
+	// is what sends such a root out of the map rather than crediting it a
+	// figure measured against the daemon's own start.
+	window := 0.0
+	if !lastAt.IsZero() {
+		window = now.Sub(lastAt).Seconds()
+	}
 	creditable := creditableRoots(previous, processes, roots, lastAt, now)
 	next := make(map[processIdentity]cpuSample, len(owners))
 	byRoot := make(map[int]float64, len(owners))
@@ -217,7 +233,7 @@ func ownedCPUByRoot(
 		if _, ok := creditable[root]; !ok {
 			continue
 		}
-		prior, seen := usableBaseline(previous, identity, lastAt)
+		prior, seen := previous[identity]
 		if !seen {
 			firstSight[root] += process.cpuSeconds
 			continue
@@ -235,7 +251,7 @@ func ownedCPUByRoot(
 		byRoot[root] += delta / wall
 	}
 	for root, cpuSeconds := range firstSight {
-		credit, ok := firstSightCredit(cpuSeconds, window, totalCores)
+		credit, ok := firstSightCredit(cpuSeconds, window, arbitratedCores)
 		if !ok {
 			delete(byRoot, root)
 			continue
@@ -283,7 +299,7 @@ func creditableRoots(
 		if !ok {
 			continue
 		}
-		if _, based := usableBaseline(previous, process.identity, lastAt); based {
+		if _, based := previous[process.identity]; based {
 			creditable[root.PID] = struct{}{}
 			continue
 		}
@@ -297,28 +313,12 @@ func creditableRoots(
 	return creditable
 }
 
-// usableBaseline reports the reading a rate can be measured from, which is one
-// taken when this window opened. An older reading spans intervals nobody was
-// watching the tree, so a rate drawn from it charges this window for CPU that
-// ran outside it.
-func usableBaseline(
-	previous map[processIdentity]cpuSample,
-	identity processIdentity,
-	lastAt time.Time,
-) (cpuSample, bool) {
-	prior, seen := previous[identity]
-	if !seen || prior.at.Before(lastAt) {
-		return cpuSample{}, false
-	}
-	return prior, true
-}
-
-func firstSightCredit(cpuSeconds, window, totalCores float64) (float64, bool) {
+func firstSightCredit(cpuSeconds, window, arbitratedCores float64) (float64, bool) {
 	// safety: processes first seen in one tree ran all their CPU inside this window,
 	// so the whole total belongs here. More than the window could hold proves some of
 	// it predates the window, and nothing here can say how much, so the tree's figure
 	// cannot stand. The ceiling is the capacity admission arbitrates, not the host's.
-	if window <= 0 || totalCores <= 0 || cpuSeconds > window*totalCores {
+	if window <= 0 || arbitratedCores <= 0 || cpuSeconds > window*arbitratedCores {
 		return 0, false
 	}
 	return cpuSeconds / window, true
@@ -409,7 +409,8 @@ func darwinCPUFromSnapshot(
 	roots []OwnedRoot,
 	lastAt time.Time,
 	now time.Time,
-	totalCores float64,
+	machineCores float64,
+	arbitratedCores float64,
 ) (float64, bool, map[int]float64, bool) {
 	if len(processes) == 0 || len(previous) == 0 || elapsedSeconds <= 0 {
 		return 0, false, nil, false
@@ -427,7 +428,7 @@ func darwinCPUFromSnapshot(
 			// safety: a process the previous snapshot did not carry ran its CPU inside
 			// this window, so the host ran it too. Counting it in owned and not in host
 			// would let a run's own work exceed the machine's and drive external to zero.
-			if credit, ok := firstSightCredit(process.cpuSeconds, elapsedSeconds, totalCores); ok {
+			if credit, ok := firstSightCredit(process.cpuSeconds, elapsedSeconds, machineCores); ok {
 				firstSeen[processID] = credit
 				host += credit
 			}
@@ -442,7 +443,7 @@ func darwinCPUFromSnapshot(
 		fractions[processID] = fraction
 		host += fraction
 	}
-	host = clampCores(host, totalCores)
+	host = clampCores(host, machineCores)
 	if len(roots) == 0 {
 		return host, true, nil, true
 	}
@@ -498,7 +499,7 @@ func darwinCPUFromSnapshot(
 		delete(byRoot, root)
 	}
 	for root, owned := range byRoot {
-		byRoot[root] = clampCores(owned, totalCores)
+		byRoot[root] = clampCores(owned, arbitratedCores)
 	}
 	return host, true, byRoot, true
 }

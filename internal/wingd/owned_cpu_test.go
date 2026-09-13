@@ -294,23 +294,37 @@ func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
 	}
 }
 
-func TestOwnedCPU_ABaselineFromBeforeThisWindowIsNotARate(t *testing.T) {
-	lastAt := time.Unix(200, 0)
-	now := lastAt.Add(10 * time.Second)
+func TestOwnedCPU_ARootFirstSeenWithNoReadingBehindItGetsNoFigure(t *testing.T) {
+	now := time.Unix(200, 0)
 	identity := processIdentity{pid: 10, startTicks: 1000}
-	// The reading predates the window by a minute, so the CPU between the two
-	// figures covers intervals nobody was watching this tree.
-	previous := map[processIdentity]cpuSample{
-		identity: {cpuSeconds: 5, at: lastAt.Add(-time.Minute)},
-	}
 	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 305}}
-	held := []OwnedRoot{{PID: 10, HeldSince: lastAt.Add(-time.Hour)}}
+	held := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Hour)}}
 
+	// A zero lastAt is what a sampler that has taken no reading carries.
 	byRoot, _ := ownedCPUByRoot(
-		previous, processes, ownedProcessOwners(held, processes), held, lastAt, now, 8)
+		nil, processes, ownedProcessOwners(held, processes), held, time.Time{}, now, 8)
 
-	if _, figure := byRoot[10]; figure {
-		t.Fatalf("stale baseline produced a figure of %v cores; want none, because a rate drawn from it charges this window for CPU that ran outside it",
-			byRoot[10])
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("root reported %v cores against no previous reading; want no figure, because the counter says nothing about when that CPU ran",
+			figure)
+	}
+}
+
+func TestOwnedProcSampler_ForgettingSamplesStopsAGapBecomingARate(t *testing.T) {
+	sampler := &ownedProcSampler{}
+	identity := processIdentity{pid: 10, startTicks: 1000}
+	firstAt := time.Now().Add(-time.Hour)
+	sampler.last = map[processIdentity]cpuSample{identity: {cpuSeconds: 0, at: firstAt}}
+	sampler.lastAt = firstAt
+
+	// Nothing is held, which is the reading that froze the clock with the samples.
+	sampler.forgetSamples()
+
+	if sampler.last != nil {
+		t.Error("samples survived a reading with nothing held, so a later rate can still span the gap")
+	}
+	if !sampler.lastAt.After(firstAt) {
+		t.Fatalf("sampler clock stayed at %v; want it moved to the idle reading, because a window measured from before the gap charges a run the whole stretch nobody held it",
+			sampler.lastAt)
 	}
 }
