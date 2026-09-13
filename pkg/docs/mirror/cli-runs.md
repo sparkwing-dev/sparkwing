@@ -245,6 +245,11 @@ needs the same idempotency a restarted pod already demands.
 A job that finishes before the stop lands is left alone. Bouncing
 again is allowed -- one request is one restart.
 
+The local runner is what acts on the request, whether the run's state
+lives here or on a controller. A job the in-cluster Kubernetes runner
+executes records the request and nothing consumes it, so the job keeps
+running; cancel the run and retry it instead.
+
 ### Flags
 
 | Flag | Description |
@@ -258,10 +263,10 @@ again is allowed -- one request is one restart.
 ### Examples
 
 ```sh
-# Bounce a wedged job in a local run
+# Bounce a wedged job
 sparkwing runs bounce --run run-fictional --node build
 
-# Bounce a job in a cluster run
+# Bounce a job in a run a controller holds
 sparkwing runs bounce --run run-fictional --node build --profile prod
 ```
 

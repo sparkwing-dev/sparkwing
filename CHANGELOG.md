@@ -101,6 +101,11 @@ unlock.
 
 ### Docs
 
+- **runs bounce:** The reference page no longer implies a bounce reaches a job
+  the in-cluster Kubernetes runner executes. The local runner is the only one
+  that consumes a pending bounce, whether the run's state lives locally or on a
+  controller; a job running as a Kubernetes Job keeps running and the page now
+  says to cancel and retry instead.
 - **getting-started:** The hand-placed download recipe no longer offers
   `SHA256SUMS` on its own as verification. That file travels from the same
   origin as the binary, so comparing them shows only that the transfer
