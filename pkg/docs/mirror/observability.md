@@ -459,6 +459,7 @@ no change. Set the ceilings on the controller:
 | `--warn-bucket-bytes` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | Stored bytes at which health reports a warning |
 | `--warn-bucket-objects` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | Objects at which health reports a warning |
 | `--bucket-reconcile` | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | Gap between bucket measurements, hourly by default |
+| `--bucket-store` | `SPARKWING_OBJECT_STORE_URL` | Store URL the measurement reads, such as `s3://bucket/prefix` |
 
 Counting costs nothing per request. Every write the process sends adds
 its own bytes to a running total, and the controller replaces that total
@@ -467,8 +468,12 @@ count drifts: an overwrite counts its key twice and a delete cannot know
 what it removed. The measurement is one paginated listing of the
 artifact store, which object stores bill per thousand keys, so an
 install that wants the ceiling without the listing sets
-`--bucket-reconcile 0` and accepts the drift. A backend that cannot
-total itself leaves the running count in place.
+`--bucket-reconcile 0` and accepts the drift. `--bucket-store` names the
+store the measurement reads; the controller reads it on the interval and
+serves none of it, and a controller pointed at no store, or at a backend
+that cannot total itself, keeps the running count. The running count
+starts at zero on restart, so a controller with no measurement source
+sees only what it has written since it started.
 
 `GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
 `warning` alone, because that route answers without a token; the totals

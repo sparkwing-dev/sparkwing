@@ -107,7 +107,8 @@ spec:
                   (dict "flag" "--max-bucket-objects" "value" $bucket.maxObjects)
                   (dict "flag" "--warn-bucket-bytes" "value" $bucket.warnBytes)
                   (dict "flag" "--warn-bucket-objects" "value" $bucket.warnObjects)
-                  (dict "flag" "--bucket-reconcile" "value" $bucket.reconcile) }}
+                  (dict "flag" "--bucket-reconcile" "value" $bucket.reconcile)
+                  (dict "flag" "--bucket-store" "value" $bucket.store) }}
             {{- $value := $limit.value }}
             {{- if not (kindIs "invalid" $value) }}
             {{- if ne (toString $value) "" }}
@@ -188,7 +189,8 @@ spec:
                   (dict "flag" "--max-bucket-objects" "value" $bucket.maxObjects)
                   (dict "flag" "--warn-bucket-bytes" "value" $bucket.warnBytes)
                   (dict "flag" "--warn-bucket-objects" "value" $bucket.warnObjects)
-                  (dict "flag" "--bucket-reconcile" "value" $bucket.reconcile) }}
+                  (dict "flag" "--bucket-reconcile" "value" $bucket.reconcile)
+                  (dict "flag" "--bucket-store" "value" $bucket.store) }}
             {{- $value := $limit.value }}
             {{- if not (kindIs "invalid" $value) }}
             {{- if ne (toString $value) "" }}

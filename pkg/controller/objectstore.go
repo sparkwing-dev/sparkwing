@@ -120,10 +120,14 @@ func objectStoreHealth() (map[string]any, []string) {
 // safety: a backend that cannot total itself reports false rather than zero, so
 // an unmeasurable store never reads as an empty bucket.
 func (s *Server) bucketUsage(ctx context.Context) (objectguard.Usage, bool, error) {
-	if s.artifactStore == nil {
+	measured := s.bucketUsageStore
+	if measured == nil {
+		measured = s.artifactStore
+	}
+	if measured == nil {
 		return objectguard.Usage{}, false, nil
 	}
-	u, ok, err := storage.Usage(ctx, s.artifactStore)
+	u, ok, err := storage.Usage(ctx, measured)
 	if err != nil || !ok {
 		return objectguard.Usage{}, ok, err
 	}

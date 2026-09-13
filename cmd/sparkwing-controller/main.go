@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -139,6 +140,11 @@ func run(args []string) error {
 	warnBucketObjects := fs.Int64("warn-bucket-objects", ceilingDefaults.Ceiling.Limit.WarnObjects,
 		"objects at which health reports the bucket as warning; 0 disables the warning "+
 			"(env: SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS)")
+	bucketStoreURL := fs.String("bucket-store", os.Getenv("SPARKWING_OBJECT_STORE_URL"),
+		"object store the bucket ceiling measures, as a store URL such as "+
+			"s3://bucket/prefix. It is read on the reconciliation interval and never "+
+			"served, so the controller exposes none of it. Empty counts only the writes "+
+			"this process makes (env: SPARKWING_OBJECT_STORE_URL)")
 	bucketReconcile := fs.Duration("bucket-reconcile", ceilingDefaults.Ceiling.Reconcile,
 		"how often the controller measures the whole bucket and replaces the running "+
 			"count with the measurement. Writes are counted as they happen, so this "+
@@ -265,6 +271,13 @@ func run(args []string) error {
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
+	}
+	if *bucketStoreURL != "" {
+		bucketStore, berr := storeurl.OpenArtifactStore(ctx, *bucketStoreURL)
+		if berr != nil {
+			return fmt.Errorf("--bucket-store: %w", berr)
+		}
+		srv = srv.WithBucketUsage(bucketStore)
 	}
 	if *requireAuth && !srv.AuthEnabled() {
 		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +

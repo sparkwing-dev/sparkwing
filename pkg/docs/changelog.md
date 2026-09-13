@@ -36,7 +36,10 @@ unlock.
   and replaces the running total with one paginated listing of the
   artifact store every `--bucket-reconcile` (env
   `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE`, hourly; `0` measures only at
-  startup), so nothing lists the bucket per request. `GET
+  startup), so nothing lists the bucket per request. `--bucket-store`
+  (env `SPARKWING_OBJECT_STORE_URL`) names the store that listing reads,
+  such as `s3://bucket/prefix`; the controller reads it on the interval
+  and serves none of it. `GET
   /api/v1/health` reports `object_store.ceiling` as `frozen` and
   `warning`; `GET /api/v1/object-store/breaker` and `sparkwing cluster
   object-store status` carry the totals and the ceilings, and `sparkwing

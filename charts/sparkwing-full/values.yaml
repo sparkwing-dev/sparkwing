@@ -129,6 +129,10 @@ controller:
     # Gap between bucket measurements (default 1h); "0" measures once at
     # startup and then relies on the running count.
     reconcile: ""
+    # Object store the ceiling measures, as a store URL such as
+    # s3://bucket/prefix. Read on the interval above and never served.
+    # Empty counts only the writes the controller itself makes.
+    store: ""
 
   cache:
     # Which sparkwing-cache the controller's gitcache proxy forwards
