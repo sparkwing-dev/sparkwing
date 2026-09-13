@@ -125,6 +125,9 @@ func renderObjectStoreCeiling(c client.ObjectStoreCeiling, thawed bool) {
 	if c.Frozen {
 		fmt.Printf("ceiling frozen on %s since %s\n", c.FrozenReason, c.FrozenAt.Format(time.RFC3339))
 	}
+	if c.Thawed {
+		fmt.Println("ceiling thawed: the freeze is held off until the next measurement")
+	}
 	if !c.ReconciledAt.IsZero() {
 		fmt.Printf("ceiling measured at %s every %s\n", c.ReconciledAt.Format(time.RFC3339), c.Reconcile)
 	}

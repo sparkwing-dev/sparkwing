@@ -238,17 +238,11 @@ func New(cfg Config) *Limiter {
 // its request budgets.
 func (l *Limiter) Ceiling() *Ceiling { return l.ceiling }
 
-// RecordWrite folds one completed request into the bucket ceiling's
-// incremental counters. A write adds its bytes and its object; a
-// deletion gives the object back and leaves the bytes for the next
-// reconciliation to correct.
-func (l *Limiter) RecordWrite(c Class, bytes int64) {
-	switch c {
-	case ClassPut:
-		l.ceiling.Record(bytes, 1)
-	case ClassDelete:
-		l.ceiling.Record(0, -1)
-	}
+// RecordWrite folds one completed object-store operation into the
+// bucket ceiling's incremental counters, by the operation name the SDK
+// uses. See [WriteDelta] for what each operation counts.
+func (l *Limiter) RecordWrite(operation string, bytes int64) {
+	l.ceiling.Record(WriteDelta(operation, bytes))
 }
 
 // Allow records one request of class c and reports whether it may

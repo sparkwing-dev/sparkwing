@@ -46,9 +46,34 @@ func (m *budgetMiddleware) HandleFinalize(
 	}
 	out, metadata, err := next.HandleFinalize(ctx, in)
 	if err == nil {
-		m.limiter.RecordWrite(class, requestBodyBytes(in))
+		bytes, objects := WriteDelta(awsmiddleware.GetOperationName(ctx), requestBodyBytes(in))
+		m.limiter.Ceiling().Record(bytes, objects)
 	}
 	return out, metadata, err
+}
+
+// WriteDelta reports what one completed request added to the bucket:
+// the bytes it stored and the objects it created or removed.
+//
+// A multipart upload carries its bytes on the parts and its object on
+// the completion, so an upload of N parts counts its bytes once and its
+// key once. An abort removes no completed object, so it counts nothing
+// and the parts it discards are corrected by the next measurement.
+func WriteDelta(operation string, contentLength int64) (bytes, objects int64) {
+	switch operation {
+	case "PutObject":
+		return contentLength, 1
+	case "UploadPart":
+		return contentLength, 0
+	case "CompleteMultipartUpload":
+		return 0, 1
+	case "CopyObject", "UploadPartCopy":
+		return 0, 1
+	case "DeleteObject", "DeleteObjects":
+		return 0, -1
+	default:
+		return 0, 0
+	}
 }
 
 // perf: the bucket total grows by what this attempt carried, so the ceiling
@@ -70,7 +95,7 @@ func ClassForOperation(operation string) Class {
 		return ClassGet
 	case "ListObjectsV2", "ListObjects", "ListBuckets", "ListMultipartUploads", "ListParts":
 		return ClassList
-	case "DeleteObject", "DeleteObjects":
+	case "DeleteObject", "DeleteObjects", "AbortMultipartUpload":
 		return ClassDelete
 	default:
 		return ClassPut

@@ -107,7 +107,7 @@ func TestCeilingThawsWhenAMeasurementFallsBackUnder(t *testing.T) {
 func TestCeilingThawIsManualAndRefreezesOnTheNextMeasurement(t *testing.T) {
 	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxObjects: 2})
 	c := l.Ceiling()
-	c.Record(1, 5)
+	c.Observe(objectguard.Usage{Bytes: 1, Objects: 5})
 
 	if !c.Thaw() {
 		t.Fatal("Thaw reports nothing was frozen on a frozen bucket")
@@ -155,10 +155,10 @@ func TestCeilingCountsRefusals(t *testing.T) {
 
 func TestRecordWriteCountsPutsAndGivesObjectsBackOnDelete(t *testing.T) {
 	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxObjects: 100})
-	l.RecordWrite(objectguard.ClassPut, 512)
-	l.RecordWrite(objectguard.ClassPut, 512)
-	l.RecordWrite(objectguard.ClassDelete, 0)
-	l.RecordWrite(objectguard.ClassGet, 4096)
+	l.RecordWrite("PutObject", 512)
+	l.RecordWrite("PutObject", 512)
+	l.RecordWrite("DeleteObject", 0)
+	l.RecordWrite("GetObject", 4096)
 
 	state := l.State().Ceiling
 	if state.Bytes != 1024 {
@@ -166,6 +166,68 @@ func TestRecordWriteCountsPutsAndGivesObjectsBackOnDelete(t *testing.T) {
 	}
 	if state.Objects != 1 {
 		t.Errorf("bucket objects = %d after two writes and one delete, want 1", state.Objects)
+	}
+}
+
+func TestRecordWriteCountsOneMultipartUploadOnce(t *testing.T) {
+	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxObjects: 100})
+	l.RecordWrite("CreateMultipartUpload", 0)
+	for range 4 {
+		l.RecordWrite("UploadPart", 1<<20)
+	}
+	l.RecordWrite("CompleteMultipartUpload", 0)
+
+	state := l.State().Ceiling
+	if state.Objects != 1 {
+		t.Errorf("a four-part upload counted %d objects, want 1", state.Objects)
+	}
+	if state.Bytes != 4<<20 {
+		t.Errorf("a four-part upload counted %d bytes, want %d", state.Bytes, 4<<20)
+	}
+}
+
+func TestAbortedMultipartUploadIsAllowedWhileFrozenAndCountsNothing(t *testing.T) {
+	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxBytes: 100})
+	l.Ceiling().Observe(objectguard.Usage{Bytes: 4096, Objects: 2})
+
+	if got := objectguard.ClassForOperation("AbortMultipartUpload"); got != objectguard.ClassDelete {
+		t.Errorf("AbortMultipartUpload bills as %q, want the delete class so a frozen bucket can be cleaned up", got)
+	}
+	if err := l.Allow(objectguard.ClassForOperation("AbortMultipartUpload")); err != nil {
+		t.Fatalf("a frozen bucket refused an aborted upload: %v", err)
+	}
+	before := l.State().Ceiling
+	l.RecordWrite("AbortMultipartUpload", 0)
+	if after := l.State().Ceiling; after.Objects != before.Objects || after.Bytes != before.Bytes {
+		t.Errorf("an abort changed the bucket total from %d/%d to %d/%d",
+			before.Bytes, before.Objects, after.Bytes, after.Objects)
+	}
+}
+
+func TestThawHoldsUntilTheNextMeasurement(t *testing.T) {
+	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxBytes: 1000})
+	c := l.Ceiling()
+	c.Observe(objectguard.Usage{Bytes: 4096, Objects: 2})
+	if !c.Thaw() {
+		t.Fatal("Thaw reports nothing was frozen on a frozen bucket")
+	}
+
+	for range 5 {
+		if err := l.Allow(objectguard.ClassPut); err != nil {
+			t.Fatalf("a thawed bucket refused a write: %v", err)
+		}
+		l.RecordWrite("PutObject", 4096)
+	}
+	if !c.State().Thawed {
+		t.Error("the ceiling stopped reporting the thaw while it was still holding")
+	}
+
+	c.Observe(objectguard.Usage{Bytes: 24576, Objects: 7})
+	if !c.Frozen() {
+		t.Fatal("the measurement after a thaw left a bucket over its ceiling writable")
+	}
+	if c.State().Thawed {
+		t.Error("the ceiling still reports a thaw after the measurement that ended it")
 	}
 }
 
@@ -234,6 +296,21 @@ func TestCeilingConfigFromEnv(t *testing.T) {
 	}
 	if cfg.Ceiling.Reconcile != 15*time.Minute {
 		t.Errorf("reconcile interval = %s, want 15m", cfg.Ceiling.Reconcile)
+	}
+}
+
+func TestCeilingReconcileEnvZeroMeansMeasureOnce(t *testing.T) {
+	cfg, err := objectguard.ConfigFromEnv(envFrom(map[string]string{
+		"SPARKWING_OBJECT_STORE_BUCKET_RECONCILE": "0",
+	}))
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
+	}
+	if cfg.Ceiling.Reconcile != 0 {
+		t.Errorf("reconcile interval = %s for an environment asking for one measurement, want 0", cfg.Ceiling.Reconcile)
+	}
+	if got := objectguard.NewCeiling(cfg.Ceiling).Reconcile(); got != 0 {
+		t.Errorf("the ceiling reports %s, want the 0 it was configured with", got)
 	}
 }
 

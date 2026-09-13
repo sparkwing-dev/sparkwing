@@ -203,8 +203,8 @@ func TestBudgetRefusesAWriteAboveTheCeilingBeforeItReachesTheBucket(t *testing.T
 	if err == nil {
 		t.Fatal("a write above the bucket ceiling reached the store")
 	}
-	if !strings.Contains(err.Error(), "bucket ceiling") {
-		t.Errorf("refusal %q does not name the bucket ceiling", err)
+	if !strings.Contains(err.Error(), "storage ceiling reached") {
+		t.Errorf("refusal %q does not name the storage ceiling", err)
 	}
 	if got := hits.Load(); got != 0 {
 		t.Errorf("the refused write still sent %d requests to the bucket", got)

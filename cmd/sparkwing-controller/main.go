@@ -127,12 +127,12 @@ func run(args []string) error {
 		return cerr
 	}
 	maxBucketBytes := fs.Int64("max-bucket-bytes", ceilingDefaults.Ceiling.Limit.MaxBytes,
-		"stored bytes across the whole object store above which the controller freezes "+
+		"stored bytes across the whole object store at or above which the controller freezes "+
 			"object writes: existing runs finish, new writes are refused naming the ceiling, "+
 			"and health reports the freeze. 0, the default, leaves the bucket unlimited "+
 			"(env: SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES)")
 	maxBucketObjects := fs.Int64("max-bucket-objects", ceilingDefaults.Ceiling.Limit.MaxObjects,
-		"objects across the whole object store above which the controller freezes object "+
+		"objects across the whole object store at or above which the controller freezes object "+
 			"writes; 0 leaves the count unlimited (env: SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS)")
 	warnBucketBytes := fs.Int64("warn-bucket-bytes", ceilingDefaults.Ceiling.Limit.WarnBytes,
 		"stored bytes at which health reports the bucket as warning, which refuses nothing; "+
@@ -273,7 +273,7 @@ func run(args []string) error {
 		srv = srv.WithSecretsCipher(cipher)
 	}
 	if *bucketStoreURL != "" {
-		bucketStore, berr := storeurl.OpenArtifactStore(ctx, *bucketStoreURL)
+		bucketStore, berr := storeurl.OpenMeasurementStore(ctx, *bucketStoreURL)
 		if berr != nil {
 			return fmt.Errorf("--bucket-store: %w", berr)
 		}
@@ -473,9 +473,6 @@ func applyBucketCeiling(cfg objectguard.CeilingConfig) error {
 	}
 	if cfg.Reconcile < 0 {
 		return fmt.Errorf("--bucket-reconcile must not be negative; pass 0 to measure the bucket only at startup")
-	}
-	if cfg.Reconcile == 0 {
-		cfg.Reconcile = -1
 	}
 	limiter, err := objectguard.Shared()
 	if err != nil {

@@ -35,11 +35,12 @@ type ObjectStoreCeiling struct {
 	WarnObjects  int64     `json:"warn_objects"`
 	Bytes        int64     `json:"bytes"`
 	Objects      int64     `json:"objects"`
-	MeasuredAt   time.Time `json:"measured_at,omitzero"`
+	CountedAt    time.Time `json:"counted_at,omitzero"`
 	ReconciledAt time.Time `json:"reconciled_at,omitzero"`
 	Reconcile    string    `json:"reconcile_interval,omitempty"`
 	Warning      bool      `json:"warning"`
 	Frozen       bool      `json:"frozen"`
+	Thawed       bool      `json:"thawed"`
 	FrozenAt     time.Time `json:"frozen_at,omitzero"`
 	FrozenReason string    `json:"frozen_reason,omitempty"`
 	Freezes      uint64    `json:"freezes_total"`

@@ -37,7 +37,8 @@ const (
 	// EnvWarnBucketObjects marks the bucket as warning at this many
 	// objects, which refuses nothing.
 	EnvWarnBucketObjects = EnvPrefix + "WARN_BUCKET_OBJECTS"
-	// EnvBucketReconcile is the gap between measured bucket totals.
+	// EnvBucketReconcile is the gap between measured bucket totals. "0"
+	// measures once at startup and then not again.
 	EnvBucketReconcile = EnvPrefix + "BUCKET_RECONCILE"
 )
 
@@ -106,11 +107,8 @@ func ceilingFromEnv(getenv func(string) string) (CeilingConfig, error) {
 		return cfg, nil
 	}
 	d, parseErr := time.ParseDuration(raw)
-	if parseErr != nil {
-		return CeilingConfig{}, fmt.Errorf("%s=%q: want a duration such as 1h or 30m, or 0 to measure the bucket only on demand", EnvBucketReconcile, raw)
-	}
-	if d == 0 {
-		d = -1
+	if parseErr != nil || d < 0 {
+		return CeilingConfig{}, fmt.Errorf("%s=%q: want a duration such as 1h or 30m, or 0 to measure the bucket once at startup", EnvBucketReconcile, raw)
 	}
 	cfg.Reconcile = d
 	return cfg, nil
