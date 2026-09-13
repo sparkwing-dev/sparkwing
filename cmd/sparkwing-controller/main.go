@@ -99,6 +99,18 @@ func run(args []string) error {
 	liveLogIdle := fs.Duration("live-log-idle", controller.DefaultLiveLogIdleTimeout,
 		"how long a node that stopped writing without reporting that it finished "+
 			"keeps its live log buffer.")
+	defaultPreferLabels := fs.String("default-prefer-labels", os.Getenv("SPARKWING_DEFAULT_PREFER_LABELS"),
+		"comma-separated label terms a node with no Prefers of its own prefers "+
+			"its runner to advertise, in the Prefers term syntax. Empty leaves "+
+			"such a node to the first claimant (env: SPARKWING_DEFAULT_PREFER_LABELS)")
+	placementHold := fs.Duration("placement-hold", 20*time.Second,
+		"how long a node is held back from a claim-mode runner that does not "+
+			"advertise its preference, measured from the node's ready time, while "+
+			"a runner that does advertise it is live and has a slot. Zero claims "+
+			"first-in-first-out regardless of preference.")
+	placementLiveness := fs.Duration("placement-liveness", 30*time.Second,
+		"how recently a claim-mode runner must have polled for a claim to count "+
+			"as live for the hold above")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -202,7 +214,8 @@ func run(args []string) error {
 		WithLogsURL(*logsURL).
 		WithCacheURL(*cacheURL).
 		WithMetricsAddr(*metricsAddr).
-		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle)
+		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
+		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
@@ -271,6 +284,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func envTruthy(name string) bool {

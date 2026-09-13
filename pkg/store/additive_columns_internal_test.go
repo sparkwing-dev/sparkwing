@@ -44,6 +44,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v35 adds two tables nothing older reads, plus two defaulted
 	// columns, so an older binary keeps writing the migrated database.
 	35: {tokensMeteredCols, nodesCreditCols},
+	36: {nodePlacementCols, nodePlacementColsPostgres},
 }
 
 func columnSpecMaps() []map[string]string {

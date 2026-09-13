@@ -55,7 +55,8 @@ type PoolLoopConfig struct {
 }
 
 type nodeClaimer interface {
-	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
+	ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration,
+		headroom *client.Headroom, capacity *client.ClaimCapacity) (*store.Node, error)
 }
 
 type executorNodeClaimer interface {
@@ -190,7 +191,10 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			sleepOrCancel(ctx, cfg.PollInterval)
 			continue
 		}
-		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, report.headroom)
+		// safety: the loop holds one slot for the claim it is about to make, so
+		// the nodes already executing are the rest of what it holds.
+		capacity := &client.ClaimCapacity{MaxConcurrent: cfg.MaxConcurrent, ActiveClaims: max(len(sem)-1, 0)}
+		n, err := claimer.ClaimNodeWithCapacity(ctx, holderID, cfg.Labels, cfg.Lease, report.headroom, capacity)
 		if err != nil {
 			<-sem
 			if sharedSlots != nil {

@@ -70,7 +70,9 @@ type Server struct {
 
 	runnerHeadroom *runnerHeadroomRegistry
 
-	liveLogs *liveLogs
+	liveLogs       *liveLogs
+	runnerPresence *runnerPresenceRegistry
+	placement      placementPolicy
 
 	assistedRunID string
 	draining      atomic.Bool
@@ -179,8 +181,28 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
 		liveLogs:            newLiveLogs(),
+		runnerPresence:      newRunnerPresenceRegistry(),
 		cronHolder:          defaultCronHolder(),
 	}
+}
+
+type placementPolicy struct {
+	defaultPrefers []string
+	hold           time.Duration
+	liveness       time.Duration
+}
+
+// WithLocalFirstPlacement holds a node back from a legacy claim-mode runner
+// that does not advertise the node's Prefers, for hold measured from the node's
+// ready time, while another runner that does advertise it has polled within
+// liveness and has a free slot. After the hold any eligible runner takes the
+// node. defaultPrefers applies to nodes whose plan declares no Prefers of their
+// own; empty leaves those nodes to the first claimant. A hold of zero or less
+// disables the rule, which is the first-in-first-out behavior of a controller
+// that never calls this.
+func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server {
+	s.placement = placementPolicy{defaultPrefers: defaultPrefers, hold: hold, liveness: liveness}
+	return s
 }
 
 // WithSessionMaxLifetime caps how long a browser session lives from the

@@ -1372,6 +1372,7 @@ type claimNodeReq struct {
 	LeaseSecs      int             `json:"lease_secs,omitempty"`
 	Labels         []string        `json:"labels,omitempty"`
 	Headroom       *claimHeadroom  `json:"headroom,omitempty"`
+	Capacity       *claimCapacity  `json:"capacity,omitempty"`
 	Binding        json.RawMessage `json:"execution_binding,omitempty"`
 }
 
@@ -1379,6 +1380,11 @@ type claimHeadroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
+}
+
+type claimCapacity struct {
+	MaxConcurrent int `json:"max_concurrent"`
+	ActiveClaims  int `json:"active_claims"`
 }
 
 var errAssistedOfferRequired = errors.New("credential is enrolled; assisted offer protocol is required")
@@ -1409,6 +1415,17 @@ func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
 		MemoryBytes: h.MemoryBytes,
 		QueueDepth:  h.QueueDepth,
 		UpdatedAt:   time.Now(),
+	})
+}
+
+func (s *Server) placementContext(ctx context.Context, claimer presenceKey) context.Context {
+	if s.placement.hold <= 0 {
+		return ctx
+	}
+	return store.WithClaimPlacement(ctx, store.ClaimPlacement{
+		DefaultPrefers: s.placement.defaultPrefers,
+		Hold:           s.placement.hold,
+		Live:           s.runnerPresence.live(time.Now(), s.placement.liveness, claimer),
 	})
 }
 
@@ -1489,8 +1506,15 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if body.Capacity != nil && (body.Capacity.MaxConcurrent < 0 || body.Capacity.ActiveClaims < 0) {
+		writeError(w, http.StatusBadRequest, errors.New("capacity must carry non-negative max_concurrent and active_claims"))
+		return
+	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
-	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
+	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
+	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
+	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
+		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
@@ -1502,6 +1526,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.runnerPresence.awarded(claimer)
 	writeClaimedNode(w, r, s, n)
 }
 

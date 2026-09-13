@@ -196,7 +196,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-       ready_at = NULL, offer_started_at = NULL, reservation_id = '',
+       ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 				FailureAgentLost, now.UnixNano(), item.coordinatorID, item.executorKind,

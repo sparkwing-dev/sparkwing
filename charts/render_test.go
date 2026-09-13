@@ -2252,3 +2252,32 @@ func TestFullChartRendersRequireAuthWithoutABootstrapToken(t *testing.T) {
 		}
 	}
 }
+
+func TestControllerPlacementFlagsRender(t *testing.T) {
+	controllerArgs := func(sets ...string) []string {
+		return webArgs(t, helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...))
+	}
+
+	for _, flag := range []string{"--default-prefer-labels=", "--placement-hold=", "--placement-liveness="} {
+		if got, ok := hasFlag(controllerArgs(), flag); ok {
+			t.Fatalf("default args carry %q, want the controller's own default", got)
+		}
+	}
+
+	configured := controllerArgs(
+		"controller.defaultPreferLabels[0]=location=local",
+		"controller.defaultPreferLabels[1]=team-a",
+		"controller.placementHold=45s",
+		"controller.placementLiveness=90s",
+	)
+	if got, _ := hasFlag(configured, "--default-prefer-labels="); got != "--default-prefer-labels=location=local,team-a" {
+		t.Fatalf("default prefer labels flag = %q", got)
+	}
+	if got, _ := hasFlag(configured, "--placement-hold="); got != "--placement-hold=45s" {
+		t.Fatalf("placement hold flag = %q", got)
+	}
+	if got, _ := hasFlag(configured, "--placement-liveness="); got != "--placement-liveness=90s" {
+		t.Fatalf("placement liveness flag = %q", got)
+	}
+}

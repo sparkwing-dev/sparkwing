@@ -8,6 +8,7 @@ import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import {
   executionAttempts,
   executionDisplay,
+  placementLabel,
 } from "@/lib/executionAttribution";
 
 function fmtMs(ms: number): string {
@@ -32,6 +33,7 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
   const isRunning = !node.finished_at && node.status !== "pending";
   const attempt = executionAttempts(node).at(-1);
   const execution = executionDisplay(attempt);
+  const placement = placementLabel(node);
   const dur = elapsed(node);
 
   return (
@@ -79,6 +81,11 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
       {node.status_detail && (
         <div className="text-xs text-[var(--muted)] font-mono truncate">
           ↳ {node.status_detail}
+        </div>
+      )}
+      {placement && (
+        <div className="text-xs text-[var(--muted)] font-mono truncate">
+          placement: {placement}
         </div>
       )}
       {node.error && !node.failure_reason && (
