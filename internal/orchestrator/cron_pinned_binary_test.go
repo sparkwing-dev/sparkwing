@@ -17,7 +17,12 @@ import (
 func cronPinnedFixture(t *testing.T) (repoDir string, cache *localCompileCache, logger *slog.Logger) {
 	t.Helper()
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	repoDir = t.TempDir()
+	// safety: a process started inside the temporary directory reports the resolved
+	// path, which on darwin is not the one TempDir hands back.
+	repoDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(repoDir, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
