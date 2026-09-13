@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,10 @@ import (
 // safety: one unauthenticated-sized read per post, so a runner with
 // more to say posts several batches rather than one unbounded body.
 const liveLogAppendLimit = 1 << 20
+
+const liveLogWaitSlice = 5 * time.Second
+
+const liveLogKeepalive = 15 * time.Second
 
 // LiveLogRead is the body of a since-offset live log read.
 type LiveLogRead struct {
@@ -97,52 +102,51 @@ func (s *Server) handleStreamNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// safety: the writer wakes this reader, so the keepalive is the only
-	// thing that has to run on a clock of its own.
-	keepalive := time.NewTicker(15 * time.Second)
-	defer keepalive.Stop()
-	woke := make(chan struct{}, 1)
-	woke <- struct{}{}
-
+	lastWrite := time.Now()
 	var partial string
 	for {
-		select {
-		case <-r.Context().Done():
+		if r.Context().Err() != nil {
 			return
-		case <-keepalive.C:
+		}
+		// safety: the wait is sliced so a silent node still reaches the
+		// keepalive below; an idle stream with no bytes is one an
+		// intermediary closes.
+		waitCtx, cancel := context.WithTimeout(r.Context(), liveLogWaitSlice)
+		chunk, ok := s.liveLogs.Wait(waitCtx, runID, nodeID, since)
+		cancel()
+		if !ok {
+			return
+		}
+		since = chunk.Next
+
+		lines, rest := splitCompleteLines(partial + string(chunk.Data))
+		partial = rest
+		for _, line := range lines {
+			if _, err := fmt.Fprintf(out, "id: %d\ndata: %s\n\n", since, liveLogSSEEscape(line)); err != nil {
+				return
+			}
+		}
+		if len(lines) > 0 {
+			if err := out.Flush(); err != nil {
+				return
+			}
+			lastWrite = time.Now()
+		}
+		if chunk.Done {
+			if _, err := fmt.Fprint(out, "event: stream_end\ndata: {}\n\n"); err != nil {
+				return
+			}
+			_ = out.Flush()
+			return
+		}
+		if time.Since(lastWrite) >= liveLogKeepalive {
 			if _, err := fmt.Fprintln(out, ": keepalive"); err != nil {
 				return
 			}
 			if err := out.Flush(); err != nil {
 				return
 			}
-		case <-woke:
-			chunk, ok := s.liveLogs.Wait(r.Context(), runID, nodeID, since)
-			if !ok {
-				return
-			}
-			since = chunk.Next
-			lines, rest := splitCompleteLines(partial + string(chunk.Data))
-			partial = rest
-			for _, line := range lines {
-				if _, err := fmt.Fprintf(out, "id: %d\ndata: %s\n\n", since, liveLogSSEEscape(line)); err != nil {
-					return
-				}
-			}
-			if len(lines) > 0 {
-				if err := out.Flush(); err != nil {
-					return
-				}
-			}
-			if chunk.Done {
-				fmt.Fprint(out, "event: stream_end\ndata: {}\n\n")
-				_ = out.Flush()
-				return
-			}
-			select {
-			case woke <- struct{}{}:
-			default:
-			}
+			lastWrite = time.Now()
 		}
 	}
 }
