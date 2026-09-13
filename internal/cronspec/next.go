@@ -49,6 +49,25 @@ func (s *Schedule) Next(after time.Time, loc *time.Location) time.Time {
 	return time.Time{}
 }
 
+// ShortestInterval returns the smallest gap between the next n instants after
+// `after`, which is a schedule's real cadence however its expression spells
+// it: `*/5 * * * *` and `0,5,10,...` both measure five minutes. It reports
+// false when fewer than two instants resolve.
+func (s *Schedule) ShortestInterval(after time.Time, loc *time.Location, n int) (time.Duration, bool) {
+	fires := s.Upcoming(after, loc, n)
+	if len(fires) < 2 {
+		return 0, false
+	}
+	shortest := time.Duration(0)
+	for i := 1; i < len(fires); i++ {
+		gap := fires[i].Sub(fires[i-1])
+		if shortest == 0 || gap < shortest {
+			shortest = gap
+		}
+	}
+	return shortest, shortest > 0
+}
+
 // Upcoming returns the next n instants after `after` that match s, in loc. It
 // returns fewer than n, possibly none, when the five-year horizon runs out.
 func (s *Schedule) Upcoming(after time.Time, loc *time.Location, n int) []time.Time {

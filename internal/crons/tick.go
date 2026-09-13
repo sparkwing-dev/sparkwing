@@ -122,6 +122,12 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 		}
 		return
 	}
+	// safety: a guard set after the schedule was armed still binds it, so the
+	// cadence is measured again here rather than trusted from arming time.
+	if err := s.refusedByMinInterval(ctx, sched); err != nil {
+		s.recordUnevaluable(ctx, sched, now, dryRun, report, err)
+		return
+	}
 
 	report.Evaluated++
 	decision := cronspec.Decide(eval.schedule, eval.loc, sched.CursorAt, now, eval.catchUp)
@@ -141,6 +147,19 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 		}
 	}
 	s.resolveDue(ctx, sched, eval, decision.Due, now, dryRun, report)
+}
+
+// safety: the guard bounds what a controller schedule may cost, and a local
+// schedule spends nothing the operator pays for.
+func (s *Service) refusedByMinInterval(ctx context.Context, sched store.CronSchedule) error {
+	if sched.Where != store.CronWhereController {
+		return nil
+	}
+	ceiling, err := s.Store.ComputeLimits(ctx)
+	if err != nil {
+		return nil
+	}
+	return RefuseBelowMinInterval(sched.Effective().Cron, ceiling.CronSeconds)
 }
 
 // safety: a host's override can break a cadence the config validated, and such

@@ -124,7 +124,10 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.store.CreateRun(r.Context(), body); err != nil {
+	// safety: the per-principal guards measure the authenticated caller, so the
+	// principal comes from the token rather than anything the body asserts.
+	runCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
+	if err := s.store.CreateRun(runCtx, body); err != nil {
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -1539,6 +1542,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.runnerPresence.awarded(claimer)
+	s.noteRunnerAlarm(r)
 	writeClaimedNode(w, r, s, n)
 }
 

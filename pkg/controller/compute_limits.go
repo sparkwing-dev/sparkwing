@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -109,6 +110,11 @@ type computeLimitRefusalJSON struct {
 	Scope    string `json:"scope,omitempty"`
 }
 
+// ComputeLimitRetryAfterSeconds is the Retry-After a guard refusal carries. A
+// guard clears when work finishes rather than on a schedule, so it names how
+// often a caller should ask again.
+const ComputeLimitRetryAfterSeconds = 5
+
 // safety: a refusal with no run of its own reaches the operator through the
 // log, because there is no run to record it against.
 func (s *Server) writeComputeLimitRefusal(
@@ -125,6 +131,7 @@ func (s *Server) writeComputeLimitRefusal(
 			"limit", refused.Limit, "cap", refused.Cap,
 			"observed", refused.Observed, "scope", refused.Scope)
 	}
+	w.Header().Set("Retry-After", strconv.Itoa(ComputeLimitRetryAfterSeconds))
 	writeJSON(w, http.StatusTooManyRequests, computeLimitRefusalJSON{
 		Error: refused.Error(), Code: ComputeLimitRefusedCode,
 		Limit: refused.Limit, Cap: refused.Cap, Observed: refused.Observed, Scope: refused.Scope,
@@ -132,18 +139,45 @@ func (s *Server) writeComputeLimitRefusal(
 	return true
 }
 
-// safety: the poller asks twice a second, so the waiting run records the
-// refusal once per node rather than on every poll.
+// safety: the poller asks twice a second, so the refusal is recorded once
+// against a run the refused principal owns; recording it on a stranger's run
+// would name that principal in a status its owner reads.
 func (s *Server) writeClaimComputeLimitRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
 	var refused *store.ComputeLimitError
 	if !errors.As(err, &refused) {
 		return false
 	}
-	runID, nodeID, lookupErr := s.store.OldestWaitingReadyNode(r.Context())
+	runID, nodeID, lookupErr := s.store.OldestWaitingReadyNodeForPrincipal(r.Context(), refused.Principal)
 	if lookupErr != nil {
-		runID = ""
+		s.logger.Warn("finding the run to record a compute-limit refusal against failed",
+			"principal", refused.Principal, "err", lookupErr)
+		runID, nodeID = "", ""
 	}
 	return s.writeComputeLimitRefusal(w, r, runID, nodeID, err)
+}
+
+// safety: the alarm exists to be heard once, so the crossing is logged on the
+// transition rather than on every claim that stays above it.
+func (s *Server) noteRunnerAlarm(r *http.Request) {
+	runners, alarm, err := s.store.ComputeAlarmState(r.Context())
+	if err != nil {
+		s.logger.Warn("reading the cloud runner alarm failed", "err", err)
+		return
+	}
+	if alarm <= 0 {
+		return
+	}
+	reached := runners >= alarm
+	s.computeAlarmMu.Lock()
+	was := s.computeAlarmOn
+	s.computeAlarmOn = reached
+	s.computeAlarmMu.Unlock()
+	switch {
+	case reached && !was:
+		s.logger.Warn("cloud runners reached the alarm count", "runners", runners, "alarm", alarm)
+	case was && !reached:
+		s.logger.Info("cloud runners fell back below the alarm", "runners", runners, "alarm", alarm)
+	}
 }
 
 func (s *Server) noteComputeLimitBlocked(
@@ -207,48 +241,9 @@ func (s *Server) stopForWallClockLimit(r *http.Request, runID, nodeID string) (s
 // safety: a schedule is evaluated over its next fires rather than its text,
 // so `*/1 * * * *` and `0,1,2 * * * *` are both measured at one minute.
 func (s *Server) cronIntervalRefusal(r *http.Request, expr string) error {
-	if expr == "" {
-		return nil
-	}
 	limits, err := s.store.ComputeLimits(r.Context())
 	if err != nil {
 		return err
 	}
-	if limits.CronSeconds <= 0 {
-		return nil
-	}
-	shortest, ok := shortestCronInterval(expr)
-	if !ok {
-		return nil
-	}
-	if shortest >= limits.CronSeconds {
-		return nil
-	}
-	return &store.ComputeLimitError{
-		Limit: store.ComputeLimitCronSeconds, Cap: limits.CronSeconds,
-		Observed: shortest, Scope: "schedule " + expr,
-	}
-}
-
-// safety: ten fires cover the repeating step of every cadence a minute field
-// can express, so the shortest gap it measures is the schedule's own.
-const cronIntervalSamples = 10
-
-func shortestCronInterval(expr string) (int64, bool) {
-	sched, err := cronspec.Parse(expr)
-	if err != nil {
-		return 0, false
-	}
-	fires := sched.Upcoming(time.Now().UTC(), time.UTC, cronIntervalSamples)
-	if len(fires) < 2 {
-		return 0, false
-	}
-	shortest := int64(0)
-	for i := 1; i < len(fires); i++ {
-		gap := int64(fires[i].Sub(fires[i-1]).Seconds())
-		if shortest == 0 || gap < shortest {
-			shortest = gap
-		}
-	}
-	return shortest, shortest > 0
+	return crons.RefuseBelowMinInterval(expr, limits.CronSeconds)
 }

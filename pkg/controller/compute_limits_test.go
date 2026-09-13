@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -18,6 +19,24 @@ func setComputeLimit(t *testing.T, f creditsFixture, name string, value int64) {
 		map[string]any{"limits": map[string]int64{name: value}})
 	if status != http.StatusOK {
 		t.Fatalf("set %s: status = %d: %s", name, status, body)
+	}
+}
+
+func seedRunNodeFor(t *testing.T, f creditsFixture, principal, runID, nodeID string) {
+	t.Helper()
+	ctx := store.WithCreatingPrincipal(context.Background(), principal)
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{
+		RunID: runID, NodeID: nodeID, Status: "pending",
+	}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
+		t.Fatalf("mark ready: %v", err)
 	}
 }
 
@@ -94,20 +113,26 @@ func TestComputeLimits_ClaimRefusedByTheRunnerGuard(t *testing.T) {
 	setComputeLimit(t, f, store.ComputeLimitConcurrentRunners, 1)
 	c := client.NewWithToken(f.url, nil, f.runner)
 	for _, runID := range []string{"run-one", "run-two"} {
-		seedRunNode(t, f.store, runID, "build")
-		if err := f.store.MarkNodeReady(ctx, runID, "build"); err != nil {
-			t.Fatalf("mark ready: %v", err)
-		}
+		seedRunNodeFor(t, f, "pool", runID, "build")
 	}
 
 	if n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil); err != nil || n == nil {
 		t.Fatalf("the first claim must succeed: %v", err)
 	}
 
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+	// safety: the runner reads the refusal as a standing condition rather than
+	// a transport failure, which is what keeps it polling instead of erroring.
+	if _, err := c.ClaimNode(ctx, "pod-2", nil, time.Minute, nil); !errors.Is(err, store.ErrComputeLimit) {
+		t.Fatalf("the client read the refusal as %v, want ErrComputeLimit", err)
+	}
+
+	status, body, header := creditsRequestWithHeader(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
 		map[string]any{"holder_id": "pod-2", "lease_secs": 60})
 	if status != http.StatusTooManyRequests {
 		t.Fatalf("the second claim = %d, want 429: %s", status, body)
+	}
+	if header.Get("Retry-After") == "" {
+		t.Fatal("the refusal carries no Retry-After")
 	}
 	var refusal struct {
 		Code     string `json:"code"`
@@ -184,7 +209,7 @@ func TestComputeLimits_NodeCreationRefusedPastThePerRunCap(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitNodesPerRun, 1)
-	seedRunNode(t, f.store, "run-fan", "build")
+	seedRunNodeFor(t, f, "pool", "run-fan", "build")
 
 	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/runs/run-fan/nodes", f.admin,
 		map[string]any{"id": "fan-1", "status": "pending"})
@@ -205,7 +230,7 @@ func TestComputeLimits_NodeCreationRefusedPastThePerRunCap(t *testing.T) {
 
 func TestComputeLimits_RunCreationRefusedPastTheHourlyCap(t *testing.T) {
 	f := newCreditsFixture(t, true)
-	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
+	setComputeLimit(t, f, store.ComputeLimitGlobalRunsPerHour, 1)
 	seedRunNode(t, f.store, "run-first", "build")
 
 	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/runs", f.admin,
@@ -238,4 +263,63 @@ func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
 
 	body["schedules"] = []map[string]any{{"pipeline": "sweep", "cron": "0 * * * *"}}
 	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
+}
+
+// safety: a refusal names the principal it refused, so recording it on another
+// principal's run would put that name in a status its owner reads.
+func TestComputeLimits_RefusalStaysInsideTheRefusedPrincipal(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	setComputeLimit(t, f, store.ComputeLimitConcurrentRunners, 1)
+	seedRunNodeFor(t, f, "pool", "run-mine-a", "build")
+	seedRunNodeFor(t, f, "pool", "run-mine-b", "build")
+	seedRunNodeFor(t, f, "stranger", "run-theirs", "build")
+
+	c := client.NewWithToken(f.url, nil, f.runner)
+	if n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil); err != nil || n == nil {
+		t.Fatalf("the first claim must succeed: %v", err)
+	}
+	if _, err := c.ClaimNode(ctx, "pod-2", nil, time.Minute, nil); !errors.Is(err, store.ErrComputeLimit) {
+		t.Fatalf("the second claim = %v, want the guard", err)
+	}
+
+	if got := len(computeLimitEvents(t, f, "run-theirs")); got != 0 {
+		t.Fatalf("another principal's run carries %d refusal events, want none", got)
+	}
+	if got := len(computeLimitEvents(t, f, "run-mine-b")); got != 1 {
+		t.Fatalf("the refused principal's waiting run carries %d refusal events, want 1", got)
+	}
+}
+
+func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 1)
+	seedRunNode(t, f.store, "run-a", "build")
+	seedRunNode(t, f.store, "run-b", "build")
+	for _, runID := range []string{"run-a", "run-b"} {
+		if err := f.store.MarkNodeReady(ctx, runID, "build"); err != nil {
+			t.Fatalf("mark ready: %v", err)
+		}
+	}
+
+	c := client.NewWithToken(f.url, nil, f.runner)
+	if n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil); err != nil || n == nil {
+		t.Fatalf("the first claim must succeed: %v", err)
+	}
+	// safety: the global guard names no principal, so its refusal has no run of
+	// its own and reaches the operator through the response and the log alone.
+	_, err := c.ClaimNode(ctx, "pod-2", nil, time.Minute, nil)
+	var refused *store.ComputeLimitError
+	if !errors.As(err, &refused) || refused.Limit != store.ComputeLimitGlobalRunners {
+		t.Fatalf("the second claim = %v, want the global guard", err)
+	}
 }

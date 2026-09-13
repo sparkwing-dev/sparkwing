@@ -50,6 +50,9 @@ type Server struct {
 	costPerRunnerHour float64
 	costRateSource    string
 
+	computeAlarmMu sync.Mutex
+	computeAlarmOn bool
+
 	bootstrapMu     sync.Mutex
 	bootstrapExpiry time.Time
 	bootstrapNeeded bool
