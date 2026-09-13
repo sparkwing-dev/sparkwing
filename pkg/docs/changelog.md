@@ -57,6 +57,14 @@ unlock.
   keeps holding it, where a waiting one is attributed on the next reading. They
   were one count, documented as the expected shape, so a host serving a dead
   lease read as a host doing ordinary work.
+- **admission (macOS):** A host sampler that cannot report host busy and owned
+  CPU from one process table no longer gets a second, separate owned-CPU
+  reading on macOS; it reports that it cannot measure, as every other platform
+  in that position already did. The daemon's own macOS sampler is unaffected --
+  it reads both from one table and is the path every release takes. A caller
+  supplying its own non-pairing host sampler on macOS now has owned CPU charged
+  to the machine rather than measured a second way that carried no window and
+  no bound.
 - **admission:** Measure a run's CPU rate only from a reading taken when the
   current window opened. A reading kept from an earlier window spans intervals
   nobody was watching that run, so re-holding a released run charged it that

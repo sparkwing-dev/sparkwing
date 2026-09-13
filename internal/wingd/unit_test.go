@@ -206,6 +206,11 @@ func newHeadroomDaemon(t *testing.T, totalCores, frac float64) *Daemon {
 		t.Fatalf("new ledger: %v", err)
 	}
 	d.ledger = lg
+	// The daemon built here reads a stand-in host sampler, so a live container
+	// sensor would mix the real machine's cgroup into those figures and make a
+	// test's verdict depend on how many cores the machine running it has. A test
+	// that needs a sensor installs its own.
+	d.container = nil
 	return d
 }
 

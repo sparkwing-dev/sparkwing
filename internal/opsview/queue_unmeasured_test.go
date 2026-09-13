@@ -139,7 +139,8 @@ func TestExternalAttributionNote_SaysWhichWayTheFigureIsWrong(t *testing.T) {
 		Samples: 120, SamplerUnreadable: 7, RunsAwaitingMeasure: 3,
 	})
 	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
-		" so external reads high and available reads low by it"
+		" so external reads high and available reads low by it" +
+		" (-o plain breaks the readings down by cause)"
 	if got := opsview.ExternalAttributionNote(qs); got != want {
 		t.Fatalf("attribution note = %q, want %q: the note reports a condition holding now, so lifetime counts belong in the rows that are labelled as lifetime",
 			got, want)

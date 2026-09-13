@@ -336,3 +336,27 @@ func TestOwnedProcSampler_AReadingWithNothingHeldEndsTheWindow(t *testing.T) {
 			figure)
 	}
 }
+
+func TestOwnedCPU_ATreeWithAnUnreadableCounterReportsNoFigure(t *testing.T) {
+	previousAt := time.Unix(100, 0)
+	now := previousAt.Add(time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	previous := map[processIdentity]cpuSample{
+		root:  {cpuSeconds: 50, at: previousAt},
+		child: {cpuSeconds: 0, at: previousAt},
+	}
+	// The root's counter ran backwards; the child measured two cores cleanly.
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 3},
+		11: {parentPID: 10, identity: child, cpuSeconds: 2},
+	}
+	owners := ownedProcessOwners(heldRoots(10), processes)
+
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), previousAt, now, 8)
+
+	if figure, reported := byRoot[10]; reported {
+		t.Fatalf("tree reported %v cores with one counter unreadable; want no figure, because the rest of the tree is short by an unknown amount and a short figure still subtracts from external",
+			figure)
+	}
+}

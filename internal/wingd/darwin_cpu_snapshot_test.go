@@ -295,14 +295,33 @@ func TestDarwinCPUSnapshotMalformedInputIsUnmeasured(t *testing.T) {
 func TestDarwinCPUSnapshotGivesNoFigureForABackwardsCounter(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	lastAt := now.Add(-10 * time.Second)
-	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 8:20.00\n")
-	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:03.00\n")
+	// pid 101 measures cleanly, so the tree has a figure for the void to remove.
+	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 8:20.00\n101 100 0:00.00\n")
+	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:03.00\n101 100 0:10.00\n")
 	roots := []OwnedRoot{{PID: 100, HeldSince: now.Add(-time.Hour)}}
 
 	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, roots, lastAt, now, 8, 8)
 
 	if figure, reported := byRoot[100]; reported {
 		t.Fatalf("backwards counter reported %v cores; want no figure, because reporting zero subtracts nothing from external and admits against CPU the daemon never measured",
+			figure)
+	}
+}
+
+// The machine's cores and the cores admission hands out are different numbers,
+// and a run's own figure is bounded by the smaller one.
+func TestDarwinCPUSnapshot_OwnedIsBoundedByTheArbitratedCoresNotTheMachine(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	lastAt := now.Add(-10 * time.Second)
+	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:00.00\n")
+	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 1:00.00\n")
+	roots := []OwnedRoot{{PID: 100, HeldSince: now.Add(-time.Hour)}}
+
+	// A 16-core machine, a 2-core container, and a tree that measured six cores.
+	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, roots, lastAt, now, 16, 2)
+
+	if figure := byRoot[100]; figure != 2 {
+		t.Fatalf("owned CPU = %v cores; want the arbitrated 2, because a tree cannot have run more than the kernel would let it and a bound at the machine's 16 admits against cores nobody can grant",
 			figure)
 	}
 }

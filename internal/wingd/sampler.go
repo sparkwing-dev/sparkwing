@@ -79,8 +79,11 @@ type OwnedCPUSampler interface {
 	// and reports the daemon as measuring cleanly while it is not.
 	//
 	// measured reports whether the host's process table was read at all.
-	// Return false where the read itself failed; it leaves byRoot empty and
-	// says nothing about any individual root. An empty map with measured true
+	// Return false where the read failed, and also where this platform has no
+	// way to measure owned CPU at all; either leaves byRoot empty and says
+	// nothing about any individual root. A platform answering false forever is
+	// stating a capability rather than reporting a fault on the box, so a count
+	// tracking every reading there is the expected shape. An empty map with measured true
 	// says the table was read and every root in it was individually
 	// unreadable, which is counted as a different fault.
 	//
@@ -224,6 +227,7 @@ func ownedCPUByRoot(
 	next := make(map[processIdentity]cpuSample, len(owners))
 	byRoot := make(map[int]float64, len(owners))
 	firstSight := make(map[int]float64, len(owners))
+	unreadable := map[int]struct{}{}
 	for identity, root := range owners {
 		process, ok := processes[identity.pid]
 		if !ok {
@@ -241,6 +245,11 @@ func ownedCPUByRoot(
 		wall := now.Sub(prior.at).Seconds()
 		delta := process.cpuSeconds - prior.cpuSeconds
 		if wall <= 0 || delta < 0 {
+			// safety: a counter that stood still or ran backwards says nothing about
+			// this process, and the rest of the tree's figure without it is short by an
+			// unknown amount. A short figure still subtracts from external, so the tree
+			// goes unmeasured rather than admitting against CPU nobody could read.
+			unreadable[root] = struct{}{}
 			continue
 		}
 		byRoot[root] += delta / wall
@@ -252,6 +261,9 @@ func ownedCPUByRoot(
 			continue
 		}
 		byRoot[root] += credit
+	}
+	for root := range unreadable {
+		delete(byRoot, root)
 	}
 	measureUnownedSurvivors(previous, processes, next, now)
 	return byRoot, next

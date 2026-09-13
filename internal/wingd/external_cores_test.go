@@ -384,7 +384,7 @@ func TestNewHonorsExplicitOwnedCPUSamplerWithDefaultHost(t *testing.T) {
 
 func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *testing.T) {
 	if runtime.NumCPU() < 3 {
-		t.Fatalf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
+		t.Skipf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
 			runtime.NumCPU())
 	}
 	d := newHeadroomDaemon(t, 8, 0)
@@ -405,7 +405,7 @@ func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *te
 // The paired sampler is the one darwin runs, so the bound has to reach it too.
 func TestRefreshHeadroom_PairedSamplerIsBoundedByTheContainerLimitToo(t *testing.T) {
 	if runtime.NumCPU() < 3 {
-		t.Fatalf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
+		t.Skipf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
 			runtime.NumCPU())
 	}
 	d := newHeadroomDaemon(t, 8, 0)

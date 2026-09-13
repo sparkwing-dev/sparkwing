@@ -449,7 +449,8 @@ func ExternalAttributionNote(qs wingwire.QueueState) string {
 		return ""
 	}
 	return "external attribution: recent readings carry some of this daemon's own runs' CPU," +
-		" so external reads high and available reads low by it"
+		" so external reads high and available reads low by it" +
+		" (-o plain breaks the readings down by cause)"
 }
 
 func coresExternalUnattributed(qs wingwire.QueueState) bool {
