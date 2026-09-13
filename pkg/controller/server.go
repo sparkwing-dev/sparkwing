@@ -66,6 +66,8 @@ type Server struct {
 
 	artifactStore storage.ArtifactStore
 
+	bucketUsageStore storage.ArtifactStore
+
 	cachePodURL  string
 	logsURL      string
 	dashboardURL string
@@ -250,6 +252,16 @@ func (s *Server) WithQueueTimeout(d time.Duration) *Server {
 func (s *Server) WithCostRate(rate float64, source string) *Server {
 	s.costPerRunnerHour = rate
 	s.costRateSource = source
+	return s
+}
+
+// WithBucketUsage names the object store the bucket ceiling measures.
+// The store is read on the reconciliation interval and never served, so
+// pointing the controller at the bucket its runners write to gives the
+// ceiling a measured total without exposing those objects on any route.
+// Without one the ceiling counts only the writes this process made.
+func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
+	s.bucketUsageStore = a
 	return s
 }
 
@@ -1149,6 +1161,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCreditSampler(ctx, creditSampleInterval)
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
+	go s.runBucketCeiling(ctx)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)

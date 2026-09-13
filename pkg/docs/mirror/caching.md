@@ -156,8 +156,42 @@ Restores require an exact key match.
   runner's agent token. Every pod in the cluster shares one cache.
 
 Both use tar.gz archives.
-The cache service bounds uploads at 500 MB; a larger archive logs a
-warning and is skipped.
+The cache service bounds one archive at
+`sparkwing-cache --max-cache-archive-bytes`
+(`SPARKWING_CACHE_MAX_ARCHIVE_BYTES`), 500 MB by default and unbounded
+at `0`. A larger archive is refused with `413` naming the cap, and the
+node logs a warning and proceeds without the dependency cache.
+`--max-artifact-bytes` (`SPARKWING_CACHE_MAX_ARTIFACT_BYTES`) is the
+same cap for one uploaded artifact, also 500 MB. Both caps are applied
+before the first byte reaches the volume, so one pipeline cannot spend a
+team's quota, or the store ceiling, on a single object. The SDK skips an
+upload over 500 MB client-side before it asks; that constant is the
+client's own, and the service's cap is what actually holds.
+
+`--max-store-bytes` and `--max-store-objects`
+(`SPARKWING_CACHE_MAX_STORE_BYTES`, `SPARKWING_CACHE_MAX_STORE_OBJECTS`)
+bound the artifact, dependency-archive and upload trees together rather
+than one object. At or above either one the service refuses every upload
+with `507` naming the ceiling, while reads and deletes keep working, and
+a later measurement that finds the store back under the ceiling thaws
+it. `--warn-store-bytes` and `--warn-store-objects`
+(`SPARKWING_CACHE_WARN_STORE_BYTES`,
+`SPARKWING_CACHE_WARN_STORE_OBJECTS`) mark the store as warning without
+refusing anything, and `--store-reconcile`
+(`SPARKWING_CACHE_STORE_RECONCILE`, hourly by default, `0` measures once
+at startup) is how often the service walks its trees and replaces its
+running count with the measurement. All of
+them are off until set, and the chart carries them as `cache.limits.*`.
+`GET /health` reports the store under `store_ceiling` (frozen, warning,
+counted bytes and objects, and when it was last measured), and the same
+state is exported as `sparkwing.cache.store_*`.
+
+The cache serves no delete, so recovery runs through two bearer-gated
+admin routes. `POST /admin/store-ceiling/measure` walks the trees
+immediately, which is how freeing space on the volume turns into uploads
+flowing again rather than a wait for the interval, and `POST
+/admin/store-ceiling/thaw` accepts uploads until the next measurement (a
+`409` when none is scheduled). Both answer with the ceiling state.
 
 ### Guarantees
 

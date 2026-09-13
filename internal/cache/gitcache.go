@@ -575,6 +575,9 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(testPath)
 	}
 
+	problems = append(problems, storeCeilingProblems()...)
+	resp["store_ceiling"] = storeCeilingState()
+
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
@@ -1378,7 +1381,15 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
-		r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
+		if err := storeCeiling.Allow(); err != nil {
+			http.Error(w, err.Error(), http.StatusInsufficientStorage)
+			return
+		}
+		// safety: the cap is applied before the first byte reaches the volume, so an
+		// oversized archive costs a refusal rather than the disk it would have filled.
+		if maxCacheArchiveBytes > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxCacheArchiveBytes)
+		}
 
 		tmpFile, err := os.CreateTemp(cacheDir, "upload-*.tmp")
 		if err != nil {
@@ -1391,10 +1402,19 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		tmpFile.Close()
 		if err != nil {
 			_ = os.Remove(tmpPath)
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, fmt.Sprintf("cache archive exceeds the %d byte upload limit", maxCacheArchiveBytes),
+					http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "read error", http.StatusBadRequest)
 			return
 		}
 
+		// safety: an overwrite replaces an object rather than adding one, so the
+		// ceiling is measured against what the key already held.
+		storeBytes, storeObjects := storeDelta(path, n)
 		// #nosec G703 -- the cache key is pattern-validated
 		err = os.Rename(tmpPath, path)
 		if err != nil {
@@ -1402,6 +1422,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
+		storeCeiling.Record(storeBytes, storeObjects)
 		// #nosec G706 -- the cache key is pattern-validated
 		log.Printf("cache store: %s (%d bytes)", key, n)
 		w.WriteHeader(http.StatusCreated)
@@ -1422,7 +1443,20 @@ var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 const artifactTempPrefix = ".sparkwing-upload-"
 
-var maxArtifactBytes int64 = 500 << 20
+// Default per-object caps. One pipeline that tars a dataset or caches a
+// multi-gigabyte directory should not spend a team's whole quota, or the
+// bucket ceiling, in a single run.
+const (
+	// DefaultMaxArtifactBytes caps one uploaded artifact.
+	DefaultMaxArtifactBytes int64 = 500 << 20
+	// DefaultMaxCacheArchiveBytes caps one stored dependency archive.
+	DefaultMaxCacheArchiveBytes int64 = 500 << 20
+)
+
+var (
+	maxArtifactBytes     = DefaultMaxArtifactBytes
+	maxCacheArchiveBytes = DefaultMaxCacheArchiveBytes
+)
 
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
@@ -1453,6 +1487,10 @@ func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
+	if err := storeCeiling.Allow(); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 	artifactPath := r.URL.Query().Get("path")
 	if artifactPath == "" {
 		http.Error(w, "path query param required", http.StatusBadRequest)
@@ -1496,7 +1534,9 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	// safety: an unbounded or half-written body must never reach the path a download serves.
-	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
+	if maxArtifactBytes > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
+	}
 
 	// #nosec G703 -- the staging file sits beside a destination contained under the artifacts root
 	tmp, err := os.CreateTemp(destDir, artifactTempPrefix+"*")
@@ -1523,6 +1563,9 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
+	// safety: an artifact written twice under one path replaces the first, so only
+	// the size difference reaches the ceiling.
+	storeBytes, storeObjects := storeDelta(dest, n)
 	// #nosec G703 -- both names are contained under the artifacts root
 	if err := os.Rename(tmpPath, dest); err != nil {
 		// #nosec G703 -- a staging name this handler created beside the destination
@@ -1531,6 +1574,7 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
+	storeCeiling.Record(storeBytes, storeObjects)
 	// #nosec G706 -- %q escapes control characters in the caller-supplied path
 	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
 	w.Header().Set("Content-Type", "application/json")
@@ -1651,6 +1695,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
+	if err := storeCeiling.Allow(); err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
 
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBufferedBodyBytes))
 	if err != nil {
@@ -1671,6 +1719,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("warning: incremental upload failed, storing as-is: %v", err)
 		} else {
+			storeCeiling.Record(int64(size), 1)
 			log.Printf("describe: upload %s (incremental from %s, %d bytes)", id, short(base), size)
 			w.Header().Set("Content-Type", "application/json")
 			writeJSONBody(w, r, map[string]any{"id": id, "size": size})
@@ -1680,11 +1729,13 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	id := fmt.Sprintf("%x", sha256.Sum256(data))[:16]
 	path := filepath.Join(uploadsDir, id+".tar.gz")
+	storeBytes, storeObjects := storeDelta(path, int64(len(data)))
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	storeCeiling.Record(storeBytes, storeObjects)
 	log.Printf("describe: upload %s (%d bytes)", id, len(data))
 	w.Header().Set("Content-Type", "application/json")
 	writeJSONBody(w, r, map[string]any{"id": id, "size": len(data)})

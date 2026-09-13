@@ -2,7 +2,10 @@ package logs_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -14,7 +17,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -445,4 +450,546 @@ func TestLogs_SweepSparesRunsWrittenNearTheCutoff(t *testing.T) {
 	if _, err := os.Stat(run); err != nil {
 		t.Errorf("run removed while an append could still be in flight: %v", err)
 	}
+}
+
+func TestLogs_LineCapTruncatesTheLongLineAndKeepsTheRest(t *testing.T) {
+	const cap = 64
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: cap})
+	defer stop()
+
+	body := []byte("short\n" + strings.Repeat("L", 200) + "\nafter\n")
+	if err := c.Append(context.Background(), "run-1", "step-a", body); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if !strings.Contains(stored, "short\n") {
+		t.Errorf("the line under the cap was not stored:\n%s", stored)
+	}
+	if !strings.Contains(stored, "after\n") {
+		t.Errorf("the line after the long one was dropped:\n%s", stored)
+	}
+	if strings.Count(stored, logs.LineTruncationMarker) != 1 {
+		t.Errorf("want one line-truncation marker, got:\n%s", stored)
+	}
+	for _, line := range strings.SplitAfter(stored, "\n") {
+		if len(line) > cap {
+			t.Errorf("stored line of %d bytes exceeds the %d-byte cap: %q", len(line), cap, line)
+		}
+	}
+}
+
+func TestLogs_LineCapMarksEveryCutLineInsideTheCap(t *testing.T) {
+	const cap = 64
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: cap})
+	defer stop()
+
+	body := []byte(strings.Repeat("A", 300) + "\n" + strings.Repeat("B", 300) + "\nshort\n" +
+		strings.Repeat("C", 300) + "\n")
+	if err := c.Append(context.Background(), "run-1", "step-a", body); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if got := strings.Count(stored, logs.LineTruncationMarker); got != 3 {
+		t.Errorf("three cut lines earned %d markers, want one each:\n%s", got, stored)
+	}
+	for _, line := range strings.SplitAfter(stored, "\n") {
+		if len(line) > cap {
+			t.Errorf("stored line of %d bytes exceeds the %d-byte cap: %q", len(line), cap, line)
+		}
+	}
+	if !strings.Contains(stored, "short\n") {
+		t.Errorf("the short line between two cut ones was lost:\n%s", stored)
+	}
+	for _, want := range []string{"AAA", "BBB", "CCC"} {
+		if !strings.Contains(stored, want) {
+			t.Errorf("the append lost its %s line:\n%s", want, stored)
+		}
+	}
+}
+
+func TestLogs_LineCapUnderTheMarkerIsRaisedToAUsableOne(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: 8})
+	defer stop()
+
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(strings.Repeat("L", 400)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	stored := readRun(t, dir, "run-1")
+	if !strings.Contains(stored, logs.LineTruncationMarker) {
+		t.Errorf("a cap under the marker stored a cut line with no marker:\n%q", stored)
+	}
+	if int64(len(stored)) > logs.MinLineBytes {
+		t.Errorf("stored %d bytes, want at most the raised cap of %d", len(stored), logs.MinLineBytes)
+	}
+}
+
+func TestLogs_LineCapCutsOnARuneBoundary(t *testing.T) {
+	const cap = 64
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: cap})
+	defer stop()
+
+	body := []byte(strings.Repeat("héllo wörld ", 40) + "\n")
+	if err := c.Append(context.Background(), "run-1", "step-a", body); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if !utf8.ValidString(stored) {
+		t.Errorf("the capped line is not valid UTF-8: %q", stored)
+	}
+	if strings.ContainsRune(stored, utf8.RuneError) {
+		t.Errorf("the cut produced a replacement character: %q", stored)
+	}
+	if len(stored) > cap {
+		t.Errorf("stored %d bytes for one capped line, want at most %d", len(stored), cap)
+	}
+}
+
+func TestLogs_LineCapLeavesShortLinesByteIdentical(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: 64})
+	defer stop()
+
+	body := "one\ntwo\nthree without a newline"
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(body)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != body {
+		t.Errorf("stored %q, want the body unchanged", stored)
+	}
+}
+
+func TestLogs_UncappedLinesAreStoredWhole(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{})
+	defer stop()
+
+	line := strings.Repeat("x", 5000) + "\n"
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(line)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != line {
+		t.Errorf("stored %d bytes with no line cap, want the whole %d-byte line", len(stored), len(line))
+	}
+}
+
+func TestLogs_GzipOutputReadsAsBinaryAtTheDocumentedThreshold(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{BinaryRatio: 0.3})
+	defer stop()
+
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	for range 200 {
+		if _, err := zw.Write([]byte("PASS ok github.com/example/pkg 0.4s\n")); err != nil {
+			t.Fatalf("gzip write: %v", err)
+		}
+	}
+	if _, err := zw.Write(randomish(4096)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+
+	if err := c.Append(context.Background(), "run-1", "step-a", buf.Bytes()); err != nil {
+		t.Fatalf("append gzip: %v", err)
+	}
+	stored := readRun(t, dir, "run-1")
+	if stored != logs.BinaryDropMarker {
+		t.Errorf("a gzip blob stored %d bytes, want only the drop marker:\n%q", len(stored), stored)
+	}
+}
+
+func randomish(n int) []byte {
+	out := make([]byte, n)
+	x := uint32(2166136261)
+	for i := range out {
+		x = x*16777619 + uint32(i)
+		out[i] = byte(x >> 13)
+	}
+	return out
+}
+
+func TestLogs_BinaryMarkerIsWrittenOncePerNodeLogNotOncePerBurst(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{BinaryRatio: 0.3})
+	defer stop()
+	ctx := context.Background()
+
+	binary := make([]byte, 256)
+	for i := range binary {
+		binary[i] = byte(i % 5)
+	}
+	for range 2 {
+		if err := c.Append(ctx, "run-1", "step-a", binary); err != nil {
+			t.Fatalf("append binary: %v", err)
+		}
+		if err := c.Append(ctx, "run-1", "step-a", []byte("back to text\n")); err != nil {
+			t.Fatalf("append text: %v", err)
+		}
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if got := strings.Count(stored, logs.BinaryDropMarker); got != 1 {
+		t.Errorf("the node log carries %d drop markers across two binary bursts, want 1:\n%q", got, stored)
+	}
+	if got := strings.Count(stored, "back to text\n"); got != 2 {
+		t.Errorf("text appends between binary bursts were lost: %q", stored)
+	}
+}
+
+func TestLogs_BinaryOutputIsDroppedAfterOneWarningLine(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{BinaryRatio: 0.3})
+	defer stop()
+	ctx := context.Background()
+
+	binary := make([]byte, 512)
+	for i := range binary {
+		binary[i] = byte(i % 7)
+	}
+	for range 3 {
+		if err := c.Append(ctx, "run-1", "step-a", binary); err != nil {
+			t.Fatalf("append binary: %v", err)
+		}
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if strings.Count(stored, logs.BinaryDropMarker) != 1 {
+		t.Errorf("want one binary-drop marker across three binary appends, got:\n%q", stored)
+	}
+	if strings.Contains(stored, "\x00\x01\x02") {
+		t.Errorf("binary output reached the stored log:\n%q", stored)
+	}
+	if int64(len(stored)) != int64(len(logs.BinaryDropMarker)) {
+		t.Errorf("stored %d bytes, want only the %d-byte marker", len(stored), len(logs.BinaryDropMarker))
+	}
+}
+
+func TestLogs_TextWithEscapeSequencesIsNotMistakenForBinary(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{BinaryRatio: 0.3})
+	defer stop()
+
+	body := "\x1b[32mPASS\x1b[0m ok\tgithub.com/example/pkg\t0.4s\nrésumé built\n"
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(body)); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != body {
+		t.Errorf("colored UTF-8 output was altered:\nstored %q\nwant   %q", stored, body)
+	}
+}
+
+func TestLogs_BinaryDetectionIsOffByDefault(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{})
+	defer stop()
+
+	binary := []byte{0, 1, 2, 3, 0, 1, 2, 3}
+	if err := c.Append(context.Background(), "run-1", "step-a", binary); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if stored := readRun(t, dir, "run-1"); stored != string(binary) {
+		t.Errorf("stored %q with detection off, want the bytes as sent", stored)
+	}
+}
+
+type ceilingServer struct {
+	server *logs.Server
+	client *logs.Client
+	dir    string
+	url    string
+}
+
+func newCeilingServer(t *testing.T, ceiling objectguard.CeilingConfig) ceilingServer {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := logs.New(dir, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	s.WithStoreCeiling(ceiling)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return ceilingServer{server: s, client: logs.NewClient(srv.URL, nil), dir: dir, url: srv.URL}
+}
+
+func TestLogs_StoreCeilingRefusesAppendsAndNamesTheLimit(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{MaxBytes: 64},
+	})
+	s, c, dir := fix.server, fix.client, fix.dir
+	ctx := context.Background()
+
+	if err := c.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 128)+"\n")); err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+	if err := s.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if !s.StoreCeiling().Frozen {
+		t.Fatal("a store over its ceiling did not freeze")
+	}
+
+	resp, err := http.Post(fix.url+"/api/v1/logs/run-1/step-a", "text/plain", strings.NewReader("more\n"))
+	if err != nil {
+		t.Fatalf("post append: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusInsufficientStorage {
+		t.Fatalf("append over the store ceiling got %d, want 507: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"storage ceiling reached", logs.StoreCeilingSubject, "64", "--max-store-bytes"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("the refusal %q does not name %q", body, want)
+		}
+	}
+
+	stored := readRun(t, dir, "run-1")
+	if strings.Contains(stored, "more") {
+		t.Errorf("the refused append reached the store:\n%q", stored)
+	}
+}
+
+func TestLogs_StoreCeilingThawsWhenTheSweepFreesSpace(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{MaxObjects: 2},
+	})
+	s, c := fix.server, fix.client
+	ctx := context.Background()
+
+	for _, node := range []string{"step-a", "step-b"} {
+		if err := c.Append(ctx, "run-1", node, []byte("hello\n")); err != nil {
+			t.Fatalf("append %s: %v", node, err)
+		}
+	}
+	if err := s.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if !s.StoreCeiling().Frozen {
+		t.Fatalf("a store at its object ceiling did not freeze: %+v", s.StoreCeiling())
+	}
+	if err := c.DeleteRun(ctx, "run-1"); err != nil {
+		t.Fatalf("delete run: %v", err)
+	}
+	if err := s.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if s.StoreCeiling().Frozen {
+		t.Error("the measurement after a delete left the store frozen")
+	}
+	if err := c.Append(ctx, "run-2", "step-a", []byte("after\n")); err != nil {
+		t.Errorf("append after the store fell back under its ceiling: %v", err)
+	}
+}
+
+func TestLogs_StoreCeilingIsOffByDefault(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{})
+	s, c := fix.server, fix.client
+
+	for range 3 {
+		if err := c.Append(context.Background(), "run-1", "step-a", []byte(strings.Repeat("x", 4096))); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if state := s.StoreCeiling(); state.Enforced || state.Frozen {
+		t.Errorf("an unconfigured store reports %+v", state)
+	}
+}
+
+func TestLogs_HealthCarriesTheStoreCeiling(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64, WarnBytes: 16},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 32)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+
+	warned := healthBody(t, fix.url)
+	ceiling, ok := warned["store_ceiling"].(map[string]any)
+	if !ok {
+		t.Fatalf("health carries no store_ceiling: %v", warned)
+	}
+	if ceiling["enforced"] != true || ceiling["warning"] != true || ceiling["frozen"] != false {
+		t.Errorf("a store past its warning mark reports %v", ceiling)
+	}
+	if ceiling["bytes"].(float64) <= 0 || ceiling["objects"].(float64) != 1 {
+		t.Errorf("health reports %v bytes / %v objects", ceiling["bytes"], ceiling["objects"])
+	}
+	if _, ok := ceiling["reconciled_at"]; !ok {
+		t.Error("health reports no reconciled_at after a measurement")
+	}
+	if warned["status"] != "degraded" {
+		t.Errorf("status = %v past the warning mark, want degraded", warned["status"])
+	}
+
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("y", 128)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	frozen := healthBody(t, fix.url)
+	if frozen["store_ceiling"].(map[string]any)["frozen"] != true {
+		t.Errorf("health does not report the freeze: %v", frozen["store_ceiling"])
+	}
+	var named bool
+	for _, p := range frozen["problems"].([]any) {
+		if strings.Contains(p.(string), "ceiling") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("health problems do not name the frozen store: %v", frozen["problems"])
+	}
+}
+
+func TestLogs_MetricsCarryTheStoreCeiling(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64, MaxObjects: 9},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 128)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+
+	resp, err := http.Get(fix.url + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{
+		"sparkwing_logs_store_bytes",
+		"sparkwing_logs_store_objects",
+		`sparkwing_logs_store_ceiling{unit="bytes"} 64`,
+		`sparkwing_logs_store_ceiling{unit="objects"} 9`,
+		"sparkwing_logs_store_ceiling_frozen 1",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("/metrics does not carry %q", want)
+		}
+	}
+}
+
+func TestLogs_DeletingARunRemeasuresAndThawsTheStore(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 128)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if !fix.server.StoreCeiling().Frozen {
+		t.Fatal("the store did not freeze")
+	}
+
+	if err := fix.client.DeleteRun(ctx, "run-1"); err != nil {
+		t.Fatalf("delete run: %v", err)
+	}
+	// safety: the walk the delete triggers runs off the request, so the test waits
+	// for it rather than asserting on a race it would sometimes win.
+	deadline := time.Now().Add(5 * time.Second)
+	for fix.server.StoreCeiling().Frozen && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if fix.server.StoreCeiling().Frozen {
+		t.Fatal("deleting the only run left the store frozen, so an operator has to wait out the interval")
+	}
+	if err := fix.client.Append(ctx, "run-2", "step-a", []byte("after\n")); err != nil {
+		t.Errorf("append after the delete freed space: %v", err)
+	}
+}
+
+func TestLogs_ADeleteDuringAWalkStillClearsTheFreeze(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 4096},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+
+	// safety: a wide run makes the first walk long enough that the second delete
+	// lands inside it, which is the case a dropped request would lose.
+	for i := range 400 {
+		node := fmt.Sprintf("step-%03d", i)
+		if err := fix.client.Append(ctx, "run-wide", node, []byte("filler\n")); err != nil {
+			t.Fatalf("append %s: %v", node, err)
+		}
+	}
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 4096)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if !fix.server.StoreCeiling().Frozen {
+		t.Fatal("the store did not freeze")
+	}
+
+	if err := fix.client.DeleteRun(ctx, "run-wide"); err != nil {
+		t.Fatalf("delete run-wide: %v", err)
+	}
+	if err := fix.client.DeleteRun(ctx, "run-1"); err != nil {
+		t.Fatalf("delete run-1: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !fix.server.StoreCeiling().Frozen && !fix.server.MeasuringStore() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if state := fix.server.StoreCeiling(); state.Frozen {
+		t.Fatalf("the second delete was lost to the running walk: %+v", state)
+	}
+	if err := fix.client.Append(ctx, "run-2", "step-a", []byte("after\n")); err != nil {
+		t.Errorf("append after both deletes: %v", err)
+	}
+}
+
+func TestLogs_MeasurementStopsWhenItsContextDoes(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 1 << 20},
+		Reconcile: time.Hour,
+	})
+	if err := fix.client.Append(context.Background(), "run-1", "step-a", []byte("hello\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := fix.server.MeasureStore(ctx)
+	if !errors.Is(err, objectguard.ErrMeasurementPartial) {
+		t.Fatalf("MeasureStore on a cancelled context = %v, want a partial measurement", err)
+	}
+	if !fix.server.StoreCeiling().Incomplete {
+		t.Error("an abandoned walk did not mark the ceiling incomplete")
+	}
+}
+
+func healthBody(t *testing.T, base string) map[string]any {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/health")
+	if err != nil {
+		t.Fatalf("GET health: %v", err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	return body
 }

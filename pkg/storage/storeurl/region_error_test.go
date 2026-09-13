@@ -15,7 +15,7 @@ func TestNewS3Client_MissingRegionNamesTheRemedy(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "y")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 
-	_, err := newS3Client(context.Background())
+	_, err := newS3Client(context.Background(), true)
 	if err == nil {
 		t.Fatal("got nil, want an error naming the missing region")
 	}
@@ -34,7 +34,7 @@ func TestNewS3Client_RegionPresentBuilds(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "x")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "y")
 
-	if _, err := newS3Client(context.Background()); err != nil {
+	if _, err := newS3Client(context.Background(), true); err != nil {
 		t.Fatalf("newS3Client: %v", err)
 	}
 }

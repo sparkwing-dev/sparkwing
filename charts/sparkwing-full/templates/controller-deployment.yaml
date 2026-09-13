@@ -118,6 +118,21 @@ spec:
             {{- end }}
             {{- with .Values.controller.idleClaimPoll }}
             - {{ printf "--idle-claim-poll=%s" . | quote }}
+            {{- $bucket := .Values.controller.bucketCeiling | default dict }}
+            {{- range $limit := list
+                  (dict "flag" "--max-bucket-bytes" "value" $bucket.maxBytes)
+                  (dict "flag" "--max-bucket-objects" "value" $bucket.maxObjects)
+                  (dict "flag" "--warn-bucket-bytes" "value" $bucket.warnBytes)
+                  (dict "flag" "--warn-bucket-objects" "value" $bucket.warnObjects)
+                  (dict "flag" "--bucket-reconcile" "value" $bucket.reconcile)
+                  (dict "flag" "--bucket-store" "value" $bucket.store)
+                  (dict "flag" "--bucket-measure-pages" "value" $bucket.measurePages) }}
+            {{- $value := $limit.value }}
+            {{- if not (kindIs "invalid" $value) }}
+            {{- if ne (toString $value) "" }}
+            - {{ printf "%s=%s" $limit.flag (toString $value) | quote }}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}

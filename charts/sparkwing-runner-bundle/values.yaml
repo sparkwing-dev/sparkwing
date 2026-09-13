@@ -201,6 +201,33 @@ cache:
   # RWO PVC -- replicas: 1 is the only safe value.
   replicas: 1
 
+  # Size bounds passed to sparkwing-cache. Each entry becomes the flag
+  # of the same name; leave one empty to keep the binary's default.
+  # The two object caps ship at 500 MB; the store ceilings are off
+  # until you set them, and at or above one every upload is refused
+  # with 507 until a measurement finds the store back under it. Size them
+  # against storage.size below. See docs/caching.md.
+  limits:
+    # Size cap for one uploaded artifact (default 500MB; 0 accepts any).
+    maxArtifactBytes: ""
+    # Size cap for one dependency archive (default 500MB; 0 accepts any).
+    maxCacheArchiveBytes: ""
+    # Stored bytes across the artifact, archive and upload trees at or
+    # above which every upload is refused. Empty leaves the store
+    # unlimited.
+    maxStoreBytes: ""
+    # Stored files across those trees at or above which every upload is
+    # refused. Empty leaves the count unlimited.
+    maxStoreObjects: ""
+    # Stored bytes at which /health reports a warning, refusing nothing.
+    warnStoreBytes: ""
+    # Stored files at which /health reports a warning.
+    warnStoreObjects: ""
+    # How often the service walks those trees and replaces its running
+    # count with the measurement (default 1h); "0" measures once at
+    # startup.
+    storeReconcile: ""
+
   image:
     # Pin this with runner and logs to one compatible revision.
     repository: ghcr.io/sparkwing-dev/sparkwing-cache
@@ -352,6 +379,29 @@ logs:
     searchMaxBytes: ""
     # How long one log search may scan (default 10s).
     searchTimeout: ""
+    # Byte cap for one log line; a longer line is stored cut to the cap
+    # with a truncation marker in place of its tail. Off unless set.
+    maxLineBytes: ""
+    # Share of control bytes in one append above which it reads as
+    # binary and is dropped, leaving one warning line per node log.
+    # Off unless set; 0.3 catches a pipeline that cats a binary.
+    binaryRatio: ""
+    # Stored bytes across the whole log store at or above which every append
+    # is refused with 507 until a measurement finds the store back under
+    # it. Empty leaves the store unlimited.
+    maxStoreBytes: ""
+    # Log files across the whole store at or above which every append is
+    # refused with 507. Empty leaves the count unlimited.
+    maxStoreObjects: ""
+    # Stored bytes at which /api/v1/health reports the store as warning,
+    # refusing nothing. Empty disables the warning.
+    warnStoreBytes: ""
+    # Log files at which /api/v1/health reports the store as warning.
+    warnStoreObjects: ""
+    # How often the service walks the store and replaces its running
+    # count with the measurement (default 1h); "0" measures once at
+    # startup.
+    storeReconcile: ""
 
   resources:
     requests:

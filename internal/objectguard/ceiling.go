@@ -1,0 +1,445 @@
+package objectguard
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+)
+
+// CeilingReason names the ceiling a freeze came from.
+type CeilingReason string
+
+const (
+	// CeilingBytes is the stored-byte ceiling.
+	CeilingBytes CeilingReason = "bytes"
+	// CeilingObjects is the object-count ceiling.
+	CeilingObjects CeilingReason = "objects"
+)
+
+// ErrCeilingFrozen matches every *CeilingError under errors.Is.
+var ErrCeilingFrozen = errors.New("object-store bucket ceiling reached")
+
+// CeilingError reports a write refused because the bucket sits above
+// its ceiling. It names the measurement and the ceiling it crossed, so
+// an operator can act on the message alone.
+type CeilingError struct {
+	// Subject names the store that is full, so a service that keeps its
+	// own ceiling says which one refused.
+	Subject string
+	// Remedy is the operator instruction for this store.
+	Remedy string
+	Reason CeilingReason
+	// Limit is the ceiling that froze writes, in bytes or objects.
+	Limit int64
+	// Observed is the bucket total the freeze was taken on.
+	Observed int64
+	// Frozen is when the bucket entered its frozen state.
+	Frozen time.Time
+}
+
+func (e *CeilingError) Error() string {
+	subject, remedy := e.Subject, e.Remedy
+	if subject == "" {
+		subject = DefaultCeilingSubject
+	}
+	if remedy == "" {
+		remedy = defaultRemedy(e.Reason)
+	}
+	return fmt.Sprintf(
+		"storage ceiling reached: %s holds %d %s against a ceiling of %d, so writes froze at %s and further writes are refused. %s",
+		subject, e.Observed, e.Reason, e.Limit, e.Frozen.UTC().Format(time.RFC3339), remedy,
+	)
+}
+
+// DefaultCeilingSubject names the store a Ceiling bounds when its owner
+// names none.
+const DefaultCeilingSubject = "the bucket"
+
+func defaultRemedy(r CeilingReason) string {
+	return "Delete objects until the next measurement puts the store under the ceiling, raise " +
+		ceilingEnv(r) + ", or clear the freeze with `sparkwing cluster object-store reset-breaker --profile NAME`"
+}
+
+func (e *CeilingError) Unwrap() error { return ErrCeilingFrozen }
+
+// RetryableError reports the refusal as final. A bucket over its
+// ceiling is not under it again by the next attempt.
+func (e *CeilingError) RetryableError() bool { return false }
+
+// CeilingLimit is the pair of ceilings and the pair of warning marks a
+// bucket is held to. A zero or negative field removes that bound, which
+// is the shipped default: a bucket is unlimited until an operator says
+// otherwise.
+type CeilingLimit struct {
+	MaxBytes    int64
+	MaxObjects  int64
+	WarnBytes   int64
+	WarnObjects int64
+}
+
+// Enforced reports whether either ceiling can freeze writes.
+func (l CeilingLimit) Enforced() bool { return l.MaxBytes > 0 || l.MaxObjects > 0 }
+
+// DefaultCeilingReconcile is how often a measured bucket total replaces
+// the incremental counters when an operator sets no interval.
+const DefaultCeilingReconcile = time.Hour
+
+// CeilingConfig is a Ceiling's whole configuration.
+type CeilingConfig struct {
+	Limit CeilingLimit
+	// Subject names the store in a refusal, such as "the log store".
+	// Empty uses DefaultCeilingSubject.
+	Subject string
+	// Remedy is the operator instruction a refusal ends with. Empty
+	// names the controller's environment variables and reset verb.
+	Remedy string
+	// Reconcile is the gap between measured bucket totals. A value at or
+	// below zero measures once at startup and then leaves the
+	// incremental counters as the only measurement. [ConfigFromEnv]
+	// fills in DefaultCeilingReconcile when the environment names no
+	// interval.
+	Reconcile time.Duration
+}
+
+// Usage is a bucket total: the bytes it stores and the objects it
+// holds, as of ObservedAt.
+type Usage struct {
+	Bytes      int64     `json:"bytes"`
+	Objects    int64     `json:"objects"`
+	ObservedAt time.Time `json:"observed_at,omitzero"`
+	// Partial marks a total the measurement could not finish, because
+	// it ran out of pages or time. A partial total is smaller than the
+	// truth, so folding it in would thaw a store that is still full.
+	Partial bool `json:"partial,omitempty"`
+}
+
+// ErrMeasurementPartial reports a measurement that stopped before it
+// had seen the whole store.
+var ErrMeasurementPartial = errors.New("store measurement did not finish")
+
+// CeilingState is the ceiling at a point in time, as the health route
+// and the metrics collector report it.
+type CeilingState struct {
+	// Enforced is false while neither ceiling is set, which is the
+	// shipped default and means the ceiling never refuses a write.
+	Enforced     bool      `json:"enforced"`
+	MaxBytes     int64     `json:"max_bytes"`
+	MaxObjects   int64     `json:"max_objects"`
+	WarnBytes    int64     `json:"warn_bytes"`
+	WarnObjects  int64     `json:"warn_objects"`
+	Bytes        int64     `json:"bytes"`
+	Objects      int64     `json:"objects"`
+	CountedAt    time.Time `json:"counted_at,omitzero"`
+	ReconciledAt time.Time `json:"reconciled_at,omitzero"`
+	Reconcile    string    `json:"reconcile_interval,omitempty"`
+	Warning      bool      `json:"warning"`
+	Frozen       bool      `json:"frozen"`
+	// Thawed is true while an operator's reset holds the freeze off
+	// until the next measurement.
+	Thawed       bool          `json:"thawed"`
+	FrozenAt     time.Time     `json:"frozen_at,omitzero"`
+	FrozenReason CeilingReason `json:"frozen_reason,omitempty"`
+	Freezes      uint64        `json:"freezes_total"`
+	Refused      uint64        `json:"refused_total"`
+	// Incomplete is true when the last measurement stopped early and
+	// was discarded, which leaves the counters as the only total.
+	Incomplete bool `json:"measurement_incomplete"`
+}
+
+// Ceiling holds a bucket to a total size and a total object count.
+//
+// Counting is incremental: [Ceiling.Record] adds one write's bytes as
+// it happens, which costs nothing per request. Those counters drift,
+// because an overwrite counts its key twice and a delete cannot know
+// what it removed, so [Ceiling.Observe] replaces them with a measured
+// total on the reconciliation interval.
+//
+// A total that reaches a ceiling freezes writes: every further object
+// write is refused with a *CeilingError until a measurement puts the
+// bucket back under the ceiling or an operator thaws it. Safe for
+// concurrent use.
+type Ceiling struct {
+	mu        sync.Mutex
+	limit     CeilingLimit
+	reconcile time.Duration
+
+	bytes      int64
+	objects    int64
+	counted    time.Time
+	reconciled time.Time
+
+	subject      string
+	remedy       string
+	frozen       bool
+	frozenAt     time.Time
+	frozenReason CeilingReason
+	frozenOn     int64
+	thawed       bool
+	incomplete   bool
+	freezes      uint64
+	refused      uint64
+
+	now func() time.Time
+}
+
+// NewCeiling builds a Ceiling from cfg. A cfg with no ceiling set never
+// refuses a write.
+func NewCeiling(cfg CeilingConfig) *Ceiling {
+	return &Ceiling{
+		limit:     cfg.Limit,
+		reconcile: cfg.Reconcile,
+		subject:   cfg.Subject,
+		remedy:    cfg.Remedy,
+		now:       time.Now,
+	}
+}
+
+// Configure replaces the ceilings and the reconciliation interval on a
+// running Ceiling and re-evaluates the freeze against the counters it
+// already holds, so raising a ceiling above the current total thaws the
+// bucket at once. The process that owns the limiter calls it to apply
+// its own configuration; a raise made this way lasts as long as the
+// process, so an operator raises the environment alongside it.
+func (c *Ceiling) Configure(cfg CeilingConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.limit = cfg.Limit
+	c.reconcile = cfg.Reconcile
+	c.subject = cfg.Subject
+	c.remedy = cfg.Remedy
+	c.thawed = false
+	c.evaluateLocked()
+}
+
+// Enforced reports whether either ceiling is set.
+func (c *Ceiling) Enforced() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.limit.Enforced()
+}
+
+// Reconcile is the gap between measured bucket totals. A value at or
+// below zero means the caller measures once and then not again.
+func (c *Ceiling) Reconcile() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reconcile
+}
+
+// Record adds one write's delta to the incremental counters and
+// re-evaluates the freeze. Bytes and objects may be negative, which is
+// how a deletion gives its object back.
+func (c *Ceiling) Record(bytes, objects int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bytes += bytes
+	c.objects += objects
+	if c.bytes < 0 {
+		c.bytes = 0
+	}
+	if c.objects < 0 {
+		c.objects = 0
+	}
+	c.counted = c.now().UTC()
+	// safety: a thaw holds until the next measurement, so the write that follows
+	// an operator's reset does not freeze the bucket again on the running count.
+	if !c.thawed {
+		c.evaluateLocked()
+	}
+}
+
+// Observe replaces the counters with a measured bucket total and
+// re-evaluates the freeze. A measurement under the ceiling thaws a
+// frozen bucket, which is how deleting objects brings writes back.
+func (c *Ceiling) Observe(u Usage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bytes = u.Bytes
+	c.objects = u.Objects
+	at := u.ObservedAt
+	if at.IsZero() {
+		at = c.now()
+	}
+	c.counted = at.UTC()
+	c.reconciled = c.counted
+	c.thawed = false
+	c.incomplete = false
+	c.evaluateLocked()
+}
+
+// safety: the freeze is taken from whichever ceiling the totals crossed first,
+// so the error names the ceiling an operator has to act on.
+func (c *Ceiling) evaluateLocked() {
+	reason, observed, over := c.overLocked()
+	if !over {
+		c.frozen = false
+		c.frozenReason = ""
+		c.frozenAt = time.Time{}
+		c.frozenOn = 0
+		return
+	}
+	if c.frozen && c.frozenReason == reason {
+		c.frozenOn = observed
+		return
+	}
+	if !c.frozen {
+		c.freezes++
+		c.frozenAt = c.now().UTC()
+	}
+	c.frozen = true
+	c.frozenReason = reason
+	c.frozenOn = observed
+}
+
+func (c *Ceiling) overLocked() (CeilingReason, int64, bool) {
+	if c.limit.MaxBytes > 0 && c.bytes >= c.limit.MaxBytes {
+		return CeilingBytes, c.bytes, true
+	}
+	if c.limit.MaxObjects > 0 && c.objects >= c.limit.MaxObjects {
+		return CeilingObjects, c.objects, true
+	}
+	return "", 0, false
+}
+
+func (c *Ceiling) warningLocked() bool {
+	if c.limit.WarnBytes > 0 && c.bytes >= c.limit.WarnBytes {
+		return true
+	}
+	return c.limit.WarnObjects > 0 && c.objects >= c.limit.WarnObjects
+}
+
+// Allow reports whether an object write may proceed. A frozen bucket
+// returns a *CeilingError and counts the refusal.
+func (c *Ceiling) Allow() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.frozen {
+		return nil
+	}
+	c.refused++
+	limit := c.limit.MaxBytes
+	if c.frozenReason == CeilingObjects {
+		limit = c.limit.MaxObjects
+	}
+	return &CeilingError{
+		Subject:  c.subject,
+		Remedy:   c.remedy,
+		Reason:   c.frozenReason,
+		Limit:    limit,
+		Observed: c.frozenOn,
+		Frozen:   c.frozenAt,
+	}
+}
+
+// Frozen reports whether the ceiling is refusing writes.
+func (c *Ceiling) Frozen() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.frozen
+}
+
+// ErrNoMeasurementScheduled reports a thaw refused because nothing
+// would ever end it.
+var ErrNoMeasurementScheduled = errors.New("no further measurement is scheduled")
+
+// Thaw clears a freeze and reports whether one was in place. It holds
+// until the next measurement: writes counted in the meantime do not
+// freeze the bucket again, so the thaw buys the whole window an
+// operator needs to delete objects or raise the ceiling. The next
+// measurement decides, and freezes again while the bucket is still over
+// the ceiling.
+//
+// It is refused when no measurement is scheduled, because a thaw that
+// nothing ends is the ceiling switched off for the life of the process
+// without saying so. Schedule one, or raise the ceiling instead.
+func (c *Ceiling) Thaw() (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.limit.Enforced() && c.reconcile <= 0 {
+		return false, fmt.Errorf(
+			"%w, so a thaw would leave the ceiling off until this process restarts: "+
+				"set a reconciliation interval, or raise the ceiling instead", ErrNoMeasurementScheduled)
+	}
+	was := c.frozen
+	c.frozen = false
+	c.frozenReason = ""
+	c.frozenAt = time.Time{}
+	c.frozenOn = 0
+	c.thawed = true
+	return was, nil
+}
+
+// State snapshots the ceiling for the health route and metrics.
+func (c *Ceiling) State() CeilingState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st := CeilingState{
+		Enforced:     c.limit.Enforced(),
+		MaxBytes:     c.limit.MaxBytes,
+		MaxObjects:   c.limit.MaxObjects,
+		WarnBytes:    c.limit.WarnBytes,
+		WarnObjects:  c.limit.WarnObjects,
+		Bytes:        c.bytes,
+		Objects:      c.objects,
+		CountedAt:    c.counted,
+		ReconciledAt: c.reconciled,
+		Warning:      c.warningLocked(),
+		Frozen:       c.frozen,
+		Thawed:       c.thawed,
+		FrozenAt:     c.frozenAt,
+		FrozenReason: c.frozenReason,
+		Freezes:      c.freezes,
+		Refused:      c.refused,
+		Incomplete:   c.incomplete,
+	}
+	if c.reconcile > 0 {
+		st.Reconcile = c.reconcile.String()
+	}
+	return st
+}
+
+// UsageSource measures a whole bucket. The Ceiling calls one on the
+// reconciliation interval and never per request, because a listing is
+// billed per thousand objects.
+type UsageSource func(context.Context) (Usage, error)
+
+// ReconcileWith measures the store through src and folds the result
+// into the ceiling. It is a no-op when no ceiling is set, so an
+// unlimited install never pays for a listing.
+//
+// A measurement that reports itself partial is discarded rather than
+// folded in: a total short of the truth would thaw a store that is
+// still over its ceiling. The ceiling then reports itself incomplete
+// and keeps counting writes.
+func (c *Ceiling) ReconcileWith(ctx context.Context, src UsageSource) error {
+	if src == nil || !c.Enforced() {
+		return nil
+	}
+	u, err := src(ctx)
+	if err != nil {
+		c.markIncomplete()
+		return fmt.Errorf("measure store usage: %w", err)
+	}
+	if u.Partial {
+		c.markIncomplete()
+		return fmt.Errorf("measure store usage: %w after %d bytes in %d objects",
+			ErrMeasurementPartial, u.Bytes, u.Objects)
+	}
+	c.Observe(u)
+	return nil
+}
+
+func (c *Ceiling) markIncomplete() {
+	c.mu.Lock()
+	c.incomplete = true
+	c.mu.Unlock()
+}
+
+func ceilingEnv(r CeilingReason) string {
+	if r == CeilingObjects {
+		return EnvMaxBucketObjects
+	}
+	return EnvMaxBucketBytes
+}

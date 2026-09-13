@@ -15,6 +15,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -63,9 +64,40 @@ func run(args []string) error {
 	searchMaxBytes := fs.Int64("search-max-bytes", defaults.SearchMaxBytes,
 		"bytes one search request may read before it returns a truncated result; "+
 			"0 disables the cap (env: SPARKWING_LOGS_SEARCH_MAX_BYTES)")
+	maxLineBytes := fs.Int64("max-line-bytes", defaults.MaxLineBytes,
+		"byte cap for one log line; a longer line is stored cut to the cap with a "+
+			"truncation marker in place of its tail. 0 stores a line of any length "+
+			"(env: SPARKWING_LOGS_MAX_LINE_BYTES)")
+	binaryRatio := fs.Float64("binary-ratio", defaults.BinaryRatio,
+		"share of control bytes in one append above which the append reads as binary "+
+			"and is dropped, leaving one warning line in the node's log. 0 stores every "+
+			"append whatever it holds; 0.3 catches a binary a pipeline cats "+
+			"(env: SPARKWING_LOGS_BINARY_RATIO)")
 	searchTimeout := fs.Duration("search-timeout", defaults.SearchTimeout,
 		"how long one search request may scan before it returns a truncated result; "+
 			"0 disables the deadline (env: SPARKWING_LOGS_SEARCH_TIMEOUT)")
+	ceilingDefaults, cerr := storeCeilingFromEnv()
+	if cerr != nil {
+		return cerr
+	}
+	maxStoreBytes := fs.Int64("max-store-bytes", ceilingDefaults.Limit.MaxBytes,
+		"stored bytes across the whole log store at or above which every append is refused with 507 "+
+			"naming the ceiling, until a measurement finds the store back under it. 0, the "+
+			"default, leaves the store unlimited (env: SPARKWING_LOGS_MAX_STORE_BYTES)")
+	maxStoreObjects := fs.Int64("max-store-objects", ceilingDefaults.Limit.MaxObjects,
+		"log files across the whole store at or above which every append is refused with 507; "+
+			"0 leaves the count unlimited (env: SPARKWING_LOGS_MAX_STORE_OBJECTS)")
+	warnStoreBytes := fs.Int64("warn-store-bytes", ceilingDefaults.Limit.WarnBytes,
+		"stored bytes at which /api/v1/health reports the store as warning, which refuses "+
+			"nothing; 0 disables the warning (env: SPARKWING_LOGS_WARN_STORE_BYTES)")
+	warnStoreObjects := fs.Int64("warn-store-objects", ceilingDefaults.Limit.WarnObjects,
+		"log files at which /api/v1/health reports the store as warning; 0 disables the "+
+			"warning (env: SPARKWING_LOGS_WARN_STORE_OBJECTS)")
+	storeReconcile := fs.Duration("store-reconcile", ceilingDefaults.Reconcile,
+		"how often the service measures the whole store and replaces its running count with "+
+			"the measurement. Appends are counted as they happen, so this walk is the only "+
+			"enumeration the ceiling costs; 0 measures once at startup "+
+			"(env: SPARKWING_LOGS_STORE_RECONCILE)")
 	_ = fs.Parse(args)
 
 	if err := checkNonNegative(
@@ -74,11 +106,35 @@ func run(args []string) error {
 		flagValue{"--max-inflight-bytes", *maxInFlightBytes},
 		flagValue{"--min-free-bytes", *minFreeBytes},
 		flagValue{"--search-max-bytes", *searchMaxBytes},
+		flagValue{"--max-line-bytes", *maxLineBytes},
+		flagValue{"--max-store-bytes", *maxStoreBytes},
+		flagValue{"--max-store-objects", *maxStoreObjects},
+		flagValue{"--warn-store-bytes", *warnStoreBytes},
+		flagValue{"--warn-store-objects", *warnStoreObjects},
+		flagValue{"--store-reconcile", int64(*storeReconcile)},
 		flagValue{"--retention", int64(*retention)},
 		flagValue{"--sweep-interval", int64(*sweepInterval)},
 		flagValue{"--search-timeout", int64(*searchTimeout)},
 	); err != nil {
 		return err
+	}
+	if *binaryRatio < 0 || *binaryRatio > 1 {
+		return fmt.Errorf("--binary-ratio must be between 0 and 1; pass 0 to store every append")
+	}
+	// safety: a cap under the marker could not store a cut line and its marker inside
+	// the cap, so the bound the operator asked for would not hold.
+	if *maxLineBytes > 0 && *maxLineBytes < logs.MinLineBytes {
+		return fmt.Errorf("--max-line-bytes must be at least %d, the size of the marker a cut line carries "+
+			"plus a byte of output; pass 0 to store a line of any length", logs.MinLineBytes)
+	}
+	ceiling := objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{
+			MaxBytes:    *maxStoreBytes,
+			MaxObjects:  *maxStoreObjects,
+			WarnBytes:   *warnStoreBytes,
+			WarnObjects: *warnStoreObjects,
+		},
+		Reconcile: *storeReconcile,
 	}
 	limits := logs.Limits{
 		MaxNodeBytes:     *maxNodeBytes,
@@ -89,6 +145,8 @@ func run(args []string) error {
 		SweepInterval:    *sweepInterval,
 		SearchMaxBytes:   *searchMaxBytes,
 		SearchTimeout:    *searchTimeout,
+		MaxLineBytes:     *maxLineBytes,
+		BinaryRatio:      *binaryRatio,
 	}
 
 	if *requireAuth {
@@ -119,6 +177,7 @@ func run(args []string) error {
 		ControllerURL: *controllerURL,
 		Private:       privateRoot,
 		Limits:        &limits,
+		StoreCeiling:  ceiling,
 	})
 }
 
@@ -163,6 +222,12 @@ func limitsFromEnv(def logs.Limits) (logs.Limits, error) {
 	if def.SearchMaxBytes, err = envInt64("SPARKWING_LOGS_SEARCH_MAX_BYTES", def.SearchMaxBytes); err != nil {
 		return def, err
 	}
+	if def.MaxLineBytes, err = envInt64("SPARKWING_LOGS_MAX_LINE_BYTES", def.MaxLineBytes); err != nil {
+		return def, err
+	}
+	if def.BinaryRatio, err = envRatio("SPARKWING_LOGS_BINARY_RATIO", def.BinaryRatio); err != nil {
+		return def, err
+	}
 	def.SearchTimeout, err = envDuration("SPARKWING_LOGS_SEARCH_TIMEOUT", def.SearchTimeout)
 	return def, err
 }
@@ -180,6 +245,38 @@ func envInt64(name string, def int64) (int64, error) {
 		return 0, fmt.Errorf("%s=%q must not be negative; pass 0 to turn that bound off", name, raw)
 	}
 	return n, nil
+}
+
+// safety: a value the operator meant as a ceiling must not decay into "unlimited" without saying so.
+func storeCeilingFromEnv() (objectguard.CeilingConfig, error) {
+	var cfg objectguard.CeilingConfig
+	var err error
+	if cfg.Limit.MaxBytes, err = envInt64("SPARKWING_LOGS_MAX_STORE_BYTES", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.Limit.MaxObjects, err = envInt64("SPARKWING_LOGS_MAX_STORE_OBJECTS", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.Limit.WarnBytes, err = envInt64("SPARKWING_LOGS_WARN_STORE_BYTES", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.Limit.WarnObjects, err = envInt64("SPARKWING_LOGS_WARN_STORE_OBJECTS", 0); err != nil {
+		return cfg, err
+	}
+	cfg.Reconcile, err = envDuration("SPARKWING_LOGS_STORE_RECONCILE", objectguard.DefaultCeilingReconcile)
+	return cfg, err
+}
+
+func envRatio(name string, def float64) (float64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil || f < 0 || f > 1 {
+		return 0, fmt.Errorf("%s=%q is not a share between 0 and 1", name, raw)
+	}
+	return f, nil
 }
 
 func envDuration(name string, def time.Duration) (time.Duration, error) {

@@ -341,6 +341,13 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_requests_total` | Counter | `class`, `outcome` | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
 | `sparkwing_object_store_trips_total` | Counter | `class` | Times a request class exhausted its budget and began refusing requests |
 | `sparkwing_object_store_tripped` | Gauge | `class` | 1 while a request class is refusing requests |
+| `sparkwing_object_store_bucket_bytes` | Gauge | (none) | Bytes the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_objects` | Gauge | (none) | Objects the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_ceiling` | Gauge | `unit` | The configured ceiling, by `unit` (`bytes`, `objects`); 0 while that unit is unlimited |
+| `sparkwing_object_store_bucket_ceiling_frozen` | Gauge | (none) | 1 while the bucket is over its ceiling and object writes are refused |
+| `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
+| `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | (none) | Object writes the ceiling refused |
+| `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
 | `sparkwing_auth_token_cache_total` | Counter | `result` | Bearer verifications by how the verified-token cache answered them (`hit`, `miss`, `coalesced`) |
 | `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
 | `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a per-runner budget refused with `429` (`claim`, `heartbeat`) |
@@ -507,7 +514,166 @@ sparkwing cluster object-store status --profile prod
 sparkwing cluster object-store reset-breaker --profile prod
 ```
 
-A reset clears every tripped class and both window counters; lifetime
-request and trip totals survive so the metrics keep their history. A
-budget that keeps tripping wants a larger limit or a caller that stops
-retrying, not a repeated reset.
+A reset clears every tripped class and both window counters, and thaws a
+frozen bucket ceiling; lifetime request and trip totals survive so the
+metrics keep their history. A budget that keeps tripping wants a larger
+limit or a caller that stops retrying, not a repeated reset.
+
+## Storage ceilings
+
+Per-team quotas bound each team; a thousand teams under quota still add
+up, and one quota bug reaches every team at once. A storage ceiling
+bounds the total. Each service that stores what pipelines produce holds
+its own store to a byte ceiling and an object-count ceiling, and freezes
+writes once a measurement reaches either one: existing runs finish,
+further writes are refused with an error naming the ceiling and the
+measurement, and health reports the freeze. Reads and deletes keep
+working, because deleting is how a store gets back under its ceiling.
+
+| Service | What it bounds | Refusal | State on |
+|--------|------|-------------|------|
+| `sparkwing-cache` | the artifact, dependency-archive and upload trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
+| `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
+| `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
+
+Each of the three reports `frozen`, `warning` and
+`measurement_incomplete` on its health route and raises a `problems`
+entry for each, so a frozen or warning store shows as degraded wherever
+health is read. The services also carry their counted bytes and objects
+and the time of the last measurement; the controller keeps its totals on
+the admin-scoped breaker route, because its health answers without a
+token.
+
+The three are independent: each measures the store it owns and freezes
+only its own writes, so no service waits on another to decide. The
+controller's ceiling is the one that reaches an S3 bucket; the services'
+ceilings bound the volumes they write.
+
+### The controller's bucket ceiling
+
+Every ceiling is unlimited by default, so an install that sets nothing
+sees no change. Set the controller's with:
+
+| Flag | Environment | Meaning |
+|--------|------|-------------|
+| `--max-bucket-bytes` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | Stored bytes at or above which object writes freeze |
+| `--max-bucket-objects` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | Objects at or above which object writes freeze |
+| `--warn-bucket-bytes` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | Stored bytes at which health reports a warning |
+| `--warn-bucket-objects` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | Objects at which health reports a warning |
+| `--bucket-reconcile` | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | Gap between bucket measurements, hourly by default |
+| `--bucket-store` | `SPARKWING_OBJECT_STORE_URL` | Store URL the measurement reads, such as `s3://bucket/prefix` |
+| `--bucket-measure-pages` | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | Listings one measurement may spend, 1000 by default |
+
+Counting costs nothing per request. Every write the process sends adds
+its own bytes to a running total, and the controller replaces that total
+with a measured one on the reconciliation interval, because the running
+count drifts: an overwrite counts its key twice and a delete cannot know
+what it removed. A multipart upload counts its bytes on the parts and
+its key on the completion, so one upload counts once; an abort counts
+nothing and is never refused, because aborting is how a frozen bucket
+sheds an upload in flight.
+
+The measurement is one paginated listing of the artifact store, which
+object stores bill per thousand keys, so an install that wants the
+ceiling without the listing sets `--bucket-reconcile 0` and accepts the
+drift. `--bucket-store` names the store the measurement reads; the
+controller reads it on the interval and serves none of it, and a
+controller pointed at no store, or at a backend that cannot total
+itself, keeps the running count. The running count starts at zero on
+restart, so a controller with no measurement source sees only what it
+has written since it started.
+
+Every Sparkwing process reads the same environment, so a runner handed
+`SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` refuses its own writes above
+the ceiling too. It counts only what it has written since it started,
+because the measurement belongs to the controller; treat that as a
+backstop on one process rather than a second view of the bucket.
+
+Three properties keep the measurement from becoming the cost it bounds.
+One replica measures per window: the controllers claim a store-wide
+lease, so N replicas cost one listing rather than N. The measurement's
+requests sit outside the object-store request budget, because totalling
+a million-object bucket spends twice the per-minute list budget in one
+pass and would otherwise leave every other reader refused for the rest
+of the minute. And the walk itself is bounded, at `--bucket-measure-pages` listings
+(1000 by default, a thousand objects each) and at half the
+reconciliation interval, whichever comes first.
+
+A measurement that stops at either bound is discarded rather than folded
+in, because a total short of the truth would thaw a store that is still
+full. The ceiling then reports `measurement_incomplete` on health and in
+`sparkwing_object_store_bucket_ceiling_measurement_incomplete`, and
+keeps counting writes until a measurement finishes. A bucket that keeps
+reporting incomplete wants a higher `--bucket-measure-pages`, which is
+the bound that binds first, and then a narrower prefix or S3 Inventory
+in place of the listing.
+
+`GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
+`warning` alone, because that route answers without a token; the totals
+and the ceilings sit behind the admin-scoped
+`GET /api/v1/object-store/breaker` and on `sparkwing cluster
+object-store status`, which also reports `counted_at` (when the running
+count last moved) and `reconciled_at` (when the bucket was last
+measured). Alarm on
+`sparkwing_object_store_bucket_ceiling_frozen` for the freeze and on
+`sparkwing_object_store_bucket_bytes` against
+`sparkwing_object_store_bucket_ceiling` for the approach; S3 publishes
+`BucketSizeBytes` and `NumberOfObjects` daily at no charge, which is the
+same signal from the account side.
+
+Clearing a freeze is an operator decision:
+
+```bash
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+A thaw is refused while no measurement is scheduled
+(`--bucket-reconcile 0`), because nothing would ever end it and the
+ceiling would be off until the process restarts; raise the ceiling
+instead. Otherwise it thaws the bucket and holds the thaw until the next
+measurement: writes counted in between do not freeze it again, so the
+operator gets the whole window to act. The measurement then decides, and freezes again
+while the bucket is still over the ceiling. Raise the ceiling on the
+controller to keep writes flowing, or delete objects until the
+measurement falls back under it.
+
+### The cache and logs service ceilings
+
+The hosted write path does not run through the controller: a runner
+uploads artifacts and dependency archives to `sparkwing-cache` and posts
+log lines to `sparkwing-logs`, and each service stores them itself. Each
+therefore carries its own ceiling and refuses its own writes with `507`
+and an error naming its own flags.
+
+| Service | Flags | Environment |
+|--------|------|-------------|
+| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` | `SPARKWING_CACHE_MAX_STORE_BYTES` and the matching names |
+| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` | `SPARKWING_LOGS_MAX_STORE_BYTES` and the matching names |
+
+Each service counts what it stores as it stores it and walks its own
+trees on `--store-reconcile` (hourly by default, `0` measures once at
+startup). The walk is local file I/O rather than billed requests, it
+stops when the service's context does and reports the total as partial
+rather than folding a short one in, and a
+measurement that finds the store back under its ceiling thaws it.
+`--warn-store-bytes` and `--warn-store-objects` mark the store as
+warning on health without refusing anything. The chart carries all of
+these as `cache.limits.*` and `logs.limits.*`.
+
+Neither service waits out the interval to recover. Deleting a run with
+`DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
+`--retention`, starts a fresh measurement of the log store, so appends
+resume shortly after the delete answers rather than at the end of the
+interval. The cache
+serves no delete of its own, so it carries two bearer-gated admin
+routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
+what turns freeing space on the volume into uploads flowing again, and
+`POST /admin/store-ceiling/thaw` accepts uploads until the next
+measurement. The measure route answers `202` with the state as it stands
+and walks off the request path, so the caller pays no latency for a
+large store and a disconnect cannot abandon the walk; one runs at a
+time. The thaw is refused with `409` when no measurement is scheduled,
+and the refusal points at the measure route. Deleting a run on the logs
+service triggers the same off-request walk. Neither service drops a
+request that arrives while a walk is running: it re-runs once when that
+walk finishes, so a delete the walk had already passed still lands.

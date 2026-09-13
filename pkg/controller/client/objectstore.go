@@ -24,13 +24,38 @@ type ObjectStoreClassState struct {
 	TrippedWindow string    `json:"tripped_window,omitempty"`
 }
 
+// ObjectStoreCeiling is the controller's bucket-size ceiling: how much
+// the bucket holds, what it is held to, and whether object writes are
+// frozen above it.
+type ObjectStoreCeiling struct {
+	Enforced     bool      `json:"enforced"`
+	MaxBytes     int64     `json:"max_bytes"`
+	MaxObjects   int64     `json:"max_objects"`
+	WarnBytes    int64     `json:"warn_bytes"`
+	WarnObjects  int64     `json:"warn_objects"`
+	Bytes        int64     `json:"bytes"`
+	Objects      int64     `json:"objects"`
+	CountedAt    time.Time `json:"counted_at,omitzero"`
+	ReconciledAt time.Time `json:"reconciled_at,omitzero"`
+	Reconcile    string    `json:"reconcile_interval,omitempty"`
+	Warning      bool      `json:"warning"`
+	Frozen       bool      `json:"frozen"`
+	Thawed       bool      `json:"thawed"`
+	FrozenAt     time.Time `json:"frozen_at,omitzero"`
+	FrozenReason string    `json:"frozen_reason,omitempty"`
+	Freezes      uint64    `json:"freezes_total"`
+	Refused      uint64    `json:"refused_total"`
+}
+
 // ObjectStoreBreaker is the controller's object-store request budget.
 type ObjectStoreBreaker struct {
 	Enabled bool                    `json:"enabled"`
 	Reset   string                  `json:"reset"`
 	Tripped bool                    `json:"tripped"`
 	Classes []ObjectStoreClassState `json:"classes"`
+	Ceiling ObjectStoreCeiling      `json:"ceiling"`
 	Cleared []string                `json:"cleared,omitempty"`
+	Thawed  bool                    `json:"thawed,omitempty"`
 }
 
 // ObjectStoreBreakerState reads the controller's object-store request
@@ -39,9 +64,10 @@ func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreak
 	return c.objectStoreBreaker(ctx, http.MethodGet, "/api/v1/object-store/breaker")
 }
 
-// ResetObjectStoreBreaker clears every tripped class on the controller
-// and returns the budget as it stands afterwards, with Cleared naming
-// the classes that were refusing requests.
+// ResetObjectStoreBreaker clears every tripped class and any
+// bucket-ceiling freeze on the controller, and returns the budget as it
+// stands afterwards, with Cleared naming the classes that were refusing
+// requests and Thawed reporting whether a ceiling freeze was lifted.
 func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error) {
 	return c.objectStoreBreaker(ctx, http.MethodPost, "/api/v1/object-store/reset-breaker")
 }

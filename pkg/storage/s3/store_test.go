@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
@@ -214,5 +216,129 @@ func TestArtifactStore_List(t *testing.T) {
 		if strings.Contains(k, "xyz") {
 			t.Errorf("List leaked sibling-prefix key %q", k)
 		}
+	}
+}
+
+func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
+	t.Parallel()
+	client, closer := fakeS3(t)
+	defer closer()
+
+	s := NewArtifactStore(testBucket, "cache", client)
+	ctx := context.Background()
+
+	usage, err := s.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage on an empty store: %v", err)
+	}
+	if usage.Bytes != 0 || usage.Objects != 0 {
+		t.Fatalf("empty store measures %d bytes / %d objects, want 0/0", usage.Bytes, usage.Objects)
+	}
+
+	for key, body := range map[string]string{"a": "hello", "b": "worldly"} {
+		if err := s.Put(ctx, key, strings.NewReader(body)); err != nil {
+			t.Fatalf("Put %s: %v", key, err)
+		}
+	}
+
+	usage, err = s.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if usage.Objects != 2 {
+		t.Errorf("measured %d objects, want 2", usage.Objects)
+	}
+	if want := int64(len("hello") + len("worldly")); usage.Bytes != want {
+		t.Errorf("measured %d bytes, want %d", usage.Bytes, want)
+	}
+	if usage.ObservedAt.IsZero() {
+		t.Error("a measurement carries no observation time")
+	}
+}
+
+func TestArtifactStore_UsageIgnoresAnotherPrefix(t *testing.T) {
+	t.Parallel()
+	client, closer := fakeS3(t)
+	defer closer()
+
+	ctx := context.Background()
+	mine := NewArtifactStore(testBucket, "mine", client)
+	theirs := NewArtifactStore(testBucket, "theirs", client)
+	if err := mine.Put(ctx, "k", strings.NewReader("1234")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := theirs.Put(ctx, "k", strings.NewReader("123456789")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	usage, err := mine.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if usage.Objects != 1 || usage.Bytes != 4 {
+		t.Errorf("prefixed store measures %d bytes / %d objects, want 4/1", usage.Bytes, usage.Objects)
+	}
+}
+
+// safety: a bucket larger than the page cap looks exactly like this, and no
+// fake that terminates could exercise the cap.
+type endlessBucket struct {
+	API
+	pages atomic.Int64
+}
+
+func (b *endlessBucket) ListObjectsV2(
+	context.Context, *awss3.ListObjectsV2Input, ...func(*awss3.Options),
+) (*awss3.ListObjectsV2Output, error) {
+	b.pages.Add(1)
+	truncated := true
+	token := "next"
+	size := int64(4)
+	return &awss3.ListObjectsV2Output{
+		Contents:              []types.Object{{Key: aws.String("k"), Size: &size}},
+		IsTruncated:           &truncated,
+		NextContinuationToken: &token,
+	}, nil
+}
+
+func TestArtifactStore_UsageStopsAtItsPageCapAndSaysSo(t *testing.T) {
+	t.Parallel()
+	bucket := &endlessBucket{}
+	s := NewArtifactStore(testBucket, "cache", bucket)
+	s.MaxUsagePages = 3
+
+	usage, err := s.Usage(context.Background())
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	if !usage.Partial {
+		t.Error("a measurement that stopped at its page cap reported a complete total")
+	}
+	if got := bucket.pages.Load(); got != 3 {
+		t.Errorf("the measurement spent %d listings against a cap of 3", got)
+	}
+	if usage.Objects != 3 {
+		t.Errorf("the partial total carries %d objects, want the 3 it counted", usage.Objects)
+	}
+}
+
+func TestArtifactStore_UsageStopsOnACancelledContext(t *testing.T) {
+	t.Parallel()
+	client, closer := fakeS3(t)
+	defer closer()
+
+	s := NewArtifactStore(testBucket, "cache", client)
+	if err := s.Put(context.Background(), "a", strings.NewReader("x")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	usage, err := s.Usage(ctx)
+	if err != nil {
+		t.Fatalf("Usage on a cancelled context returned an error rather than a partial total: %v", err)
+	}
+	if !usage.Partial {
+		t.Error("a measurement cut short by its deadline reported a complete total")
 	}
 }
