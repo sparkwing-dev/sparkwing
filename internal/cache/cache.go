@@ -51,13 +51,11 @@ type Config struct {
 
 	WorkspaceSeedMaxAge time.Duration
 
-	// EgressMonthlyBytes refuses a principal's downloads once its
-	// UTC-month total reaches this many bytes. Zero is unlimited.
-	EgressMonthlyBytes int64
-
 	// EgressDailyAlarmBytes raises the egress alarm, which health
 	// reports, once this pod has sent this many bytes in a UTC day. It
-	// refuses nothing. Zero is off.
+	// refuses nothing, because this service authenticates one shared
+	// token and so cannot tell one caller's spend from another's. Zero
+	// is off.
 	EgressDailyAlarmBytes int64
 }
 
@@ -174,14 +172,9 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
-	egressMeter = egress.New(egress.Config{
-		PerPrincipalMonthlyBytes: cfg.EgressMonthlyBytes,
-		GlobalDailyAlarmBytes:    cfg.EgressDailyAlarmBytes,
-	})
-	if cfg.EgressMonthlyBytes > 0 || cfg.EgressDailyAlarmBytes > 0 {
-		log.Printf("sparkwing-cache egress budgets: %d bytes per principal per month, %d bytes per day before the alarm",
-			cfg.EgressMonthlyBytes, cfg.EgressDailyAlarmBytes)
-	}
+	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
+	setEgressMeter(egressCfg)
+	logEgressBudgets(egressCfg)
 
 	loadRepoNames()
 	initProxy()

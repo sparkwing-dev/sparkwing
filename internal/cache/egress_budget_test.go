@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -17,6 +16,7 @@ import (
 func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.Server {
 	t.Helper()
 	savedMeter := egressMeter
+	egressMeter = nil
 	t.Cleanup(func() { egressMeter = savedMeter })
 
 	saved := struct {
@@ -38,7 +38,6 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	c.SSHKeyDir = filepath.Join(root, "no-ssh-key")
 	c.APIToken = token
 	c.AllowUnauthenticated = token == ""
-	c.EgressMonthlyBytes = cfg.PerPrincipalMonthlyBytes
 	c.EgressDailyAlarmBytes = cfg.GlobalDailyAlarmBytes
 	s, err := New(c)
 	if err != nil {
@@ -66,9 +65,9 @@ type fetched struct {
 	body   []byte
 }
 
-func fetch(t *testing.T, srv *httptest.Server, path, token string) fetched {
+func fetch(t *testing.T, srv *httptest.Server, method, path, token string) fetched {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+path, nil)
+	req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,41 +86,56 @@ func fetch(t *testing.T, srv *httptest.Server, path, token string) fetched {
 	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
 }
 
+func get(t *testing.T, srv *httptest.Server, path, token string) fetched {
+	t.Helper()
+	return fetch(t, srv, http.MethodGet, path, token)
+}
+
 const artifactDownloadPath = "/artifacts/job1?glob=*"
 
-func TestArtifactDownloadsSpendTheCachesMonthlyBudget(t *testing.T) {
-	srv := newBudgetedServer(t, "s3cret", egress.Config{PerPrincipalMonthlyBytes: 1})
+// safety: the cache resolves every credentialed caller to one name, so a
+// per-principal refusal here would stop every runner's checkout and
+// cache read at once, for up to a month, with no recovery but a restart.
+// It meters and alarms; the refusal lives on the controller and the logs
+// service, where the principal is real.
+func TestTheCacheNeverRefusesADownload(t *testing.T) {
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
 	seedArtifact(t, "job1", "out.tar", 100)
 
-	first := fetch(t, srv, artifactDownloadPath, "s3cret")
-	if first.status != http.StatusOK || len(first.body) == 0 {
-		t.Fatalf("first download = %d with %d bytes, want 200 and a body", first.status, len(first.body))
+	var served int
+	for i := range 12 {
+		got := get(t, srv, artifactDownloadPath, "s3cret")
+		if got.status != http.StatusOK || len(got.body) == 0 {
+			t.Fatalf("download %d = %d with %d bytes, want 200 and a body", i, got.status, len(got.body))
+		}
+		if got.header.Get("Retry-After") != "" {
+			t.Fatalf("the cache named a Retry-After on download %d", i)
+		}
+		served += len(got.body)
 	}
-	if state := egressMeter.State(); state.GlobalMonthBytes != int64(len(first.body)) {
-		t.Fatalf("metered %d bytes, want the served %d", state.GlobalMonthBytes, len(first.body))
+	if !egressMeter.Alarm() {
+		t.Fatal("twelve downloads past the threshold raised no alarm")
 	}
+	state := egressMeter.State()
+	if state.GlobalMonthBytes != int64(served) {
+		t.Fatalf("metered %d bytes, want the %d served", state.GlobalMonthBytes, served)
+	}
+	if state.Refused != 0 {
+		t.Fatalf("the cache refused %d requests, want none", state.Refused)
+	}
+}
 
-	refused := fetch(t, srv, artifactDownloadPath, "s3cret")
-	if refused.status != http.StatusTooManyRequests {
-		t.Fatalf("second download = %d, want 429", refused.status)
+// safety: the cache cannot enforce a per-principal budget, so it must not
+// hold one; a configuration that carries one is a cap nobody applies.
+func TestTheCacheCarriesNoPerPrincipalBudget(t *testing.T) {
+	newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
+	cfg := egressMeter.Config()
+	if cfg.PerPrincipalMonthlyBytes != 0 || cfg.MaxDownloadsPerPrincipal != 0 || cfg.MaxStreamsPerPrincipal != 0 {
+		t.Fatalf("cache meter config = %+v, want only the daily alarm", cfg)
 	}
-	seconds, err := strconv.Atoi(refused.header.Get("Retry-After"))
-	if err != nil || seconds <= 0 {
-		t.Fatalf("Retry-After = %q, want a positive number of seconds", refused.header.Get("Retry-After"))
-	}
-	var refusal struct {
-		Error     string `json:"error"`
-		Code      string `json:"code"`
-		Principal string `json:"principal"`
-	}
-	if err := json.Unmarshal(refused.body, &refusal); err != nil {
-		t.Fatalf("decode refusal: %v -- raw %q", err, refused.body)
-	}
-	if refusal.Code != "egress_budget_exceeded" || refusal.Principal != BearerPrincipal {
-		t.Fatalf("refusal = %+v", refusal)
-	}
-	if !strings.Contains(refusal.Error, "egress budget exceeded") {
-		t.Errorf("error member %q does not carry the reason", refusal.Error)
+	state, _ := egressHealth()
+	if state["enforced"] != false {
+		t.Fatalf("health = %+v, want enforced false", state)
 	}
 }
 
@@ -137,7 +151,7 @@ func TestDownloadRoutesStillRequireTheBearer(t *testing.T) {
 		"/uploads/anything",
 		"/file?repo=x&branch=main&path=p",
 	} {
-		if got := fetch(t, srv, path, "").status; got != http.StatusUnauthorized {
+		if got := get(t, srv, path, "").status; got != http.StatusUnauthorized {
 			t.Errorf("GET %s without a bearer = %d, want 401", path, got)
 		}
 	}
@@ -146,9 +160,59 @@ func TestDownloadRoutesStillRequireTheBearer(t *testing.T) {
 	}
 
 	// safety: the credentialed fetch a runner makes must keep working.
-	got := fetch(t, srv, artifactDownloadPath, "s3cret")
+	got := get(t, srv, artifactDownloadPath, "s3cret")
 	if got.status != http.StatusOK || len(got.body) == 0 {
 		t.Fatalf("a bearer fetch = %d with %d bytes, want 200 and a body", got.status, len(got.body))
+	}
+}
+
+// safety: net/http discards a HEAD body and an error body is not the
+// download the alarm is for, so neither reaches the day's total; charging
+// a HEAD once let eight of them latch the alarm with nothing on the wire.
+func TestBodylessAndRefusedResponsesChargeNothing(t *testing.T) {
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
+	seedArtifact(t, "job1", "out.tar", 1<<16)
+
+	for range 8 {
+		if got := fetch(t, srv, http.MethodHead, artifactDownloadPath, "s3cret"); got.status < 400 {
+			t.Fatalf("HEAD = %d, want the route to answer it without a body", got.status)
+		}
+		if got := get(t, srv, "/artifacts/job1?glob=nothing-matches-this", "s3cret"); got.status >= 500 {
+			t.Fatalf("an empty glob = %d", got.status)
+		}
+		if got := get(t, srv, artifactDownloadPath, ""); got.status != http.StatusUnauthorized {
+			t.Fatalf("an unauthenticated download = %d, want 401", got.status)
+		}
+	}
+	if state := egressMeter.State(); state.GlobalDayBytes != 0 {
+		t.Fatalf("bodyless and refused responses charged %d bytes, want 0", state.GlobalDayBytes)
+	}
+	if egressMeter.Alarm() {
+		t.Fatal("a bodyless or refused response raised the daily alarm")
+	}
+}
+
+// safety: a second New with the same budget must not restart the day's
+// total behind an alarm that is already up.
+func TestASecondServerKeepsAnUnchangedMetersCounters(t *testing.T) {
+	newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1 << 30})
+	egressMeter.Record(BearerPrincipal, egress.ClassArtifact, 500)
+	first := egressMeter
+
+	setEgressMeter(egress.Config{GlobalDailyAlarmBytes: 1 << 30})
+	if egressMeter != first {
+		t.Fatal("an unchanged budget replaced the live meter")
+	}
+	if got := egressMeter.State().GlobalDayBytes; got != 500 {
+		t.Fatalf("day bytes after a second New = %d, want 500", got)
+	}
+
+	setEgressMeter(egress.Config{GlobalDailyAlarmBytes: 1 << 20})
+	if egressMeter == first {
+		t.Fatal("a changed budget kept the old meter")
+	}
+	if got := egressMeter.State().GlobalDayBytes; got != 0 {
+		t.Fatalf("day bytes after a changed budget = %d, want a fresh meter", got)
 	}
 }
 
@@ -161,7 +225,7 @@ func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 		Problems []string       `json:"problems"`
 		Egress   map[string]any `json:"egress"`
 	}
-	body := fetch(t, srv, "/health", "").body
+	body := get(t, srv, "/health", "").body
 	if err := json.Unmarshal(body, &health); err != nil {
 		t.Fatalf("decode health: %v -- raw %q", err, body)
 	}
@@ -169,16 +233,19 @@ func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 		t.Fatalf("health egress = %+v, want no alarm", health.Egress)
 	}
 
-	if got := fetch(t, srv, artifactDownloadPath, "s3cret").status; got != http.StatusOK {
+	if got := get(t, srv, artifactDownloadPath, "s3cret").status; got != http.StatusOK {
 		t.Fatalf("download = %d", got)
 	}
 
-	body = fetch(t, srv, "/health", "").body
+	body = get(t, srv, "/health", "").body
 	if err := json.Unmarshal(body, &health); err != nil {
 		t.Fatalf("decode health: %v -- raw %q", err, body)
 	}
 	if health.Egress["alarm"] != true || health.Status != "degraded" {
 		t.Fatalf("health = %+v, want a degraded status with the alarm up", health)
+	}
+	if health.Egress["enforced"] != false {
+		t.Fatalf("health egress = %+v, want enforced false", health.Egress)
 	}
 	var named bool
 	for _, p := range health.Problems {
@@ -195,7 +262,7 @@ func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 
 	var served int
 	for range 3 {
-		got := fetch(t, srv, artifactDownloadPath, "s3cret")
+		got := get(t, srv, artifactDownloadPath, "s3cret")
 		if got.status != http.StatusOK || len(got.body) == 0 {
 			t.Fatalf("download = %d with %d bytes, want 200 and a body", got.status, len(got.body))
 		}

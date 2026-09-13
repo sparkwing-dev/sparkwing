@@ -44,6 +44,10 @@ const EgressBudgetCode = "egress_budget_exceeded"
 // past the per-principal concurrency cap answers with.
 const EgressStreamLimitCode = "egress_stream_limit"
 
+// EgressDownloadLimitCode is the `code` member of the 429 body a read
+// past the per-principal concurrency cap answers with.
+const EgressDownloadLimitCode = "egress_download_limit"
+
 // safety: the meter keys on the principal the controller resolved the
 // bearer to, so a service running with auth off counts every read in one
 // bucket rather than reporting a budget it cannot attribute.
@@ -56,24 +60,17 @@ func egressPrincipal(r *http.Request) string {
 }
 
 func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.egress == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		principal := egressPrincipal(r)
-		if err := s.egress.Check(principal); err != nil {
-			s.writeEgressRefusal(w, r, class, err)
-			return
-		}
-		next.ServeHTTP(s.egress.Serve(w, principal, class), r)
-	})
+	return s.meterOn(class, egress.SlotDownload, next)
 }
 
 // safety: one browser tab per node multiplies a live stream without
-// limit, so the stream surface carries a concurrency cap the other
-// metered routes do not need.
+// limit, so the stream surface counts its own slot; a stream lasts as
+// long as its node and a read does not.
 func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handler {
+	return s.meterOn(class, egress.SlotLogStream, next)
+}
+
+func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.egress == nil {
 			next.ServeHTTP(w, r)
@@ -84,13 +81,19 @@ func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handl
 			s.writeEgressRefusal(w, r, class, err)
 			return
 		}
-		release, err := s.egress.OpenStream(principal)
+		// safety: a response the server discards holds no slot and
+		// charges nothing, so a HEAD never spends either budget.
+		if egress.Bodyless(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		release, err := s.egress.Open(principal, slot)
 		if err != nil {
 			s.writeEgressRefusal(w, r, class, err)
 			return
 		}
 		defer release()
-		next.ServeHTTP(s.egress.Serve(w, principal, class), r)
+		next.ServeHTTP(s.egress.Serve(w, r, principal, class), r)
 	})
 }
 
@@ -99,15 +102,15 @@ func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, clas
 	retryAfter := time.Minute
 
 	var budget *egress.BudgetError
-	var stream *egress.StreamLimitError
+	var concurrency *egress.ConcurrencyError
 	switch {
 	case errors.As(err, &budget):
 		body.Principal, body.LimitBytes = budget.Principal, budget.LimitBytes
 		body.UsedBytes, body.Month = budget.UsedBytes, budget.Month
 		retryAfter = budget.RetryAfter
-	case errors.As(err, &stream):
-		body.Code, body.Principal = EgressStreamLimitCode, stream.Principal
-		retryAfter = stream.RetryAfter
+	case errors.As(err, &concurrency):
+		body.Code, body.Principal = concurrencyCode(concurrency.Slot), concurrency.Principal
+		retryAfter = concurrency.RetryAfter
 	}
 
 	s.logger.Warn("egress refused",
@@ -137,7 +140,14 @@ func (s *Server) writeEgressJSON(w http.ResponseWriter, body EgressRefusalBody) 
 	}
 }
 
-// safety: the alarm is the deployment's bill crossing a daily threshold,
+func concurrencyCode(slot egress.Slot) string {
+	if slot == egress.SlotDownload {
+		return EgressDownloadLimitCode
+	}
+	return EgressStreamLimitCode
+}
+
+// safety: the alarm is this process's bill crossing a daily threshold,
 // which no single read can answer for, so it reaches an operator as a
 // health problem and a warn line rather than as a refusal.
 func (s *Server) egressHealth() (map[string]any, []string) {

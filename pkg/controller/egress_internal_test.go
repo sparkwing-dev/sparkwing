@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -25,7 +26,7 @@ func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 	s, st := egressServer(t, cfg)
 
 	s.egress.Record("alice", egress.ClassArtifact, 400)
-	s.flushEgressUsage(ctx)
+	s.sweepEgressUsage(ctx)
 
 	rows, err := st.ListEgressUsage(ctx, "")
 	if err != nil {
@@ -37,9 +38,9 @@ func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 
 	// safety: a sweep with nothing served must not write, which is what
 	// keeps metering off the per-response write path.
-	s.flushEgressUsage(ctx)
+	s.sweepEgressUsage(ctx)
 	s.egress.Record("alice", egress.ClassArtifact, 100)
-	s.flushEgressUsage(ctx)
+	s.sweepEgressUsage(ctx)
 	rows, err = st.ListEgressUsage(ctx, "")
 	if err != nil {
 		t.Fatalf("ListEgressUsage: %v", err)
@@ -68,12 +69,51 @@ func TestEgressHooksAreInertWithoutAMeter(t *testing.T) {
 	s := New(st, nil)
 
 	s.loadEgressUsage(ctx)
-	s.flushEgressUsage(ctx)
+	s.sweepEgressUsage(ctx)
 	state, problems := s.egressHealth()
 	if state["enabled"] != false || len(problems) != 0 {
 		t.Fatalf("health without a meter = %+v, %v; want disabled and no problem", state, problems)
 	}
 	if s.EgressMeter() != nil {
 		t.Error("a controller given no meter reports one")
+	}
+}
+
+func TestTheSweepPrunesMonthsPastRetentionExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	s, st := egressServer(t, egress.Config{})
+
+	stale := time.Now().UTC().AddDate(0, -(store.EgressUsageRetentionMonths + 1), 0).Format("2006-01")
+	keep := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	if err := st.RecordEgressUsage(ctx, []store.EgressUsage{
+		{Principal: "alice", Month: stale, Bytes: 9},
+		{Principal: "alice", Month: keep, Bytes: 9},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	s.sweepEgressUsage(ctx)
+	rows, err := st.ListEgressUsage(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Month != keep {
+		t.Fatalf("rows after the sweep = %+v, want only %s", rows, keep)
+	}
+
+	// safety: the prune runs once a month, not on every ten-second sweep,
+	// so a second sweep must not reach the database again.
+	if err := st.RecordEgressUsage(ctx, []store.EgressUsage{
+		{Principal: "bob", Month: stale, Bytes: 9},
+	}); err != nil {
+		t.Fatalf("seed a second stale row: %v", err)
+	}
+	s.sweepEgressUsage(ctx)
+	rows, err = st.ListEgressUsage(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows after a second sweep = %+v, want the stale row left for next month", rows)
 	}
 }

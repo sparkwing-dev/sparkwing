@@ -2,11 +2,13 @@ package egress_test
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,7 +72,7 @@ func TestMonthlyBudgetRefusesOnlyThePrincipalPastIt(t *testing.T) {
 	if budget.RetryAfter <= 0 {
 		t.Errorf("RetryAfter = %s, want the wait until the month rolls", budget.RetryAfter)
 	}
-	for _, want := range []string{"alice", "egress budget exceeded", "--egress-monthly-bytes"} {
+	for _, want := range []string{"alice", "egress budget exceeded", egress.FlagMonthlyBytes} {
 		if !strings.Contains(budget.Error(), want) {
 			t.Errorf("refusal message %q does not name %q", budget.Error(), want)
 		}
@@ -122,43 +124,73 @@ func TestDailyAlarmRaisesOnceAndClearsWithTheDay(t *testing.T) {
 	}
 }
 
-func TestStreamCapRefusesPastTheLimitAndReleaseFreesASlot(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{MaxStreamsPerPrincipal: 2}, "2026-09-13T10:00:00Z")
-	first, err := m.OpenStream("alice")
+func TestSlotCapsRefusePastTheLimitAndReleaseFreesASlot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  egress.Config
+		slot egress.Slot
+	}{
+		{"streams", egress.Config{MaxStreamsPerPrincipal: 2}, egress.SlotLogStream},
+		{"downloads", egress.Config{MaxDownloadsPerPrincipal: 2}, egress.SlotDownload},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := meterAt(t, tc.cfg, "2026-09-13T10:00:00Z")
+			first, err := m.Open("alice", tc.slot)
+			if err != nil {
+				t.Fatalf("first = %v, want nil", err)
+			}
+			second, err := m.Open("alice", tc.slot)
+			if err != nil {
+				t.Fatalf("second = %v, want nil", err)
+			}
+			var limit *egress.ConcurrencyError
+			if err := func() error { _, err := m.Open("alice", tc.slot); return err }(); !errors.As(err, &limit) {
+				t.Fatalf("third = %v, want a *ConcurrencyError", err)
+			}
+			if !errors.Is(limit, egress.ErrConcurrencyLimit) || limit.Limit != 2 || limit.Slot != tc.slot {
+				t.Fatalf("refusal = %+v, want the cap of 2 on %s", limit, tc.slot)
+			}
+			if _, err := m.Open("bob", tc.slot); err != nil {
+				t.Fatalf("another principal's first = %v, want nil", err)
+			}
+			second()
+			second()
+			third, err := m.Open("alice", tc.slot)
+			if err != nil {
+				t.Fatalf("after a release = %v, want nil", err)
+			}
+			first()
+			third()
+			if state := m.State(); len(state.Top) != 1 || state.Top[0].Principal != "bob" {
+				t.Fatalf("state after every alice slot closed = %+v, want only bob holding one", state.Top)
+			}
+		})
+	}
+}
+
+// safety: the two slots are separate budgets, so a principal holding its
+// cap of streams may still start a download.
+func TestSlotsAreCountedApart(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{MaxStreamsPerPrincipal: 1, MaxDownloadsPerPrincipal: 1}, "2026-09-13T10:00:00Z")
+	stream, err := m.Open("alice", egress.SlotLogStream)
 	if err != nil {
-		t.Fatalf("first stream = %v, want nil", err)
+		t.Fatal(err)
 	}
-	second, err := m.OpenStream("alice")
+	defer stream()
+	download, err := m.Open("alice", egress.SlotDownload)
 	if err != nil {
-		t.Fatalf("second stream = %v, want nil", err)
+		t.Fatalf("a download while a stream is open = %v, want nil", err)
 	}
-	var limit *egress.StreamLimitError
-	if err := func() error { _, err := m.OpenStream("alice"); return err }(); !errors.As(err, &limit) {
-		t.Fatalf("third stream = %v, want a *StreamLimitError", err)
-	}
-	if !errors.Is(limit, egress.ErrStreamLimit) || limit.Limit != 2 {
-		t.Fatalf("refusal = %+v, want the cap of 2", limit)
-	}
-	if _, err := m.OpenStream("bob"); err != nil {
-		t.Fatalf("another principal's first stream = %v, want nil", err)
-	}
-	second()
-	second()
-	third, err := m.OpenStream("alice")
-	if err != nil {
-		t.Fatalf("stream after a release = %v, want nil", err)
-	}
-	first()
-	third()
-	if state := m.State(); len(state.Top) != 1 || state.Top[0].Principal != "bob" {
-		t.Fatalf("state after every alice stream closed = %+v, want only bob holding one", state.Top)
+	defer download()
+	if _, err := m.Open("alice", egress.SlotDownload); err == nil {
+		t.Fatal("a second download past the cap was admitted")
 	}
 }
 
 func TestServeCountsTheBytesTheHandlerWrites(t *testing.T) {
 	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 32}, "2026-09-13T10:00:00Z")
 	rec := httptest.NewRecorder()
-	out := m.Serve(rec, "alice", egress.ClassArtifact)
+	out := m.Serve(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", egress.ClassArtifact)
 	if _, err := out.Write([]byte("0123456789")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -182,9 +214,9 @@ func TestServeCountsTheBytesTheHandlerWrites(t *testing.T) {
 func TestServeKeepsTheStreamControlsAHandlerAsksFor(t *testing.T) {
 	m := egress.New(egress.Config{})
 	done := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
-		out := m.Serve(w, "alice", egress.ClassLogStream)
+		out := m.Serve(w, r, "alice", egress.ClassLogStream)
 		f, ok := out.(http.Flusher)
 		if !ok {
 			t.Error("the counting writer dropped http.Flusher")
@@ -271,21 +303,29 @@ func TestAnonymousBytesShareOneBudget(t *testing.T) {
 	}
 }
 
+// safety: the daily alarm is set below what the goroutines will send, so
+// the alarm branch of Record runs while other goroutines are writing the
+// principal map; without the key captured under the lock this is a
+// "concurrent map read and map write" under -race.
 func TestConcurrentRecordsSumExactly(t *testing.T) {
-	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+	m, _ := meterAt(t, egress.Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for range 20 {
-				m.Record("alice", egress.ClassArtifact, 7)
+			for i := range 20 {
+				m.Record(fmt.Sprintf("principal-%d", i), egress.ClassArtifact, 7)
 			}
 		}()
 	}
 	wg.Wait()
-	if state := m.State(); state.GlobalMonthBytes != 50*20*7 {
+	state := m.State()
+	if state.GlobalMonthBytes != 50*20*7 {
 		t.Fatalf("GlobalMonthBytes = %d, want %d", state.GlobalMonthBytes, 50*20*7)
+	}
+	if !state.Alarm {
+		t.Error("the alarm did not rise, so the racing branch never ran")
 	}
 }
 
@@ -318,5 +358,180 @@ func TestBudgetedReportsWhetherAnyBudgetApplies(t *testing.T) {
 		if !cfg.Budgeted() {
 			t.Errorf("%+v reports no budget", cfg)
 		}
+	}
+}
+
+func TestHeadRequestsChargeNothing(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{GlobalDailyAlarmBytes: 1}, "2026-09-13T10:00:00Z")
+	rec := httptest.NewRecorder()
+	out := m.Serve(rec, httptest.NewRequest(http.MethodHead, "/a", nil), "alice", egress.ClassArtifact)
+	// safety: net/http discards this, so charging it let a HEAD loop latch
+	// the daily alarm with nothing on the wire.
+	if _, err := out.Write([]byte(strings.Repeat("x", 4096))); err != nil {
+		t.Fatal(err)
+	}
+	if state := m.State(); state.GlobalDayBytes != 0 {
+		t.Fatalf("a HEAD charged %d bytes, want 0", state.GlobalDayBytes)
+	}
+	if m.Alarm() {
+		t.Error("a HEAD raised the daily alarm")
+	}
+	if !egress.Bodyless(httptest.NewRequest(http.MethodHead, "/a", nil)) {
+		t.Error("Bodyless does not recognize HEAD")
+	}
+	if egress.Bodyless(httptest.NewRequest(http.MethodGet, "/a", nil)) {
+		t.Error("Bodyless treats GET as bodyless")
+	}
+}
+
+func TestOnlySuccessfulResponsesAreCharged(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		want   int64
+	}{
+		{"ok", http.StatusOK, 5},
+		{"partial", http.StatusPartialContent, 5},
+		{"not found", http.StatusNotFound, 0},
+		{"server error", http.StatusInternalServerError, 0},
+		{"redirect", http.StatusFound, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+			rec := httptest.NewRecorder()
+			out := m.Serve(rec, httptest.NewRequest(http.MethodGet, "/a", nil), "alice", egress.ClassArtifact)
+			out.WriteHeader(tc.status)
+			if _, err := out.Write([]byte("12345")); err != nil {
+				t.Fatal(err)
+			}
+			if got := m.State().GlobalDayBytes; got != tc.want {
+				t.Fatalf("a %d response charged %d bytes, want %d", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestServeForwardsHijack(t *testing.T) {
+	m := egress.New(egress.Config{})
+	hijacked := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := m.Serve(w, r, "alice", egress.ClassGit)
+		h, ok := out.(http.Hijacker)
+		if !ok {
+			hijacked <- errors.New("the counting writer dropped http.Hijacker")
+			return
+		}
+		conn, buf, err := h.Hijack()
+		if err != nil {
+			hijacked <- err
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if _, err := buf.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"); err != nil {
+			hijacked <- err
+			return
+		}
+		hijacked <- buf.Flush()
+	}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-hijacked; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrincipalsPastTheCapShareTheOverflowBudget(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 10}, "2026-09-13T10:00:00Z")
+	for i := range egress.MaxPrincipals {
+		m.Record(fmt.Sprintf("p%d", i), egress.ClassArtifact, 1)
+	}
+	if got := m.State().Principals; got != egress.MaxPrincipals {
+		t.Fatalf("tracked %d principals, want the cap of %d", got, egress.MaxPrincipals)
+	}
+
+	m.Record("late-1", egress.ClassArtifact, 6)
+	m.Record("late-2", egress.ClassArtifact, 6)
+	var budget *egress.BudgetError
+	// safety: the fold must tighten the meter, not open it, so two
+	// untracked principals spend one shared budget rather than none.
+	if err := m.Check("late-3"); !errors.As(err, &budget) {
+		t.Fatalf("Check for an untracked principal = %v, want a refusal", err)
+	}
+	if budget.Principal != egress.OverflowPrincipal || budget.UsedBytes != 12 {
+		t.Fatalf("refusal = %+v, want %s at 12 bytes", budget, egress.OverflowPrincipal)
+	}
+	if got := m.State().Principals; got != egress.MaxPrincipals+1 {
+		t.Fatalf("tracked %d principals, want the cap plus the overflow bucket", got)
+	}
+
+	// safety: a month roll drops the principals that spent nothing, so the
+	// fold is not permanent.
+	*clock = at(t, "2026-10-01T00:00:00Z")
+	if got := m.State().Principals; got != 0 {
+		t.Fatalf("tracked %d principals after the month rolled, want every idle one dropped", got)
+	}
+	if err := m.Check("late-3"); err != nil {
+		t.Fatalf("Check after the roll = %v, want nil", err)
+	}
+}
+
+func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{}, "2026-09-30T23:59:59Z")
+	m.Record("alice", egress.ClassArtifact, 400)
+
+	// safety: the flush that would have persisted September lands after
+	// the roll, so the closing total must still be offered under September.
+	*clock = at(t, "2026-10-01T00:00:01Z")
+	m.Record("alice", egress.ClassArtifact, 5)
+
+	dirty := m.Dirty()
+	if len(dirty) != 2 {
+		t.Fatalf("Dirty = %+v, want the closing September row and the October one", dirty)
+	}
+	if dirty[0].Month != "2026-09" || dirty[0].Bytes != 400 {
+		t.Fatalf("first usage = %+v, want September at 400", dirty[0])
+	}
+	if dirty[1].Month != "2026-10" || dirty[1].Bytes != 5 {
+		t.Fatalf("second usage = %+v, want October at 5", dirty[1])
+	}
+	if again := m.Dirty(); len(again) != 0 {
+		t.Fatalf("Dirty again = %+v, want empty", again)
+	}
+}
+
+// safety: the alarm clears when the day rolls, so a clock that advances a
+// day per reading makes Record take its alarm branch on almost every
+// call. That is what puts the branch's own map access next to every other
+// goroutine's write; with the branch reading the principal map after the
+// unlock this is a "concurrent map read and map write" under -race, and
+// with one alarm per run it is a window the detector can miss.
+func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
+	m := egress.New(egress.Config{GlobalDailyAlarmBytes: 1})
+	var ticks atomic.Int64
+	base := at(t, "2026-09-13T10:00:00Z")
+	egress.SetClock(m, func() time.Time {
+		return base.Add(time.Duration(ticks.Add(1)) * 24 * time.Hour)
+	})
+
+	var wg sync.WaitGroup
+	for g := range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 20 {
+				m.Record(fmt.Sprintf("principal-%d-%d", g, i), egress.ClassArtifact, 7)
+			}
+		}()
+	}
+	wg.Wait()
+	if m.State().Refused != 0 {
+		t.Error("the daily alarm refused a request")
 	}
 }

@@ -49,6 +49,10 @@ const EgressBudgetCode = "egress_budget_exceeded"
 // stream past the per-principal concurrency cap answers with.
 const EgressStreamLimitCode = "egress_stream_limit"
 
+// EgressDownloadLimitCode is the `code` member of the 429 body a
+// download past the per-principal concurrency cap answers with.
+const EgressDownloadLimitCode = "egress_download_limit"
+
 // safety: the meter keys on the principal the bearer resolved to, so a
 // controller serving with auth off counts every download in one bucket
 // rather than reporting a budget it cannot attribute.
@@ -61,24 +65,17 @@ func egressPrincipal(r *http.Request) string {
 }
 
 func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.egress == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		principal := egressPrincipal(r)
-		if err := s.egress.Check(principal); err != nil {
-			s.writeEgressRefusal(w, r, class, err)
-			return
-		}
-		next.ServeHTTP(s.egress.Serve(w, principal, class), r)
-	})
+	return s.meterOn(class, egress.SlotDownload, next)
 }
 
 // safety: one browser tab per node multiplies a live stream without
-// limit, so the stream surface carries a concurrency cap the other
-// metered routes do not need.
+// limit, so the stream surface counts its own slot; a stream lasts as
+// long as its node and a download does not.
 func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handler {
+	return s.meterOn(class, egress.SlotLogStream, next)
+}
+
+func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.egress == nil {
 			next.ServeHTTP(w, r)
@@ -89,13 +86,19 @@ func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handl
 			s.writeEgressRefusal(w, r, class, err)
 			return
 		}
-		release, err := s.egress.OpenStream(principal)
+		// safety: a response the server discards holds no slot and
+		// charges nothing, so a HEAD never spends either budget.
+		if egress.Bodyless(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		release, err := s.egress.Open(principal, slot)
 		if err != nil {
 			s.writeEgressRefusal(w, r, class, err)
 			return
 		}
 		defer release()
-		next.ServeHTTP(s.egress.Serve(w, principal, class), r)
+		next.ServeHTTP(s.egress.Serve(w, r, principal, class), r)
 	})
 }
 
@@ -104,15 +107,15 @@ func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, clas
 	retryAfter := time.Minute
 
 	var budget *egress.BudgetError
-	var stream *egress.StreamLimitError
+	var concurrency *egress.ConcurrencyError
 	switch {
 	case errors.As(err, &budget):
 		body.Principal, body.LimitBytes = budget.Principal, budget.LimitBytes
 		body.UsedBytes, body.Month = budget.UsedBytes, budget.Month
 		retryAfter = budget.RetryAfter
-	case errors.As(err, &stream):
-		body.Code, body.Principal = EgressStreamLimitCode, stream.Principal
-		retryAfter = stream.RetryAfter
+	case errors.As(err, &concurrency):
+		body.Code, body.Principal = concurrencyCode(concurrency.Slot), concurrency.Principal
+		retryAfter = concurrency.RetryAfter
 	}
 
 	s.logger.Warn("egress refused",
@@ -120,6 +123,13 @@ func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, clas
 		"class", string(class), "path", r.URL.Path)
 	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(retryAfter))))
 	writeJSON(w, http.StatusTooManyRequests, body)
+}
+
+func concurrencyCode(slot egress.Slot) string {
+	if slot == egress.SlotDownload {
+		return EgressDownloadLimitCode
+	}
+	return EgressStreamLimitCode
 }
 
 func retryAfterSeconds(d time.Duration) int64 {
@@ -159,7 +169,7 @@ func (s *Server) egressHealth() (map[string]any, []string) {
 		return summary, nil
 	}
 	return summary, []string{fmt.Sprintf(
-		"egress: the deployment has sent %s today, at or past the %s daily threshold",
+		"egress: this controller has sent %s today, at or past the %s daily threshold",
 		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
 }
 
@@ -184,11 +194,17 @@ func (s *Server) loadEgressUsage(ctx context.Context) {
 }
 
 // perf: the reaper calls this on its own tick, so metering costs one
-// batch of writes per sweep rather than one write per response.
-func (s *Server) flushEgressUsage(ctx context.Context) {
+// batch of writes per sweep rather than one write per response, and the
+// prune runs once a month rather than on every sweep.
+func (s *Server) sweepEgressUsage(ctx context.Context) {
 	if s.egress == nil || s.store == nil {
 		return
 	}
+	s.flushEgressUsage(ctx)
+	s.pruneEgressUsage(ctx)
+}
+
+func (s *Server) flushEgressUsage(ctx context.Context) {
 	dirty := s.egress.Dirty()
 	if len(dirty) == 0 {
 		return
@@ -199,5 +215,25 @@ func (s *Server) flushEgressUsage(ctx context.Context) {
 	}
 	if err := s.store.RecordEgressUsage(ctx, rows); err != nil {
 		s.logger.Warn("egress usage flush failed", "err", err, "principals", len(rows))
+	}
+}
+
+// safety: the reaper goroutine is the only caller, so the once-a-month
+// gate needs no lock; the first sweep after a start prunes and the rest
+// of the month's sweeps do not.
+func (s *Server) pruneEgressUsage(ctx context.Context) {
+	month := time.Now().UTC().Format("2006-01")
+	if s.egressPrunedMonth == month {
+		return
+	}
+	s.egressPrunedMonth = month
+	cutoff := time.Now().UTC().AddDate(0, -store.EgressUsageRetentionMonths, 0).Format("2006-01")
+	n, err := s.store.PruneEgressUsage(ctx, cutoff)
+	if err != nil {
+		s.logger.Warn("egress usage prune failed", "err", err, "before", cutoff)
+		return
+	}
+	if n > 0 {
+		s.logger.Info("pruned egress usage", "rows", n, "before", cutoff)
 	}
 }

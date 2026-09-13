@@ -62,6 +62,7 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
 const EgressBudgetCode = "egress_budget_exceeded"
+const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 type FloodPolicy struct {

@@ -148,7 +148,7 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	s, h := newEgressLogsServer(t, egress.Config{MaxStreamsPerPrincipal: 1})
 	appendLog(t, h, "alice", "r1", "n1", "hello\n")
 
-	release, err := s.egress.OpenStream("alice")
+	release, err := s.egress.Open("alice", egress.SlotLogStream)
 	if err != nil {
 		t.Fatalf("reserve the only slot: %v", err)
 	}
@@ -164,6 +164,9 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	}
 	if body.Code != EgressStreamLimitCode {
 		t.Fatalf("refusal code = %q, want %q", body.Code, EgressStreamLimitCode)
+	}
+	if !strings.Contains(body.Error, "egress concurrency limit reached") {
+		t.Errorf("error member %q does not carry the reason", body.Error)
 	}
 	if refused.Header().Get("Retry-After") == "" {
 		t.Error("the stream refusal named no Retry-After")
@@ -236,5 +239,46 @@ func TestLogsServerWithoutAMeterServesUnmetered(t *testing.T) {
 	state, problems := s.egressHealth()
 	if state["enabled"] != false || len(problems) != 0 {
 		t.Fatalf("health without a meter = %+v, %v", state, problems)
+	}
+}
+
+func TestHeadReadsChargeNothing(t *testing.T) {
+	s, h := newEgressLogsServer(t, egress.Config{GlobalDailyAlarmBytes: 1})
+	appendLog(t, h, "alice", "r1", "n1", strings.Repeat("x", 4096)+"\n")
+
+	for range 8 {
+		req := httptest.NewRequest(http.MethodHead, "/api/v1/logs/r1/n1", nil)
+		req.Header.Set("Authorization", "Bearer alice")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("HEAD = %d, body %s", rec.Code, rec.Body.String())
+		}
+	}
+	// safety: a recorder keeps a HEAD body that net/http would discard, so
+	// the meter must decide on the method rather than on what was written.
+	if state := s.egress.State(); state.GlobalDayBytes != 0 {
+		t.Fatalf("eight HEADs charged %d bytes, want 0", state.GlobalDayBytes)
+	}
+	if s.egress.Alarm() {
+		t.Error("a HEAD raised the daily alarm")
+	}
+}
+
+// safety: an error body is not the download the budget is for, so a
+// refusal must not spend a principal's month.
+func TestARefusedReadIsNotCharged(t *testing.T) {
+	s, h := newEgressLogsServer(t, egress.Config{})
+	appendLog(t, h, "alice", "r1", "n1", "hello\n")
+
+	rec := readLog(t, h, "alice", "/api/v1/logs/r1/n1?tail=notanumber")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a malformed filter = %d, want 400", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("the refusal carried no body, so the test proves nothing")
+	}
+	if state := s.egress.State(); state.GlobalDayBytes != 0 {
+		t.Fatalf("a refused read charged %d bytes, want 0", state.GlobalDayBytes)
 	}
 }

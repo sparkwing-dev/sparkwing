@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,31 +72,48 @@ func newEgressFixture(t *testing.T, cfg egress.Config, art storage.ArtifactStore
 	}
 }
 
-func (f egressFixture) get(t *testing.T, path, token string) *http.Response {
+// safety: helpers hand back a whole answer rather than a live
+// *http.Response, so no call site owns a body it can forget to close.
+type fetched struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+func (f egressFixture) request(t *testing.T, method, path, token string) *http.Request {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, f.url+path, nil)
+	req, err := http.NewRequestWithContext(context.Background(), method, f.url+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	return req
+}
+
+func (f egressFixture) fetch(t *testing.T, method, path, token string) fetched {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(f.request(t, method, path, token))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
 }
 
-// safety: the helper closes what it opened, so a caller that only needs
-// the bytes gone does not leak the connection behind them.
+func (f egressFixture) get(t *testing.T, path, token string) fetched {
+	t.Helper()
+	return f.fetch(t, http.MethodGet, path, token)
+}
+
 func (f egressFixture) spend(t *testing.T, path, token string) {
 	t.Helper()
-	resp := f.get(t, path, token)
-	defer func() { _ = resp.Body.Close() }()
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		t.Fatalf("drain response: %v", err)
-	}
+	f.get(t, path, token)
 }
 
 func seedLiveLog(t *testing.T, f egressFixture, runID, nodeID, text string) {
@@ -144,34 +162,25 @@ func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
 	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
 	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 150}, art)
 
-	resp := f.get(t, "/api/v1/artifacts/k", f.adminToken)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || len(body) != 100 {
-		t.Fatalf("first download = %d with %d bytes, want 200 and 100", resp.StatusCode, len(body))
+	first := f.get(t, "/api/v1/artifacts/k", f.adminToken)
+	if first.status != http.StatusOK || len(first.body) != 100 {
+		t.Fatalf("first download = %d with %d bytes, want 200 and 100", first.status, len(first.body))
 	}
 	if state := f.meter.State(); state.GlobalMonthBytes != 100 {
 		t.Fatalf("metered %d bytes, want 100", state.GlobalMonthBytes)
 	}
 
-	second := f.get(t, "/api/v1/artifacts/k", f.adminToken)
-	secondStatus := second.StatusCode
-	if _, err := io.Copy(io.Discard, second.Body); err != nil {
-		t.Fatal(err)
-	}
-	second.Body.Close()
-	if secondStatus != http.StatusOK {
-		t.Fatalf("second download = %d, want 200; the budget was not yet spent", secondStatus)
+	if got := f.get(t, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusOK {
+		t.Fatalf("second download = %d, want 200; the budget was not yet spent", got)
 	}
 
 	third := f.get(t, "/api/v1/artifacts/k", f.adminToken)
-	defer third.Body.Close()
-	if third.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("third download = %d, want 429", third.StatusCode)
+	if third.status != http.StatusTooManyRequests {
+		t.Fatalf("third download = %d, want 429", third.status)
 	}
-	retry, err := strconv.Atoi(third.Header.Get("Retry-After"))
+	retry, err := strconv.Atoi(third.header.Get("Retry-After"))
 	if err != nil || retry <= 0 {
-		t.Fatalf("Retry-After = %q, want a positive number of seconds", third.Header.Get("Retry-After"))
+		t.Fatalf("Retry-After = %q, want a positive number of seconds", third.header.Get("Retry-After"))
 	}
 	var refusal struct {
 		Error      string `json:"error"`
@@ -180,8 +189,8 @@ func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
 		LimitBytes int64  `json:"limit_bytes"`
 		UsedBytes  int64  `json:"used_bytes"`
 	}
-	if err := json.NewDecoder(third.Body).Decode(&refusal); err != nil {
-		t.Fatalf("decode refusal: %v", err)
+	if err := json.Unmarshal(third.body, &refusal); err != nil {
+		t.Fatalf("decode refusal: %v -- raw %q", err, third.body)
 	}
 	if refusal.Code != controller.EgressBudgetCode || refusal.Principal != "root" {
 		t.Fatalf("refusal = %+v", refusal)
@@ -200,62 +209,43 @@ func TestOneBudgetDoesNotRefuseAnotherPrincipal(t *testing.T) {
 
 	f.spend(t, "/api/v1/artifacts/k", f.adminToken)
 
-	refused := f.get(t, "/api/v1/artifacts/k", f.adminToken)
-	refused.Body.Close()
-	if refused.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("the spent principal = %d, want 429", refused.StatusCode)
+	if got := f.get(t, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusTooManyRequests {
+		t.Fatalf("the spent principal = %d, want 429", got)
 	}
 
 	// safety: the runner and CLI fetch paths must keep working while
 	// another principal is over budget.
 	other := f.get(t, "/api/v1/artifacts/k", f.reader)
-	body, _ := io.ReadAll(other.Body)
-	other.Body.Close()
-	if other.StatusCode != http.StatusOK || len(body) != 100 {
-		t.Fatalf("a runner-scoped token fetching = %d with %d bytes, want 200 and 100", other.StatusCode, len(body))
+	if other.status != http.StatusOK || len(other.body) != 100 {
+		t.Fatalf("a CLI token fetching = %d with %d bytes, want 200 and 100", other.status, len(other.body))
 	}
 }
 
 func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 	art := &fakeArtifactStore{objects: map[string][]byte{"k": []byte("payload")}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 1 << 20, MaxStreamsPerPrincipal: 4}, art)
+	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 1 << 20, MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4}, art)
 	seedLiveLog(t, f, "r1", "n1", "hello\n")
 
 	// safety: a runner reads a node's logs on its claim scope, which is the
 	// path a metered route must not break.
 	claimRunForRunner(t, f, "r1")
 	runnerLogs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.runner)
-	runnerBody, err := io.ReadAll(runnerLogs.Body)
-	runnerLogs.Body.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runnerLogs.StatusCode != http.StatusOK || !strings.Contains(string(runnerBody), "hello") {
-		t.Fatalf("runner log read = %d, body %q", runnerLogs.StatusCode, runnerBody)
+	if runnerLogs.status != http.StatusOK || !strings.Contains(string(runnerLogs.body), "hello") {
+		t.Fatalf("runner log read = %d, body %q", runnerLogs.status, runnerLogs.body)
 	}
 
 	artifact := f.get(t, "/api/v1/artifacts/k", f.reader)
-	body, err := io.ReadAll(artifact.Body)
-	artifact.Body.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if artifact.StatusCode != http.StatusOK || string(body) != "payload" {
-		t.Fatalf("CLI artifact fetch = %d, body %q", artifact.StatusCode, body)
+	if artifact.status != http.StatusOK || string(artifact.body) != "payload" {
+		t.Fatalf("CLI artifact fetch = %d, body %q", artifact.status, artifact.body)
 	}
 
 	logs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.reader)
-	logBody, err := io.ReadAll(logs.Body)
-	logs.Body.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if logs.StatusCode != http.StatusOK || !strings.Contains(string(logBody), "hello") {
-		t.Fatalf("CLI log read = %d, body %q", logs.StatusCode, logBody)
+	if logs.status != http.StatusOK || !strings.Contains(string(logs.body), "hello") {
+		t.Fatalf("CLI log read = %d, body %q", logs.status, logs.body)
 	}
 
 	state := f.meter.State()
-	if state.GlobalMonthBytes < int64(len(runnerBody)+len(body)+len(logBody)) {
+	if state.GlobalMonthBytes < int64(len(runnerLogs.body)+len(artifact.body)+len(logs.body)) {
 		t.Errorf("metered %d bytes, want at least the three bodies", state.GlobalMonthBytes)
 	}
 	if len(state.Top) != 2 {
@@ -273,14 +263,95 @@ func TestDownloadRoutesRefuseARequestWithoutABearer(t *testing.T) {
 		"/api/v1/runs/r1/nodes/n1/logs",
 		"/api/v1/runs/r1/nodes/n1/logs/stream",
 	} {
-		resp := f.get(t, path, "")
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Errorf("GET %s without a bearer = %d, want 401", path, resp.StatusCode)
+		if got := f.get(t, path, "").status; got != http.StatusUnauthorized {
+			t.Errorf("GET %s without a bearer = %d, want 401", path, got)
 		}
 	}
 	if state := f.meter.State(); state.GlobalMonthBytes != 0 {
 		t.Errorf("an unauthenticated refusal metered %d bytes, want 0", state.GlobalMonthBytes)
+	}
+}
+
+func TestHeadRequestsChargeNothingAndHoldNoSlot(t *testing.T) {
+	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 1<<20)}}
+	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 1 << 20, MaxDownloadsPerPrincipal: 1}, art)
+
+	for range 8 {
+		if got := f.fetch(t, http.MethodHead, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusOK {
+			t.Fatalf("HEAD = %d, want 200", got)
+		}
+	}
+
+	// safety: net/http discards a HEAD body, so eight of them over a
+	// 1 MiB object once latched the daily alarm with nothing on the wire.
+	state := f.meter.State()
+	if state.GlobalDayBytes != 0 {
+		t.Fatalf("eight HEADs charged %d bytes, want 0", state.GlobalDayBytes)
+	}
+	if state.Alarm {
+		t.Fatal("a HEAD raised the daily alarm")
+	}
+}
+
+// safety: this holds one Get open until released, which is how a test
+// gets two downloads in flight against a concurrency cap of one.
+type blockingArtifactStore struct {
+	payload []byte
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingArtifactStore) Get(_ context.Context, _ string) (io.ReadCloser, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return io.NopCloser(bytes.NewReader(b.payload)), nil
+}
+func (b *blockingArtifactStore) Put(context.Context, string, io.Reader) error   { return nil }
+func (b *blockingArtifactStore) Has(context.Context, string) (bool, error)      { return false, nil }
+func (b *blockingArtifactStore) Delete(context.Context, string) error           { return nil }
+func (b *blockingArtifactStore) List(context.Context, string) ([]string, error) { return nil, nil }
+
+func TestConcurrentDownloadsAreCappedPerPrincipal(t *testing.T) {
+	art := &blockingArtifactStore{
+		payload: []byte("payload"),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1}, art)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.spend(t, "/api/v1/artifacts/k", f.adminToken)
+	}()
+	<-art.started
+
+	refused := f.get(t, "/api/v1/artifacts/k", f.adminToken)
+	if refused.status != http.StatusTooManyRequests {
+		t.Fatalf("a second simultaneous download = %d, want 429", refused.status)
+	}
+	var refusal struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.Unmarshal(refused.body, &refusal); err != nil {
+		t.Fatalf("decode refusal: %v -- raw %q", err, refused.body)
+	}
+	if refusal.Code != controller.EgressDownloadLimitCode {
+		t.Fatalf("refusal code = %q, want %q", refusal.Code, controller.EgressDownloadLimitCode)
+	}
+	if !strings.Contains(refusal.Error, "egress concurrency limit reached") {
+		t.Errorf("error member %q does not carry the reason", refusal.Error)
+	}
+
+	close(art.release)
+	<-done
+
+	// safety: the slot is released when the response ends, so the next
+	// download is admitted.
+	if got := f.get(t, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusOK {
+		t.Fatalf("a download after the first finished = %d, want 200", got)
 	}
 }
 
@@ -312,24 +383,23 @@ func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	}
 
 	second := f.get(t, "/api/v1/runs/r1/nodes/n1/logs/stream", f.adminToken)
-	defer second.Body.Close()
-	if second.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("second stream = %d, want 429", second.StatusCode)
+	if second.status != http.StatusTooManyRequests {
+		t.Fatalf("second stream = %d, want 429", second.status)
 	}
-	if second.Header.Get("Retry-After") == "" {
+	if second.header.Get("Retry-After") == "" {
 		t.Error("the stream refusal named no Retry-After")
 	}
 	var refusal struct {
 		Error string `json:"error"`
 		Code  string `json:"code"`
 	}
-	if err := json.NewDecoder(second.Body).Decode(&refusal); err != nil {
-		t.Fatalf("decode refusal: %v", err)
+	if err := json.Unmarshal(second.body, &refusal); err != nil {
+		t.Fatalf("decode refusal: %v -- raw %q", err, second.body)
 	}
 	if refusal.Code != controller.EgressStreamLimitCode {
 		t.Fatalf("refusal code = %q, want %q", refusal.Code, controller.EgressStreamLimitCode)
 	}
-	if !strings.Contains(refusal.Error, "live log stream limit reached") {
+	if !strings.Contains(refusal.Error, "egress concurrency limit reached") {
 		t.Errorf("error member %q does not carry the reason", refusal.Error)
 	}
 }
@@ -338,16 +408,15 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
 	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 60}, art)
 
-	before := f.get(t, "/api/v1/health", "")
 	var health struct {
 		Status   string         `json:"status"`
 		Problems []string       `json:"problems"`
 		Egress   map[string]any `json:"egress"`
 	}
-	if err := json.NewDecoder(before.Body).Decode(&health); err != nil {
-		t.Fatalf("decode health: %v", err)
+	before := f.get(t, "/api/v1/health", "")
+	if err := json.Unmarshal(before.body, &health); err != nil {
+		t.Fatalf("decode health: %v -- raw %q", err, before.body)
 	}
-	before.Body.Close()
 	if health.Egress["alarm"] != false {
 		t.Fatalf("health egress = %+v, want no alarm", health.Egress)
 	}
@@ -355,10 +424,9 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	f.spend(t, "/api/v1/artifacts/k", f.adminToken)
 
 	after := f.get(t, "/api/v1/health", "")
-	if err := json.NewDecoder(after.Body).Decode(&health); err != nil {
-		t.Fatalf("decode health: %v", err)
+	if err := json.Unmarshal(after.body, &health); err != nil {
+		t.Fatalf("decode health: %v -- raw %q", err, after.body)
 	}
-	after.Body.Close()
 	if health.Egress["alarm"] != true {
 		t.Fatalf("health egress = %+v, want the alarm up", health.Egress)
 	}
@@ -374,16 +442,15 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	}
 
 	view := f.get(t, "/api/v1/egress", f.adminToken)
-	defer view.Body.Close()
-	if view.StatusCode != http.StatusOK {
-		t.Fatalf("GET /api/v1/egress = %d, want 200", view.StatusCode)
+	if view.status != http.StatusOK {
+		t.Fatalf("GET /api/v1/egress = %d, want 200", view.status)
 	}
 	var top struct {
 		Enabled bool         `json:"enabled"`
 		Egress  egress.State `json:"egress"`
 	}
-	if err := json.NewDecoder(view.Body).Decode(&top); err != nil {
-		t.Fatalf("decode the top-consumers view: %v", err)
+	if err := json.Unmarshal(view.body, &top); err != nil {
+		t.Fatalf("decode the top-consumers view: %v -- raw %q", err, view.body)
 	}
 	if !top.Enabled || !top.Egress.Alarm {
 		t.Fatalf("view = %+v, want an enabled meter with the alarm up", top)
@@ -395,9 +462,7 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 
 func TestTheTopConsumersViewIsAdminOnly(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{}, nil)
-	resp := f.get(t, "/api/v1/egress", f.runner)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("a runner reading the egress view = %d, want 403", resp.StatusCode)
+	if got := f.get(t, "/api/v1/egress", f.runner).status; got != http.StatusForbidden {
+		t.Fatalf("a runner reading the egress view = %d, want 403", got)
 	}
 }

@@ -5,14 +5,24 @@
 // stream, and git proxy fetches. Every byte is counted twice, once
 // against the principal that asked for it and once against the process
 // total, so an operator can see both who spent the month's egress and
-// how much left the deployment today.
+// how much left this process today.
 //
-// Two budgets act on those counters. A principal past its monthly byte
+// Three budgets act on those counters. A principal past its monthly byte
 // budget is refused before the next download starts, which is the cap
-// that stops one tenant turning a CI product into a file host. The
-// global daily threshold refuses nothing; it raises an alarm the health
-// route reports and the log carries at warn level, because the bill an
-// operator needs to see early is the deployment's, not one principal's.
+// that stops one tenant turning a CI product into a file host. A
+// principal at its concurrency cap is refused one more simultaneous
+// download or live log stream, which bounds how far a burst can carry a
+// principal past the byte budget: the overshoot a meter can never
+// prevent is the concurrency cap times the largest object. The global
+// daily threshold refuses nothing; it raises an alarm the health route
+// reports and the log carries at warn level, because the bill an
+// operator needs to see early is the process's, not one principal's.
+//
+// Enforcement needs a principal the meter can tell apart. A service that
+// authenticates one shared token, or that serves with auth off, resolves
+// every caller to the same name, so its callers share one budget; such a
+// service sets only the daily alarm and leaves refusals to the services
+// that know who is asking.
 //
 // Counting is in memory. [Meter.Dirty] hands a caller the principals
 // whose totals have moved since the last call so a service with a store
@@ -21,9 +31,11 @@
 package egress
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -47,14 +59,16 @@ const (
 )
 
 // AnonymousPrincipal labels bytes a service served without a bearer,
-// which is what the dependency proxy answers. They share one budget, so
-// an open route cannot be spent anonymously past the cap.
+// which is what the dependency proxy answers and what every request
+// resolves to on a service running with auth off. They share one budget,
+// so an open route cannot be spent anonymously past the cap.
 const AnonymousPrincipal = "anonymous"
 
 // OverflowPrincipal labels bytes served to a principal the meter had no
 // room to track separately. They share one budget rather than an
 // unbudgeted one, so reaching the cardinality cap tightens the meter
-// instead of opening it.
+// instead of opening it. The fold lasts until the month rolls, which is
+// when a meter drops the principals that spent nothing.
 const OverflowPrincipal = "(overflow)"
 
 // MaxPrincipals bounds how many principals one meter tracks. A
@@ -81,47 +95,74 @@ type BudgetError struct {
 	Month string
 	// RetryAfter is the wait until the budget resets.
 	RetryAfter time.Duration
+	// Flag names the flag that raises the budget on the refusing service.
+	Flag string
 }
 
 func (e *BudgetError) Error() string {
+	flag := e.Flag
+	if flag == "" {
+		flag = FlagMonthlyBytes
+	}
 	return fmt.Sprintf(
 		"egress budget exceeded: %s has downloaded %s of its %s monthly budget, so this %s download is refused until the budget resets at the start of the next UTC month, in %s. "+
-			"Raise it with --egress-monthly-bytes on the serving process, or wait out the reset",
-		e.Principal, FormatBytes(e.UsedBytes), FormatBytes(e.LimitBytes), e.Class, roundWait(e.RetryAfter))
+			"Raise it with %s on the serving process, or wait out the reset",
+		e.Principal, FormatBytes(e.UsedBytes), FormatBytes(e.LimitBytes), e.Class, roundWait(e.RetryAfter), flag)
 }
 
 func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
 
-// ErrStreamLimit matches every *StreamLimitError under errors.Is.
-var ErrStreamLimit = errors.New("live log stream limit reached")
+// Slot names a concurrency cap. Both slots bound how many responses one
+// principal may hold open at once; they are counted apart because a live
+// log stream lasts as long as its node and a download does not.
+type Slot string
 
-// StreamLimitError refuses a live log stream because the principal
-// already holds its cap of concurrent ones.
-type StreamLimitError struct {
+const (
+	// SlotDownload counts simultaneous metered downloads.
+	SlotDownload Slot = "download"
+	// SlotLogStream counts simultaneous live log streams.
+	SlotLogStream Slot = "live log stream"
+)
+
+// ErrConcurrencyLimit matches every *ConcurrencyError under errors.Is.
+var ErrConcurrencyLimit = errors.New("egress concurrency limit reached")
+
+// ConcurrencyError refuses a response because the principal already
+// holds its cap of that slot open.
+type ConcurrencyError struct {
 	Principal string
+	Slot      Slot
 	Limit     int
-	// RetryAfter is how long a client should wait before reopening.
+	// RetryAfter is how long a client should wait before retrying.
 	RetryAfter time.Duration
+	// Flag names the flag that raises the cap on the refusing service.
+	Flag string
 }
 
-func (e *StreamLimitError) Error() string {
+func (e *ConcurrencyError) Error() string {
+	flag := e.Flag
+	if flag == "" {
+		flag = FlagMaxLogStreams
+	}
 	return fmt.Sprintf(
-		"live log stream limit reached: %s already holds %d concurrent live log streams, which is the cap, so this one is refused. "+
-			"Close a stream and retry, or raise --egress-max-log-streams on the serving process",
-		e.Principal, e.Limit)
+		"egress concurrency limit reached: %s already holds %d concurrent %ss, which is the cap, so this one is refused. "+
+			"Let one finish and retry, or raise %s on the serving process",
+		e.Principal, e.Limit, e.Slot, flag)
 }
 
-func (e *StreamLimitError) Unwrap() error { return ErrStreamLimit }
+func (e *ConcurrencyError) Unwrap() error { return ErrConcurrencyLimit }
 
-// StreamRetryAfter is the wait a refused stream is told to observe. A
-// stream ends when its node does, so a short retry is the honest answer.
-const StreamRetryAfter = 30 * time.Second
+// SlotRetryAfter is the wait a refused response is told to observe. A
+// stream ends when its node does and a download ends when its bytes run
+// out, so a short retry is the honest answer for both.
+const SlotRetryAfter = 30 * time.Second
 
 // Config is a Meter's whole configuration. Every budget is off at zero,
 // which is what a Sparkwing that was never given one serves.
 type Config struct {
 	// PerPrincipalMonthlyBytes refuses a principal's downloads once its
-	// UTC-month total reaches this many bytes. Zero is unlimited.
+	// UTC-month total reaches this many bytes. Zero is unlimited, and a
+	// service whose callers all resolve to one principal leaves it there.
 	PerPrincipalMonthlyBytes int64
 	// GlobalDailyAlarmBytes raises the alarm once the process has sent
 	// this many bytes in a UTC day. It refuses nothing. Zero is off.
@@ -129,11 +170,34 @@ type Config struct {
 	// MaxStreamsPerPrincipal caps concurrent live log streams per
 	// principal. Zero is unlimited.
 	MaxStreamsPerPrincipal int
+	// MaxDownloadsPerPrincipal caps concurrent metered downloads per
+	// principal, which is what bounds how far one burst carries a
+	// principal past PerPrincipalMonthlyBytes. Zero is unlimited.
+	MaxDownloadsPerPrincipal int
+	// Flags names the flags this service spells its budgets with, so a
+	// refusal tells the operator which one to raise. The zero value uses
+	// the unprefixed names.
+	Flags FlagNames
 }
 
 // Budgeted reports whether any budget in this configuration applies.
 func (c Config) Budgeted() bool {
-	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyAlarmBytes > 0 || c.MaxStreamsPerPrincipal > 0
+	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyAlarmBytes > 0 ||
+		c.MaxStreamsPerPrincipal > 0 || c.MaxDownloadsPerPrincipal > 0
+}
+
+func (c Config) limitFor(slot Slot) int {
+	if slot == SlotDownload {
+		return c.MaxDownloadsPerPrincipal
+	}
+	return c.MaxStreamsPerPrincipal
+}
+
+func (c Config) flagFor(slot Slot) string {
+	if slot == SlotDownload {
+		return c.Flags.orDefault().MaxDownloads
+	}
+	return c.Flags.orDefault().MaxLogStreams
 }
 
 // Usage is one principal's total for one UTC month, as a service
@@ -151,6 +215,7 @@ type PrincipalState struct {
 	MonthBytes int64  `json:"month_bytes"`
 	DayBytes   int64  `json:"day_bytes"`
 	Streams    int    `json:"streams"`
+	Downloads  int    `json:"downloads"`
 	OverBudget bool   `json:"over_budget"`
 }
 
@@ -160,6 +225,7 @@ type State struct {
 	MonthlyBytesPerPrincipal int64            `json:"monthly_bytes_per_principal"`
 	DailyAlarmBytes          int64            `json:"daily_alarm_bytes"`
 	MaxStreamsPerPrincipal   int              `json:"max_streams_per_principal"`
+	MaxDownloadsPerPrincipal int              `json:"max_downloads_per_principal"`
 	Month                    string           `json:"month"`
 	Day                      string           `json:"day"`
 	GlobalMonthBytes         int64            `json:"global_month_bytes"`
@@ -180,7 +246,28 @@ type principalCounters struct {
 	day        string
 	dayBytes   int64
 	streams    int
+	downloads  int
 	dirty      bool
+}
+
+func (st *principalCounters) idle() bool {
+	return st.monthBytes == 0 && st.dayBytes == 0 &&
+		st.streams == 0 && st.downloads == 0 && !st.dirty
+}
+
+func (st *principalCounters) slots(slot Slot) int {
+	if slot == SlotDownload {
+		return st.downloads
+	}
+	return st.streams
+}
+
+func (st *principalCounters) hold(slot Slot, delta int) {
+	if slot == SlotDownload {
+		st.downloads += delta
+		return
+	}
+	st.streams += delta
 }
 
 // Meter counts bytes sent per principal and for the process as a whole,
@@ -193,6 +280,10 @@ type Meter struct {
 	mu         sync.Mutex
 	now        func() time.Time
 	principals map[string]*principalCounters
+	// safety: a month roll zeroes a principal's counter, so the closing
+	// total is parked here for the next Dirty rather than lost between
+	// the roll and the flush that would have persisted it.
+	pending    []Usage
 	month      string
 	monthBytes int64
 	day        string
@@ -237,22 +328,23 @@ func (m *Meter) Check(principal string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now().UTC()
-	st := m.counters(principal, now)
+	key, st := m.counters(principal, now)
 	if st.monthBytes < m.cfg.PerPrincipalMonthlyBytes {
 		return nil
 	}
 	m.refused++
 	return &BudgetError{
-		Principal:  m.key(principal),
+		Principal:  key,
 		LimitBytes: m.cfg.PerPrincipalMonthlyBytes,
 		UsedBytes:  st.monthBytes,
 		Month:      st.month,
 		RetryAfter: untilNextMonth(now),
+		Flag:       m.cfg.Flags.orDefault().MonthlyBytes,
 	}
 }
 
 // Record adds n bytes served to principal through class. It is called
-// after the bytes reach the client, so a download already in flight
+// as the bytes reach the client, so a download already in flight
 // finishes and its cost lands on the budget that refuses the next one.
 func (m *Meter) Record(principal string, class Class, n int64) {
 	if m == nil || n <= 0 {
@@ -260,13 +352,16 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 	}
 	m.mu.Lock()
 	now := m.now().UTC()
-	st := m.counters(principal, now)
+	key, st := m.counters(principal, now)
 	st.monthBytes += n
 	st.dayBytes += n
 	st.dirty = true
 	m.monthBytes += n
 	m.dayBytes += n
 	raised := m.raiseAlarmLocked(now)
+	// safety: every value the log line needs is copied under the lock,
+	// because reading the principal map again after the unlock races the
+	// next Record's write to it.
 	day, total := m.day, m.dayBytes
 	m.mu.Unlock()
 
@@ -275,57 +370,83 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 			"day", day,
 			"day_bytes", total,
 			"threshold_bytes", m.cfg.GlobalDailyAlarmBytes,
-			"principal", m.key(principal),
+			"principal", key,
 			"class", string(class))
 	}
 }
 
-// Serve returns a ResponseWriter that records everything written
-// through it against principal. It preserves the flush and deadline
-// control a streaming handler reaches for through
-// [http.NewResponseController].
-func (m *Meter) Serve(w http.ResponseWriter, principal string, class Class) http.ResponseWriter {
+// Serve returns a ResponseWriter that records what the handler actually
+// sends against principal. Bytes count only on a 2xx response to a
+// request whose method carries a body, because net/http discards what a
+// handler writes to a HEAD and an error body is not the download the
+// budget is for. It preserves the flush, hijack, and deadline control a
+// streaming handler reaches for.
+func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
 	if m == nil {
 		return w
 	}
-	counting := &countingWriter{ResponseWriter: w, meter: m, principal: principal, class: class}
-	// safety: a stream handler asks whether its writer flushes before it
-	// commits to SSE, so the wrapper answers that question the same way
-	// the writer underneath it would.
-	if _, ok := w.(http.Flusher); ok {
-		return &flushingCountingWriter{countingWriter: counting}
+	counting := &countingWriter{
+		ResponseWriter: w,
+		meter:          m,
+		principal:      principal,
+		class:          class,
+		bodyless:       Bodyless(r),
+		status:         http.StatusOK,
 	}
-	return counting
+	// safety: a stream handler asks whether its writer flushes or hijacks
+	// before it commits to a protocol, so the wrapper answers those
+	// questions the same way the writer underneath it would.
+	flusher, canFlush := w.(http.Flusher)
+	hijacker, canHijack := w.(http.Hijacker)
+	switch {
+	case canFlush && canHijack:
+		return &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}
+	case canFlush:
+		return &flushingWriter{countingWriter: counting, flusher: flusher}
+	case canHijack:
+		return &hijackingWriter{countingWriter: counting, hijacker: hijacker}
+	default:
+		return counting
+	}
 }
 
-// OpenStream reserves one of principal's concurrent live log streams
-// and returns the release the caller defers. A principal already at the
-// cap gets a *StreamLimitError and a release that does nothing.
-func (m *Meter) OpenStream(principal string) (func(), error) {
-	if m == nil || m.cfg.MaxStreamsPerPrincipal <= 0 {
+// Bodyless reports whether a request's method makes the server discard
+// whatever the handler writes, so a caller can skip the work of
+// producing bytes nobody is charged for.
+func Bodyless(r *http.Request) bool {
+	return r != nil && r.Method == http.MethodHead
+}
+
+// Open reserves one of principal's slots and returns the release the
+// caller defers. A principal already at the cap gets a
+// *ConcurrencyError and a release that does nothing.
+func (m *Meter) Open(principal string, slot Slot) (func(), error) {
+	if m == nil || m.cfg.limitFor(slot) <= 0 {
 		return func() {}, nil
 	}
+	limit := m.cfg.limitFor(slot)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now().UTC()
-	st := m.counters(principal, now)
-	if st.streams >= m.cfg.MaxStreamsPerPrincipal {
+	key, st := m.counters(principal, now)
+	if st.slots(slot) >= limit {
 		m.refused++
-		return func() {}, &StreamLimitError{
-			Principal:  m.key(principal),
-			Limit:      m.cfg.MaxStreamsPerPrincipal,
-			RetryAfter: StreamRetryAfter,
+		return func() {}, &ConcurrencyError{
+			Principal:  key,
+			Slot:       slot,
+			Limit:      limit,
+			RetryAfter: SlotRetryAfter,
+			Flag:       m.cfg.flagFor(slot),
 		}
 	}
-	st.streams++
-	key := m.key(principal)
+	st.hold(slot, 1)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			m.mu.Lock()
 			defer m.mu.Unlock()
-			if held := m.principals[key]; held != nil && held.streams > 0 {
-				held.streams--
+			if held := m.principals[key]; held != nil && held.slots(slot) > 0 {
+				held.hold(slot, -1)
 			}
 		})
 	}, nil
@@ -333,14 +454,17 @@ func (m *Meter) OpenStream(principal string) (func(), error) {
 
 // Dirty returns the usages whose byte totals have moved since the last
 // call and clears the marks. A service with a store persists them on a
-// timer; one without calls nothing and keeps counting in memory.
+// timer; one without calls nothing and keeps counting in memory. A month
+// that rolled between two calls yields its closing total first, so the
+// last bytes of a month are persisted under that month.
 func (m *Meter) Dirty() []Usage {
 	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []Usage
+	out := m.pending
+	m.pending = nil
 	for name, st := range m.principals {
 		if !st.dirty {
 			continue
@@ -349,15 +473,23 @@ func (m *Meter) Dirty() []Usage {
 		out = append(out, Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
 	}
 	slices.SortFunc(out, func(a, b Usage) int {
-		if a.Principal != b.Principal {
-			if a.Principal < b.Principal {
-				return -1
-			}
-			return 1
+		if c := compareStrings(a.Month, b.Month); c != 0 {
+			return c
 		}
-		return 0
+		return compareStrings(a.Principal, b.Principal)
 	})
 	return out
+}
+
+func compareStrings(a, b string) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // Restore loads persisted usages, so a restarted service resumes the
@@ -376,7 +508,7 @@ func (m *Meter) Restore(usages []Usage) {
 		if u.Month != month || u.Bytes <= 0 || u.Principal == "" {
 			continue
 		}
-		st := m.counters(u.Principal, now)
+		_, st := m.counters(u.Principal, now)
 		if u.Bytes <= st.monthBytes {
 			continue
 		}
@@ -399,6 +531,7 @@ func (m *Meter) State() State {
 		MonthlyBytesPerPrincipal: m.cfg.PerPrincipalMonthlyBytes,
 		DailyAlarmBytes:          m.cfg.GlobalDailyAlarmBytes,
 		MaxStreamsPerPrincipal:   m.cfg.MaxStreamsPerPrincipal,
+		MaxDownloadsPerPrincipal: m.cfg.MaxDownloadsPerPrincipal,
 		Month:                    m.month,
 		Day:                      m.day,
 		GlobalMonthBytes:         m.monthBytes,
@@ -409,8 +542,7 @@ func (m *Meter) State() State {
 		Principals:               len(m.principals),
 	}
 	for name, st := range m.principals {
-		m.rollPrincipal(st, now)
-		if st.monthBytes == 0 && st.dayBytes == 0 && st.streams == 0 {
+		if st.monthBytes == 0 && st.dayBytes == 0 && st.streams == 0 && st.downloads == 0 {
 			continue
 		}
 		out.Top = append(out.Top, PrincipalState{
@@ -418,20 +550,15 @@ func (m *Meter) State() State {
 			MonthBytes: st.monthBytes,
 			DayBytes:   st.dayBytes,
 			Streams:    st.streams,
+			Downloads:  st.downloads,
 			OverBudget: m.cfg.PerPrincipalMonthlyBytes > 0 && st.monthBytes >= m.cfg.PerPrincipalMonthlyBytes,
 		})
 	}
 	slices.SortFunc(out.Top, func(a, b PrincipalState) int {
-		switch {
-		case a.MonthBytes != b.MonthBytes:
+		if a.MonthBytes != b.MonthBytes {
 			return int(sign(b.MonthBytes - a.MonthBytes))
-		case a.Principal < b.Principal:
-			return -1
-		case a.Principal > b.Principal:
-			return 1
-		default:
-			return 0
 		}
+		return compareStrings(a.Principal, b.Principal)
 	})
 	if len(out.Top) > TopConsumers {
 		out.Top = out.Top[:TopConsumers]
@@ -474,7 +601,10 @@ func (m *Meter) key(principal string) string {
 	return principal
 }
 
-func (m *Meter) counters(principal string, now time.Time) *principalCounters {
+// safety: the returned name is the one the principal is tracked under,
+// which is not the name the caller passed when the fold or the anonymous
+// mapping renamed it; every caller must label with what comes back here.
+func (m *Meter) counters(principal string, now time.Time) (string, *principalCounters) {
 	m.rollGlobal(now)
 	key := m.key(principal)
 	if key == OverflowPrincipal && !m.overflowed {
@@ -487,16 +617,19 @@ func (m *Meter) counters(principal string, now time.Time) *principalCounters {
 		st = &principalCounters{month: m.month, day: m.day}
 		m.principals[key] = st
 	}
-	m.rollPrincipal(st, now)
-	return st
+	m.rollPrincipal(key, st, now)
+	return key, st
 }
 
-func (m *Meter) rollPrincipal(st *principalCounters, now time.Time) {
+func (m *Meter) rollPrincipal(name string, st *principalCounters, now time.Time) {
 	month, day := now.Format("2006-01"), now.Format("2006-01-02")
 	if st.month != month {
+		if st.dirty {
+			m.pending = append(m.pending, Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
+			st.dirty = false
+		}
 		st.month = month
 		st.monthBytes = 0
-		st.dirty = false
 	}
 	if st.day != day {
 		st.day = day
@@ -505,18 +638,34 @@ func (m *Meter) rollPrincipal(st *principalCounters, now time.Time) {
 }
 
 // safety: the day total drives the alarm, so rolling it also clears the
-// alarm; an operator paged for yesterday's bytes must not stay paged.
+// alarm; an operator paged for yesterday's bytes must not stay paged. A
+// month roll drops the principals that spent nothing and hold nothing
+// open, so the cardinality cap and the overflow fold it forces are not
+// permanent.
 func (m *Meter) rollGlobal(now time.Time) {
 	month, day := now.Format("2006-01"), now.Format("2006-01-02")
 	if m.month != month {
 		m.month = month
 		m.monthBytes = 0
+		m.evictIdle(now)
 	}
 	if m.day != day {
 		m.day = day
 		m.dayBytes = 0
 		m.alarm = false
 		m.alarmSince = time.Time{}
+	}
+}
+
+func (m *Meter) evictIdle(now time.Time) {
+	for name, st := range m.principals {
+		m.rollPrincipal(name, st, now)
+		if st.idle() {
+			delete(m.principals, name)
+		}
+	}
+	if len(m.principals) < MaxPrincipals {
+		m.overflowed = false
 	}
 }
 
@@ -564,20 +713,63 @@ type countingWriter struct {
 	meter     *Meter
 	principal string
 	class     Class
+	// safety: true when the server discards this response body, so nothing
+	// written through the wrapper reaches the wire and nothing is charged.
+	bodyless bool
+	status   int
+	wrote    bool
+}
+
+func (w *countingWriter) WriteHeader(code int) {
+	if !w.wrote {
+		w.status = code
+		w.wrote = true
+	}
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *countingWriter) Write(p []byte) (int, error) {
+	w.wrote = true
 	n, err := w.ResponseWriter.Write(p)
-	w.meter.Record(w.principal, w.class, int64(n))
+	if w.charges() {
+		w.meter.Record(w.principal, w.class, int64(n))
+	}
 	return n, err
+}
+
+// safety: net/http drops a HEAD response body and an error body is not
+// the download the budget is for, so neither is charged; charging a HEAD
+// let eight of them latch the daily alarm with nothing on the wire.
+func (w *countingWriter) charges() bool {
+	return !w.bodyless && w.status >= 200 && w.status < 300
 }
 
 // Unwrap hands the underlying writer to [http.NewResponseController],
 // so a streaming handler keeps its flush and its write deadline.
 func (w *countingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-type flushingCountingWriter struct {
+type flushingWriter struct {
 	*countingWriter
+	flusher http.Flusher
 }
 
-func (w *flushingCountingWriter) Flush() { w.ResponseWriter.(http.Flusher).Flush() }
+func (w *flushingWriter) Flush() { w.flusher.Flush() }
+
+type hijackingWriter struct {
+	*countingWriter
+	hijacker http.Hijacker
+}
+
+func (w *hijackingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return w.hijacker.Hijack() }
+
+type flushingHijackingWriter struct {
+	*countingWriter
+	flusher  http.Flusher
+	hijacker http.Hijacker
+}
+
+func (w *flushingHijackingWriter) Flush() { w.flusher.Flush() }
+
+func (w *flushingHijackingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.hijacker.Hijack()
+}
