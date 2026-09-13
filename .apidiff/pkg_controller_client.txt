@@ -209,6 +209,7 @@ type CronReposResponse struct {
 	Withdrawn []string
 }
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
+var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
 type ExecutorClaim struct {
 	ExecutorName   string
 	HolderID       string

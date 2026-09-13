@@ -11,6 +11,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
@@ -22,6 +23,7 @@ type ConfigureInit struct {
 	Exposed     bool                   `json:"exposed,omitempty"`
 	ConfigFiles []ConfigureInitFile    `json:"config_files"`
 	Toolchain   ConfigureInitToolchain `json:"toolchain"`
+	Hooks       *githooks.RepoGates    `json:"hooks,omitempty"`
 	NextSteps   []InfoNextStep         `json:"next_steps"`
 }
 
@@ -102,8 +104,26 @@ func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 
 	out.ConfigFiles = surveyConfigFiles(configDir, profilesPath)
 	out.Toolchain = probeToolchain()
+	out.Hooks = surveyProjectGates()
 	out.NextSteps = configureInitNextSteps()
 	return out, nil
+}
+
+func surveyProjectGates() *githooks.RepoGates {
+	sparkwingDir, err := findSparkwingDir()
+	if err != nil {
+		return nil
+	}
+	repoRoot := filepath.Dir(sparkwingDir)
+	declared, err := declaredHookNames(repoRoot)
+	if err != nil {
+		// safety: a config that will not load hides whether the gates fire, which
+		// is the one thing this block exists to answer.
+		broken := githooks.Broken(repoRoot, err)
+		return &broken
+	}
+	row := githooks.Survey(runGit, repoRoot, declared)
+	return &row
 }
 
 func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
@@ -253,6 +273,15 @@ func printConfigureInitTable(info ConfigureInit) {
 		fmt.Printf("              %s\n", goInstallHintForce())
 	}
 	fmt.Println()
+
+	if info.Hooks != nil {
+		fmt.Println("GIT HOOKS")
+		fmt.Printf("  %s\n", info.Hooks.Summary())
+		if !info.Hooks.Gated() {
+			fmt.Printf("  fix: %s\n", info.Hooks.Remedy())
+		}
+		fmt.Println()
+	}
 
 	fmt.Println("NEXT STEPS")
 	width := 0

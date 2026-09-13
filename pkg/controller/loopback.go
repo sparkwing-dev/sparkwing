@@ -236,7 +236,7 @@ func (l *Loopback) Handler() http.Handler {
 	router.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	router.Handle("/", l.authenticate(mux))
+	router.Handle("/", l.authenticate(unsupportedRouteFallback(mux)))
 	// safety: preserve the server wrapper order while the Warn-level loopback
 	// logger suppresses per-request Info lines from node state writes.
 	return otelutil.WrapHandler("sparkwing-controller",

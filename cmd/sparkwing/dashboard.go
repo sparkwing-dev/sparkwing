@@ -35,24 +35,6 @@ const (
 
 const dashboardStartTimeout = 30 * time.Second
 
-func removedDashboardCommand(args []string) bool {
-	for len(args) > 0 {
-		arg := args[0]
-		switch {
-		case arg == "-o" || arg == "--output":
-			if len(args) < 2 {
-				return false
-			}
-			args = args[2:]
-		case arg == "help" || arg == "--help" || arg == "-h" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2):
-			args = args[1:]
-		default:
-			return arg == "dashboard"
-		}
-	}
-	return false
-}
-
 func runDashboard(args []string) error {
 	if handleParentHelp(cmdDashboard, args) {
 		return nil
