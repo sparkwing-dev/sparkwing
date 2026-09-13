@@ -55,7 +55,7 @@ func OpenArtifactStore(ctx context.Context, raw string) (storage.ArtifactStore, 
 		if err != nil {
 			return nil, err
 		}
-		client, err := newS3Client(ctx)
+		client, err := newS3Client(ctx, true)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +85,7 @@ func OpenLogStore(ctx context.Context, raw string) (storage.LogStore, error) {
 		if err != nil {
 			return nil, err
 		}
-		client, err := newS3Client(ctx)
+		client, err := newS3Client(ctx, true)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +149,35 @@ const SDKMaxBackoff = 5 * time.Second
 // safety: the only S3 client this repository constructs, so every object-store
 // request passes the process-wide request budget and the SDK retryer is capped
 // in exactly one place.
-func newS3Client(ctx context.Context) (*awss3.Client, error) {
+// OpenMeasurementStore opens raw for measurement alone: reading the
+// store's own total, never serving it.
+//
+// Its requests stay outside the process-wide request budget on purpose.
+// Totalling a bucket costs one LIST per thousand keys, so a bucket of a
+// million objects would spend twice the whole per-minute list budget in
+// one pass and leave every other reader refused for the rest of the
+// minute. The measurement is bounded by its own schedule instead: one
+// caller per reconciliation window, and the window is the operator's.
+func OpenMeasurementStore(ctx context.Context, raw string) (storage.ArtifactStore, error) {
+	scheme, rest, err := splitScheme(raw)
+	if err != nil {
+		return nil, err
+	}
+	if scheme != "s3" {
+		return OpenArtifactStore(ctx, raw)
+	}
+	bucket, prefix, err := s3BucketPrefix(rest)
+	if err != nil {
+		return nil, err
+	}
+	client, err := newS3Client(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	return s3store.NewArtifactStore(bucket, prefix, client), nil
+}
+
+func newS3Client(ctx context.Context, budgeted bool) (*awss3.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRetryer(func() aws.Retryer {
 		return retry.NewStandard(func(o *retry.StandardOptions) {
 			o.MaxAttempts = SDKMaxAttempts
@@ -172,11 +200,13 @@ func newS3Client(ctx context.Context) (*awss3.Client, error) {
 			o.UsePathStyle = true
 		})
 	}
-	limiter, lerr := sharedLimiter()
-	if lerr != nil {
-		return nil, fmt.Errorf("object-store request budget: %w", lerr)
+	if budgeted {
+		limiter, lerr := sharedLimiter()
+		if lerr != nil {
+			return nil, fmt.Errorf("object-store request budget: %w", lerr)
+		}
+		opts = append(opts, objectguard.WithBudget(limiter))
 	}
-	opts = append(opts, objectguard.WithBudget(limiter))
 	return awss3.NewFromConfig(cfg, opts...), nil
 }
 

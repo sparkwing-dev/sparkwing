@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -168,5 +169,52 @@ func TestTrippedBudgetFailsARunsStateWriteClosed(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the run's failure does not mention %q:\n%v", want, err)
 		}
+	}
+}
+
+func TestMeasurementStoreStaysOutsideTheListBudget(t *testing.T) {
+	hits := &atomic.Int64{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+			`<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`))
+	}))
+	t.Cleanup(srv.Close)
+	s3Env(t, srv.URL)
+
+	spent := objectguard.New(objectguard.Config{
+		Enabled: true,
+		Limits:  map[objectguard.Class]objectguard.Limit{objectguard.ClassList: {PerMinute: 1}},
+	})
+	if err := spent.Allow(objectguard.ClassList); err != nil {
+		t.Fatalf("seed the list budget: %v", err)
+	}
+	useLimiter(t, spent)
+
+	budgeted, err := OpenArtifactStore(context.Background(), "s3://bucket/prefix")
+	if err != nil {
+		t.Fatalf("OpenArtifactStore: %v", err)
+	}
+	if _, err := budgeted.List(context.Background(), ""); err == nil {
+		t.Error("an ordinary client listed past a spent list budget")
+	}
+
+	measured, err := OpenMeasurementStore(context.Background(), "s3://bucket/prefix")
+	if err != nil {
+		t.Fatalf("OpenMeasurementStore: %v", err)
+	}
+	usage, ok, err := storage.Usage(context.Background(), measured)
+	if err != nil {
+		t.Fatalf("the measurement was refused by the list budget: %v", err)
+	}
+	if !ok {
+		t.Fatal("the measurement store cannot total itself")
+	}
+	if usage.Objects != 0 {
+		t.Errorf("measured %d objects from an empty listing, want 0", usage.Objects)
+	}
+	if hits.Load() == 0 {
+		t.Error("the measurement never reached the bucket")
 	}
 }

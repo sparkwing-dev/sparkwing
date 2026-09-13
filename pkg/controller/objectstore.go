@@ -134,6 +134,30 @@ func (s *Server) bucketUsage(ctx context.Context) (objectguard.Usage, bool, erro
 	return objectguard.Usage{Bytes: u.Bytes, Objects: u.Objects, ObservedAt: u.ObservedAt}, true, nil
 }
 
+// perf: one replica per window pays for the listing, because a bucket total is
+// the same answer whoever asks and each pass is billed per thousand keys.
+func (s *Server) measureBucketLeased(ctx context.Context, ceiling *objectguard.Ceiling, window time.Duration) (bool, error) {
+	measure := func(ctx context.Context) error {
+		usage, ok, err := s.bucketUsage(ctx)
+		if err != nil || !ok {
+			return err
+		}
+		ceiling.Observe(usage)
+		return nil
+	}
+	if s.store == nil || window <= 0 {
+		return true, measure(ctx)
+	}
+	return s.store.RunBucketMeasureLeased(ctx, s.measureHolder(), window, window, measure)
+}
+
+func (s *Server) measureHolder() string {
+	if s.cronHolder != "" {
+		return s.cronHolder
+	}
+	return "controller"
+}
+
 // perf: an unlimited bucket returns before the first listing, so an install that
 // sets no ceiling never pays to enumerate its object store.
 func (s *Server) runBucketCeiling(ctx context.Context) {
@@ -146,22 +170,21 @@ func (s *Server) runBucketCeiling(ctx context.Context) {
 	if !ceiling.Enforced() {
 		return
 	}
+	interval := ceiling.Reconcile()
 	measure := func() {
-		usage, ok, err := s.bucketUsage(ctx)
+		ran, err := s.measureBucketLeased(ctx, ceiling, interval)
 		if err != nil {
 			s.logger.Error("object-store bucket ceiling", "op", "measure bucket", "err", err)
 			return
 		}
-		if !ok {
+		if !ran {
 			return
 		}
-		ceiling.Observe(usage)
 		state := ceiling.State()
 		s.logger.Info("object-store bucket measured",
 			"bytes", state.Bytes, "objects", state.Objects, "frozen", state.Frozen)
 	}
 	measure()
-	interval := ceiling.Reconcile()
 	if interval <= 0 {
 		return
 	}
