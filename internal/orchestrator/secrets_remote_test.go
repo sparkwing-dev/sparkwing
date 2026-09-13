@@ -24,7 +24,9 @@ func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
 		case "TOKEN":
 			fmt.Fprintln(w, `{"name":"TOKEN","value":"prod-abc","principal":"admin","masked":true,"created_at":1,"updated_at":1}`)
 		default:
-			http.Error(w, "not found", http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not found"}`))
 		}
 	}))
 	defer srv.Close()

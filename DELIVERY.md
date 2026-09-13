@@ -36,6 +36,10 @@ launcher when testing isolated tool state.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Scripts under `bin/`:** editing one means running `GOWORK=off go test
+  ./bin`, about ten seconds. Go tests there pin what the scripts do, including
+  the exact argv `bin/install.sh` builds with, so a change to a shell script
+  reds a package no other check points at.
 - **Orchestrator iteration:** `GOWORK=off go test -short
   -timeout=5m ./internal/orchestrator` keeps the inexpensive `RunLocal` and
   daemon coverage. It skips the process-per-node binary fixtures, scaffolded

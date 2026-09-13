@@ -180,3 +180,23 @@ func TestSparkManifestShape(t *testing.T) {
 		})
 	}
 }
+
+func TestSparksUpdateRefusesName(t *testing.T) {
+	root := writeSparkFixture(t, map[string]string{
+		"sparkwing.yaml": "sparks:\n" +
+			"  - name: libA\n    source: example.com/a\n    version: latest\n" +
+			"  - name: libB\n    source: example.com/b\n    version: latest\n",
+		"go.mod": "module example.com/project/.sparkwing\n\ngo 1.26.0\n",
+	})
+
+	err := runSparksUpdate([]string{"--sparkwing-dir", root, "--name", "libA"})
+	if err == nil {
+		t.Fatal("expected --name to be refused")
+	}
+	if !strings.Contains(err.Error(), "--name is not supported") {
+		t.Fatalf("refusal does not name the flag: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, ".resolved.mod")); statErr == nil {
+		t.Fatal("refused update still wrote an overlay")
+	}
+}
