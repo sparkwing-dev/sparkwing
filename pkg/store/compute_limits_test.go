@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -180,12 +181,17 @@ func TestGuardsLetAnIdempotentRecreateThrough(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("re-creating the same run must not meet the hourly guard: %v", err)
 	}
-	if err := s.CreateNode(ctx, store.Node{
-		RunID: "run-again", NodeID: "build", Status: "pending",
-	}); err != nil && !errors.Is(err, store.ErrComputeLimit) {
-		return
-	} else if errors.Is(err, store.ErrComputeLimit) {
+	// safety: re-creating a node must fail on the row that already exists, not
+	// on the guard, so the error is read rather than merely tolerated.
+	err := s.CreateNode(ctx, store.Node{RunID: "run-again", NodeID: "build", Status: "pending"})
+	if err == nil {
+		t.Fatal("re-creating the same node reported no duplicate")
+	}
+	if errors.Is(err, store.ErrComputeLimit) {
 		t.Fatalf("re-creating the same node met a guard: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+		t.Fatalf("re-creating the same node failed with %v, want a unique-constraint violation", err)
 	}
 }
 
@@ -560,5 +566,83 @@ func TestRunnerGuardsLeaveUnmeteredClaimsAlone(t *testing.T) {
 	}
 	if runners != 0 || alarm != 1 {
 		t.Fatalf("alarm state = (%d, %d), want no runners against an alarm of one", runners, alarm)
+	}
+}
+
+// safety: a trigger whose run a guard refused would be claimed by a worker and
+// executed anyway, so the two rows are written together or not at all.
+func TestConcurrentTriggerAdmissionLeavesNoOrphanTrigger(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 2)
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := fmt.Sprintf("run-%d", i)
+			now := time.Now()
+			_ = s.CreateTriggerWithRun(ctx,
+				store.Trigger{ID: id, Pipeline: "demo", TriggerSource: "manual", CreatedAt: now},
+				store.Run{ID: id, Pipeline: "demo", Status: "pending", StartedAt: now, CreatedAt: now})
+		}(i)
+	}
+	wg.Wait()
+
+	triggers, err := s.ListTriggers(ctx, store.TriggerFilter{Limit: 100})
+	if err != nil {
+		t.Fatalf("list triggers: %v", err)
+	}
+	if len(triggers) > 2 {
+		t.Fatalf("wrote %d triggers past a cap of 2", len(triggers))
+	}
+	for _, trig := range triggers {
+		if _, err := s.GetRun(ctx, trig.ID); err != nil {
+			t.Fatalf("trigger %s has no run: %v", trig.ID, err)
+		}
+	}
+	claimed := 0
+	for {
+		trig, err := s.ClaimNextTrigger(ctx, time.Minute)
+		if errors.Is(err, store.ErrNotFound) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("claim trigger: %v", err)
+		}
+		if trig == nil {
+			break
+		}
+		if _, err := s.GetRun(ctx, trig.ID); err != nil {
+			t.Fatalf("a worker claimed trigger %s with no run: %v", trig.ID, err)
+		}
+		claimed++
+		if claimed > 2 {
+			t.Fatalf("claimed %d triggers past a cap of 2", claimed)
+		}
+	}
+	if claimed != len(triggers) {
+		t.Fatalf("claimed %d of %d triggers", claimed, len(triggers))
+	}
+}
+
+func TestTriggerAndItsRunAreRefusedTogether(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
+	now := time.Now()
+	if err := s.CreateTriggerWithRun(ctx,
+		store.Trigger{ID: "run-1", Pipeline: "demo", TriggerSource: "manual", CreatedAt: now},
+		store.Run{ID: "run-1", Pipeline: "demo", Status: "pending", StartedAt: now, CreatedAt: now}); err != nil {
+		t.Fatalf("the first admission must be allowed: %v", err)
+	}
+
+	err := s.CreateTriggerWithRun(ctx,
+		store.Trigger{ID: "run-2", Pipeline: "demo", TriggerSource: "manual", CreatedAt: now},
+		store.Run{ID: "run-2", Pipeline: "demo", Status: "pending", StartedAt: now, CreatedAt: now})
+	limitRefusal(t, err, store.ComputeLimitGlobalRunsPerHour)
+	if trig, err := s.GetTrigger(ctx, "run-2"); err == nil && trig != nil {
+		t.Fatal("the refused admission left a trigger behind")
 	}
 }

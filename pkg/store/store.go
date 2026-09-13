@@ -3239,18 +3239,41 @@ type Run struct {
 // upsert keeps it: secret resolution reads it, so a caller that can
 // upsert a run must not be able to repoint it.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
-	if err := ValidateRunInvocation(r); err != nil {
-		return err
-	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, r.ID); err != nil {
+	if err := s.createRunTx(ctx, tx, r); err != nil {
 		return err
 	}
-	if err := enforceRunsPerHourTx(ctx, tx, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
+	return tx.Commit()
+}
+
+// CreateTriggerWithRun writes a trigger and the pending run it names in one
+// transaction, so a guard that refuses the run leaves no trigger behind for a
+// worker to claim. It maps the same duplicate-key errors [Store.CreateTrigger]
+// does.
+func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createTriggerTx(ctx, tx, t); err != nil {
+		return err
+	}
+	if err := s.createRunTx(ctx, tx, r); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) createRunTx(ctx context.Context, tx *storeTx, r Run) error {
+	if err := ValidateRunInvocation(r); err != nil {
+		return err
+	}
+	if err := s.assertRunMutationFenceTx(ctx, tx, r.ID); err != nil {
 		return err
 	}
 	argsJSON, _ := json.Marshal(r.Args)
@@ -3280,10 +3303,16 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if finished == nil && isTerminalRunStatus(r.Status) {
 		finished = time.Now().UnixNano()
 	}
+	// safety: lock order across this store is executor eligibility first, then
+	// a guard or ledger advisory lock; taking them the other way around here
+	// deadlocks against a claim that holds the executor lock.
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `
+	if err := enforceRunsPerHourTx(ctx, tx, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
 INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
@@ -3323,10 +3352,7 @@ WHERE runs.status = '`+runStatusPending+`'`,
 		r.ReplayOfRunID, r.ReplayOfNodeID,
 		invocationJSON, heartbeat, creatingPrincipal(ctx),
 	)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+	return err
 }
 
 const finishRunStmt = `
@@ -6121,6 +6147,18 @@ func coordinatorIDTx(ctx context.Context, tx *storeTx) (string, error) {
 
 // CreateTrigger inserts a new trigger with status='pending'.
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createTriggerTx(ctx, tx, t); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status
@@ -6139,7 +6177,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if t.RepoInherited {
 		repoInheritedInt = 1
 	}
-	_, err := s.exec(
+	_, err := tx.ExecContext(
 		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,

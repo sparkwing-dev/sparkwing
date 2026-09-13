@@ -63,7 +63,7 @@ var runsPrincipalCols = map[string]string{
 // safety: the runner counts read every node with an open charge window and the
 // hourly count reads one principal's recent runs, so both get an index rather
 // than a table scan inside the claim transaction.
-const computeGuardIndexesSQLite = `
+const computeGuardIndexes = `
 CREATE INDEX IF NOT EXISTS idx_nodes_credit_active ON nodes(credit_charged_through);
 CREATE INDEX IF NOT EXISTS idx_nodes_credit_principal ON nodes(claim_principal, credit_charged_through);
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at);
@@ -73,7 +73,7 @@ func applyComputeGuardsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := ensureColumnsSQLite(ctx, tx, "runs", runsPrincipalCols); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, computeGuardIndexesSQLite)
+	_, err := tx.ExecContext(ctx, computeGuardIndexes)
 	return err
 }
 
@@ -81,7 +81,7 @@ func applyComputeGuardsMigrationPostgres(ctx context.Context, tx *storeTx) error
 	if err := addColumnsTx(ctx, tx, "runs", runsPrincipalCols); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, computeGuardIndexesSQLite)
+	_, err := tx.ExecContext(ctx, computeGuardIndexes)
 	return err
 }
 
@@ -389,7 +389,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string
 	}
 	ceiling, guard := limits.GlobalNodesPerRun, ComputeLimitGlobalNodesPerRun
 	if limits.NodesPerRun > 0 {
-		metered, err := principalMeteredTx(ctx, tx, principal)
+		metered, err := principalMetered(ctx, tx, principal)
 		if err != nil {
 			return err
 		}
@@ -400,7 +400,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string
 	if ceiling <= 0 {
 		return nil
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	if err := lockComputeGuardsTx(ctx, tx); err != nil {
 		return err
 	}
 	var nodes int64
@@ -429,25 +429,10 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, runID, principal str
 	if err != nil || present {
 		return err
 	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	if err := lockComputeGuardsTx(ctx, tx); err != nil {
 		return err
 	}
 	return runsPerHourRefusal(ctx, tx, limits, principal, now)
-}
-
-// RunsPerHourRefusal reports the hourly guard the principal in ctx would meet
-// if it created a run now, without writing anything. A caller that writes rows
-// of its own before the run uses it to refuse first; the guard inside
-// [Store.CreateRun] is still what makes the decision atomic.
-func (s *Store) RunsPerHourRefusal(ctx context.Context, now time.Time) error {
-	limits, err := s.ComputeLimits(ctx)
-	if err != nil {
-		return err
-	}
-	if limits.RunsPerHour <= 0 && limits.GlobalRunsPerHour <= 0 {
-		return nil
-	}
-	return runsPerHourRefusal(ctx, storeRowQuerier{s}, limits, creatingPrincipal(ctx), now)
 }
 
 func runsPerHourRefusal(
@@ -455,7 +440,7 @@ func runsPerHourRefusal(
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
 	if limits.RunsPerHour > 0 {
-		metered, err := principalMeteredTx(ctx, q, principal)
+		metered, err := principalMetered(ctx, q, principal)
 		if err != nil {
 			return err
 		}
@@ -494,12 +479,6 @@ type rowQuerier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-type storeRowQuerier struct{ s *Store }
-
-func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return q.s.queryRow(ctx, query, args...)
-}
-
 func rowPresentTx(ctx context.Context, q rowQuerier, query string, args ...any) (bool, error) {
 	var one int
 	err := q.QueryRowContext(ctx, query, args...).Scan(&one)
@@ -527,12 +506,23 @@ func runPrincipalTx(ctx context.Context, tx *storeTx, runID string) (string, err
 
 // safety: metering follows the operator's token marker, so a principal holding
 // no metered token is local work the per-principal guards leave alone.
-func principalMeteredTx(ctx context.Context, q rowQuerier, principal string) (bool, error) {
+func principalMetered(ctx context.Context, q rowQuerier, principal string) (bool, error) {
 	if principal == "" {
 		return false, nil
 	}
 	return rowPresentTx(ctx, q,
-		`SELECT 1 FROM tokens WHERE principal = ? AND metered = 1 LIMIT 1`, principal)
+		`SELECT 1 FROM tokens WHERE principal = ? AND metered != 0 LIMIT 1`, principal)
+}
+
+// safety: the create-side guards count runs and nodes, which no claim reads, so
+// they serialize on a key of their own rather than the ledger's. Both are taken
+// after the executor eligibility lock, which is the store's one lock order.
+func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/compute-guards")
+	return err
 }
 
 // RunExceedsWallClock reports whether the run has held cloud runners past the
