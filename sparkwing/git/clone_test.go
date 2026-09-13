@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 func TestResolveCloneURL_NoCache(t *testing.T) {
@@ -67,7 +69,7 @@ func TestResolveCloneURL_StubServerHealthy(t *testing.T) {
 
 	upstream := "git@github.com:owner/repo.git"
 	got, _, _ := resolveCloneURL(context.Background(), upstream)
-	want := srv.URL + "/git/repo"
+	want := srv.URL + "/git/" + sourceurl.ClaimedRepoNameFromURL(upstream)
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -79,7 +81,7 @@ func TestResolveCloneURL_EnvOverride(t *testing.T) {
 
 	upstream := "https://github.com/owner/repo.git"
 	got, _, _ := resolveCloneURL(context.Background(), upstream)
-	want := "http://cache.local:9999/git/repo"
+	want := "http://cache.local:9999/git/" + sourceurl.ClaimedRepoNameFromURL(upstream)
 	if got != want {
 		t.Fatalf("env override: got %q, want %q", got, want)
 	}
@@ -89,21 +91,27 @@ func TestCacheCloneURL_FormatVariants(t *testing.T) {
 	cases := []struct {
 		name, in, want string
 	}{
-		{"ssh", "git@github.com:owner/repo.git", "http://c/git/repo"},
-		{"https", "https://github.com/owner/repo.git", "http://c/git/repo"},
-		{"no-suffix", "git@host:owner/repo", "http://c/git/repo"},
-		{"trailing-slash-base", "git@github.com:owner/repo.git", "http://c/git/repo"},
+		{"ssh", "git@github.com:owner/repo.git", "http://c/git/repo-b1cd17c6cfc6f18ca212b7e8ac47cfe7429102823006de2bc18203527bf"},
+		{"https", "https://github.com/owner/repo.git", "http://c/git/repo-bc40893b43beea6303cb93d2e61df787840b4e09dcf293506e68491b9a0"},
+		{"no-suffix", "git@host:owner/repo", "http://c/git/repo-c0fd43e6c91cc975a9984a19b2ee89b0d5e73839898d897d45fd3eb72c3"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := cacheCloneURL("http://c", c.in)
-			if got != c.want {
+			if got := cacheCloneURL("http://c", c.in); got != c.want {
 				t.Fatalf("got %q, want %q", got, c.want)
 			}
-			if !strings.HasPrefix(got, "http://c/") {
-				t.Fatalf("base lost: %q", got)
+			if got := cacheCloneURL("http://c/", c.in); got != c.want {
+				t.Fatalf("trailing-slash base: got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestCacheCloneURL_DistinguishesEqualBasenames(t *testing.T) {
+	first := cacheCloneURL("http://c", "https://github.com/acme/utils.git")
+	second := cacheCloneURL("http://c", "https://github.com/other/utils.git")
+	if first == second {
+		t.Fatalf("different repositories share the cache name %q", first)
 	}
 }
 

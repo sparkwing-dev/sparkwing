@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 var gitcacheProbeURL = "http://localhost:18090"
@@ -187,12 +189,5 @@ func detectGitcache(ctx context.Context) (base string, named bool) {
 }
 
 func cacheCloneURL(cacheBase, upstream string) string {
-	repoName := upstream
-	if i := strings.LastIndex(repoName, "/"); i >= 0 {
-		repoName = repoName[i+1:]
-	} else if i := strings.LastIndex(repoName, ":"); i >= 0 {
-		repoName = repoName[i+1:]
-	}
-	repoName = strings.TrimSuffix(repoName, ".git")
-	return strings.TrimRight(cacheBase, "/") + "/git/" + repoName
+	return strings.TrimRight(cacheBase, "/") + "/git/" + sourceurl.ClaimedRepoNameFromURL(upstream)
 }

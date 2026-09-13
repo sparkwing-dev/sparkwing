@@ -45,9 +45,9 @@ func Unbind() {
 	}
 }
 
-// GateIndex reports the recorded index path, or empty where no hook recorded
-// one or the file it named is gone. Bind it to the single command that should
-// read the staged content rather than exporting it.
+// GateIndex reports the recorded index path, or empty where there is none this
+// process can stand behind. Bind it to the single command that should read the
+// staged content rather than exporting it.
 func GateIndex() string {
 	path := os.Getenv(GateIndexVar)
 	if path == "" {

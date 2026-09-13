@@ -224,19 +224,6 @@ func TestMetrics_EndpointUnauthWithAuthEnabled(t *testing.T) {
 	}
 }
 
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := l.Addr().String()
-	if err := l.Close(); err != nil {
-		t.Fatalf("close probe listener: %v", err)
-	}
-	return addr
-}
-
 func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -244,9 +231,13 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	metricsAddr := freeAddr(t)
-	apiAddr := freeAddr(t)
-	srv := controller.New(st, nil).WithMetricsAddr(metricsAddr)
+	metricsLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = metricsLn.Close() })
+	metricsAddr := metricsLn.Addr().String()
+	srv := controller.New(st, nil).WithMetricsListener(metricsLn)
 
 	api := httptest.NewServer(srv.Handler())
 	t.Cleanup(api.Close)
@@ -258,7 +249,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- controller.ServeWith(ctx, srv, apiAddr) }()
+	go func() { served <- controller.ServeWith(ctx, srv, "127.0.0.1:0") }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-served; err != nil {
@@ -306,7 +297,7 @@ func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	srv := controller.New(st, nil).WithMetricsAddr(held.Addr().String())
-	if err := controller.ServeWith(ctx, srv, freeAddr(t)); err == nil {
+	if err := controller.ServeWith(ctx, srv, "127.0.0.1:0"); err == nil {
 		t.Fatal("ServeWith error = nil, want the bind failure")
 	}
 }

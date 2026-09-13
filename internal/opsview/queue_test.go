@@ -333,3 +333,91 @@ func TestRenderStats_EmptyWindow(t *testing.T) {
 		t.Fatalf("empty stats view: %q", buf.String())
 	}
 }
+
+func TestRenderQueuePretty_ExplainsSoftCoreAllowance(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 10, Held: 12.881},
+		},
+		Holders: []wingwire.Holder{
+			{RunID: "run-pinned", Resources: wingwire.HostResources{Cores: 9.5}, CostSource: "pin"},
+			{RunID: "run-guessed", Resources: wingwire.HostResources{Cores: 3.381}, CostSource: "measured"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	note := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "soft-core allowance:") {
+			note = line
+		}
+	}
+	if note == "" {
+		t.Fatalf("over-capacity view omits the soft-core allowance:\n%s", out)
+	}
+	for _, want := range []string{"12.88", "10", "capacity less reserved and external", "at most one grant", "run-guessed (measured)"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("allowance note omits %q: %s", want, note)
+		}
+	}
+	if strings.Contains(note, "run-pinned") {
+		t.Fatalf("pinned holder listed as priced from an estimate: %s", note)
+	}
+}
+
+func TestRenderQueuePretty_NoSoftCoreNoteWithinCapacity(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 10, Held: 4, Available: 6},
+		},
+		Holders: []wingwire.Holder{
+			{RunID: "run-guessed", Resources: wingwire.HostResources{Cores: 4}, CostSource: "measured"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	if strings.Contains(buf.String(), "soft-core") {
+		t.Fatalf("within capacity the view explains an allowance it did not use:\n%s", buf.String())
+	}
+}
+
+func TestRenderQueuePretty_NoSoftCoreNoteForPinnedOvercommit(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 10, Held: 12},
+		},
+		Holders: []wingwire.Holder{
+			{RunID: "run-pinned", Resources: wingwire.HostResources{Cores: 12}, CostSource: "pin"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	if strings.Contains(buf.String(), "soft-core") {
+		t.Fatalf("a pinned grant over capacity is blamed on the allowance:\n%s", buf.String())
+	}
+}
+
+func TestRenderQueuePlain_OmitsSoftCoreNote(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 10, Held: 12.881},
+		},
+		Holders: []wingwire.Holder{
+			{RunID: "run-guessed", Resources: wingwire.HostResources{Cores: 12.881}, CostSource: "measured"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderLocalQueue(&buf, qs, opsview.Serving(), "plain"); err != nil {
+		t.Fatalf("render plain: %v", err)
+	}
+	if strings.Contains(buf.String(), "soft-core") {
+		t.Fatalf("machine output gained the allowance note:\n%s", buf.String())
+	}
+}

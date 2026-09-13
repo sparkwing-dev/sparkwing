@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 type localFleetSource struct {
@@ -63,7 +64,7 @@ func startLocalFleetSource(root, bundle, sha, repoURL, token string) (*localFlee
 	}
 	s := &localFleetSource{
 		url: "http://" + lis.Addr().String(), token: token,
-		name: bincache.ClaimedRepoNameFromURL(repoURL), repoURL: repoURL, bareRepo: bare,
+		name: sourceurl.ClaimedRepoNameFromURL(repoURL), repoURL: repoURL, bareRepo: bare,
 	}
 	s.srv = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = s.srv.Serve(lis) }()

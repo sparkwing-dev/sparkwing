@@ -79,11 +79,13 @@ type PullRequestTrigger struct {
 
 	Branches []string
 }
+func (p *PullRequestTrigger) UnmarshalYAML(node *yaml.Node) error
 type PushTrigger struct {
 	Branches []string
 
 	Paths []string
 }
+func (p *PushTrigger) UnmarshalYAML(node *yaml.Node) error
 const ScheduleOverlapQueue = "queue"
 const ScheduleOverlapSkip = "skip"
 const ScheduleTZLocal = "local"
@@ -139,3 +141,4 @@ func (t *Triggers) UnmarshalYAML(node *yaml.Node) error
 type WebhookTrigger struct {
 	Path string
 }
+func (w *WebhookTrigger) UnmarshalYAML(node *yaml.Node) error

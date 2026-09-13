@@ -256,8 +256,8 @@ The dashboard shows failure information where a run's detail is:
 It also shows what admission is doing with the machine:
 
 - **Queue page**: the live admission queue -- every resource with its
-  headroom, every holder, every waiter in order with its ETA. Mirrors
-  `sparkwing queue`.
+  headroom, every holder, every lease connected without holding resources,
+  and every waiter in order with its ETA. Mirrors `sparkwing queue`.
 - **Fleet section**: registered executors with their configured policy, observed
   liveness and headroom, and current slot and run activity in separate panels.
   Legacy executors inferred from recent activity stay visible without invented

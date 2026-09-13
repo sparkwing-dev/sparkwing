@@ -226,7 +226,7 @@ func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 	}
 	defer b.Close()
 
-	reclaimed, err := b.Reattach(context.Background(), token)
+	reclaimed, err := b.Reattach(context.Background(), token, lease.RunID)
 	if err != nil {
 		t.Fatalf("reattach: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestReattach_RejectedAfterGrace(t *testing.T) {
 	b := ensure(t, home, "")
 	waitForRecoveredHolderRelease(t, b, "a")
 
-	_, err := b.Reattach(context.Background(), token)
+	_, err := b.Reattach(context.Background(), token, lease.RunID)
 	if !errors.Is(err, client.ErrReattachRejected) {
 		t.Fatalf("reattach after grace: got %v, want ErrReattachRejected", err)
 	}
@@ -316,7 +316,7 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	}
 
 	reconnect := ensure(t, home, "v2.0.0")
-	reclaimed, err := reconnect.Reattach(context.Background(), token)
+	reclaimed, err := reconnect.Reattach(context.Background(), token, lease.RunID)
 	if err != nil {
 		t.Fatalf("reattach after takeover: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestVersionTakeover_ExactSourceBuildDrainsSameReleaseAndReattaches(t *testi
 		t.Fatalf("release daemon should have drained and exited: %v", err)
 	}
 	reconnect := ensure(t, home, newVersion)
-	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token, lease.RunID)
 	if err != nil {
 		t.Fatalf("holder reattach: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *tes
 		t.Fatalf("old daemon should exit: %v", err)
 	}
 	reconnect := ensure(t, home, newVersion)
-	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token, lease.RunID)
 	if err != nil {
 		t.Fatalf("holder reattach: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestRestartRunning_ReplacesExactBuildAndReattachesHolder(t *testing.T) {
 		t.Fatalf("old daemon should exit: %v", err)
 	}
 	reconnect := ensure(t, home, version)
-	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token, lease.RunID)
 	if err != nil {
 		t.Fatalf("holder reattach: %v", err)
 	}

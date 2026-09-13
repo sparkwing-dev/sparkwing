@@ -2,6 +2,8 @@ package sourceurl
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -269,6 +271,31 @@ func TestRedactSCPUser(t *testing.T) {
 		got := Redact(user + "@github.com:acme/repo.git")
 		if got != "redacted@github.com:acme/repo.git" {
 			t.Fatalf("Redact SCP URL = %q", got)
+		}
+	}
+}
+
+func TestClaimedRepoNameFromURL_DistinguishesEqualBasenames(t *testing.T) {
+	first := ClaimedRepoNameFromURL("https://git.example.com/acme/widgets.git")
+	second := ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git")
+	if first == second {
+		t.Fatalf("claim-scoped names collide: %q", first)
+	}
+	if !strings.HasPrefix(first, "repo-") || len(first) != 64 {
+		t.Fatalf("claim-scoped name = %q", first)
+	}
+	if got := ClaimedRepoNameFromURL("  https://git.example.com/acme/widgets.git  "); got != first {
+		t.Fatalf("normalized claim-scoped name = %q, want %q", got, first)
+	}
+	// safety: the gitcache refuses to register a name outside this set, so a
+	// derivation that leaves it takes the cache out of the path silently.
+	registrable := regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	for _, repoURL := range []string{
+		"https://git.example.com/acme/widgets.git", "git@git.example.com:acme/widgets.git",
+		"", "../../etc/passwd", "-x", "https://git.example.com/acme/wid gets.git",
+	} {
+		if got := ClaimedRepoNameFromURL(repoURL); !registrable.MatchString(got) {
+			t.Fatalf("%q produced the unregistrable cache name %q", repoURL, got)
 		}
 	}
 }

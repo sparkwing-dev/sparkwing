@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -220,7 +220,7 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	repoURL := "https://git.example.com/acme/widgets.git"
-	cacheName := bincache.ClaimedRepoNameFromURL(repoURL)
+	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
@@ -316,7 +316,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	}
 	for name, path := range map[string]string{
 		"same-basename foreign repository": base + "/register?name=" +
-			bincache.ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git") +
+			sourceurl.ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git") +
 			"&repo=https://git.example.com/other/widgets.git",
 		"foreign cache name": base + "/other/info/refs?service=git-upload-pack",
 	} {

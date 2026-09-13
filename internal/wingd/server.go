@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1224,12 +1225,20 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		return
 	}
 	requestID := d.leaseRun[leaseID]
+	reclaimed, claimed := d.claimUnreclaimedMemberLocked(leaseID, requestID, req.RunID)
+	if !claimed {
+		d.mu.Unlock()
+		d.cfg.logf("reattach: lease %s holds no unreclaimed member named %s", leaseID, req.RunID)
+		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "reattach", Policy: wingwire.PolicyFail}); err != nil {
+			d.cfg.logf("reattach: refuse %s: %v", req.RunID, err)
+		}
+		return
+	}
 	c.role = roleHolder
 	c.leaseID = leaseID
 	c.startAt = d.now()
 	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
-	reclaimed := d.claimUnreclaimedMemberLocked(leaseID, requestID)
 	c.members = []string{reclaimed}
 	c.runID = reclaimed
 	for _, m := range c.members {
@@ -1248,25 +1257,31 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 
 // safety: a nested run's parent and child present the same lease token, so each
 // reattach claims one member; one connection owning them all releases the whole
-// lease when any one run ends. The frame names no run, so members go out in order
-// after the lease's request, and a child reattaching first is finalized under it.
-func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID string) string {
+// lease when any one run ends. A client naming runID claims that member and
+// nothing else; a frame that names no run leaves members going out in order
+// after the lease's request, which is what gave a child the parent's identity.
+func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID, runID string) (member string, claimed bool) {
 	remaining := d.reattachMembers[id]
 	if len(remaining) == 0 {
+		if runID != "" && runID != requestID {
+			return "", false
+		}
 		delete(d.reattachMembers, id)
 		delete(d.reattachWait, id)
-		return requestID
+		return requestID, true
 	}
-	claimed, at := "", -1
-	for i, member := range remaining {
-		if member == requestID {
-			claimed, at = member, i
-			break
-		}
+	want := runID
+	if want == "" {
+		want = requestID
 	}
+	at := slices.Index(remaining, want)
 	if at < 0 {
-		claimed, at = remaining[0], 0
+		if runID != "" {
+			return "", false
+		}
+		at = 0
 	}
+	member = remaining[at]
 	remaining = append(remaining[:at], remaining[at+1:]...)
 	if len(remaining) == 0 {
 		delete(d.reattachMembers, id)
@@ -1274,7 +1289,7 @@ func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID st
 	} else {
 		d.reattachMembers[id] = remaining
 	}
-	return claimed
+	return member, true
 }
 
 func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {

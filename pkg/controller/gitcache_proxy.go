@@ -121,7 +121,7 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 		expectedURL = bincache.RepoURLFromGitHub(repo)
 	}
 	expectedURL, err = sourceurl.ValidateCloneURL(expectedURL)
-	if err != nil || bincache.ClaimedRepoNameFromURL(expectedURL) != name || (repoURL != "" && repoURL != expectedURL) {
+	if err != nil || sourceurl.ClaimedRepoNameFromURL(expectedURL) != name || (repoURL != "" && repoURL != expectedURL) {
 		http.Error(w, "cache repository is not the source of the claimed run", http.StatusForbidden)
 		return false
 	}

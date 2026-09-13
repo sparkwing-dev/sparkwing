@@ -258,7 +258,7 @@ func (h *holder) reattach() bool {
 			time.Sleep(25 * time.Millisecond)
 			continue
 		}
-		lease, rerr := cl.Reattach(context.Background(), token)
+		lease, rerr := cl.Reattach(context.Background(), token, h.hf.run)
 		if rerr == nil {
 			h.set(cl, lease)
 			return true

@@ -37,6 +37,11 @@ Runners have `GITHUB_TOKEN` from the `github-config` k8s secret.
 Repos are registered by name so pipelines can clone them as
 `http://gitcache/git/<name>` without knowing the full URL.
 
+The SDK's `git.Clone` is the exception: it addresses a repository by the hash of
+its clone URL, not by an alias, so a repository registered only under an alias is
+served to pipelines and cloned from upstream by `git.Clone`. Register it under
+the hashed name as well to serve both.
+
 ### Auto-registration (recommended)
 
 Set `GITCACHE_REPOS` env var on the cache deployment:

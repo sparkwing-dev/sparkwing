@@ -328,6 +328,8 @@ type Queued struct {
 }
 type Reattach struct {
 	LeaseToken string
+
+	RunID string
 }
 type RejectionCount struct {
 	Cause string
