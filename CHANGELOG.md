@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **run:** `sparkwing run --sw-ref <ref>` removes the temporary git worktree it
+  checked the ref out into. Every earlier `--sw-ref` run left one registered in
+  the repository and a `$TMPDIR/sparkwing-from-*` directory beside it; reap
+  those with `git worktree prune` and by deleting the directories. The teardown
+  was a deferred call, and the exec path exits the process to carry the
+  pipeline's status, which skips defers.
+
 ## [v0.50.0] - 2026-09-12
 
 ### Added
@@ -149,16 +158,6 @@ unlock.
   Slowest pipelines, failure clustering, and agent utilization rendered
   placeholder text for views the dashboard does not build. The trend charts
   stay.
-
-### Fixed
-
-- **run:** `sparkwing run --sw-ref <ref>` removes the temporary git worktree it
-  checked the ref out into. The teardown was a deferred call, and every exec
-  path ends in `os.Exit` to carry the pipeline's status, which skips defers, so
-  each run left a registered worktree in the repository and a
-  `$TMPDIR/sparkwing-from-*` directory for the user to reap with
-  `git worktree prune`. The teardown now runs once the pipeline binary has
-  finished and before the CLI exits.
 
 ### Security
 

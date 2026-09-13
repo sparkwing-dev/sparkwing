@@ -319,3 +319,45 @@ func TestDispatchRunRejectsMalformedWorkersBeforeProjectLookup(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupRefWorktreeCleanupLeavesNothingRegistered(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture", "--allow-empty"},
+	} {
+		if out, err := runGit(root, args...); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	writeRepoFile(t, filepath.Join(root, ".sparkwing", "main.go"), "package main\n\nfunc main() {}\n")
+	if out, err := runGit(root, "add", "."); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	if out, err := runGit(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-qm", "pipelines"); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+
+	worktree, pipelineDir, cleanup, err := setupRefWorktree(filepath.Join(root, ".sparkwing"), "HEAD")
+	if err != nil {
+		t.Fatalf("setupRefWorktree: %v", err)
+	}
+	if _, err := os.Stat(pipelineDir); err != nil {
+		t.Fatalf("checked-out pipeline directory: %v", err)
+	}
+
+	cleanup()
+	cleanup()
+
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Errorf("worktree directory %s survived cleanup: %v", worktree, err)
+	}
+	list, err := runGit(root, "worktree", "list")
+	if err != nil {
+		t.Fatalf("git worktree list: %v", err)
+	}
+	if strings.Contains(list, worktree) {
+		t.Errorf("worktree still registered:\n%s", list)
+	}
+}

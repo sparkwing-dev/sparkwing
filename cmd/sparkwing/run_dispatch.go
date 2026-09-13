@@ -479,11 +479,17 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 		return "", "", nil, fmt.Errorf("ref %s has no .sparkwing/ directory", ref)
 	}
 
-	// safety: the exec path runs this and so does the error path's defer, and
-	// the second `worktree remove` of a gone path fails loudly.
+	// safety: more than one caller runs this, and the second `worktree remove`
+	// of a gone path fails loudly.
 	var once sync.Once
 	cleanup = func() {
 		once.Do(func() {
+			// safety: Windows holds an open handle on a process's working
+			// directory, and the exec path leaves it inside the worktree being
+			// removed.
+			if chdirErr := os.Chdir(repoRoot); chdirErr != nil {
+				slog.Warn("could not leave the temporary worktree", "path", repoRoot, "error", chdirErr)
+			}
 			if cleanupErr := exec.Command("git", "-C", repoRoot,
 				"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
 				slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
