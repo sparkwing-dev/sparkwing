@@ -4944,6 +4944,12 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // Label-mismatched candidates have their ready_at bumped 1us so they
 // don't starve the FIFO queue.
 //
+// A [ClaimPlacement] on ctx adds the local-first hold: a candidate whose
+// preference runnerLabels does not satisfy is passed over while a live runner
+// that satisfies it has a slot and the hold window from the node's ready time
+// has not run out. Every claim stamps why the node went where it did, as one of
+// [PlacementPreferred], [PlacementFallback], or [PlacementNone].
+//
 // claimant is the authenticated token the claim answers to;
 // [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
 // only that token afterwards. Pass the zero value when the caller is
