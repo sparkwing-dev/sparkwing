@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
@@ -49,17 +50,15 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	var cleared []string
-	for _, c := range objectguard.Classes() {
-		if limiter.ResetClass(c) {
-			cleared = append(cleared, string(c))
-		}
-	}
 	resp := objectStoreBreakerState(limiter)
-	resp.Cleared = cleared
+	for _, c := range limiter.Reset() {
+		resp.Cleared = append(resp.Cleared, string(c))
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// safety: the health route answers without a token, so the summary says which
+// classes refuse and never what their limits are.
 func objectStoreHealth() (map[string]any, []string) {
 	limiter, err := objectguard.Shared()
 	if err != nil {
@@ -76,18 +75,20 @@ func objectStoreHealth() (map[string]any, []string) {
 		}
 		tripped = append(tripped, string(c.Class))
 		problems = append(problems, fmt.Sprintf(
-			"object-store %s budget: the per-%s limit of %d is spent and writes of this class fail closed",
-			c.Class, c.TrippedWindow, trippedLimit(c)))
+			"object-store %s budget: the per-%s limit is spent and requests of this class are refused",
+			c.Class, c.TrippedWindow))
 	}
 	if len(tripped) > 0 {
 		summary["tripped_classes"] = tripped
 	}
-	return summary, problems
-}
 
-func trippedLimit(c objectguard.ClassState) int {
-	if c.TrippedWindow == objectguard.WindowDay {
-		return c.PerDay
+	stalls := objectguard.Stalls()
+	if len(stalls) > 0 {
+		summary["stalled"] = stalls
 	}
-	return c.PerMinute
+	for _, st := range stalls {
+		problems = append(problems, fmt.Sprintf(
+			"object-store replay stalled since %s: %s", st.Since.Format(time.RFC3339), st.Path))
+	}
+	return summary, problems
 }

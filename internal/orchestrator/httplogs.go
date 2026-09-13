@@ -115,7 +115,7 @@ var (
 
 // safety: one append is one object-store PUT, so an unreachable log store must
 // not cost a doubling series that keeps growing per line.
-var httpNodeLogRetryMaxBackoff = 2 * time.Second
+const httpNodeLogRetryMaxBackoff = 2 * time.Second
 
 var httpNodeLogDropCooldown = 5 * time.Second
 

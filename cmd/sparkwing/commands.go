@@ -46,7 +46,7 @@ var allCommands = []*Command{
 	&cmdImage, &cmdImageRollout,
 	&cmdHealth,
 	&cmdWebhooks, &cmdWebhooksList, &cmdWebhooksDeliveries, &cmdWebhooksReplay,
-	&cmdAgents, &cmdAgentsList, &cmdAgentsEnroll, &cmdClusterConcurrency, &cmdClusterObjectStore, &cmdClusterObjectStoreResetBreaker,
+	&cmdAgents, &cmdAgentsList, &cmdAgentsEnroll, &cmdClusterConcurrency, &cmdClusterObjectStore, &cmdClusterObjectStoreStatus, &cmdClusterObjectStoreResetBreaker,
 	&cmdFleet, &cmdFleetInit, &cmdFleetAgents, &cmdFleetAgentsEnroll,
 	&cmdSparks, &cmdSparksCatalog, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup, &cmdSparksInflate,

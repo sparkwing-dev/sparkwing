@@ -370,6 +370,10 @@ refused with an error naming the class and the limit, and nothing is
 queued. Classes are independent, so a tripped `put` budget leaves reads
 serving until their own budget trips.
 
+The budget counts billed attempts, not API calls. It sits inside the AWS
+SDK's retry loop, so a call the SDK re-sends four times spends four
+units, which is what the object store charges for.
+
 The guard exists because a retry loop against a failing bucket bills per
 request and the bill arrives hours later. Defaults sit far above normal
 load and far below a loop with no sleep:
@@ -384,19 +388,42 @@ load and far below a loop with no sleep:
 Override any of them with `SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE`
 and `SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY`, where `<CLASS>` is `PUT`,
 `GET`, `LIST` or `DELETE`. A value of `0` removes that budget.
-`SPARKWING_OBJECT_STORE_TRIP_RESET` chooses what clears a tripped class
-without an operator: `day` (the default) clears it when the day window
-rolls, `manual` keeps it until a reset.
+A class tripped by its per-minute rate clears when that minute rolls, so
+one burst costs a minute of refusals rather than a day of them; the day
+budget still bounds the total. A class tripped by its per-day budget is
+the one `SPARKWING_OBJECT_STORE_TRIP_RESET` governs: `day` (the default)
+clears it when the day window rolls, `manual` keeps it until a reset.
 `SPARKWING_OBJECT_STORE_BREAKER=off` counts requests without refusing
-any, which is the escape hatch for a local process that must finish past
-a tripped budget.
+any, which is the escape hatch for a process that must finish past a
+tripped budget.
 
-The controller reports the budget on `GET /api/v1/health` under
+### One budget per process
+
+The budget belongs to a process, not to a cluster or a bucket. A
+controller, each `sparkwing run`, each worker and each runner agent
+builds its own from the same environment, and they do not aggregate: N
+processes on the same bucket can spend N budgets. Size the numbers for
+what one process should ever need, and read the AWS-side budget action
+and CloudWatch alarm as the layer that sees the whole account.
+
+The same split decides the remedies. `sparkwing cluster object-store
+reset-breaker` reaches the controller process and nothing else, so a
+refusal inside a local `sparkwing run` clears with
+`SPARKWING_OBJECT_STORE_BREAKER=off` or a raised limit on that process.
+The refusal message names both.
+
+The controller reports its own budget on `GET /api/v1/health` under
 `object_store`, names every tripped class in `problems`, and exports the
-three `sparkwing_object_store_*` metrics above. Clear a tripped budget
-with:
+three `sparkwing_object_store_*` metrics above. The health summary names
+the classes and not their limits, because that route answers without a
+token. A state outbox that has given up replaying appears there too,
+under `object_store.stalled` and as a problem naming the path and when
+it stalled.
+
+Read a controller's budget, and clear a tripped one, with:
 
 ```bash
+sparkwing cluster object-store status --profile prod
 sparkwing cluster object-store reset-breaker --profile prod
 ```
 

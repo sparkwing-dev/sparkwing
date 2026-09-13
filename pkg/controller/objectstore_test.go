@@ -84,6 +84,32 @@ func TestObjectStoreResetBreaker_NeedsAdminScope(t *testing.T) {
 	}
 }
 
+func TestObjectStoreHealth_NamesTrippedClassesWithoutTheirLimits(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
+	var body struct {
+		ObjectStore map[string]any `json:"object_store"`
+		Problems    []string       `json:"problems"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.ObjectStore["tripped"] != false {
+		t.Fatalf("a fresh controller reports tripped=%v", body.ObjectStore["tripped"])
+	}
+	if _, ok := body.ObjectStore["per_minute"]; ok {
+		t.Error("the unauthenticated health route carries the configured limits")
+	}
+	for _, p := range body.Problems {
+		if strings.ContainsAny(p, "0123456789") && strings.Contains(p, "object-store") {
+			t.Errorf("an object-store health problem carries a number: %q", p)
+		}
+	}
+}
+
 func TestMetrics_ObjectStoreBudgetIsExported(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()

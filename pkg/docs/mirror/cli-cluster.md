@@ -293,6 +293,7 @@ budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
 
 ### Subcommands
 
+- `status` -- Show the controller's object-store request budget
 - `reset-breaker` -- Clear a tripped object-store request budget
 
 ### Examples
@@ -330,6 +331,32 @@ profile's controller, which needs an admin-scoped token.
 ```sh
 # Clear a tripped budget
 sparkwing cluster object-store reset-breaker --profile prod
+```
+
+## `sparkwing cluster object-store status`
+
+Show the controller's object-store request budget
+
+Prints each request class with its per-minute rate, its per-day budget,
+how much of each window the controller has spent, how many times the
+class has tripped, and whether it is refusing requests now. Changes
+nothing.
+
+Hits GET /api/v1/object-store/breaker on the selected profile's
+controller, which needs an admin-scoped token.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile selecting the controller (required) |
+| `-o, --output FORMAT` | Output format (json\|table) |
+
+### Examples
+
+```sh
+# Read the budget
+sparkwing cluster object-store status --profile prod
 ```
 
 ## `sparkwing cluster status`

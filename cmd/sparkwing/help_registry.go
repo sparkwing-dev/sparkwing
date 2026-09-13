@@ -3519,9 +3519,29 @@ SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
 clears when its day window rolls (day, the default) or waits for an
 operator (manual). A local process that must finish past a tripped
 budget sets SPARKWING_OBJECT_STORE_BREAKER=off.`,
-	SubcommandOrder: []string{"reset-breaker"},
+	SubcommandOrder: []string{"status", "reset-breaker"},
 	Examples: []Example{
 		{"Clear a tripped budget", "sparkwing cluster object-store reset-breaker --profile prod"},
+	},
+}
+
+var cmdClusterObjectStoreStatus = Command{
+	Path:     "sparkwing cluster object-store status",
+	Synopsis: "Show the controller's object-store request budget",
+	Description: `Prints each request class with its per-minute rate, its per-day budget,
+how much of each window the controller has spent, how many times the
+class has tripped, and whether it is refusing requests now. Changes
+nothing.
+
+Hits GET /api/v1/object-store/breaker on the selected profile's
+controller, which needs an admin-scoped token.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format (json|table)", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "System", "Other"},
+	Examples: []Example{
+		{"Read the budget", "sparkwing cluster object-store status --profile prod"},
 	},
 }
 
