@@ -91,6 +91,50 @@ type Guards struct {
 	Reject  []string `yaml:"reject,omitempty"`
 }
 
+// UnmarshalYAML decodes a guards mapping and rejects any key outside
+// the schema. A typo'd key would otherwise drop the fence it names while
+// leaving the rest of the mapping in place, so nothing reads as missing.
+func (g *Guards) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return g.UnmarshalYAML(node.Alias)
+	}
+	if node.Tag == "!!null" {
+		*g = Guards{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("guards: expected a mapping, got %s", nodeKindName(node.Kind))
+	}
+	known := guardsKnownYAMLFields()
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode || key.Tag == mergeKeyTag {
+			continue
+		}
+		if _, ok := known[key.Value]; !ok {
+			return fmt.Errorf("guards: unknown field %q on line %d", key.Value, key.Line)
+		}
+	}
+	type guardsAlias Guards
+	var raw guardsAlias
+	if err := node.Decode(&raw); err != nil {
+		return fmt.Errorf("guards: %w", err)
+	}
+	*g = Guards(raw)
+	return nil
+}
+
+// safety: yaml expands a `<<` key into the mapping instead of matching it
+// against a field, so the strict check has to let it through.
+const mergeKeyTag = "!!merge"
+
+func guardsKnownYAMLFields() map[string]struct{} {
+	return map[string]struct{}{"require": {}, "reject": {}}
+}
+
 // SecretEntry is one secret declaration. Required/Optional are
 // mutually exclusive; when neither is set the entry is treated as
 // required (see IsRequired).
@@ -196,6 +240,49 @@ type Triggers struct {
 	// after the commit is recorded. It never blocks or aborts the
 	// commit.
 	PostCommitHook *PostCommitHookTrigger `yaml:"post_commit,omitempty"`
+}
+
+// UnmarshalYAML decodes an on: mapping and rejects any key outside the
+// schema. A typo'd trigger name would otherwise load clean and leave the
+// pipeline with no trigger the author asked for.
+func (t *Triggers) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return t.UnmarshalYAML(node.Alias)
+	}
+	if node.Tag == "!!null" {
+		*t = Triggers{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("on: expected a mapping, got %s", nodeKindName(node.Kind))
+	}
+	known := triggersKnownYAMLFields()
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode || key.Tag == mergeKeyTag {
+			continue
+		}
+		if _, ok := known[key.Value]; !ok {
+			return fmt.Errorf("on: unknown field %q on line %d", key.Value, key.Line)
+		}
+	}
+	type triggersAlias Triggers
+	var raw triggersAlias
+	if err := node.Decode(&raw); err != nil {
+		return fmt.Errorf("on: %w", err)
+	}
+	*t = Triggers(raw)
+	return nil
+}
+
+func triggersKnownYAMLFields() map[string]struct{} {
+	return map[string]struct{}{
+		"push": {}, "pull_request": {}, "schedule": {},
+		"webhook": {}, "pre_commit": {}, "pre_push": {}, "post_commit": {},
+	}
 }
 
 // PushTrigger records intent for GitHub push events. The controller dispatches
