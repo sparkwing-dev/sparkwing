@@ -21,12 +21,15 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -133,8 +136,26 @@ func s3BucketPrefix(rest string) (bucket, prefix string, err error) {
 	return u.Host, prefix, nil
 }
 
-func newS3Client(ctx context.Context) (*awss3.Client, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
+// SDKMaxAttempts caps the AWS SDK's own retryer, which otherwise
+// decides on its own how many times one call re-sends. Counting the
+// first try, a failing request leaves at most this many billed requests
+// behind.
+const SDKMaxAttempts = 4
+
+// SDKMaxBackoff ceilings the SDK's wait between those attempts, so a
+// slow failure cannot stretch one call past a caller's patience.
+const SDKMaxBackoff = 5 * time.Second
+
+// safety: the only S3 client this repository constructs, so every object-store
+// request passes the process-wide request budget and the SDK retryer is capped
+// in exactly one place.
+func newS3Client(ctx context.Context) (objectguard.S3API, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRetryer(func() aws.Retryer {
+		return retry.NewStandard(func(o *retry.StandardOptions) {
+			o.MaxAttempts = SDKMaxAttempts
+			o.MaxBackoff = SDKMaxBackoff
+		})
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("aws config: %w", err)
 	}
@@ -151,5 +172,9 @@ func newS3Client(ctx context.Context) (*awss3.Client, error) {
 			o.UsePathStyle = true
 		})
 	}
-	return awss3.NewFromConfig(cfg, opts...), nil
+	limiter, lerr := objectguard.Shared()
+	if lerr != nil {
+		return nil, fmt.Errorf("object-store request budget: %w", lerr)
+	}
+	return objectguard.GuardS3(limiter, awss3.NewFromConfig(cfg, opts...)), nil
 }
