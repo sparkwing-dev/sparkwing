@@ -112,14 +112,16 @@ func TokenKindFromPrefix(raw string) string {
 // CreateToken mints a token. Returns the RAW string only once; the
 // hash is one-way.
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error) {
-	return s.CreateTokenWith(principal, kind, scopes, ttl, now, TokenOptions{})
+	return s.CreateTokenWith(context.Background(), principal, kind, scopes, ttl, now, TokenOptions{})
 }
 
-// CreateTokenWith mints a token carrying opts. It is [Store.CreateToken]
-// with the fields a plain mint leaves at their zero value, such as the
-// metering marker an operator puts on a cloud runner's credential.
-func (s *Store) CreateTokenWith(principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions) (string, *Token, error) {
-	ctx := context.Background()
+// CreateTokenWith mints a token carrying opts, under the caller's context.
+// It is [Store.CreateToken] with the fields a plain mint leaves at their zero
+// value, such as the metering marker an operator puts on a cloud runner's
+// credential.
+func (s *Store) CreateTokenWith(
+	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
+) (string, *Token, error) {
 	for attempt := 1; ; attempt++ {
 		raw, tok, err := createTokenRow(ctx, storeExecer{s: s}, principal, kind, scopes, ttl, now, opts)
 		if err == nil {

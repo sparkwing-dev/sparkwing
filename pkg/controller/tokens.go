@@ -80,7 +80,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	ttl := time.Duration(req.TTLSecs) * time.Second
 	now := time.Now().UTC()
-	raw, tok, err := s.store.CreateTokenWith(req.Principal, req.Kind, req.Scopes, ttl, now,
+	raw, tok, err := s.store.CreateTokenWith(r.Context(), req.Principal, req.Kind, req.Scopes, ttl, now,
 		store.TokenOptions{Metered: req.Metered})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)

@@ -5021,7 +5021,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			return nil, err
 		}
 		if err := reserveNodeCreditsTx(ctx, tx, claimant, n.RunID, n.NodeID, now); err != nil {
-			_ = tx.Rollback()
+			rollbackUnlessDone(tx, &err)
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
