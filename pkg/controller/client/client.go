@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -1745,7 +1746,11 @@ func describeForeignBody(body []byte) string {
 	}
 	const keep = 120
 	if len(trimmed) > keep {
-		trimmed = append(trimmed[:keep:keep], []byte("...")...)
+		cut := keep
+		for cut > 0 && !utf8.Valid(trimmed[:cut]) {
+			cut--
+		}
+		trimmed = append(trimmed[:cut:cut], []byte("...")...)
 	}
 	return fmt.Sprintf("%q", trimmed)
 }
