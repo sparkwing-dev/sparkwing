@@ -236,6 +236,33 @@ func (s *Server) meteredTokenPrefix(r *http.Request) string {
 	return prefix
 }
 
+// safety: the node's own claim carries the credential the ledger priced the
+// work against, so a finish posted by another principal settles the same way,
+// and a node whose credential was revoked mid-run still releases its charge
+// window instead of holding a reservation open forever.
+func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
+	settlement, err := s.nodeSettlement(r, runID, nodeID)
+	if err != nil {
+		return
+	}
+	s.settleNodeLedger(r, runID, nodeID, settlement)
+	// safety: an open window means the ledger priced this node as cloud work,
+	// whatever the credential says now, so a token un-metered mid-run is not
+	// counted under both placements.
+	if settlement.Metering == store.MeteringFree && !settlement.ChargeWindowOpen {
+		addLocalNodeSeconds(settlement.Seconds)
+	}
+}
+
+func (s *Server) nodeSettlement(r *http.Request, runID, nodeID string) (store.NodeSettlement, error) {
+	settlement, err := s.store.NodeSettlement(r.Context(), runID, nodeID)
+	if err != nil {
+		s.logger.Warn("reading a node's settlement failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+	}
+	return settlement, err
+}
+
 // safety: a balance spent past the grace period cancels the node in this same
 // request, so the run records why instead of waiting out the lease.
 func (s *Server) chargeMeteredHeartbeat(r *http.Request, runID, nodeID string) (stop bool) {
@@ -290,11 +317,21 @@ func (s *Server) cancelForExhaustedCredits(
 // safety: without this the tail between the last heartbeat and the finish is
 // free, and the unused part of the claim reservation is never refunded.
 func (s *Server) finalizeMeteredNode(r *http.Request, runID, nodeID string) {
-	prefix := s.meteredTokenPrefix(r)
-	if prefix == "" {
+	settlement, err := s.nodeSettlement(r, runID, nodeID)
+	if err != nil {
 		return
 	}
-	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, prefix, time.Now())
+	s.settleNodeLedger(r, runID, nodeID, settlement)
+}
+
+// safety: an open window is the only thing worth settling, and it is also what
+// keeps a node in the reservation index, so it is released whatever the
+// finishing principal presents.
+func (s *Server) settleNodeLedger(r *http.Request, runID, nodeID string, settlement store.NodeSettlement) {
+	if !settlement.ChargeWindowOpen {
+		return
+	}
+	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, settlement.ClaimTokenPrefix, time.Now())
 	if err != nil {
 		s.logger.Warn("settling a metered node failed",
 			"run_id", runID, "node_id", nodeID, "err", err)

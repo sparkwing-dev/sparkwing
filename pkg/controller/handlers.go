@@ -528,7 +528,7 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.finalizeMeteredNode(r, runID, nodeID)
+	s.settleFinishedNode(r, runID, nodeID)
 	s.liveLogs.Finish(runID, nodeID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1584,6 +1584,7 @@ func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *stor
 		pipeline = run.Pipeline
 	}
 	observeNodeClaim(pipeline)
+	observeClaimWait(n)
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: n.RunID, NodeID: n.NodeID, Pipeline: pipeline,
 	})

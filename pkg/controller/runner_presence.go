@@ -128,6 +128,24 @@ func (r *runnerPresenceRegistry) live(now time.Time, within time.Duration, exclu
 	return out
 }
 
+// safety: the placement read is what prunes the registry, so a sampler reads
+// without deleting: an export must not decide which runners a later claim sees.
+func (r *runnerPresenceRegistry) liveLabelSets(now time.Time, within time.Duration) [][]string {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([][]string, 0, len(r.m))
+	for _, p := range r.m {
+		if now.Sub(p.UpdatedAt) > within {
+			continue
+		}
+		out = append(out, p.Labels)
+	}
+	return out
+}
+
 // safety: one runner mints a fresh holder id per claim, so only the name
 // segment identifies it across polls, as the agents view groups it.
 func presenceName(holderID string) string {

@@ -1042,7 +1042,21 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 38
+// safety: the operational samplers read these aggregates on a timer, so each
+// one scans an index rather than the table it sums.
+var observabilityIndexes = `
+CREATE INDEX IF NOT EXISTS idx_nodes_outstanding
+    ON nodes(status, ready_at, claimed_by)
+    WHERE ` + nodeNotDone + `;
+CREATE INDEX IF NOT EXISTS idx_nodes_credit_window
+    ON nodes(credit_charged_through)
+    WHERE credit_charged_through != 0;
+CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
+    ON credit_grants(kind, amount_micro);
+CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
+    ON credit_charges(kind, amount_micro, seconds);`
+
+const expectedSchemaVersion = 39
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1915,6 +1929,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 38:
 		return applyStorageMigrationSQLite(ctx, tx)
+	case 39:
+		_, err := tx.ExecContext(ctx, observabilityIndexes)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2232,6 +2249,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 38:
 		return applyStorageMigrationPostgres(ctx, tx)
+	case 39:
+		_, err := tx.ExecContext(ctx, observabilityIndexes)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -4920,7 +4940,7 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
        offer_priority_target = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_base_priority = 0, claim_priority = 0, claim_worker_id = '', claim_executor_kind = '',
        claim_reservation_id = '', claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL, claim_generation = 0,
        coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        credit_charged_through = 0,
@@ -7439,6 +7459,119 @@ func (s *Store) CountPendingNodes(ctx context.Context) (int, error) {
 		  WHERE ready_at IS NOT NULL AND (claimed_by IS NULL OR claimed_by = '')`,
 	).Scan(&n)
 	return n, err
+}
+
+// Queue states a node occupies before it reaches a terminal outcome. The set
+// is closed, so a caller may use it as a metric label without growing the
+// series count.
+const (
+	// QueueStateWaiting is a node whose dependencies have not all finished.
+	QueueStateWaiting = "waiting"
+	// QueueStateReady is a node any eligible runner may claim.
+	QueueStateReady = "ready"
+	// QueueStateClaimed is a node a runner holds but has not started.
+	QueueStateClaimed = "claimed"
+	// QueueStateRunning is a node a runner is executing.
+	QueueStateRunning = "running"
+	// QueueStateApprovalPending is a node waiting on a human decision.
+	QueueStateApprovalPending = "approval_pending"
+)
+
+// QueueStates lists every state [Store.CountNodesByQueueState] reports, in the
+// order a node passes through them.
+func QueueStates() []string {
+	return []string{
+		QueueStateWaiting, QueueStateReady, QueueStateClaimed,
+		QueueStateRunning, QueueStateApprovalPending,
+	}
+}
+
+// CountNodesByQueueState counts the nodes sitting in each queue state, keyed
+// by the [QueueStates] names. Terminal nodes are absent: the answer is the
+// work still outstanding, which is what a queue-depth alert reads. The read is
+// bounded by the outstanding-node index rather than the table.
+func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error) {
+	var waiting, ready, claimed, running, approval int
+	err := s.queryRow(ctx,
+		`SELECT
+                    COALESCE(SUM(CASE WHEN status = ? AND ready_at IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = ? AND ready_at IS NOT NULL
+                                      AND (claimed_by IS NULL OR claimed_by = '') THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = ? AND claimed_by IS NOT NULL
+                                      AND claimed_by != '' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+                   FROM nodes
+                  WHERE `+nodeNotDone,
+		nodeStatusPending, nodeStatusPending, nodeStatusPending,
+		nodeStatusRunning, NodeStatusApprovalPending,
+	).Scan(&waiting, &ready, &claimed, &running, &approval)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]int{
+		QueueStateWaiting:         waiting,
+		QueueStateReady:           ready,
+		QueueStateClaimed:         claimed,
+		QueueStateRunning:         running,
+		QueueStateApprovalPending: approval,
+	}, nil
+}
+
+// NodeMetering says whether the credential that claimed a node was metered.
+type NodeMetering int
+
+const (
+	// MeteringUnknown means the claiming credential is no longer on file, so
+	// the node is attributed to neither side rather than guessed at.
+	MeteringUnknown NodeMetering = iota
+	// MeteringFree is a credential the operator never marked metered.
+	MeteringFree
+	// MeteringPaid is a metered credential, whose work the ledger bills.
+	MeteringPaid
+)
+
+// NodeSettlement is what one node's own row says about settling it: how long it
+// ran, the credential that claimed it, how that credential was metered, and
+// whether a credit reservation is still open against it.
+type NodeSettlement struct {
+	Seconds          float64
+	ClaimTokenPrefix string
+	Metering         NodeMetering
+	// ChargeWindowOpen reports a reservation the ledger has not released. It
+	// stays true for a node whose claiming credential was revoked, so a
+	// terminal node always has something to settle against.
+	ChargeWindowOpen bool
+}
+
+// NodeSettlement reads what settling one node needs from the node's own row.
+// The claim recorded there names the credential the ledger priced the work
+// against, so a finish posted by another principal settles the same way.
+func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
+	var out NodeSettlement
+	var startedAt, finishedAt sql.NullInt64
+	var chargedThrough int64
+	var metered sql.NullBool
+	err := s.queryRow(ctx,
+		`SELECT started_at, finished_at, claim_token_prefix, credit_charged_through,
+                        (SELECT metered FROM tokens WHERE prefix = nodes.claim_token_prefix)
+                   FROM nodes WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID,
+	).Scan(&startedAt, &finishedAt, &out.ClaimTokenPrefix, &chargedThrough, &metered)
+	if err != nil {
+		return out, err
+	}
+	out.ChargeWindowOpen = chargedThrough != 0
+	if metered.Valid {
+		out.Metering = MeteringFree
+		if metered.Bool {
+			out.Metering = MeteringPaid
+		}
+	}
+	if startedAt.Valid && finishedAt.Valid && finishedAt.Int64 > startedAt.Int64 {
+		out.Seconds = time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds()
+	}
+	return out, nil
 }
 
 // CountActiveRunners counts distinct claimed_by within `window`.

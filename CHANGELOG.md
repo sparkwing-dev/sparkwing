@@ -135,6 +135,47 @@ unlock.
   --name N` revokes the profile's token and removes it, naming the prefix and
   the revoke command whenever the credential it holds is not allowed to make
   that call.
+- **controller:** `/metrics` carries the series an operator alerts on and a
+  meter bills from. `sparkwing_queue_depth` reports outstanding nodes by state
+  (`waiting`, `ready`, `claimed`, `running`, `approval_pending`),
+  `sparkwing_node_claim_wait_seconds` the wait from a node becoming claimable to
+  its first runner taking it, `sparkwing_claim_unavailable_total` the claim
+  requests answered `503`, and `sparkwing_runners_live` the runners heard from
+  inside the liveness window by the label set they advertised.
+  `sparkwing_node_seconds_total{placement="cloud"}` is the billing line and is
+  read from the credit ledger. A claim reserves a minute up front and a finish
+  refunds what the node did not use, so the series counts a reservation as the
+  node consumes it and only ever grows; the `local` series counts what this
+  process settled for unmetered credentials, and a node whose claiming
+  credential has been revoked counts under neither. The
+  `sparkwing_credits_*` family reports balance, grants by kind, reservations,
+  charges and refunds from the ledger, so the totals survive a restart. Both
+  ledger sums refresh every 5 minutes over a covering index; the queue and
+  runner series refresh on the 10-second reaper sweep over a new index on the
+  nodes that have not finished. Principal names, token prefixes, holder ids and
+  run ids stay out of every label; a runner's self-asserted label set is
+  ordered, deduplicated, and collapsed onto `other` past 120 bytes or past the
+  31 busiest sets, and a set that stops reporting loses its series rather than
+  holding one forever. `sparkwing_live_runners` carries the fleet size with no
+  labels, so an empty fleet reads 0 instead of dropping out of the exposition.
+  Documented in [observability.md](docs/observability.md).
+- **store:** `Store.CountNodesByQueueState`, `Store.CreditLedgerTotals` and
+  `Store.NodeSettlement` report the figures the controller exports. The ledger
+  read runs at repeatable-read isolation and measures its held-back
+  reservations against the database clock, so neither a second controller nor a
+  stepped system clock can pull the seconds figure backwards. Schema
+  v39 adds the indexes those reads scan: partial indexes over the nodes that
+  have not finished and over the nodes holding a credit reservation, and
+  covering indexes on the credit grant and charge kinds. The migration adds
+  indexes only, so an older binary still opens the database. It builds them
+  inside the migration transaction, so on PostgreSQL the `credit_charges` build
+  holds a write lock on that table for its duration; upgrade a large deployment
+  in a maintenance window.
+- **controller:** An automatic node retry resets the claim generation along with
+  the rest of the claim state, so the retry's first claim is a first claim. A
+  node's finish settles the ledger against the credential recorded on the node
+  rather than the one posting the finish, so a node whose credential was
+  revoked or un-metered mid-run still releases its credit reservation.
 - **controller:** `sparkwing-controller --dashboard-url URL` announces the
   dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
   client that has just been handed a token can say where to watch its runs. The

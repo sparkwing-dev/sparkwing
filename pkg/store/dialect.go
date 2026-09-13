@@ -138,6 +138,35 @@ type storeTx struct {
 	dialect Dialect
 }
 
+// safety: Postgres takes a fresh snapshot per statement unless the isolation
+// is named, so a write landing mid-read is counted by one statement and not
+// another. SQLite is already one snapshot per transaction and its driver
+// refuses the level, so it keeps the default.
+func (s *Store) beginSnapshotReadTx(ctx context.Context) (*storeTx, error) {
+	if s.dialect != DialectPostgres {
+		return s.beginTx(ctx)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelRepeatableRead,
+		ReadOnly:  true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &storeTx{tx: tx, dialect: s.dialect}, nil
+}
+
+// safety: a figure compared against itself across samples must come off one
+// clock, so the database's is what a second controller and a stepped system
+// clock are both measured against. Both branches truncate, because a rounded
+// one would put the clock a half second ahead of the other dialect's.
+func (s *Store) nowSeconds() string {
+	if s.dialect == DialectPostgres {
+		return "FLOOR(EXTRACT(EPOCH FROM now()))::BIGINT"
+	}
+	return "unixepoch()"
+}
+
 func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

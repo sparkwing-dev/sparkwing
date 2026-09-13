@@ -45,6 +45,7 @@ func downgradeCreditsToV34(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	statements := []string{
+		`DROP INDEX IF EXISTS idx_nodes_credit_window`,
 		`DROP TABLE credit_charges`,
 		`DROP TABLE credit_grants`,
 		`ALTER TABLE tokens DROP COLUMN metered`,
@@ -120,6 +121,9 @@ func TestSchemaV35RepairsAV35StoreMissingTheChargeKind(t *testing.T) {
 	st, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`DROP INDEX IF EXISTS idx_credit_charges_kind_amount`); err != nil {
+		t.Fatalf("drop the index over the charge kind: %v", err)
 	}
 	if _, err := st.DB().Exec(`ALTER TABLE credit_charges DROP COLUMN kind`); err != nil {
 		t.Fatalf("strip the charge kind: %v", err)
