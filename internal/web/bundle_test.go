@@ -6,8 +6,8 @@ import (
 	"testing/fstest"
 )
 
-func TestBundleReasonNamesTheBuildStepWhenOnlyTheGitkeepIsEmbedded(t *testing.T) {
-	reason := bundleSkipReason(fstest.MapFS{"next-out/.gitkeep": &fstest.MapFile{}})
+func TestBundleMissingReasonNamesTheBuildStepWhenOnlyTheGitkeepIsEmbedded(t *testing.T) {
+	reason := bundleMissingReason(fstest.MapFS{"next-out/.gitkeep": &fstest.MapFile{}})
 	if reason == "" {
 		t.Fatal("a bundle holding only .gitkeep must not read as a built dashboard")
 	}
@@ -16,16 +16,18 @@ func TestBundleReasonNamesTheBuildStepWhenOnlyTheGitkeepIsEmbedded(t *testing.T)
 	}
 }
 
-func TestBundleReasonIsEmptyWhenTheBundleIsBuilt(t *testing.T) {
+func TestBundleMissingReasonIsEmptyWhenTheBundleIsBuilt(t *testing.T) {
 	built := fstest.MapFS{"next-out/index.html": &fstest.MapFile{Data: []byte("<title>Sparkwing</title>")}}
-	if reason := bundleSkipReason(built); reason != "" {
+	if reason := bundleMissingReason(built); reason != "" {
 		t.Errorf("a built bundle must read as built: %q", reason)
 	}
 }
 
-func TestVerifyBundleEmbeddedAcceptsABuiltBundleAndRefusesAnEmptyOne(t *testing.T) {
-	if (VerifyBundleEmbedded() == nil) != (bundleSkipReason(nextBundle) == "") {
-		t.Fatalf("the startup guard and the bundle reader disagree about this binary's bundle: "+
-			"VerifyBundleEmbedded=%v reason=%q", VerifyBundleEmbedded(), bundleSkipReason(nextBundle))
+func TestVerifyBundleRefusesASuppliedBundleWithNoIndex(t *testing.T) {
+	if err := VerifyBundle(fstest.MapFS{"_next/static/app.js": &fstest.MapFile{}}); err == nil {
+		t.Fatal("a supplied bundle with no index.html must not be served as a dashboard")
+	}
+	if err := VerifyBundle(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<title>Sparkwing</title>")}}); err != nil {
+		t.Errorf("a supplied bundle rooted at index.html must be served: %v", err)
 	}
 }

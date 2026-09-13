@@ -34,13 +34,22 @@ import (
 var nextBundle embed.FS
 
 func VerifyBundleEmbedded() error {
-	if bundleSkipReason(nextBundle) != "" {
+	if bundleMissingReason(nextBundle) != "" {
 		return errors.New(missingBundleMessage)
 	}
 	return nil
 }
 
-func bundleSkipReason(bundle fs.FS) string {
+// VerifyBundle reports whether bundleFS carries a dashboard to serve. The
+// bundle is rooted at its index.html, the way BundleFS returns it.
+func VerifyBundle(bundleFS fs.FS) error {
+	if _, err := fs.Stat(bundleFS, "index.html"); err != nil {
+		return fmt.Errorf("dashboard bundle carries no index.html: %w", err)
+	}
+	return nil
+}
+
+func bundleMissingReason(bundle fs.FS) string {
 	if _, err := fs.Stat(bundle, "next-out/index.html"); err != nil {
 		return "dashboard bundle not built in this checkout; run: bash bin/build-web.sh"
 	}
@@ -116,9 +125,9 @@ type HandlerOptions struct {
 	AllowInsecureCookiesRemote bool
 
 	// Bundle, when non-nil, is served as the dashboard in place of the
-	// bundle embedded in this binary. A source checkout carries no
-	// embedded bundle, so a test that serves the dashboard supplies its
-	// own.
+	// bundle embedded in this binary, rooted at its index.html the way
+	// BundleFS returns it. A source checkout carries no embedded bundle,
+	// so a test that serves the dashboard supplies its own.
 	Bundle fs.FS
 }
 
@@ -157,6 +166,8 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 		if err := VerifyBundleEmbedded(); err != nil {
 			return err
 		}
+	} else if err := VerifyBundle(opts.Bundle); err != nil {
+		return err
 	}
 	if err := opts.Paths.EnsureRoot(); err != nil {
 		return err

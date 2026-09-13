@@ -87,8 +87,9 @@ type Options struct {
 	Instance string
 
 	// Bundle, when non-nil, is served as the dashboard in place of the
-	// bundle embedded in this binary. A source build carries no embedded
-	// bundle, so a test that serves the dashboard supplies its own.
+	// bundle embedded in this binary, rooted at its index.html the way
+	// web.BundleFS returns it. A source build carries no embedded bundle,
+	// so a test that serves the dashboard supplies its own.
 	Bundle fs.FS
 }
 
@@ -117,6 +118,8 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 			return err
 		}
 		bundle = web.BundleFS()
+	} else if err := web.VerifyBundle(bundle); err != nil {
+		return err
 	}
 
 	paths, err := localPaths(opts.Home)
