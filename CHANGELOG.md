@@ -38,8 +38,8 @@ unlock.
 - **logs:** An `s3` logs surface coalesces a node's lines into one object
   per flush instead of one object per line. A flush lands when the buffer
   reaches `batch_bytes` (256 KiB), when `batch_interval` (2s) elapses, when
-  a reader asks for the node's log, and when the node finishes; a
-  5,000-line node costs 3 objects rather than 5,000. `max_log_objects`
+  a reader asks for the node's log, and when the node finishes, so a node
+  costs one object per 256 KiB of log text rather than one per line. `max_log_objects`
   (2000) and `max_log_bytes` (64 MiB) bound one node's log, and past either
   the surface drops further lines and ends the node's log with one marker
   line counting them. All four keys are optional on the profile's `logs:`
