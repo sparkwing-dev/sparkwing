@@ -149,3 +149,24 @@ func expiredContext(t *testing.T) context.Context {
 	<-ctx.Done()
 	return ctx
 }
+
+func TestDescribeLintFailureSeparatesTheLinterOwnTimeoutFromFindings(t *testing.T) {
+	err := &sparkwing.ExecError{
+		Command:  "golangci-lint run ./...",
+		Stdout:   "main.go:7:2: declared and not used: x (typecheck)\n",
+		Stderr:   "level=error msg=\"Timeout exceeded: try increasing it by passing --timeout option\"\n",
+		ExitCode: 4,
+	}
+
+	got := describeLintFailure(context.Background(), 5*time.Minute, err)
+
+	if !strings.Contains(got, "could not finish") {
+		t.Fatalf("a run that stopped early read as a completed one: %s", got)
+	}
+	if !strings.Contains(got, "run.timeout") {
+		t.Fatalf("the message does not name what to raise: %s", got)
+	}
+	if strings.Contains(got, "contention") {
+		t.Fatalf("a timeout was reported as contention: %s", got)
+	}
+}

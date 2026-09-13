@@ -16,6 +16,8 @@ const lintLockWait = 5 * time.Minute
 
 const golangciContention = "parallel golangci-lint is running"
 
+const golangciTimeout = "Timeout exceeded"
+
 const lintCoreCost = 4.0
 
 const measuredColdCoreDemand = 2.67
@@ -158,6 +160,12 @@ func describeLintFailure(ctx context.Context, waited time.Duration, err error) s
 	if errors.As(err, &execErr) && strings.Contains(execErr.Stdout+execErr.Stderr, golangciContention) {
 		return "golangci-lint: could not run -- another golangci-lint holds the box-wide " +
 			"lock. That is contention, not a finding in this tree."
+	}
+	if errors.As(err, &execErr) && strings.Contains(execErr.Stdout+execErr.Stderr, golangciTimeout) {
+		return fmt.Sprintf("golangci-lint: could not finish -- it stopped at its own run.timeout after %s, "+
+			"so the packages it never reached were not judged and anything it printed is partial. "+
+			"Raise run.timeout in .golangci.yml rather than acting on the findings above.",
+			waited.Round(time.Second))
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Sprintf("golangci-lint: could not run -- no result after %s. Most often "+
