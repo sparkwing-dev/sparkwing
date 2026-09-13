@@ -31,6 +31,11 @@ func newOwnershipFixture(t *testing.T) ownershipFixture {
 
 func newOwnershipFixtureWithScopes(t *testing.T, scopes []string) ownershipFixture {
 	t.Helper()
+	return newOwnershipFixtureWith(t, scopes, nil)
+}
+
+func newOwnershipFixtureWith(t *testing.T, scopes []string, configure func(*controller.Server) *controller.Server) ownershipFixture {
+	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +60,11 @@ func newOwnershipFixtureWithScopes(t *testing.T, scopes []string) ownershipFixtu
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
 
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	c := controller.New(st, nil).EnableAuthFromStore()
+	if configure != nil {
+		c = configure(c)
+	}
+	srv := httptest.NewServer(c.Handler())
 	t.Cleanup(srv.Close)
 
 	n, err := client.NewWithToken(srv.URL, nil, owner).

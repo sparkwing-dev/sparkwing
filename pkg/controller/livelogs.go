@@ -16,9 +16,18 @@ const DefaultLiveLogNodeBytes = 512 << 10
 // controller's heap without bound.
 const DefaultLiveLogTotalBytes = 64 << 20
 
+// DefaultLiveLogMaxNodes caps how many nodes hold a live buffer at
+// once. Bytes alone do not bound the map, and a caller that can name a
+// node can mint a buffer for it.
+const DefaultLiveLogMaxNodes = 1024
+
 // DefaultLiveLogIdleTimeout releases the ring of a node that stopped
 // writing without ever reporting that it finished.
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
+
+// safety: the idle sweep walks every ring under the registry lock, so it
+// runs at most this often rather than on every append.
+const liveLogSweepInterval = time.Second
 
 // safety: a finished node's ring outlives the node by this much so a
 // reader that connected late still sees its last lines.
@@ -44,11 +53,13 @@ type liveRing struct {
 type liveLogs struct {
 	perNodeBytes int
 	totalBytes   int64
+	maxNodes     int
 	idle         time.Duration
 
-	mu    sync.Mutex
-	nodes map[liveKey]*liveRing
-	total int64
+	mu        sync.Mutex
+	nodes     map[liveKey]*liveRing
+	total     int64
+	lastSweep time.Time
 
 	// safety: the sweep's clock, so a test can age a ring out without
 	// waiting the idle timeout for it.
@@ -59,6 +70,7 @@ func newLiveLogs() *liveLogs {
 	return &liveLogs{
 		perNodeBytes: DefaultLiveLogNodeBytes,
 		totalBytes:   DefaultLiveLogTotalBytes,
+		maxNodes:     DefaultLiveLogMaxNodes,
 		idle:         DefaultLiveLogIdleTimeout,
 		nodes:        map[liveKey]*liveRing{},
 	}
@@ -85,6 +97,7 @@ func (l *liveLogs) Append(runID, nodeID string, data []byte) {
 
 	r := l.nodes[key]
 	if r == nil {
+		l.makeRoomLocked()
 		r = &liveRing{updated: make(chan struct{})}
 		l.nodes[key] = r
 	}
@@ -127,6 +140,7 @@ type liveChunk struct {
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.sweepLocked(l.clock())
 	return l.readLocked(liveKey{runID, nodeID}, since)
 }
 
@@ -201,12 +215,35 @@ func (l *liveLogs) releaseLocked(key liveKey, r *liveRing) {
 }
 
 func (l *liveLogs) sweepLocked(now time.Time) {
+	if now.Sub(l.lastSweep) < liveLogSweepInterval {
+		return
+	}
+	l.lastSweep = now
 	for key, r := range l.nodes {
 		expired := r.done && now.Sub(r.doneAt) > liveLogDrainGrace
 		idle := !r.touched.IsZero() && now.Sub(r.touched) > l.idle
 		if expired || idle {
 			l.releaseLocked(key, r)
 		}
+	}
+}
+
+// safety: the ring count is what a caller who can name nodes controls,
+// so a new ring evicts the least recently written one rather than
+// growing the map.
+func (l *liveLogs) makeRoomLocked() {
+	for len(l.nodes) >= l.maxNodes {
+		var oldestKey liveKey
+		var oldest *liveRing
+		for key, r := range l.nodes {
+			if oldest == nil || r.touched.Before(oldest.touched) {
+				oldestKey, oldest = key, r
+			}
+		}
+		if oldest == nil {
+			return
+		}
+		l.releaseLocked(oldestKey, oldest)
 	}
 }
 

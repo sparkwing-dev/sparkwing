@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: one unauthenticated-sized read per post, so a runner with
@@ -41,6 +42,16 @@ type LiveLogRead struct {
 func (s *Server) handleAppendNodeLiveLog(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
+	// safety: a trigger-claim principal may write any node id under its own
+	// run, so without this a caller could mint a buffer per invented name.
+	if _, err := s.store.GetNode(r.Context(), runID, nodeID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, liveLogAppendLimit+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -112,17 +123,27 @@ func (s *Server) handleStreamNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		// keepalive below; an idle stream with no bytes is one an
 		// intermediary closes.
 		waitCtx, cancel := context.WithTimeout(r.Context(), liveLogWaitSlice)
-		chunk, ok := s.liveLogs.Wait(waitCtx, runID, nodeID, since)
+		want := since
+		chunk, ok := s.liveLogs.Wait(waitCtx, runID, nodeID, want)
 		cancel()
 		if !ok {
+			if r.Context().Err() == nil {
+				writeLiveLogSSE(out, since, liveLogReleasedMarker)
+				_ = out.Flush()
+			}
 			return
+		}
+		if chunk.Start > want {
+			writeLiveLogSSE(out, chunk.Start, liveLogGapMarker(chunk.Start-want))
+			_ = out.Flush()
+			partial = ""
 		}
 		since = chunk.Next
 
 		lines, rest := splitCompleteLines(partial + string(chunk.Data))
 		partial = rest
 		for _, line := range lines {
-			if _, err := fmt.Fprintf(out, "id: %d\ndata: %s\n\n", since, liveLogSSEEscape(line)); err != nil {
+			if err := writeLiveLogSSE(out, since, line); err != nil {
 				return
 			}
 		}
@@ -169,6 +190,21 @@ func liveLogSince(r *http.Request) (int64, error) {
 func splitCompleteLines(s string) ([]string, string) {
 	parts := strings.Split(s, "\n")
 	return parts[:len(parts)-1], parts[len(parts)-1]
+}
+
+// safety: a reader whose buffer vanished has to be told, or a truncated
+// live view reads as a complete one.
+const liveLogReleasedMarker = `{"level":"warn","msg":"sparkwing released this node's live log buffer; read the durable copy"}`
+
+func liveLogGapMarker(dropped int64) string {
+	return fmt.Sprintf(
+		`{"level":"warn","msg":"sparkwing dropped %d byte(s) of this node's live log before this point; the durable copy has them"}`,
+		dropped)
+}
+
+func writeLiveLogSSE(out io.Writer, id int64, line string) error {
+	_, err := fmt.Fprintf(out, "id: %d\ndata: %s\n\n", id, liveLogSSEEscape(line))
+	return err
 }
 
 func liveLogSSEEscape(s string) string {

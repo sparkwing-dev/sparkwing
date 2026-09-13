@@ -3,6 +3,8 @@ package controller_test
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,6 +21,17 @@ func newLiveLogFixture(t *testing.T) ownershipFixture {
 		controller.ScopeNodesClaim,
 		controller.ScopeRunsState,
 		controller.ScopeRunsRead,
+	})
+}
+
+func newLiveLogFixtureWithLimits(t *testing.T, perNode int, total int64, maxNodes int, idle time.Duration) ownershipFixture {
+	t.Helper()
+	return newOwnershipFixtureWith(t, []string{
+		controller.ScopeNodesClaim,
+		controller.ScopeRunsState,
+		controller.ScopeRunsRead,
+	}, func(s *controller.Server) *controller.Server {
+		return s.WithLiveLogLimits(perNode, total, maxNodes, idle)
 	})
 }
 
@@ -165,5 +178,69 @@ func waitForSSELine(t *testing.T, lines <-chan string, want ...string) bool {
 		case <-deadline:
 			return false
 		}
+	}
+}
+
+func TestLiveLog_AppendRefusesANodeTheRunDoesNotHave(t *testing.T) {
+	f := newLiveLogFixture(t)
+	for _, path := range []string{
+		"/api/v1/runs/run-1/nodes/invented/logs",
+		"/api/v1/runs/run-2/nodes/only/logs",
+	} {
+		got := f.post(t, f.owner, path, `{"msg":"nowhere"}`)
+		if got == http.StatusNoContent {
+			t.Errorf("POST %s = 204; a node the run does not have must not mint a buffer", path)
+		}
+	}
+	if _, err := client.NewWithToken(f.url, nil, f.owner).
+		ReadNodeLiveLog(context.Background(), "run-1", "invented", 0); !errors.Is(err, client.ErrNoLiveLog) {
+		t.Fatalf("live read of the invented node = %v, want ErrNoLiveLog", err)
+	}
+}
+
+func TestLiveLog_ReaderIsToldWhenTheBufferDroppedBytesItHadNotRead(t *testing.T) {
+	f := newLiveLogFixtureWithLimits(t, 256, 1<<20, 16, time.Minute)
+	const path = "/api/v1/runs/run-1/nodes/only/logs"
+	if got := f.post(t, f.owner, path, `{"msg":"oldest"}`); got != http.StatusNoContent {
+		t.Fatalf("seed POST = %d, want 204", got)
+	}
+	for i := range 40 {
+		if got := f.post(t, f.owner, path, fmt.Sprintf(`{"msg":"filler %02d"}`, i)); got != http.StatusNoContent {
+			t.Fatalf("filler POST = %d, want 204", got)
+		}
+	}
+
+	chunk, err := client.NewWithToken(f.url, nil, f.owner).
+		ReadNodeLiveLog(context.Background(), "run-1", "only", 0)
+	if err != nil {
+		t.Fatalf("ReadNodeLiveLog: %v", err)
+	}
+	if chunk.Start == 0 {
+		t.Fatal("the buffer never evicted, so the gap cannot be reported")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	body, err := client.NewWithToken(f.url, nil, f.owner).
+		StreamNodeLiveLog(ctx, "run-1", "only", 0)
+	if err != nil {
+		t.Fatalf("StreamNodeLiveLog: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	lines := make(chan string, 64)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(body)
+		for scanner.Scan() {
+			select {
+			case lines <- scanner.Text():
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	if !waitForSSEData(t, lines, "dropped") {
+		t.Fatal("the stream never told the reader bytes were dropped before its first line")
 	}
 }

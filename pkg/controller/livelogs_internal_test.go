@@ -140,3 +140,61 @@ func TestLiveLogs_WaitReturnsWhenTheNodeFinishes(t *testing.T) {
 		t.Fatal("waiter never woke on finish")
 	}
 }
+
+func TestLiveLogs_NodeCapReleasesTheLeastRecentlyWrittenRing(t *testing.T) {
+	now := time.Now()
+	l := newLiveLogs()
+	l.maxNodes = 3
+	l.now = func() time.Time { return now }
+
+	for i := range 3 {
+		now = now.Add(time.Millisecond)
+		l.Append("run-1", fmt.Sprintf("node-%d", i), liveLine(i))
+	}
+	now = now.Add(time.Millisecond)
+	l.Append("run-1", "node-1", liveLine(99))
+
+	now = now.Add(time.Millisecond)
+	l.Append("run-1", "node-new", liveLine(1))
+
+	nodes, _ := l.Stats()
+	if nodes != 3 {
+		t.Fatalf("rings = %d, want the cap of 3", nodes)
+	}
+	if _, ok := l.Read("run-1", "node-0", 0); ok {
+		t.Error("the least recently written ring survived the cap")
+	}
+	for _, keep := range []string{"node-1", "node-2", "node-new"} {
+		if _, ok := l.Read("run-1", keep, 0); !ok {
+			t.Errorf("%s lost its ring to the cap", keep)
+		}
+	}
+}
+
+func TestLiveLogs_WaitReturnsNotFoundOnceTheRingIsReleased(t *testing.T) {
+	now := time.Now()
+	l := newLiveLogs()
+	l.now = func() time.Time { return now }
+	l.Append("run-1", "build", liveLine(1))
+	chunk, _ := l.Read("run-1", "build", 0)
+
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := l.Wait(context.Background(), "run-1", "build", chunk.Next)
+		done <- ok
+	}()
+
+	l.Finish("run-1", "build")
+	now = now.Add(liveLogDrainGrace + liveLogSweepInterval + time.Second)
+	l.Append("run-1", "other", liveLine(1))
+
+	select {
+	case ok := <-done:
+		_ = ok
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter never woke after its ring was released")
+	}
+	if _, ok := l.Read("run-1", "build", 0); ok {
+		t.Fatal("the released ring is still readable")
+	}
+}
