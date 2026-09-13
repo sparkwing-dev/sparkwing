@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **localws:** `Options.Bundle` serves a caller-supplied dashboard bundle in
+  place of the one embedded in the binary. A source build embeds no bundle, so
+  `Run` previously refused to start; supplying an `fs.FS` lets a test or an
+  embedder serve a dashboard of its own. Leaving it nil keeps the embedded
+  bundle and its existing check.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added

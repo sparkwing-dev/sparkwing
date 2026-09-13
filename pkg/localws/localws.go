@@ -85,6 +85,11 @@ type Options struct {
 
 	// Instance binds a lifecycle readiness probe to this supervisor invocation.
 	Instance string
+
+	// Bundle, when non-nil, is served as the dashboard in place of the
+	// bundle embedded in this binary. A source build carries no embedded
+	// bundle, so a test that serves the dashboard supplies its own.
+	Bundle fs.FS
 }
 
 // Run starts the local dev server and blocks until ctx is cancelled
@@ -106,8 +111,12 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	if !opts.AllowRemote && !LoopbackBind(opts.Addr) {
 		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
 	}
-	if err := web.VerifyBundleEmbedded(); err != nil {
-		return err
+	bundle := opts.Bundle
+	if bundle == nil {
+		if err := web.VerifyBundleEmbedded(); err != nil {
+			return err
+		}
+		bundle = web.BundleFS()
 	}
 
 	paths, err := localPaths(opts.Home)
@@ -190,7 +199,7 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		ctrl:         ctrl,
 		logs:         logsSrv,
 		s3OnlyReader: useS3OnlyReader,
-	}, web.BundleFS())
+	}, bundle)
 
 	srv := &http.Server{
 		Addr:              opts.Addr,

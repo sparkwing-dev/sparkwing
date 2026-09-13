@@ -40,10 +40,6 @@ func VerifyBundleEmbedded() error {
 	return nil
 }
 
-func BundleSkipReason() string {
-	return bundleSkipReason(nextBundle)
-}
-
 func bundleSkipReason(bundle fs.FS) string {
 	if _, err := fs.Stat(bundle, "next-out/index.html"); err != nil {
 		return "dashboard bundle not built in this checkout; run: bash bin/build-web.sh"
@@ -118,6 +114,12 @@ type HandlerOptions struct {
 	// non-loopback listener, for an operator who publishes the dashboard
 	// over plain HTTP through a proxy or ingress and has said so.
 	AllowInsecureCookiesRemote bool
+
+	// Bundle, when non-nil, is served as the dashboard in place of the
+	// bundle embedded in this binary. A source checkout carries no
+	// embedded bundle, so a test that serves the dashboard supplies its
+	// own.
+	Bundle fs.FS
 }
 
 // Serve runs the store-backed dashboard on addr. Backend and Paths come
@@ -151,8 +153,10 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	if err := validateCookieExposure(opts, addr); err != nil {
 		return err
 	}
-	if err := VerifyBundleEmbedded(); err != nil {
-		return err
+	if opts.Bundle == nil {
+		if err := VerifyBundleEmbedded(); err != nil {
+			return err
+		}
 	}
 	if err := opts.Paths.EnsureRoot(); err != nil {
 		return err
@@ -188,6 +192,9 @@ func BundleFS() fs.FS {
 }
 
 func HandlerFromOptions(opts HandlerOptions) http.Handler {
+	if opts.Bundle != nil {
+		return HandlerFromOptionsWithBundle(opts, opts.Bundle)
+	}
 	return HandlerFromOptionsWithBundle(opts, BundleFS())
 }
 

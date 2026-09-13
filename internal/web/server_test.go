@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -59,11 +61,18 @@ func init() {
 	register("web-ansi", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &webANSI{} })
 }
 
+// safety: the real bundle is gitignored, so a checkout that has not built the
+// dashboard has none to serve; the suite carries its own shell instead.
+func fixtureBundle() fs.FS {
+	return fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(
+			`<!doctype html><title>Sparkwing</title>` +
+				`<script src="/sparkwing-runtime.js"></script><div id="app">dashboard shell</div>`)},
+	}
+}
+
 func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	t.Helper()
-	if reason := web.BundleSkipReason(); reason != "" {
-		t.Skip(reason)
-	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +84,7 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	done := make(chan struct{})
 	var serveErr error
 	go func() {
-		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{})
+		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{Bundle: fixtureBundle()})
 		close(done)
 	}()
 	var stopOnce sync.Once

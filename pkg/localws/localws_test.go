@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -238,10 +237,20 @@ func TestRun_ArtifactsEndpoint(t *testing.T) {
 	}
 }
 
+// safety: the real bundle is gitignored, so a checkout that has not built the
+// dashboard has none to serve; the suite carries its own shell instead.
+func fixtureBundle() fstest.MapFS {
+	return fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(
+			`<!doctype html><title>Sparkwing</title>` +
+				`<script src="/sparkwing-runtime.js"></script><div id="app">dashboard shell</div>`)},
+	}
+}
+
 func startLocalws(t *testing.T, opts Options) string {
 	t.Helper()
-	if reason := web.BundleSkipReason(); reason != "" {
-		t.Skip(reason)
+	if opts.Bundle == nil {
+		opts.Bundle = fixtureBundle()
 	}
 	ln := pickListener(t)
 	t.Cleanup(func() { _ = ln.Close() })
