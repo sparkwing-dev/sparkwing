@@ -2992,7 +2992,7 @@ With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
 time. Pipelines declare a typed Secrets provider to resolve their secrets.
 'secrets list' masks values; 'secrets get' prints them.`,
-	SubcommandOrder: []string{"set", "get", "list", "delete"},
+	SubcommandOrder: []string{"set", "get", "list", "delete", "rotate"},
 }
 
 var cmdSecretSet = Command{
@@ -3073,6 +3073,29 @@ resolve until the secret is re-added.`,
 	Examples: []Example{
 		{"Delete a local secret", "sparkwing secrets delete --name API_TOKEN"},
 		{"Delete a remote secret", "sparkwing secrets delete --name API_TOKEN --profile prod"},
+	},
+}
+
+var cmdSecretRotate = Command{
+	Path:     "sparkwing secrets rotate",
+	Synopsis: "Re-encrypt every stored secret under the controller's current key",
+	Description: `Reads every secret the named profile's controller holds and writes it
+back sealed under the key that controller is running with now, in one
+transaction. Run it after moving a controller onto a new key with the old
+one still configured as --secrets-previous-key-file
+(SPARKWING_SECRETS_PREVIOUS_KEY); once it reports the count, the old key
+can be dropped. A value the controller was holding as plaintext comes out
+encrypted too, which is how an existing install turns encryption on
+without re-setting each secret by hand.
+
+The controller refuses when it has no key configured. Values never leave
+it: the rotation opens and reseals them in place.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile naming the controller to rotate", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"System", "Other"},
+	Examples: []Example{
+		{"Re-encrypt prod secrets under the current key", "sparkwing secrets rotate --profile prod"},
 	},
 }
 

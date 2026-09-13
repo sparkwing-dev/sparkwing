@@ -151,6 +151,7 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (c *Client) ResumeCron(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
+func (c *Client) RotateSecrets(ctx context.Context) (int, error)
 func (c *Client) RunCronNow(ctx context.Context, name string) (*crons.RunEnvelope, error)
 func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*crons.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error

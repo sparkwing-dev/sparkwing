@@ -25,6 +25,7 @@ time. Pipelines declare a typed Secrets provider to resolve their secrets.
 - `get` -- Print a secret's raw value to stdout
 - `list` -- List secret names + metadata
 - `delete` -- Remove a secret
+- `rotate` -- Re-encrypt every stored secret under the controller's current key
 
 ## `sparkwing secrets delete`
 
@@ -104,6 +105,35 @@ sparkwing secrets list --profile prod
 
 # Filter to API-related names
 sparkwing secrets list --profile prod --grep API
+```
+
+## `sparkwing secrets rotate`
+
+Re-encrypt every stored secret under the controller's current key
+
+Reads every secret the named profile's controller holds and writes it
+back sealed under the key that controller is running with now, in one
+transaction. Run it after moving a controller onto a new key with the old
+one still configured as --secrets-previous-key-file
+(SPARKWING_SECRETS_PREVIOUS_KEY); once it reports the count, the old key
+can be dropped. A value the controller was holding as plaintext comes out
+encrypted too, which is how an existing install turns encryption on
+without re-setting each secret by hand.
+
+The controller refuses when it has no key configured. Values never leave
+it: the rotation opens and reseals them in place.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile naming the controller to rotate (required) |
+
+### Examples
+
+```sh
+# Re-encrypt prod secrets under the current key
+sparkwing secrets rotate --profile prod
 ```
 
 ## `sparkwing secrets set`

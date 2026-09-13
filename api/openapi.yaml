@@ -3397,6 +3397,34 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/secrets/rotate:
+    post:
+      x-sparkwing-scope: admin
+      tags: [secrets]
+      summary: Re-encrypt every stored secret under the controller's current key.
+      description: |
+        Opens each stored value with the keys the controller holds -- the
+        current one, then the previous one when one is configured -- and
+        writes it back sealed and bound under the current key, in one
+        transaction. A value the controller was holding as plaintext comes
+        out encrypted. Once this answers, the previous key can be dropped.
+
+        Answers `400` when no key is configured, and `500` without changing
+        a row when any stored value opens under neither key.
+      responses:
+        "200":
+          description: Rotation complete.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.secretsRotateResponse
+                type: object
+                required: [rotated]
+                properties:
+                  rotated:
+                    type: integer
+                    description: Secret rows rewritten under the current key.
+
 components:
   securitySchemes:
     bearerToken:

@@ -112,6 +112,21 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
 	return body.Secrets, nil
 }
 
+// RotateSecrets re-encrypts every stored secret under the key the
+// controller holds now and returns how many rows it rewrote. Run it
+// after moving the controller onto a new key with the old one still
+// configured as the previous key; once it returns, the old key can be
+// dropped. The controller refuses when it has no key at all.
+func (c *Client) RotateSecrets(ctx context.Context) (int, error) {
+	var body struct {
+		Rotated int `json:"rotated"`
+	}
+	if err := c.post(ctx, "/api/v1/secrets/rotate", nil, http.StatusOK, &body); err != nil {
+		return 0, err
+	}
+	return body.Rotated, nil
+}
+
 // DeleteSecret removes the row by name. Returns store.ErrNotFound
 // when no row existed.
 func (c *Client) DeleteSecret(ctx context.Context, name string) error {

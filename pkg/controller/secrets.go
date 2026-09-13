@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -244,4 +245,41 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// safety: a row held as plaintext and one sealed under the previous key both
+// come out under the current key, so dropping the previous key loses nothing.
+func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
+	if s.secretsCipher == nil {
+		writeError(w, http.StatusBadRequest,
+			errors.New("secrets cipher: no key configured, so there is nothing to rotate to"))
+		return
+	}
+	rotated, err := s.store.RotateSecretValues(r.Context(), func(sec store.Secret) (string, error) {
+		binding := bindingForRow(&sec)
+		plain := sec.Value
+		if secrets.IsEncrypted(plain) {
+			opened, oerr := openSecret(s.secretsCipher, binding, plain)
+			if oerr != nil {
+				s.logger.Error("secret rotate: open envelope", "name", sec.Name, "repo", sec.Repo, "err", oerr)
+				return "", fmt.Errorf("secret %q did not open under the configured keys", sec.Name)
+			}
+			plain = opened
+		}
+		return sealSecret(s.secretsCipher, binding, plain)
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	principal := "anonymous"
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		principal = p.Name
+	}
+	s.logger.Info("secrets rotated", "count", rotated, "principal", principal)
+	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: rotated})
+}
+
+type secretsRotateResponse struct {
+	Rotated int `json:"rotated"`
 }

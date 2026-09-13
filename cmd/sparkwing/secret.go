@@ -23,7 +23,7 @@ func runSecret(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSecret, os.Stderr)
-		return errors.New("secret: subcommand required (set|get|list|delete)")
+		return errors.New("secret: subcommand required (set|get|list|delete|rotate)")
 	}
 	switch args[0] {
 	case "set":
@@ -34,6 +34,8 @@ func runSecret(args []string) error {
 		return runSecretList(args[1:])
 	case "delete", "rm", "remove":
 		return runSecretDelete(args[1:])
+	case "rotate":
+		return runSecretRotate(args[1:])
 	default:
 		PrintHelp(cmdSecret, os.Stderr)
 		return fmt.Errorf("secret: unknown subcommand %q", args[0])
@@ -354,5 +356,38 @@ func runSecretDelete(args []string) error {
 		return fmt.Errorf("secret delete: %w", err)
 	}
 	fmt.Fprintf(os.Stdout, "secret %q deleted (on: %s)\n", name, prof.Name)
+	return nil
+}
+
+func runSecretRotate(args []string) error {
+	fs := flag.NewFlagSet(cmdSecretRotate.Path, flag.ContinueOnError)
+	v := bindFlags(cmdSecretRotate, fs)
+	if err := parseAndCheck(cmdSecretRotate, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	on := v.String("profile")
+	if !fs.Changed("profile") {
+		return errors.New("secret rotate: --profile is required; the local store holds no encrypted values")
+	}
+	prof, err := resolveProfile(on)
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "secret rotate"); err != nil {
+		return err
+	}
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	rotated, err := c.RotateSecrets(ctx)
+	if err != nil {
+		return fmt.Errorf("secret rotate: %w", err)
+	}
+	fmt.Fprintf(os.Stdout,
+		"%d secret(s) re-encrypted under the current key (on: %s); the previous key can now be dropped\n",
+		rotated, prof.Name)
 	return nil
 }
