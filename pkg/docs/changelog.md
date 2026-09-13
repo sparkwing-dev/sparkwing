@@ -80,7 +80,7 @@ unlock.
   read runs at repeatable-read isolation and measures its held-back
   reservations against the database clock, so neither a second controller nor a
   stepped system clock can pull the seconds figure backwards. Schema
-  v38 adds the indexes those reads scan: partial indexes over the nodes that
+  v39 adds the indexes those reads scan: partial indexes over the nodes that
   have not finished and over the nodes holding a credit reservation, and
   covering indexes on the credit grant and charge kinds. The migration adds
   indexes only, so an older binary still opens the database. It builds them

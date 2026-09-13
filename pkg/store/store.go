@@ -1056,7 +1056,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 38
+const expectedSchemaVersion = 39
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1927,7 +1927,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 37:
 		_, err := tx.ExecContext(ctx, githubWebhookBindingsTableSQLite)
 		return err
+	// safety: v38 is the storage-quota migration landing beside this branch, so
+	// the number stays reserved rather than reused; this branch carries only
+	// the indexes at v39.
 	case 38:
+		return nil
+	case 39:
 		_, err := tx.ExecContext(ctx, observabilityIndexes)
 		return err
 	default:
@@ -2245,7 +2250,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 37:
 		_, err := tx.ExecContext(ctx, githubWebhookBindingsTablePostgres)
 		return err
+	// safety: v38 is the storage-quota migration landing beside this branch, so
+	// the number stays reserved rather than reused; this branch carries only
+	// the indexes at v39.
 	case 38:
+		return nil
+	case 39:
 		_, err := tx.ExecContext(ctx, observabilityIndexes)
 		return err
 	default:

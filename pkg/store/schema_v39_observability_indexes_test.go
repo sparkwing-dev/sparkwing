@@ -11,10 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A database stamped at 37 takes the observability indexes on its own, and the
-// rows it already holds stay readable because the migration adds nothing but
-// indexes.
-func TestSchemaV38_UpgradeFromAStoreStampedAt37(t *testing.T) {
+// A database stamped a version short of the indexes takes them on its own, and
+// the rows it already holds stay readable because the migration adds nothing
+// but indexes.
+func TestSchemaV39_UpgradeFromAStoreStampedShortOfTheIndexes(t *testing.T) {
 	target := storetest.New(t)
 	seeded, err := target.TryOpen()
 	if err != nil {
@@ -41,11 +41,11 @@ func TestSchemaV38_UpgradeFromAStoreStampedAt37(t *testing.T) {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
-	if _, err := seeded.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 38`); err != nil {
-		t.Fatalf("reset version to 37: %v", err)
+	if _, err := seeded.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 39`); err != nil {
+		t.Fatalf("rewind the stamp past the indexes: %v", err)
 	}
-	if v := readSchemaVersion(t, seeded.DB()); v != 37 {
-		t.Fatalf("seeded version = %d, want 37", v)
+	if v := readSchemaVersion(t, seeded.DB()); v != store.ExpectedSchemaVersion()-1 {
+		t.Fatalf("seeded version = %d, want %d", v, store.ExpectedSchemaVersion()-1)
 	}
 	_ = seeded.Close()
 
