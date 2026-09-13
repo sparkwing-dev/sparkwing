@@ -13,11 +13,18 @@ func TestDelayCeilingDoublesAndStopsAtMax(t *testing.T) {
 		objectguard.Backoff{Base: 100 * time.Millisecond, Max: time.Second},
 		func(n int64) int64 { return n - 1 },
 	)
-	want := []time.Duration{100, 200, 400, 800, 1000, 1000}
-	for attempt, ms := range want {
+	want := []time.Duration{
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		time.Second,
+		time.Second,
+	}
+	for attempt, ceiling := range want {
 		got := b.Delay(attempt) + time.Nanosecond
-		if got != time.Duration(ms)*time.Millisecond {
-			t.Fatalf("attempt %d ceiling is %s, want %dms", attempt, got, ms)
+		if got != ceiling {
+			t.Fatalf("attempt %d ceiling is %s, want %s", attempt, got, ceiling)
 		}
 	}
 }
