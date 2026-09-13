@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -59,23 +61,30 @@ func init() {
 	register("web-ansi", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &webANSI{} })
 }
 
+// safety: the real bundle is gitignored, so a checkout that has not built the
+// dashboard has none to serve; the suite carries its own shell instead.
+func fixtureShell() fs.FS {
+	return fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(
+			`<!doctype html><title>Sparkwing</title>` +
+				`<script src="/sparkwing-runtime.js"></script><div id="app">dashboard shell</div>`)},
+	}
+}
+
 func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	t.Helper()
-	if reason := web.BundleSkipReason(); reason != "" {
-		t.Skip(reason)
-	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = ln.Close() })
 	addr := ln.Addr().String()
-	_ = ln.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	var serveErr error
 	go func() {
-		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{})
+		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{Bundle: fixtureShell(), Listener: ln})
 		close(done)
 	}()
 	var stopOnce sync.Once
@@ -84,12 +93,12 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	stop := func() {
 		stopOnce.Do(func() {
 			cancel()
-			timer := time.NewTimer(time.Second)
+			timer := time.NewTimer(10 * time.Second)
 			defer timer.Stop()
 			select {
 			case <-done:
 			case <-timer.C:
-				stopErr = fmt.Errorf("web server did not stop within 1s")
+				stopErr = fmt.Errorf("web server did not stop within 10s")
 			}
 		})
 		if stopErr != nil && !stopReported {
@@ -100,10 +109,13 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	t.Cleanup(stop)
 
 	base := fmt.Sprintf("http://%s", addr)
-	client := &http.Client{Timeout: 250 * time.Millisecond}
+	// safety: a -race build of this package needs seconds to open its store,
+	// so the wait is sized for that, not for the tenth of a second an
+	// uninstrumented one takes.
+	client := &http.Client{Timeout: time.Second}
 	retry := time.NewTicker(25 * time.Millisecond)
 	defer retry.Stop()
-	deadline := time.NewTimer(3 * time.Second)
+	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	for {
 		select {
