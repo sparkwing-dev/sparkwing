@@ -2846,6 +2846,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 			"duration_ms": time.Since(nodeStartTS).Milliseconds(),
 		},
 	})
+	handOverNodeLog(s.ctx, nodeLog)
 
 	if err := s.backends.State.FinishNode(s.ctx, s.runID, node.ID(), string(resolution.outcome), resolution.errMsg, resolution.payload); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
