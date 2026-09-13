@@ -22,6 +22,54 @@ unlock.
 
 ### Added
 
+- **controller:** A global bucket ceiling freezes object writes once the
+  object store holds more than it should. `sparkwing-controller
+  --max-bucket-bytes` and `--max-bucket-objects` (env
+  `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES`,
+  `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS`) set the ceilings and
+  `--warn-bucket-bytes` and `--warn-bucket-objects` set the marks health
+  reports as a warning; all four default to 0, which leaves the bucket
+  unlimited and every existing install unchanged. Above a ceiling the
+  breaker refuses object writes with an error naming the measurement and
+  the ceiling, while reads and deletes keep working so the bucket can get
+  back under it. The controller counts each write's bytes as it happens
+  and replaces the running total with one paginated listing of the
+  artifact store every `--bucket-reconcile` (env
+  `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE`, hourly; `0` measures only at
+  startup), so nothing lists the bucket per request. `GET
+  /api/v1/health` reports `object_store.ceiling` as `frozen` and
+  `warning`; `GET /api/v1/object-store/breaker` and `sparkwing cluster
+  object-store status` carry the totals and the ceilings, and `sparkwing
+  cluster object-store reset-breaker` thaws a freeze until the next
+  measurement. New metrics:
+  `sparkwing_object_store_bucket_bytes`,
+  `sparkwing_object_store_bucket_objects`,
+  `sparkwing_object_store_bucket_ceiling`,
+  `sparkwing_object_store_bucket_ceiling_frozen`,
+  `sparkwing_object_store_bucket_ceiling_freezes_total`, and
+  `sparkwing_object_store_bucket_ceiling_refused_total`.
+- **cache:** `sparkwing-cache --max-artifact-bytes` and
+  `--max-cache-archive-bytes` (env `SPARKWING_CACHE_MAX_ARTIFACT_BYTES`,
+  `SPARKWING_CACHE_MAX_ARCHIVE_BYTES`) set the size cap for one uploaded
+  artifact and one stored dependency archive. Both default to the 500 MB
+  the service already enforced, and `0` accepts an object of any size. An
+  upload over either cap is refused with `413` naming the cap before a
+  byte reaches the volume; a dependency-cache save that is refused logs a
+  warning and the node proceeds, as it already did.
+- **logs:** `sparkwing-logs --max-line-bytes` (env
+  `SPARKWING_LOGS_MAX_LINE_BYTES`) caps one log line, storing a longer
+  line cut to the cap with a `[sparkwing-logs] truncated: line byte cap
+  reached` marker in place of its tail, so one unbroken line cannot spend
+  a node's whole allowance. `--binary-ratio` (env
+  `SPARKWING_LOGS_BINARY_RATIO`) drops an append whose share of control
+  bytes runs above it, leaving one `[sparkwing-logs] dropped` line per
+  node log; bytes above `0x7f` are not counted, so UTF-8 text in any
+  language is stored as sent. Both default to 0, which is off.
+- **sdk:** `storage.UsageReporter` is the optional capability an
+  `ArtifactStore` exposes when it can total its own contents, reached
+  through `storage.Usage`, which reports false for a backend that cannot
+  measure itself. The S3 store implements it with one paginated listing.
+
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
