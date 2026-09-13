@@ -189,6 +189,46 @@ func (s *Spec) ValidateFields(surface string) error {
 			return fmt.Errorf("%s backend type=controller requires controller: <profile-name>", surface)
 		}
 	}
+	return s.validateLogBatching(surface)
+}
+
+// safety: these are the logs surfaces that write one object per append,
+// so they are the only ones the batching keys reach.
+var objectStoreLogSurfaces = map[string]bool{
+	TypeS3:        true,
+	TypeGCS:       true,
+	TypeAzureBlob: true,
+}
+
+// safety: a batching key reads as tuning wherever it is written, so one
+// on a filesystem logs surface or on state would be silently inert.
+func (s *Spec) validateLogBatching(surface string) error {
+	set := map[string]bool{
+		"batch_interval":  s.BatchInterval != 0,
+		"batch_bytes":     s.BatchBytes != 0,
+		"max_log_objects": s.MaxLogObjects != 0,
+		"max_log_bytes":   s.MaxLogBytes != 0,
+	}
+	negative := map[string]bool{
+		"batch_interval":  s.BatchInterval < 0,
+		"batch_bytes":     s.BatchBytes < 0,
+		"max_log_objects": s.MaxLogObjects < 0,
+		"max_log_bytes":   s.MaxLogBytes < 0,
+	}
+	for _, key := range []string{"batch_interval", "batch_bytes", "max_log_objects", "max_log_bytes"} {
+		if !set[key] {
+			continue
+		}
+		if negative[key] {
+			return fmt.Errorf("%s backend: %s must be positive", surface, key)
+		}
+		if surface != "logs" {
+			return fmt.Errorf("%s backend: %s applies only to the logs surface", surface, key)
+		}
+		if !objectStoreLogSurfaces[s.Type] {
+			return fmt.Errorf("logs backend: %s applies only to an object-store logs surface (s3, gcs, azure-blob), not type=%s", key, s.Type)
+		}
+	}
 	return nil
 }
 
