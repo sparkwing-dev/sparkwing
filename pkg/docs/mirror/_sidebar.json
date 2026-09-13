@@ -42,7 +42,7 @@
     },
     {
       "label": "Performance",
-      "slugs": ["fast-builds", "build-caching", "caching"]
+      "slugs": ["fast-builds", "build-caching", "caching", "install-to-green"]
     },
     {
       "label": "Operations",
