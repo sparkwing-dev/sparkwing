@@ -525,6 +525,7 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.finalizeMeteredNode(r, runID, nodeID)
 	s.liveLogs.Finish(runID, nodeID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1450,6 +1451,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
 		})
 		if err != nil {
+			if s.writeCreditsRefusal(w, r, err) {
+				return
+			}
 			if writeExecutionAdmissionError(w, err) {
 				return
 			}
@@ -1490,6 +1494,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if s.writeCreditsRefusal(w, r, err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
@@ -1577,6 +1584,7 @@ func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.finalizeMeteredNode(r, r.PathValue("id"), r.PathValue("nodeID"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1776,6 +1784,12 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// safety: the runner abandons a node whose claim the controller refuses,
+	// which is how a cancellation for an empty balance reaches it.
+	if s.chargeMeteredHeartbeat(r, runID, nodeID) {
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

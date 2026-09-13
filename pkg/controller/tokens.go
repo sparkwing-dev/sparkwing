@@ -19,6 +19,7 @@ type tokenRecordJSON struct {
 	LastUsedAt *int64   `json:"last_used_at,omitempty"`
 	RevokedAt  *int64   `json:"revoked_at,omitempty"`
 	ReplacedBy string   `json:"replaced_by,omitempty"`
+	Metered    bool     `json:"metered,omitempty"`
 }
 
 func tokenToJSON(t *store.Token) tokenRecordJSON {
@@ -29,6 +30,7 @@ func tokenToJSON(t *store.Token) tokenRecordJSON {
 		Scopes:     t.Scopes,
 		CreatedAt:  t.CreatedAt.Unix(),
 		ReplacedBy: t.ReplacedBy,
+		Metered:    t.Metered,
 	}
 	if t.ExpiresAt != nil {
 		v := t.ExpiresAt.Unix()
@@ -50,6 +52,7 @@ type createTokenReq struct {
 	Kind      string   `json:"kind"`
 	Scopes    []string `json:"scopes"`
 	TTLSecs   int64    `json:"ttl_secs,omitempty"`
+	Metered   bool     `json:"metered,omitempty"`
 }
 
 type createTokenResp struct {
@@ -77,7 +80,8 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	ttl := time.Duration(req.TTLSecs) * time.Second
 	now := time.Now().UTC()
-	raw, tok, err := s.store.CreateToken(req.Principal, req.Kind, req.Scopes, ttl, now)
+	raw, tok, err := s.store.CreateTokenWith(req.Principal, req.Kind, req.Scopes, ttl, now,
+		store.TokenOptions{Metered: req.Metered})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -88,11 +92,46 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		"kind", tok.Kind,
 		"prefix", tok.Prefix,
 		"scopes", tok.Scopes,
+		"metered", tok.Metered,
 	)
 	writeJSON(w, http.StatusCreated, createTokenResp{
 		Token:    raw,
 		Metadata: tokenToJSON(tok),
 	})
+}
+
+type setTokenMeteredReq struct {
+	Metered bool `json:"metered"`
+}
+
+// safety: metering is recorded on the token, so a pool already running can be
+// marked without a new credential.
+func (s *Server) handleSetTokenMetered(w http.ResponseWriter, r *http.Request) {
+	prefix := r.PathValue("prefix")
+	var req setTokenMeteredReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.SetTokenMetered(r.Context(), prefix, req.Metered); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	tok, err := s.store.LookupTokenByPrefix(prefix)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	who := authwire.AnonymousPrincipal
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		who = p.Name
+	}
+	s.logger.Info("token metering changed", "prefix", prefix, "metered", req.Metered, "by", who)
+	writeJSON(w, http.StatusOK, tokenToJSON(tok))
 }
 
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {

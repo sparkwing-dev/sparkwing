@@ -184,7 +184,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "image", "webhooks", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -2007,7 +2007,7 @@ var cmdTokens = Command{
 profile named by --profile.
 Token creation prints the raw value to stdout once --
 save it before leaving this command.`,
-	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
+	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate", "set-metered"},
 }
 
 var cmdTokensCreate = Command{
@@ -2022,11 +2022,111 @@ this command exits it cannot be recovered.`,
 		{Name: "principal", Argument: "NAME", Desc: "Name identifying the token holder", Required: true, Group: "Input"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes; use sparkwing docs read --topic auth for the supported set", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (30d, 720h, and similar durations). 0 = never expires", Group: "Input"},
+		{Name: "metered", Desc: "Mark the token as one whose node claims cost credits", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod"},
 		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod"},
+		{"Mint a metered cloud runner token", "sparkwing cluster tokens create --type runner --principal agent:cloud-pool --scope nodes.claim --metered --profile prod"},
+	},
+}
+
+var cmdTokensSetMetered = Command{
+	Path:     "sparkwing cluster tokens set-metered",
+	Synopsis: "Mark an existing token as one credits pay for",
+	Description: `Sets or clears the metering marker on a token that is already
+minted, which is how a warm pool already running starts costing
+credits without a new credential. Metering is an operator
+decision: a runner's own labels never make its work billable.
+A claim by a metered token reserves a minute of cloud runner
+time and is refused when the balance cannot cover it.`,
+	Flags: []FlagSpec{
+		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
+		{Name: "metered", Argument: "BOOL", Desc: "true to charge this token's claims, false to stop", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Start charging the warm pool", "sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered true --profile prod"},
+		{"Stop charging a token", "sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered false --profile prod"},
+	},
+}
+
+var cmdCredits = Command{
+	Path:     "sparkwing cluster credits",
+	Synopsis: "Inspect and top up the prepaid credit balance",
+	Description: `Cloud runner time is prepaid. One hundred credits is one dollar,
+so a ten dollar top-up is a thousand credits. The balance is
+grants minus charges: a claim reserves a minute of cloud runner
+time before it is granted, heartbeats charge the seconds they
+cover, and the finish refunds whatever of the reservation the
+node did not use. Runners the operator did not mark metered are
+never charged.`,
+	SubcommandOrder: []string{"show", "grant", "history"},
+	Examples: []Example{
+		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
+		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
+	},
+}
+
+var cmdCreditsShow = Command{
+	Path:     "sparkwing cluster credits show",
+	Synopsis: "Print the balance, the rate, and the recent burn",
+	Description: `Prints the balance in credits, what was granted and charged, the
+price of a cloud runner second, the credits burned over the last
+day, the grace period a running node gets after the balance
+reaches zero, and the cap on what any one charge may bill. A
+controller that was never granted anything reads a zero balance
+and charges nothing, because nothing is metered until an
+operator marks a token.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the balance", "sparkwing cluster credits show --profile prod"},
+		{"Read the balance as JSON", "sparkwing cluster credits show --profile prod -o json"},
+	},
+}
+
+var cmdCreditsGrant = Command{
+	Path:     "sparkwing cluster credits grant",
+	Synopsis: "Add free or paid credits to the ledger",
+	Description: `Adds credits and records who added them, which kind they are, and
+the payment they came from. One hundred credits is one dollar.
+A grant that lifts the balance above zero lets metered runners
+claim again and stops the cancellation of nodes running on an
+empty balance. Requires the admin scope.`,
+	Flags: []FlagSpec{
+		{Name: "kind", Argument: "KIND", Desc: "Grant kind: free | paid", Required: true, Group: "Input"},
+		{Name: "amount", Argument: "N", Desc: "Credits to add; 100 credits is one dollar", Required: true, Group: "Input"},
+		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant", Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Load ten dollars against a payment", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
+		{"Hand out trial credits", "sparkwing cluster credits grant --kind free --amount 500 --profile prod"},
+	},
+}
+
+var cmdCreditsHistory = Command{
+	Path:     "sparkwing cluster credits history",
+	Synopsis: "List grants and charges, newest first",
+	Description: `Lists every movement of the ledger newest first: grants with
+their kind and reference, and the reservation a claim took, the
+usage an interval billed, and the refund of a reservation a node
+did not use, each with the run, node, token prefix and seconds
+it covered. Charges render negative because they take credits
+out and a refund renders positive. -o json emits one JSON record
+per line.`,
+	Flags: []FlagSpec{
+		{Name: "limit", Argument: "N", Desc: "Maximum rows of each kind, up to 1000 (0 = the controller's default)", Group: "Filter"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the ledger", "sparkwing cluster credits history --profile prod"},
+		{"Sum today's charges", "sparkwing cluster credits history --profile prod -o json | jq 'select(.type==\"charge\") | .amount_micro'"},
 	},
 }
 

@@ -1818,6 +1818,12 @@ paths:
                       reservation_id: {type: string}
         "204": {description: Nothing to claim.}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "402":
+          description: >-
+            The claiming token is metered and the credit balance does not cover a minute of its time. The node stays ready and the waiting run records why.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditsRefused"}
         "409":
           description: >-
             Assisted offer refusal. The controller does not reserve, record, or award the offer.
@@ -3562,6 +3568,107 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/credits:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: Read the prepaid credit balance, the rate, and the recent burn.
+      description: |
+        Cloud runner time is prepaid. Amounts are micro-credits: a million
+        of them is one credit, and a hundred credits is one dollar, so a
+        ten dollar top-up is a thousand credits. The balance is the sum of
+        grants less the sum of charges, computed in SQL. `rate_micro_per_second`
+        prices one cloud runner second, `grace_seconds` is how long a running
+        node survives an empty balance, and `burn_micro` is what the last
+        `burn_window_seconds` cost. A controller that was never granted
+        anything reads zero and charges nothing.
+      responses:
+        "200":
+          description: Ledger state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditState"}
+
+  /api/v1/credits/grants:
+    post:
+      x-sparkwing-scope: admin
+      tags: [credits]
+      summary: Add free or paid credits to the ledger.
+      description: |
+        Records who granted the credits, which kind they are, and the
+        payment `reference` they came from. A grant that lifts the balance
+        above zero lets metered runners claim again and stops the
+        cancellation of nodes running on an empty balance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateGrantRequest"}
+      responses:
+        "201":
+          description: The grant written.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditGrant"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/credits/history:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: List credit grants and charges, newest first.
+      description: |
+        Each charge names the run, node, and token prefix it billed and the
+        seconds it covered, so every movement of the ledger traces to the
+        work that caused it. `limit` caps each list; the controller applies
+        its own default when it is omitted.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer}
+          description: Maximum rows of each kind.
+      responses:
+        "200":
+          description: Grants and charges.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditHistory"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/tokens/{prefix}/metered:
+    parameters:
+      - in: path
+        name: prefix
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: admin
+      tags: [tokens]
+      summary: Mark an existing token as one whose node claims cost credits.
+      description: |
+        Metering is an operator decision recorded against the token, which
+        is how a warm pool already running starts costing credits without a
+        new credential. A runner's self-asserted labels never make its work
+        billable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.setTokenMeteredReq
+              type: object
+              required: [metered]
+              properties:
+                metered: {type: boolean}
+      responses:
+        "200":
+          description: The token after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Token"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4046,6 +4153,78 @@ components:
         last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
         revoked_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
         replaced_by: {type: string}
+        metered:
+          type: boolean
+          description: The operator marked this token as one whose node claims cost credits.
+    CreditState:
+      x-sparkwing-go-type: pkg/controller.creditStateJSON
+      type: object
+      description: The prepaid ledger as an operator reads it. Amounts are micro-credits.
+      properties:
+        balance_micro: {type: integer, format: int64, description: Grants less charges.}
+        granted_micro: {type: integer, format: int64}
+        charged_micro: {type: integer, format: int64}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
+        grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop.: ''}
+        burn_window_seconds: {type: integer, format: int64}
+        burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
+        exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
+        micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
+        credits_per_dollar: {type: integer, format: int64}
+    CreditGrant:
+      x-sparkwing-go-type: pkg/controller.creditGrantJSON
+      type: object
+      description: One addition to the ledger.
+      properties:
+        id: {type: string}
+        kind: {type: string, description: free or paid.}
+        amount_micro: {type: integer, format: int64}
+        reference: {type: string, description: Payment id or operator note.}
+        created_by: {type: string}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+    CreditCharge:
+      x-sparkwing-go-type: pkg/controller.creditChargeJSON
+      type: object
+      description: One movement a metered node caused - the minute its claim reserved, an interval it ran, or the refund of a reservation it did not use.
+      properties:
+        id: {type: string}
+        run_id: {type: string}
+        node_id: {type: string}
+        token_prefix: {type: string}
+        kind: {type: string, description: reservation, usage: '', or refund; a refund carries negative seconds and amount.: ''}
+        seconds: {type: integer, format: int64}
+        amount_micro: {type: integer, format: int64}
+        charged_at: {type: integer, format: int64, description: Unix seconds.}
+    CreditHistory:
+      x-sparkwing-go-type: pkg/controller.creditHistoryJSON
+      type: object
+      required: [grants, charges]
+      properties:
+        grants:
+          type: array
+          items: {$ref: "#/components/schemas/CreditGrant"}
+        charges:
+          type: array
+          items: {$ref: "#/components/schemas/CreditCharge"}
+    CreateGrantRequest:
+      x-sparkwing-go-type: pkg/controller.createGrantReq
+      type: object
+      required: [kind, amount_micro]
+      properties:
+        kind: {type: string, description: free or paid.}
+        amount_micro: {type: integer, format: int64, description: Micro-credits to add; a million is one credit.}
+        reference: {type: string, description: Payment id or operator note.}
+    CreditsRefused:
+      x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
+      type: object
+      description: A claim or heartbeat the credit balance could not pay for.
+      required: [error, code, balance_micro, required_micro]
+      properties:
+        error: {type: string}
+        code: {type: string, description: Always insufficient_credits.}
+        balance_micro: {type: integer, format: int64}
+        required_micro: {type: integer, format: int64}
     CreateTokenRequest:
       x-sparkwing-go-type: pkg/controller.createTokenReq
       type: object
@@ -4060,6 +4239,9 @@ components:
           type: integer
           format: int64
           description: Lifetime in seconds from mint time. Omit or zero for a token that does not expire.
+        metered:
+          type: boolean
+          description: Mint the token as one whose node claims cost credits.
     CreateTokenResponse:
       x-sparkwing-go-type: pkg/controller.createTokenResp
       type: object

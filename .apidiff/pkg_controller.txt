@@ -50,6 +50,7 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024

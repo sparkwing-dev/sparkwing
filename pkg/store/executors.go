@@ -192,7 +192,7 @@ func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executo
 		if err != nil {
 			return "", nil, err
 		}
-		raw, tok, err := createTokenRow(ctx, tx, principal, TokenKindRunner, scopes, ttl, now)
+		raw, tok, err := createTokenRow(ctx, tx, principal, TokenKindRunner, scopes, ttl, now, TokenOptions{})
 		if err == nil {
 			executor.Principal = principal
 			err = enrollExecutorWith(ctx, tx, tok.Prefix, executor, caps)

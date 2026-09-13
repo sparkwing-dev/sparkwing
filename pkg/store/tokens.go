@@ -65,6 +65,15 @@ type Token struct {
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
 	ReplacedBy string // non-empty when this token has been rotated
+	// Metered marks a token the operator mints for a runner credits pay
+	// for. Only the operator sets it; a runner's own labels never do.
+	Metered bool
+}
+
+// TokenOptions carries the fields a mint sets beyond the required ones.
+type TokenOptions struct {
+	// Metered marks the minted token as one whose claims cost credits.
+	Metered bool
 }
 
 // IsValid reports whether the token is usable at `now`.
@@ -103,9 +112,16 @@ func TokenKindFromPrefix(raw string) string {
 // CreateToken mints a token. Returns the RAW string only once; the
 // hash is one-way.
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error) {
+	return s.CreateTokenWith(principal, kind, scopes, ttl, now, TokenOptions{})
+}
+
+// CreateTokenWith mints a token carrying opts. It is [Store.CreateToken]
+// with the fields a plain mint leaves at their zero value, such as the
+// metering marker an operator puts on a cloud runner's credential.
+func (s *Store) CreateTokenWith(principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions) (string, *Token, error) {
 	ctx := context.Background()
 	for attempt := 1; ; attempt++ {
-		raw, tok, err := createTokenRow(ctx, storeExecer{s: s}, principal, kind, scopes, ttl, now)
+		raw, tok, err := createTokenRow(ctx, storeExecer{s: s}, principal, kind, scopes, ttl, now, opts)
 		if err == nil {
 			return raw, tok, nil
 		}
@@ -197,6 +213,7 @@ func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []str
 func createTokenRow(
 	ctx context.Context, e tokenExecer,
 	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
+	opts TokenOptions,
 ) (string, *Token, error) {
 	marker, ok := prefixForKind(kind)
 	if !ok {
@@ -206,7 +223,7 @@ func createTokenRow(
 	if err != nil {
 		return "", nil, err
 	}
-	tok, err := insertTokenRow(ctx, e, raw, principal, kind, scopes, ttl, now)
+	tok, err := insertTokenRow(ctx, e, raw, principal, kind, scopes, ttl, now, opts)
 	if err != nil {
 		return "", nil, err
 	}
@@ -216,6 +233,7 @@ func createTokenRow(
 func insertTokenRow(
 	ctx context.Context, e tokenExecer, raw string,
 	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
+	opts TokenOptions,
 ) (*Token, error) {
 	if principal == "" {
 		return nil, errors.New("tokens: principal is required")
@@ -233,13 +251,18 @@ func insertTokenRow(
 		return nil, err
 	}
 	scoped := dedupeScopes(scopes)
+	metered := 0
+	if opts.Metered {
+		metered = 1
+	}
 	if _, err := e.ExecContext(ctx, `
-        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at, metered)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
 		hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
 		now.UTC().Unix(),
 		expiresUnix(expires),
+		metered,
 	); err != nil {
 		return nil, fmt.Errorf("tokens: insert: %w", err)
 	}
@@ -251,6 +274,7 @@ func insertTokenRow(
 		Scopes:    scoped,
 		CreatedAt: now.UTC(),
 		ExpiresAt: expires,
+		Metered:   opts.Metered,
 	}, nil
 }
 
@@ -302,7 +326,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 const selectTokensByPrefixSQL = `
         SELECT hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
-               COALESCE(replaced_by, '')
+               COALESCE(replaced_by, ''), metered
           FROM tokens
          WHERE prefix = ?`
 
@@ -330,14 +354,15 @@ func scanTokenRows(rows *sql.Rows) ([]Token, error) {
 		var t Token
 		var scopes string
 		var expiresAt, lastUsedAt, revokedAt sql.NullInt64
-		var created int64
+		var created, metered int64
 		if err := rows.Scan(
 			&t.Hash, &t.Prefix, &t.Principal, &t.Kind, &scopes,
 			&created, &expiresAt, &lastUsedAt, &revokedAt,
-			&t.ReplacedBy,
+			&t.ReplacedBy, &metered,
 		); err != nil {
 			return nil, err
 		}
+		t.Metered = metered != 0
 		t.Scopes = splitScopes(scopes)
 		t.CreatedAt = time.Unix(created, 0).UTC()
 		if expiresAt.Valid {
@@ -394,7 +419,7 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 	q := `
         SELECT hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
-               COALESCE(replaced_by, '')
+               COALESCE(replaced_by, ''), metered
           FROM tokens
     `
 	args := []any{}
@@ -477,7 +502,8 @@ func (s *Store) rotateToken(
 		return "", nil, nil, errors.New("token is already revoked")
 	}
 
-	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now)
+	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
+		TokenOptions{Metered: oldTok.Metered})
 	if err != nil {
 		return "", nil, nil, err
 	}
