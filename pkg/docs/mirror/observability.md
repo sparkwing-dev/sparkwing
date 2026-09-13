@@ -329,44 +329,53 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 
 **Controller** (`sparkwing-controller`, Prometheus):
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `sparkwing_runs_total` | Counter | Runs that reached a terminal state, by pipeline and status |
-| `sparkwing_run_duration_seconds` | Histogram | End-to-end wall time from create to finish |
-| `sparkwing_nodes_claimed_total` | Counter | Successful node claims |
-| `sparkwing_pending_nodes` | Gauge | Claim-queue depth (ready, unclaimed nodes) |
-| `sparkwing_active_runners` | Gauge | Distinct runners with a non-expired lease in the last 2 minutes |
-| `sparkwing_http_requests_total` | Counter | HTTP requests by route, method, status |
-| `sparkwing_http_request_duration_seconds` | Histogram | HTTP latency by route and method |
-| `sparkwing_object_store_requests_total` | Counter | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
-| `sparkwing_object_store_trips_total` | Counter | Times a request class exhausted its budget and began refusing requests |
-| `sparkwing_object_store_tripped` | Gauge | 1 while a request class is refusing requests |
-| `sparkwing_auth_token_cache_total` | Counter | Bearer verifications by how the verified-token cache answered them (`result` is `hit`, `miss` or `coalesced`) |
-| `sparkwing_auth_hashing_rejected_total` | Counter | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
-| `sparkwing_queue_depth` | Gauge | Nodes short of a terminal outcome, by `state`: `waiting`, `ready`, `claimed`, `running`, `approval_pending` |
-| `sparkwing_node_claim_wait_seconds` | Histogram | Seconds a node waited between becoming claimable and a runner taking it, by `placement` |
-| `sparkwing_claim_unavailable_total` | Counter | Claim requests answered `503`, which a runner retries after the interval the response names |
-| `sparkwing_runners_live` | Gauge | Runners that polled for a claim inside the liveness window, by the `label_set` they advertised |
-| `sparkwing_node_seconds_total` | Counter | Node execution seconds the controller settled, by `placement`: `local` or `cloud` |
-| `sparkwing_credits_balance_micro` | Gauge | Micro-credits left to spend |
-| `sparkwing_credits_granted_micro_total` | Counter | Micro-credits granted over the ledger's life, by grant `kind`: `free` or `paid` |
-| `sparkwing_credits_reserved_micro_total` | Counter | Micro-credits claims reserved up front, by `principal_kind` |
-| `sparkwing_credits_charged_micro_total` | Counter | Micro-credits execution billed, by `principal_kind` |
-| `sparkwing_credits_refunded_micro_total` | Counter | Micro-credits returned from the unused tail of a claim reservation, by `principal_kind` |
-| `sparkwing_requests_by_principal_total` | Counter | Requests that authenticated, by the `credential` kind behind them: `user`, `runner`, `service` or `other` |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sparkwing_runs_total` | Counter | `pipeline`, `status` | Runs that reached a terminal state |
+| `sparkwing_run_duration_seconds` | Histogram | `outcome`, `pipeline` | End-to-end wall time from create to finish |
+| `sparkwing_nodes_claimed_total` | Counter | `pipeline` | Successful node claims |
+| `sparkwing_pending_nodes` | Gauge | (none) | Claim-queue depth (ready, unclaimed nodes) |
+| `sparkwing_active_runners` | Gauge | (none) | Distinct runners with a non-expired lease in the last 2 minutes |
+| `sparkwing_http_requests_total` | Counter | `method`, `route`, `status` | HTTP requests the controller answered |
+| `sparkwing_http_request_duration_seconds` | Histogram | `method`, `route` | HTTP handling latency |
+| `sparkwing_object_store_requests_total` | Counter | `class`, `outcome` | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
+| `sparkwing_object_store_trips_total` | Counter | `class` | Times a request class exhausted its budget and began refusing requests |
+| `sparkwing_object_store_tripped` | Gauge | `class` | 1 while a request class is refusing requests |
+| `sparkwing_auth_token_cache_total` | Counter | `result` | Bearer verifications by how the verified-token cache answered them (`hit`, `miss`, `coalesced`) |
+| `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
+| `sparkwing_queue_depth` | Gauge | `state` | Nodes short of a terminal outcome: `waiting`, `ready`, `claimed`, `running`, `approval_pending` |
+| `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
+| `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
+| `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
+| `sparkwing_node_seconds_total` | Counter | `placement` | Node execution seconds: `cloud` is what the ledger billed, `local` is what this controller process settled for unmetered credentials |
+| `sparkwing_credits_balance_micro` | Gauge | (none) | Micro-credits left to spend |
+| `sparkwing_credits_granted_micro_total` | Counter | `kind` | Micro-credits granted over the ledger's life, by whether the operator paid for the grant (`free`, `paid`) |
+| `sparkwing_credits_reserved_micro_total` | Counter | (none) | Micro-credits claims reserved up front |
+| `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
+| `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned from the unused tail of a claim reservation |
+| `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
 
-`sparkwing_node_seconds_total{placement="cloud"}` is the billing line. A
-metered credential claims cloud capacity and the ledger charges it per
-second; every other credential runs on the operator's own capacity and
-appears under `local`. The credit series carry the same split as
-`principal_kind`, where `paid` is a metered principal and `free` is every
-other one, so the free series stays at zero until an unmetered principal
-draws credit.
+`sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
+comes from the credit ledger rather than from a request handler: a node the
+credit reaper cancels, a lease expiry requeues, or a run-level failure cascades
+is billed by the ledger and counted here, whether or not a finish ever reaches
+the controller. The `local` series counts what this controller process settled
+for an unmetered credential, read from the claiming credential recorded on the
+node, and it restarts at zero with the process. Only a metered credential moves
+credits, so the `sparkwing_credits_*` totals are paid work by construction and
+carry no free-versus-paid split; the split an operator wants is
+`sparkwing_node_seconds_total{placement}` for work and
+`sparkwing_credits_granted_micro_total{kind}` for funding.
+
+`sparkwing_node_claim_wait_seconds` measures from `placement_hold_from`, the
+instant the node became claimable, which survives the `ready_at` bump a
+label-mismatched claim applies. A node re-claimed after a requeue is not
+observed, because the only wait it could report is the previous attempt's.
 
 Per-run and per-team attribution lives in the ledger, not in the metrics:
-`GET /api/v1/credits/history` returns each charge with its run and node.
-A run id would mint one series per run, so the exported counters sum the
-seconds and name only the placement.
+`GET /api/v1/credits/history` returns each charge with its run and node. A run
+id would mint one series per run, so the exported counters sum the seconds and
+name only the placement.
 
 The `route` label is the pattern the controller registered the request
 against, so every path parameter reaches Prometheus in its declared form
@@ -376,25 +385,27 @@ that matches no route is labeled `other`, and so is any `method` outside
 the seven the controller answers, so neither an unrecognized path nor an
 invented request method can grow the series count.
 
-`sparkwing_runners_live` carries a label a runner writes for itself, so
-the exporter sorts and deduplicates each advertised label set, collapses
-a set longer than 120 bytes onto `label_set="other"`, and collapses every
-set past the 32nd onto the same series. A runner that advertises nothing
-reports under the empty label set. The gauge zeroes a set it reported on
-the previous sample and no longer sees, so a runner that goes away reads
-as zero rather than holding its last count.
+`sparkwing_runners_live` carries a label a runner writes for itself, so the
+exporter sorts and deduplicates each advertised label set and collapses a set
+longer than 120 bytes onto `label_set="other"`. When more than 32 distinct sets
+are live, the busiest 31 keep their own series and the rest are summed into
+`other`, so a set invented to sort first cannot displace a real fleet. Each
+sweep deletes the series for a set it no longer sees, which is what keeps the
+metric from growing with every label array a runner has ever sent.
 
 Principal identity never becomes a label. `sparkwing_requests_by_principal_total`
-carries the credential's kind and `principal_kind` carries whether the
-principal is metered; principal names, token prefixes and holder ids stay
-out of every series.
+carries the credential's kind; principal names, token prefixes, holder ids and
+run ids stay out of every series.
 
-Sampled series -- `sparkwing_queue_depth`, `sparkwing_runners_live`,
-`sparkwing_pending_nodes`, `sparkwing_active_runners` and the
-`sparkwing_credits_*` family -- refresh on the controller's reaper loop
-rather than at scrape time, so they lag a scrape by up to one sweep. The
-credit totals come from the ledger rather than an in-process counter, so
-they survive a controller restart.
+Sampled series do not refresh at scrape time. `sparkwing_queue_depth`,
+`sparkwing_runners_live`, `sparkwing_pending_nodes` and
+`sparkwing_active_runners` refresh on the controller's reaper loop every 10
+seconds, bounded by an index over the nodes that have not finished. The
+`sparkwing_credits_*` family and `sparkwing_node_seconds_total{placement="cloud"}`
+refresh every 5 minutes, because both ledger sums scan a table that grows with
+every charge and is never pruned; read them as a slow-moving billing figure
+rather than a live gauge. Those totals come from the ledger rather than an
+in-process counter, so they survive a controller restart.
 
 **Cache** (`sparkwing-cache`, OTEL meter):
 

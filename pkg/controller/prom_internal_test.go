@@ -3,9 +3,13 @@ package controller
 import (
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,8 +32,7 @@ func scrapeRegistry(t *testing.T) string {
 	return string(body)
 }
 
-func sampleValue(t *testing.T, body, series string) float64 {
-	t.Helper()
+func sampleValue(body, series string) (float64, bool) {
 	for line := range strings.SplitSeq(body, "\n") {
 		raw, ok := strings.CutPrefix(line, series+" ")
 		if !ok {
@@ -37,16 +40,23 @@ func sampleValue(t *testing.T, body, series string) float64 {
 		}
 		v, err := strconv.ParseFloat(raw, 64)
 		if err != nil {
-			t.Fatalf("parse %q: %v", line, err)
+			return 0, false
 		}
-		return v
+		return v, true
 	}
-	t.Fatalf("series %q absent from the exposition", series)
-	return 0
+	return 0, false
 }
 
-func seriesCount(t *testing.T, body, name string) int {
+func mustSample(t *testing.T, body, series string) float64 {
 	t.Helper()
+	v, ok := sampleValue(body, series)
+	if !ok {
+		t.Fatalf("series %q absent from the exposition", series)
+	}
+	return v
+}
+
+func seriesCount(body, name string) int {
 	n := 0
 	for line := range strings.SplitSeq(body, "\n") {
 		if strings.HasPrefix(line, name+"{") || strings.HasPrefix(line, name+" ") {
@@ -54,6 +64,18 @@ func seriesCount(t *testing.T, body, name string) int {
 		}
 	}
 	return n
+}
+
+// safety: every test here writes package-global metrics, so each one hands the
+// registry back the way it found it rather than relying on test order.
+func restoreGlobals(t *testing.T) {
+	t.Helper()
+	before := ledgerSnapshot.get()
+	t.Cleanup(func() {
+		liveRunners.sample(nil)
+		setQueueDepth(nil)
+		ledgerSnapshot.set(before)
+	})
 }
 
 func TestRunnerLabelSetOrdersAndDeduplicates(t *testing.T) {
@@ -70,53 +92,82 @@ func TestRunnerLabelSetCollapsesAnOversizedSet(t *testing.T) {
 	}
 }
 
-func TestRunnerLivenessSamplerCollapsesPastTheLabelSetCap(t *testing.T) {
-	sampler := &runnerLivenessSampler{report: map[string]struct{}{}}
-	sets := make([][]string, 0, maxRunnerLabelSets*2)
-	for i := range maxRunnerLabelSets * 2 {
-		sets = append(sets, []string{"capped-runner-" + strconv.Itoa(i)})
-	}
-	sampler.sample(sets)
+func TestRunnerLivenessDeletesDepartedSeries(t *testing.T) {
+	restoreGlobals(t)
 
-	body := scrapeRegistry(t)
-	if got := seriesCount(t, body, "sparkwing_runners_live"); got > maxRunnerLabelSets+2 {
-		t.Errorf("runners_live series = %d, want the cap to bound them", got)
-	}
-	if got := sampleValue(t, body, `sparkwing_runners_live{label_set="other"}`); got < 1 {
-		t.Errorf("overflow series = %v, want the sets past the cap collapsed onto it", got)
-	}
-	sampler.sample(nil)
-}
-
-func TestRunnerLivenessSamplerZeroesASetThatWentAway(t *testing.T) {
-	sampler := &runnerLivenessSampler{report: map[string]struct{}{}}
-	sampler.sample([][]string{{"departing-runner"}})
+	liveRunners.sample([][]string{{"departing-runner"}})
 	const series = `sparkwing_runners_live{label_set="departing-runner"}`
-	if got := sampleValue(t, scrapeRegistry(t), series); got != 1 {
+	if got := mustSample(t, scrapeRegistry(t), series); got != 1 {
 		t.Fatalf("live gauge = %v, want 1 after the runner reported", got)
 	}
-	sampler.sample(nil)
-	if got := sampleValue(t, scrapeRegistry(t), series); got != 0 {
-		t.Errorf("live gauge = %v, want 0 once the runner stopped polling", got)
+
+	liveRunners.sample(nil)
+	body := scrapeRegistry(t)
+	if _, present := sampleValue(body, series); present {
+		t.Errorf("a runner that stopped polling kept its series:\n%s", body)
+	}
+	if got := seriesCount(body, "sparkwing_runners_live"); got != 0 {
+		t.Errorf("runners_live series = %d after every runner left, want 0", got)
+	}
+}
+
+func TestRunnerLivenessStaysBoundedAcrossSweeps(t *testing.T) {
+	restoreGlobals(t)
+
+	for sweep := range 20 {
+		sets := make([][]string, 0, 8)
+		for i := range 8 {
+			sets = append(sets, []string{"sweep-" + strconv.Itoa(sweep) + "-runner-" + strconv.Itoa(i)})
+		}
+		liveRunners.sample(sets)
+	}
+
+	if got := seriesCount(scrapeRegistry(t), "sparkwing_runners_live"); got > maxRunnerLabelSets {
+		t.Errorf("runners_live series = %d after 20 sweeps of fresh label sets, want at most %d",
+			got, maxRunnerLabelSets)
+	}
+}
+
+func TestRunnerLivenessEvictsTheSmallestSetsNotTheFirstAlphabetically(t *testing.T) {
+	restoreGlobals(t)
+
+	var sets [][]string
+	for range 40 {
+		sets = append(sets, []string{"fleet-prod"})
+	}
+	for i := range maxRunnerLabelSets * 2 {
+		sets = append(sets, []string{"!hostile-" + strconv.Itoa(i)})
+	}
+	liveRunners.sample(sets)
+
+	body := scrapeRegistry(t)
+	if got := mustSample(t, body, `sparkwing_runners_live{label_set="fleet-prod"}`); got != 40 {
+		t.Errorf("the busiest set reports %v, want 40: a set sorting first must not displace it", got)
+	}
+	if got := seriesCount(body, "sparkwing_runners_live"); got > maxRunnerLabelSets {
+		t.Errorf("runners_live series = %d, want at most %d", got, maxRunnerLabelSets)
+	}
+	if got := mustSample(t, body, `sparkwing_runners_live{label_set="other"}`); got < 1 {
+		t.Errorf("overflow series = %v, want the displaced sets summed onto it", got)
 	}
 }
 
 func TestSetQueueDepthCoversEveryState(t *testing.T) {
+	restoreGlobals(t)
+
 	setQueueDepth(map[string]int{store.QueueStateReady: 3})
 	body := scrapeRegistry(t)
-	if got := sampleValue(t, body, `sparkwing_queue_depth{state="ready"}`); got != 3 {
+	if got := mustSample(t, body, `sparkwing_queue_depth{state="ready"}`); got != 3 {
 		t.Errorf("ready depth = %v, want 3", got)
 	}
 	for _, state := range store.QueueStates() {
 		if state == store.QueueStateReady {
 			continue
 		}
-		series := `sparkwing_queue_depth{state="` + state + `"}`
-		if got := sampleValue(t, body, series); got != 0 {
+		if got := mustSample(t, body, `sparkwing_queue_depth{state="`+state+`"}`); got != 0 {
 			t.Errorf("%s depth = %v, want a state the sample omitted to read 0", state, got)
 		}
 	}
-	setQueueDepth(map[string]int{})
 }
 
 func TestCredentialLabelClampsAnUnknownKind(t *testing.T) {
@@ -130,8 +181,69 @@ func TestCredentialLabelClampsAnUnknownKind(t *testing.T) {
 	}
 }
 
+func TestClaimUnavailableCountsOnlyTheClaimRoutes503s(t *testing.T) {
+	const series = "sparkwing_claim_unavailable_total"
+	before := mustSample(t, scrapeRegistry(t), series)
+
+	observeHTTPRequest(claimRoute, http.MethodPost, http.StatusNoContent, time.Millisecond)
+	observeHTTPRequest("/api/v1/health", http.MethodGet, http.StatusServiceUnavailable, time.Millisecond)
+	if got := mustSample(t, scrapeRegistry(t), series); got != before {
+		t.Errorf("counter = %v, want %v: neither a healthy claim nor another route's 503 counts", got, before)
+	}
+
+	observeHTTPRequest(claimRoute, http.MethodPost, http.StatusServiceUnavailable, time.Millisecond)
+	if got := mustSample(t, scrapeRegistry(t), series); got != before+1 {
+		t.Errorf("counter = %v, want %v after one claim 503", got, before+1)
+	}
+}
+
+func TestClaimWaitSkipsAReclaimAfterRequeue(t *testing.T) {
+	const series = "sparkwing_node_claim_wait_seconds_count"
+	claimable := time.Now().Add(-2 * time.Second)
+
+	before := mustSample(t, scrapeRegistry(t), series)
+	observeClaimWait(&store.Node{PlacementHoldFrom: &claimable, ClaimGeneration: 2})
+	if got := mustSample(t, scrapeRegistry(t), series); got != before {
+		t.Errorf("observations = %v, want %v: a re-claim reports the previous attempt's wait", got, before)
+	}
+
+	observeClaimWait(&store.Node{PlacementHoldFrom: &claimable, ClaimGeneration: 1})
+	if got := mustSample(t, scrapeRegistry(t), series); got != before+1 {
+		t.Errorf("observations = %v, want %v after a first claim", got, before+1)
+	}
+}
+
+func TestClaimWaitPrefersTheHoldInstantOverReadyAt(t *testing.T) {
+	const sum = "sparkwing_node_claim_wait_seconds_sum"
+	held := time.Now().Add(-30 * time.Second)
+	bumped := time.Now().Add(-time.Second)
+
+	before := mustSample(t, scrapeRegistry(t), sum)
+	observeClaimWait(&store.Node{PlacementHoldFrom: &held, ReadyAt: &bumped, ClaimGeneration: 1})
+	if got := mustSample(t, scrapeRegistry(t), sum) - before; got < 20 {
+		t.Errorf("observed wait = %vs, want the hold instant rather than the bumped ready_at", got)
+	}
+}
+
+func TestNodeSecondsReportsLedgerSecondsAsCloud(t *testing.T) {
+	restoreGlobals(t)
+
+	beforeLocal := mustSample(t, scrapeRegistry(t), `sparkwing_node_seconds_total{placement="local"}`)
+	ledgerSnapshot.set(store.CreditLedgerTotals{BilledSeconds: 4242})
+	addLocalNodeSeconds(12.5)
+
+	body := scrapeRegistry(t)
+	if got := mustSample(t, body, `sparkwing_node_seconds_total{placement="cloud"}`); got != 4242 {
+		t.Errorf("cloud seconds = %v, want the ledger's billed seconds 4242", got)
+	}
+	if got := mustSample(t, body, `sparkwing_node_seconds_total{placement="local"}`) - beforeLocal; got != 12.5 {
+		t.Errorf("local seconds delta = %v, want 12.5", got)
+	}
+}
+
 func TestCreditsCollectorReportsTheSampledLedger(t *testing.T) {
-	t.Cleanup(func() { ledgerSnapshot.set(store.CreditLedgerTotals{}) })
+	restoreGlobals(t)
+
 	ledgerSnapshot.set(store.CreditLedgerTotals{
 		BalanceMicro:     7_000_000,
 		GrantedFreeMicro: 2_000_000,
@@ -143,21 +255,150 @@ func TestCreditsCollectorReportsTheSampledLedger(t *testing.T) {
 
 	body := scrapeRegistry(t)
 	for series, want := range map[string]float64{
-		"sparkwing_credits_balance_micro":                               7_000_000,
-		`sparkwing_credits_granted_micro_total{kind="free"}`:            2_000_000,
-		`sparkwing_credits_granted_micro_total{kind="paid"}`:            9_000_000,
-		`sparkwing_credits_reserved_micro_total{principal_kind="paid"}`: 1_200_000,
-		`sparkwing_credits_reserved_micro_total{principal_kind="free"}`: 0,
-		`sparkwing_credits_charged_micro_total{principal_kind="paid"}`:  3_400_000,
-		`sparkwing_credits_refunded_micro_total{principal_kind="paid"}`: 600_000,
+		"sparkwing_credits_balance_micro":                    7_000_000,
+		`sparkwing_credits_granted_micro_total{kind="free"}`: 2_000_000,
+		`sparkwing_credits_granted_micro_total{kind="paid"}`: 9_000_000,
+		"sparkwing_credits_reserved_micro_total":             1_200_000,
+		"sparkwing_credits_charged_micro_total":              3_400_000,
+		"sparkwing_credits_refunded_micro_total":             600_000,
 	} {
-		if got := sampleValue(t, body, series); got != want {
+		if got := mustSample(t, body, series); got != want {
 			t.Errorf("%s = %v, want %v", series, got, want)
 		}
 	}
 }
 
-func TestReaperSamplesTheOperationalSeries(t *testing.T) {
+var documentedMetricRE = regexp.MustCompile("(?m)^\\| `(sparkwing_[a-z0-9_]+)` \\| \\w+ \\| ([^|]+)\\|")
+
+// safety: the cache table lists metrics this registry does not serve, so the
+// controller's own section is the only part of the page this compares against.
+func documentedControllerMetrics(t *testing.T) map[string][]string {
+	t.Helper()
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "observability.md"))
+	if err != nil {
+		t.Fatalf("read observability.md: %v", err)
+	}
+	page := string(doc)
+	start := strings.Index(page, "**Controller** (`sparkwing-controller`, Prometheus):")
+	if start < 0 {
+		t.Fatal("observability.md has no controller metrics section")
+	}
+	section := page[start:]
+	if end := strings.Index(section, "**Cache** ("); end > 0 {
+		section = section[:end]
+	}
+
+	out := map[string][]string{}
+	for _, m := range documentedMetricRE.FindAllStringSubmatch(section, -1) {
+		var labels []string
+		for _, l := range strings.Split(strings.TrimSpace(m[2]), ",") {
+			l = strings.Trim(strings.TrimSpace(l), "`")
+			if l == "" || l == "(none)" {
+				continue
+			}
+			labels = append(labels, l)
+		}
+		slices.Sort(labels)
+		out[m[1]] = labels
+	}
+	return out
+}
+
+func TestDocumentedMetricsMatchTheRegistry(t *testing.T) {
+	documented := documentedControllerMetrics(t)
+	described := describedMetrics()
+
+	if len(documented) < 20 {
+		t.Fatalf("observability.md yielded %d controller metrics, so the table shape changed", len(documented))
+	}
+	for name, labels := range described {
+		docLabels, ok := documented[name]
+		if !ok {
+			t.Errorf("the registry exports %q but observability.md does not document it", name)
+			continue
+		}
+		if !slices.Equal(labels, docLabels) {
+			t.Errorf("%s labels: registry %v, observability.md %v", name, labels, docLabels)
+		}
+	}
+	for name := range documented {
+		if _, ok := described[name]; !ok {
+			t.Errorf("observability.md documents %q but the registry does not export it", name)
+		}
+	}
+}
+
+var (
+	expositionTypeRE   = regexp.MustCompile(`^# TYPE ([a-zA-Z_:][a-zA-Z0-9_:]*) (counter|gauge|histogram|summary|untyped)$`)
+	expositionSampleRE = regexp.MustCompile(
+		`^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})? (-?(?:[0-9]+\.?[0-9]*(?:[eE][+-]?[0-9]+)?|Inf|NaN)|\+Inf)( [0-9]+)?$`)
+)
+
+// safety: reads the text format the way a scraper does, so a malformed line
+// fails the test rather than passing a substring match.
+func TestExpositionParsesAndNamesTheDocumentedSet(t *testing.T) {
+	restoreGlobals(t)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	srv := New(st, nil)
+	api := httptest.NewServer(srv.Handler())
+	t.Cleanup(api.Close)
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-expo", Pipeline: "expo", Status: "running", StartedAt: time.Now().Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-expo", NodeID: "node-a", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-expo", "node-a"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+	if _, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{}, "holder-expo", time.Minute, nil); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	observeNodeClaim("expo")
+	observeRunFinish("expo", "success", time.Second)
+	liveRunners.sample([][]string{{"expo-runner"}})
+
+	body := scrapeRegistry(t)
+	families := map[string]string{}
+	for i, line := range strings.Split(body, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			if m := expositionTypeRE.FindStringSubmatch(line); m != nil {
+				families[m[1]] = m[2]
+				continue
+			}
+			if !strings.HasPrefix(line, "# HELP ") && !strings.HasPrefix(line, "# EOF") {
+				t.Errorf("/metrics line %d is neither a HELP nor a TYPE comment: %q", i+1, line)
+			}
+			continue
+		}
+		if !expositionSampleRE.MatchString(line) {
+			t.Errorf("/metrics line %d is not a valid sample: %q", i+1, line)
+		}
+	}
+
+	for name := range documentedControllerMetrics(t) {
+		if _, ok := families[name]; !ok {
+			t.Errorf("the exposition does not name %q, which observability.md documents", name)
+		}
+	}
+}
+
+func TestReaperAndCreditSamplerFillTheOperationalSeries(t *testing.T) {
+	restoreGlobals(t)
+
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -180,9 +421,11 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 	}
 
 	srv := New(st, nil)
-	srv.runnerPresence.record(presenceKey{tokenPrefix: "swr_reaper", name: "pool-a"},
-		[]string{"zone=b"}, nil, time.Now())
+	api := httptest.NewServer(srv.Handler())
+	t.Cleanup(api.Close)
+	claimWithLabels(t, api.URL, "pool-a", []string{"zone=b"})
 
+	srv.sampleCreditLedger(ctx)
 	reaperCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -204,7 +447,7 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 		body := scrapeRegistry(t)
 		settled := true
 		for series, v := range want {
-			if sampleValueOrZero(body, series) != v {
+			if got, ok := sampleValue(body, series); !ok || got != v {
 				settled = false
 			}
 		}
@@ -212,23 +455,21 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the reaper never sampled the operational series:\n%s", body)
+			t.Fatalf("the samplers never reported %v:\n%s", slices.Sorted(maps.Keys(want)), body)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-func sampleValueOrZero(body, series string) float64 {
-	for line := range strings.SplitSeq(body, "\n") {
-		raw, ok := strings.CutPrefix(line, series+" ")
-		if !ok {
-			continue
-		}
-		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil {
-			return 0
-		}
-		return v
+func claimWithLabels(t *testing.T, base, holder string, labels []string) {
+	t.Helper()
+	body := `{"holder_id":"` + holder + `","lease_secs":60,"labels":["` + strings.Join(labels, `","`) + `"]}`
+	resp, err := http.Post(base+claimRoute, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("claim poll: %v", err)
 	}
-	return 0
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		t.Fatalf("claim poll status = %d", resp.StatusCode)
+	}
 }

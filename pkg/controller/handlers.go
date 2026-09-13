@@ -1537,7 +1537,7 @@ func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *stor
 		pipeline = run.Pipeline
 	}
 	observeNodeClaim(pipeline)
-	observeClaimWait(s.claimPlacement(r), n.ReadyAt)
+	observeClaimWait(n)
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: n.RunID, NodeID: n.NodeID, Pipeline: pipeline,
 	})

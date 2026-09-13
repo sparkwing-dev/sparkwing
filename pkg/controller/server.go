@@ -1118,6 +1118,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 
 	go s.runReaper(ctx, 10*time.Second)
+	go s.runCreditSampler(ctx, creditSampleInterval)
 	go s.runCronTick(ctx, cronTickOffer)
 
 	if s.pool != nil {
@@ -1323,13 +1324,34 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				setQueueDepth(counts)
 			}
 			liveRunners.sample(s.runnerPresence.liveLabelSets(time.Now(), runnerLivenessWindow))
-			if totals, err := s.store.CreditLedgerTotals(ctx); err != nil {
-				s.logger.Error("credit ledger sample failed", "err", err)
-			} else {
-				ledgerSnapshot.set(totals)
-			}
 		}
 	}
+}
+
+// safety: both ledger sums scan a table that is never pruned, so they run on a
+// timer of their own rather than on every reaper sweep.
+func (s *Server) runCreditSampler(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		s.sampleCreditLedger(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Server) sampleCreditLedger(ctx context.Context) {
+	totals, err := s.store.CreditLedgerTotals(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.logger.Error("credit ledger sample failed", "err", err)
+		}
+		return
+	}
+	ledgerSnapshot.set(totals)
 }
 
 func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*http.Request) string) http.Handler {

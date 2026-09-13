@@ -54,18 +54,29 @@ unlock.
 - **controller:** `/metrics` carries the series an operator alerts on and a
   meter bills from. `sparkwing_queue_depth` reports outstanding nodes by state
   (`waiting`, `ready`, `claimed`, `running`, `approval_pending`),
-  `sparkwing_node_claim_wait_seconds` the latency from a node becoming
-  claimable to a runner taking it, `sparkwing_claim_unavailable_total` the
-  claim requests answered `503`, and `sparkwing_runners_live` the runners
-  heard from inside the liveness window by the label set they advertised.
-  `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, split
-  from `local` by whether the claiming credential is metered. The
-  `sparkwing_credits_*` family reports the balance, grants by kind, and the
-  reservations, charges and refunds by principal kind, read from the ledger so
-  they survive a restart. Principal names, token prefixes, holder ids and run
-  ids stay out of every label; a runner's self-asserted label set is ordered,
-  deduplicated, and collapsed onto `other` past 32 distinct sets or 120 bytes.
-  Documented in [observability.md](docs/observability.md).
+  `sparkwing_node_claim_wait_seconds` the wait from a node becoming claimable to
+  its first runner taking it, `sparkwing_claim_unavailable_total` the claim
+  requests answered `503`, and `sparkwing_runners_live` the runners heard from
+  inside the liveness window by the label set they advertised.
+  `sparkwing_node_seconds_total{placement="cloud"}` is the billing line and is
+  read from the credit ledger, so a node a cancel, a requeue or a cascade ends
+  is counted whether or not a finish reaches the controller; the `local` series
+  counts what this process settled for unmetered credentials. The
+  `sparkwing_credits_*` family reports balance, grants by kind, reservations,
+  charges and refunds from the ledger, so the totals survive a restart. Both
+  ledger sums refresh every 5 minutes over a covering index; the queue and
+  runner series refresh on the 10-second reaper sweep over a new index on the
+  nodes that have not finished. Principal names, token prefixes, holder ids and
+  run ids stay out of every label; a runner's self-asserted label set is
+  ordered, deduplicated, and collapsed onto `other` past 120 bytes or past the
+  31 busiest sets, and a set that stops reporting loses its series rather than
+  holding one forever. Documented in
+  [observability.md](docs/observability.md).
+- **store:** `Store.CountNodesByQueueState`, `Store.CreditLedgerTotals` and
+  `Store.SettledNodeSeconds` report the figures the controller exports. Schema
+  v38 adds the indexes those reads scan: a partial index over the nodes that
+  have not finished, and covering indexes on the credit grant and charge kinds.
+  The migration adds indexes only, so an older binary still opens the database.
 - **controller:** `sparkwing-controller --dashboard-url URL` announces the
   dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
   client that has just been handed a token can say where to watch its runs. The

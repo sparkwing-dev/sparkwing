@@ -236,33 +236,21 @@ func (s *Server) meteredTokenPrefix(r *http.Request) string {
 	return prefix
 }
 
-// safety: the metered credential is the one the ledger bills, so it is also
-// what separates cloud seconds from the operator's own capacity.
-func (s *Server) claimPlacement(r *http.Request) string {
-	if s.meteredTokenPrefix(r) == "" {
-		return placementLocal
-	}
-	return placementCloud
-}
-
-// safety: the wall clock the controller settled is the number a bill is drawn
-// from, so both placements are measured the one way and the label is what
-// separates them.
+// safety: the node's own claim carries the credential that did the work, so a
+// finish posted by another principal still attributes the seconds to the
+// runner that ran it. Cloud seconds come from the ledger instead, where a
+// cancel or a requeue bills them whether or not a finish reaches this route.
 func (s *Server) observeSettledNodeSeconds(r *http.Request, runID, nodeID string) {
-	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	seconds, metered, err := s.store.SettledNodeSeconds(r.Context(), runID, nodeID)
 	if err != nil {
 		s.logger.Warn("sampling settled node seconds failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
 		return
 	}
-	if n == nil || n.StartedAt == nil {
+	if metered {
 		return
 	}
-	finished := time.Now()
-	if n.FinishedAt != nil {
-		finished = *n.FinishedAt
-	}
-	observeNodeSeconds(s.claimPlacement(r), finished.Sub(*n.StartedAt).Seconds())
+	addLocalNodeSeconds(seconds)
 }
 
 // safety: a balance spent past the grace period cancels the node in this same

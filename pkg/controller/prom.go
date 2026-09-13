@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"maps"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -91,13 +94,12 @@ var (
 		[]string{"state"},
 	)
 
-	claimWaitSeconds = prometheus.NewHistogramVec(
+	claimWaitSeconds = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "sparkwing_node_claim_wait_seconds",
-			Help:    "Seconds a node waited between becoming claimable and a runner taking it, by placement.",
+			Help:    "Seconds a node waited between becoming claimable and its first runner taking it. A re-claim after a requeue is not observed, because the wait it would report is the previous attempt's.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300},
 		},
-		[]string{"placement"},
 	)
 
 	claimUnavailableTotal = prometheus.NewCounter(
@@ -115,14 +117,6 @@ var (
 		[]string{"label_set"},
 	)
 
-	nodeSecondsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "sparkwing_node_seconds_total",
-			Help: "Node execution seconds the controller settled, by placement. The cloud series is the billing line.",
-		},
-		[]string{"placement"},
-	)
-
 	requestsByPrincipalTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_requests_by_principal_total",
@@ -132,18 +126,9 @@ var (
 	)
 )
 
-// safety: the split a bill is drawn from, so the two values are the only ones
-// the placement label ever carries.
 const (
 	placementLocal = "local"
 	placementCloud = "cloud"
-)
-
-// safety: a metered credential is paid and every other one runs free, so the
-// credit metrics carry a closed pair rather than an identity.
-const (
-	principalKindFree = "free"
-	principalKindPaid = "paid"
 )
 
 const claimRoute = "/api/v1/nodes/claim"
@@ -151,6 +136,8 @@ const claimRoute = "/api/v1/nodes/claim"
 // safety: the window sparkwing_active_runners already reports, so the two
 // liveness series answer the same question.
 const runnerLivenessWindow = 2 * time.Minute
+
+const creditSampleInterval = 5 * time.Minute
 
 // safety: a runner names its own labels, so past this many distinct sets the
 // rest collapse onto one series.
@@ -170,29 +157,66 @@ func observeAuthCache(result string) {
 	authTokenCacheTotal.WithLabelValues(result).Inc()
 }
 
+// safety: named rather than passed inline so the drift check can ask the same
+// collectors the registry serves what they export.
+var sparkwingCollectors = []prometheus.Collector{
+	runsTotal,
+	runDurationSeconds,
+	nodesClaimedTotal,
+	pendingNodesGauge,
+	activeRunnersGauge,
+	httpRequestsTotal,
+	httpRequestDurationSeconds,
+	authTokenCacheTotal,
+	queueDepthGauge,
+	claimWaitSeconds,
+	claimUnavailableTotal,
+	runnersLiveGauge,
+	requestsByPrincipalTotal,
+	objectStoreCollector{},
+	hashingBudgetCollector{},
+	creditsCollector{},
+	nodeSecondsCollector{},
+}
+
 func init() {
+	metricsRegistry.MustRegister(sparkwingCollectors...)
 	metricsRegistry.MustRegister(
-		runsTotal,
-		runDurationSeconds,
-		nodesClaimedTotal,
-		pendingNodesGauge,
-		activeRunnersGauge,
-		httpRequestsTotal,
-		httpRequestDurationSeconds,
-		authTokenCacheTotal,
-		queueDepthGauge,
-		claimWaitSeconds,
-		claimUnavailableTotal,
-		runnersLiveGauge,
-		nodeSecondsTotal,
-		requestsByPrincipalTotal,
-		objectStoreCollector{},
-		hashingBudgetCollector{},
-		creditsCollector{},
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	initZeroSeries()
+}
+
+var describedNameRE = regexp.MustCompile(`fqName: "([^"]+)".*variableLabels: \{([^}]*)\}`)
+
+// safety: read from the collectors the registry serves rather than from the
+// exposition, so a metric that has minted no child yet is still checked.
+func describedMetrics() map[string][]string {
+	descs := make(chan *prometheus.Desc, 64)
+	out := map[string][]string{}
+	for _, c := range sparkwingCollectors {
+		go func() {
+			c.Describe(descs)
+			close(descs)
+		}()
+		for d := range descs {
+			m := describedNameRE.FindStringSubmatch(d.String())
+			if m == nil {
+				continue
+			}
+			var labels []string
+			for _, l := range strings.Split(m[2], ",") {
+				if l = strings.TrimSpace(l); l != "" {
+					labels = append(labels, l)
+				}
+			}
+			slices.Sort(labels)
+			out[m[1]] = labels
+		}
+		descs = make(chan *prometheus.Desc, 64)
+	}
+	return out
 }
 
 // safety: a series that appears only after the first event reads as a gap in
@@ -202,10 +226,6 @@ func initZeroSeries() {
 	for _, state := range store.QueueStates() {
 		queueDepthGauge.WithLabelValues(state)
 	}
-	for _, placement := range []string{placementLocal, placementCloud} {
-		claimWaitSeconds.WithLabelValues(placement)
-		nodeSecondsTotal.WithLabelValues(placement)
-	}
 	for _, result := range []string{authCacheHit, authCacheMiss, authCacheCoalesced} {
 		authTokenCacheTotal.WithLabelValues(result)
 	}
@@ -214,7 +234,6 @@ func initZeroSeries() {
 	} {
 		requestsByPrincipalTotal.WithLabelValues(credential)
 	}
-	runnersLiveGauge.WithLabelValues("")
 }
 
 func metricsHandler() http.Handler {
@@ -280,20 +299,23 @@ func setQueueDepth(counts map[string]int) {
 	}
 }
 
-func observeClaimWait(placement string, readyAt *time.Time) {
-	if readyAt == nil {
+// safety: a label-mismatched claim bumps ready_at while placement_hold_from
+// survives it, so the hold instant is the one that still says when the node
+// became claimable.
+func observeClaimWait(n *store.Node) {
+	if n == nil || n.ClaimGeneration > 1 {
 		return
 	}
-	if wait := time.Since(*readyAt); wait > 0 {
-		claimWaitSeconds.WithLabelValues(placement).Observe(wait.Seconds())
+	from := n.PlacementHoldFrom
+	if from == nil {
+		from = n.ReadyAt
 	}
-}
-
-func observeNodeSeconds(placement string, seconds float64) {
-	if seconds <= 0 {
+	if from == nil {
 		return
 	}
-	nodeSecondsTotal.WithLabelValues(placement).Add(seconds)
+	if wait := time.Since(*from); wait > 0 {
+		claimWaitSeconds.Observe(wait.Seconds())
+	}
 }
 
 func observeRequestPrincipal(kind string) {
@@ -311,44 +333,59 @@ func credentialLabel(kind string) string {
 	return otherLabel
 }
 
-// safety: a gauge child left behind reports a runner that has gone, so the
-// sampler zeroes every set it reported last time and no longer sees.
+// safety: a child left behind reports a runner that has gone and holds a series
+// forever, so the sampler deletes the sets it reported last sweep and no longer
+// sees rather than zeroing them.
 type runnerLivenessSampler struct {
-	mu     sync.Mutex
-	report map[string]struct{}
+	mu       sync.Mutex
+	reported map[string]struct{}
 }
 
-var liveRunners = &runnerLivenessSampler{report: map[string]struct{}{"": {}}}
+var liveRunners = &runnerLivenessSampler{reported: map[string]struct{}{}}
 
 func (s *runnerLivenessSampler) sample(labelSets [][]string) {
-	sets := make([]string, 0, len(labelSets))
-	for _, labels := range labelSets {
-		sets = append(sets, runnerLabelSet(labels))
-	}
-	slices.Sort(sets)
-
 	counts := map[string]int{}
-	for _, set := range sets {
-		if _, known := counts[set]; !known && len(counts) >= maxRunnerLabelSets {
-			set = otherLabel
-		}
-		counts[set]++
+	for _, labels := range labelSets {
+		counts[runnerLabelSet(labels)]++
 	}
+	counts = boundLabelSets(counts)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for set := range s.report {
+	for set := range s.reported {
 		if _, still := counts[set]; !still {
-			runnersLiveGauge.WithLabelValues(set).Set(0)
+			runnersLiveGauge.DeleteLabelValues(set)
 		}
 	}
+	reported := make(map[string]struct{}, len(counts))
 	for set, n := range counts {
 		runnersLiveGauge.WithLabelValues(set).Set(float64(n))
+		reported[set] = struct{}{}
 	}
-	s.report = map[string]struct{}{"": {}}
-	for set := range counts {
-		s.report[set] = struct{}{}
+	s.reported = reported
+}
+
+// safety: the busiest sets keep their identity and the tail folds into one
+// series, so a set invented to sort first cannot displace a real fleet.
+func boundLabelSets(counts map[string]int) map[string]int {
+	if len(counts) <= maxRunnerLabelSets {
+		return counts
 	}
+	sets := slices.Collect(maps.Keys(counts))
+	slices.SortFunc(sets, func(a, b string) int {
+		if counts[a] != counts[b] {
+			return counts[b] - counts[a]
+		}
+		return strings.Compare(a, b)
+	})
+	bounded := make(map[string]int, maxRunnerLabelSets)
+	for _, set := range sets[:maxRunnerLabelSets-1] {
+		bounded[set] = counts[set]
+	}
+	for _, set := range sets[maxRunnerLabelSets-1:] {
+		bounded[otherLabel] += counts[set]
+	}
+	return bounded
 }
 
 // safety: a runner asserts its own labels, so the value is ordered for a stable
@@ -477,7 +514,7 @@ func (hashingBudgetCollector) Collect(ch chan<- prometheus.Metric) {
 var (
 	creditsBalanceDesc = prometheus.NewDesc(
 		"sparkwing_credits_balance_micro",
-		"Micro-credits left to spend. Sampled from the ledger by the reaper loop.",
+		"Micro-credits left to spend. Sampled from the ledger on the credit-sample timer.",
 		nil, nil,
 	)
 
@@ -489,26 +526,32 @@ var (
 
 	creditsReservedDesc = prometheus.NewDesc(
 		"sparkwing_credits_reserved_micro_total",
-		"Micro-credits claims reserved up front, by principal kind. Only a metered principal reserves, so the free series is the zero line a ratio divides by.",
-		[]string{"principal_kind"}, nil,
+		"Micro-credits claims reserved up front. Only a metered credential reserves, so every micro-credit here is paid work.",
+		nil, nil,
 	)
 
 	creditsChargedDesc = prometheus.NewDesc(
 		"sparkwing_credits_charged_micro_total",
-		"Micro-credits execution billed, by principal kind.",
-		[]string{"principal_kind"}, nil,
+		"Micro-credits execution billed.",
+		nil, nil,
 	)
 
 	creditsRefundedDesc = prometheus.NewDesc(
 		"sparkwing_credits_refunded_micro_total",
-		"Micro-credits returned from the unused tail of a claim reservation, by principal kind.",
-		[]string{"principal_kind"}, nil,
+		"Micro-credits returned from the unused tail of a claim reservation.",
+		nil, nil,
+	)
+
+	nodeSecondsDesc = prometheus.NewDesc(
+		"sparkwing_node_seconds_total",
+		"Node execution seconds, by placement. The cloud series is the seconds the ledger billed, which is the billing line; the local series counts what this controller process settled for unmetered credentials.",
+		[]string{"placement"}, nil,
 	)
 )
 
-// safety: the reaper samples the ledger and the collector reports what it last
-// saw, so a scrape never opens a database transaction, and the totals survive a
-// restart that would reset an in-process counter.
+// safety: the sampler reads the ledger on a timer and the collector reports
+// what it last saw, so a scrape never opens a database transaction, and the
+// totals survive a restart that would reset an in-process counter.
 type creditsLedgerSnapshot struct {
 	mu     sync.Mutex
 	totals store.CreditLedgerTotals
@@ -545,12 +588,30 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric) {
 		float64(t.GrantedFreeMicro), store.CreditGrantFree)
 	ch <- prometheus.MustNewConstMetric(creditsGrantedDesc, prometheus.CounterValue,
 		float64(t.GrantedPaidMicro), store.CreditGrantPaid)
-	for desc, paid := range map[*prometheus.Desc]int64{
-		creditsReservedDesc: t.ReservedMicro,
-		creditsChargedDesc:  t.ChargedMicro,
-		creditsRefundedDesc: t.RefundedMicro,
-	} {
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue, 0, principalKindFree)
-		ch <- prometheus.MustNewConstMetric(desc, prometheus.CounterValue, float64(paid), principalKindPaid)
+	ch <- prometheus.MustNewConstMetric(creditsReservedDesc, prometheus.CounterValue, float64(t.ReservedMicro))
+	ch <- prometheus.MustNewConstMetric(creditsChargedDesc, prometheus.CounterValue, float64(t.ChargedMicro))
+	ch <- prometheus.MustNewConstMetric(creditsRefundedDesc, prometheus.CounterValue, float64(t.RefundedMicro))
+}
+
+// safety: the cloud series is read from the ledger rather than counted in the
+// request path, so a node the credit reaper cancels or a lease expiry requeues
+// still reports the seconds it was billed for.
+type nodeSecondsCollector struct{}
+
+var localNodeSeconds atomic.Uint64
+
+func addLocalNodeSeconds(seconds float64) {
+	if seconds <= 0 {
+		return
 	}
+	localNodeSeconds.Add(uint64(seconds * 1000))
+}
+
+func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc) { ch <- nodeSecondsDesc }
+
+func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(nodeSecondsDesc, prometheus.CounterValue,
+		float64(localNodeSeconds.Load())/1000, placementLocal)
+	ch <- prometheus.MustNewConstMetric(nodeSecondsDesc, prometheus.CounterValue,
+		float64(ledgerSnapshot.get().BilledSeconds), placementCloud)
 }
