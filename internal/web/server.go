@@ -638,8 +638,15 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	if body == nil {
-		w.WriteHeader(http.StatusNotImplemented)
-		return
+		// safety: an object-store logs surface has no live read, so the
+		// controller's in-memory ring is the only live view of a node
+		// that is still running.
+		live, liveErr := backend.StreamLiveLog(r.Context(), b, runID, nodeID, 0)
+		if liveErr != nil || live == nil {
+			w.WriteHeader(http.StatusNotImplemented)
+			return
+		}
+		body = live
 	}
 	defer body.Close()
 

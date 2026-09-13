@@ -38,6 +38,42 @@ unlock.
   and plist. The command refuses a host that cannot supervise a runner, and an
   agent config that does not validate, before it mints anything, and it names
   the live token and its revoke command whenever a step after the mint fails.
+- **cli:** `sparkwing runs logs --follow` prints log lines rather than the
+  server-sent-events frames that carried them. A follow against a controller
+  logs surface used to show each line's `data:` prefix and the stream's own
+  `: open` and keepalive comments.
+- **controller + web:** A run is watchable live even when its logs surface is
+  an object store. The node's runner mirrors its lines to the controller, which
+  holds the last 512 KiB of each running node in memory and serves it over
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream` (server-sent events) and
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/logs?since=<offset>` (JSON). The
+  dashboard and `sparkwing runs logs --follow` read that ring while a node runs
+  and the durable copy afterwards; both used to poll the bucket or answer 501.
+  The runner posts batches to `POST /api/v1/runs/{id}/nodes/{nodeID}/logs`
+  under scope `runs.state`, gated on the node's live claim like every other
+  node write. Buffers are bounded per node and across nodes together, and
+  `sparkwing-controller` takes `--live-log-node-kb`, `--live-log-total-mb` and
+  `--live-log-idle`. A deployment running `sparkwing-logs` keeps its own live
+  stream and mirrors nothing.
+- **logs:** An `s3` logs surface coalesces a node's lines into one object
+  per flush instead of one object per line. A flush lands when the buffer
+  reaches `batch_bytes` (256 KiB), when `batch_interval` (2s) elapses, when
+  a reader asks for the node's log, and when the node finishes, so a node
+  costs one object per 256 KiB of log text rather than one per line. The
+  finish flush runs before the node's status is written on every path, so a
+  node that reads terminal has a complete log, and a flush the store refuses
+  counts its whole batch into the node's dropped-line total. The four keys
+  are refused on any surface that does not act on them, and when negative. `max_log_objects`
+  (2000) and `max_log_bytes` (64 MiB) bound one node's log, and past either
+  the surface drops further lines and ends the node's log with one marker
+  line counting them. All four keys are optional on the profile's `logs:`
+  block. `filesystem` and `controller` logs surfaces write through
+  unchanged.
+- **sdk:** `storage.NodeFlusher` is the optional capability a
+  `storage.LogStore` exposes when it buffers appends, and
+  `storage.FlushNode` calls it for a store that has it. A write-through
+  store needs neither.
+
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

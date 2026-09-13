@@ -16,6 +16,14 @@ type Spec struct {
 	Controller string
 
 	Binaries *Spec
+
+	BatchInterval time.Duration
+
+	BatchBytes int
+
+	MaxLogObjects int
+
+	MaxLogBytes int64
 }
 func (s *Spec) ResolvedToken() string
 func (s *Spec) ValidateFields(surface string) error

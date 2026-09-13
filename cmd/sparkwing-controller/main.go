@@ -71,6 +71,19 @@ func run(args []string) error {
 			"admits %d at a time and the rest queue.",
 			store.Argon2HashBytes>>20,
 			store.Argon2Concurrency(store.DefaultArgon2MemoryBudget)))
+	liveLogNodeKB := fs.Int("live-log-node-kb", controller.DefaultLiveLogNodeBytes>>10,
+		"kilobytes of each running node's log the controller keeps in memory for "+
+			"live readers. This is the live view for a deployment whose logs surface "+
+			"is an object store; the durable copy is unaffected.")
+	liveLogTotalMB := fs.Int("live-log-total-mb", int(controller.DefaultLiveLogTotalBytes>>20),
+		"megabytes of live log buffers across every running node together. Past it "+
+			"the controller drops the oldest bytes of the widest buffer.")
+	liveLogMaxNodes := fs.Int("live-log-max-nodes", controller.DefaultLiveLogMaxNodes,
+		"how many nodes may hold a live log buffer at once. Past it the controller "+
+			"releases the buffer of the node that wrote least recently.")
+	liveLogIdle := fs.Duration("live-log-idle", controller.DefaultLiveLogIdleTimeout,
+		"how long a node that stopped writing without reporting that it finished "+
+			"keeps its live log buffer.")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -84,6 +97,22 @@ func run(args []string) error {
 	}
 	if *argonBudgetMB < 1 {
 		return fmt.Errorf("--argon2-memory-budget-mb must be at least 1")
+	}
+	if *liveLogNodeKB < 1 {
+		return fmt.Errorf("--live-log-node-kb must be at least 1")
+	}
+	if *liveLogTotalMB < 1 {
+		return fmt.Errorf("--live-log-total-mb must be at least 1")
+	}
+	if *liveLogMaxNodes < 1 {
+		return fmt.Errorf("--live-log-max-nodes must be at least 1")
+	}
+	if *liveLogIdle <= 0 {
+		return fmt.Errorf("--live-log-idle must be positive")
+	}
+	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
+		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
+			*liveLogNodeKB, *liveLogTotalMB)
 	}
 	store.SetArgon2MemoryBudget(int64(*argonBudgetMB) << 20)
 
@@ -138,7 +167,8 @@ func run(args []string) error {
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
 		WithCacheURL(*cacheURL).
-		WithMetricsAddr(*metricsAddr)
+		WithMetricsAddr(*metricsAddr).
+		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)

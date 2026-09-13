@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
@@ -80,7 +81,10 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 		if err != nil {
 			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
 		}
-		return s3store.NewLogStore(spec.Bucket, spec.Prefix, client), nil
+		return logbatch.New(
+			s3store.NewLogStore(spec.Bucket, spec.Prefix, client),
+			logBatchOptions(spec)...,
+		), nil
 	case backends.TypeStdout:
 		if err := stdoutlogs.CheckSpec(spec.Bucket, spec.Prefix, spec.Path, spec.URL, spec.URLSource, spec.Token); err != nil {
 			return nil, err
@@ -100,6 +104,17 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 		return nil, unimplemented("logs", spec.Type)
 	default:
 		return nil, fmt.Errorf("logs backend type %q is not recognized", spec.Type)
+	}
+}
+
+// safety: every zero field keeps the package default, so a profile
+// that names none of these keys still batches.
+func logBatchOptions(spec backends.Spec) []logbatch.Option {
+	return []logbatch.Option{
+		logbatch.WithFlushInterval(spec.BatchInterval),
+		logbatch.WithBufferThreshold(spec.BatchBytes),
+		logbatch.WithMaxObjects(spec.MaxLogObjects),
+		logbatch.WithMaxBytes(spec.MaxLogBytes),
 	}
 }
 

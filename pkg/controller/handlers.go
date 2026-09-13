@@ -522,6 +522,7 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.liveLogs.Finish(runID, nodeID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

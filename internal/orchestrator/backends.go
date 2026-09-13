@@ -124,6 +124,15 @@ func resetNodeForAutoRetry(ctx context.Context, state StateBackend, runID, nodeI
 	return resetter.ResetNodeForAutoRetry(ctx, runID, nodeID)
 }
 
+// safety: the close is the write that hands over a node's last lines and
+// ends its live stream, so it has to land before the node's status goes
+// terminal; a reader that acts on the status would otherwise see a short log.
+func handOverNodeLog(ctx context.Context, log NodeLog) {
+	if err := log.Close(); err != nil {
+		sparkwing.Debug(ctx, "close node log: %v", err)
+	}
+}
+
 func bindNodeLogExecutionAttempt(log NodeLog, ordinal int) error {
 	binder, ok := log.(interface{ BindExecutionAttempt(int) error })
 	if !ok {
@@ -271,6 +280,9 @@ var _ StateBackend = (*client.Client)(nil)
 func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
 	if logs == nil {
 		logs = NewHTTPLogsWithToken(remoteLogsURL(c), nil, c.Token(), nil)
+	}
+	if h, ok := logs.(*HTTPLogs); ok {
+		logs = h.WithLiveSink(c)
 	}
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()

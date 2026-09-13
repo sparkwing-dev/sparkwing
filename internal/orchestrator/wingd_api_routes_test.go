@@ -30,6 +30,7 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/pipelines/{name}/profile/contention",
 	"POST /api/v1/pipelines/{name}/profile/observations",
 	"POST /api/v1/pipelines/{name}/profile/waits",
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/logs",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/usage",
 	"POST /api/v1/triggers/{id}/claim",
 	"GET /api/v1/agents",

@@ -3397,6 +3397,90 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/runs/{id}/nodes/{nodeID}/logs:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or logs.read or nodes.claim or triggers.claim
+      tags: [nodes]
+      summary: Read the tail of a running node's log from a byte offset.
+      description: >
+        Serves the controller's in-memory ring for one running node, which is the live view for a deployment whose durable logs surface has no live read of its own. Answers 404 once the node has finished and its ring has been released, which is the reader's signal to use the durable copy.
+
+      parameters:
+        - in: query
+          name: since
+          required: false
+          schema: {type: integer, format: int64}
+          description: Byte offset to read from. Omit for the whole buffer.
+      responses:
+        "200":
+          description: The buffered bytes after the requested offset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LiveLogRead"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      x-sparkwing-scope: runs.state
+      tags: [nodes]
+      summary: Add one batch of a running node's log lines to the live ring.
+      description: >
+        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the logs surface's job; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write.
+
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: {type: string}
+      responses:
+        "204": {description: Accepted.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: The batch exceeds the per-request limit.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/logs/stream:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or logs.read or nodes.claim or triggers.claim
+      tags: [nodes]
+      summary: Follow a running node's log as server-sent events.
+      description: >
+        Streams the controller's live ring for one node, one event per log line, from the offset in `since` or `Last-Event-ID`. Each event carries the next offset as its id, and the stream closes with an `event: stream_end` once the node finishes.
+
+      parameters:
+        - in: query
+          name: since
+          required: false
+          schema: {type: integer, format: int64}
+          description: Byte offset to resume from. Omit to start at the buffer's beginning.
+      responses:
+        "200":
+          description: A server-sent-events stream of log lines.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -3478,6 +3562,24 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    LiveLogRead:
+      x-sparkwing-go-type: pkg/controller.LiveLogRead
+      type: object
+      description: One live read of a running node's log buffer.
+      required: [start, next, data, done]
+      properties:
+        start:
+          type: integer
+          format: int64
+          description: Offset `data` begins at; higher than the requested offset when the ring had already evicted those bytes.
+        next:
+          type: integer
+          format: int64
+          description: Offset to pass to the next read.
+        data: {type: string}
+        done:
+          type: boolean
+          description: The node has finished writing, so `next` will not advance again.
     Error:
       x-sparkwing-go-type: none
       type: object

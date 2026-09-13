@@ -50,6 +50,10 @@ type Cipher interface {
 	Open(envelope string) (string, error)
 }
 func CronIdempotencyKey(scheduleID string, due time.Time) string
+const DefaultLiveLogIdleTimeout = 10 * time.Minute
+const DefaultLiveLogMaxNodes = 1024
+const DefaultLiveLogNodeBytes = 512 << 10
+const DefaultLiveLogTotalBytes = 64 << 20
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
@@ -69,6 +73,15 @@ type GitHubWebhookConfig struct {
 	RepoSecrets map[string]string
 }
 func (c GitHubWebhookConfig) BindingCounts() GitHubWebhookBindingCounts
+type LiveLogRead struct {
+	Start int64
+
+	Next int64
+
+	Data string
+
+	Done bool
+}
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
@@ -155,6 +168,7 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
+func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
@@ -187,4 +201,9 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
+func (l *liveLogs) Append(runID, nodeID string, data []byte)
+func (l *liveLogs) Finish(runID, nodeID string)
+func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
+func (l *liveLogs) Stats() (nodes int, bytes int64)
+func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
 func (r *statusRecorder) WriteHeader(code int)

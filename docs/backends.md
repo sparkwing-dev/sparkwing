@@ -46,6 +46,47 @@ defaults. `sparkwing profile` prints which profile resolved and why.
 | `cache` | `filesystem`, `s3`, `gcs`, `azure-blob`, `controller` | Content-addressed artifact and compiled-binary store |
 | `logs`  | `filesystem`, `s3`, `gcs`, `azure-blob`, `controller`, `stdout` | Per-job log stream persistence |
 
+### Object-store log batching
+
+An object store charges per request, so the `s3` logs surface buffers
+each node's lines and writes one object per flush rather than one per
+line. Four optional keys tune it; every one defaults to a value that
+suits a chatty CI node, and a profile that names none behaves the same
+as one that names the defaults.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `batch_interval` | `2s` | Longest a buffered line waits before its object is written |
+| `batch_bytes` | `262144` | Buffer size that triggers an early flush |
+| `max_log_objects` | `2000` | Objects one node's log may cost |
+| `max_log_bytes` | `67108864` | Bytes one node's log may hold |
+
+```yaml
+profiles:
+  team:
+    logs:
+      type: s3
+      bucket: my-team-sparkwing
+      prefix: logs/
+      batch_interval: 5s
+      batch_bytes: 524288
+```
+
+A flush also lands when a reader asks for the node's log, and when the
+node finishes. The finish flush runs before the node's status is
+written, on the failing and cancelled paths as well as the succeeding
+one, so a node whose status reads terminal has a complete log. Past
+`max_log_objects` or `max_log_bytes` the surface drops further lines and
+ends that node's log with one marker line counting them. A flush the
+object store refuses loses its whole batch; those lines are counted into
+the node's dropped-line total and reported as a `logs_drop` event.
+
+The keys are valid only on an object-store logs surface. A `filesystem`
+surface appends to an open file and a `controller` surface takes a
+streaming append, so neither reads them, and a profile that sets one
+anywhere else is refused at load with the key named. A negative value is
+refused the same way.
+
 State backends correspond to deployment modes. See
 [Deployment modes](deployment-modes.md) for when to pick each:
 
