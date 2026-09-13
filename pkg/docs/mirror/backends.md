@@ -151,11 +151,11 @@ profiles:
 ```
 
 A pipeline compile reads `bin/<hash>` from the sub-spec when one is
-declared and from the cache surface otherwise. `sparkwing pipeline publish
---profile <name>` writes the same destination, so what it uploads is what a
-later run finds; `--artifact-store URL` names a destination outside any
-profile. Only one level is read: a `binaries` block inside a `binaries`
-block is ignored.
+declared and from the cache surface otherwise. The publish command writes
+that same destination when `--profile` names this profile, so what it
+uploads is what a later run finds; its `--artifact-store` URL names a
+destination outside any profile. Only one level is read: a `binaries` block
+inside a `binaries` block is ignored.
 
 ## Migrating from `backends.yaml`
 
