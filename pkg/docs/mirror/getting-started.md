@@ -1,5 +1,23 @@
 # Getting Started
 
+## Two paths
+
+**Local** is the product. Sparkwing is a program on your machine: it
+compiles `.sparkwing/` and runs each job as a host subprocess, keeps state
+in SQLite under `~/.sparkwing/`, and serves its own dashboard. No account,
+no cloud, and the machines you own join a run with `--sw-fleet`. It keeps
+working with the network unplugged.
+
+**Sparkwing Cloud** is a hosted controller for when a team needs one
+dashboard, one run history, and work scheduled across everybody's
+machines. One command connects a repository and a machine to it, and it
+picks up the work when your laptops are closed.
+
+Start local. Read [Install](#install) and [Quick start](#quick-start),
+then [Sparkwing Cloud](#sparkwing-cloud) when you want a team to see the
+same runs. [Advanced deployments](#advanced-deployments) covers hosting
+the state, cache, or controller yourself.
+
 ## Install
 
 ### macOS / Linux
@@ -156,28 +174,6 @@ If you want a local Kubernetes cluster as a deploy target for user apps
 works. Sparkwing does not run in-cluster locally; the controller is a
 prod-only component.
 
-### Storage class
-
-When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),
-the controller provisions a PersistentVolumeClaim for its state DB. A PVC
-that omits `storageClassName` falls back to the cluster's default
-StorageClass; on clusters without one (some bare-metal kubeadm installs,
-fresh kind clusters with the local-path provisioner not installed, etc.)
-the PVC sits `Pending` indefinitely with no clear error.
-
-Set the class explicitly via the chart value:
-
-```bash
-helm install sparkwing charts/sparkwing-full \
-    --set controller.storage.pvc.storageClassName=gp3
-```
-
-Common values: `gp3` (EKS), `standard-rwo` (GKE), `managed-csi` (AKS),
-`standard` (kind/minikube with the default local-path provisioner).
-
-The controller logs a `WARNING` at startup when no PVC declares a class
-and the cluster has no default StorageClass.
-
 ## What `sparkwing pipeline new` Creates
 
 ```
@@ -279,6 +275,103 @@ Step boundaries inside a `Work()` are emitted automatically by each
 dashboard surfaces them as a collapsible bucket. For DAG-level
 composition (parallel, sequence, needs, modifiers), use the `Plan`.
 
+## Run Targets
+
+`sparkwing run` executes locally; `sparkwing pipeline trigger` hands
+execution to a profile's controller. Both take `--profile` to pick where
+state lives and which controller to talk to. `sparkwing run` also takes
+`--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
+tree (trigger runs the source registered with the controller):
+
+```bash
+sparkwing run build                              # run locally with local code
+sparkwing run build --profile dev               # local code, state via "dev"
+sparkwing run build --sw-ref main               # build the main ref locally
+sparkwing pipeline trigger build --profile dev  # run on the "dev" cluster
+sparkwing pipeline trigger build --profile prod # run on the "prod" cluster
+```
+
+Cluster names are profiles. `sparkwing cloud connect` writes one; see
+[Sparkwing Cloud](#sparkwing-cloud). Sparkwing itself
+does not run in-cluster locally - clusters named by `--profile` are
+user-managed deploy targets, not local sparkwing deployments.
+
+## Sparkwing Cloud
+
+Sparkwing Cloud is a controller Sparkwing hosts: it owns the shared
+dashboard, run history, scheduling, webhooks, and tokens, and your
+machines reach it over outbound HTTPS. One command connects this machine
+to it, or to any other controller you can reach:
+
+```bash
+sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+```
+
+It reads an admin token from stdin, mints a user token carrying `runs.read`,
+`runs.write`, `triggers.read`, `logs.read` and `approvals.write`, writes the
+profile into `~/.config/sparkwing/profiles.yaml`, and prints the dashboard URL
+the controller announces along with the same probes `sparkwing configure
+profiles test` runs. The admin token is never stored. Nothing here asks you to
+edit YAML.
+
+The profile is named after the controller host (`api-sparkwing-example`
+above) unless you pass `--name`. Pass a token someone minted for you with
+`--token-stdin` instead of `--admin-token-stdin`. An existing profile of that
+name is replaced only with `--force`, because the token it holds stays live
+until it is revoked.
+
+Add `--set-default` inside a repository to write `defaults.profile` into its
+`.sparkwing/sparkwing.yaml`, so runs in that checkout select the connection
+with no flag. The name resolves against the project's own `profiles:` block
+first and `profiles.yaml` second, so the token stays out of the checkout.
+
+```bash
+sparkwing cloud status --profile prod        # principal, scopes, and probes
+sparkwing cloud disconnect --name prod --admin-token-stdin   # revoke and remove
+```
+
+Disconnect revokes the profile's token. The profile's own token revokes only
+when it carries `admin`, so `--admin-token-stdin` supplies one that does; a
+revoke the credential is not allowed to make leaves the token live and names
+the prefix and the command that finishes the job. `--keep-token` removes the
+profile and touches no credential.
+
+To run work on this machine for that controller, enroll it as a runner with
+`sparkwing cluster runners add --profile prod --name this-laptop`.
+
+## Advanced deployments
+
+Everything below is optional. A team on the two paths above never has to
+read it; reach for one of these when you host the state, cache, or
+controller yourself. Each is one profile away, and pipeline code does not
+change between them.
+
+**Shared object storage.** Runners write run state, cache blobs, and logs
+to one bucket, and coordinate over object-store compare-and-swap with no
+database and no controller. See
+[shared object storage](deployment-modes.md#shared-object-storage-mode-2).
+
+**Postgres and object storage.** Run state moves to a shared Postgres so
+cache reservation, triggers, approvals, and debug pauses rest on a row
+lock rather than the bucket's CAS support. Every runner then holds a
+database credential. See
+[Postgres and object storage](deployment-modes.md#postgres-and-object-storage-mode-3).
+
+**Self-hosted controller.** The `sparkwing-full` Helm chart deploys the
+controller, dashboard, cache, logs service, and Kubernetes runner into a
+cluster you operate. See [Self-hosting](self-hosting.md) and
+[hosted controller](deployment-modes.md#hosted-controller-mode-4).
+
+**One of your own machines as the controller.** A single-instance
+controller on one box, backed by SQLite and local disk, lets a laptop
+point its profile at a desktop you own. See
+[one of your own machines as the controller](deployment-modes.md#one-of-your-own-machines-as-the-controller).
+
+**Profile surface YAML.** The `state` / `cache` / `logs` triple every
+advanced shape selects is documented in
+[Storage backends](backends.md), and the full field list in
+[config-reference.md](config-reference.md).
+
 ## Releasing sparkwing
 
 Sparkwing tags itself via the in-repo `release` pipeline (no consumer
@@ -322,64 +415,3 @@ to origin.
 `sparkwing run release` is the canonical sparkwing-side release path. Don't
 hand-tag and `git push` -- it bypasses the validation gates and makes
 silent releases possible.
-
-## Run Targets
-
-`sparkwing run` executes locally; `sparkwing pipeline trigger` hands
-execution to a profile's controller. Both take `--profile` to pick where
-state lives and which controller to talk to. `sparkwing run` also takes
-`--sw-ref <branch|tag|sha>` to compile a git ref instead of the working
-tree (trigger runs the source registered with the controller):
-
-```bash
-sparkwing run build                              # run locally with local code
-sparkwing run build --profile dev               # local code, state via "dev"
-sparkwing run build --sw-ref main               # build the main ref locally
-sparkwing pipeline trigger build --profile dev  # run on the "dev" cluster
-sparkwing pipeline trigger build --profile prod # run on the "prod" cluster
-```
-
-Cluster names are profiles. `sparkwing cloud connect` writes one; see
-[Connecting to a controller](#connecting-to-a-controller). Sparkwing itself
-does not run in-cluster locally - clusters named by `--profile` are
-user-managed deploy targets, not local sparkwing deployments.
-
-## Connecting to a controller
-
-One command connects this machine to a controller:
-
-```bash
-sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
-```
-
-It reads an admin token from stdin, mints a user token carrying `runs.read`,
-`runs.write`, `triggers.read`, `logs.read` and `approvals.write`, writes the
-profile into `~/.config/sparkwing/profiles.yaml`, and prints the dashboard URL
-the controller announces along with the same probes `sparkwing configure
-profiles test` runs. The admin token is never stored. Nothing here asks you to
-edit YAML.
-
-The profile is named after the controller host (`api-sparkwing-example`
-above) unless you pass `--name`. Pass a token someone minted for you with
-`--token-stdin` instead of `--admin-token-stdin`. An existing profile of that
-name is replaced only with `--force`, because the token it holds stays live
-until it is revoked.
-
-Add `--set-default` inside a repository to write `defaults.profile` into its
-`.sparkwing/sparkwing.yaml`, so runs in that checkout select the connection
-with no flag. The name resolves against the project's own `profiles:` block
-first and `profiles.yaml` second, so the token stays out of the checkout.
-
-```bash
-sparkwing cloud status --profile prod        # principal, scopes, and probes
-sparkwing cloud disconnect --name prod --admin-token-stdin   # revoke and remove
-```
-
-Disconnect revokes the profile's token. The profile's own token revokes only
-when it carries `admin`, so `--admin-token-stdin` supplies one that does; a
-revoke the credential is not allowed to make leaves the token live and names
-the prefix and the command that finishes the job. `--keep-token` removes the
-profile and touches no credential.
-
-To run work on this machine for that controller, enroll it as a runner with
-`sparkwing cluster runners add --profile prod --name this-laptop`.

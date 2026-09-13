@@ -90,7 +90,7 @@ refused the same way.
 State backends correspond to deployment modes. See
 [Deployment modes](deployment-modes.md) for when to pick each:
 
-- `sqlite` -- laptop-local (Mode 1).
+- `sqlite` -- laptop-local; the default when no profile is selected.
 - `s3`, `gcs`, `azure-blob` -- per-run NDJSON state on a shared bucket
   (Mode 2). Cache reservation, approvals, and debug pauses coordinate
   over object-store CAS where the bucket enforces write preconditions

@@ -433,6 +433,19 @@ unlock.
   could not read the process table; the cleanup failure is now a warning naming
   the process group. A cancelled or failing compile reports as before.
 
+### Docs
+
+- **docs:** The user-facing docs lead with two paths. Getting started opens
+  on Local (a program on your machine, and the machines you own through
+  `--sw-fleet`) and Sparkwing Cloud (`sparkwing cloud connect`), and names
+  every other shape in one paragraph under Advanced deployments.
+  `deployment-modes.md` carries the same two paths and groups shared object
+  storage, Postgres, the self-hosted controller, and a peer machine as the
+  controller under Advanced shapes. The README and the docs index open the
+  same way, the sidebar's Infrastructure category is now Advanced and
+  self-hosting, and `cli-cloud.md` joins the CLI reference category. No page
+  or command was removed.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added

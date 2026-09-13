@@ -7,6 +7,23 @@ Pipelines as Go code. The public CLI + SDK for sparkwing.
 > **Status:** pre-release. Tester binaries are available; APIs may change.
 > Pre-1.0; expect churn outside the stable surface (`sparkwing/` package).
 
+## Two paths
+
+**Local.** Sparkwing is a program on your machine. It compiles
+`.sparkwing/`, runs each job as a host subprocess, keeps state in SQLite
+under `~/.sparkwing/`, and serves its own dashboard. No account, no
+cloud, and the machines you own join one run with `--sw-fleet`. Once the
+first build has fetched its modules, it runs with the network unplugged.
+
+**Sparkwing Cloud.** A hosted controller for a team that wants one
+dashboard, one run history, and work scheduled across everybody's
+machines. `sparkwing cloud connect --controller URL` writes the profile
+in one command.
+
+Hosting your own bucket, database, or controller is an
+[advanced deployment](docs/getting-started.md#advanced-deployments), not a
+step on either path.
+
 ## Install
 
 ```sh
@@ -43,6 +60,17 @@ sparkwing run hello
 # Open the local dashboard
 sparkwing serve start
 ```
+
+When a team should see the same runs, connect the machine to Sparkwing
+Cloud:
+
+```sh
+sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+```
+
+It mints a scoped token, writes `~/.config/sparkwing/profiles.yaml`, and
+prints the dashboard URL. See
+[getting-started.md](docs/getting-started.md#sparkwing-cloud).
 
 `sparkwing info` surveys the current repo and suggests next commands.
 `sparkwing docs list` browses the embedded reference (offline,

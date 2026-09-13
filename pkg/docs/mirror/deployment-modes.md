@@ -1,16 +1,16 @@
 # Deployment modes
 
-Sparkwing runs in four distinct deployment shapes, sharing one
-codebase and one configuration file. The shape you pick determines
-who else can see your runs, whether cross-runner caching coordinates,
-and what infrastructure you have to host.
+Two paths carry a reader: **Local** and **Sparkwing Cloud**.
+[Getting started](getting-started.md) walks both. This page is the
+storage-and-coordination taxonomy underneath them, for a team that hosts
+its own state, cache, or controller.
 
-| Mode | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
+| Shape | Infrastructure | Shared dashboard | Coordinated cache | Triggers / approvals / debug pauses | Auth surface |
 | --- | --- | --- | --- | --- | --- |
 | Local | none | -- | -- | -- | filesystem |
+| Hosted controller, Sparkwing Cloud included | controller + DB + object store | yes | yes | yes | tokens / sessions |
 | Shared object storage | object store | yes (read-only) | with CAS¹ | approvals + pauses, with CAS¹ | bucket IAM |
 | Postgres + object storage | object store + Postgres | yes | yes | yes | DB roles + bucket IAM |
-| Hosted controller | controller + DB + object store | yes | yes | yes | tokens / sessions |
 
 ¹ Mode 2 coordinates cross-runner caching, approvals, and debug
 pauses over object-store conditional-write CAS where the bucket
@@ -18,15 +18,14 @@ enforces write preconditions (S3 today). Where it does not, cache
 reservation degrades to last-write-wins, while approvals and debug
 pauses report not-supported and need Mode 3. Pipeline triggers report
 not-supported under Mode 2 whatever the bucket does, and need Mode 3.
-See [Mode 2](#mode-2-shared-object-storage).
+See [shared object storage](#shared-object-storage-mode-2).
 
-Pick the lowest row that meets your requirements. The selection lives in
-the profile you run under -- each profile in
+The selection lives in the profile you run under -- each profile in
 `~/.config/sparkwing/profiles.yaml` carries a `state` / `cache` / `logs`
 triple (see [Storage backends](backends.md)) -- and applies uniformly to
 `sparkwing run`, `sparkwing-web`, and any cluster-side binaries.
 
-## Mode 1: Local
+## Local
 
 SQLite under `~/.sparkwing/state.db`, with per-run logs under
 `~/.sparkwing/runs/<runID>/`. Zero shared
@@ -34,14 +33,42 @@ infrastructure. This is the default behavior -- no profile is selected and
 the built-in local sqlite + filesystem defaults apply -- when no
 `--profile` is given and the project sets no `defaults.profile`.
 
-For: a developer working on pipelines on their own laptop.
+For: a developer working on pipelines on their own laptop, and the other
+machines that developer owns. `sparkwing run <pipeline> --sw-fleet` hands
+nodes of one foreground run to helpers provisioned with
+[`sparkwing fleet`](cli-fleet.md), which keeps the run local to your own
+hardware and needs no controller.
 
 Tradeoff: nobody else can see what you ran.
 
 No configuration needed. `sparkwing run hello` and
-`sparkwing serve start` work out of the box.
+`sparkwing serve start` work out of the box. The path stays open with no
+network once the first build has fetched its modules; see
+[offline after the first build](getting-started.md#offline-after-the-first-build).
 
-## Mode 2: Shared object storage
+## Sparkwing Cloud
+
+A controller Sparkwing runs for you. It owns the shared dashboard, run
+history, scheduling, webhooks, and tokens; your machines reach it over
+outbound HTTPS and never hold a database credential.
+
+```bash
+sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+```
+
+That one command mints a user token, writes the profile, and prints the
+dashboard URL. See
+[connecting to Sparkwing Cloud](getting-started.md#sparkwing-cloud) for
+the flags, and [hosted controller](#hosted-controller-mode-4) below for
+what the controller process does.
+
+## Advanced shapes
+
+The rest of this page is for a team that runs its own bucket, database,
+or controller. Each shape is a profile away: pipeline code does not
+change.
+
+### Shared object storage (Mode 2)
 
 Runners write their run state, cache blobs, and log streams to a
 shared object store. The dashboard reads from the same bucket. No
@@ -124,7 +151,7 @@ profiles:
       prefix: logs
 ```
 
-### What each runner needs beyond the profile
+#### What each runner needs beyond the profile
 
 The profile carries two strings per surface -- `bucket` and `prefix`.
 Everything else is environment, and every runner needs it:
@@ -158,10 +185,10 @@ See [local-execution.md](local-execution.md#per-host-concurrency)
 for the host-local concurrency gate that caps how many `sparkwing run`
 processes a single machine admits at once. The gate is mode-agnostic
 but matters most in Mode 2, where the state backend doesn't
-incidentally serialize overlapping invocations the way Mode 1's SQLite
+incidentally serialize overlapping invocations the way the local path's SQLite
 does.
 
-## Mode 3: Postgres + object storage
+### Postgres and object storage (Mode 3)
 
 Runners write run state to a shared Postgres database and caches /
 logs to a shared object store. The `.Memoize()` DSL routes through
@@ -211,7 +238,7 @@ The Postgres state database is not a browser session backend. Keep this
 controller-free dashboard on a trusted network, or provide a controller URL or
 controller-bearing profile before enabling `--require-login`.
 
-### Schema versioning
+#### Schema versioning
 
 The database records two things: the migrations applied, one
 `sparkwing_schema_version` row each, and the features its schema relies
@@ -245,7 +272,7 @@ mixed-version fleets briefly during a rollout. Mode 4 (hosted
 controller) is the alternative that decouples client and schema
 versions entirely.
 
-### Testing against Postgres
+#### Testing against Postgres
 
 The store's own test suite runs against either dialect.
 `SPARKWING_TEST_STORE=postgres` points every test that opens through the
@@ -257,7 +284,7 @@ store-postgres` sets both against an embedded Postgres it starts and stops
 itself, so proving a store change on this mode's dialect needs neither
 Docker nor a database of your own.
 
-### One-click provisioning
+#### One-click provisioning
 
 A Terraform module under `install/terraform/mode3-postgres` stands up the
 Postgres this mode needs in one `terraform apply`: the database (a single
@@ -269,7 +296,7 @@ You supply the VPC and private subnets; the module places the database
 into networking you already run. Its README covers the variables and how
 to point a runner at the result.
 
-## Mode 4: Hosted controller
+### Hosted controller (Mode 4)
 
 A central controller process owns Postgres + object-store credentials
 and serves the dashboard. Runners (including laptops) talk to it
@@ -284,16 +311,10 @@ Tradeoff: you have to host the controller. Deploy the complete OSS stack with
 the `sparkwing-full` Helm chart. Teams that do not need a shared controller can
 keep pipeline execution and its dashboard local instead.
 
-The "owns Postgres" framing above describes the multi-tenant case;
-the controller's state backend is pluggable. A single-instance
-controller on one box can back its state with SQLite
-(`~/.sparkwing/state.db`) and keep caches and logs on local disk --
-the same storage layout as Mode 1, but fronted by the HTTP controller
-so untrusted clients still never touch the store directly. Solo
-operators and small teams don't need to stand up Postgres to run this
-mode. Reach for Postgres + object storage when you outgrow a single
-box -- more than one controller instance, or state and caches that
-must survive that box.
+The "owns Postgres" framing above describes the multi-tenant case; the
+controller's state backend is pluggable. See
+[one of your own machines as the controller](#one-of-your-own-machines-as-the-controller)
+for the single-box shape.
 
 ```yaml
 # ~/.config/sparkwing/profiles.yaml
@@ -328,7 +349,7 @@ the controller and the logs service on a single mux. When it is wrong,
 every append gets a 404 and the run fails naming the missing service,
 rather than losing the lines silently.
 
-### Watching a run live without the logs service
+#### Watching a run live without the logs service
 
 A deployment whose `logs:` surface is an object store has no live read:
 an object appears only once a batch is flushed, and the store serves no
@@ -339,7 +360,7 @@ runs logs --follow` read that ring while the node runs. The durable
 copy still goes to the bucket, and a read after the node finishes comes
 from there.
 
-The ring is memory, so it is bounded three ways: 512 KiB per node,
+The ring is memory, so every dimension is bounded: 512 KiB per node,
 64 MiB across every node together, and 1024 nodes holding a ring at
 once. Past the byte bounds the oldest bytes of the widest ring go first;
 past the node bound the ring of the node that wrote least recently is
@@ -358,6 +379,19 @@ run actually has can write to a ring.
 A deployment that runs `sparkwing-logs` keeps its own live stream and
 mirrors nothing.
 
+### One of your own machines as the controller
+
+A single-instance controller on one box can back its state with SQLite
+(`~/.sparkwing/state.db`) and keep caches and logs on local disk -- the
+same storage layout as the local path, but fronted by the HTTP
+controller so untrusted clients still never touch the store directly. A
+laptop that points its profile at a desktop you own is this shape: one
+person's own machines, coordinated without an account. Solo operators
+and small teams don't need to stand up Postgres to run it. Reach for
+Postgres + object storage when you outgrow a single box -- more than one
+controller instance, or state and caches that must survive that box. A
+team's fleet coordinates through Sparkwing Cloud instead.
+
 ## Forcing local mode for a single run
 
 `sparkwing run <pipeline> --sw-local-only` ignores the shared surfaces in any
@@ -374,27 +408,31 @@ resolve a profile normally again.
 Profile selection is explicit: pass `--profile NAME`, or set
 `defaults.profile` in `.sparkwing/sparkwing.yaml` for the project's
 default. With neither, no profile is active and the built-in local
-defaults (Mode 1) apply.
+defaults (the local path) apply.
 There is no environment-based auto-selection -- a CI job picks its
 profile by passing `--profile` in the run command (see
 [ci-embedded.md](ci-embedded.md)).
 
-## Choosing a mode
+## Choosing a shape
 
 A practical decision order:
 
-1. **One person, one laptop?** Mode 1.
-2. **Multiple people on S3, fine with bucket-dependent
+1. **One person, on the machines they own?** Local, plus `--sw-fleet`
+   when a run should spread across them.
+2. **A team that wants one dashboard and one run history?**
+   [Sparkwing Cloud](#sparkwing-cloud) -- `sparkwing cloud connect` and
+   nothing to host.
+3. **Multiple people on S3, fine with bucket-dependent
    coordination?** Mode 2 -- a bucket, a shared profile, and the
    per-runner environment that profile does not carry: `AWS_REGION`,
    credentials, and `SPARKWING_S3_ENDPOINT` for a non-AWS store. See
    [what each runner needs](#what-each-runner-needs-beyond-the-profile).
-3. **Expensive cacheable steps where you want reservation guaranteed
+4. **Expensive cacheable steps where you want reservation guaranteed
    regardless of bucket CAS support, or low tail latency under heavy
    contention?** Mode 3 -- add a Postgres on top of Mode 2.
-4. **Untrusted runners (public CI, customer pipelines) or you don't
-   want every runner holding DB credentials?** Mode 4 -- host a
-   controller.
+5. **Untrusted runners (public CI, customer pipelines) or you don't
+   want every runner holding DB credentials, and you want to host the
+   controller yourself?** Mode 4.
 
 You can move between modes by editing a profile (or selecting a
 different one with `--profile`); pipeline code doesn't change.

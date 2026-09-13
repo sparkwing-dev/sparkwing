@@ -7,16 +7,24 @@ these pages; the CLI ships them embedded too (`sparkwing docs read
 
 ## Where to start
 
+Sparkwing has two paths. **Local** is a program on your machine and the
+machines you own; **Sparkwing Cloud** is a hosted controller that gives a
+team one dashboard and one run history.
+[`getting-started.md`](getting-started.md) walks both.
+
 - **New here?** [`getting-started.md`](getting-started.md) -- install,
-  scaffold, run.
+  scaffold, run, then connect to Sparkwing Cloud.
 - **Writing pipelines?** [`sdk.md`](sdk.md) and
   [`pipelines.md`](pipelines.md) cover the Go DSL.
 - **Running in CI?** [`ci-embedded.md`](ci-embedded.md) -- `sparkwing
   run --sw-mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
-- **Self-hosting the dashboard?** [`architecture.md`](architecture.md)
-  - [`deployment.md`](deployment.md).
-- **Self-hosting?** [`self-hosting.md`](self-hosting.md) -- choose direct local
-  execution or the complete Helm deployment.
+- **Hosting the bucket, database, or controller yourself?**
+  [`getting-started.md`](getting-started.md#advanced-deployments) names
+  each shape in a paragraph;
+  [`deployment-modes.md`](deployment-modes.md#advanced-shapes) is the
+  reference and [`self-hosting.md`](self-hosting.md) is the Helm path.
+  [`architecture.md`](architecture.md) and
+  [`deployment.md`](deployment.md) cover the in-cluster picture.
 
 ## Map
 
@@ -31,7 +39,7 @@ docs/
   api.md                 controller HTTP API reference
   architecture.md        in-cluster deployment architecture
   deployment.md          deploy targets, gitops, ArgoCD, registries
-  deployment-modes.md    the deployment shapes and what each gives you
+  deployment-modes.md    the two paths, then the advanced shapes underneath
   self-hosting.md        supported local and Kubernetes deployment paths
   ci-embedded.md         run pipelines inside an existing CI job
   local-execution.md     how local vs remote execution interact
