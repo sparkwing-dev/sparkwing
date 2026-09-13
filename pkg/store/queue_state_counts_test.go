@@ -124,13 +124,80 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 		t.Errorf("balance = %d, want the refund to raise it above %d",
 			settled.BalanceMicro, totals.BalanceMicro)
 	}
-	if settled.BilledSeconds < 0 || settled.BilledSeconds > store.CreditClaimFloorSeconds {
-		t.Errorf("billed seconds = %d, want the net of a reservation the node barely used",
-			settled.BilledSeconds)
+	if settled.SettledSeconds < 0 || settled.SettledSeconds > store.CreditClaimFloorSeconds {
+		t.Errorf("settled seconds = %d, want the net of a reservation the node barely used",
+			settled.SettledSeconds)
 	}
-	if want := settled.BilledSeconds * store.DefaultCreditRateMicro; want != 25_000_000-settled.BalanceMicro {
-		t.Errorf("billed seconds %d price to %d micro, but the balance fell by %d: the seconds and the bill disagree",
-			settled.BilledSeconds, want, 25_000_000-settled.BalanceMicro)
+	if want := settled.SettledSeconds * store.DefaultCreditRateMicro; want != 25_000_000-settled.BalanceMicro {
+		t.Errorf("settled seconds %d price to %d micro, but the balance fell by %d: the seconds and the bill disagree",
+			settled.SettledSeconds, want, 25_000_000-settled.BalanceMicro)
+	}
+}
+
+// A counter that falls reads to Prometheus as a reset, so the settled-seconds
+// figure must not dip anywhere in a node's life: not while a reservation is
+// outstanding, not when usage bills past it, and not when the finish refunds
+// the part the node never used.
+func TestCreditLedgerTotals_SettledSecondsNeverFall(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 200_000_000, "invoice", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	claimant := meteredClaimant(t, s, "pool")
+
+	high := int64(-1)
+	sample := func(stage string) int64 {
+		t.Helper()
+		totals, err := s.CreditLedgerTotals(ctx)
+		if err != nil {
+			t.Fatalf("CreditLedgerTotals at %s: %v", stage, err)
+		}
+		if totals.SettledSeconds < high {
+			t.Errorf("settled seconds fell to %d at %s, having reached %d",
+				totals.SettledSeconds, stage, high)
+		}
+		if totals.SettledSeconds > high {
+			high = totals.SettledSeconds
+		}
+		return totals.SettledSeconds
+	}
+
+	sample("empty ledger")
+	readyNode(t, s, "run-mono", "node-a")
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "holder-mono", time.Minute, nil); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	atClaim := sample("claim")
+	if atClaim > 1 {
+		t.Errorf("settled seconds = %d right after the claim, want the unconsumed reservation held back", atClaim)
+	}
+
+	// safety: rewinding the charge window is how a test advances the clock the
+	// ledger measures against without sleeping through a reservation.
+	rewindChargeWindow(t, s, "run-mono", "node-a", time.Now().Add(-10*time.Second))
+	afterWait := sample("reservation partly consumed")
+	if afterWait < store.CreditClaimFloorSeconds-10 {
+		t.Errorf("settled seconds = %d once the window had 10s left, want near the consumed minute", afterWait)
+	}
+
+	if _, err := s.ChargeNodeCredits(ctx, "run-mono", "node-a", claimant.TokenPrefix, time.Now()); err != nil {
+		t.Fatalf("heartbeat charge: %v", err)
+	}
+	sample("heartbeat")
+
+	if _, err := s.FinalizeNodeCredits(ctx, "run-mono", "node-a", claimant.TokenPrefix, time.Now()); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	atFinish := sample("finish and refund")
+
+	totals, err := s.CreditLedgerTotals(ctx)
+	if err != nil {
+		t.Fatalf("CreditLedgerTotals: %v", err)
+	}
+	if want := atFinish * store.DefaultCreditRateMicro; want != 200_000_000-totals.BalanceMicro {
+		t.Errorf("settled seconds %d price to %d micro but the balance fell by %d",
+			atFinish, want, 200_000_000-totals.BalanceMicro)
 	}
 }
 
@@ -153,12 +220,12 @@ func TestSettledNodeSeconds_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	_, metered, err := s.SettledNodeSeconds(ctx, "run-settled", "metered")
+	_, metering, err := s.SettledNodeSeconds(ctx, "run-settled", "metered")
 	if err != nil {
 		t.Fatalf("SettledNodeSeconds: %v", err)
 	}
-	if !metered {
-		t.Error("a node claimed by a metered credential reported unmetered")
+	if metering != store.MeteringPaid {
+		t.Errorf("metering = %v, want paid for a node a metered credential claimed", metering)
 	}
 
 	readyNode(t, s, "run-settled-local", "plain")
@@ -172,12 +239,12 @@ func TestSettledNodeSeconds_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	if err := s.FinishNode(ctx, "run-settled-local", "plain", "success", "", nil); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
-	seconds, metered, err := s.SettledNodeSeconds(ctx, "run-settled-local", "plain")
+	seconds, metering, err := s.SettledNodeSeconds(ctx, "run-settled-local", "plain")
 	if err != nil {
 		t.Fatalf("SettledNodeSeconds: %v", err)
 	}
-	if metered {
-		t.Error("a node claimed by a credential the operator never metered reported metered")
+	if metering != store.MeteringUnknown {
+		t.Errorf("metering = %v, want unknown for a node whose claim credential is not on file", metering)
 	}
 	if seconds < 0 {
 		t.Errorf("seconds = %v, want a non-negative wall time", seconds)

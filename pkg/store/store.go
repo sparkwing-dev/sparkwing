@@ -1048,6 +1048,9 @@ var observabilityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_nodes_outstanding
     ON nodes(status, ready_at, claimed_by)
     WHERE ` + nodeNotDone + `;
+CREATE INDEX IF NOT EXISTS idx_nodes_credit_window
+    ON nodes(credit_charged_through)
+    WHERE credit_charged_through != 0;
 CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
     ON credit_grants(kind, amount_micro);
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
@@ -4933,7 +4936,7 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
        offer_priority_target = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_base_priority = 0, claim_priority = 0, claim_worker_id = '', claim_executor_kind = '',
        claim_reservation_id = '', claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL, claim_generation = 0,
        coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        credit_charged_through = 0,
@@ -7511,26 +7514,46 @@ func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, err
 	}, nil
 }
 
-// SettledNodeSeconds reports the wall seconds one finished node ran and
-// whether the credential that claimed it was metered. The node's own claim
-// carries the answer, so a caller that settles a node on behalf of another
-// principal still attributes the work to the runner that did it.
-func (s *Store) SettledNodeSeconds(ctx context.Context, runID, nodeID string) (seconds float64, metered bool, err error) {
+// NodeMetering says whether the credential that claimed a node was metered.
+type NodeMetering int
+
+const (
+	// MeteringUnknown means the claiming credential is no longer on file, so
+	// the node is attributed to neither side rather than guessed at.
+	MeteringUnknown NodeMetering = iota
+	// MeteringFree is a credential the operator never marked metered.
+	MeteringFree
+	// MeteringPaid is a metered credential, whose work the ledger bills.
+	MeteringPaid
+)
+
+// SettledNodeSeconds reports the wall seconds one finished node ran and how the
+// credential that claimed it was metered. The node's own claim carries the
+// answer, so a caller that settles a node on behalf of another principal still
+// attributes the work to the runner that did it.
+func (s *Store) SettledNodeSeconds(ctx context.Context, runID, nodeID string) (float64, NodeMetering, error) {
 	var startedAt, finishedAt sql.NullInt64
-	var meteredFlag sql.NullBool
-	err = s.queryRow(ctx,
+	var metered sql.NullBool
+	err := s.queryRow(ctx,
 		`SELECT started_at, finished_at,
                         (SELECT metered FROM tokens WHERE prefix = nodes.claim_token_prefix)
                    FROM nodes WHERE run_id = ? AND node_id = ?`,
 		runID, nodeID,
-	).Scan(&startedAt, &finishedAt, &meteredFlag)
+	).Scan(&startedAt, &finishedAt, &metered)
 	if err != nil {
-		return 0, false, err
+		return 0, MeteringUnknown, err
+	}
+	metering := MeteringUnknown
+	if metered.Valid {
+		metering = MeteringFree
+		if metered.Bool {
+			metering = MeteringPaid
+		}
 	}
 	if !startedAt.Valid || !finishedAt.Valid || finishedAt.Int64 <= startedAt.Int64 {
-		return 0, meteredFlag.Bool, nil
+		return 0, metering, nil
 	}
-	return time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds(), meteredFlag.Bool, nil
+	return time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds(), metering, nil
 }
 
 // CountActiveRunners counts distinct claimed_by within `window`.

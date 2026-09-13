@@ -372,10 +372,12 @@ type CreditLedgerTotals struct {
 	// RefundedMicro is the unused reservation tail returned at finish,
 	// reported as a positive amount.
 	RefundedMicro int64
-	// BilledSeconds is the net runner seconds the ledger charged for:
-	// reservations plus usage less refunds. It is the seconds side of
-	// BalanceMicro, so a report drawn from it cannot disagree with the bill.
-	BilledSeconds int64
+	// SettledSeconds is the runner seconds the ledger has finished charging
+	// for: every charge row less the part of an open reservation a finish
+	// would still refund. A reservation therefore enters this total as the
+	// node consumes it rather than all at once, so the figure only ever
+	// grows and a caller may export it as a counter.
+	SettledSeconds int64
 }
 
 // CreditLedgerTotals reports the ledger's lifetime sums under one read
@@ -401,7 +403,7 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro); err != nil {
 		return out, err
 	}
-	var settled int64
+	var settled, charged int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
@@ -411,9 +413,27 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
                    FROM credit_charges`,
 		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
 	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro,
-		&settled, &out.BilledSeconds); err != nil {
+		&settled, &charged); err != nil {
 		return out, err
 	}
+
+	// safety: a reservation is charged up front and refunded at finish, so
+	// counting it whole would make the seconds total fall by the refund. The
+	// part a finish right now would still return is held back instead, which
+	// is what makes the remainder a figure that only grows.
+	now := time.Now().UnixNano()
+	var refundable int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN credit_charged_through > ?
+                                         THEN (credit_charged_through - ?) / ?
+                                         ELSE 0 END), 0)
+                   FROM nodes WHERE credit_charged_through != 0`,
+		now, now, int64(time.Second),
+	).Scan(&refundable); err != nil {
+		return out, err
+	}
+	out.SettledSeconds = charged - refundable
+
 	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - settled
 	return out, tx.Commit()
 }
