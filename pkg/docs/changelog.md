@@ -82,10 +82,17 @@ unlock.
   /admin/store-ceiling/measure` to walk the trees now and `POST
   /admin/store-ceiling/thaw` to accept uploads until the next
   measurement. A thaw is refused with `409` when no measurement is
-  scheduled, because nothing would end it. A measurement is bounded at a
-  thousand listings and half the interval, and one that stops early is
-  discarded rather than folded in, leaving `measurement_incomplete`
-  behind.
+  scheduled, because nothing would end it, and the refusal names the
+  route that does work. A measurement is bounded at
+  `--bucket-measure-pages` listings (env
+  `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES`, 1000 by default, a
+  thousand objects each) and half the interval, and the services' own
+  walks stop with their context; one that stops early is discarded
+  rather than folded in, leaving `measurement_incomplete` behind on
+  health and in
+  `sparkwing_object_store_bucket_ceiling_measurement_incomplete`. The
+  cache's measure route answers `202` and walks off the request path, as
+  does the walk a log-run deletion triggers.
 - **cache:** `sparkwing-cache --max-artifact-bytes` and
   `--max-cache-archive-bytes` (env `SPARKWING_CACHE_MAX_ARTIFACT_BYTES`,
   `SPARKWING_CACHE_MAX_ARCHIVE_BYTES`) set the size cap for one uploaded

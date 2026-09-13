@@ -346,6 +346,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_bucket_ceiling_frozen` | Gauge | 1 while the bucket is over its ceiling and object writes are refused |
 | `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | Times the bucket crossed its ceiling and began refusing object writes |
 | `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | Object writes the ceiling refused |
+| `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | 1 while the last measurement stopped early and was discarded |
 
 The `route` label is the pattern the controller registered the request
 against, so every path parameter reaches Prometheus in its declared form
@@ -481,6 +482,7 @@ sees no change. Set the controller's with:
 | `--warn-bucket-objects` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | Objects at which health reports a warning |
 | `--bucket-reconcile` | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | Gap between bucket measurements, hourly by default |
 | `--bucket-store` | `SPARKWING_OBJECT_STORE_URL` | Store URL the measurement reads, such as `s3://bucket/prefix` |
+| `--bucket-measure-pages` | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | Listings one measurement may spend, 1000 by default |
 
 Counting costs nothing per request. Every write the process sends adds
 its own bytes to a running total, and the controller replaces that total
@@ -513,16 +515,18 @@ lease, so N replicas cost one listing rather than N. The measurement's
 requests sit outside the object-store request budget, because totalling
 a million-object bucket spends twice the per-minute list budget in one
 pass and would otherwise leave every other reader refused for the rest
-of the minute. And the walk itself is bounded, at a thousand listings
-and at half the reconciliation interval, whichever comes first.
+of the minute. And the walk itself is bounded, at `--bucket-measure-pages` listings
+(1000 by default, a thousand objects each) and at half the
+reconciliation interval, whichever comes first.
 
 A measurement that stops at either bound is discarded rather than folded
 in, because a total short of the truth would thaw a store that is still
 full. The ceiling then reports `measurement_incomplete` on health and in
 `sparkwing_object_store_bucket_ceiling_measurement_incomplete`, and
 keeps counting writes until a measurement finishes. A bucket that keeps
-reporting incomplete wants a longer `--bucket-reconcile`, a narrower
-prefix, or S3 Inventory in place of the listing.
+reporting incomplete wants a higher `--bucket-measure-pages`, which is
+the bound that binds first, and then a narrower prefix or S3 Inventory
+in place of the listing.
 
 `GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
 `warning` alone, because that route answers without a token; the totals
@@ -568,7 +572,9 @@ and an error naming its own flags.
 
 Each service counts what it stores as it stores it and walks its own
 trees on `--store-reconcile` (hourly by default, `0` measures once at
-startup). The walk is local file I/O rather than billed requests, and a
+startup). The walk is local file I/O rather than billed requests, it
+stops when the service's context does and reports the total as partial
+rather than folding a short one in, and a
 measurement that finds the store back under its ceiling thaws it.
 `--warn-store-bytes` and `--warn-store-objects` mark the store as
 warning on health without refusing anything. The chart carries all of
@@ -578,8 +584,12 @@ Neither service waits out the interval to recover. Deleting a run with
 `DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
 `--retention`, measures the log store again on the spot. The cache
 serves no delete of its own, so it carries two bearer-gated admin
-routes: `POST /admin/store-ceiling/measure` walks the trees now, which
-is what turns freeing space on the volume into uploads flowing again,
-and `POST /admin/store-ceiling/thaw` accepts uploads until the next
-measurement. Both answer with the ceiling state, and the thaw is refused
-with `409` when no measurement is scheduled.
+routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
+what turns freeing space on the volume into uploads flowing again, and
+`POST /admin/store-ceiling/thaw` accepts uploads until the next
+measurement. The measure route answers `202` with the state as it stands
+and walks off the request path, so the caller pays no latency for a
+large store and a disconnect cannot abandon the walk; one runs at a
+time. The thaw is refused with `409` when no measurement is scheduled,
+and the refusal points at the measure route. Deleting a run on the logs
+service triggers the same off-request walk.
