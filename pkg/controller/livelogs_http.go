@@ -128,14 +128,16 @@ func (s *Server) handleStreamNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		cancel()
 		if !ok {
 			if r.Context().Err() == nil {
-				writeLiveLogSSE(out, since, liveLogReleasedMarker)
-				_ = out.Flush()
+				if err := emitLiveLogSSE(out, since, liveLogReleasedMarker); err != nil {
+					return
+				}
 			}
 			return
 		}
 		if chunk.Start > want {
-			writeLiveLogSSE(out, chunk.Start, liveLogGapMarker(chunk.Start-want))
-			_ = out.Flush()
+			if err := emitLiveLogSSE(out, chunk.Start, liveLogGapMarker(chunk.Start-want)); err != nil {
+				return
+			}
 			partial = ""
 		}
 		since = chunk.Next
@@ -157,7 +159,9 @@ func (s *Server) handleStreamNodeLiveLog(w http.ResponseWriter, r *http.Request)
 			if _, err := fmt.Fprint(out, "event: stream_end\ndata: {}\n\n"); err != nil {
 				return
 			}
-			_ = out.Flush()
+			if err := out.Flush(); err != nil {
+				return
+			}
 			return
 		}
 		if time.Since(lastWrite) >= liveLogKeepalive {
@@ -202,9 +206,23 @@ func liveLogGapMarker(dropped int64) string {
 		dropped)
 }
 
+type liveLogSink interface {
+	io.Writer
+	Flush() error
+}
+
 func writeLiveLogSSE(out io.Writer, id int64, line string) error {
 	_, err := fmt.Fprintf(out, "id: %d\ndata: %s\n\n", id, liveLogSSEEscape(line))
 	return err
+}
+
+// safety: a marker the reader has to see is flushed with its event, so
+// it does not sit in the buffer behind the next wait.
+func emitLiveLogSSE(out liveLogSink, id int64, line string) error {
+	if err := writeLiveLogSSE(out, id, line); err != nil {
+		return err
+	}
+	return out.Flush()
 }
 
 func liveLogSSEEscape(s string) string {

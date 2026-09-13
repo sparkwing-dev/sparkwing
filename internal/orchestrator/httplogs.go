@@ -383,7 +383,14 @@ func (l *httpNodeLog) Close() error {
 	ctx, cancel := context.WithTimeout(l.ctx, httpNodeLogFinishTimeout)
 	defer cancel()
 	if l.live != nil {
-		_ = l.live.Close()
+		if lerr := l.live.Close(); lerr != nil {
+			l.logger.Warn(
+				"live log mirror did not flush its last batch; the durable copy is unaffected",
+				"run_id", l.runID,
+				"node_id", l.nodeID,
+				"err", lerr,
+			)
+		}
 	}
 	err := storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
 	l.collectFlushLosses()

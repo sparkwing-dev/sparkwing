@@ -40,6 +40,7 @@ type liveLogStore struct {
 func (l *liveLogStore) Append(_ context.Context, runID, nodeID string, data []byte) error {
 	ctx, cancel := context.WithTimeout(l.ctx, liveLogPostTimeout)
 	defer cancel()
+	//nolint:contextcheck // the batcher flushes on a ticker whose context carries no claim fence; only l.ctx has one.
 	return l.sink.AppendNodeLiveLog(ctx, runID, nodeID, data)
 }
 

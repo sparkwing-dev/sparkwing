@@ -247,7 +247,7 @@ func copySSEStream(ctx context.Context, rc io.Reader, nodeID string, multi *atom
 		if multi.Load() {
 			fmt.Fprintf(out, "[%s] ", nodeID)
 		}
-		_, _ = io.WriteString(out, payload)
+		fmt.Fprint(out, payload)
 		fmt.Fprintln(out)
 		mu.Unlock()
 	}

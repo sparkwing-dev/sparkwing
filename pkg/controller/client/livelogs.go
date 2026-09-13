@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 )
@@ -96,14 +97,28 @@ func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, si
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+		closeDrained(resp.Body)
 		return nil, ErrNoLiveLog
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		closeDrained(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("live log stream %d: %w", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("live log stream %d: %s", resp.StatusCode, bytes.TrimSpace(body))
 	}
 	return resp.Body, nil
+}
+
+// safety: the one sanctioned place this package loses a response-body
+// error. The body is already being abandoned, so a drain or close that
+// fails costs a pooled connection and nothing the caller can act on.
+func closeDrained(body io.ReadCloser) {
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		slog.Debug("discarding a live log response body failed", "err", err)
+	}
+	if err := body.Close(); err != nil {
+		slog.Debug("closing a live log response body failed", "err", err)
+	}
 }

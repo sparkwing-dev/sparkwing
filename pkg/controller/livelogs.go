@@ -282,11 +282,9 @@ func (l *liveLogs) dropOldestLocked(r *liveRing, want int) {
 		r.buf = r.buf[:0]
 		return
 	}
-	cut := want
+	cut := len(r.buf)
 	if i := bytes.IndexByte(r.buf[want:], '\n'); i >= 0 {
 		cut = want + i + 1
-	} else {
-		cut = len(r.buf)
 	}
 	r.buf = append(r.buf[:0], r.buf[cut:]...)
 	r.start += int64(cut)
