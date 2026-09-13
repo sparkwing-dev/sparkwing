@@ -31,6 +31,18 @@ unlock.
   installer it displaced now lives at `install/service-install.sh`, unchanged.
   See [installer paths](docs/migrations/_unreleased.md#installer-paths).
 
+### Fixed
+
+- **sdk:** `sparkwing/git.Clone` falls back to upstream on any gitcache
+  failure, which is what its documentation has always promised. It fell back
+  only for a 401, a 3xx, or a credential prompt, and the cache's own answer for
+  a repository it does not serve is a 404 that git reports as
+  "repository not found" -- so on a machine where a gitcache answered, every
+  `Clone` failed outright rather than cloning from upstream. `Clone` still asks
+  the cache for a name nothing registers, so the cache serves none of its
+  clones yet; it now costs a failed request and a stderr notice instead of the
+  clone.
+
 ### Security
 
 - **install:** The public installer refuses a release it cannot authenticate.
