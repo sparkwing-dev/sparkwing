@@ -13,7 +13,7 @@ import (
 func ceilingLimiter(t *testing.T, limit objectguard.CeilingLimit) *objectguard.Limiter {
 	t.Helper()
 	cfg := testConfig(0, 0)
-	cfg.Ceiling = objectguard.CeilingConfig{Limit: limit}
+	cfg.Ceiling = objectguard.CeilingConfig{Limit: limit, Reconcile: time.Hour}
 	return objectguard.New(cfg)
 }
 
@@ -109,14 +109,14 @@ func TestCeilingThawIsManualAndRefreezesOnTheNextMeasurement(t *testing.T) {
 	c := l.Ceiling()
 	c.Observe(objectguard.Usage{Bytes: 1, Objects: 5})
 
-	if !c.Thaw() {
-		t.Fatal("Thaw reports nothing was frozen on a frozen bucket")
+	if thawed, err := c.Thaw(); err != nil || !thawed {
+		t.Fatalf("Thaw on a frozen bucket: thawed=%t err=%v", thawed, err)
 	}
 	if err := l.Allow(objectguard.ClassPut); err != nil {
 		t.Fatalf("a manually thawed bucket still refuses writes: %v", err)
 	}
-	if c.Thaw() {
-		t.Error("Thaw reports a freeze cleared on a bucket that was already thawed")
+	if thawed, err := c.Thaw(); err != nil || thawed {
+		t.Errorf("Thaw on an already thawed bucket: thawed=%t err=%v", thawed, err)
 	}
 
 	c.Observe(objectguard.Usage{Bytes: 1, Objects: 5})
@@ -208,8 +208,8 @@ func TestThawHoldsUntilTheNextMeasurement(t *testing.T) {
 	l := ceilingLimiter(t, objectguard.CeilingLimit{MaxBytes: 1000})
 	c := l.Ceiling()
 	c.Observe(objectguard.Usage{Bytes: 4096, Objects: 2})
-	if !c.Thaw() {
-		t.Fatal("Thaw reports nothing was frozen on a frozen bucket")
+	if thawed, err := c.Thaw(); err != nil || !thawed {
+		t.Fatalf("Thaw on a frozen bucket: thawed=%t err=%v", thawed, err)
 	}
 
 	for range 5 {
@@ -340,5 +340,83 @@ func TestCeilingConfigFromEnvRejectsAMalformedCeiling(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error %q does not name %s", err, name)
 		}
+	}
+}
+
+func TestThawIsRefusedWhenNoMeasurementIsScheduled(t *testing.T) {
+	c := objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 100},
+		Reconcile: 0,
+	})
+	c.Observe(objectguard.Usage{Bytes: 4096, Objects: 2})
+
+	thawed, err := c.Thaw()
+	if err == nil {
+		t.Fatal("a thaw was accepted with no measurement to end it")
+	}
+	if !errors.Is(err, objectguard.ErrNoMeasurementScheduled) {
+		t.Errorf("refusal %v does not match ErrNoMeasurementScheduled", err)
+	}
+	if thawed {
+		t.Error("the refused thaw still reported clearing the freeze")
+	}
+	if !c.Frozen() {
+		t.Error("the refused thaw cleared the freeze anyway")
+	}
+}
+
+func TestThawIsAllowedOnAnUnlimitedCeilingWithNoSchedule(t *testing.T) {
+	c := objectguard.NewCeiling(objectguard.CeilingConfig{Reconcile: 0})
+	if _, err := c.Thaw(); err != nil {
+		t.Errorf("a thaw on an unlimited store was refused: %v", err)
+	}
+}
+
+func TestPartialMeasurementIsDiscardedAndReported(t *testing.T) {
+	c := objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 1000},
+		Reconcile: time.Hour,
+	})
+	c.Observe(objectguard.Usage{Bytes: 4096, Objects: 9})
+
+	err := c.ReconcileWith(context.Background(), func(context.Context) (objectguard.Usage, error) {
+		return objectguard.Usage{Bytes: 10, Objects: 1, Partial: true}, nil
+	})
+	if !errors.Is(err, objectguard.ErrMeasurementPartial) {
+		t.Fatalf("ReconcileWith error = %v, want it to match ErrMeasurementPartial", err)
+	}
+	state := c.State()
+	if state.Bytes != 4096 {
+		t.Errorf("a partial total of 10 bytes replaced the measured 4096: %d", state.Bytes)
+	}
+	if !state.Frozen {
+		t.Error("a partial measurement thawed a store that is still over its ceiling")
+	}
+	if !state.Incomplete {
+		t.Error("the ceiling does not report its measurement as incomplete")
+	}
+
+	if err := c.ReconcileWith(context.Background(), func(context.Context) (objectguard.Usage, error) {
+		return objectguard.Usage{Bytes: 10, Objects: 1}, nil
+	}); err != nil {
+		t.Fatalf("ReconcileWith: %v", err)
+	}
+	if c.State().Incomplete {
+		t.Error("a complete measurement left the incomplete mark standing")
+	}
+}
+
+func TestFailedMeasurementMarksTheCeilingIncomplete(t *testing.T) {
+	c := objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 1000},
+		Reconcile: time.Hour,
+	})
+	if err := c.ReconcileWith(context.Background(), func(context.Context) (objectguard.Usage, error) {
+		return objectguard.Usage{}, errors.New("bucket unreachable")
+	}); err == nil {
+		t.Fatal("a failed measurement reported success")
+	}
+	if !c.State().Incomplete {
+		t.Error("a failed measurement left the ceiling reporting a good total")
 	}
 }

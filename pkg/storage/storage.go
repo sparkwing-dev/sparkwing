@@ -124,6 +124,11 @@ type StoreUsage struct {
 	Bytes      int64
 	Objects    int64
 	ObservedAt time.Time
+	// Partial marks a total the store stopped measuring early, because
+	// it hit its page cap or the caller's deadline. A partial total is
+	// short of the truth, so a caller bounding storage discards it
+	// rather than acting on it.
+	Partial bool
 }
 
 // UsageReporter is the optional capability an [ArtifactStore] exposes

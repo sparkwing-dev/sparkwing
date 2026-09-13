@@ -109,7 +109,15 @@ type Usage struct {
 	Bytes      int64     `json:"bytes"`
 	Objects    int64     `json:"objects"`
 	ObservedAt time.Time `json:"observed_at,omitzero"`
+	// Partial marks a total the measurement could not finish, because
+	// it ran out of pages or time. A partial total is smaller than the
+	// truth, so folding it in would thaw a store that is still full.
+	Partial bool `json:"partial,omitempty"`
 }
+
+// ErrMeasurementPartial reports a measurement that stopped before it
+// had seen the whole store.
+var ErrMeasurementPartial = errors.New("store measurement did not finish")
 
 // CeilingState is the ceiling at a point in time, as the health route
 // and the metrics collector report it.
@@ -135,6 +143,9 @@ type CeilingState struct {
 	FrozenReason CeilingReason `json:"frozen_reason,omitempty"`
 	Freezes      uint64        `json:"freezes_total"`
 	Refused      uint64        `json:"refused_total"`
+	// Incomplete is true when the last measurement stopped early and
+	// was discarded, which leaves the counters as the only total.
+	Incomplete bool `json:"measurement_incomplete"`
 }
 
 // Ceiling holds a bucket to a total size and a total object count.
@@ -166,6 +177,7 @@ type Ceiling struct {
 	frozenReason CeilingReason
 	frozenOn     int64
 	thawed       bool
+	incomplete   bool
 	freezes      uint64
 	refused      uint64
 
@@ -253,6 +265,7 @@ func (c *Ceiling) Observe(u Usage) {
 	c.counted = at.UTC()
 	c.reconciled = c.counted
 	c.thawed = false
+	c.incomplete = false
 	c.evaluateLocked()
 }
 
@@ -327,22 +340,35 @@ func (c *Ceiling) Frozen() bool {
 	return c.frozen
 }
 
+// ErrNoMeasurementScheduled reports a thaw refused because nothing
+// would ever end it.
+var ErrNoMeasurementScheduled = errors.New("no further measurement is scheduled")
+
 // Thaw clears a freeze and reports whether one was in place. It holds
 // until the next measurement: writes counted in the meantime do not
 // freeze the bucket again, so the thaw buys the whole window an
 // operator needs to delete objects or raise the ceiling. The next
 // measurement decides, and freezes again while the bucket is still over
 // the ceiling.
-func (c *Ceiling) Thaw() bool {
+//
+// It is refused when no measurement is scheduled, because a thaw that
+// nothing ends is the ceiling switched off for the life of the process
+// without saying so. Schedule one, or raise the ceiling instead.
+func (c *Ceiling) Thaw() (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.limit.Enforced() && c.reconcile <= 0 {
+		return false, fmt.Errorf(
+			"%w, so a thaw would leave the ceiling off until this process restarts: "+
+				"set a reconciliation interval, or raise the ceiling instead", ErrNoMeasurementScheduled)
+	}
 	was := c.frozen
 	c.frozen = false
 	c.frozenReason = ""
 	c.frozenAt = time.Time{}
 	c.frozenOn = 0
 	c.thawed = true
-	return was
+	return was, nil
 }
 
 // State snapshots the ceiling for the health route and metrics.
@@ -366,6 +392,7 @@ func (c *Ceiling) State() CeilingState {
 		FrozenReason: c.frozenReason,
 		Freezes:      c.freezes,
 		Refused:      c.refused,
+		Incomplete:   c.incomplete,
 	}
 	if c.reconcile > 0 {
 		st.Reconcile = c.reconcile.String()
@@ -378,19 +405,36 @@ func (c *Ceiling) State() CeilingState {
 // billed per thousand objects.
 type UsageSource func(context.Context) (Usage, error)
 
-// ReconcileWith measures the bucket through src and folds the result
+// ReconcileWith measures the store through src and folds the result
 // into the ceiling. It is a no-op when no ceiling is set, so an
 // unlimited install never pays for a listing.
+//
+// A measurement that reports itself partial is discarded rather than
+// folded in: a total short of the truth would thaw a store that is
+// still over its ceiling. The ceiling then reports itself incomplete
+// and keeps counting writes.
 func (c *Ceiling) ReconcileWith(ctx context.Context, src UsageSource) error {
 	if src == nil || !c.Enforced() {
 		return nil
 	}
 	u, err := src(ctx)
 	if err != nil {
-		return fmt.Errorf("measure bucket usage: %w", err)
+		c.markIncomplete()
+		return fmt.Errorf("measure store usage: %w", err)
+	}
+	if u.Partial {
+		c.markIncomplete()
+		return fmt.Errorf("measure store usage: %w after %d bytes in %d objects",
+			ErrMeasurementPartial, u.Bytes, u.Objects)
 	}
 	c.Observe(u)
 	return nil
+}
+
+func (c *Ceiling) markIncomplete() {
+	c.mu.Lock()
+	c.incomplete = true
+	c.mu.Unlock()
 }
 
 func ceilingEnv(r CeilingReason) string {
