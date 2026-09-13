@@ -42,3 +42,6 @@ internal/web/next-out/*
 /doccheck
 
 /internal/web/.build-state/
+
+# pipeline cache and lock files a local run writes beside the package it ran in
+**/.sparkwing/cache/
