@@ -24,7 +24,7 @@ func (Gate) ShortHelp() string {
 }
 
 func (Gate) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and on the staged change, no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. The git pre-push hook runs this pipeline; the far cheaper source-policy subset runs at pre-commit."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. The git pre-push hook runs this pipeline; the far cheaper source-policy subset runs at pre-commit."
 }
 
 func (Gate) Examples() []sparkwing.Example {
@@ -143,8 +143,34 @@ func runFrontendBrowser(ctx context.Context) error {
 }
 
 func checkComments(ctx context.Context) error {
-	_, err := sparkwing.Bash(ctx, `go run ./internal/commentcheck -staged .`).Run()
+	command, scope, err := commentCheckCommand(ctx)
+	if err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "comments: %s", scope)
+	_, err = sparkwing.Bash(ctx, command).Run()
 	return err
+}
+
+func commentCheckCommand(ctx context.Context) (command, scope string, err error) {
+	// safety: -staged gates an empty diff on a branch whose work is already
+	// committed, so the step passes locally and the hosted gate, which stages
+	// the whole push, fails the same comments after the fast-forward.
+	staged, err := stagedNames(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("list the staged change: %w", err)
+	}
+	if len(staged) > 0 {
+		return "go run ./internal/commentcheck -staged .",
+			fmt.Sprintf("%d staged Go file(s)", len(existingGoFiles(staged))), nil
+	}
+	base, err := resolveGateBase(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return "go run ./internal/commentcheck -base " + base + " .",
+		fmt.Sprintf("nothing staged, so the change since %s (%s) and every untracked Go file",
+			gateBaselineRef, base), nil
 }
 
 var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
@@ -164,7 +190,7 @@ var homeRules = []homeRule{
 		pattern: homeEnvRead,
 		allowed: map[string]string{
 			"internal/paths/paths.go":      "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
-			"pkg/storage/storeurl/spec.go": "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the same rule including the redirect",
+			"pkg/storage/storeurl/spec.go": "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the sandbox redirect",
 		},
 		advice: "Call internal/paths.DefaultPaths() instead, which honors SPARKWING_HOME the same way and adds the test-sandbox redirect that keeps a test binary out of the developer's real ~/.sparkwing.",
 	},
@@ -173,7 +199,7 @@ var homeRules = []homeRule{
 		pattern: homeDirJoin,
 		allowed: map[string]string{
 			"internal/paths/paths.go":             "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
-			"pkg/storage/storeurl/spec.go":        "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the same rule including the redirect",
+			"pkg/storage/storeurl/spec.go":        "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the sandbox redirect",
 			"internal/configguard/configguard.go": "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
 		},
 		advice: "Call internal/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
@@ -270,7 +296,7 @@ func runFormatters(ctx context.Context) error {
 }
 
 func changeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {
-	staged, err := listNames(ctx, `diff --cached -z --name-only --diff-filter=ACMR`)
+	staged, err := stagedNames(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the staged change: %w", err)
 	}
@@ -332,13 +358,47 @@ func listNames(ctx context.Context, args string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return splitNULNames(out), nil
+}
+
+func stagedNames(ctx context.Context) ([]string, error) {
+	cmd := sparkwing.Bash(ctx, "git -c core.quotePath=false diff --cached -z --name-only --diff-filter=ACMR")
+	// safety: the CLI unbinds GIT_INDEX_FILE at startup and records it here, so
+	// the commit a hook is building lives in $SPARKWING_GATE_INDEX. Reading the
+	// repository index instead reports `git commit -a` as staging nothing, and
+	// every scoped step then widens to the branch range.
+	if index := hookIndex(); index != "" {
+		cmd = cmd.Env("GIT_INDEX_FILE", index)
+	}
+	out, err := cmd.String()
+	if err != nil {
+		return nil, err
+	}
+	return splitNULNames(out), nil
+}
+
+func hookIndex() string {
+	if os.Getenv("GIT_INDEX_FILE") != "" {
+		return ""
+	}
+	path := os.Getenv(gateIndexVar)
+	if path == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
+func splitNULNames(out string) []string {
 	var names []string
 	for _, name := range strings.Split(out, "\x00") {
 		if name != "" {
 			names = append(names, name)
 		}
 	}
-	return names, nil
+	return names
 }
 
 func existingGoFiles(all []string) []string {
@@ -387,10 +447,16 @@ func checkDocsMirror(ctx context.Context) error {
 	return nil
 }
 
+const gateIndexVar = "SPARKWING_GATE_INDEX"
+
 var productTestUnset = []string{
 	wingwire.LeaseTokenEnv,
 	wingwire.ChildLeaseTokenEnv,
 	"GIT_INDEX_FILE",
+	// safety: a node process carries this run's home, which for an ordinary
+	// gate is the operator's own. A test binary that inherits it opens the
+	// real runs store instead of the sandbox internal/paths gives it.
+	"SPARKWING_HOME",
 }
 
 func withoutInherited(cmd string, names []string) string {

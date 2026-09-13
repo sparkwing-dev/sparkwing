@@ -137,6 +137,21 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 	if qs.ExternalMeasurementAgeMS > 0 {
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
+	if a := qs.ExternalAttribution; a != nil {
+		for _, row := range []struct {
+			key   string
+			count int64
+		}{
+			{"samples", a.Samples},
+			{"attributed", a.Attributed},
+			{"sampler-unreadable", a.SamplerUnreadable},
+			{"runs-without-process", a.RunsWithoutProcess},
+			{"runs-process-gone", a.RunsProcessGone},
+			{"runs-awaiting-measure", a.RunsAwaitingMeasure},
+		} {
+			fmt.Fprintf(w, "external-attribution-%s\t%d\n", row.key, row.count)
+		}
+	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
 	}
@@ -226,6 +241,9 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		fmt.Fprintln(out, note)
 	}
 	if note := ExternalAgeNote(qs); note != "" {
+		fmt.Fprintln(out, note)
+	}
+	if note := ExternalAttributionNote(qs); note != "" {
 		fmt.Fprintln(out, note)
 	}
 	if note := ExternalPressureNote(qs); note != "" {
@@ -423,6 +441,25 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 		note += " (host sampled " + fmtElapsed(qs.ExternalMeasurementAgeMS) + " ago)"
 	}
 	return note
+}
+
+func ExternalAttributionNote(qs wingwire.QueueState) string {
+	a := qs.ExternalAttribution
+	if qs.IgnoreExternal || a == nil || a.Samples == 0 || !coresExternalUnattributed(qs) {
+		return ""
+	}
+	return "external attribution: recent readings carry some of this daemon's own runs' CPU," +
+		" so external reads high and available reads low by it" +
+		" (-o plain breaks the readings down by cause)"
+}
+
+func coresExternalUnattributed(qs wingwire.QueueState) bool {
+	for _, r := range qs.Resources {
+		if r.Key == "cores" && r.ExternalSource == wingwire.ExternalUnattributed {
+			return true
+		}
+	}
+	return false
 }
 
 func isHostResource(key string) bool { return key == "cores" || key == "memory" }

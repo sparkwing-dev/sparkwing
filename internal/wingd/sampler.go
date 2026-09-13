@@ -30,7 +30,7 @@ type HostSampler interface {
 }
 
 type pairedHostOwnedSampler interface {
-	SampleWithOwned(roots []int) (HostStat, float64, bool, error)
+	SampleWithOwned(roots []OwnedRoot, arbitratedCores float64) (HostStat, map[int]float64, bool, error)
 }
 
 type hostSamplerOnly struct {
@@ -61,22 +61,267 @@ type ProcBatchSampler interface {
 	CPUUsages(pids []int) map[int]ProcUsage
 }
 
+// OwnedRoot is one run's root process and the moment the daemon began holding
+// that run, which bounds how old the run's processes can be.
+type OwnedRoot struct {
+	PID       int
+	HeldSince time.Time
+}
+
+// OwnedCPUSampler reports the CPU each held run's process tree ran, keyed by
+// the root pid the caller asked about. A process under more than one root
+// counts once, against its nearest ancestor root.
+//
+// An implementation leaves a root out of the map where no figure could be
+// computed for it, and gives it a zero only where it ran no measurable CPU.
+// Both answers grant the same cores, so a zero in place of an absence costs no
+// capacity and reports the daemon as measuring cleanly while it is not.
+//
+// measured reports whether the host's process table was read at all. It is
+// false where the read failed, and also where the platform has no way to
+// measure owned CPU; either leaves byRoot empty and says nothing about any
+// individual root. A platform answering false forever states a capability
+// rather than a fault on the box, so a count tracking every reading there is
+// the expected shape. An empty map with measured true says the table was read
+// and every root in it was individually unreadable, a different fault.
+//
+// arbitratedCores is the capacity these runs physically execute on: a cgroup
+// limit where one caps them below the machine's core count, and the machine's
+// otherwise. An implementation bounds a figure it cannot otherwise justify
+// against it, because no tree under that limit can have run more.
 type OwnedCPUSampler interface {
-	CPUUsage(pids []int) (fraction float64, measured bool)
+	CPUUsage(roots []OwnedRoot, arbitratedCores float64) (byRoot map[int]float64, measured bool)
 }
 
 type ownedProcSampler struct {
 	//lint:ignore U1000 used by platform implementations
-	mu   sync.Mutex
-	last map[processIdentity]cpuSample
+	mu     sync.Mutex
+	last   map[processIdentity]cpuSample
+	lastAt time.Time
 }
 
 func newOwnedCPUSampler() *ownedProcSampler {
 	return &ownedProcSampler{last: map[processIdentity]cpuSample{}}
 }
 
-func (s *ownedProcSampler) CPUUsage(pids []int) (float64, bool) {
-	return s.sampleOwned(pids)
+func (s *ownedProcSampler) CPUUsage(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
+	if len(roots) == 0 {
+		// safety: the samples and the clock they are read against move together.
+		// Keeping either across a stretch with nothing held leaves this window open
+		// across intervals nobody was watching a tree, and holding one again then
+		// charges it that whole stretch in a single reading.
+		s.forgetSamples(time.Now())
+		return nil, true
+	}
+	return s.sampleOwned(roots, arbitratedCores)
+}
+
+func newProcSampler() *procSampler {
+	return &procSampler{
+		last: map[int]cpuSample{},
+		tree: map[int]map[int]struct{}{},
+	}
+}
+
+func (p *procSampler) CPUUsage(pid int) (ProcUsage, bool) { return p.sample(pid) }
+
+func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids) }
+
+type processIdentity struct {
+	pid        int
+	startTicks uint64
+}
+
+type ownedProcess struct {
+	parentPID  int
+	identity   processIdentity
+	cpuSeconds float64
+}
+
+func ownersByNearestRoot(parentOf map[int]int, rootPIDs map[int]struct{}) map[int]int {
+	owners := make(map[int]int, len(parentOf))
+	unowned := make(map[int]struct{}, len(parentOf))
+	var chain []int
+	for pid := range parentOf {
+		chain = chain[:0]
+		root, found := 0, false
+		for current := pid; ; {
+			if known, ok := owners[current]; ok {
+				root, found = known, true
+				break
+			}
+			if _, ok := unowned[current]; ok {
+				break
+			}
+			if _, ok := rootPIDs[current]; ok {
+				root, found = current, true
+				chain = append(chain, current)
+				break
+			}
+			chain = append(chain, current)
+			next, ok := parentOf[current]
+			if !ok || next <= 0 || len(chain) > len(parentOf) {
+				break
+			}
+			current = next
+		}
+		for _, walked := range chain {
+			if found {
+				owners[walked] = root
+			} else {
+				unowned[walked] = struct{}{}
+			}
+		}
+	}
+	return owners
+}
+
+func ownedProcessOwners(roots []OwnedRoot, processes map[int]ownedProcess) map[processIdentity]int {
+	parentOf := make(map[int]int, len(processes))
+	for processID, process := range processes {
+		parentOf[processID] = process.parentPID
+	}
+	rootPIDs := make(map[int]struct{}, len(roots))
+	for _, root := range roots {
+		if _, ok := processes[root.PID]; ok {
+			rootPIDs[root.PID] = struct{}{}
+		}
+	}
+	byPID := ownersByNearestRoot(parentOf, rootPIDs)
+	owners := make(map[processIdentity]int, len(byPID))
+	for processID, root := range byPID {
+		owners[processes[processID].identity] = root
+	}
+	return owners
+}
+
+func (s *ownedProcSampler) forgetSamples(now time.Time) {
+	// safety: the samples and the clock they are read against move together, so
+	// no later window can span a stretch this sampler sat out.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last, s.lastAt = nil, now
+}
+
+func ownedCPUByRoot(
+	previous map[processIdentity]cpuSample,
+	processes map[int]ownedProcess,
+	owners map[processIdentity]int,
+	roots []OwnedRoot,
+	lastAt time.Time,
+	now time.Time,
+	arbitratedCores float64,
+) (map[int]float64, map[processIdentity]cpuSample) {
+	// safety: with no reading behind it there is no window, and a process's
+	// counter says nothing about when its CPU ran. Leaving the window at zero
+	// is what sends such a root out of the map rather than crediting it a
+	// figure measured against the daemon's own start.
+	window := 0.0
+	if !lastAt.IsZero() {
+		window = now.Sub(lastAt).Seconds()
+	}
+	creditable := creditableRoots(previous, processes, roots, lastAt, now)
+	next := make(map[processIdentity]cpuSample, len(owners))
+	byRoot := make(map[int]float64, len(owners))
+	firstSight := make(map[int]float64, len(owners))
+	unreadable := map[int]struct{}{}
+	for identity, root := range owners {
+		process, ok := processes[identity.pid]
+		if !ok {
+			continue
+		}
+		next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
+		if _, ok := creditable[root]; !ok {
+			continue
+		}
+		prior, seen := previous[identity]
+		if !seen {
+			firstSight[root] += process.cpuSeconds
+			continue
+		}
+		wall := now.Sub(prior.at).Seconds()
+		delta := process.cpuSeconds - prior.cpuSeconds
+		if wall <= 0 || delta < 0 {
+			// safety: a counter that stood still or ran backwards says nothing about
+			// this process, and the rest of the tree's figure without it is short by an
+			// unknown amount. A short figure still subtracts from external, so the tree
+			// goes unmeasured rather than admitting against CPU nobody could read.
+			unreadable[root] = struct{}{}
+			continue
+		}
+		byRoot[root] += delta / wall
+	}
+	for root, cpuSeconds := range firstSight {
+		credit, ok := firstSightCredit(cpuSeconds, window, arbitratedCores)
+		if !ok {
+			delete(byRoot, root)
+			continue
+		}
+		byRoot[root] += credit
+	}
+	for root := range unreadable {
+		delete(byRoot, root)
+	}
+	measureUnownedSurvivors(previous, processes, next, now)
+	return byRoot, next
+}
+
+func measureUnownedSurvivors(
+	previous map[processIdentity]cpuSample,
+	processes map[int]ownedProcess,
+	next map[processIdentity]cpuSample,
+	now time.Time,
+) {
+	// safety: a process the daemon stopped owning is still measured while it
+	// runs, so re-holding its tree charges only the CPU this reading covers.
+	for identity := range previous {
+		if _, taken := next[identity]; taken {
+			continue
+		}
+		process, alive := processes[identity.pid]
+		if !alive || process.identity != identity {
+			continue
+		}
+		next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
+	}
+}
+
+func creditableRoots(
+	previous map[processIdentity]cpuSample,
+	processes map[int]ownedProcess,
+	roots []OwnedRoot,
+	lastAt time.Time,
+	now time.Time,
+) map[int]struct{} {
+	creditable := make(map[int]struct{}, len(roots))
+	for _, root := range roots {
+		process, ok := processes[root.PID]
+		if !ok {
+			continue
+		}
+		if _, based := previous[process.identity]; based {
+			creditable[root.PID] = struct{}{}
+			continue
+		}
+		// safety: with no reading for the root itself the daemon was not watching this
+		// tree, so only a run that began holding since the last reading can have run
+		// all its CPU inside the window. An older one stays unmeasured.
+		if !root.HeldSince.IsZero() && !root.HeldSince.Before(lastAt) && !root.HeldSince.After(now) {
+			creditable[root.PID] = struct{}{}
+		}
+	}
+	return creditable
+}
+
+func firstSightCredit(cpuSeconds, window, arbitratedCores float64) (float64, bool) {
+	// safety: processes first seen in one tree ran all their CPU inside this window,
+	// so the whole total belongs here. More than the window could hold proves some of
+	// it predates the window, and nothing here can say how much, so the tree's figure
+	// cannot stand. The ceiling is the capacity admission arbitrates, not the host's.
+	if window <= 0 || arbitratedCores <= 0 || cpuSeconds > window*arbitratedCores {
+		return 0, false
+	}
+	return cpuSeconds / window, true
 }
 
 type ProcUsage struct {
@@ -107,64 +352,6 @@ func processCPUFraction(previous, current cpuSample) (float64, bool) {
 		return 0, false
 	}
 	return delta / wall, true
-}
-
-type processIdentity struct {
-	pid        int
-	startTicks uint64
-}
-
-type ownedProcess struct {
-	parentPID  int
-	identity   processIdentity
-	cpuSeconds float64
-}
-
-func ownedProcessIdentities(roots []int, processes map[int]ownedProcess) map[processIdentity]struct{} {
-	children := map[int][]int{}
-	for processID, process := range processes {
-		children[process.parentPID] = append(children[process.parentPID], processID)
-	}
-	owned := map[processIdentity]struct{}{}
-	for _, root := range roots {
-		if _, ok := processes[root]; !ok {
-			continue
-		}
-		for _, processID := range collectSubtree(root, children) {
-			owned[processes[processID].identity] = struct{}{}
-		}
-	}
-	return owned
-}
-
-func ownedCPUFromProcesses(
-	previous map[processIdentity]cpuSample,
-	processes map[int]ownedProcess,
-	owned map[processIdentity]struct{},
-	now time.Time,
-) (float64, bool, map[processIdentity]cpuSample) {
-	next := make(map[processIdentity]cpuSample, len(owned))
-	var fraction float64
-	var measured bool
-	for identity := range owned {
-		process, ok := processes[identity.pid]
-		if !ok || process.identity != identity {
-			continue
-		}
-		next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
-		prior, ok := previous[identity]
-		if !ok {
-			continue
-		}
-		wall := now.Sub(prior.at).Seconds()
-		delta := process.cpuSeconds - prior.cpuSeconds
-		if wall <= 0 || delta < 0 {
-			continue
-		}
-		fraction += delta / wall
-		measured = true
-	}
-	return fraction, measured, next
 }
 
 type darwinCPUProcess struct {
@@ -219,59 +406,103 @@ func darwinCPUFromSnapshot(
 	processes map[int]darwinCPUProcess,
 	previous map[int]darwinCPUProcess,
 	elapsedSeconds float64,
-	roots []int,
-	totalCores float64,
-) (float64, bool, float64, bool) {
+	roots []OwnedRoot,
+	lastAt time.Time,
+	now time.Time,
+	machineCores float64,
+	arbitratedCores float64,
+) (float64, bool, map[int]float64, bool) {
 	if len(processes) == 0 || len(previous) == 0 || elapsedSeconds <= 0 {
-		return 0, false, 0, false
+		return 0, false, nil, false
 	}
 	fractions := make(map[int]float64, len(processes))
-	children := map[int][]int{}
+	firstSeen := make(map[int]float64, len(processes))
+	backwards := map[int]struct{}{}
 	var host float64
 	for processID, process := range processes {
-		children[process.parentPID] = append(children[process.parentPID], processID)
+		// bug: this snapshot carries no process start time, so a pid the OS
+		// recycles within one interval reads as the dead process continuing.
+		// Only a falling cpuSeconds catches it.
 		prior, seen := previous[processID]
 		if !seen {
+			// safety: a process the previous snapshot did not carry ran its CPU inside
+			// this window, so the host ran it too. Counting it in owned and not in host
+			// would let a run's own work exceed the machine's and drive external to zero.
+			if credit, ok := firstSightCredit(process.cpuSeconds, elapsedSeconds, machineCores); ok {
+				firstSeen[processID] = credit
+				host += credit
+			}
 			continue
 		}
 		delta := process.cpuSeconds - prior.cpuSeconds
-		if delta <= 0 {
+		if delta < 0 {
+			backwards[processID] = struct{}{}
 			continue
 		}
 		fraction := delta / elapsedSeconds
 		fractions[processID] = fraction
 		host += fraction
 	}
-	host = clampCores(host, totalCores)
+	host = clampCores(host, machineCores)
 	if len(roots) == 0 {
-		return host, true, 0, true
+		return host, true, nil, true
 	}
-	ownedIDs := map[int]struct{}{}
+	rootPIDs := make(map[int]struct{}, len(roots))
+	creditable := make(map[int]struct{}, len(roots))
 	for _, root := range roots {
-		if _, ok := processes[root]; !ok {
-			return host, true, 0, false
+		if _, ok := processes[root.PID]; !ok {
+			continue
 		}
-		for _, processID := range collectSubtree(root, children) {
-			ownedIDs[processID] = struct{}{}
+		rootPIDs[root.PID] = struct{}{}
+		if _, based := previous[root.PID]; based {
+			creditable[root.PID] = struct{}{}
+			continue
+		}
+		if !root.HeldSince.IsZero() && !root.HeldSince.Before(lastAt) && !root.HeldSince.After(now) {
+			creditable[root.PID] = struct{}{}
 		}
 	}
-	var owned float64
-	for processID := range ownedIDs {
-		owned += fractions[processID]
+	parentOf := make(map[int]int, len(processes))
+	for processID, process := range processes {
+		parentOf[processID] = process.parentPID
 	}
-	return host, true, clampCores(owned, totalCores), true
-}
-
-func newProcSampler() *procSampler {
-	return &procSampler{
-		last: map[int]cpuSample{},
-		tree: map[int]map[int]struct{}{},
+	owners := ownersByNearestRoot(parentOf, rootPIDs)
+	byRoot := make(map[int]float64, len(rootPIDs))
+	unbounded := map[int]struct{}{}
+	for processID := range processes {
+		root, ok := owners[processID]
+		if !ok {
+			continue
+		}
+		if _, ok := creditable[root]; !ok {
+			continue
+		}
+		if fraction, measured := fractions[processID]; measured {
+			byRoot[root] += fraction
+			continue
+		}
+		if _, ran := backwards[processID]; ran {
+			// safety: a counter that ran backwards is unreadable, so the tree it sits
+			// under gets no figure. Reporting zero for it subtracts nothing from
+			// external, which admits against CPU this daemon never measured.
+			unbounded[root] = struct{}{}
+			continue
+		}
+		credit, sighted := firstSeen[processID]
+		if _, seen := previous[processID]; !seen && !sighted {
+			unbounded[root] = struct{}{}
+			continue
+		}
+		byRoot[root] += credit
 	}
+	for root := range unbounded {
+		delete(byRoot, root)
+	}
+	for root, owned := range byRoot {
+		byRoot[root] = clampCores(owned, arbitratedCores)
+	}
+	return host, true, byRoot, true
 }
-
-func (p *procSampler) CPUUsage(pid int) (ProcUsage, bool) { return p.sample(pid) }
-
-func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids) }
 
 func collectSubtree(root int, children map[int][]int) []int {
 	var out []int

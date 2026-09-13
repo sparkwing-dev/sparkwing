@@ -2,7 +2,9 @@ package wingd
 
 import (
 	"math"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,24 +22,26 @@ type blockingOwnedCPUSampler struct {
 	fraction float64
 }
 
-func (s *blockingOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
-	s.started <- append([]int(nil), pids...)
+func (s *blockingOwnedCPUSampler) CPUUsage(roots []OwnedRoot, _ float64) (map[int]float64, bool) {
+	s.started <- rootPIDsOf(roots)
 	<-s.release
-	return s.fraction, true
+	return ownedOnFirstRoot(rootPIDsOf(roots), s.fraction), true
 }
 
 type fixedOwnedCPUSampler struct {
-	fraction float64
-	measured bool
-	roots    []int
+	fraction        float64
+	measured        bool
+	roots           []int
+	arbitratedCores float64
 }
 
 type pairedHostSampler struct {
-	stat      HostStat
-	owned     float64
-	measured  bool
-	pairCalls int
-	hostCalls int
+	stat            HostStat
+	owned           float64
+	measured        bool
+	pairCalls       int
+	hostCalls       int
+	arbitratedCores float64
 }
 
 func (s *pairedHostSampler) Sample() (HostStat, error) {
@@ -45,14 +49,31 @@ func (s *pairedHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
 }
 
-func (s *pairedHostSampler) SampleWithOwned([]int) (HostStat, float64, bool, error) {
+func (s *pairedHostSampler) SampleWithOwned(roots []OwnedRoot, arbitratedCores float64) (HostStat, map[int]float64, bool, error) {
 	s.pairCalls++
-	return s.stat, s.owned, s.measured, nil
+	s.arbitratedCores = arbitratedCores
+	return s.stat, ownedOnFirstRoot(rootPIDsOf(roots), s.owned), s.measured, nil
 }
 
-func (s *fixedOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
-	s.roots = append([]int(nil), pids...)
-	return s.fraction, s.measured
+func (s *fixedOwnedCPUSampler) CPUUsage(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
+	s.roots = rootPIDsOf(roots)
+	s.arbitratedCores = arbitratedCores
+	return ownedOnFirstRoot(s.roots, s.fraction), s.measured
+}
+
+func rootPIDsOf(roots []OwnedRoot) []int {
+	pids := make([]int, 0, len(roots))
+	for _, root := range roots {
+		pids = append(pids, root.PID)
+	}
+	return pids
+}
+
+func ownedOnFirstRoot(pids []int, fraction float64) map[int]float64 {
+	if len(pids) == 0 {
+		return nil
+	}
+	return map[int]float64{pids[0]: fraction}
 }
 
 func (s *countingHostSampler) Sample() (HostStat, error) {
@@ -245,7 +266,7 @@ func TestRefreshHeadroomSubtractsMeasuredHolderUsageNotLeaseCapacity(t *testing.
 	}
 }
 
-func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T) {
+func TestRefreshHeadroomKeepsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0)
 	d.sampler = &countingHostSampler{stat: HostStat{
 		TotalCores:       8,
@@ -268,6 +289,10 @@ func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testin
 		close(done)
 	}()
 
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(owned.release) }) }
+	t.Cleanup(release)
+
 	select {
 	case roots := <-owned.started:
 		if len(roots) != 1 || roots[0] != 4242 {
@@ -280,7 +305,7 @@ func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testin
 	delete(d.byRun, "first")
 	d.byRun["second"] = &conn{runID: "second", role: roleHolder, pid: 4242}
 	d.mu.Unlock()
-	close(owned.release)
+	release()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -288,8 +313,9 @@ func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testin
 	}
 
 	cores := queueRow(t, queueState(t, d), "cores")
-	if cores.External != 3 {
-		t.Errorf("external cores = %v, want 3 after the sampled holder was replaced", cores.External)
+	if cores.External != 0 {
+		t.Errorf("external cores = %v, want 0: the process tree at that pid is still this daemon's work whichever run holds it, so charging it to the machine bills this daemon for its own run",
+			cores.External)
 	}
 }
 
@@ -353,5 +379,89 @@ func TestNewHonorsExplicitOwnedCPUSamplerWithDefaultHost(t *testing.T) {
 	}
 	if _, paired := d.sampler.(pairedHostOwnedSampler); paired {
 		t.Fatal("default host retained paired owned sampling and would ignore the explicit sampler")
+	}
+}
+
+func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *testing.T) {
+	if runtime.NumCPU() < 3 {
+		t.Skipf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
+			runtime.NumCPU())
+	}
+	d := newHeadroomDaemon(t, 8, 0)
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "200000 100000"}))
+	owned := &fixedOwnedCPUSampler{fraction: 1, measured: true}
+	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true}}
+	d.ownedSampler = owned
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+
+	d.refreshHeadroom()
+
+	if owned.arbitratedCores != 2 {
+		t.Fatalf("owned sampler was bounded at %v cores; want the container's 2, because the clamp that produces it runs after the sample and a bound at the machine's count admits against cores nobody can grant",
+			owned.arbitratedCores)
+	}
+}
+
+// The paired sampler is the one darwin runs, so the bound has to reach it too.
+func TestRefreshHeadroom_PairedSamplerIsBoundedByTheContainerLimitToo(t *testing.T) {
+	if runtime.NumCPU() < 3 {
+		t.Skipf("this machine has %d cores, so a two-core container limit is not smaller than the machine and the two bounds cannot be told apart here",
+			runtime.NumCPU())
+	}
+	d := newHeadroomDaemon(t, 8, 0)
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "200000 100000"}))
+	paired := &pairedHostSampler{
+		stat:     HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true},
+		owned:    1,
+		measured: true,
+	}
+	d.sampler = paired
+	d.ownedSampler = nil
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+
+	d.refreshHeadroom()
+
+	if paired.arbitratedCores != 2 {
+		t.Fatalf("paired sampler was bounded at %v cores; want the container's 2: darwin takes this branch, so a bound that reaches only the split path leaves the platform unbounded",
+			paired.arbitratedCores)
+	}
+}
+
+// The daemon must reach the sampler on a reading with nothing held, because
+// that is where the sampler ends the window it was measuring against.
+func TestRefreshHeadroom_AReadingWithNothingHeldStillReachesTheSampler(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0)
+	owned := &ownedProcSampler{}
+	frozenAt := time.Now().Add(-time.Hour)
+	owned.last = map[processIdentity]cpuSample{
+		{pid: 10, startTicks: 1000}: {cpuSeconds: 0, at: frozenAt},
+	}
+	owned.lastAt = frozenAt
+	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 8, BusyCores: 1, CPUMeasured: true}}
+	d.ownedSampler = owned
+
+	d.refreshHeadroom()
+
+	owned.mu.Lock()
+	kept, moved := owned.last != nil, owned.lastAt.After(frozenAt)
+	owned.mu.Unlock()
+	if kept || !moved {
+		t.Fatalf("after a reading with nothing held: samples kept=%v, clock moved=%v; want the sampler reached and its window ended, because a frozen clock charges a re-held run every interval nobody held it",
+			kept, moved)
+	}
+}
+
+// Host busy measures the whole machine, so a container limit is not its ceiling.
+func TestDarwinCPUSnapshot_HostBusyIsNotClampedToTheContainerLimit(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:00.00\n")
+	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 1:00.00\n")
+
+	host, measured, _, _ := darwinCPUFromSnapshot(
+		current, previous, 10, nil, now.Add(-10*time.Second), now, 16, 2)
+
+	if !measured || host < 5.9 {
+		t.Fatalf("host busy = %v (measured %v); want the six cores the machine ran, because clamping it to the container's two understates external and admits against cores the machine is already using",
+			host, measured)
 	}
 }
