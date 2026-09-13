@@ -35,6 +35,33 @@ unlock.
   `compiled`) and `build_ms` for each pipeline binary it readies, so the
   cost of a cold compile is visible per run. `runner.maxClaimsBeforeRestart`
   is unchanged.
+- **cli:** `sparkwing cloud connect --controller URL` joins a controller in one
+  command, so connecting no longer means editing `profiles.yaml` by hand. It
+  verifies the controller answers, mints a user token scoped to `runs.read`,
+  `runs.write`, `triggers.read`, `logs.read` and `approvals.write` when
+  `--admin-token-stdin` hands it an admin credential, writes the profile, and
+  closes with the dashboard URL the controller announces and the probes
+  `sparkwing configure profiles test` runs. `--token-stdin` stores a token you
+  already hold, `--scope` selects what to mint, `--name` defaults to the
+  controller host with every character outside `a-z0-9` turned into a dash, and
+  an existing profile of that name is replaced only with `--force`.
+  `--set-default` writes `defaults.profile` into this repository's
+  `.sparkwing/sparkwing.yaml`. `sparkwing cloud status` reports the connection,
+  its principal and scopes, and those probes; `sparkwing cloud disconnect
+  --name N` revokes the profile's token and removes it, naming the prefix and
+  the revoke command whenever the credential it holds is not allowed to make
+  that call.
+- **controller:** `sparkwing-controller --dashboard-url URL` announces the
+  dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
+  client that has just been handed a token can say where to watch its runs. The
+  flag defaults to `SPARKWING_DASHBOARD_URL`, which the GitHub commit-status
+  reporter already read. Empty disables the announcement.
+- **config:** `defaults.profile` in `.sparkwing/sparkwing.yaml` may name a
+  profile from `~/.config/sparkwing/profiles.yaml`. The project's own
+  `profiles:` block still wins on a name both declare, so a repository can
+  default to a connection whose token stays out of the checkout. A name neither
+  file declares now fails where the profile is resolved rather than where the
+  project file is parsed.
 - **cli:** `sparkwing cluster runners add --profile P --name NAME` enrolls the
   machine it runs on in one command: it mints a runner token scoped to
   `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and

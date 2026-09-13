@@ -73,6 +73,10 @@ func run(args []string) error {
 			"GET /api/v1/services so runners post node log lines to the service that "+
 			"routes them; the controller itself serves no /api/v1/logs. Empty disables "+
 			"the announcement, which is correct only when one process serves both.")
+	dashboardURL := fs.String("dashboard-url", os.Getenv("SPARKWING_DASHBOARD_URL"),
+		"externally-reachable URL of the dashboard that watches this controller. "+
+			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
+			"where to watch runs. Empty disables the announcement.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
@@ -209,9 +213,10 @@ func run(args []string) error {
 		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithGitHubWebhookConfig(webhookCfg).
-		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), os.Getenv("SPARKWING_DASHBOARD_URL")).
+		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
+		WithDashboardURL(*dashboardURL).
 		WithCacheURL(*cacheURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).

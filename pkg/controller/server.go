@@ -57,8 +57,9 @@ type Server struct {
 
 	artifactStore storage.ArtifactStore
 
-	cachePodURL string
-	logsURL     string
+	cachePodURL  string
+	logsURL      string
+	dashboardURL string
 
 	cacheURL   string
 	cacheToken string
@@ -256,6 +257,15 @@ func (s *Server) WithCachePodURL(url string) *Server {
 // co-located deployment where one mux serves both.
 func (s *Server) WithLogsURL(url string) *Server {
 	s.logsURL = url
+	return s
+}
+
+// WithDashboardURL announces the externally-reachable dashboard URL via
+// GET /api/v1/services, so a client that has just been given a token can
+// tell its operator where to watch the runs it dispatches. Empty disables
+// the announcement.
+func (s *Server) WithDashboardURL(url string) *Server {
+	s.dashboardURL = url
 	return s
 }
 
