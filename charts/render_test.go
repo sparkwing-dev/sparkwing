@@ -25,8 +25,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.10" {
-		t.Fatalf("full chart version = %q, want 0.1.10", chart.Version)
+	if chart.Version != "0.1.11" {
+		t.Fatalf("full chart version = %q, want 0.1.11", chart.Version)
 	}
 }
 
@@ -405,8 +405,14 @@ type renderedContainer struct {
 	Command         []string                `yaml:"command"`
 	Args            []string                `yaml:"args"`
 	Env             []renderedEnvVar        `yaml:"env"`
+	Ports           []renderedContainerPort `yaml:"ports"`
 	SecurityContext renderedSecurityContext `yaml:"securityContext"`
 	VolumeMounts    []renderedVolumeMount   `yaml:"volumeMounts"`
+}
+
+type renderedContainerPort struct {
+	Name          string `yaml:"name"`
+	ContainerPort int    `yaml:"containerPort"`
 }
 
 type renderedDeployment struct {
@@ -2499,5 +2505,149 @@ func TestControllerPlacementFlagsRender(t *testing.T) {
 	}
 	if got, _ := hasFlag(configured, "--placement-liveness="); got != "--placement-liveness=90s" {
 		t.Fatalf("placement liveness flag = %q", got)
+	}
+}
+
+func TestControllerBucketCeilingFlagsComeFromValues(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing")
+	if args := deploymentDocument(t, rendered).Spec.Template.Spec.Containers[0].Args; containsArg(args, "--max-bucket-bytes") {
+		t.Errorf("controller args = %v, want no ceiling flag while the operator sets none", args)
+	}
+
+	rendered = helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing",
+		"controller.bucketCeiling.maxBytes=1099511627776",
+		"controller.bucketCeiling.maxObjects=5000000",
+		"controller.bucketCeiling.warnBytes=879609302220",
+		"controller.bucketCeiling.reconcile=30m",
+		"controller.bucketCeiling.store=s3://sparkwing-prod/artifacts")
+	container := deploymentDocument(t, rendered).Spec.Template.Spec.Containers[0]
+	for flag, want := range map[string]string{
+		"--max-bucket-bytes":   "1099511627776",
+		"--max-bucket-objects": "5000000",
+		"--warn-bucket-bytes":  "879609302220",
+		"--bucket-reconcile":   "30m",
+		"--bucket-store":       "s3://sparkwing-prod/artifacts",
+	} {
+		if got := equalsArgValue(container.Args, flag); got != want {
+			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, container.Args)
+		}
+	}
+	if containsArg(container.Args, "--warn-bucket-objects") {
+		t.Errorf("controller args = %v, want no flag for a bound the operator left empty", container.Args)
+	}
+}
+
+// safety: the ceiling flags render into args, and a copy of that block under
+// ports would put strings where the API server wants ContainerPort objects.
+func TestControllerPortsStayPortsWithTheCeilingOn(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing",
+		"controller.bucketCeiling.maxBytes=1099511627776",
+		"controller.bucketCeiling.maxObjects=5000000",
+		"controller.bucketCeiling.warnBytes=879609302220",
+		"controller.bucketCeiling.warnObjects=4000000",
+		"controller.bucketCeiling.reconcile=30m",
+		"controller.bucketCeiling.store=s3://sparkwing-prod/artifacts",
+		"controller.metricsPort=9090")
+
+	var doc struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Ports []map[string]any `yaml:"ports"`
+					} `yaml:"containers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(rendered), &doc); err != nil {
+		t.Fatalf("decode controller Deployment: %v\n%s", err, rendered)
+	}
+	ports := doc.Spec.Template.Spec.Containers[0].Ports
+	if len(ports) != 2 {
+		t.Fatalf("controller declares %d ports, want http and metrics:\n%s", len(ports), rendered)
+	}
+	for _, port := range ports {
+		name, ok := port["name"].(string)
+		if !ok || name == "" {
+			t.Errorf("port entry %v carries no name", port)
+		}
+		number, ok := port["containerPort"].(int)
+		if !ok || number <= 0 {
+			t.Errorf("port %q has containerPort %v, want a positive number", name, port["containerPort"])
+		}
+		if len(port) != 2 {
+			t.Errorf("port %q carries unexpected fields %v", name, port)
+		}
+	}
+
+	container := deploymentDocument(t, rendered).Spec.Template.Spec.Containers[0]
+	if len(container.Ports) != 2 {
+		t.Fatalf("typed decode found %d ports, want 2", len(container.Ports))
+	}
+	for _, p := range container.Ports {
+		if p.Name == "" || p.ContainerPort <= 0 {
+			t.Errorf("port %+v is not a ContainerPort object", p)
+		}
+	}
+}
+
+func equalsArgValue(args []string, flag string) string {
+	for _, a := range args {
+		if after, ok := strings.CutPrefix(a, flag+"="); ok {
+			return after
+		}
+	}
+	return argValue(args, flag)
+}
+
+func TestCacheStoreCeilingFlagsComeFromValues(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing")
+	if args := runnerContainer(t, rendered).Args; containsArg(args, "--max-store-bytes") {
+		t.Errorf("cache args = %v, want no ceiling flag while the operator sets none", args)
+	}
+
+	args := runnerContainer(t, helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing",
+		"cache.limits.maxArtifactBytes=104857600",
+		"cache.limits.maxStoreBytes=536870912000",
+		"cache.limits.maxStoreObjects=2000000",
+		"cache.limits.storeReconcile=2h")).Args
+	for flag, want := range map[string]string{
+		"--max-artifact-bytes": "104857600",
+		"--max-store-bytes":    "536870912000",
+		"--max-store-objects":  "2000000",
+		"--store-reconcile":    "2h",
+	} {
+		if got := argValue(args, flag); got != want {
+			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, args)
+		}
+	}
+	if containsArg(args, "--warn-store-bytes") {
+		t.Errorf("cache args = %v, want no flag for a bound the operator left empty", args)
+	}
+}
+
+func TestCacheUnauthenticatedFlagSurvivesTheLimitsBlock(t *testing.T) {
+	args := runnerContainer(t, helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing",
+		"cache.allowUnauthenticated=true",
+		"cache.limits.maxStoreBytes=1024")).Args
+	if !containsArg(args, "--allow-unauthenticated") {
+		t.Errorf("cache args = %v, want --allow-unauthenticated alongside the size bounds", args)
+	}
+}
+
+func TestLogsStoreCeilingFlagsComeFromValues(t *testing.T) {
+	args := runnerContainer(t, renderLogs(t,
+		"logs.limits.maxStoreBytes=107374182400",
+		"logs.limits.maxStoreObjects=500000",
+		"logs.limits.storeReconcile=0")).Args
+	for flag, want := range map[string]string{
+		"--max-store-bytes":   "107374182400",
+		"--max-store-objects": "500000",
+		"--store-reconcile":   "0",
+	} {
+		if got := argValue(args, flag); got != want {
+			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, args)
+		}
 	}
 }
