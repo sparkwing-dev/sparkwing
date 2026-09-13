@@ -106,6 +106,22 @@ func (f egressFixture) fetch(t *testing.T, method, path, token string) fetched {
 	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
 }
 
+func (f egressFixture) fetchAs(t *testing.T, path, token, pod string) fetched {
+	t.Helper()
+	req := f.request(t, http.MethodGet, path, token)
+	req.Header.Set(egress.RunnerHeader, pod)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
+}
+
 func (f egressFixture) get(t *testing.T, path, token string) fetched {
 	t.Helper()
 	return f.fetch(t, http.MethodGet, path, token)
@@ -302,9 +318,18 @@ type blockingArtifactStore struct {
 	once    sync.Once
 }
 
+// safety: only the first Get blocks. A later one must answer, or a test
+// that expects a second caller to be admitted waits on a store that never
+// returns instead of on the slot it is measuring.
 func (b *blockingArtifactStore) Get(_ context.Context, _ string) (io.ReadCloser, error) {
-	b.once.Do(func() { close(b.started) })
-	<-b.release
+	first := false
+	b.once.Do(func() {
+		first = true
+		close(b.started)
+	})
+	if first {
+		<-b.release
+	}
 	return io.NopCloser(bytes.NewReader(b.payload)), nil
 }
 func (b *blockingArtifactStore) Put(context.Context, string, io.Reader) error   { return nil }
@@ -465,4 +490,85 @@ func TestTheTopConsumersViewIsAdminOnly(t *testing.T) {
 	if got := f.get(t, "/api/v1/egress", f.runner).status; got != http.StatusForbidden {
 		t.Fatalf("a runner reading the egress view = %d, want 403", got)
 	}
+}
+
+// safety: the gitcache proxy is the checkout path every node takes and a
+// whole pool shares one bearer, so a concurrency cap there refuses the
+// clone rather than the download it was meant to bound. It stays
+// byte-metered.
+func TestTheGitcacheProxyIsByteMeteredButHoldsNoSlot(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("packfile-bytes"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meter := egress.New(egress.Config{MaxDownloadsPerPrincipal: 1})
+	srv := httptest.NewServer(controller.New(st, nil).
+		EnableAuthFromStore().WithCacheURL(upstream.URL).WithEgressMeter(meter).Handler())
+	t.Cleanup(srv.Close)
+	f := egressFixture{url: srv.URL, store: st, meter: meter, adminToken: admin}
+
+	// safety: the cap of one would refuse the second of these if the proxy
+	// took a slot, even though neither overlaps the other.
+	for i := range 4 {
+		got := f.get(t, "/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", f.adminToken)
+		if got.status != http.StatusOK {
+			t.Fatalf("gitcache fetch %d = %d, body %q", i, got.status, got.body)
+		}
+	}
+	if state := meter.State(); state.GlobalMonthBytes == 0 {
+		t.Fatal("the gitcache proxy metered no bytes")
+	}
+	if state := meter.State(); state.Refused != 0 {
+		t.Fatalf("the gitcache proxy refused %d requests, want none", state.Refused)
+	}
+}
+
+// safety: twenty pods share one pool bearer, so a cap keyed on the
+// principal alone refuses nineteen of them at once.
+func TestEachPodOfAPoolHoldsItsOwnDownloadSlot(t *testing.T) {
+	art := &blockingArtifactStore{
+		payload: []byte("payload"),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1}, art)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		req := f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken)
+		req.Header.Set(egress.RunnerHeader, "pod-a")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.Copy(io.Discard, resp.Body)
+	}()
+	<-art.started
+
+	// safety: a second pod under the same bearer gets its own slot.
+	other := f.fetchAs(t, "/api/v1/artifacts/k", f.adminToken, "pod-b")
+	if other.status == http.StatusTooManyRequests {
+		t.Fatal("a second pod was refused by the first pod's slot")
+	}
+
+	// safety: the cap still holds within one pod.
+	same := f.fetchAs(t, "/api/v1/artifacts/k", f.adminToken, "pod-a")
+	if same.status != http.StatusTooManyRequests {
+		t.Fatalf("the same pod's second simultaneous download = %d, want 429", same.status)
+	}
+
+	close(art.release)
+	<-done
 }

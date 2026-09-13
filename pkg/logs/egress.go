@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // WithEgressMeter bounds the bytes this service sends to clients. The
@@ -87,7 +88,11 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		release, err := s.egress.Open(principal, slot)
+		// safety: a pool shares one bearer, so the slot counts the pod the
+		// request names and falls back to the principal only when nothing
+		// names one.
+		holder := egress.SlotIdentity(r, principal, store.ClaimHolderHeader)
+		release, err := s.egress.Open(holder, slot)
 		if err != nil {
 			s.writeEgressRefusal(w, r, class, err)
 			return
