@@ -1019,6 +1019,15 @@ type Headroom struct {
 	QueueDepth  int     `json:"queue_depth"`
 }
 
+// ClaimCapacity is a claim-mode runner's own account of its slots: the ceiling
+// it executes under and how many nodes it holds already. The controller reads
+// it to tell a saturated runner from an idle one when it decides whether to
+// hold a node back for a runner the node prefers.
+type ClaimCapacity struct {
+	MaxConcurrent int `json:"max_concurrent"`
+	ActiveClaims  int `json:"active_claims"`
+}
+
 // ExecutorClaim describes an attested local reservation. Prepare does not
 // create one when compiled-body attestation is absent.
 type ExecutorClaim struct {
@@ -1164,7 +1173,14 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 }
 
 func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error) {
-	_ = executor
+	return c.ClaimNodeWithCapacity(ctx, holderID, labels, lease, headroom, nil)
+}
+
+// ClaimNodeWithCapacity claims as [Client.ClaimNode] does and tells the
+// controller what slots this runner is working with. A nil capacity claims
+// without advertising any, which leaves the controller's placement rule to
+// treat the runner as having room.
+func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, capacity *ClaimCapacity) (*store.Node, error) {
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		secs := int(lease.Seconds())
@@ -1178,6 +1194,9 @@ func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []stri
 	}
 	if headroom != nil {
 		body["headroom"] = headroom
+	}
+	if capacity != nil {
+		body["capacity"] = capacity
 	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,

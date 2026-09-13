@@ -62,6 +62,19 @@ type executorNodeClaimer interface {
 	ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 }
 
+type capacityNodeClaimer interface {
+	ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom, capacity *client.ClaimCapacity) (*store.Node, error)
+}
+
+func claimNode(ctx context.Context, claimer nodeClaimer, holderID string, labels []string,
+	lease time.Duration, headroom *client.Headroom, capacity *client.ClaimCapacity,
+) (*store.Node, error) {
+	if reporting, ok := claimer.(capacityNodeClaimer); ok {
+		return reporting.ClaimNodeWithCapacity(ctx, holderID, labels, lease, headroom, capacity)
+	}
+	return claimer.ClaimNode(ctx, holderID, labels, lease, headroom)
+}
+
 type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
 
 func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) error {
@@ -187,7 +200,10 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			sleepOrCancel(ctx, cfg.PollInterval)
 			continue
 		}
-		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, report.headroom)
+		// safety: the loop holds one slot for the claim it is about to make, so
+		// the nodes already executing are the rest of what it holds.
+		capacity := &client.ClaimCapacity{MaxConcurrent: cfg.MaxConcurrent, ActiveClaims: max(len(sem)-1, 0)}
+		n, err := claimNode(ctx, claimer, holderID, cfg.Labels, cfg.Lease, report.headroom, capacity)
 		if err != nil {
 			<-sem
 			if sharedSlots != nil {
