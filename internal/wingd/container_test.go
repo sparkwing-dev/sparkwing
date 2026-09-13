@@ -242,3 +242,23 @@ func TestContainerSensorFor_Gate(t *testing.T) {
 type fakeHostSampler struct{}
 
 func (fakeHostSampler) Sample() (HostStat, error) { return HostStat{}, nil }
+
+func TestContainerSensor_ArbitratedCoresIsTheSmallerOfTheTwo(t *testing.T) {
+	limited := newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "600000 100000"}))
+	unlimited := newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "max 100000"}))
+
+	if cores := limited.arbitratedCores(24); cores != 6 {
+		t.Errorf("arbitratedCores under a six-core limit on a 24-core machine = %v; want 6, because admission hands out the limit and a bound above it admits against CPU nobody can grant",
+			cores)
+	}
+	if cores := limited.arbitratedCores(4); cores != 4 {
+		t.Errorf("arbitratedCores under a six-core limit on a four-core machine = %v; want 4, because a limit above the machine's capacity does not create cores",
+			cores)
+	}
+	if cores := unlimited.arbitratedCores(24); cores != 24 {
+		t.Errorf("arbitratedCores with no limit = %v; want the machine's 24", cores)
+	}
+	if cores := (*containerSensor)(nil).arbitratedCores(24); cores != 24 {
+		t.Errorf("arbitratedCores with no sensor = %v; want the machine's 24", cores)
+	}
+}
