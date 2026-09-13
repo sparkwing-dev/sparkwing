@@ -1024,6 +1024,7 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	s.runTotals.forget(runID)
 	// safety: deleting a run is how an operator brings a frozen store back, so the
 	// total is remeasured here rather than at the end of the reconciliation window.
+	//nolint:contextcheck // the walk must outlive the delete that triggered it; the sweeper's context bounds it.
 	s.remeasureAfterDelete()
 	w.WriteHeader(http.StatusNoContent)
 }
