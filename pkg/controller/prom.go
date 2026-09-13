@@ -117,6 +117,13 @@ var (
 		[]string{"label_set"},
 	)
 
+	liveRunnersGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "sparkwing_live_runners",
+			Help: "Runners that polled for a claim inside the liveness window, across every label set. Always present, so an empty fleet reads 0 rather than dropping out of the exposition.",
+		},
+	)
+
 	requestsByPrincipalTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_requests_by_principal_total",
@@ -172,6 +179,7 @@ var sparkwingCollectors = []prometheus.Collector{
 	claimWaitSeconds,
 	claimUnavailableTotal,
 	runnersLiveGauge,
+	liveRunnersGauge,
 	requestsByPrincipalTotal,
 	objectStoreCollector{},
 	hashingBudgetCollector{},
@@ -348,26 +356,30 @@ func (s *runnerLivenessSampler) sample(labelSets [][]string) {
 	for _, labels := range labelSets {
 		counts[runnerLabelSet(labels)]++
 	}
-	counts = boundLabelSets(counts)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	counts = boundLabelSets(counts, s.reported)
 	for set := range s.reported {
 		if _, still := counts[set]; !still {
 			runnersLiveGauge.DeleteLabelValues(set)
 		}
 	}
 	reported := make(map[string]struct{}, len(counts))
+	total := 0
 	for set, n := range counts {
 		runnersLiveGauge.WithLabelValues(set).Set(float64(n))
 		reported[set] = struct{}{}
+		total += n
 	}
+	liveRunnersGauge.Set(float64(total))
 	s.reported = reported
 }
 
 // safety: the busiest sets keep their identity and the tail folds into one
-// series, so a set invented to sort first cannot displace a real fleet.
-func boundLabelSets(counts map[string]int) map[string]int {
+// series. A tie goes to the set already reported, so a newcomer invented to
+// sort first cannot displace a fleet of the same size that was there first.
+func boundLabelSets(counts map[string]int, reported map[string]struct{}) map[string]int {
 	if len(counts) <= maxRunnerLabelSets {
 		return counts
 	}
@@ -375,6 +387,14 @@ func boundLabelSets(counts map[string]int) map[string]int {
 	slices.SortFunc(sets, func(a, b string) int {
 		if counts[a] != counts[b] {
 			return counts[b] - counts[a]
+		}
+		_, aKnown := reported[a]
+		_, bKnown := reported[b]
+		if aKnown != bKnown {
+			if aKnown {
+				return -1
+			}
+			return 1
 		}
 		return strings.Compare(a, b)
 	})
@@ -544,7 +564,7 @@ var (
 
 	nodeSecondsDesc = prometheus.NewDesc(
 		"sparkwing_node_seconds_total",
-		"Node execution seconds, by placement. The cloud series is the seconds the ledger billed, which is the billing line; the local series counts what this controller process settled for unmetered credentials.",
+		"Node execution seconds, by placement. The cloud series is the seconds the ledger has finished charging for, which is the billing line; the local series counts what this controller process settled for unmetered credentials.",
 		[]string{"placement"}, nil,
 	)
 )
@@ -613,5 +633,5 @@ func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(nodeSecondsDesc, prometheus.CounterValue,
 		float64(localNodeSeconds.Load())/1000, placementLocal)
 	ch <- prometheus.MustNewConstMetric(nodeSecondsDesc, prometheus.CounterValue,
-		float64(ledgerSnapshot.get().BilledSeconds), placementCloud)
+		float64(ledgerSnapshot.get().SettledSeconds), placementCloud)
 }

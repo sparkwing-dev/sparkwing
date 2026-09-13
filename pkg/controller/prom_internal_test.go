@@ -109,6 +109,22 @@ func TestRunnerLivenessDeletesDepartedSeries(t *testing.T) {
 	if got := seriesCount(body, "sparkwing_runners_live"); got != 0 {
 		t.Errorf("runners_live series = %d after every runner left, want 0", got)
 	}
+	if got := mustSample(t, body, "sparkwing_live_runners"); got != 0 {
+		t.Errorf("fleet gauge = %v, want an empty fleet to read 0 rather than drop out", got)
+	}
+}
+
+func TestLiveRunnersGaugeStaysPresentForAnEmptyFleet(t *testing.T) {
+	restoreGlobals(t)
+
+	liveRunners.sample([][]string{{"a"}, {"b"}, {"b"}})
+	if got := mustSample(t, scrapeRegistry(t), "sparkwing_live_runners"); got != 3 {
+		t.Errorf("fleet gauge = %v, want every runner across both label sets", got)
+	}
+	liveRunners.sample(nil)
+	if _, present := sampleValue(scrapeRegistry(t), "sparkwing_live_runners"); !present {
+		t.Error("the fleet gauge left the exposition, so an equality alert can never fire")
+	}
 }
 
 func TestRunnerLivenessStaysBoundedAcrossSweeps(t *testing.T) {
@@ -149,6 +165,25 @@ func TestRunnerLivenessEvictsTheSmallestSetsNotTheFirstAlphabetically(t *testing
 	}
 	if got := mustSample(t, body, `sparkwing_runners_live{label_set="other"}`); got < 1 {
 		t.Errorf("overflow series = %v, want the displaced sets summed onto it", got)
+	}
+}
+
+func TestRunnerLivenessKeepsAnIncumbentOverATiedNewcomer(t *testing.T) {
+	restoreGlobals(t)
+
+	liveRunners.sample([][]string{{"quiet-incumbent"}})
+	sets := [][]string{{"quiet-incumbent"}}
+	for i := range maxRunnerLabelSets * 2 {
+		sets = append(sets, []string{"!hostile-" + strconv.Itoa(i)})
+	}
+	liveRunners.sample(sets)
+
+	body := scrapeRegistry(t)
+	if got := mustSample(t, body, `sparkwing_runners_live{label_set="quiet-incumbent"}`); got != 1 {
+		t.Errorf("the incumbent reports %v, want 1: a newcomer must not win the size tie", got)
+	}
+	if got := seriesCount(body, "sparkwing_runners_live"); got > maxRunnerLabelSets {
+		t.Errorf("runners_live series = %d, want at most %d", got, maxRunnerLabelSets)
 	}
 }
 
@@ -229,12 +264,12 @@ func TestNodeSecondsReportsLedgerSecondsAsCloud(t *testing.T) {
 	restoreGlobals(t)
 
 	beforeLocal := mustSample(t, scrapeRegistry(t), `sparkwing_node_seconds_total{placement="local"}`)
-	ledgerSnapshot.set(store.CreditLedgerTotals{BilledSeconds: 4242})
+	ledgerSnapshot.set(store.CreditLedgerTotals{SettledSeconds: 4242})
 	addLocalNodeSeconds(12.5)
 
 	body := scrapeRegistry(t)
 	if got := mustSample(t, body, `sparkwing_node_seconds_total{placement="cloud"}`); got != 4242 {
-		t.Errorf("cloud seconds = %v, want the ledger's billed seconds 4242", got)
+		t.Errorf("cloud seconds = %v, want the ledger's settled seconds 4242", got)
 	}
 	if got := mustSample(t, body, `sparkwing_node_seconds_total{placement="local"}`) - beforeLocal; got != 12.5 {
 		t.Errorf("local seconds delta = %v, want 12.5", got)

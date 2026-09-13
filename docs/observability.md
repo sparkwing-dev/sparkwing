@@ -347,7 +347,8 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
 | `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
-| `sparkwing_node_seconds_total` | Counter | `placement` | Node execution seconds: `cloud` is what the ledger billed, `local` is what this controller process settled for unmetered credentials |
+| `sparkwing_live_runners` | Gauge | (none) | Runners that polled for a claim inside the liveness window, across every label set |
+| `sparkwing_node_seconds_total` | Counter | `placement` | Node execution seconds: `cloud` is what the ledger has finished charging for, `local` is what this controller process settled for unmetered credentials |
 | `sparkwing_credits_balance_micro` | Gauge | (none) | Micro-credits left to spend |
 | `sparkwing_credits_granted_micro_total` | Counter | `kind` | Micro-credits granted over the ledger's life, by whether the operator paid for the grant (`free`, `paid`) |
 | `sparkwing_credits_reserved_micro_total` | Counter | (none) | Micro-credits claims reserved up front |
@@ -356,12 +357,22 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
 
 `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
-comes from the credit ledger rather than from a request handler: a node the
-credit reaper cancels, a lease expiry requeues, or a run-level failure cascades
-is billed by the ledger and counted here, whether or not a finish ever reaches
-the controller. The `local` series counts what this controller process settled
-for an unmetered credential, read from the claiming credential recorded on the
-node, and it restarts at zero with the process. Only a metered credential moves
+comes from the credit ledger rather than from a request handler. A claim
+reserves a minute up front and a finish refunds the part the node did not use,
+so the series counts a reservation as the node consumes it rather than all at
+once: the figure only ever grows, which is what a counter has to do. Work the
+ledger has not settled is absent until it settles. A node the credit-exhaustion
+sweep cancels settles there, and a node whose lease expires keeps the seconds
+its reservation already charged, because the requeue writes no refund. A node
+whose run fails without any finish reaching the controller keeps an open
+reservation, and its seconds appear once a later requeue, cancel or finish
+resolves it.
+
+The `local` series counts what this controller process settled for an unmetered
+credential, read from the claiming credential recorded on the node, and it
+restarts at zero with the process. A node whose claiming credential has since
+been revoked counts under neither placement, because guessing would bill the
+operator's own capacity for cloud work. Only a metered credential moves
 credits, so the `sparkwing_credits_*` totals are paid work by construction and
 carry no free-versus-paid split; the split an operator wants is
 `sparkwing_node_seconds_total{placement}` for work and
@@ -369,8 +380,10 @@ carry no free-versus-paid split; the split an operator wants is
 
 `sparkwing_node_claim_wait_seconds` measures from `placement_hold_from`, the
 instant the node became claimable, which survives the `ready_at` bump a
-label-mismatched claim applies. A node re-claimed after a requeue is not
-observed, because the only wait it could report is the previous attempt's.
+label-mismatched claim applies. A node re-claimed after a lease-expiry requeue is not
+observed, because the only wait it could report is the previous attempt's. An
+automatic retry is observed, because the retry clears the hold instant and the
+claim generation, which makes its next claim a first claim.
 
 Per-run and per-team attribution lives in the ledger, not in the metrics:
 `GET /api/v1/credits/history` returns each charge with its run and node. A run
@@ -389,9 +402,17 @@ invented request method can grow the series count.
 exporter sorts and deduplicates each advertised label set and collapses a set
 longer than 120 bytes onto `label_set="other"`. When more than 32 distinct sets
 are live, the busiest 31 keep their own series and the rest are summed into
-`other`, so a set invented to sort first cannot displace a real fleet. Each
-sweep deletes the series for a set it no longer sees, which is what keeps the
-metric from growing with every label array a runner has ever sent.
+`other`, so a set invented to sort first cannot displace a real fleet. A tie in
+size goes to the set already reported, so a newcomer cannot displace a fleet
+that was there first. Each sweep deletes the series for a set it no longer
+sees, which is what keeps the metric from growing with every label array a
+runner has ever sent.
+
+A gauge with no children is absent from the exposition, so
+`sparkwing_runners_live == 0` never evaluates when the fleet is empty. Alert on
+`sparkwing_live_runners`, which carries no labels and is always present, and
+read `sparkwing_runners_live` for the composition of the fleet rather than for
+its size.
 
 Principal identity never becomes a label. `sparkwing_requests_by_principal_total`
 carries the credential's kind; principal names, token prefixes, holder ids and

@@ -241,13 +241,15 @@ func (s *Server) meteredTokenPrefix(r *http.Request) string {
 // runner that ran it. Cloud seconds come from the ledger instead, where a
 // cancel or a requeue bills them whether or not a finish reaches this route.
 func (s *Server) observeSettledNodeSeconds(r *http.Request, runID, nodeID string) {
-	seconds, metered, err := s.store.SettledNodeSeconds(r.Context(), runID, nodeID)
+	seconds, metering, err := s.store.SettledNodeSeconds(r.Context(), runID, nodeID)
 	if err != nil {
 		s.logger.Warn("sampling settled node seconds failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
 		return
 	}
-	if metered {
+	// safety: a revoked credential leaves no metering to read, and counting it
+	// as local would bill the operator's own capacity for cloud work.
+	if metering != store.MeteringFree {
 		return
 	}
 	addLocalNodeSeconds(seconds)
