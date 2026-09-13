@@ -30,7 +30,7 @@ func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 	}
 	defer func() {
 		_ = child.Process.Kill()
-		_, _ = child.Process.Wait()
+		_ = child.Wait()
 	}()
 
 	byRoot, ok := sampler.sampleOwnedFrom(time.Now, roots, cores)
