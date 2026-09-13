@@ -16,7 +16,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cluster"
+	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -148,11 +148,11 @@ func TestFleetAgentsEnrollUpdatesTrustAndPrintsRawOnlyOnce(t *testing.T) {
 	if err := fssecure.SecurePrivateConfig(agentPath); err != nil {
 		t.Fatal(err)
 	}
-	loadedAgent, err := cluster.LoadAgentConfig(agentPath)
+	loadedAgent, err := agentconfig.Load(agentPath)
 	if err != nil {
 		t.Fatalf("load emitted agent.yaml snippet: %v", err)
 	}
-	normalizedAgent, err := cluster.ValidateAgentConfig(*loadedAgent)
+	normalizedAgent, err := agentconfig.Validate(*loadedAgent)
 	if err != nil {
 		t.Fatalf("validate emitted agent.yaml snippet: %v", err)
 	}

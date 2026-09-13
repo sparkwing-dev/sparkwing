@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -20,149 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func TestAgentConfig_RoundTripFromYAML(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "agent.yaml")
-	yaml := `
-controller: http://localhost:4344
-logs: http://localhost:4345
-gitcache: http://localhost:4344/api/v1/gitcache
-cache_token: cache-abc
-profile: dev
-token: tok-abc
-max_concurrent: 3
-labels:
-  - laptop
-  - arch=arm64
-  - "  "
-spawn_policy: return-to-queue
-`
-	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := fssecure.SecurePrivateConfig(path); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := LoadAgentConfig(path)
-	if err != nil {
-		t.Fatalf("LoadAgentConfig: %v", err)
-	}
-	if cfg.Controller != "http://localhost:4344" {
-		t.Fatalf("controller: %q", cfg.Controller)
-	}
-	if cfg.Gitcache != "http://localhost:4344/api/v1/gitcache" || cfg.CacheToken != "cache-abc" {
-		t.Fatalf("gitcache credentials: url=%q token=%q", cfg.Gitcache, cfg.CacheToken)
-	}
-	if cfg.Token != "tok-abc" || cfg.MaxConcurrent != 3 {
-		t.Fatalf("unexpected cfg: %+v", cfg)
-	}
-	norm, err := ValidateAgentConfig(*cfg)
-	if err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if len(norm.Labels) != 2 || norm.Labels[0] != "laptop" || norm.Labels[1] != "arch=arm64" {
-		t.Fatalf("labels normalization: %v", norm.Labels)
-	}
-	if norm.Poll <= 0 || norm.Lease <= 0 {
-		t.Fatalf("defaults missing: %+v", norm)
-	}
-}
-
-func TestAgentConfig_RejectsUnknownFieldsAndAdditionalDocuments(t *testing.T) {
-	for _, tc := range []struct {
-		name, body, want string
-	}{
-		{"unknown field", "controller: http://localhost:4344\nadmin: true\n", "field admin not found"},
-		{"second document", "controller: http://localhost:4344\n---\ntoken: hidden\n", "multiple YAML documents"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "agent.yaml")
-			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := fssecure.SecurePrivateConfig(path); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := LoadAgentConfig(path); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("LoadAgentConfig error = %v, want %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestAgentConfig_RejectsMissingController(t *testing.T) {
-	_, err := ValidateAgentConfig(AgentConfig{Token: "x"})
-	if err == nil {
-		t.Fatal("expected error for missing controller")
-	}
-}
-
-func TestAgentConfig_RejectsUnsupportedSpawnPolicy(t *testing.T) {
-	for _, policy := range []string{"run-local", "auto", "bogus"} {
-		_, err := ValidateAgentConfig(AgentConfig{
-			Controller:  "http://x",
-			SpawnPolicy: policy,
-		})
-		if err == nil {
-			t.Fatalf("spawn_policy=%q should be rejected", policy)
-		}
-	}
-}
-
-func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
-	norm, err := ValidateAgentConfig(AgentConfig{Controller: "http://x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if norm.SpawnPolicy != "return-to-queue" {
-		t.Fatalf("default: %q", norm.SpawnPolicy)
-	}
-	if norm.Gitcache != "http://x/api/v1/gitcache" {
-		t.Fatalf("gitcache default = %q, want controller proxy", norm.Gitcache)
-	}
-	if norm.LocalAdmission == nil || *norm.LocalAdmission {
-		t.Fatal("legacy singular config did not preserve disabled local admission")
-	}
-}
-
-func TestAgentConfig_RequiresLocalAdmissionOnlyForEnrolledMode(t *testing.T) {
-	disabled := false
-	legacy, err := ValidateAgentConfig(AgentConfig{Controller: "http://x", LocalAdmission: &disabled})
-	if err != nil || legacy.LocalAdmission == nil || *legacy.LocalAdmission {
-		t.Fatalf("legacy local_admission:false = %+v, %v", legacy.LocalAdmission, err)
-	}
-	if _, err := ValidateAgentConfig(AgentConfig{Name: "desk", Controller: "http://x", Token: "swr_x", LocalAdmission: &disabled}); err == nil {
-		t.Fatal("enrolled local_admission:false was accepted")
-	}
-	enrolled, err := ValidateAgentConfig(AgentConfig{Name: "desk", Controller: "http://x", Token: "swr_x"})
-	if err != nil || enrolled.LocalAdmission == nil || !*enrolled.LocalAdmission {
-		t.Fatalf("enrolled local admission default = %+v, %v", enrolled.LocalAdmission, err)
-	}
-}
-
-func TestAgentConfig_MultipleMembershipsRequireDistinctCredentialsAndShareCeilings(t *testing.T) {
-	cfg := AgentConfig{
-		Name: "desk", MaxConcurrent: 3, Contribution: "4,8gb",
-		Coordinators: []AgentCoordinatorConfig{
-			{Controller: "https://personal.example", Token: "swr_personal", MaxConcurrent: 2},
-			{Controller: "https://team.example", Token: "swr_team", MaxConcurrent: 9, Contribution: "2,4gb"},
-		},
-	}
-	norm, err := ValidateAgentConfig(cfg)
-	if err != nil {
-		t.Fatalf("ValidateAgentConfig: %v", err)
-	}
-	if norm.Coordinators[0].Name != "desk" || norm.Coordinators[1].Name != "desk" ||
-		norm.Coordinators[0].Contribution != "4,8gb" || norm.Coordinators[1].MaxConcurrent != 3 {
-		t.Fatalf("membership ceilings = %+v", norm.Coordinators)
-	}
-	cfg.Coordinators[1].Token = "swr_personal"
-	if _, err := ValidateAgentConfig(cfg); err == nil {
-		t.Fatal("duplicate membership credential was accepted")
-	}
-}
 
 func TestAgentMembership_HeartbeatsAndFailsClosedWithoutWingd(t *testing.T) {
 	var heartbeats atomic.Int64
@@ -187,8 +45,8 @@ func TestAgentMembership_HeartbeatsAndFailsClosedWithoutWingd(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	cfg := AgentConfig{Heartbeat: time.Millisecond}
-	member := AgentCoordinatorConfig{Name: "desk", Controller: srv.URL, Token: "swr_member"}
+	cfg := agentconfig.Config{Heartbeat: time.Millisecond}
+	member := agentconfig.Coordinator{Name: "desk", Controller: srv.URL, Token: "swr_member"}
 	ctrl := client.NewWithToken(srv.URL, srv.Client(), member.Token)
 	provider := func(context.Context) capacityReport {
 		return capacityReport{headroom: &client.Headroom{Cores: 2, MemoryBytes: 4 << 30}}
@@ -275,7 +133,7 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	cfg, err := ValidateAgentConfig(AgentConfig{
+	cfg, err := agentconfig.Validate(agentconfig.Config{
 		Controller:    srv.URL,
 		Token:         "bearer-xyz",
 		Labels:        []string{"laptop", "arch=arm64"},
@@ -400,7 +258,7 @@ func TestExecutorOfferSlotDoesNotReserveAfterBodyAttestationRefusal(t *testing.T
 		reservations.Add(1)
 		return nil, errors.New("unexpected reservation")
 	}}
-	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Millisecond}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+	runExecutorOfferSlot(ctx, agentconfig.Config{Poll: time.Millisecond}, agentconfig.Coordinator{Name: "desk"}, 123, 0,
 		ctrl, ledger, nil, discardSlog())
 	if reservations.Load() != 0 || len(ctrl.offers) != 0 {
 		t.Fatalf("body-attestation refusal reserved=%d offered=%d", reservations.Load(), len(ctrl.offers))
@@ -421,7 +279,7 @@ func TestExecutorOfferSlotDoesNotReserveOrRunAnUnsealedLegacyCandidate(t *testin
 	exec := func(context.Context, *store.Node, string, *orchestrator.LocalAdmission) {
 		executions.Add(1)
 	}
-	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Millisecond}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+	runExecutorOfferSlot(ctx, agentconfig.Config{Poll: time.Millisecond}, agentconfig.Coordinator{Name: "desk"}, 123, 0,
 		ctrl, ledger, exec, discardSlog())
 	if reservations.Load() != 0 || len(ctrl.offers) != 0 || executions.Load() != 0 {
 		t.Fatalf("unsealed legacy candidate reserved=%d offered=%d executed=%d",
@@ -482,8 +340,8 @@ func TestExecutorOfferSlotPinsAcrossLostResponseAndConsumesThePreparedReservatio
 		executed.Add(1)
 		cancel()
 	}
-	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Minute, Lease: time.Minute},
-		AgentCoordinatorConfig{Name: "desk"}, 123, 0, ctrl, ledger, exec, discardSlog())
+	runExecutorOfferSlot(ctx, agentconfig.Config{Poll: time.Minute, Lease: time.Minute},
+		agentconfig.Coordinator{Name: "desk"}, 123, 0, ctrl, ledger, exec, discardSlog())
 	if len(ctrl.offers) != 3 {
 		t.Fatalf("offers = %d, want 3", len(ctrl.offers))
 	}
@@ -507,7 +365,7 @@ func TestExecutorOfferSlotWithholdsOfferWithoutImmediateCapacity(t *testing.T) {
 		cancel()
 		return nil, ErrExecutorCapacityUnavailable
 	}}
-	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Millisecond}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+	runExecutorOfferSlot(ctx, agentconfig.Config{Poll: time.Millisecond}, agentconfig.Coordinator{Name: "desk"}, 123, 0,
 		ctrl, ledger, nil, discardSlog())
 	if len(ctrl.offers) != 0 {
 		t.Fatalf("offers without capacity = %d", len(ctrl.offers))
@@ -526,7 +384,7 @@ func TestExecutorOfferSlotHonorsEnrollmentConcurrencyCeiling(t *testing.T) {
 		reservations.Add(1)
 		return nil, errors.New("unexpected reservation")
 	}}
-	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Millisecond}, AgentCoordinatorConfig{Name: "desk"}, 123, 1,
+	runExecutorOfferSlot(ctx, agentconfig.Config{Poll: time.Millisecond}, agentconfig.Coordinator{Name: "desk"}, 123, 1,
 		ctrl, ledger, nil, discardSlog())
 	if reservations.Load() != 0 || len(ctrl.offers) != 0 {
 		t.Fatalf("reservations = %d, offers = %d", reservations.Load(), len(ctrl.offers))
@@ -556,7 +414,7 @@ func TestExecutorOfferSlotReleasesReservationWhenControllerHangsAfterFirstOffer(
 	started := time.Now()
 	done := make(chan struct{})
 	go func() {
-		runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Hour}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+		runExecutorOfferSlot(ctx, agentconfig.Config{Poll: time.Hour}, agentconfig.Coordinator{Name: "desk"}, 123, 0,
 			ctrl, ledger, nil, discardSlog())
 		close(done)
 	}()
@@ -576,42 +434,6 @@ func TestExecutorOfferSlotReleasesReservationWhenControllerHangsAfterFirstOffer(
 	}
 }
 
-func TestCheckEnrolledExecutionAvailable_RefusesEveryEnrolledShape(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cfg  AgentConfig
-	}{
-		{"named singular", AgentConfig{Controller: "http://x", Name: "desk", Token: "tok"}},
-		{"coordinators", AgentConfig{Controller: "http://x", Coordinators: []AgentCoordinatorConfig{
-			{Name: "desk", Controller: "http://x", Token: "tok"},
-		}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := ValidateAgentConfig(tc.cfg)
-			if err != nil {
-				t.Fatalf("validate: %v", err)
-			}
-			err = CheckEnrolledExecutionAvailable(cfg, false)
-			if err == nil || err.Error() != EnrolledExecutionUnavailable {
-				t.Fatalf("refusal = %v, want %q", err, EnrolledExecutionUnavailable)
-			}
-			if err := CheckEnrolledExecutionAvailable(cfg, true); err != nil {
-				t.Fatalf("preview override: %v", err)
-			}
-		})
-	}
-}
-
-func TestCheckEnrolledExecutionAvailable_AdmitsClaimMode(t *testing.T) {
-	cfg, err := ValidateAgentConfig(AgentConfig{Controller: "http://x", Token: "tok", HolderPrefix: "desk"})
-	if err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if err := CheckEnrolledExecutionAvailable(cfg, false); err != nil {
-		t.Fatalf("claim mode refused: %v", err)
-	}
-}
-
 func TestRunAgentCLI_EnrolledConfigRefusesBeforePolling(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	body := "controller: http://127.0.0.1:1\nname: desk\ntoken: tok\n"
@@ -622,7 +444,7 @@ func TestRunAgentCLI_EnrolledConfigRefusesBeforePolling(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := runAgentCLI([]string{"--config", path}, buildinfo.Identity{})
-	if err == nil || err.Error() != EnrolledExecutionUnavailable {
-		t.Fatalf("runAgentCLI = %v, want %q", err, EnrolledExecutionUnavailable)
+	if err == nil || err.Error() != agentconfig.EnrolledExecutionUnavailable {
+		t.Fatalf("runAgentCLI = %v, want %q", err, agentconfig.EnrolledExecutionUnavailable)
 	}
 }

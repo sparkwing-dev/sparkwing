@@ -5,212 +5,26 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
-	"go.yaml.in/yaml/v3"
-
+	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/executorinfo"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type AgentConfig struct {
-	Name         string                   `yaml:"name"`
-	Contribution string                   `yaml:"contribution"`
-	Coordinators []AgentCoordinatorConfig `yaml:"coordinators"`
-
-	Controller    string        `yaml:"controller"`
-	Logs          string        `yaml:"logs"`
-	Gitcache      string        `yaml:"gitcache"`
-	CacheToken    string        `yaml:"cache_token"`
-	Profile       string        `yaml:"profile"`
-	Token         string        `yaml:"token"`
-	MaxConcurrent int           `yaml:"max_concurrent"`
-	Labels        []string      `yaml:"labels"`
-	SpawnPolicy   string        `yaml:"spawn_policy"`
-	HolderPrefix  string        `yaml:"holder_prefix"`
-	Poll          time.Duration `yaml:"poll"`
-	Lease         time.Duration `yaml:"lease"`
-	Heartbeat     time.Duration `yaml:"heartbeat"`
-
-	LocalAdmission *bool `yaml:"local_admission"`
-
-	LocalReserve string `yaml:"local_reserve"`
-
-	registered bool
-}
-
-// AgentCoordinatorConfig is one explicitly enrolled controller membership.
-// Each membership carries a distinct credential and may narrow the global
-// slot and contribution ceilings.
-type AgentCoordinatorConfig struct {
-	Name          string `yaml:"name"`
-	Controller    string `yaml:"controller"`
-	Logs          string `yaml:"logs"`
-	Gitcache      string `yaml:"gitcache"`
-	CacheToken    string `yaml:"cache_token"`
-	Profile       string `yaml:"profile"`
-	Token         string `yaml:"token"`
-	MaxConcurrent int    `yaml:"max_concurrent"`
-	Contribution  string `yaml:"contribution"`
-}
-
-func LoadAgentConfig(path string) (*AgentConfig, error) {
-	f, err := fssecure.OpenPrivateConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-	var cfg AgentConfig
-	decoder := yaml.NewDecoder(f)
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("multiple YAML documents are not allowed")
-		}
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	return &cfg, nil
-}
-
-func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
-	out := in
-	if out.Controller == "" && len(out.Coordinators) == 0 {
-		return out, errors.New("agent.yaml: controller is required")
-	}
-	if out.Gitcache == "" {
-		out.Gitcache = strings.TrimRight(out.Controller, "/") + "/api/v1/gitcache"
-	}
-	if out.SpawnPolicy == "" {
-		out.SpawnPolicy = "return-to-queue"
-	}
-	switch out.SpawnPolicy {
-	case "return-to-queue":
-	case "run-local", "auto":
-		return out, fmt.Errorf("agent.yaml: spawn_policy %q is not implemented yet (only return-to-queue is supported in v0)", out.SpawnPolicy)
-	default:
-		return out, fmt.Errorf("agent.yaml: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
-	}
-	if _, err := parseReserve(out.LocalReserve); err != nil {
-		return out, fmt.Errorf("agent.yaml: local_reserve: %w", err)
-	}
-	if _, err := parseReserve(out.Contribution); err != nil {
-		return out, fmt.Errorf("agent.yaml: contribution: %w", err)
-	}
-	out.Name = strings.TrimSpace(out.Name)
-	out.registered = out.Name != "" || len(out.Coordinators) > 0
-	if out.registered && strings.Contains(out.Name, ":") {
-		return out, errors.New("agent.yaml: name is required and cannot contain ':'")
-	}
-	if out.registered {
-		if out.LocalAdmission != nil && !*out.LocalAdmission {
-			return out, errors.New("agent.yaml: local_admission cannot be false for enrolled helper memberships")
-		}
-		required := true
-		out.LocalAdmission = &required
-	} else if out.LocalAdmission == nil {
-		disabled := false
-		out.LocalAdmission = &disabled
-	}
-	if out.MaxConcurrent < 1 {
-		out.MaxConcurrent = 1
-	}
-	if out.Poll <= 0 {
-		out.Poll = 500 * time.Millisecond
-	}
-	if out.Lease <= 0 {
-		out.Lease = store.DefaultLeaseDuration
-	}
-	clean := make([]string, 0, len(out.Labels))
-	seen := map[string]bool{}
-	for _, l := range out.Labels {
-		l = strings.TrimSpace(l)
-		if l != "" && !seen[l] {
-			seen[l] = true
-			clean = append(clean, l)
-		}
-	}
-	out.Labels = clean
-	membershipTokens := map[string]bool{}
-	membershipControllers := map[string]bool{}
-	for i := range out.Coordinators {
-		member := &out.Coordinators[i]
-		if member.Controller == "" {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].controller is required", i)
-		}
-		if membershipControllers[member.Controller] {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].controller is enrolled more than once", i)
-		}
-		membershipControllers[member.Controller] = true
-		if member.Name == "" {
-			member.Name = out.Name
-		}
-		member.Name = strings.TrimSpace(member.Name)
-		if member.Name == "" || strings.Contains(member.Name, ":") {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].name is required and cannot contain ':'", i)
-		}
-		if member.Token == "" {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].token is required", i)
-		}
-		if membershipTokens[member.Token] {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].token must be distinct", i)
-		}
-		membershipTokens[member.Token] = true
-		if member.Gitcache == "" {
-			member.Gitcache = strings.TrimRight(member.Controller, "/") + "/api/v1/gitcache"
-		}
-		if member.MaxConcurrent <= 0 || member.MaxConcurrent > out.MaxConcurrent {
-			member.MaxConcurrent = out.MaxConcurrent
-		}
-		if member.Contribution == "" {
-			member.Contribution = out.Contribution
-		}
-		if _, err := parseReserve(member.Contribution); err != nil {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].contribution: %w", i, err)
-		}
-	}
-	if out.registered && len(out.Coordinators) == 0 && out.Token == "" {
-		return out, errors.New("agent.yaml: token is required for an enrolled helper membership")
-	}
-	return out, nil
-}
-
-// EnrolledExecutionUnavailable is the whole message an agent prints when its
-// configuration selects enrolled mode, which the controller refuses on both
-// the claim route and the offer route.
-const EnrolledExecutionUnavailable = "enrolled execution is not available; " +
-	"remove name and coordinators from agent.yaml to run in claim mode, " +
-	"or pass --allow-enrolled-preview to start the unfinished enrolled path"
-
-// CheckEnrolledExecutionAvailable refuses a configuration that would enter
-// enrolled mode. allowPreview lets a developer of enrolled execution run the
-// unfinished path anyway.
-func CheckEnrolledExecutionAvailable(cfg AgentConfig, allowPreview bool) error {
-	if !cfg.registered || allowPreview {
-		return nil
-	}
-	return errors.New(EnrolledExecutionUnavailable)
-}
-
-func agentCoordinators(cfg AgentConfig) []AgentCoordinatorConfig {
+func agentCoordinators(cfg agentconfig.Config) []agentconfig.Coordinator {
 	if len(cfg.Coordinators) > 0 {
 		return cfg.Coordinators
 	}
-	return []AgentCoordinatorConfig{{
+	return []agentconfig.Coordinator{{
 		Name:       cfg.Name,
 		Controller: cfg.Controller, Logs: cfg.Logs, Gitcache: cfg.Gitcache,
 		CacheToken: cfg.CacheToken, Profile: cfg.Profile, Token: cfg.Token,
@@ -218,7 +32,7 @@ func agentCoordinators(cfg AgentConfig) []AgentCoordinatorConfig {
 	}}
 }
 
-func runAgentMembership(ctx context.Context, cfg AgentConfig, member AgentCoordinatorConfig, ledger ExecutorCapacityLedger, logger *slog.Logger) error {
+func runAgentMembership(ctx context.Context, cfg agentconfig.Config, member agentconfig.Coordinator, ledger ExecutorCapacityLedger, logger *slog.Logger) error {
 	limits, err := executorCapacityLimitsFor(cfg, member)
 	if err != nil {
 		return err
@@ -232,7 +46,7 @@ func runAgentMembership(ctx context.Context, cfg AgentConfig, member AgentCoordi
 	return runAgentMembershipLoop(ctx, cfg, member, provider, ctrl, ledger, exec, logger)
 }
 
-func executorCapacityLimitsFor(cfg AgentConfig, member AgentCoordinatorConfig) (executorCapacityLimits, error) {
+func executorCapacityLimitsFor(cfg agentconfig.Config, member agentconfig.Coordinator) (executorCapacityLimits, error) {
 	localReserve, err := parseReserve(cfg.LocalReserve)
 	if err != nil {
 		return executorCapacityLimits{}, err
@@ -263,7 +77,7 @@ const (
 	executorOfferTransportBudget = 500 * time.Millisecond
 )
 
-func runAgentMembershipLoop(ctx context.Context, cfg AgentConfig, member AgentCoordinatorConfig, provider headroomProvider, ctrl executorMembershipClient, ledger ExecutorCapacityLedger, exec executorNodeFn, logger *slog.Logger) error {
+func runAgentMembershipLoop(ctx context.Context, cfg agentconfig.Config, member agentconfig.Coordinator, provider headroomProvider, ctrl executorMembershipClient, ledger ExecutorCapacityLedger, exec executorNodeFn, logger *slog.Logger) error {
 	interval := cfg.Heartbeat
 	if interval <= 0 {
 		interval = 10 * time.Second
@@ -325,7 +139,7 @@ func heartbeatExecutor(ctx context.Context, executorName string, provider headro
 	return nil
 }
 
-func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoordinatorConfig, instanceID int64, slot int, ctrl executorMembershipClient, ledger ExecutorCapacityLedger, exec executorNodeFn, logger *slog.Logger) {
+func runExecutorOfferSlot(ctx context.Context, cfg agentconfig.Config, member agentconfig.Coordinator, instanceID int64, slot int, ctrl executorMembershipClient, ledger ExecutorCapacityLedger, exec executorNodeFn, logger *slog.Logger) {
 	limits, err := executorCapacityLimitsFor(cfg, member)
 	if err != nil {
 		logger.Error("executor capacity configuration is invalid", "err", err, "slot", slot)
@@ -457,10 +271,6 @@ func superviseAgentMembership(ctx context.Context, run func(context.Context) err
 	}
 }
 
-func DefaultAgentConfigPath() (string, error) {
-	return fssecure.ConfigFile("agent.yaml")
-}
-
 func RunAgentCLI(args []string) error {
 	return runAgentCLI(args, buildinfo.Read("sparkwing-runner", ""))
 }
@@ -475,22 +285,22 @@ func runAgentCLI(args []string, identity buildinfo.Identity) error {
 	}
 
 	if *configPath == "" {
-		p, err := DefaultAgentConfigPath()
+		p, err := agentconfig.DefaultPath()
 		if err != nil {
 			return err
 		}
 		*configPath = p
 	}
 
-	raw, err := LoadAgentConfig(*configPath)
+	raw, err := agentconfig.Load(*configPath)
 	if err != nil {
 		return err
 	}
-	cfg, err := ValidateAgentConfig(*raw)
+	cfg, err := agentconfig.Validate(*raw)
 	if err != nil {
 		return err
 	}
-	if err := CheckEnrolledExecutionAvailable(cfg, *allowEnrolledPreview); err != nil {
+	if err := agentconfig.CheckEnrolledExecutionAvailable(cfg, *allowEnrolledPreview); err != nil {
 		return err
 	}
 
@@ -504,14 +314,14 @@ func runAgentCLI(args []string, identity buildinfo.Identity) error {
 		"config", *configPath,
 		"name", cfg.Name,
 		"coordinators", len(memberships),
-		"registered", cfg.registered,
+		"registered", cfg.Enrolled(),
 		"labels", cfg.Labels,
 		"max_concurrent", cfg.MaxConcurrent,
 		"spawn_policy", cfg.SpawnPolicy,
 		"observed_platform", executorinfo.DetectObservedPlatform(),
 	)
 
-	if !cfg.registered {
+	if !cfg.Enrolled() {
 		prefix := cfg.HolderPrefix
 		if prefix == "" {
 			if h, err := os.Hostname(); err == nil && h != "" {

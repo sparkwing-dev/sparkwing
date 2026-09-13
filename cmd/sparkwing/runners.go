@@ -14,12 +14,12 @@ import (
 	flag "github.com/spf13/pflag"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cluster"
+	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
+	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/internal/runnersvc"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -167,7 +167,7 @@ func runRunnersRemove(args []string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := cluster.LoadAgentConfig(path)
+	raw, err := agentconfig.Load(path)
 	if err != nil {
 		return err
 	}
@@ -260,15 +260,15 @@ func validateAgentFileConfig(cfg agentFileConfig) error {
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(body))
 	decoder.KnownFields(true)
-	var parsed cluster.AgentConfig
+	var parsed agentconfig.Config
 	if err := decoder.Decode(&parsed); err != nil {
 		return fmt.Errorf("the assembled agent config does not parse: %w", err)
 	}
-	validated, err := cluster.ValidateAgentConfig(parsed)
+	validated, err := agentconfig.Validate(parsed)
 	if err != nil {
 		return err
 	}
-	return cluster.CheckEnrolledExecutionAvailable(validated, false)
+	return agentconfig.CheckEnrolledExecutionAvailable(validated, false)
 }
 
 // safety: the claim-mode subset install/service-install.sh writes. A name or a coordinator here would select
@@ -288,7 +288,7 @@ func agentConfigPath(override string) (string, error) {
 	if override != "" {
 		return filepath.Abs(override)
 	}
-	return cluster.DefaultAgentConfigPath()
+	return agentconfig.DefaultPath()
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
@@ -370,7 +370,7 @@ func firstNonBlank(values ...string) string {
 
 // safety: the decision about this machine's service manager, taken before anything irreversible happens.
 type runnerServicePlan struct {
-	host    runnersvc.Host
+	host    agentservice.Host
 	skipped bool
 	manual  bool
 }
@@ -391,8 +391,8 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 	if host.Binary == "" {
 		return runnerServicePlan{}, errRunnerBinaryMissing()
 	}
-	if err := runnersvc.Preflight(host); err != nil {
-		if errors.Is(err, runnersvc.ErrUnsupported) {
+	if err := agentservice.Preflight(host); err != nil {
+		if errors.Is(err, agentservice.ErrUnsupported) {
 			return runnerServicePlan{manual: true}, nil
 		}
 		return runnerServicePlan{}, err
@@ -409,7 +409,7 @@ func (p runnerServicePlan) start(configPath string) error {
 		printWindowsServiceSteps(configPath)
 		return nil
 	}
-	state, err := runnersvc.Install(p.host)
+	state, err := agentservice.Install(p.host)
 	if err != nil {
 		return err
 	}
@@ -426,9 +426,9 @@ func stopRunnerService(configPath string, skip bool) error {
 	if err != nil {
 		return err
 	}
-	state, err := runnersvc.Uninstall(host)
+	state, err := agentservice.Uninstall(host)
 	if err != nil {
-		if errors.Is(err, runnersvc.ErrUnsupported) {
+		if errors.Is(err, agentservice.ErrUnsupported) {
 			return nil
 		}
 		return err
@@ -445,10 +445,10 @@ func printWindowsServiceSteps(configPath string) {
 	fmt.Println("  3. register that command with your service manager so it restarts at logon")
 }
 
-func defaultRunnerServiceHost(configPath string) (runnersvc.Host, error) {
+func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return runnersvc.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
+		return agentservice.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
 	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -456,9 +456,9 @@ func defaultRunnerServiceHost(configPath string) (runnersvc.Host, error) {
 	}
 	root, err := paths.DefaultPaths()
 	if err != nil {
-		return runnersvc.Host{}, err
+		return agentservice.Host{}, err
 	}
-	return runnersvc.Host{
+	return agentservice.Host{
 		GOOS:       runnerServiceGOOS,
 		Home:       home,
 		ConfigHome: configHome,
@@ -466,7 +466,7 @@ func defaultRunnerServiceHost(configPath string) (runnersvc.Host, error) {
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		UID:        os.Getuid(),
-		Exec:       runnersvc.DefaultExec,
+		Exec:       agentservice.DefaultExec,
 	}, nil
 }
 
