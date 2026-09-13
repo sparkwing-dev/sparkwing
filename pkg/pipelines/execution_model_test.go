@@ -112,6 +112,78 @@ func TestParse_UnknownTriggerFieldRejected(t *testing.T) {
 	}
 }
 
+func TestParse_UnknownNestedTriggerFieldRejected(t *testing.T) {
+	cases := []struct{ trigger, body, key string }{
+		{"push", "{branchez: [main]}", "branchez"},
+		{"pull_request", "{actionz: [opened]}", "actionz"},
+		{"webhook", "{pathh: /x}", "pathh"},
+	}
+	for _, c := range cases {
+		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    on:\n      " + c.trigger + ": " + c.body + "\n"
+		_, err := pipelines.Parse(strings.NewReader(yaml))
+		want := "on." + c.trigger + `: unknown field "` + c.key + `"`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("on.%s: expected %s; got %v", c.trigger, want, err)
+		}
+	}
+}
+
+func TestParse_NullTriggerValueRejected(t *testing.T) {
+	keys := []string{"push", "pull_request", "schedule", "webhook", "pre_commit", "pre_push", "post_commit"}
+	for _, key := range keys {
+		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    on:\n      " + key + ":\n"
+		_, err := pipelines.Parse(strings.NewReader(yaml))
+		if err == nil || !strings.Contains(err.Error(), "on."+key+": no value") {
+			t.Errorf("on.%s: a trigger key with no value loaded clean; got %v", key, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "line 5") {
+			t.Errorf("on.%s: the refusal does not name the offending line; got %v", key, err)
+		}
+	}
+}
+
+func TestParse_NestedTriggerRefusesWhatIsNotAMapping(t *testing.T) {
+	cases := map[string]string{
+		"push":         "on:\n      push: main\n",
+		"pull_request": "on:\n      pull_request: [opened]\n",
+		"webhook":      "on:\n      webhook: /review\n",
+	}
+	for trigger, body := range cases {
+		yaml := "pipelines:\n  - name: x\n    entrypoint: X\n    " + body
+		_, err := pipelines.Parse(strings.NewReader(yaml))
+		if err == nil || !strings.Contains(err.Error(), "on."+trigger+": expected a mapping") {
+			t.Errorf("on.%s: a scalar or sequence body was accepted; got %v", trigger, err)
+		}
+	}
+}
+
+// a merge key carries the anchored mapping's own keys, so the strict check
+// must read through it rather than refuse the `<<` spelling itself
+func TestParse_NestedTriggerReadsThroughAMergeKey(t *testing.T) {
+	yaml := `
+pipelines:
+  - name: base
+    entrypoint: Base
+    on:
+      push: &push_defaults
+        branches: [main]
+  - name: x
+    entrypoint: X
+    on:
+      push:
+        <<: *push_defaults
+        paths: ["*.go"]
+`
+	cfg, err := pipelines.Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("a merged on.push mapping was refused: %v", err)
+	}
+	got := cfg.Pipelines[1].On.Push
+	if got == nil || len(got.Branches) != 1 || got.Branches[0] != "main" {
+		t.Fatalf("on.push = %+v, want the merged branches", got)
+	}
+}
+
 func TestParse_UnknownGuardFieldRejected(t *testing.T) {
 	yaml := `
 pipelines:

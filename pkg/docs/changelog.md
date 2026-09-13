@@ -29,6 +29,22 @@ unlock.
   between the assignment and the bind. `ServeWith` closes the listener when it
   returns, so a server configured this way serves once.
 
+### Changed
+
+- **config (Breaking):** A trigger key under `on:` that carries no value is
+  refused, naming the key and the line. `pre_commit:` with no body yielded no
+  trigger and installed no hook, which read as working. Give every trigger a
+  body: `pre_commit: {}` for one with no options, and a mapping of options for
+  the rest. `on:` itself may still be empty.
+
+### Fixed
+
+- **config:** A pipeline's `on.push`, `on.pull_request` and `on.webhook`
+  mappings reject a key outside their schema, naming the field and the line.
+  `on: {webhook: {pathh: /review}}` loaded clean and exposed the pipeline on
+  the empty path. Keys under `on.pre_commit`, `on.pre_push` and
+  `on.post_commit` are still matched loosely.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added

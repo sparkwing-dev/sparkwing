@@ -268,6 +268,10 @@ func (t *Triggers) UnmarshalYAML(node *yaml.Node) error {
 		if _, ok := known[key.Value]; !ok {
 			return fmt.Errorf("on: unknown field %q on line %d", key.Value, key.Line)
 		}
+		if value := node.Content[i+1]; value.Tag == "!!null" {
+			return fmt.Errorf("on.%s: no value on line %d; give the trigger a mapping of its options, or drop the key",
+				key.Value, value.Line)
+		}
 	}
 	type triggersAlias Triggers
 	var raw triggersAlias
@@ -296,6 +300,23 @@ type PushTrigger struct {
 	Paths []string `yaml:"paths,omitempty"`
 }
 
+// UnmarshalYAML decodes an on.push mapping and rejects any key outside the
+// schema, so a typo'd option cannot leave the trigger holding a default the
+// author never asked for.
+func (p *PushTrigger) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	type pushAlias PushTrigger
+	var raw pushAlias
+	if err := decodeStrictTrigger(node, "on.push",
+		map[string]struct{}{"branches": {}, "paths": {}}, &raw); err != nil {
+		return err
+	}
+	*p = PushTrigger(raw)
+	return nil
+}
+
 // PullRequestTrigger fires on GitHub pull_request events. The
 // controller dispatches on the opened, synchronize, and reopened
 // actions; other actions (labeled, closed, ...) are acknowledged and
@@ -315,6 +336,23 @@ type PullRequestTrigger struct {
 	// Branches records the intended pull-request base branch globs. It does
 	// not gate webhook dispatch.
 	Branches []string `yaml:"branches,omitempty"`
+}
+
+// UnmarshalYAML decodes an on.pull_request mapping and rejects any key outside
+// the schema, so a typo'd option cannot leave the trigger holding a default the
+// author never asked for.
+func (p *PullRequestTrigger) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	type pullRequestAlias PullRequestTrigger
+	var raw pullRequestAlias
+	if err := decodeStrictTrigger(node, "on.pull_request",
+		map[string]struct{}{"actions": {}, "branches": {}}, &raw); err != nil {
+		return err
+	}
+	*p = PullRequestTrigger(raw)
+	return nil
 }
 
 // ScheduleTriggers is one pipeline's declared cadences, one entry per cadence, nil when the
@@ -613,6 +651,45 @@ type WebhookTrigger struct {
 	// Path is the HTTP path the controller exposes to fire the
 	// pipeline (e.g. /review).
 	Path string `yaml:"path"`
+}
+
+// UnmarshalYAML decodes an on.webhook mapping and rejects any key outside the
+// schema. Path carries no validation, so a typo'd key would otherwise expose
+// the pipeline on the empty path without complaint.
+func (w *WebhookTrigger) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	type webhookAlias WebhookTrigger
+	var raw webhookAlias
+	if err := decodeStrictTrigger(node, "on.webhook",
+		map[string]struct{}{"path": {}}, &raw); err != nil {
+		return err
+	}
+	*w = WebhookTrigger(raw)
+	return nil
+}
+
+func decodeStrictTrigger(node *yaml.Node, what string, known map[string]struct{}, dst any) error {
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: expected a mapping, got %s", what, nodeKindName(node.Kind))
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode || key.Tag == mergeKeyTag {
+			continue
+		}
+		if _, ok := known[key.Value]; !ok {
+			return fmt.Errorf("%s: unknown field %q on line %d", what, key.Value, key.Line)
+		}
+	}
+	if err := node.Decode(dst); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	return nil
 }
 
 // PreHookTrigger fires from a pre-commit git hook. Scoped to fast
