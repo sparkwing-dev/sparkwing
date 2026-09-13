@@ -70,6 +70,13 @@ unlock.
   name and then discarded, so a publish that named a profile refused with an
   error telling the operator to name a profile.
 
+### Removed
+
+- **cli:** The retired `dashboard` noun lost the parsing and migration message
+  it kept after v0.49.0 removed the command. It reads as an unknown subcommand. `sparkwing serve` is the supported command group; see
+  [the retired dashboard noun](docs/migrations/_unreleased.md#retired-dashboard-noun),
+  and [v0.49.0](docs/migrations/v0.49.0.md#serve-command) for the command map
+
 ### Docs
 
 - **runs bounce:** The reference page no longer implies a bounce reaches a job

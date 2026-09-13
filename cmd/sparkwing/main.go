@@ -341,9 +341,6 @@ func removeEnv(env []string, key string) []string {
 }
 
 func runSparkwing(args []string) error {
-	if removedDashboardCommand(args) {
-		return errors.New("dashboard was removed; use sparkwing serve (for example, sparkwing serve start)")
-	}
 	args, err := moveRootOutput(args)
 	if err != nil {
 		return err
