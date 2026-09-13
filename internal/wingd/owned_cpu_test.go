@@ -600,11 +600,30 @@ func TestOwnedCPU_ARecycledPIDDoesNotInheritTheDeadProcessBaseline(t *testing.T)
 	}
 }
 
-func TestProcessStartFromCreation_RefusesAnAgeWiderThanADurationHolds(t *testing.T) {
-	started := processStartFromCreation(time.Now(), time.Time{})
+func TestProcessStartFromCreation_RefusesACreationStampTooOldToKeepAMonotonicReading(t *testing.T) {
+	now := time.Now()
+	for name, createdAt := range map[string]time.Time{
+		// a creation stamp a garbage FILETIME reaches: the conversion clamps to
+		// 1677 at the low end, so every one of these is a value the caller can
+		// hand over, not a value only a test can build.
+		"past the range a duration holds":      time.Date(1700, 1, 1, 0, 0, 0, 0, time.UTC),
+		"inside the range a duration holds":    time.Date(1800, 1, 1, 0, 0, 0, 0, time.UTC),
+		"an age no source could have measured": {},
+	} {
+		if started := processStartFromCreation(now, createdAt); !started.IsZero() {
+			t.Fatalf("%s: process dated %v; want no date, because subtracting an age this wide lands outside the range a monotonic reading survives and the result silently carries none",
+				name, started)
+		}
+	}
+}
+
+func TestProcessStartFromUptime_RefusesAnUptimeTooWideToKeepAMonotonicReading(t *testing.T) {
+	const secondsIn200Years = 200 * 365 * 24 * 60 * 60
+
+	started := processStartFromUptime(time.Now(), secondsIn200Years, 0)
 
 	if !started.IsZero() {
-		t.Fatalf("process dated %v; want no date: the age saturates, and subtracting a saturated duration overflows away the monotonic reading this function exists to carry",
+		t.Fatalf("process dated %v; want no date: no machine reports an uptime this wide, and the two dating paths answer the same way so neither grows a case the other lacks",
 			started)
 	}
 }

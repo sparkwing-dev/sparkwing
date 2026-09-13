@@ -1,13 +1,10 @@
 package wingd
 
 import (
-	"math"
 	"strconv"
 	"strings"
 	"time"
 )
-
-const maxProcessAge = time.Duration(math.MaxInt64)
 
 type cpuTotals struct {
 	busy  float64
@@ -97,13 +94,10 @@ func processStartFromCreation(now, createdAt time.Time) time.Time {
 	// wall clock, where a step larger than the dating slack moves the bound and
 	// nothing goes red.
 	age := now.Sub(createdAt)
-	if age < 0 || age == maxProcessAge {
-		// safety: a difference wider than a duration can hold saturates here, and
-		// subtracting that overflows the monotonic reading away again, so the
-		// saturated value is refused rather than dated.
+	if age < 0 {
 		return time.Time{}
 	}
-	return now.Add(-age)
+	return datedOrUndatable(now, age)
 }
 
 func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) time.Time {
@@ -117,5 +111,18 @@ func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) 
 	if age < 0 {
 		return time.Time{}
 	}
-	return now.Add(-time.Duration(age * float64(time.Second)))
+	return datedOrUndatable(now, time.Duration(age*float64(time.Second)))
+}
+
+func datedOrUndatable(now time.Time, age time.Duration) time.Time {
+	// safety: a subtraction this large can land outside the range a monotonic
+	// reading survives, and Go drops the reading rather than failing. Ask the
+	// result whether it kept one instead of guessing which ages are wide enough
+	// to lose it, because a comparison against a time carrying no reading falls
+	// back to the wall clock and a step moves the admit bound.
+	dated := now.Add(-age)
+	if dated == dated.Round(0) {
+		return time.Time{}
+	}
+	return dated
 }

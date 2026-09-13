@@ -205,16 +205,17 @@ func (s *ownedProcSampler) forgetSamples(now time.Time) {
 	s.last, s.lastAt, s.seenSince = nil, now, now
 }
 
-// safety: seenSince is when this scan began listing, not when it finished. A
-// process born between the two is absent from a reading already underway, so
-// dating it against the finish refuses a credit the tree earned.
 // scanWindow carries the two instants a reading is measured against. They are
-// one argument because they are the same type and mean opposite things: a
-// transposition reads as a plausible edit and turns the dating bound into the
-// scan's end, which is the state this sampler exists to avoid.
+// one argument rather than two because they are the same type and mean opposite
+// things, so a transposition reads as a plausible edit.
 type scanWindow struct {
+	// startedListingAt is when the scan began enumerating, not when it finished.
+	// A process born between the two is absent from a reading already underway,
+	// so dating it against the finish refuses a credit the tree earned.
 	startedListingAt time.Time
-	readAt           time.Time
+	// readAt ends this window and begins the next, so whatever offset sits
+	// between it and the counter reads cancels across consecutive readings.
+	readAt time.Time
 }
 
 func (s *ownedProcSampler) creditScan(
