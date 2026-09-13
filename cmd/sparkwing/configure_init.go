@@ -117,7 +117,10 @@ func surveyProjectGates() *githooks.RepoGates {
 	repoRoot := filepath.Dir(sparkwingDir)
 	declared, err := declaredHookNames(repoRoot)
 	if err != nil {
-		return nil
+		// safety: a config that will not load hides whether the gates fire, which
+		// is the one thing this block exists to answer.
+		broken := githooks.Broken(repoRoot, err)
+		return &broken
 	}
 	row := githooks.Survey(runGit, repoRoot, declared)
 	return &row

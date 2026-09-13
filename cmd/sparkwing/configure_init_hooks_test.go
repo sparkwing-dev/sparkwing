@@ -48,6 +48,39 @@ func TestConfigureInitOffersNoRepairForAnArmedCheckout(t *testing.T) {
 	}
 }
 
+func TestConfigureInitNamesAProjectWhoseConfigWillNotLoad(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, ".sparkwing", "sparkwing.yaml")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(project, []byte("pipelines: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(project), "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(restore) })
+
+	gates := surveyProjectGates()
+	if gates == nil {
+		t.Fatal("a project whose config will not load reported nothing at all")
+	}
+	if gates.State != githooks.GateBroken {
+		t.Fatalf("state = %q, want %q", gates.State, githooks.GateBroken)
+	}
+	if gates.Gated() {
+		t.Fatal("a project whose config will not load reported as gated")
+	}
+}
+
 func TestConfigureInitSaysNothingAboutHooksOutsideAProject(t *testing.T) {
 	out := captureStdout(t, func() { printConfigureInitTable(ConfigureInit{ConfigDir: t.TempDir()}) })
 	if strings.Contains(out, "GIT HOOKS") {
