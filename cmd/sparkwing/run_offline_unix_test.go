@@ -33,7 +33,7 @@ const offlineStopTimeout = 30 * time.Second
 
 // TestRun_PinnedPipelineRunsWithTheNetworkDenied is the local product's
 // offline promise as an executed fact: one run downloads modules and compiles,
-// and the next run is green with every outbound request funnelled into a
+// and the next run is green with every outbound request funneled into a
 // recorder that answers nothing.
 func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if testing.Short() {
