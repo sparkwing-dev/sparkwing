@@ -50,6 +50,10 @@ a protected user ACL on Windows). Direct shell redirection can truncate an
 existing multi-coordinator file before validation and can destroy existing
 memberships.
 
+A coordinators block selects enrolled mode, which sparkwing-runner refuses to
+start without --allow-enrolled-preview; enroll a machine that must execute work
+with 'sparkwing cluster runners add' instead.
+
 Use one credential per coordinator membership.
 
 ### Flags

@@ -190,11 +190,11 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 }
 
 // EnrolledExecutionUnavailable is the whole message an agent prints when its
-// configuration selects enrolled mode on a build whose controller still
-// refuses that credential on the claim and offer routes.
-const EnrolledExecutionUnavailable = "enrolled execution is not available in this release; " +
+// configuration selects enrolled mode, which the controller refuses on both
+// the claim route and the offer route.
+const EnrolledExecutionUnavailable = "enrolled execution is not available; " +
 	"remove name and coordinators from agent.yaml to run in claim mode, " +
-	"or wait for the release that enables it"
+	"or pass --allow-enrolled-preview to start the unfinished enrolled path"
 
 // CheckEnrolledExecutionAvailable refuses a configuration that would enter
 // enrolled mode. allowPreview lets a developer of enrolled execution run the

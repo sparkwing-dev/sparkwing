@@ -67,7 +67,10 @@ sparkwing cluster runners add --profile prod --name dev-laptop
 It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
 `runs.state`, `secrets.read` and `logs.write`, writes
 `~/.config/sparkwing/agent.yaml` at mode `0600`, installs the user service, and
-prints the token prefix with the command that revokes it. `--max-concurrent`,
+prints the token prefix with the command that revokes it. The config and the
+machine are checked before the mint, so a host with no `sparkwing-runner` or no
+user service session fails before a credential exists; a failure after the mint
+prints the live token and its revoke command. `--max-concurrent`,
 `--contribution` and `--labels` set the same fields the interactive installer
 asks for, `--no-service` writes the config for a machine you supervise
 yourself, and an existing config is replaced only with `--force`. Retire the
@@ -133,10 +136,11 @@ reserve constrains local admission. Neither enables the reservation-backed
 assisted offer protocol.
 
 Keep the config in that claim-mode shape. Adding `name` or `coordinators`
-selects enrolled mode, which this release does not execute, so the agent
-refuses to start and names the state. `sparkwing-runner agent
---allow-enrolled-preview` starts it anyway, for developers of enrolled
-execution. See [local-execution.md](local-execution.md) for the enrolled design.
+selects enrolled mode, which the controller refuses on both the claim route and
+the offer route, so the agent refuses to start and names the state.
+`sparkwing-runner agent --allow-enrolled-preview` starts it anyway, against the
+unfinished enrolled path. See [local-execution.md](local-execution.md) for the
+enrolled design.
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
 --config <path>` command, but neither installer creates a Windows service. On

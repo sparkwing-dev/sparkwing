@@ -309,9 +309,14 @@ writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
 
-The config is written in claim mode, which is the mode this release executes.
+The config is written in claim mode, which is the mode that executes work.
 An existing config is never replaced without --force, because the token it
 holds stays live until it is revoked.
+
+Nothing is minted until the config validates and the machine answers: a
+missing sparkwing-runner, an unreachable service manager, or an unusable
+setting fails first. If a step after the mint fails, the output names the live
+token and the command that revokes it.
 
 The command prints the token prefix and the revoke command. The raw token
 reaches only the config file.
@@ -350,7 +355,10 @@ Stop the runner service and revoke its token
 Reads the token out of the agent config, stops and removes the
 user service, then revokes that token on the profile's controller. The service
 stops first, so a claim in flight finishes against a credential that still
-authenticates.
+authenticates. A prefix the controller reports as anything but a runner token
+is refused, naming what it found.
+
+A service file that runs a different agent config is left alone.
 
 The config file stays on disk holding the revoked token; 'runners add --force'
 replaces it.

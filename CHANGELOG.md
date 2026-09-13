@@ -35,7 +35,9 @@ unlock.
   config is replaced only with `--force`. `sparkwing cluster runners remove
   --profile P` stops the service and then revokes the token.
   `install/service-install.sh` is unchanged and still installs the same unit
-  and plist.
+  and plist. The command refuses a host that cannot supervise a runner, and an
+  agent config that does not validate, before it mints anything, and it names
+  the live token and its revoke command whenever a step after the mint fails.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the
@@ -45,15 +47,20 @@ unlock.
 
 ### Changed
 
+- **cli:** `sparkwing fleet agents enroll` says that the `coordinators` block it
+  prints selects enrolled mode, which `sparkwing-runner agent` refuses to start
+  without `--allow-enrolled-preview`, and points at `sparkwing cluster runners
+  add` for a machine that must execute work. The command and its output are
+  otherwise unchanged.
 - **runner (Breaking):** `sparkwing-runner agent` refuses to start when
   `agent.yaml` sets `name` or `coordinators`. That configuration selects
-  enrolled mode, whose execution path the controller does not yet serve, so the
-  agent polled and logged an error on every slot while claiming nothing. It now
-  exits non-zero with `enrolled execution is not available in this release;
-  remove name and coordinators from agent.yaml to run in claim mode, or wait for
-  the release that enables it`. Remove both keys to run the claim-mode loop the
-  service installer writes. `--allow-enrolled-preview` restores the polling
-  behavior for developers of enrolled execution.
+  enrolled mode, which the controller refuses on both the claim route and the
+  offer route, so the agent polled and logged an error on every slot while
+  claiming nothing. It now exits non-zero naming the state. Remove both keys to
+  run the claim-mode loop the service installer writes; see the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-refuses-to-start).
+  `--allow-enrolled-preview` restores the polling behavior for the developers of
+  the enrolled path.
 - **config (Breaking):** A trigger key under `on:` that carries no value is
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a
