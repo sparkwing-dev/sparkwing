@@ -38,11 +38,34 @@ var cmdDaemon = Command{
 	Description: `The admission daemon starts on demand when a pipeline needs it. Status never
 starts one. Restart replaces only an answering daemon with this installed
 build, using the same drain, durable lease, and reattachment path as automatic
-version takeover; a stopped daemon stays stopped.`,
-	SubcommandOrder: []string{"status", "restart", "recover-state"},
+version takeover; a stopped daemon stays stopped. Stop drains an answering
+daemon and launches no successor.`,
+	SubcommandOrder: []string{"status", "restart", "stop", "recover-state"},
 	Examples: []Example{
 		{"Machine-readable status", "sparkwing daemon status -o json"},
 		{"Refresh only if already running", "sparkwing daemon restart"},
+		{"Stop it and leave it stopped", "sparkwing daemon stop"},
+	},
+}
+
+var cmdDaemonStop = Command{
+	Path:     "sparkwing daemon stop",
+	Synopsis: "Drain an answering wingd and leave it stopped",
+	Description: `Drains an answering daemon through the same wire request a restart uses and
+waits for its admission socket to go quiet. No successor is launched, and the
+supervisor exits with the worker it started, so the pair stays down until the
+next run needs a daemon. An absent daemon is a no-op and exits zero.
+
+Existing holders are reported as they were when the daemon began draining; a
+run still holding admission finishes against the store it already opened.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home whose daemon should stop", Group: "Input"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Stop this machine's daemon", "sparkwing daemon stop"},
+		{"Machine-readable result", "sparkwing daemon stop -o json"},
 	},
 }
 

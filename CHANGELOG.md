@@ -23,6 +23,11 @@ unlock.
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
+- **cli:** `sparkwing daemon stop` drains an answering admission daemon and
+  leaves it stopped. It uses the same wire drain a restart does, launches no
+  successor, and waits for the admission socket to go quiet; the supervisor
+  exits with the worker it started. An absent daemon is a no-op and exits zero.
+  The report names the build that was stopped and any holders it still had.
 - **cli:** `sparkwing runs status` and `sparkwing runs errors` take the run id as
   a positional argument, so `sparkwing runs status run-20260910-...` works.
   `--run` keeps working; passing both refuses.

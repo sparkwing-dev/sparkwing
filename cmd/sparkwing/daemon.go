@@ -22,11 +22,18 @@ import (
 // daemon that is still stopping.
 const daemonRestartTimeout = 20 * time.Second
 
+// safety: a stop waits out the same nesting shutdown windows a restart does,
+// plus the supervisor's own exit, so it reports a daemon that is still
+// stopping rather than one it merely stopped watching.
+const daemonStopTimeout = 30 * time.Second
+
 type daemonReport struct {
 	Running             bool     `json:"running"`
 	Healthy             bool     `json:"healthy"`
 	Draining            bool     `json:"draining"`
 	Restarted           bool     `json:"restarted"`
+	Stopped             bool     `json:"stopped,omitempty"`
+	HoldersRemaining    int      `json:"holders_remaining,omitempty"`
 	BinaryVersion       string   `json:"binary_version,omitempty"`
 	RunningRevision     string   `json:"running_revision,omitempty"`
 	PreviousVersion     string   `json:"previous_version,omitempty"`
@@ -61,6 +68,8 @@ func runDaemon(args []string) error {
 		return runDaemonStatus(args[1:])
 	case "restart":
 		return runDaemonRestart(args[1:])
+	case "stop":
+		return runDaemonStop(args[1:])
 	case "recover-state":
 		return runDaemonRecoverState(args[1:])
 	default:
@@ -303,6 +312,68 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 	return emitDaemonReport(report, format)
 }
 
+func runDaemonStop(args []string) error {
+	return runDaemonStopWith(args, daemonStopDeps{
+		stop:    wingdclient.StopRunning,
+		inspect: inspectDaemon,
+	})
+}
+
+type daemonStopDeps struct {
+	stop    func(context.Context, wingdclient.Options) (wingdclient.StopResult, error)
+	inspect func(context.Context, string) (daemonReport, error)
+}
+
+func runDaemonStopWith(args []string, deps daemonStopDeps) error {
+	fs := flag.NewFlagSet(cmdDaemonStop.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
+	home := fs.String("home", "", "sparkwing home whose daemon should stop")
+	if err := parseAndCheck(cmdDaemonStop, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), daemonStopTimeout)
+	defer cancel()
+	format, err := resolveTTYAwareOutput(*output, cmdDaemonStop.Path)
+	if err != nil {
+		return err
+	}
+	result, err := deps.stop(ctx, wingdclient.Options{
+		Home:    *home,
+		Version: installedVersion(),
+		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
+	})
+	if errors.Is(err, wingdclient.ErrNoDaemon) {
+		report, inspectErr := deps.inspect(ctx, *home)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		return emitDaemonReport(report, format)
+	}
+	if err != nil {
+		return fmt.Errorf("daemon stop: %w", err)
+	}
+	if !result.Stopped {
+		answering := result.StoppedVersion
+		if answering == "" {
+			answering = "the daemon"
+		}
+		return fmt.Errorf("daemon stop: %s still answers after %s; run `sparkwing daemon status` for what it reports",
+			answering, daemonStopTimeout)
+	}
+	report, inspectErr := deps.inspect(ctx, *home)
+	if inspectErr != nil {
+		return inspectErr
+	}
+	report.Stopped = true
+	report.HoldersRemaining = result.HoldersRemaining
+	report.PreviousVersion = result.StoppedVersion
+	report.PreviousRevision = versionRevision(result.StoppedVersion)
+	return emitDaemonReport(report, format)
+}
+
 func apiFault(report daemonReport) string {
 	if report.APIError != "" {
 		return report.APIError
@@ -346,6 +417,13 @@ func emitDaemonReport(report daemonReport, output string) error {
 		fmt.Fprintln(os.Stdout, report.BinaryVersion)
 		return nil
 	case "pretty", "":
+		if report.Stopped {
+			fmt.Fprintf(os.Stdout, "wingd %s is stopped\n", report.PreviousVersion)
+			if report.HoldersRemaining > 0 {
+				fmt.Fprintf(os.Stdout, "%d holder(s) were still admitted when it drained\n", report.HoldersRemaining)
+			}
+			return nil
+		}
 		if !report.Running {
 			fmt.Fprintln(os.Stdout, "wingd is stopped")
 			return nil
