@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -285,5 +286,128 @@ func TestSystemdWordQuotesSpacesAndDoublesSpecifiers(t *testing.T) {
 		if got := systemdWord(tc.in); got != tc.want {
 			t.Errorf("systemdWord(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		host func(*testing.T, *fakeExec) Host
+		path func(Host) string
+	}{
+		{"linux", linuxHost, UnitPath},
+		{"darwin", darwinHost, PlistPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			install := &fakeExec{}
+			h := tc.host(t, install)
+			if _, err := Install(h); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			exec := &fakeExec{}
+			other := h
+			other.Exec = exec.run
+			other.ConfigPath = filepath.Join(filepath.Dir(h.ConfigPath), "other-agent.yaml")
+
+			state, err := Uninstall(other)
+			if err != nil {
+				t.Fatalf("Uninstall: %v", err)
+			}
+			if !state.Mismatch {
+				t.Fatalf("state = %+v, want Mismatch", state)
+			}
+			if !strings.Contains(state.Detail, h.ConfigPath) {
+				t.Errorf("detail does not name the config the service runs: %q", state.Detail)
+			}
+			if _, err := os.Stat(tc.path(h)); err != nil {
+				t.Errorf("the other runner's service file was removed: %v", err)
+			}
+			if len(exec.calls) != 0 {
+				t.Errorf("a mismatched uninstall still drove the service manager: %v", exec.calls)
+			}
+		})
+	}
+}
+
+func TestUnitConfigPathReadsQuotedAndEscapedArguments(t *testing.T) {
+	h := Host{Binary: "/opt/my runner/sparkwing-runner", ConfigPath: "/home/a b/.config/sparkwing/agent.yaml"}
+	if got := unitConfigPath(serviceUnit(h)); got != h.ConfigPath {
+		t.Errorf("unitConfigPath = %q, want %q", got, h.ConfigPath)
+	}
+	h = Host{Binary: "/opt/100%/sparkwing-runner", ConfigPath: "/home/a/100%/agent.yaml"}
+	if got := unitConfigPath(serviceUnit(h)); got != h.ConfigPath {
+		t.Errorf("unitConfigPath with a specifier = %q, want %q", got, h.ConfigPath)
+	}
+	if got := unitConfigPath("[Service]\nExecStart=/usr/bin/true\n"); got != "" {
+		t.Errorf("unitConfigPath of a unit with no --config = %q, want empty", got)
+	}
+}
+
+func TestPlistConfigPathReadsProgramArguments(t *testing.T) {
+	h := Host{Binary: "/usr/local/bin/sparkwing-runner", ConfigPath: "/Users/a b/.config/sparkwing/agent.yaml", Home: "/Users/a b"}
+	if got := plistConfigPath([]byte(agentPlist(h))); got != h.ConfigPath {
+		t.Errorf("plistConfigPath = %q, want %q", got, h.ConfigPath)
+	}
+}
+
+func TestPreflightReportsAnUnreachableServiceManager(t *testing.T) {
+	exec := &fakeExec{fail: map[string]string{
+		"systemctl --user show": "Failed to connect to bus: No medium found",
+	}}
+	h := linuxHost(t, exec)
+	err := Preflight(h)
+	if err == nil || !strings.Contains(err.Error(), "systemd user session is unreachable") {
+		t.Fatalf("Preflight = %v, want an unreachable systemd session", err)
+	}
+
+	clean := &fakeExec{}
+	h = linuxHost(t, clean)
+	if err := Preflight(h); err != nil {
+		t.Fatalf("Preflight on a reachable session: %v", err)
+	}
+	if len(clean.calls) != 1 {
+		t.Errorf("Preflight calls = %v, want one probe", clean.calls)
+	}
+
+	darwin := &fakeExec{}
+	dh := darwinHost(t, darwin)
+	if err := Preflight(dh); err != nil {
+		t.Fatalf("Preflight on darwin: %v", err)
+	}
+	if !slices.Contains(darwin.calls, "launchctl print gui/501") {
+		t.Errorf("darwin preflight calls = %v", darwin.calls)
+	}
+
+	if err := Preflight(Host{GOOS: "windows"}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("Preflight on windows = %v, want ErrUnsupported", err)
+	}
+	bad := linuxHost(t, &fakeExec{})
+	bad.Binary = "sparkwing-runner"
+	if err := Preflight(bad); err == nil {
+		t.Fatal("Preflight accepted a relative binary path")
+	}
+}
+
+func TestXMLTextEscapesMarkupAndKeepsSpaces(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"/Users/a b/agent.yaml", "/Users/a b/agent.yaml"},
+		{"/opt/r&d/agent.yaml", "/opt/r&amp;d/agent.yaml"},
+		{`/opt/<a>"b"/agent.yaml`, "/opt/&lt;a&gt;&#34;b&#34;/agent.yaml"},
+	} {
+		if got := xmlText(tc.in); got != tc.want {
+			t.Errorf("xmlText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	h := Host{Binary: "/usr/local/bin/sparkwing-runner", Home: "/Users/r&d", ConfigPath: "/Users/r&d/agent.yaml"}
+	body := agentPlist(h)
+	if strings.Contains(body, "r&d") {
+		t.Errorf("the plist carries a raw ampersand:\n%s", body)
+	}
+	var parsed any
+	if err := xml.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("a plist with an ampersand is not well-formed: %v", err)
+	}
+	if got := plistConfigPath([]byte(body)); got != h.ConfigPath {
+		t.Errorf("plistConfigPath after escaping = %q, want %q", got, h.ConfigPath)
 	}
 }

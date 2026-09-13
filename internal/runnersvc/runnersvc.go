@@ -6,10 +6,20 @@
 //
 // A file this package writes carries [Marker]; a file the shell installer
 // wrote carries its own. A file with neither is left alone, so a unit an
-// operator wrote by hand is never overwritten or removed. All contact with the
-// machine -- systemctl, launchctl, the home and config directories, the binary
-// path -- arrives through [Host], so a test decides what the machine looks
-// like and both platforms are exercised anywhere.
+// operator wrote by hand is never overwritten or removed. [Uninstall] also
+// leaves a managed file alone when the agent config baked into it is not the
+// one it was asked about, so two runners on one machine do not remove each
+// other. All contact with the machine -- systemctl, launchctl, the home and
+// config directories, the binary path -- arrives through [Host], so a test
+// decides what the machine looks like and both platforms are exercised
+// anywhere.
+//
+// On Linux the unit goes where systemd reads user units:
+// $XDG_CONFIG_HOME/systemd/user, falling back to ~/.config/systemd/user.
+// install/service-install.sh writes ~/.config/systemd/user unconditionally, so
+// on a host that sets XDG_CONFIG_HOME to anything else the two paths differ
+// and neither adopts the other's unit. Matching the script there would put the
+// unit where systemd does not look, so this package follows systemd instead.
 package runnersvc
 
 import (
@@ -40,7 +50,7 @@ const (
 	PlistName = Label + ".plist"
 )
 
-// hack: 0600, matching the shell installer -- the plist names the user's home.
+// safety: 0600 like the shell installer; the unit and plist name the operator's home and binary paths.
 const fileMode os.FileMode = 0o600
 
 // ErrUnsupported is returned, wrapped, for a GOOS that has no runner service.
@@ -83,6 +93,10 @@ type State struct {
 	// shell installer wrote. Such a file is never overwritten or removed.
 	Foreign bool `json:"foreign"`
 
+	// Mismatch reports a managed file that runs a different agent config than
+	// the one [Host] names. [Uninstall] leaves such a file in place.
+	Mismatch bool `json:"mismatch"`
+
 	// Running reports that the service manager accepted the start or stop.
 	Running bool `json:"running"`
 
@@ -115,6 +129,40 @@ func Uninstall(h Host) (State, error) {
 		return uninstallDarwin(h)
 	}
 	return State{}, unsupported(h.GOOS)
+}
+
+// Preflight reports whether this machine can run the service at all: the
+// binary and config paths resolve, and the service manager answers. Call it
+// before doing anything expensive or irreversible, so a host that cannot
+// supervise a runner fails before the work rather than after it.
+func Preflight(h Host) error {
+	switch h.GOOS {
+	case "linux":
+		if err := requireHost(h); err != nil {
+			return err
+		}
+		if h.ConfigHome == "" {
+			return errors.New("runnersvc: Host.ConfigHome is required on linux")
+		}
+		if out, err := h.run("systemctl", "--user", "show", "-p", "Version", "--value"); err != nil {
+			return fmt.Errorf("runnersvc: systemd user session is unreachable (systemctl --user show): %w: %s",
+				err, strings.TrimSpace(out))
+		}
+		return nil
+	case "darwin":
+		if err := requireHost(h); err != nil {
+			return err
+		}
+		if h.Home == "" {
+			return errors.New("runnersvc: Host.Home is required on darwin")
+		}
+		if out, err := h.run("launchctl", "print", h.domainTarget()); err != nil {
+			return fmt.Errorf("runnersvc: launchd domain %s is unreachable (launchctl print): %w: %s",
+				h.domainTarget(), err, strings.TrimSpace(out))
+		}
+		return nil
+	}
+	return unsupported(h.GOOS)
 }
 
 // DefaultExec runs a command and returns its output, stdout and stderr
@@ -181,6 +229,9 @@ func uninstallLinux(h Host) (State, error) {
 	}
 	if !existing.exists {
 		return State{Path: path, Detail: "no sparkwing runner service is installed here"}, nil
+	}
+	if other := unitConfigPath(existing.body); !sameConfig(other, h.ConfigPath) {
+		return mismatchState(path, other, h.ConfigPath), nil
 	}
 
 	var stopErr error
@@ -251,6 +302,9 @@ func uninstallDarwin(h Host) (State, error) {
 	if !existing.exists {
 		return State{Path: path, Detail: "no sparkwing runner service is installed here"}, nil
 	}
+	if other := plistConfigPath([]byte(existing.body)); !sameConfig(other, h.ConfigPath) {
+		return mismatchState(path, other, h.ConfigPath), nil
+	}
 
 	var stopErr error
 	if out, err := h.run("launchctl", "bootout", h.serviceTarget()); err != nil && !notLoaded(out) {
@@ -297,6 +351,7 @@ func unsupported(goos string) error {
 type managed struct {
 	exists bool
 	ours   bool
+	body   string
 }
 
 func (m managed) foreign() bool { return m.exists && !m.ours }
@@ -310,7 +365,11 @@ func readManaged(path string) (managed, error) {
 		return managed{}, fmt.Errorf("runnersvc: read %s: %w", path, err)
 	}
 	text := string(body)
-	return managed{exists: true, ours: strings.Contains(text, Marker) || strings.Contains(text, installerMarker)}, nil
+	return managed{
+		exists: true,
+		ours:   strings.Contains(text, Marker) || strings.Contains(text, installerMarker),
+		body:   text,
+	}, nil
 }
 
 func foreignState(path string) State {
@@ -381,6 +440,128 @@ func notLoaded(out string) bool {
 		}
 	}
 	return false
+}
+
+// safety: an empty parse means the file names no config, which no comparison can clear.
+func sameConfig(found, want string) bool {
+	return found != "" && found == want
+}
+
+func mismatchState(path, found, want string) State {
+	return State{
+		Path: path, Installed: true, Mismatch: true,
+		Detail: fmt.Sprintf("%s runs the agent config %s, not %s, so sparkwing left it alone", path, describeConfig(found), want),
+	}
+}
+
+func describeConfig(found string) string {
+	if found == "" {
+		return "(none it could read)"
+	}
+	return found
+}
+
+// safety: the unit is the only record of the config it runs; nothing keeps a sidecar.
+func unitConfigPath(unit string) string {
+	for _, line := range strings.Split(unit, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ExecStart=")
+		if !ok {
+			continue
+		}
+		return configArgument(systemdWords(rest))
+	}
+	return ""
+}
+
+// safety: the plist is the only record of the config it runs; nothing keeps a sidecar.
+func plistConfigPath(body []byte) string {
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	inKey, inArgs := false, false
+	var args []string
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return configArgument(args)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "key":
+				inKey = true
+			case "string":
+				if !inArgs {
+					continue
+				}
+				var v string
+				if err := dec.DecodeElement(&v, &t); err != nil {
+					return configArgument(args)
+				}
+				args = append(args, v)
+			case "array":
+			default:
+				if inArgs && t.Name.Local != "array" {
+					inArgs = false
+				}
+			}
+		case xml.CharData:
+			if inKey {
+				inArgs = strings.TrimSpace(string(t)) == "ProgramArguments"
+			}
+		case xml.EndElement:
+			switch t.Name.Local {
+			case "key":
+				inKey = false
+			case "array":
+				if inArgs {
+					return configArgument(args)
+				}
+			}
+		}
+	}
+}
+
+func configArgument(words []string) string {
+	for i, w := range words {
+		if w == "--config" && i+1 < len(words) {
+			return words[i+1]
+		}
+		if rest, ok := strings.CutPrefix(w, "--config="); ok {
+			return rest
+		}
+	}
+	return ""
+}
+
+// safety: systemd's own splitting, so a quoted path with a space stays one word.
+func systemdWords(s string) []string {
+	var words []string
+	var b strings.Builder
+	quoted, started := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\\' && i+1 < len(s):
+			i++
+			b.WriteByte(s[i])
+			started = true
+		case c == '"':
+			quoted = !quoted
+			started = true
+		case !quoted && (c == ' ' || c == '\t'):
+			if started {
+				words = append(words, strings.ReplaceAll(b.String(), "%%", "%"))
+				b.Reset()
+				started = false
+			}
+		default:
+			b.WriteByte(c)
+			started = true
+		}
+	}
+	if started {
+		words = append(words, strings.ReplaceAll(b.String(), "%%", "%"))
+	}
+	return words
 }
 
 func serviceUnit(h Host) string {

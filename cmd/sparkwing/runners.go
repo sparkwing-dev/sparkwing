@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,7 @@ var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state", 
 // safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"
 
-// safety: tests replace these with a fake machine.
+// safety: the machine is reached only through these two, so a suite can substitute a host that touches nothing.
 var (
 	runnerServiceHost = defaultRunnerServiceHost
 	runnerServiceGOOS = runtime.GOOS
@@ -88,9 +89,24 @@ func runRunnersAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	// safety: the token is minted only once the destination is known writable,
-	// so a refused write never leaves a live credential nobody holds.
+	// safety: this refusal runs before the mint, so the common rerun strands no live credential.
 	if err := checkAgentConfigAbsent(path, *force); err != nil {
+		return err
+	}
+	cfg := agentFileConfig{
+		Controller:     strings.TrimRight(prof.ControllerURL(), "/"),
+		Logs:           firstNonBlank(*logsURL, profileLogsURL(prof)),
+		MaxConcurrent:  *maxConcurrent,
+		HolderPrefix:   *name,
+		Labels:         splitCSV(*labels),
+		Contribution:   *contribution,
+		LocalAdmission: true,
+	}
+	if err := validateAgentFileConfig(cfg); err != nil {
+		return err
+	}
+	service, err := planRunnerService(path, *noService)
+	if err != nil {
 		return err
 	}
 
@@ -99,23 +115,11 @@ func runRunnersAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := agentFileConfig{
-		Controller:     strings.TrimRight(prof.ControllerURL(), "/"),
-		Logs:           firstNonBlank(*logsURL, profileLogsURL(prof)),
-		Token:          minted.Raw,
-		MaxConcurrent:  *maxConcurrent,
-		HolderPrefix:   *name,
-		Labels:         splitCSV(*labels),
-		Contribution:   *contribution,
-		LocalAdmission: true,
-	}
-	if err := writeAgentConfig(path, cfg); err != nil {
-		return err
-	}
-
 	fmt.Printf("minted runner token %s for %s on profile %s\n", minted.Prefix, principal, prof.Name)
-	fmt.Printf("wrote %s (mode 0600)\n", path)
-	if err := startRunnerService(path, *noService); err != nil {
+	cfg.Token = minted.Raw
+
+	if err := finishRunnerEnrollment(path, cfg, service); err != nil {
+		printRunnerRevokeHint(prof.Name, minted.Prefix)
 		return err
 	}
 	fmt.Println()
@@ -124,6 +128,21 @@ func runRunnersAdd(args []string) error {
 	fmt.Println("or revoke the token alone with:")
 	fmt.Printf("  sparkwing cluster tokens revoke --profile %s --prefix %s\n", prof.Name, minted.Prefix)
 	return nil
+}
+
+func finishRunnerEnrollment(path string, cfg agentFileConfig, service runnerServicePlan) error {
+	if err := writeAgentConfig(path, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s (mode 0600)\n", path)
+	return service.start(path)
+}
+
+// safety: the credential outlives every failure after the mint, so the operator is always told how to kill it.
+func printRunnerRevokeHint(profileName, prefix string) {
+	fmt.Println()
+	fmt.Printf("the token %s is live; revoke it with:\n", prefix)
+	fmt.Printf("  sparkwing cluster tokens revoke --profile %s --prefix %s\n", profileName, prefix)
 }
 
 func runRunnersRemove(args []string) error {
@@ -155,6 +174,11 @@ func runRunnersRemove(args []string) error {
 	prefix, err := tokenPrefix(raw.Token)
 	if err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	// safety: the config names a prefix, not a promise about it; revoking the wrong kind
+	// would cut an operator or a service off its controller.
+	if err := requireRunnerToken(prof.ControllerURL(), prof.ControllerToken(), prefix, path); err != nil {
+		return err
 	}
 
 	// safety: stop the runner before the credential dies so an in-flight claim
@@ -212,6 +236,41 @@ func tokenPrefix(raw string) (string, error) {
 	return raw[:store.PrefixLen], nil
 }
 
+func requireRunnerToken(controller, adminToken, prefix, configPath string) error {
+	resp, err := tokensGet(controller, adminToken, "/api/v1/tokens/"+prefix)
+	if err != nil {
+		return fmt.Errorf("look up the token %s named by %s: %w", prefix, configPath, err)
+	}
+	var found tokenListItem
+	if err := json.Unmarshal(resp, &found); err != nil {
+		return fmt.Errorf("decode the token %s: %w", prefix, err)
+	}
+	if found.Kind != store.TokenKindRunner {
+		return fmt.Errorf("%s names the token %s, which is a %s token held by %q, not a runner token; "+
+			"revoke it with `sparkwing cluster tokens revoke` if that is what you meant",
+			configPath, prefix, found.Kind, found.Principal)
+	}
+	return nil
+}
+
+func validateAgentFileConfig(cfg agentFileConfig) error {
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	var parsed cluster.AgentConfig
+	if err := decoder.Decode(&parsed); err != nil {
+		return fmt.Errorf("the assembled agent config does not parse: %w", err)
+	}
+	validated, err := cluster.ValidateAgentConfig(parsed)
+	if err != nil {
+		return err
+	}
+	return cluster.CheckEnrolledExecutionAvailable(validated, false)
+}
+
 // safety: the claim-mode subset install/service-install.sh writes. A name or a coordinator here would select
 // enrolled mode, which the agent refuses to start.
 type agentFileConfig struct {
@@ -233,27 +292,64 @@ func agentConfigPath(override string) (string, error) {
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
-	_, err := os.Lstat(path)
+	info, err := os.Lstat(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return nil
 	case err != nil:
 		return err
-	case force:
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink; sparkwing writes a credential only to a regular file, "+
+			"so move it aside and run this again", path)
+	}
+	if force {
 		return nil
 	}
 	return fmt.Errorf("%s already exists; pass --force to replace it (its token stays live until you revoke it)", path)
 }
 
+// safety: the config is replaced by a rename, so an interrupted write leaves the
+// previous credential intact rather than a truncated file no agent can read.
 func writeAgentConfig(path string, cfg agentFileConfig) error {
 	body, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {
+	dir := filepath.Dir(path)
+	if err := fssecure.EnsureConfigDir(dir); err != nil {
 		return err
 	}
-	return fssecure.WriteFile(path, body)
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink; sparkwing writes a credential only to a regular file", path)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".agent-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer func() {
+		if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "sparkwing: could not clear the temporary file %s: %v\n", name, err)
+		}
+	}()
+	if err := fssecure.TightenOpen(tmp); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	return fssecure.SecurePrivateConfig(path)
 }
 
 func profileLogsURL(p *profile.Profile) string {
@@ -272,25 +368,49 @@ func firstNonBlank(values ...string) string {
 	return ""
 }
 
-func startRunnerService(configPath string, skip bool) error {
+// safety: the decision about this machine's service manager, taken before anything irreversible happens.
+type runnerServicePlan struct {
+	host    runnersvc.Host
+	skipped bool
+	manual  bool
+}
+
+// safety: resolving the binary and probing the service manager here means a
+// machine that cannot supervise a runner fails before a credential exists.
+func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) {
 	if skip {
-		fmt.Printf("skipped the service install; start the runner with `%s agent --config %s`\n", runnerBinaryName, configPath)
-		return nil
+		return runnerServicePlan{skipped: true}, nil
 	}
 	if runnerServiceGOOS == "windows" {
-		printWindowsServiceSteps(configPath)
-		return nil
+		return runnerServicePlan{manual: true}, nil
 	}
 	host, err := runnerServiceHost(configPath)
 	if err != nil {
-		return err
+		return runnerServicePlan{}, err
 	}
-	state, err := runnersvc.Install(host)
-	if err != nil {
+	if host.Binary == "" {
+		return runnerServicePlan{}, errRunnerBinaryMissing()
+	}
+	if err := runnersvc.Preflight(host); err != nil {
 		if errors.Is(err, runnersvc.ErrUnsupported) {
-			printWindowsServiceSteps(configPath)
-			return nil
+			return runnerServicePlan{manual: true}, nil
 		}
+		return runnerServicePlan{}, err
+	}
+	return runnerServicePlan{host: host}, nil
+}
+
+func (p runnerServicePlan) start(configPath string) error {
+	switch {
+	case p.skipped:
+		fmt.Printf("skipped the service install; start the runner with `%s agent --config %s`\n", runnerBinaryName, configPath)
+		return nil
+	case p.manual:
+		printWindowsServiceSteps(configPath)
+		return nil
+	}
+	state, err := runnersvc.Install(p.host)
+	if err != nil {
 		return err
 	}
 	fmt.Printf("started the runner service: %s\n", state.Detail)
@@ -334,10 +454,6 @@ func defaultRunnerServiceHost(configPath string) (runnersvc.Host, error) {
 	if configHome == "" {
 		configHome = filepath.Join(home, ".config")
 	}
-	binary, err := runnerBinaryPath()
-	if err != nil {
-		return runnersvc.Host{}, err
-	}
 	root, err := paths.DefaultPaths()
 	if err != nil {
 		return runnersvc.Host{}, err
@@ -346,7 +462,7 @@ func defaultRunnerServiceHost(configPath string) (runnersvc.Host, error) {
 		GOOS:       runnerServiceGOOS,
 		Home:       home,
 		ConfigHome: configHome,
-		Binary:     binary,
+		Binary:     runnerBinaryPath(),
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		UID:        os.Getuid(),
@@ -355,18 +471,24 @@ func defaultRunnerServiceHost(configPath string) (runnersvc.Host, error) {
 }
 
 // safety: a systemd or launchd job inherits no PATH, so the absolute path is baked in.
-func runnerBinaryPath() (string, error) {
+func runnerBinaryPath() string {
 	if found, err := exec.LookPath(runnerBinaryName); err == nil {
 		if abs, err := filepath.Abs(found); err == nil {
-			return abs, nil
+			return abs
 		}
 	}
 	if self, err := installsite.Self(); err == nil && self != "" {
 		beside := filepath.Join(filepath.Dir(self), runnerBinaryName)
 		if info, err := os.Stat(beside); err == nil && !info.IsDir() {
-			return beside, nil
+			return beside
 		}
 	}
-	return "", fmt.Errorf("%s is not on PATH. Install it with `go install github.com/sparkwing-dev/sparkwing/cmd/%s@latest`, "+
-		"or download it from the release assets, then run this command again", runnerBinaryName, runnerBinaryName)
+	return ""
+}
+
+func errRunnerBinaryMissing() error {
+	return fmt.Errorf("%s is not on PATH and does not sit beside this binary. "+
+		"Install it with `go install github.com/sparkwing-dev/sparkwing/cmd/%s@latest` or from the release assets, "+
+		"then run this command again; `--no-service` writes the config without it",
+		runnerBinaryName, runnerBinaryName)
 }
