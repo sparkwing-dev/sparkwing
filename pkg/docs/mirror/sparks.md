@@ -281,6 +281,12 @@ previous overlay exists at `.sparkwing/.resolved.mod`, it is reused; otherwise
 compile uses the git-tracked `go.mod`. Useful on flights, in offline CI, or
 while debugging a stale pin without touching the network.
 
+Exact tags need no flag: they resolve without a proxy call, so a pipeline
+pinned exactly runs with the network unplugged once its first build has
+populated the module cache. See
+[offline after the first build](getting-started.md#offline-after-the-first-build)
+for the whole boundary.
+
 ### Ghost pin guidance
 
 A `sparks:` overlay MASKS a stale or ghost version in `go.mod` at

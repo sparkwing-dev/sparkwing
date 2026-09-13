@@ -174,6 +174,39 @@ If you want a local Kubernetes cluster as a deploy target for user apps
 works. Sparkwing does not run in-cluster locally; the controller is a
 prod-only component.
 
+## Offline after the first build
+
+One successful `sparkwing run` in a checkout is all the network a local
+run ever needs. After it, the same command is green on a plane: the Go
+modules sit in the module cache, the compiled pipeline binary sits in
+`~/.sparkwing/cache/pipelines/`, and the run's state, logs, dashboard,
+and admission daemon are files and sockets on your own machine. The
+repository's test suite runs a pipeline with the network denied and fails
+if the run reaches for it or recompiles.
+
+The first run is the one that reaches out. It downloads the SDK and every
+spark library your `.sparkwing/go.mod` requires, then compiles. A run
+whose sources and pins have not changed reuses the cached binary and
+compiles nothing.
+
+What still wants the network is visible in advance:
+
+- **A `latest` or range pin.** A `sparks:` entry pinned to `latest`, `^v0.24.0`,
+  or `~v0.10.3` asks the module proxy for the newest matching tag on every
+  run. Pass `--sw-no-update` to skip resolution and compile against the
+  overlay already on disk, or pin exact tags and pay nothing. Without the
+  flag an unreachable proxy fails the run and the error names it. The
+  resolution rules are in [sparks.md](sparks.md).
+- **A profile with a `controller:` block.** Sparkwing Cloud and any other
+  hosted controller own state, cache, and secrets over HTTPS, so a run
+  under that profile needs the controller. `--sw-local-only` pins one run
+  back to the local surfaces.
+- **What the pipeline itself does.** A step that pulls an image, fetches a
+  ref, or deploys needs whatever that step needs. Sparkwing does not
+  change it.
+- **Updating sparkwing.** `sparkwing update` and the install script fetch
+  a release.
+
 ## What `sparkwing pipeline new` Creates
 
 ```

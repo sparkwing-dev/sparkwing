@@ -435,6 +435,14 @@ unlock.
 
 ### Docs
 
+- **docs:** Getting started documents the offline guarantee and its
+  boundary. A local run needs the network once, to download modules and
+  compile; after that the cached pipeline binary, the SQLite store, the
+  logs, the dashboard, and the admission daemon are all local. What still
+  reaches out is named: a `latest` or range `sparks:`
+  pin (`--sw-no-update` skips the proxy call, exact tags never make one),
+  a profile with a `controller:` block, whatever the pipeline's own steps
+  do, and `sparkwing update`. `sparks.md` points at the same boundary.
 - **docs:** The user-facing docs lead with two paths. Getting started opens
   on Local (a program on your machine, and the machines you own through
   `--sw-fleet`) and Sparkwing Cloud (`sparkwing cloud connect`), and names
