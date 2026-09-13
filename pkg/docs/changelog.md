@@ -36,6 +36,12 @@ unlock.
   trigger and installed no hook, which read as working. Give every trigger a
   body: `pre_commit: {}` for one with no options, and a mapping of options for
   the rest. `on:` itself may still be empty.
+- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
+  host override asking for more is evaluated with 24h: `sparkwing crons
+  install` warns at arm time, naming the schedule, the declared window and the
+  effective one, and `sparkwing crons show` prints the effective window in its
+  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
+  as before.
 
 ### Fixed
 
@@ -54,18 +60,6 @@ unlock.
   "Connected (no resources held)" table, with its own count beside the holding
   one. Those rows leave the holder table, so a lease appears in one table or
   the other, and the page groups admission the way `sparkwing queue` does.
-
-### Changed
-
-- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
-  host override asking for more is evaluated with 24h: `sparkwing crons
-  install` warns at arm time, naming the schedule, the declared window and the
-  effective one, and `sparkwing crons show` prints the effective window in its
-  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
-  as before.
-
-### Fixed
-
 - **cli:** A schedule under `overlap: skip` no longer suppresses itself for
   longer than a day. The tick asked whether the previous run was still active
   using the declared catch-up window, so a run no consumer ever claimed read as
