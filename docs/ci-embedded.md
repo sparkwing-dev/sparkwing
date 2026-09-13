@@ -170,11 +170,19 @@ errors out -- the dashboard would have nowhere to read from.
         runs/<runID>/state.ndjson           # final run + node dump
         <user-keys...>                      # pipeline-saved blobs
     logs/                                   # LogStore
-        <runID>/<nodeID>/<seq>.ndjson       # rolling per-Append parts
+        <runID>/<nodeID>/<seq>.ndjson       # one object per flush
 ```
 
-Object-per-Append is intentional: S3 has no native append. Reads
-list+concat by prefix, which is fine at single-run scales.
+S3 has no native append, so every write is its own object. The logs
+surface buffers each node's lines and writes one object per flush,
+which keeps a chatty node at a handful of requests rather than one per
+line. A flush lands when the buffer reaches `batch_bytes`, when
+`batch_interval` elapses, when a reader asks for the node's log, and
+when the node finishes. `max_log_objects` and `max_log_bytes` bound
+what one node can write; past either the surface drops further lines
+and ends the node's log with one marker line counting them. See
+[storage backends](backends.md#object-store-log-batching) for the keys
+and their defaults. Reads list+concat by prefix.
 
 ## Exit codes
 

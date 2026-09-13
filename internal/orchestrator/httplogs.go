@@ -114,6 +114,8 @@ var (
 
 var httpNodeLogDropCooldown = 5 * time.Second
 
+const httpNodeLogFinishTimeout = 30 * time.Second
+
 const httpNodeLogPendingLimit = 4 << 20
 
 func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS int) {
@@ -303,11 +305,22 @@ func (l *httpNodeLog) dropSuppressed() bool {
 	return true
 }
 
+// Close hands the node's last lines to the store. A batching store
+// holds them until something asks for them, and the node finishing is
+// that something; a write-through store has nothing left to do.
 func (l *httpNodeLog) Close() error {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
 	l.mu.Lock()
+	already := l.closed
 	l.closed = true
 	l.mu.Unlock()
-	return nil
+	if already {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(l.ctx, httpNodeLogFinishTimeout)
+	defer cancel()
+	return storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
 }
 
 func (l *httpNodeLog) Fatal() error {

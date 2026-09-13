@@ -8,6 +8,7 @@ package backends
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 // Surfaces groups the four persistence destinations a run touches.
@@ -69,6 +70,27 @@ type Spec struct {
 	// shared s3 bucket while the rest of cache stays on disk). Only
 	// valid on the cache surface, and read through Surfaces.BinaryCache.
 	Binaries *Spec `yaml:"binaries,omitempty"`
+
+	// BatchInterval bounds how long a log line waits in the per-node
+	// buffer before the logs surface writes it as an object. Object
+	// store logs surfaces only; zero selects 2s.
+	BatchInterval time.Duration `yaml:"batch_interval,omitempty"`
+
+	// BatchBytes flushes a node's log buffer early once it holds this
+	// many bytes, so one object never grows without bound. Object
+	// store logs surfaces only; zero selects 262144 (256 KiB).
+	BatchBytes int `yaml:"batch_bytes,omitempty"`
+
+	// MaxLogObjects caps how many log objects one node writes. Past
+	// the cap the backend drops further lines and ends the node's log
+	// with one marker line counting them. Object store logs surfaces
+	// only; zero selects 2000.
+	MaxLogObjects int `yaml:"max_log_objects,omitempty"`
+
+	// MaxLogBytes caps how many log bytes one node writes, enforced
+	// the same way as MaxLogObjects. Object store logs surfaces only;
+	// zero selects 67108864 (64 MiB).
+	MaxLogBytes int64 `yaml:"max_log_bytes,omitempty"`
 }
 
 // Backend type discriminators.
@@ -274,6 +296,18 @@ func layerSpec(base, over *Spec) *Spec {
 	}
 	if merged.Binaries == nil {
 		merged.Binaries = base.Binaries
+	}
+	if merged.BatchInterval == 0 {
+		merged.BatchInterval = base.BatchInterval
+	}
+	if merged.BatchBytes == 0 {
+		merged.BatchBytes = base.BatchBytes
+	}
+	if merged.MaxLogObjects == 0 {
+		merged.MaxLogObjects = base.MaxLogObjects
+	}
+	if merged.MaxLogBytes == 0 {
+		merged.MaxLogBytes = base.MaxLogBytes
 	}
 	return &merged
 }

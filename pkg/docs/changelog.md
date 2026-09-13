@@ -22,6 +22,21 @@ unlock.
 
 ### Added
 
+- **logs:** An `s3` logs surface coalesces a node's lines into one object
+  per flush instead of one object per line. A flush lands when the buffer
+  reaches `batch_bytes` (256 KiB), when `batch_interval` (2s) elapses, when
+  a reader asks for the node's log, and when the node finishes; a
+  5,000-line node costs 3 objects rather than 5,000. `max_log_objects`
+  (2000) and `max_log_bytes` (64 MiB) bound one node's log, and past either
+  the surface drops further lines and ends the node's log with one marker
+  line counting them. All four keys are optional on the profile's `logs:`
+  block. `filesystem` and `controller` logs surfaces write through
+  unchanged.
+- **sdk:** `storage.NodeFlusher` is the optional capability a
+  `storage.LogStore` exposes when it buffers appends, and
+  `storage.FlushNode` calls it for a store that has it. A write-through
+  store needs neither.
+
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

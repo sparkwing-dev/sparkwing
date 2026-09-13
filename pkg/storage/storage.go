@@ -117,6 +117,30 @@ func Conditional(store ArtifactStore) (ConditionalWriter, bool) {
 	return cw, ok
 }
 
+// NodeFlusher is the optional capability a [LogStore] exposes when it
+// buffers appends instead of writing each one straight through. The
+// writer calls FlushNode once the node has finished, so the node's
+// last lines reach the store without waiting out the store's own
+// flush interval, and the store can release the node's buffer.
+//
+// Reach it through [FlushNode], which is a no-op for a write-through
+// store.
+type NodeFlusher interface {
+	// FlushNode writes everything buffered for one node and releases
+	// its buffer. Flushing a node that wrote nothing is not an error.
+	FlushNode(ctx context.Context, runID, nodeID string) error
+}
+
+// FlushNode flushes one node's buffered appends when store buffers
+// any, and returns nil for a store that writes each append through.
+func FlushNode(ctx context.Context, store LogStore, runID, nodeID string) error {
+	f, ok := store.(NodeFlusher)
+	if !ok {
+		return nil
+	}
+	return f.FlushNode(ctx, runID, nodeID)
+}
+
 // ReadOpts narrows a log read server-side. Zero values disable
 // individual filters; an empty ReadOpts returns the full log.
 type ReadOpts struct {
