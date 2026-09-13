@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"testing"
 	"time"
 
@@ -81,9 +80,12 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 
 func serverGoPath(t *testing.T) string {
 	t.Helper()
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatalf("runtime.Caller failed")
+	// safety: a reproducible build trims the compiled-in source path, so runtime.Caller
+	// yields a module path the filesystem does not hold. A test runs in its own package
+	// directory, which is where this source sits.
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("resolve working directory: %v", err)
 	}
-	return filepath.Join(filepath.Dir(here), "server.go")
+	return filepath.Join(dir, "server.go")
 }

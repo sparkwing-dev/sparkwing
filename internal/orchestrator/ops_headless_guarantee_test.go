@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -151,20 +150,29 @@ func stopHomeDaemon(t *testing.T, home string) {
 	})
 }
 
+func moduleRootDir(t *testing.T) string {
+	t.Helper()
+	// safety: a reproducible build trims the compiled-in source path, so resolving the
+	// repository from runtime.Caller yields a module path the filesystem does not hold.
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("resolve working directory: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("no go.mod above the working directory")
+		}
+		dir = parent
+	}
+}
+
 func repoRootDir(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot resolve this test's source path")
-	}
-	root, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
-	if err != nil {
-		t.Fatalf("resolve repo root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		t.Fatalf("repo root %q has no go.mod: %v", root, err)
-	}
-	return root
+	return moduleRootDir(t)
 }
 
 func writeMod(t *testing.T, path, body string) {
