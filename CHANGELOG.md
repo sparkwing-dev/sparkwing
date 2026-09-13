@@ -20,14 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
-  that takes the connection and then fails the handshake, with the probe error.
-  The sweep dropped every peer whose probe failed, so a machine holding wedged
-  peer daemons read as a machine holding none. The report carries them under
-  `faulted_peers`. A peer that never answered the dial, or that ran out of
-  doctor's budget, stays out of the report.
 ### Added
 
 - **cli:** `sparkwing configure init` reports whether the checkout it stands in
@@ -78,6 +70,12 @@ unlock.
   when it declares one, its cache surface otherwise. The flag was read for its
   name and then discarded, so a publish that named a profile refused with an
   error telling the operator to name a profile.
+- **cli:** `sparkwing doctor`'s stray-daemon sweep names a peer home's daemon
+  that takes the connection and then fails the handshake, with the probe error.
+  The sweep dropped every peer whose probe failed, so a machine holding wedged
+  peer daemons read as a machine holding none. The report carries them under
+  `faulted_peers`. A peer that never answered the dial, or that ran out of
+  doctor's budget, stays out of the report.
 
 ### Removed
 
