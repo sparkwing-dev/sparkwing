@@ -257,7 +257,7 @@ func runFormatters(ctx context.Context) error {
 	if len(files) == 0 {
 		return nil
 	}
-	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff "+shellQuoteAll(files)).Capture()
+	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff -- "+shellQuoteAll(files)).Capture()
 	if runErr == nil {
 		return nil
 	}
@@ -328,12 +328,15 @@ func shellQuoteAll(paths []string) string {
 // drops out of every scoped step and the step passes without judging it. -z
 // also carries a name holding a newline, which no line-split can.
 func listNames(ctx context.Context, args string) ([]string, error) {
-	out, err := sparkwing.Bash(ctx, "git -c core.quotePath=false "+args).String()
+	// safety: String trims the whole blob, which eats the leading byte of a
+	// NUL-delimited name that starts with whitespace. Such a repo-root path
+	// sorts first, so it would drop out of scope and the step would pass it.
+	res, err := sparkwing.Bash(ctx, "git -c core.quotePath=false "+args).Capture()
 	if err != nil {
 		return nil, err
 	}
 	var names []string
-	for _, name := range strings.Split(out, "\x00") {
+	for _, name := range strings.Split(res.Stdout, "\x00") {
 		if name != "" {
 			names = append(names, name)
 		}

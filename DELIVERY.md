@@ -15,8 +15,9 @@ launcher when testing isolated tool state.
 ## Checks
 
 - **The three local tiers:** `pre-commit` judges the staged change against
-  this repo's source policy and nothing else, which is what keeps it near two
-  seconds; the git pre-commit hook runs it. `gate` is the broad check, and the
+  this repo's source policy and nothing else, which is what keeps it cheap
+  enough to run on every commit; the bullet below measures it, and the git
+  pre-commit hook runs it. `gate` is the broad check, and the
   git pre-push hook runs it. `pre-release` is the release-boundary tier, which
   the release pipeline runs and no git hook fires; hosted CI runs `gate` and
   `pre-release` on every pull request and every push to main.
@@ -29,8 +30,8 @@ launcher when testing isolated tool state.
   admission daemon, and a hook that long is a hook everyone passes
   `--no-verify`. Measured on a 16-core Linux host: the commit tier is 1.3 s
   warm and 3.8 s on a typical commit, and a scoped `go vet` alone was 5.4 s on
-  a cold vet cache. All four still run under an enforced blocking hook, at the
-  push, where a landing already pays for them once, and on every hosted pull
+  a cold vet cache. All four run at the push, under the pre-push hook wherever
+  it is armed, where a landing pays for them once, and on every hosted pull
   request.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
