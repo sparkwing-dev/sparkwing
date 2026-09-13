@@ -140,7 +140,8 @@ func run(args []string) error {
 			"minute, keyed on the token prefix together with the runner the "+
 			"request names. Past it a claim is answered 429 with a Retry-After "+
 			"naming the refill delay. Zero is unlimited; %d suits the cadence the "+
-			"shipped runners poll at.", controller.RecommendedClaimsPerMinute))
+			"shipped runners poll at, scaled by an enrolled agent's slot count "+
+			"because its slots poll under one name.", controller.RecommendedClaimsPerMinute))
 	heartbeatsPerMinute := fs.Int("heartbeats-per-runner-minute", 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
 			"rolling minute. The agent liveness heartbeat is never budgeted. "+

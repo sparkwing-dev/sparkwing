@@ -10,11 +10,12 @@ import (
 
 // Recommended per-runner request budgets for the claim and heartbeat routes,
 // per rolling minute, computed from the cadence the shipped runners actually
-// use. A pool runner claims every 500ms (120 a minute) and an agent membership
-// offers per slot at the same rate; a node heartbeat runs every 3s (20 a
-// minute per node) and a trigger heartbeat every 3s. Ten times the claim
-// cadence and the heartbeat cadence of a fully loaded runner leaves room for
-// retries and bursts while still bounding a runner stuck in a tight loop.
+// use. A pool runner claims every 500ms (120 a minute); a node heartbeat runs
+// every 3s (20 a minute per node) and a trigger heartbeat every 3s. Ten times
+// that leaves room for retries and bursts while still bounding a runner stuck
+// in a tight loop. An enrolled agent's offer slots poll under the agent's one
+// name, so an operator running many slots per agent scales the claim budget by
+// that count.
 //
 // They are recommendations, not defaults: a controller budgets nothing until
 // an operator names a number.
