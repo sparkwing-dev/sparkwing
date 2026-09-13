@@ -28,6 +28,12 @@ unlock.
   peer daemons read as a machine holding none. The report carries them under
   `faulted_peers`. A peer that never answered the dial, or that ran out of
   doctor's budget, stays out of the report.
+### Removed
+
+- **cli:** The retired `dashboard` noun reads as an unknown subcommand. The
+  parsing that recognized the old spelling and named `sparkwing serve` carried
+  readers across [v0.49.0](docs/migrations/v0.49.0.md#serve-command), which
+  removed the command and whose guide carries the full command map.
 
 ## [v0.50.0] - 2026-09-12
 
