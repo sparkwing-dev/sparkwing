@@ -325,6 +325,7 @@ var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already clai
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidCredentials = errors.New("invalid username or password")
@@ -491,6 +492,15 @@ const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureVerify = "verify"
 func FormatCredits(micro int64) string
+type GitHubWebhookBinding struct {
+	Pipeline  string
+	Repo      string
+	Secret    string
+	Events    []string
+	HookID    int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 type InsufficientCreditsError struct {
@@ -659,6 +669,7 @@ type NodeUsage struct {
 	MaxRSSBytes int64
 	Wall        time.Duration
 }
+func NormalizeGitHubWebhookRepo(repo string) string
 const OnLimitCancelOthers = "cancel_others"
 const OnLimitCoalesce = "coalesce"
 const OnLimitFail = "fail"
@@ -931,6 +942,7 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
+func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
@@ -962,6 +974,7 @@ func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approva
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
+func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
@@ -989,6 +1002,7 @@ func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPaus
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
+func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
@@ -1030,6 +1044,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
+func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
