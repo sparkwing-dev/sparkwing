@@ -118,6 +118,7 @@ func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
 		<-held
 	}()
 
+	shedBefore := Argon2Shed()
 	start := time.Now()
 	_, err := hashPassword("shed me")
 	elapsed := time.Since(start)
@@ -126,6 +127,9 @@ func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
 	}
 	if elapsed > time.Second {
 		t.Fatalf("saturated hash waited %v, want it shed near the acquire timeout", elapsed)
+	}
+	if got := Argon2Shed(); got != shedBefore+1 {
+		t.Fatalf("Argon2Shed = %d, want %d: a shed hash is what the budget metric counts", got, shedBefore+1)
 	}
 }
 

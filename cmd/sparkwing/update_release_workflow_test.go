@@ -140,7 +140,7 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		"FROM --platform=$BUILDPLATFORM " + goImage + " AS build",
 		"FROM " + alpineImage,
 		"ARG SPARKWING_IMAGE_REFRESH=local",
-		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client",
+		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client procps-ng",
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
 		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
 		"COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner",

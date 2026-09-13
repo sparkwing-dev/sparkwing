@@ -690,7 +690,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Stamp `ready_at` so pool runners can claim the node.
       responses:
@@ -702,7 +702,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Atomically null `ready_at` iff the node is not claimed.
       responses:
@@ -1404,7 +1404,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Try to acquire a slot under a concurrency key.
       description: |
@@ -1441,7 +1441,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Extend a holder's lease.
       requestBody:
@@ -1476,7 +1476,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Release a slot. Idempotent.
       requestBody:
@@ -1574,7 +1574,7 @@ paths:
   /api/v1/concurrency/{key}/holder:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Read one holder's slot.
       parameters:
@@ -1596,7 +1596,7 @@ paths:
   /api/v1/concurrency/{key}/resolve:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Resolve one waiter's standing in a single read.
       description: |
@@ -1799,6 +1799,11 @@ paths:
                   nullable: true
                   description: >-
                     The runner's free capacity at claim time, which the agents view reports back. Omit it when the runner engages no local admission daemon.
+                capacity:
+                  allOf: [{$ref: "#/components/schemas/ClaimCapacity"}]
+                  nullable: true
+                  description: >-
+                    The runner's own slot ceiling and in-flight claim count, which local-first placement reads to tell a saturated runner from an idle one. Omit it to advertise no ceiling, which counts as having room.
       responses:
         "200":
           description: Claimed node.
@@ -1818,6 +1823,12 @@ paths:
                       reservation_id: {type: string}
         "204": {description: Nothing to claim.}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "402":
+          description: >-
+            The claiming token is metered and the credit balance does not cover a minute of its time. The node stays ready and the waiting run records why.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditsRefused"}
         "409":
           description: >-
             Assisted offer refusal. The controller does not reserve, record, or award the offer.
@@ -2528,13 +2539,13 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the cache and logs URLs a runner should use.
+      summary: Announce the cache, logs, and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
         started without the matching flag; a co-located laptop deployment
-        announces neither, because there the controller URL is already the
-        right answer.
+        announces none of them, because there the controller URL is already
+        the right answer.
       responses:
         "200":
           description: The announced URLs.
@@ -2546,6 +2557,7 @@ paths:
                 properties:
                   cache_pod: {type: string}
                   logs: {type: string}
+                  dashboard: {type: string}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: This controller announces no services.}
 
@@ -3027,19 +3039,22 @@ paths:
     post:
       x-sparkwing-scope: logs.write
       tags: [nodes]
-      summary: Validate a log writer's exact live execution attempt.
+      summary: Validate a log writer's exact execution attempt.
       description: |
         Internal controller-to-log-service fence check. The request must carry
         either the four `X-Sparkwing-Claim-*` headers plus a positive
         `X-Sparkwing-Attempt-Ordinal`, or a positive
         `X-Sparkwing-Trigger-Generation` and, except for `_compile`, an attempt
-        ordinal. Mixing node and trigger identities is rejected. Trusted
-        controller-internal calls bypass claim validation.
+        ordinal. Mixing node and trigger identities is rejected. The identity
+        must still hold the claim that opened the named attempt; the attempt
+        itself may already have finished, because a node writes its closing
+        lines after closing the attempt. Trusted controller-internal calls
+        bypass claim validation.
       responses:
-        "204": {description: Attempt is live. Empty body.}
+        "204": {description: The claim that opened the attempt is live. Empty body.}
         "400": {description: Node and trigger identities were combined.}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "409": {description: "Missing, malformed, stale, expired, or finished identity."}
+        "409": {description: "Missing, malformed, stale, or expired identity."}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/execution-finish:
@@ -3151,7 +3166,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Resolve an executor offer round or release coordinator fallback.
       description: |
@@ -3397,6 +3412,327 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/runs/{id}/nodes/{nodeID}/logs:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or logs.read or nodes.claim or triggers.claim
+      tags: [nodes]
+      summary: Read the tail of a running node's log from a byte offset.
+      description: >
+        Serves the controller's in-memory ring for one running node, which is the live view for a deployment whose durable logs surface has no live read of its own. Answers 404 once the node has finished and its ring has been released, which is the reader's signal to use the durable copy.
+
+      parameters:
+        - in: query
+          name: since
+          required: false
+          schema: {type: integer, format: int64}
+          description: Byte offset to read from. Omit for the whole buffer.
+      responses:
+        "200":
+          description: The buffered bytes after the requested offset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LiveLogRead"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      x-sparkwing-scope: runs.state
+      tags: [nodes]
+      summary: Add one batch of a running node's log lines to the live ring.
+      description: >
+        The node's own runner posts newline-delimited log text here so watchers see the run as it happens. The durable copy is the logs surface's job; this route only feeds the live view, and the controller drops the oldest bytes once the node's ring is full. Gated on the node's live claim, like every other node write.
+
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: {type: string}
+      responses:
+        "204": {description: Accepted.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: The batch exceeds the per-request limit.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/logs/stream:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or logs.read or nodes.claim or triggers.claim
+      tags: [nodes]
+      summary: Follow a running node's log as server-sent events.
+      description: >
+        Streams the controller's live ring for one node, one event per log line, from the offset in `since` or `Last-Event-ID`. Each event carries the next offset as its id, and the stream closes with an `event: stream_end` once the node finishes.
+
+      parameters:
+        - in: query
+          name: since
+          required: false
+          schema: {type: integer, format: int64}
+          description: Byte offset to resume from. Omit to start at the buffer's beginning.
+      responses:
+        "200":
+          description: A server-sent-events stream of log lines.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/secrets/rotate:
+    post:
+      x-sparkwing-scope: admin
+      tags: [secrets]
+      summary: Re-encrypt every stored secret under the controller's current key.
+      description: |
+        Opens each stored value with the keys the controller holds -- the
+        current one, then the previous one when one is configured -- and
+        writes it back sealed and bound under the current key, in one
+        transaction. A value the controller was holding as plaintext comes
+        out encrypted. A value that opens under neither key keeps the bytes
+        it had and is named in `skipped`, so one unreadable row costs the
+        others nothing. The previous key can be dropped once a rotation
+        answers with `skipped` empty.
+
+        Answers `400` when no key is configured.
+      responses:
+        "200":
+          description: Rotation complete.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.secretsRotateResponse
+                type: object
+                required: [rotated, skipped]
+                properties:
+                  rotated:
+                    type: integer
+                    description: Secret rows rewritten under the current key.
+                  skipped:
+                    type: array
+                    description: Rows left as they were because they opened under no configured key.
+                    items:
+                      x-sparkwing-go-type: pkg/controller.secretsRotateSkip
+                      type: object
+                      required: [name]
+                      properties:
+                        name: {type: string}
+                        repo:
+                          type: string
+                          description: Owning repository slug; absent on the unscoped row.
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/object-store/breaker:
+    get:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Read the controller's object-store request budget.
+      description: |
+        Reports the per-minute rate and per-day budget for each object-store
+        request class (put, get, list, delete), how much of each window the
+        process has spent, and which classes are refusing requests. Changes
+        nothing.
+      responses:
+        "200":
+          description: The budget as it stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ObjectStoreBreaker"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/object-store/reset-breaker:
+    post:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Clear a tripped object-store request budget.
+      description: |
+        Clears every tripped request class and resets both window counters,
+        then returns the budget as it stands with `cleared` naming the classes
+        that were refusing requests. Lifetime request and trip totals survive,
+        so the metrics keep their history. Takes no body.
+      responses:
+        "200":
+          description: The budget after the reset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ObjectStoreBreaker"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/credits:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: Read the prepaid credit balance, the rate, and the recent burn.
+      description: |
+        Cloud runner time is prepaid. Amounts are micro-credits: a million
+        of them is one credit, and a hundred credits is one dollar, so a
+        ten dollar top-up is a thousand credits. The balance is the sum of
+        grants less the sum of charges, computed in SQL. `rate_micro_per_second`
+        prices one cloud runner second, `grace_seconds` is how long a running
+        node survives an empty balance, and `burn_micro` is what the last
+        `burn_window_seconds` cost. A controller that was never granted
+        anything reads zero and charges nothing.
+      responses:
+        "200":
+          description: Ledger state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditState"}
+
+  /api/v1/credits/grants:
+    post:
+      x-sparkwing-scope: admin
+      tags: [credits]
+      summary: Add free or paid credits to the ledger.
+      description: |
+        Records who granted the credits, which kind they are, and the
+        payment `reference` they came from. A grant that lifts the balance
+        above zero lets metered runners claim again and stops the
+        cancellation of nodes running on an empty balance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateGrantRequest"}
+      responses:
+        "201":
+          description: The grant written.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditGrant"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/credits/history:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: List credit grants and charges, newest first.
+      description: |
+        Each charge names the run, node, and token prefix it billed and the
+        seconds it covered, so every movement of the ledger traces to the
+        work that caused it. `limit` caps each list; the controller applies
+        its own default when it is omitted.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer}
+          description: Maximum rows of each kind.
+      responses:
+        "200":
+          description: Grants and charges.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditHistory"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/tokens/{prefix}/metered:
+    parameters:
+      - in: path
+        name: prefix
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: admin
+      tags: [tokens]
+      summary: Mark an existing token as one whose node claims cost credits.
+      description: |
+        Metering is an operator decision recorded against the token, which
+        is how a warm pool already running starts costing credits without a
+        new credential. A runner's self-asserted labels never make its work
+        billable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.setTokenMeteredReq
+              type: object
+              required: [metered]
+              properties:
+                metered: {type: boolean}
+      responses:
+        "200":
+          description: The token after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Token"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/webhooks/github/bindings:
+    delete:
+      x-sparkwing-scope: admin
+      tags: [webhooks]
+      summary: Disconnect one repository from one pipeline.
+      description: |
+        Removes the stored binding, so deliveries from that repository are
+        verified against the `GITHUB_WEBHOOK_BINDINGS` document and the
+        shared secret again, and refused where neither covers them. Delete
+        the webhook on GitHub first; `sparkwing cluster webhooks disconnect`
+        does both in that order.
+      parameters:
+        - in: query
+          name: pipeline
+          required: true
+          schema: {type: string}
+          description: Pipeline the binding fires.
+        - in: query
+          name: repo
+          required: true
+          schema: {type: string}
+          description: Repository slug, owner/name.
+      responses:
+        "200":
+          description: Whether a binding was there to remove.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubWebhookDisconnectResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+    post:
+      x-sparkwing-scope: admin
+      tags: [webhooks]
+      summary: Connect one repository to one pipeline.
+      description: |
+        Stores the secret deliveries from this repository to this pipeline
+        are signed with, and adds the repository to that pipeline's
+        allow-list. The binding takes precedence over the
+        `GITHUB_WEBHOOK_BINDINGS` document for the same pipeline and
+        repository, and adds to it everywhere else. Posting again replaces
+        the secret, which is how a connect rotates it. The secret is sealed
+        with the controller's secrets key when one is configured, and no
+        route reads it back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GitHubWebhookBindingRequest"}
+      responses:
+        "201":
+          description: The stored binding and the URL GitHub must deliver to.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubWebhookBindingResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -3478,6 +3814,24 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    LiveLogRead:
+      x-sparkwing-go-type: pkg/controller.LiveLogRead
+      type: object
+      description: One live read of a running node's log buffer.
+      required: [start, next, data, done]
+      properties:
+        start:
+          type: integer
+          format: int64
+          description: Offset `data` begins at; higher than the requested offset when the ring had already evicted those bytes.
+        next:
+          type: integer
+          format: int64
+          description: Offset to pass to the next read.
+        data: {type: string}
+        done:
+          type: boolean
+          description: The node has finished writing, so `next` will not advance again.
     Error:
       x-sparkwing-go-type: none
       type: object
@@ -3603,6 +3957,17 @@ components:
         prefers_labels:
           type: array
           items: {type: string}
+        placement_reason:
+          type: string
+          enum: ["", preference, fallback, none]
+          description: >-
+            Why the claiming runner got this node: it advertised the node's preference, it took the node as a fallback once the local-first hold expired, or the node carried no preference. Empty on a node no claim path decided.
+        placement_hold_from:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the node became claimable, which the local-first hold runs from. Held apart from `ready_at`, which a label-mismatched claim moves to keep the queue in motion.
         requested_cores: {type: number}
         requested_memory_bytes: {type: integer, format: int64}
         requested_slots: {type: integer}
@@ -3863,6 +4228,111 @@ components:
         last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
         revoked_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
         replaced_by: {type: string}
+        metered:
+          type: boolean
+          description: The operator marked this token as one whose node claims cost credits.
+    CreditState:
+      x-sparkwing-go-type: pkg/controller.creditStateJSON
+      type: object
+      description: The prepaid ledger as an operator reads it. Amounts are micro-credits.
+      properties:
+        balance_micro: {type: integer, format: int64, description: Grants less charges.}
+        granted_micro: {type: integer, format: int64}
+        charged_micro: {type: integer, format: int64}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
+        grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop.: ''}
+        burn_window_seconds: {type: integer, format: int64}
+        burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
+        exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
+        micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
+        credits_per_dollar: {type: integer, format: int64}
+    CreditGrant:
+      x-sparkwing-go-type: pkg/controller.creditGrantJSON
+      type: object
+      description: One addition to the ledger.
+      properties:
+        id: {type: string}
+        kind: {type: string, description: free or paid.}
+        amount_micro: {type: integer, format: int64}
+        reference: {type: string, description: Payment id or operator note.}
+        created_by: {type: string}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+    CreditCharge:
+      x-sparkwing-go-type: pkg/controller.creditChargeJSON
+      type: object
+      description: One movement a metered node caused - the minute its claim reserved, an interval it ran, or the refund of a reservation it did not use.
+      properties:
+        id: {type: string}
+        run_id: {type: string}
+        node_id: {type: string}
+        token_prefix: {type: string}
+        kind: {type: string, description: reservation, usage: '', or refund; a refund carries negative seconds and amount.: ''}
+        seconds: {type: integer, format: int64}
+        amount_micro: {type: integer, format: int64}
+        charged_at: {type: integer, format: int64, description: Unix seconds.}
+    CreditHistory:
+      x-sparkwing-go-type: pkg/controller.creditHistoryJSON
+      type: object
+      required: [grants, charges]
+      properties:
+        grants:
+          type: array
+          items: {$ref: "#/components/schemas/CreditGrant"}
+        charges:
+          type: array
+          items: {$ref: "#/components/schemas/CreditCharge"}
+    GitHubWebhookBindingRequest:
+      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingRequest
+      type: object
+      required: [pipeline, repo, secret]
+      properties:
+        pipeline: {type: string, description: Pipeline the deliveries fire.}
+        repo: {type: string, description: Repository slug (owner/name) stored folded to lower case.}
+        secret: {type: string, description: HMAC secret the repository's deliveries are signed with.}
+        events: {type: array, items: {type: string}, description: GitHub events the webhook subscribes to.}
+        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub.}
+    GitHubWebhookBindingResponse:
+      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingResponse
+      type: object
+      description: One stored binding. It never carries the secret.
+      required: [pipeline, repo, delivery_url, created_at, updated_at]
+      properties:
+        pipeline: {type: string}
+        repo: {type: string}
+        events: {type: array, items: {type: string}}
+        hook_id: {type: integer, format: int64}
+        delivery_url: {type: string, description: Where GitHub posts this pipeline's deliveries.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
+    GitHubWebhookDisconnectResponse:
+      x-sparkwing-go-type: pkg/controller.GitHubWebhookDisconnectResponse
+      type: object
+      required: [pipeline, repo, removed, delivery_url]
+      properties:
+        pipeline: {type: string}
+        repo: {type: string}
+        removed: {type: boolean, description: False when the controller held no such binding.}
+        delivery_url: {type: string, description: Where the removed binding's deliveries were posted.}
+        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub the binding recorded.}
+    CreateGrantRequest:
+      x-sparkwing-go-type: pkg/controller.createGrantReq
+      type: object
+      required: [kind, amount_micro]
+      properties:
+        kind: {type: string, description: free or paid.}
+        amount_micro: {type: integer, format: int64, description: Micro-credits to add; a million is one credit.}
+        reference: {type: string, description: Payment id or operator note.}
+    CreditsRefused:
+      x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
+      type: object
+      description: A claim or heartbeat the credit balance could not pay for.
+      required: [error, code, balance_micro, required_micro]
+      properties:
+        error: {type: string}
+        code: {type: string, description: Always insufficient_credits.}
+        balance_micro: {type: integer, format: int64}
+        required_micro: {type: integer, format: int64}
     CreateTokenRequest:
       x-sparkwing-go-type: pkg/controller.createTokenReq
       type: object
@@ -3877,6 +4347,9 @@ components:
           type: integer
           format: int64
           description: Lifetime in seconds from mint time. Omit or zero for a token that does not expire.
+        metered:
+          type: boolean
+          description: Mint the token as one whose node claims cost credits.
     CreateTokenResponse:
       x-sparkwing-go-type: pkg/controller.createTokenResp
       type: object
@@ -3977,6 +4450,13 @@ components:
         memory_bytes: {type: integer, format: int64}
         queue_depth: {type: integer}
         observed_at: {type: string, format: date-time}
+    ClaimCapacity:
+      x-sparkwing-go-type: pkg/controller.claimCapacity
+      type: object
+      description: A claim-mode runner's slot ceiling and in-flight claim count.
+      properties:
+        max_concurrent: {type: integer}
+        active_claims: {type: integer}
     ExecutionClaimBinding:
       x-sparkwing-go-type: none
       type: object
@@ -4459,6 +4939,36 @@ components:
         schedule: {$ref: "#/components/schemas/CronSchedule"}
         fires: {type: array, items: {$ref: "#/components/schemas/CronFire"}}
         upcoming: {type: array, items: {type: string}}
+    ObjectStoreBreaker:
+      x-sparkwing-go-type: pkg/controller.ObjectStoreBreakerResponse
+      type: object
+      description: The process-wide object-store request budget, one entry per request class.
+      properties:
+        enabled: {type: boolean}
+        reset: {type: string, enum: [day, manual]}
+        tripped: {type: boolean}
+        classes:
+          type: array
+          items: {$ref: "#/components/schemas/ObjectStoreBreakerClass"}
+        cleared:
+          type: array
+          items: {type: string}
+    ObjectStoreBreakerClass:
+      x-sparkwing-go-type: internal/objectguard.ClassState
+      type: object
+      description: One request class's counters and trip state.
+      properties:
+        class: {type: string, enum: [put, get, list, delete]}
+        per_minute: {type: integer}
+        per_day: {type: integer}
+        minute_used: {type: integer}
+        day_used: {type: integer}
+        allowed_total: {type: integer}
+        refused_total: {type: integer}
+        trips_total: {type: integer}
+        tripped: {type: boolean}
+        tripped_at: {type: string, format: date-time}
+        tripped_window: {type: string, enum: [minute, day]}
     CronScheduleEnvelope:
       x-sparkwing-go-type: internal/crons.ScheduleEnvelope
       type: object

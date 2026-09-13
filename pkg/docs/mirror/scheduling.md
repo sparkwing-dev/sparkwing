@@ -67,8 +67,9 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
   The first matching term adds `len(Prefers) - index`, so preferences break
   nearby scores rather than overriding administrator-owned base priority. For
   example, a base-50 generic executor still outranks a base-0 executor that
-  matches one preference. Legacy name-less claims remain FIFO and do not rank
-  on preferences.
+  matches one preference. On the legacy claim path a preference holds the node
+  back from a runner that does not advertise it, for the controller's hold
+  window; see Local-first placement in claim mode below.
 - **`WhenRunner`** -- conditional execution. A runner that advertises
   labels evaluates the terms up front and skips the node when they are
   not satisfied (downstream `Needs` treats a skip as satisfied); a runner
@@ -125,14 +126,64 @@ a child process that compiles and runs the pipeline. It works at the
 trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
 which claims nodes.
 
+## Local-first placement in claim mode
+
+A warm cloud pool polls every 500ms, so first-in-first-out hands it every node
+before a developer's own machine asks. The controller holds a node back from a
+claim-mode runner whose labels do not satisfy the node's `Prefers` while another
+runner is worth waiting for. A runner is worth waiting for when all four hold:
+it advertises the preference, it satisfies the node's `Requires` as well, it
+polled inside `--placement-liveness` (default 30s), and its last poll advertised
+a slot it has not since spent. The hold runs `--placement-hold` (default 20s)
+from the node's hold-from time, which is when it became claimable; after that,
+the next eligible runner takes it. A node with no `Prefers` falls back to
+`--default-prefer-labels` (comma-separated terms, empty by default; the
+environment variable `SPARKWING_DEFAULT_PREFER_LABELS` supplies the same
+value), and a node
+with neither is claimed first-in-first-out as before.
+
+The rule reorders the queue and never widens it: `Requires` stays a hard filter,
+and a held node blocks nothing behind it, because one poll reads past held
+nodes in ready order, up to 512 of them, to find the first it may take. Three cases deliberately hold nothing
+back, because each is a runner that cannot be counted on to take the node:
+
+- a runner whose claim carries no `capacity` block, which said nothing about
+  having room and is what a runner from before this protocol sends;
+- a runner at its advertised ceiling, counting the nodes this controller has
+  handed it since its last poll;
+- a runner this controller has never awarded a node to. Labels are
+  self-asserted, so polling alone would let any claim credential reserve the
+  queue for a machine that never executes anything. Hand claim tokens only to
+  machines you trust to poll honestly, and watch them in `GET /api/v1/agents`,
+  which reports the labels and ceiling each one asserted.
+
+A runner's hold-from time survives the 1us `ready_at` bump a label-mismatched
+claim applies, so a mixed fleet polling constantly cannot restart the window.
+
+Each claim records on the node which runner took it and why, as the
+`placement_reason` field (`preference`, `fallback`, or `none`) and a
+`node_placed` event. `sparkwing runs status` prints that line under a node the
+preference decided:
+
+```
+    build:
+      placement: runner:laptop-alice:1 (preferred)
+```
+
+Run the developer's own runner with the label its pipelines prefer:
+
+```bash
+sparkwing-runner runner --label location=local
+```
+
 ## Agent-first execution with Kubernetes overflow
 
 The `warm` trigger runner still sends nodes through the legacy name-less
 `sparkwing-runner agent` FIFO claim loop. That process opens no listener and
 polls the controller over outbound HTTP(S). A LAN, VPN, or tailnet may provide
 a direct cache path, but discovery grants no execution trust. Legacy `labels`
-are self-asserted placement terms. `Prefers` does not affect claim order, and
-local admission may happen after a claim.
+are self-asserted placement terms, so they order the claim queue and never
+satisfy a hard requirement. Local admission may happen after a claim.
 
 Schema 30 adds administrator-owned executor enrollment for the assisted
 scheduler. Enrollment binds an exact runner or service token prefix
@@ -144,7 +195,8 @@ granted to any helper. Authenticated worker heartbeats can update only
 liveness and finite nonnegative headroom. Idle enrollments remain visible;
 stale ones appear offline. Each enrollment also reports the exact number of
 live node claims as `active_slots`; legacy inferred rows omit that field because
-their slot count is unknown. Rotating an enrollment to a different credential
+their slot count is unknown, and carry the labels and `max_concurrent` their
+runner asserted on its last claim. Rotating an enrollment to a different credential
 marks it offline until that exact credential sends a heartbeat. The scheduling
 summary and membership check apply hard capability, slot, headroom, and
 resource filters before bounded priority. Each controller accepts at most 256

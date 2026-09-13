@@ -1,14 +1,127 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+// safety: a concurrency key is shared across runs, so a claim-scoped token may
+// move only a slot belonging to a run it holds a live claim on. The run comes
+// out of the request the caller sends, either named outright or through the
+// holder row it names; admin bypasses, as it does on every other claim fence.
+type slotRunResolver func(http.ResponseWriter, *http.Request) (string, *http.Request, bool)
+
+func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		p, ok := PrincipalFromContext(ctx)
+		if !ok || p.HasScope(ScopeAdmin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		runID, r, ok := resolve(w, r)
+		if !ok {
+			return
+		}
+		held, err := s.ownsRun(ctx, runID, claimIdentity(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "claim_required", Principal: p.label(),
+				Message: "run " + runID + " is not claimed by this principal",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) slotRunFromBody(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	r, ok := peekJSONBody(w, r, &body)
+	if !ok {
+		return "", r, false
+	}
+	if body.RunID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
+		return "", r, false
+	}
+	return body.RunID, r, true
+}
+
+func (s *Server) slotRunFromBodyHolder(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+	var body struct {
+		HolderID string `json:"holder_id"`
+	}
+	r, ok := peekJSONBody(w, r, &body)
+	if !ok {
+		return "", r, false
+	}
+	return s.slotRunFromHolder(w, r, body.HolderID)
+}
+
+func (s *Server) slotRunFromQueryHolder(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+	return s.slotRunFromHolder(w, r, r.URL.Query().Get("holder_id"))
+}
+
+func (s *Server) slotRunFromQueryRun(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+	runID := r.URL.Query().Get("run_id")
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
+		return "", r, false
+	}
+	return runID, r, true
+}
+
+// safety: a holder whose lease has lapsed names no run the caller can prove it
+// owns, so the request is refused rather than resolved against a stale row.
+func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holderID string) (string, *http.Request, bool) {
+	if holderID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return "", r, false
+	}
+	holder, err := s.store.ConcurrencyHolder(r.Context(), r.PathValue("key"), holderID, time.Now())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			p, _ := PrincipalFromContext(r.Context())
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "claim_required", Principal: p.label(),
+				Message: "holder " + holderID + " does not hold this key",
+			})
+			return "", r, false
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return "", r, false
+	}
+	return holder.RunID, r, true
+}
+
+func peekJSONBody(w http.ResponseWriter, r *http.Request, v any) (*http.Request, bool) {
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxJSONBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return r, false
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if err := json.Unmarshal(raw, v); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return r, false
+	}
+	return r, true
+}
 
 type acquireSlotReq struct {
 	HolderID          string `json:"holder_id"`

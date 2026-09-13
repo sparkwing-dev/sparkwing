@@ -22,6 +22,254 @@ unlock.
 
 ### Added
 
+- **runner + chart:** A runner pool can keep its Go caches across pod
+  restarts and warm them at startup. `runner.goCache.persistence.enabled`
+  mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
+  `GOMODCACHE`, off by default; every replica mounts that claim, so the
+  StorageClass must serve `ReadWriteMany` above one replica and the chart
+  refuses to render otherwise. `sparkwing-runner runner --warm-modules`
+  (env `SPARKWING_WARM_MODULES`, chart `runner.goCache.warmModules`)
+  downloads modules into `GOMODCACHE` while the claim loop starts and
+  defaults to the Sparkwing SDK at the runner's own version; `off` warms
+  nothing. The runner also logs `binary_cache` (`local`, `remote`, or
+  `compiled`) and `build_ms` for each pipeline binary it readies, so the
+  cost of a cold compile is visible per run. `runner.maxClaimsBeforeRestart`
+  is unchanged.
+- **cli:** `sparkwing cloud connect --controller URL` joins a controller in one
+  command, so connecting no longer means editing `profiles.yaml` by hand. It
+  verifies the controller answers, mints a user token scoped to `runs.read`,
+  `runs.write`, `triggers.read`, `logs.read` and `approvals.write` when
+  `--admin-token-stdin` hands it an admin credential, writes the profile, and
+  closes with the dashboard URL the controller announces and the probes
+  `sparkwing configure profiles test` runs. `--token-stdin` stores a token you
+  already hold, `--scope` selects what to mint, `--name` defaults to the
+  controller host with every character outside `a-z0-9` turned into a dash, and
+  an existing profile of that name is replaced only with `--force`.
+  `--set-default` writes `defaults.profile` into this repository's
+  `.sparkwing/sparkwing.yaml`. `sparkwing cloud status` reports the connection,
+  its principal and scopes, and those probes; `sparkwing cloud disconnect
+  --name N` revokes the profile's token and removes it, naming the prefix and
+  the revoke command whenever the credential it holds is not allowed to make
+  that call.
+- **controller:** `sparkwing-controller --dashboard-url URL` announces the
+  dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
+  client that has just been handed a token can say where to watch its runs. The
+  flag defaults to `SPARKWING_DASHBOARD_URL`, which the GitHub commit-status
+  reporter already read. Empty disables the announcement.
+- **config:** `defaults.profile` in `.sparkwing/sparkwing.yaml` may name a
+  profile from `~/.config/sparkwing/profiles.yaml`. The project's own
+  `profiles:` block still wins on a name both declare, so a repository can
+  default to a connection whose token stays out of the checkout. A name neither
+  file declares now fails where the profile is resolved rather than where the
+  project file is parsed.
+- **cli + controller:** `sparkwing cluster webhooks connect --profile P --repo
+  OWNER/NAME --pipeline NAME` registers both sides of a GitHub trigger in one
+  command. It generates a 32-byte secret, stores the binding on the controller
+  through `POST /api/v1/webhooks/github/bindings` (scope `admin`), creates or
+  updates the repository's webhook with the `gh` CLI so it posts to the
+  controller's delivery URL for that pipeline, and asks GitHub for a ping so
+  the status the controller answered is part of the output. The secret is
+  never printed and never passed on a command line; it reaches `gh` on stdin
+  and the controller seals it with the secrets key when one is configured.
+  `--events` selects the events (default `push,pull_request`). `sparkwing
+  cluster webhooks disconnect` removes the binding and then deletes the
+  webhook the controller was bound to, and reports either side that was
+  already absent.
+  Stored bindings add to the `GITHUB_WEBHOOK_BINDINGS` document rather than
+  replacing it: a binding supplies the secret and allows its repository for
+  that pipeline, the document keeps every pipeline and repository it already
+  covered, and a pipeline the document leaves unchecked stays unchecked.
+- **controller:** `sparkwing-controller --external-url` (env
+  `SPARKWING_EXTERNAL_URL`) declares the base URL GitHub reaches this
+  controller at, which the bindings route announces as each pipeline's
+  delivery URL. Unset, the route answers with the URL the request arrived at.
+- **store:** Schema v37 adds `github_webhook_bindings`, holding one row per
+  connected pipeline and repository with its signing secret, events, and
+  GitHub hook id. The migration is additive, so a controller built before it
+  opens the migrated database unchanged.
+- **cli:** `sparkwing cluster runners add --profile P --name NAME` enrolls the
+  machine it runs on in one command: it mints a runner token scoped to
+  `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and
+  `logs.write` on the profile's controller, writes
+  `~/.config/sparkwing/agent.yaml` at mode 0600 in the claim-mode format the
+  service installer writes, installs and starts the user service (a systemd
+  user unit on Linux, a LaunchAgent on macOS), and prints the token prefix with
+  the command that revokes it. On Windows it prints the manual supervision
+  steps. `--max-concurrent`, `--contribution` and `--labels` set the ceilings
+  and placement terms, `--no-service` stops at the config, and an existing
+  config is replaced only with `--force`. `sparkwing cluster runners remove
+  --profile P` stops the service and then revokes the token.
+  `install/service-install.sh` is unchanged and still installs the same unit
+  and plist. The command refuses a host that cannot supervise a runner, and an
+  agent config that does not validate, before it mints anything, and it names
+  the live token and its revoke command whenever a step after the mint fails.
+- **cli:** `sparkwing runs logs --follow` prints log lines rather than the
+  server-sent-events frames that carried them. A follow against a controller
+  logs surface used to show each line's `data:` prefix and the stream's own
+  `: open` and keepalive comments.
+- **controller + web:** A run is watchable live even when its logs surface is
+  an object store. The node's runner mirrors its lines to the controller, which
+  holds the last 512 KiB of each running node in memory and serves it over
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream` (server-sent events) and
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/logs?since=<offset>` (JSON). The
+  dashboard and `sparkwing runs logs --follow` read that ring while a node runs
+  and the durable copy afterwards; both used to poll the bucket or answer 501.
+  The runner posts batches to `POST /api/v1/runs/{id}/nodes/{nodeID}/logs`
+  under scope `runs.state`, gated on the node's live claim like every other
+  node write. Buffers are bounded per node and across nodes together, and
+  `sparkwing-controller` takes `--live-log-node-kb`, `--live-log-total-mb` and
+  `--live-log-idle`. A deployment running `sparkwing-logs` keeps its own live
+  stream and mirrors nothing.
+- **logs:** An `s3` logs surface coalesces a node's lines into one object
+  per flush instead of one object per line. A flush lands when the buffer
+  reaches `batch_bytes` (256 KiB), when `batch_interval` (2s) elapses, when
+  a reader asks for the node's log, and when the node finishes, so a node
+  costs one object per 256 KiB of log text rather than one per line. The
+  finish flush runs before the node's status is written on every path, so a
+  node that reads terminal has a complete log, and a flush the store refuses
+  counts its whole batch into the node's dropped-line total. The four keys
+  are refused on any surface that does not act on them, and when negative. `max_log_objects`
+  (2000) and `max_log_bytes` (64 MiB) bound one node's log, and past either
+  the surface drops further lines and ends the node's log with one marker
+  line counting them. All four keys are optional on the profile's `logs:`
+  block. `filesystem` and `controller` logs surfaces write through
+  unchanged.
+- **sdk:** `storage.NodeFlusher` is the optional capability a
+  `storage.LogStore` exposes when it buffers appends, and
+  `storage.FlushNode` calls it for a store that has it. A write-through
+  store needs neither.
+
+- **controller:** `--bootstrap-admin-token-file PATH`
+  (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN` carries the value itself) stores the first
+  admin token before the listener binds, so a provisioned controller never
+  serves a request unauthenticated and `--require-auth` is satisfied on a first
+  start. Only the token's argon2 hash reaches the database, under the principal
+  `bootstrap:admin`. A tokens table holding a token that still authenticates is
+  left alone; one holding only revoked or expired rows is bootstrapped again,
+  which recovers a cluster whose last credential was revoked or ran out. The
+  value has to carry a minted token's shape, `swu_` followed by at least 28
+  characters. `charts/sparkwing-full` gains
+  `controller.bootstrapAdminToken.name` and `controller.requireAuth`.
+- **controller + cli:** `--secrets-previous-key-file PATH`
+  (`SPARKWING_SECRETS_PREVIOUS_KEY`) is a read-only fallback for secret
+  encryption: a stored value that does not open under the current key is tried
+  against the previous one, so a key change keeps every value readable.
+  `sparkwing secrets rotate --profile NAME` (`POST /api/v1/secrets/rotate`,
+  admin) then re-encrypts every stored secret under the current key in one
+  transaction, after which the previous key can be dropped. A value the
+  controller was holding as plaintext comes out encrypted, which turns
+  encryption on for an existing database without re-setting each secret.
+  A row that opens under no configured key keeps the bytes it had and is named
+  in the response, so one unreadable value costs the others nothing.
+  Encryption stays opt-in: a controller with no key configured is unchanged and
+  the rotate route answers `400`. `charts/sparkwing-full` gains
+  `controller.secretsPreviousKey.name`, and now delivers the encryption keys and
+  the bootstrap token as mounted files rather than environment variables; the
+  controller clears either variable from its environment as it reads it.
+- **pkg/store:** `Store.CreateTokenIfNoneExist` writes a caller-supplied token
+  when the tokens table is empty, checking and inserting in one transaction, and
+  `Store.RotateSecretValues` rewrites every secret row's stored value through a
+  caller-supplied function in one transaction. `store.ValidateRawToken` reports
+  whether a credential minted elsewhere carries a usable shape.
+- **storage + controller:** Every object-store client a process builds draws on
+  one request budget, counting `put`, `get`, `list` and `delete` separately
+  against a per-minute rate and a per-day total. A class that spends either
+  budget trips: requests of that class are refused with an error naming the
+  class and the limit, nothing queues, and the other classes keep serving on
+  their own budgets. Defaults are 1200 put, 3000 get, 600 list and 600 delete a
+  minute, and 200000/500000/100000/100000 a day, so normal load never reaches
+  them and a retry loop with no sleep trips in under two seconds. The budget
+  counts billed attempts rather than API calls: it sits inside the AWS SDK's
+  retry loop, so a call the SDK re-sends spends one unit per attempt. A class
+  tripped by its per-minute rate clears when that minute rolls; a class tripped
+  by its per-day budget follows `SPARKWING_OBJECT_STORE_TRIP_RESET`. The budget
+  belongs to one process and does not aggregate, so N processes on one bucket
+  can spend N budgets. Override with
+  `SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE` and
+  `SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY`; `SPARKWING_OBJECT_STORE_TRIP_RESET`
+  picks whether a tripped class clears on the day roll (`day`) or waits for an
+  operator (`manual`); `SPARKWING_OBJECT_STORE_BREAKER=off` counts without
+  refusing. The controller reports the budget on `GET /api/v1/health` under
+  `object_store` and exports `sparkwing_object_store_requests_total`,
+  `sparkwing_object_store_trips_total` and `sparkwing_object_store_tripped`.
+- **cli + controller:** `sparkwing cluster object-store status --profile NAME`
+  prints a controller's object-store budget and `sparkwing cluster object-store
+  reset-breaker --profile NAME` clears a tripped one, over the new admin-scoped
+  `GET /api/v1/object-store/breaker` and `POST
+  /api/v1/object-store/reset-breaker`. `Client.ObjectStoreBreakerState` and
+  `Client.ResetObjectStoreBreaker` reach both from Go. The reset reaches the
+  controller process alone; a local process clears its own budget with
+  `SPARKWING_OBJECT_STORE_BREAKER=off`, which the refusal message names.
+- **controller:** A prepaid credit ledger meters cloud runner time. Grants are
+  `free` or `paid` and record who added them and the payment they came from;
+  charges name the run, node, token prefix, and seconds they billed. The
+  balance is grants less charges, computed in SQL. `GET /api/v1/credits` and
+  `GET /api/v1/credits/history` read it on `runs.read` and
+  `POST /api/v1/credits/grants` adds to it on `admin`. Amounts are
+  micro-credits: a million is one credit and a hundred credits is one dollar,
+  so a ten dollar top-up is a thousand credits. At the default rate a cloud
+  runner second costs 0.02 credits, which is 72 credits ($0.72) an hour.
+- **controller:** A runner token the operator marked metered is checked and
+  charged; no other token is. A metered claim reserves its first minute inside
+  the claim's own transaction, so concurrent runners cannot each claim against
+  the same balance; when the balance cannot cover it,
+  `POST /api/v1/nodes/claim` answers `402` with
+  `"code": "insufficient_credits"`, the node stays ready, and the waiting run
+  records a `credits_blocked` event. Each heartbeat charges the seconds since
+  that node's previous charge, and the finish charges the tail and refunds the
+  unused reservation, so a node that runs four seconds pays for four seconds.
+  No single charge bills more than the charge cap (30 seconds by default), and
+  a requeued node releases its charge window, so neither a controller outage
+  nor the gap between two attempts is billed. Once the balance reaches zero the
+  node runs out a grace period (60 seconds by default); the next heartbeat then
+  fails the node with the reason `credits_exhausted`, releases its claim, and
+  answers `409`, and the run records a `credits_exhausted` event naming why.
+- **cli:** `sparkwing cluster credits show`, `grant`, and `history` read the
+  balance, the rate, the charge cap and the day's burn, add free or paid
+  credits, and list every movement of the ledger newest first. `history
+  --limit` accepts up to 1000 rows of each kind and names the ceiling when
+  asked for more. `history -o json` emits one record per line.
+- **cli:** `sparkwing cluster tokens create --metered` mints a token whose node
+  claims cost credits, and `sparkwing cluster tokens set-metered --prefix P
+  --metered true|false` marks a token already in use, which is how a warm pool
+  already running starts being charged. `tokens list` gained a METERED column.
+  Metering is an operator decision recorded against the token: a runner's
+  self-asserted labels never make its work billable.
+- **store:** `CreateTokenWith` mints a token carrying `TokenOptions` under the
+  caller's context,
+  `SetTokenMetered` and `TokenMetered` read and write the metering marker, and
+  `GrantCredits`, `CreditBalanceMicro`, `CreditState`, `ListCreditGrants`,
+  `ListCreditCharges`, `ChargeNodeCredits`, `FinalizeNodeCredits`, and
+  `CancelNodeForExhaustedCredits` carry the ledger. A charge is a
+  `reservation`, `usage`, or `refund`. Schema v35 adds the `credit_grants` and
+  `credit_charges` tables and two defaulted columns; the migration is additive
+  and stamps no requirement, so an older binary still opens the database.
+- **controller:** Local-first placement on the claim path. A node is held back
+  from a claim-mode runner whose labels do not satisfy its `Prefers` while
+  another runner is worth waiting for: one that advertises the preference,
+  satisfies the node's `Requires`, polled inside `--placement-liveness`
+  (default 30s), and advertised a slot it has not since spent. The hold runs
+  `--placement-hold` (default 20s) from when the node became claimable, after
+  which any eligible runner takes it. `--default-prefer-labels` supplies a
+  preference for nodes whose plan declares none; empty, its default, leaves
+  those nodes first-in-first-out. `Requires` is unchanged: preferences reorder
+  the claim queue and never widen it. The chart exposes all three as
+  `controller.defaultPreferLabels`, `controller.placementHold`, and
+  `controller.placementLiveness`. Each claim stamps `placement_reason`
+  (`preference`, `fallback`, `none`) on the node, a declared or overridden
+  preference writes a `node_placed` event, and `sparkwing runs status` and the
+  dashboard's node panel name the runner and the reason.
+- **store:** Schema 36 adds `nodes.placement_reason` and
+  `nodes.placement_hold_from`, both additive with defaults an older binary
+  keeps writing. The hold-from column is what the local-first window runs
+  from, so the `ready_at` bump a label-mismatched claim applies cannot restart
+  it.
+- **controller + runner:** `POST /api/v1/nodes/claim` accepts a `capacity`
+  object carrying the runner's `max_concurrent` and `active_claims`, which
+  `pkg/controller/client.Client.ClaimNodeWithCapacity` sends and the agents
+  view reports for a claim-mode runner alongside the labels it asserted. A
+  runner that sends no `capacity` block, one at its ceiling, and one this
+  controller has never awarded a node to each hold nothing back.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the
@@ -31,6 +279,43 @@ unlock.
 
 ### Changed
 
+- **cli:** `sparkwing fleet agents enroll` says that the `coordinators` block it
+  prints selects enrolled mode, which `sparkwing-runner agent` refuses to start
+  without `--allow-enrolled-preview`, and points at `sparkwing cluster runners
+  add` for a machine that must execute work. The command and its output are
+  otherwise unchanged.
+- **runner (Breaking):** `sparkwing-runner agent` refuses to start when
+  `agent.yaml` sets `name` or `coordinators`. That configuration selects
+  enrolled mode, which the controller refuses on both the claim route and the
+  offer route, so the agent polled and logged an error on every slot while
+  claiming nothing. It now exits non-zero naming the state. Remove both keys to
+  run the claim-mode loop the service installer writes; see the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-refuses-to-start).
+  `--allow-enrolled-preview` restores the polling behavior for the developers of
+  the enrolled path.
+- **storage:** Every retry path that can reach an object store now waits an
+  exponentially growing, fully jittered interval between attempts and stops at a
+  stated cap. The AWS SDK retryer is pinned to 4 attempts and a 5s backoff
+  ceiling; the state backend's conditional-write loops space their 16 attempts
+  instead of spinning; the state outbox gives up after 12 consecutive failed
+  replay cycles, reports the stall on the controller's health route, and drops
+  to one attempt every five minutes until a write lands; the state flush loop
+  backs off to a 30s ceiling while every dirty run is failing; concurrency
+  compare-and-swap retries grow to a 250ms ceiling; the hosted daemon transport
+  caps one call at 32 attempts; and a log append retry and a controller 503
+  retry each carry jitter. A bucket that refuses every write now costs a bounded
+  number of requests rather than one per loop iteration for as long as the
+  process lives.
+
+  One latency cost comes with it: a concurrency slot under sustained contention
+  now takes roughly 25s of jittered waiting to exhaust its 200 compare-and-swap
+  attempts, against roughly 10s before. Slots are held for the length of a run,
+  so the added wait is small beside what a contended slot is waiting for, and it
+  is what drops the exhausted-loop request rate from about 40 a second to about
+  8.
+- **storage:** A write the object-store request budget refuses is never staged to
+  the state outbox. The outbox absorbs an outage; a spent budget is a guard
+  against a runaway loop, so it fails the write closed instead of queueing it.
 - **config (Breaking):** A trigger key under `on:` that carries no value is
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a
@@ -57,6 +342,51 @@ unlock.
 
 ### Fixed
 
+- **controller:** The concurrency slot routes `acquire`, `heartbeat`,
+  `release`, `holder` and `resolve` take `runs.state` plus a live claim on the
+  run the request names, so a pipeline that declares a concurrency group or a
+  memoized node runs under a runner token. They required `admin`, and
+  `RemoteBackends` points the orchestrator's concurrency backend at them, so
+  every such pipeline failed with `403` on a hosted controller whose runners are
+  not admins. `acquire` and `resolve` name their run; `heartbeat`, `release` and
+  `holder` name a holder whose row names the run. A caller holding no live claim
+  on that run gets `403 claim_required`. `force-release` and `cancel-waiter` act
+  on rows another run owns and still require `admin`, and an `admin` token
+  reaches all seven exactly as before.
+- **controller + runner:** A polling fleet no longer draws `503` answers out of
+  the argon2 budget. Concurrent requests carrying one bearer token share a
+  single verification and answer from a cache keyed by the token's prefix and a
+  SHA-256 of the credential, so a token costs one hash per 60-second window
+  rather than one per request; the raw token is no longer held in controller
+  memory between requests. `sparkwing_auth_token_cache_total` reports
+  verifications by `hit`, `miss` and `coalesced`, and
+  `sparkwing_auth_hashing_rejected_total` reports what the memory budget shed.
+  A claim or heartbeat answered `503` with a `Retry-After` is backoff for the
+  pool, trigger and executor loops: they wait the header out, capped at 30
+  seconds, log it at debug and warn at most once a minute, where every shed
+  poll used to print an error line. Revocation, rotation and the cache window
+  behave as [docs/auth.md](docs/auth.md) describes.
+
+- **controller + logs:** A node keeps the log lines it writes after its
+  execution attempt closes. `POST
+  /api/v1/runs/{id}/nodes/{nodeID}/claim/validate` authorizes an append against
+  the claim the writer still holds rather than against the attempt still being
+  open, so the `node_end` line and anything an `AfterRun` hook writes now land.
+  Both the claim-mode runner and the trigger runner executing a node in process
+  used to get `409 held by another holder` on every node's closing append, log
+  `logs append rejected`, and finish the run green with a truncated log. An
+  append from a principal that does not hold the node claim, or whose claim
+  lease has lapsed, is still refused.
+- **orchestrator:** A rejected log append is reported as the log loss it is
+  rather than as `failing run`. The message used to promise a failure the run
+  did not take when the rejection arrived after the node's outcome was decided.
+- **controller:** The executor offer routes `mark-ready`, `revoke-ready` and
+  `finalize-ready` take `runs.state` plus the live claim on the run's trigger,
+  the gate `auto-retry/reset` already carried. They required `admin`, so a
+  warm-pool dispatcher running on the documented runner scope set answered every
+  run with `403` at the first readiness call and the node stayed pending. A node
+  claim still cannot open a round, and an `admin` token reaches all three exactly
+  as before.
 - **wingd:** Credit a first-seen process only where the scan can date its start
   Admission computes grantable cores as the machine's capacity less the CPU it cannot
   account for, so a tree whose CPU goes unattributed is charged to the machine and the
@@ -114,6 +444,17 @@ unlock.
   beside the participant that holds the cores, which is the occupancy
   `sparkwing queue` reports. The capacity page still lists every lease in one
   table.
+- **orchestrator:** On Linux the process table behind process-group cleanup is
+  read from `/proc` instead of a `ps` fork. BusyBox `ps`, which minimal images
+  such as Alpine ship, rejects `-axo pid=,pgid=,stat=`, so every cleanup on
+  those hosts failed and no pipeline could compile. Other Unixes keep the `ps`
+  path, and a process that exits mid-scan is a gap in the snapshot rather than
+  a failed listing.
+- **cache:** A compile is judged on the compiler's own exit status even when the
+  process-group cleanup that follows it fails. A successful `go build` was
+  reported as a failed compile carrying no compiler output whenever the cleanup
+  could not read the process table; the cleanup failure is now a warning naming
+  the process group. A cancelled or failing compile reports as before.
 
 ## [v0.50.1] - 2026-09-13
 

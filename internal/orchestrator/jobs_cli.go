@@ -601,13 +601,20 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	for _, n := range nodes {
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
-		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
+		placement := placementLine(n)
+		// safety: a preference that was honored is the ordinary case and would
+		// expand every node in the run; only an overridden one is news.
+		expandsForPlacement := n.PlacementReason == store.PlacementFallback
+		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || expandsForPlacement || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
 		fmt.Fprintf(out, "    %s\n", color.Bold(n.NodeID+":"))
 		if n.StatusDetail != "" {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("↳"), n.StatusDetail)
+		}
+		if placement != "" {
+			fmt.Fprintf(out, "      %s %s\n", color.Dim("placement:"), placement)
 		}
 		for _, a := range annotations {
 			fmt.Fprintf(out, "      %s %s\n", color.Dim("@"), a)
@@ -635,6 +642,20 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 				writeIndentedSummary(out, "        ", s.Summary)
 			}
 		}
+	}
+}
+
+func placementLine(n *store.Node) string {
+	if n.ClaimedBy == "" {
+		return ""
+	}
+	switch n.PlacementReason {
+	case store.PlacementPreferred:
+		return n.ClaimedBy + " (preferred)"
+	case store.PlacementFallback:
+		return n.ClaimedBy + " (fallback after the local-first hold)"
+	default:
+		return ""
 	}
 }
 

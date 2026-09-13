@@ -7,6 +7,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 ## Command groups
 
 - [`sparkwing cache`](cli-cache.md) -- Inspect or trim the compiled pipeline binary cache
+- [`sparkwing cloud`](cli-cloud.md) -- Connect this machine to a sparkwing controller
 - [`sparkwing cluster`](cli-cluster.md) -- Operate and inspect the sparkwing cluster
 - [`sparkwing commands`](cli-commands.md) -- Index of every command: one path and synopsis per line
 - [`sparkwing completion`](cli-completion.md) -- Emit a shell completion script (bash\|zsh\|fish)

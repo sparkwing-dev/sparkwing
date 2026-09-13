@@ -17,15 +17,18 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
-| `POST` | `/api/v1/concurrency/{key}/acquire` | `admin` |
+| `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
-| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `admin` |
-| `GET` | `/api/v1/concurrency/{key}/holder` | `admin` |
+| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/holder` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/notify` | `runs.read` |
-| `POST` | `/api/v1/concurrency/{key}/release` | `admin` |
-| `GET` | `/api/v1/concurrency/{key}/resolve` | `admin` |
+| `POST` | `/api/v1/concurrency/{key}/release` | `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
+| `GET` | `/api/v1/credits` | `runs.read` |
+| `POST` | `/api/v1/credits/grants` | `admin` |
+| `GET` | `/api/v1/credits/history` | `runs.read` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.write` |
 | `PUT` | `/api/v1/crons/repos` | `runs.write` |
@@ -45,6 +48,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
+| `GET` | `/api/v1/object-store/breaker` | `admin` |
+| `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
 | `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |
@@ -93,15 +98,18 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `admin` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.state` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs/stream` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.write` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `nodes.claim` |
@@ -120,6 +128,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/secrets` | `admin` |
 | `POST` | `/api/v1/secrets` | `admin` |
+| `POST` | `/api/v1/secrets/rotate` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` |
 | `GET` | `/api/v1/secrets/{name}` | `secrets.read` |
 | `GET` | `/api/v1/services` | `authenticated` |
@@ -127,6 +136,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |
 | `GET` | `/api/v1/tokens/{prefix}` | `admin` |
+| `POST` | `/api/v1/tokens/{prefix}/metered` | `admin` |
 | `POST` | `/api/v1/tokens/{prefix}/rotate` | `admin` |
 | `GET` | `/api/v1/trends` | `runs.read` |
 | `GET` | `/api/v1/triggers` | `triggers.read` |
@@ -140,6 +150,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/users` | `admin` |
 | `POST` | `/api/v1/users` | `admin` |
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
+| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
+| `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
 | `GET` | `/metrics` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |
 

@@ -20,13 +20,16 @@ local dashboard with 'sparkwing serve'.
 
 - `status` -- Connectivity + fleet + queue health check against a remote cluster
 - `agents` -- Inspect the controller's fleet view
+- `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
 - `gc` -- Sweep stale warm-PVC state
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
+- `credits` -- Inspect and top up the prepaid credit balance
 - `image` -- Rollout helpers for images referenced by a gitops repo
-- `webhooks` -- Inspect and replay GitHub webhooks
+- `webhooks` -- Connect, inspect, and replay GitHub webhooks
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
+- `object-store` -- Operate the controller's object-store request budget
 
 ### Examples
 
@@ -162,6 +165,122 @@ command narrows to one namespace.
 sparkwing cluster concurrency --namespace deploy-prod --profile prod
 ```
 
+## `sparkwing cluster credits`
+
+Inspect and top up the prepaid credit balance
+
+Cloud runner time is prepaid. One hundred credits is one dollar,
+so a ten dollar top-up is a thousand credits. The balance is
+grants minus charges: a claim reserves a minute of cloud runner
+time before it is granted, heartbeats charge the seconds they
+cover, and the finish refunds whatever of the reservation the
+node did not use. Runners the operator did not mark metered are
+never charged.
+
+### Subcommands
+
+- `show` -- Print the balance, the rate, and the recent burn
+- `grant` -- Add free or paid credits to the ledger
+- `history` -- List grants and charges, newest first
+
+### Examples
+
+```sh
+# Read the balance and the burn
+sparkwing cluster credits show --profile prod
+
+# Load ten dollars
+sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+```
+
+## `sparkwing cluster credits grant`
+
+Add free or paid credits to the ledger
+
+Adds credits and records who added them, which kind they are, and
+the payment they came from. One hundred credits is one dollar.
+A grant that lifts the balance above zero lets metered runners
+claim again and stops the cancellation of nodes running on an
+empty balance. Requires the admin scope.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--kind KIND` | Grant kind: free \| paid (required) |
+| `--amount N` | Credits to add; 100 credits is one dollar (required) |
+| `--reference REF` | Payment id or operator note recorded with the grant |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Load ten dollars against a payment
+sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+
+# Hand out trial credits
+sparkwing cluster credits grant --kind free --amount 500 --profile prod
+```
+
+## `sparkwing cluster credits history`
+
+List grants and charges, newest first
+
+Lists every movement of the ledger newest first: grants with
+their kind and reference, and the reservation a claim took, the
+usage an interval billed, and the refund of a reservation a node
+did not use, each with the run, node, token prefix and seconds
+it covered. Charges render negative because they take credits
+out and a refund renders positive. -o json emits one JSON record
+per line.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--limit N` | Maximum rows of each kind, up to 1000 (0 = the controller's default) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read the ledger
+sparkwing cluster credits history --profile prod
+
+# Sum today's charges
+sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
+```
+
+## `sparkwing cluster credits show`
+
+Print the balance, the rate, and the recent burn
+
+Prints the balance in credits, what was granted and charged, the
+price of a cloud runner second, the credits burned over the last
+day, the grace period a running node gets after the balance
+reaches zero, and the cap on what any one charge may bill. A
+controller that was never granted anything reads a zero balance
+and charges nothing, because nothing is metered until an
+operator marks a token.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read the balance
+sparkwing cluster credits show --profile prod
+
+# Read the balance as JSON
+sparkwing cluster credits show --profile prod -o json
+```
+
 ## `sparkwing cluster gc`
 
 Sweep stale warm-PVC state
@@ -271,6 +390,199 @@ sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --w
 sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs
 ```
 
+## `sparkwing cluster object-store`
+
+Operate the controller's object-store request budget
+
+The controller counts every object-store request it makes, by class
+(put, get, list, delete), against a per-minute rate and a per-day
+budget. A class that spends either budget trips: writes of that class
+fail closed and reads keep serving until their own budget trips. The
+state appears on 'sparkwing cluster status' and on the controller's
+Prometheus metrics as sparkwing_object_store_requests_total,
+sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
+
+Budgets come from SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE and
+SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
+SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
+clears when its day window rolls (day, the default) or waits for an
+operator (manual). A local process that must finish past a tripped
+budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
+
+### Subcommands
+
+- `status` -- Show the controller's object-store request budget
+- `reset-breaker` -- Clear a tripped object-store request budget
+
+### Examples
+
+```sh
+# Clear a tripped budget
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+## `sparkwing cluster object-store reset-breaker`
+
+Clear a tripped object-store request budget
+
+Clears every tripped request class on the selected controller and
+resets its per-minute and per-day window counters, then prints the
+budget as it stands. Lifetime request and trip totals survive, so the
+metrics keep their history.
+
+Reach for this after fixing what caused the trip. A budget that keeps
+tripping wants a larger limit or a caller that stops retrying, not a
+repeated reset.
+
+Hits POST /api/v1/object-store/reset-breaker on the selected
+profile's controller, which needs an admin-scoped token.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile selecting the controller (required) |
+| `-o, --output FORMAT` | Output format (json\|table) |
+
+### Examples
+
+```sh
+# Clear a tripped budget
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+## `sparkwing cluster object-store status`
+
+Show the controller's object-store request budget
+
+Prints each request class with its per-minute rate, its per-day budget,
+how much of each window the controller has spent, how many times the
+class has tripped, and whether it is refusing requests now. Changes
+nothing.
+
+Hits GET /api/v1/object-store/breaker on the selected profile's
+controller, which needs an admin-scoped token.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile selecting the controller (required) |
+| `-o, --output FORMAT` | Output format (json\|table) |
+
+### Examples
+
+```sh
+# Read the budget
+sparkwing cluster object-store status --profile prod
+```
+
+## `sparkwing cluster runners`
+
+Enroll and retire this machine as a runner
+
+Turns one machine into a runner for the selected profile's
+controller in a single command. 'add' mints a scoped runner token, writes the
+owner-only agent config, and installs the user service. 'remove' stops that
+service and revokes the token.
+
+Use 'sparkwing cluster agents list' to see the runners a controller knows
+about.
+
+### Subcommands
+
+- `add` -- Mint a runner token, write the config, start the service
+- `remove` -- Stop the runner service and revoke its token
+
+### Examples
+
+```sh
+# Enroll this machine
+sparkwing cluster runners add --profile prod --name dev-laptop
+
+# Retire this machine
+sparkwing cluster runners remove --profile prod
+```
+
+## `sparkwing cluster runners add`
+
+Mint a runner token, write the config, start the service
+
+Mints a runner token carrying nodes.claim, triggers.claim,
+runs.state, secrets.read and logs.write against the profile's controller,
+writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
+the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
+Windows it prints the manual supervision steps instead.
+
+The config is written in claim mode, which is the mode that executes work.
+An existing config is never replaced without --force, because the token it
+holds stays live until it is revoked.
+
+Nothing is minted until the config validates and the machine answers: a
+missing sparkwing-runner, an unreachable service manager, or an unusable
+setting fails first. If a step after the mint fails, the output names the live
+token and the command that revokes it.
+
+The command prints the token prefix and the revoke command. The raw token
+reaches only the config file.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--name NAME` | Runner name, shown in the dashboard (required) |
+| `--labels CSV` | Comma-separated self-asserted placement labels |
+| `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
+| `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
+| `--logs URL` | Logs service URL (default: the profile's logs surface) |
+| `--config PATH` | Agent config to write (default: ~/.config/sparkwing/agent.yaml) |
+| `--force` | Replace an existing agent config |
+| `--no-service` | Write the config without installing or starting the service |
+| `--profile NAME` | Profile naming the controller to enroll against (required) |
+
+### Examples
+
+```sh
+# Enroll this machine
+sparkwing cluster runners add --profile prod --name dev-laptop
+
+# Enroll with a capacity ceiling and labels
+sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4 --contribution 4,8gb --labels linux,arch=amd64
+
+# Write the config and supervise the agent yourself
+sparkwing cluster runners add --profile prod --name dev-laptop --no-service
+```
+
+## `sparkwing cluster runners remove`
+
+Stop the runner service and revoke its token
+
+Reads the token out of the agent config, stops and removes the
+user service, then revokes that token on the profile's controller. The service
+stops first, so a claim in flight finishes against a credential that still
+authenticates. A prefix the controller reports as anything but a runner token
+is refused, naming what it found.
+
+A service file that runs a different agent config is left alone.
+
+The config file stays on disk holding the revoked token; 'runners add --force'
+replaces it.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--config PATH` | Agent config to read the token from (default: ~/.config/sparkwing/agent.yaml) |
+| `--no-service` | Revoke the token without touching the service |
+| `--profile NAME` | Profile naming the controller that issued the token (required) |
+
+### Examples
+
+```sh
+# Retire this machine
+sparkwing cluster runners remove --profile prod
+```
+
 ## `sparkwing cluster status`
 
 Connectivity + fleet + queue health check against a remote cluster
@@ -325,6 +637,7 @@ save it before leaving this command.
 - `revoke` -- Mark a token revoked
 - `lookup` -- Print metadata for a single token
 - `rotate` -- Mint a replacement token with a grace window
+- `set-metered` -- Mark an existing token as one credits pay for
 
 ## `sparkwing cluster tokens create`
 
@@ -343,6 +656,7 @@ this command exits it cannot be recovered.
 | `--principal NAME` | Name identifying the token holder (required) |
 | `--scope CSV` | Comma-separated scopes; use sparkwing docs read --topic auth for the supported set |
 | `--ttl DURATION` | Token lifetime (30d, 720h, and similar durations). 0 = never expires |
+| `--metered` | Mark the token as one whose node claims cost credits |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
@@ -353,6 +667,9 @@ sparkwing cluster tokens create --type service --principal deploy-bot --scope ru
 
 # Mint a user token that expires in 30 days
 sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod
+
+# Mint a metered cloud runner token
+sparkwing cluster tokens create --type runner --principal agent:cloud-pool --scope nodes.claim --metered --profile prod
 ```
 
 ## `sparkwing cluster tokens list`
@@ -461,6 +778,35 @@ window short.
 sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
 ```
 
+## `sparkwing cluster tokens set-metered`
+
+Mark an existing token as one credits pay for
+
+Sets or clears the metering marker on a token that is already
+minted, which is how a warm pool already running starts costing
+credits without a new credential. Metering is an operator
+decision: a runner's own labels never make its work billable.
+A claim by a metered token reserves a minute of cloud runner
+time and is refused when the balance cannot cover it.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--prefix PREFIX` | Non-secret token prefix (from 'tokens list') (required) |
+| `--metered BOOL` | true to charge this token's claims, false to stop (required) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Start charging the warm pool
+sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered true --profile prod
+
+# Stop charging a token
+sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered false --profile prod
+```
+
 ## `sparkwing cluster users`
 
 Manage dashboard login users
@@ -556,14 +902,17 @@ sparkwing cluster users list --profile prod
 
 ## `sparkwing cluster webhooks`
 
-Inspect and replay GitHub webhooks
+Connect, inspect, and replay GitHub webhooks
 
-Inspect GitHub webhooks through the installed 'gh' command and its
-credentials. The deliveries view joins delivery records with Sparkwing
-triggers and run outcomes.
+Manage GitHub webhooks through the installed 'gh' command and its
+credentials. 'connect' registers a repository against a pipeline on both
+sides and 'disconnect' removes it; the deliveries view joins delivery
+records with Sparkwing triggers and run outcomes.
 
 ### Subcommands
 
+- `connect` -- Connect a GitHub repository to a pipeline
+- `disconnect` -- Remove a repository's webhook and its controller binding
 - `list` -- List GitHub hooks configured on a repo
 - `deliveries` -- List recent deliveries for a hook, joined with trigger state
 - `replay` -- Queue a redelivery of a specific delivery UUID
@@ -571,11 +920,50 @@ triggers and run outcomes.
 ### Examples
 
 ```sh
+# Connect a repository to a pipeline
+sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build
+
 # List hooks on a repo
 sparkwing cluster webhooks list --repo your-org/my-app
 
 # Recent deliveries for a hook
 sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
+```
+
+## `sparkwing cluster webhooks connect`
+
+Connect a GitHub repository to a pipeline
+
+Registers both sides of a webhook in one command. It generates a
+signing secret, stores the binding on the controller, creates or
+updates the repository's webhook through 'gh' so it posts to the
+controller's delivery URL for this pipeline, and asks GitHub for a
+ping so the answer the controller gave is part of the output.
+
+The secret is never printed and never passed in a command line; the
+controller stores it and verifies every delivery's HMAC against it.
+Re-running the command rotates the secret on both sides.
+
+The delivery URL comes from the controller: its --external-url when
+it announces one, and otherwise the URL this command reached it at.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--repo OWNER/NAME` | GitHub repo (owner can be omitted if gh has a default) (required) |
+| `--pipeline NAME` | Pipeline the deliveries fire (required) |
+| `--events LIST` | Comma-separated GitHub events (default: push,pull_request) |
+| `--profile NAME` | Profile name (the controller that stores the binding) (required) |
+
+### Examples
+
+```sh
+# Connect push and pull-request triggers
+sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build
+
+# Connect pushes only
+sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push
 ```
 
 ## `sparkwing cluster webhooks deliveries`
@@ -605,6 +993,35 @@ take a time filter). Default: 24h.
 ```sh
 # Recent deliveries for a hook
 sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
+```
+
+## `sparkwing cluster webhooks disconnect`
+
+Remove a repository's webhook and its controller binding
+
+Removes the binding the controller verifies deliveries against, then
+deletes the webhook on GitHub through 'gh'. The controller answers with
+the webhook it was bound to, so a repository connected to two
+controllers under the same pipeline name loses only this one. A webhook
+written by hand is matched by its pipeline path instead, and every
+deleted hook is printed with its URL.
+
+Either side already being absent is reported rather than failing, so a
+half-finished connect is cleaned up by running this once.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--repo OWNER/NAME` | GitHub repo (required) |
+| `--pipeline NAME` | Pipeline the webhook fires (required) |
+| `--profile NAME` | Profile name (the controller holding the binding) (required) |
+
+### Examples
+
+```sh
+# Disconnect a repository
+sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build
 ```
 
 ## `sparkwing cluster webhooks list`

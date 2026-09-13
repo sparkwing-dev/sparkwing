@@ -389,6 +389,8 @@ func runSparkwing(args []string) error {
 	case "crons":
 		return runCrons(args[1:])
 
+	case "cloud":
+		return runCloud(args[1:])
 	case "cluster":
 		return runCluster(args[1:])
 	case "fleet":
@@ -484,6 +486,8 @@ func runCluster(args []string) error {
 		return runHealth(args[1:])
 	case "agents":
 		return runAgents(args[1:])
+	case "runners":
+		return runRunners(args[1:])
 	case "worker":
 		return runWorker(args[1:])
 	case "gc":
@@ -492,12 +496,16 @@ func runCluster(args []string) error {
 		return runUsers(args[1:])
 	case "tokens":
 		return runTokens(args[1:])
+	case "credits":
+		return runCredits(args[1:])
 	case "image":
 		return runImage(args[1:])
 	case "webhooks":
 		return runWebhooks(args[1:])
 	case "concurrency":
 		return runConcurrency(args[1:])
+	case "object-store":
+		return runClusterObjectStore(args[1:])
 	default:
 		PrintHelp(cmdCluster, os.Stderr)
 		return fmt.Errorf("cluster: unknown subcommand %q", args[0])

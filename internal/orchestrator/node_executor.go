@@ -262,6 +262,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			Event: "node_end",
 			Attrs: attrs,
 		})
+		handOverNodeLog(ctx, nlog)
 	}
 
 	samplerCtx, stopSampler := context.WithCancel(ctx)
@@ -687,11 +688,6 @@ done:
 
 	emitNodeEnd(sparkwing.Success, "")
 
-	// safety: the close is the write that hands over the last lines, so its
-	// failures have to be counted before the node is called successful.
-	if cerr := nlog.Close(); cerr != nil {
-		sparkwing.Debug(nodeCtx, "close node log: %v", cerr)
-	}
 	if count, reason := nodeLogDrops(nlog); count > reportedDrops {
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
 		noteEvent(ctx, r.backends.State, runID, node.ID(), "logs_drop", payload)

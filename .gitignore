@@ -43,5 +43,8 @@ internal/web/next-out/*
 
 /internal/web/.build-state/
 
+# per-worktree golangci-lint cache the delivery guidance points GOLANGCI_LINT_CACHE at
+.golangci-cache/
+
 # pipeline cache and lock files a local run writes beside the package it ran in
 **/.sparkwing/cache/

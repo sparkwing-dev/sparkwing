@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -28,6 +29,14 @@ const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 
 var argonIDFunc = argon2.IDKey
+
+var argonShed atomic.Int64
+
+// Argon2Shed reports how many hashes the memory budget has shed with
+// [ErrHashingBusy] since the process started. It is a saturation signal:
+// a controller whose count climbs under ordinary polling is verifying
+// credentials that a cache should be answering.
+func Argon2Shed() int64 { return argonShed.Load() }
 
 var (
 	argonSemMu   sync.RWMutex
@@ -92,6 +101,7 @@ func argonKey(secret string, salt []byte) ([]byte, error) {
 	select {
 	case sem <- struct{}{}:
 	case <-timer.C:
+		argonShed.Add(1)
 		return nil, ErrHashingBusy
 	}
 	defer func() { <-sem }()

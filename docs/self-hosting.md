@@ -56,10 +56,32 @@ instead.
 ## Add workstation capacity
 
 After a controller is running, a Linux or macOS workstation can run
-`sparkwing-runner` as a user service. From a Sparkwing source checkout:
+`sparkwing-runner` as a user service. With `sparkwing-runner` on PATH and a
+profile naming the controller, one command does the whole enrollment:
 
 ```bash
 go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
+sparkwing cluster runners add --profile prod --name dev-laptop
+```
+
+It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
+`runs.state`, `secrets.read` and `logs.write`, writes
+`~/.config/sparkwing/agent.yaml` at mode `0600`, installs the user service, and
+prints the token prefix with the command that revokes it. The config and the
+machine are checked before the mint, so a host with no `sparkwing-runner` or no
+user service session fails before a credential exists; a failure after the mint
+prints the live token and its revoke command. `--max-concurrent`,
+`--contribution` and `--labels` set the same fields the interactive installer
+asks for, `--no-service` writes the config for a machine you supervise
+yourself, and an existing config is replaced only with `--force`. Retire the
+machine with `sparkwing cluster runners remove --profile prod`, which stops the
+service and then revokes the token.
+
+The command needs an admin credential on the profile, because minting a token
+is an admin route. A machine whose operator holds no admin token uses the
+interactive installer with a token an administrator minted for them:
+
+```bash
 bash install/service-install.sh
 ```
 
@@ -107,16 +129,31 @@ budget grammar as local admission. The contribution defaults to `50%,50%`;
 the reserve defaults to empty because the contribution already retains half
 the machine for other work.
 
+A runner warms its Go module cache at startup from `--warm-modules` (or
+`SPARKWING_WARM_MODULES`), a comma-separated list of module paths with an
+optional `@version`; it defaults to the SDK at the runner's own version, and
+`off` disables it. The warm runs in the background and a failed download only
+logs, so a cold cache never blocks a claim.
+
 The installer writes the token to `~/.config/sparkwing/agent.yaml` with mode
 `0600`. The service uses that file rather than embedding the token in its
 launchd plist or systemd unit. The contribution caps reported capacity; the
 reserve constrains local admission. Neither enables the reservation-backed
 assisted offer protocol.
 
+Keep the config in that claim-mode shape. Adding `name` or `coordinators`
+selects enrolled mode, which the controller refuses on both the claim route and
+the offer route, so the agent refuses to start and names the state.
+`sparkwing-runner agent --allow-enrolled-preview` starts it anyway, against the
+unfinished enrolled path. See [local-execution.md](local-execution.md) for the
+enrolled design.
+
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
---config <path>` command, but the bundled installer does not create a Windows
-service. Supervise it with the service manager you already use, or run the
-Linux installer inside WSL when systemd user services are enabled.
+--config <path>` command, but neither installer creates a Windows service. On
+Windows `sparkwing cluster runners add` mints the token, writes the config, and
+prints those manual steps. Supervise the agent with the service manager you
+already use, or run the Linux installer inside WSL when systemd user services
+are enabled.
 
 ### Operate the service
 

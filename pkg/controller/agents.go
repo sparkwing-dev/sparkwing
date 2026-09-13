@@ -291,6 +291,10 @@ SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(le
 			ActiveJobs:    active,
 			MaxConcurrent: 0,
 		}
+		if presence, ok := s.runnerPresence.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
+			agent.Capabilities = presence.Labels
+			agent.MaxConcurrent = presence.MaxConcurrent
+		}
 		if hr, ok := s.runnerHeadroom.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
 			agent.Headroom = &AgentHeadroom{
 				Cores:       hr.Cores,

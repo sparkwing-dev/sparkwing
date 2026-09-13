@@ -21,7 +21,7 @@ programs in a repo's .sparkwing/ directory, triggered by git hooks,
 webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.`,
-	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "serve", "doctor", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
+	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "serve", "doctor", "cloud", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
@@ -184,10 +184,111 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "image", "webhooks", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
+	},
+}
+
+var cmdCloud = Command{
+	Path:     "sparkwing cloud",
+	Synopsis: "Connect this machine to a sparkwing controller",
+	Description: `One command joins a controller: 'connect' verifies the
+controller answers, mints a user token when you hand it an admin credential,
+and writes the profile that every other command selects with --profile.
+'status' reports what that connection authenticates as. 'disconnect' removes
+the profile and revokes its token.
+
+Nothing here edits profiles.yaml by hand. Enroll this machine as a runner with
+'sparkwing cluster runners add'.`,
+	SubcommandOrder: []string{"connect", "status", "disconnect"},
+	Examples: []Example{
+		{"Connect with a one-time admin token", "sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin"},
+		{"Report the connection", "sparkwing cloud status --profile api-sparkwing-example"},
+	},
+}
+
+var cmdCloudConnect = Command{
+	Path:     "sparkwing cloud connect",
+	Synopsis: "Write the profile that reaches a controller",
+	Description: `Verifies the controller answers its health route, then writes
+a profile carrying the controller URL and a token.
+
+--admin-token-stdin reads an admin credential from stdin and mints a user
+token with it, carrying runs.read, runs.write, triggers.read, logs.read and
+approvals.write. The admin credential is never stored; only the minted token
+reaches profiles.yaml. --token-stdin stores a token you already hold. Neither
+flag connects to a controller serving unauthenticated.
+
+--name defaults to the controller host with every character outside a-z0-9
+turned into a dash, so https://api.sparkwing.example becomes
+api-sparkwing-example. An existing profile of that name is never replaced
+without --force, because the token it holds stays live until it is revoked.
+
+--set-default writes defaults.profile into this repository's
+.sparkwing/sparkwing.yaml, so runs in this checkout select the connection with
+no flag. The name resolves against the project's own profiles: block first and
+profiles.yaml second, so the token stays out of the checkout.
+
+The command closes with the dashboard URL the controller announces and the
+probes 'sparkwing configure profiles test' runs.`,
+	Flags: []FlagSpec{
+		{Name: "controller", Argument: "URL", Desc: "Controller base URL", Required: true, Group: "Identity"},
+		{Name: "name", Argument: "NAME", Desc: "Profile name (default: derived from the controller host)", Group: "Identity"},
+		{Name: "admin-token-stdin", Desc: "Read an admin token from stdin and mint a user token with it", ConflictsWith: []string{"token-stdin"}, Group: "Credential"},
+		{Name: "token-stdin", Desc: "Read an already-minted user token from stdin", ConflictsWith: []string{"admin-token-stdin"}, Group: "Credential"},
+		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes for the minted token", Default: "runs.read,runs.write,triggers.read,logs.read,approvals.write", Group: "Credential"},
+		{Name: "set-default", Desc: "Set defaults.profile in this project's .sparkwing/sparkwing.yaml", Group: "Project"},
+		{Name: "force", Desc: "Replace an existing profile of that name", Group: "Project"},
+	},
+	GroupOrder: []string{"Identity", "Credential", "Project", "Other"},
+	Examples: []Example{
+		{"Connect with a one-time admin token", "sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin"},
+		{"Connect and make it this repository's default", "sparkwing cloud connect --controller https://api.sparkwing.example --name prod --admin-token-stdin --set-default"},
+		{"Store a token someone minted for you", "sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin"},
+	},
+}
+
+var cmdCloudStatus = Command{
+	Path:     "sparkwing cloud status",
+	Synopsis: "Report the connection, its principal, and the probes",
+	Description: `Prints the selected profile, its controller, the principal
+and scopes the controller reports for its token, the announced dashboard URL,
+and the controller, auth, logs and gitcache probes. Exits non-zero when a probe
+fails.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile naming the connection to report", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json|table", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Report the connection", "sparkwing cloud status --profile prod"},
+		{"Machine-readable status", "sparkwing cloud status --profile prod -o json"},
+	},
+}
+
+var cmdCloudDisconnect = Command{
+	Path:     "sparkwing cloud disconnect",
+	Synopsis: "Revoke the connection's token and drop the profile",
+	Description: `Revokes the profile's token on its controller, then removes
+the profile. A revoke this credential is not allowed to make leaves the token
+live and names the prefix and the command that finishes the job, so a
+connection is never dropped silently.
+
+The profile's own token revokes only when it carries admin;
+--admin-token-stdin supplies one that does. A prefix the controller reports as
+anything but a user token is refused, naming what it found. --keep-token drops
+the profile and touches no credential.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Profile name to disconnect", Required: true, Group: "Identity"},
+		{Name: "admin-token-stdin", Desc: "Read an admin token from stdin and revoke with it", Group: "Credential"},
+		{Name: "keep-token", Desc: "Remove the profile without revoking its token", Group: "Credential"},
+	},
+	GroupOrder: []string{"Identity", "Credential", "Other"},
+	Examples: []Example{
+		{"Disconnect and revoke with an admin token", "sparkwing cloud disconnect --name prod --admin-token-stdin"},
+		{"Drop the profile and leave the token alone", "sparkwing cloud disconnect --name prod --keep-token"},
 	},
 }
 
@@ -2007,7 +2108,7 @@ var cmdTokens = Command{
 profile named by --profile.
 Token creation prints the raw value to stdout once --
 save it before leaving this command.`,
-	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
+	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate", "set-metered"},
 }
 
 var cmdTokensCreate = Command{
@@ -2022,11 +2123,111 @@ this command exits it cannot be recovered.`,
 		{Name: "principal", Argument: "NAME", Desc: "Name identifying the token holder", Required: true, Group: "Input"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes; use sparkwing docs read --topic auth for the supported set", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (30d, 720h, and similar durations). 0 = never expires", Group: "Input"},
+		{Name: "metered", Desc: "Mark the token as one whose node claims cost credits", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod"},
 		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod"},
+		{"Mint a metered cloud runner token", "sparkwing cluster tokens create --type runner --principal agent:cloud-pool --scope nodes.claim --metered --profile prod"},
+	},
+}
+
+var cmdTokensSetMetered = Command{
+	Path:     "sparkwing cluster tokens set-metered",
+	Synopsis: "Mark an existing token as one credits pay for",
+	Description: `Sets or clears the metering marker on a token that is already
+minted, which is how a warm pool already running starts costing
+credits without a new credential. Metering is an operator
+decision: a runner's own labels never make its work billable.
+A claim by a metered token reserves a minute of cloud runner
+time and is refused when the balance cannot cover it.`,
+	Flags: []FlagSpec{
+		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
+		{Name: "metered", Argument: "BOOL", Desc: "true to charge this token's claims, false to stop", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Start charging the warm pool", "sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered true --profile prod"},
+		{"Stop charging a token", "sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered false --profile prod"},
+	},
+}
+
+var cmdCredits = Command{
+	Path:     "sparkwing cluster credits",
+	Synopsis: "Inspect and top up the prepaid credit balance",
+	Description: `Cloud runner time is prepaid. One hundred credits is one dollar,
+so a ten dollar top-up is a thousand credits. The balance is
+grants minus charges: a claim reserves a minute of cloud runner
+time before it is granted, heartbeats charge the seconds they
+cover, and the finish refunds whatever of the reservation the
+node did not use. Runners the operator did not mark metered are
+never charged.`,
+	SubcommandOrder: []string{"show", "grant", "history"},
+	Examples: []Example{
+		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
+		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
+	},
+}
+
+var cmdCreditsShow = Command{
+	Path:     "sparkwing cluster credits show",
+	Synopsis: "Print the balance, the rate, and the recent burn",
+	Description: `Prints the balance in credits, what was granted and charged, the
+price of a cloud runner second, the credits burned over the last
+day, the grace period a running node gets after the balance
+reaches zero, and the cap on what any one charge may bill. A
+controller that was never granted anything reads a zero balance
+and charges nothing, because nothing is metered until an
+operator marks a token.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the balance", "sparkwing cluster credits show --profile prod"},
+		{"Read the balance as JSON", "sparkwing cluster credits show --profile prod -o json"},
+	},
+}
+
+var cmdCreditsGrant = Command{
+	Path:     "sparkwing cluster credits grant",
+	Synopsis: "Add free or paid credits to the ledger",
+	Description: `Adds credits and records who added them, which kind they are, and
+the payment they came from. One hundred credits is one dollar.
+A grant that lifts the balance above zero lets metered runners
+claim again and stops the cancellation of nodes running on an
+empty balance. Requires the admin scope.`,
+	Flags: []FlagSpec{
+		{Name: "kind", Argument: "KIND", Desc: "Grant kind: free | paid", Required: true, Group: "Input"},
+		{Name: "amount", Argument: "N", Desc: "Credits to add; 100 credits is one dollar", Required: true, Group: "Input"},
+		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant", Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Load ten dollars against a payment", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
+		{"Hand out trial credits", "sparkwing cluster credits grant --kind free --amount 500 --profile prod"},
+	},
+}
+
+var cmdCreditsHistory = Command{
+	Path:     "sparkwing cluster credits history",
+	Synopsis: "List grants and charges, newest first",
+	Description: `Lists every movement of the ledger newest first: grants with
+their kind and reference, and the reservation a claim took, the
+usage an interval billed, and the refund of a reservation a node
+did not use, each with the run, node, token prefix and seconds
+it covered. Charges render negative because they take credits
+out and a refund renders positive. -o json emits one JSON record
+per line.`,
+	Flags: []FlagSpec{
+		{Name: "limit", Argument: "N", Desc: "Maximum rows of each kind, up to 1000 (0 = the controller's default)", Group: "Filter"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the ledger", "sparkwing cluster credits history --profile prod"},
+		{"Sum today's charges", "sparkwing cluster credits history --profile prod -o json | jq 'select(.type==\"charge\") | .amount_micro'"},
 	},
 }
 
@@ -2992,7 +3193,7 @@ With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
 time. Pipelines declare a typed Secrets provider to resolve their secrets.
 'secrets list' masks values; 'secrets get' prints them.`,
-	SubcommandOrder: []string{"set", "get", "list", "delete"},
+	SubcommandOrder: []string{"set", "get", "list", "delete", "rotate"},
 }
 
 var cmdSecretSet = Command{
@@ -3073,6 +3274,31 @@ resolve until the secret is re-added.`,
 	Examples: []Example{
 		{"Delete a local secret", "sparkwing secrets delete --name API_TOKEN"},
 		{"Delete a remote secret", "sparkwing secrets delete --name API_TOKEN --profile prod"},
+	},
+}
+
+var cmdSecretRotate = Command{
+	Path:     "sparkwing secrets rotate",
+	Synopsis: "Re-encrypt every stored secret under the controller's current key",
+	Description: `Reads every secret the named profile's controller holds and writes it
+back sealed under the key that controller is running with now, in one
+transaction. Run it after moving a controller onto a new key with the old
+one still configured as --secrets-previous-key-file
+(SPARKWING_SECRETS_PREVIOUS_KEY); drop the old key once a rotation reports
+nothing skipped. A value the controller was holding as plaintext comes out
+encrypted too, which is how an existing install turns encryption on
+without re-setting each secret by hand.
+
+A row that opens under no configured key keeps the bytes it had and is
+listed by name; the rest of the table still rotates. The controller
+refuses when it has no key configured. Values never leave it: the
+rotation opens and reseals them in place.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile naming the controller to rotate", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"System", "Other"},
+	Examples: []Example{
+		{"Re-encrypt prod secrets under the current key", "sparkwing secrets rotate --profile prod"},
 	},
 }
 
@@ -3257,14 +3483,67 @@ on "is the cluster reachable at all?".`,
 
 var cmdWebhooks = Command{
 	Path:     "sparkwing cluster webhooks",
-	Synopsis: "Inspect and replay GitHub webhooks",
-	Description: `Inspect GitHub webhooks through the installed 'gh' command and its
-credentials. The deliveries view joins delivery records with Sparkwing
-triggers and run outcomes.`,
-	SubcommandOrder: []string{"list", "deliveries", "replay"},
+	Synopsis: "Connect, inspect, and replay GitHub webhooks",
+	Description: `Manage GitHub webhooks through the installed 'gh' command and its
+credentials. 'connect' registers a repository against a pipeline on both
+sides and 'disconnect' removes it; the deliveries view joins delivery
+records with Sparkwing triggers and run outcomes.`,
+	SubcommandOrder: []string{"connect", "disconnect", "list", "deliveries", "replay"},
 	Examples: []Example{
+		{"Connect a repository to a pipeline", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
 		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
 		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
+	},
+}
+
+var cmdWebhooksConnect = Command{
+	Path:     "sparkwing cluster webhooks connect",
+	Synopsis: "Connect a GitHub repository to a pipeline",
+	Description: `Registers both sides of a webhook in one command. It generates a
+signing secret, stores the binding on the controller, creates or
+updates the repository's webhook through 'gh' so it posts to the
+controller's delivery URL for this pipeline, and asks GitHub for a
+ping so the answer the controller gave is part of the output.
+
+The secret is never printed and never passed in a command line; the
+controller stores it and verifies every delivery's HMAC against it.
+Re-running the command rotates the secret on both sides.
+
+The delivery URL comes from the controller: its --external-url when
+it announces one, and otherwise the URL this command reached it at.`,
+	Flags: []FlagSpec{
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
+		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the deliveries fire", Required: true, Group: "Input"},
+		{Name: "events", Argument: "LIST", Desc: "Comma-separated GitHub events", Default: defaultWebhookEvents, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller that stores the binding)", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Input", "System", "Other"},
+	Examples: []Example{
+		{"Connect push and pull-request triggers", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build"},
+		{"Connect pushes only", "sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push"},
+	},
+}
+
+var cmdWebhooksDisconnect = Command{
+	Path:     "sparkwing cluster webhooks disconnect",
+	Synopsis: "Remove a repository's webhook and its controller binding",
+	Description: `Removes the binding the controller verifies deliveries against, then
+deletes the webhook on GitHub through 'gh'. The controller answers with
+the webhook it was bound to, so a repository connected to two
+controllers under the same pipeline name loses only this one. A webhook
+written by hand is matched by its pipeline path instead, and every
+deleted hook is printed with its URL.
+
+Either side already being absent is reported rather than failing, so a
+half-finished connect is cleaned up by running this once.`,
+	Flags: []FlagSpec{
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
+		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline the webhook fires", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name (the controller holding the binding)", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Input", "System", "Other"},
+	Examples: []Example{
+		{"Disconnect a repository", "sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build"},
 	},
 }
 
@@ -3337,6 +3616,86 @@ offline agents and gateways, plus recent legacy claim-only runners.`,
 	SubcommandOrder: []string{"list", "enroll"},
 	Examples: []Example{
 		{"List prod agents", "sparkwing cluster agents list --profile prod"},
+	},
+}
+
+var cmdRunners = Command{
+	Path:     "sparkwing cluster runners",
+	Synopsis: "Enroll and retire this machine as a runner",
+	Description: `Turns one machine into a runner for the selected profile's
+controller in a single command. 'add' mints a scoped runner token, writes the
+owner-only agent config, and installs the user service. 'remove' stops that
+service and revokes the token.
+
+Use 'sparkwing cluster agents list' to see the runners a controller knows
+about.`,
+	SubcommandOrder: []string{"add", "remove"},
+	Examples: []Example{
+		{"Enroll this machine", "sparkwing cluster runners add --profile prod --name dev-laptop"},
+		{"Retire this machine", "sparkwing cluster runners remove --profile prod"},
+	},
+}
+
+var cmdRunnersAdd = Command{
+	Path:     "sparkwing cluster runners add",
+	Synopsis: "Mint a runner token, write the config, start the service",
+	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
+runs.state, secrets.read and logs.write against the profile's controller,
+writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
+the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
+Windows it prints the manual supervision steps instead.
+
+The config is written in claim mode, which is the mode that executes work.
+An existing config is never replaced without --force, because the token it
+holds stays live until it is revoked.
+
+Nothing is minted until the config validates and the machine answers: a
+missing sparkwing-runner, an unreachable service manager, or an unusable
+setting fails first. If a step after the mint fails, the output names the live
+token and the command that revokes it.
+
+The command prints the token prefix and the revoke command. The raw token
+reaches only the config file.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Runner name, shown in the dashboard", Required: true, Group: "Identity"},
+		{Name: "labels", Argument: "CSV", Desc: "Comma-separated self-asserted placement labels", Group: "Identity"},
+		{Name: "max-concurrent", Argument: "N", Desc: "Concurrent jobs this machine accepts", Default: "2", Group: "Limits"},
+		{Name: "contribution", Argument: "SPEC", Desc: "CPU and memory this machine contributes (4,8gb or 50%,50%)", Default: "50%,50%", Group: "Limits"},
+		{Name: "logs", Argument: "URL", Desc: "Logs service URL (default: the profile's logs surface)", Group: "Input"},
+		{Name: "config", Argument: "PATH", Desc: "Agent config to write (default: ~/.config/sparkwing/agent.yaml)", Group: "Input"},
+		{Name: "force", Desc: "Replace an existing agent config", Group: "Input"},
+		{Name: "no-service", Desc: "Write the config without installing or starting the service", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile naming the controller to enroll against", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Identity", "Limits", "Input", "System", "Other"},
+	Examples: []Example{
+		{"Enroll this machine", "sparkwing cluster runners add --profile prod --name dev-laptop"},
+		{"Enroll with a capacity ceiling and labels", "sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4 --contribution 4,8gb --labels linux,arch=amd64"},
+		{"Write the config and supervise the agent yourself", "sparkwing cluster runners add --profile prod --name dev-laptop --no-service"},
+	},
+}
+
+var cmdRunnersRemove = Command{
+	Path:     "sparkwing cluster runners remove",
+	Synopsis: "Stop the runner service and revoke its token",
+	Description: `Reads the token out of the agent config, stops and removes the
+user service, then revokes that token on the profile's controller. The service
+stops first, so a claim in flight finishes against a credential that still
+authenticates. A prefix the controller reports as anything but a runner token
+is refused, naming what it found.
+
+A service file that runs a different agent config is left alone.
+
+The config file stays on disk holding the revoked token; 'runners add --force'
+replaces it.`,
+	Flags: []FlagSpec{
+		{Name: "config", Argument: "PATH", Desc: "Agent config to read the token from (default: ~/.config/sparkwing/agent.yaml)", Group: "Input"},
+		{Name: "no-service", Desc: "Revoke the token without touching the service", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile naming the controller that issued the token", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Input", "System", "Other"},
+	Examples: []Example{
+		{"Retire this machine", "sparkwing cluster runners remove --profile prod"},
 	},
 }
 
@@ -3457,6 +3816,10 @@ a protected user ACL on Windows). Direct shell redirection can truncate an
 existing multi-coordinator file before validation and can destroy existing
 memberships.
 
+A coordinators block selects enrolled mode, which sparkwing-runner refuses to
+start without --allow-enrolled-preview; enroll a machine that must execute work
+with 'sparkwing cluster runners add' instead.
+
 Use one credential per coordinator membership.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
@@ -3499,6 +3862,73 @@ command narrows to one namespace.`,
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Who holds and who's queued", "sparkwing cluster concurrency --namespace deploy-prod --profile prod"},
+	},
+}
+
+var cmdClusterObjectStore = Command{
+	Path:     "sparkwing cluster object-store",
+	Synopsis: "Operate the controller's object-store request budget",
+	Description: `The controller counts every object-store request it makes, by class
+(put, get, list, delete), against a per-minute rate and a per-day
+budget. A class that spends either budget trips: writes of that class
+fail closed and reads keep serving until their own budget trips. The
+state appears on 'sparkwing cluster status' and on the controller's
+Prometheus metrics as sparkwing_object_store_requests_total,
+sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
+
+Budgets come from SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE and
+SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
+SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
+clears when its day window rolls (day, the default) or waits for an
+operator (manual). A local process that must finish past a tripped
+budget sets SPARKWING_OBJECT_STORE_BREAKER=off.`,
+	SubcommandOrder: []string{"status", "reset-breaker"},
+	Examples: []Example{
+		{"Clear a tripped budget", "sparkwing cluster object-store reset-breaker --profile prod"},
+	},
+}
+
+var cmdClusterObjectStoreStatus = Command{
+	Path:     "sparkwing cluster object-store status",
+	Synopsis: "Show the controller's object-store request budget",
+	Description: `Prints each request class with its per-minute rate, its per-day budget,
+how much of each window the controller has spent, how many times the
+class has tripped, and whether it is refusing requests now. Changes
+nothing.
+
+Hits GET /api/v1/object-store/breaker on the selected profile's
+controller, which needs an admin-scoped token.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format (json|table)", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "System", "Other"},
+	Examples: []Example{
+		{"Read the budget", "sparkwing cluster object-store status --profile prod"},
+	},
+}
+
+var cmdClusterObjectStoreResetBreaker = Command{
+	Path:     "sparkwing cluster object-store reset-breaker",
+	Synopsis: "Clear a tripped object-store request budget",
+	Description: `Clears every tripped request class on the selected controller and
+resets its per-minute and per-day window counters, then prints the
+budget as it stands. Lifetime request and trip totals survive, so the
+metrics keep their history.
+
+Reach for this after fixing what caused the trip. A budget that keeps
+tripping wants a larger limit or a caller that stops retrying, not a
+repeated reset.
+
+Hits POST /api/v1/object-store/reset-breaker on the selected
+profile's controller, which needs an admin-scoped token.`,
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format (json|table)", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "System", "Other"},
+	Examples: []Example{
+		{"Clear a tripped budget", "sparkwing cluster object-store reset-breaker --profile prod"},
 	},
 }
 

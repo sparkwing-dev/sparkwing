@@ -17,6 +17,7 @@ import (
 type stubClaimer struct {
 	responses []claimResp
 	calls     atomic.Int64
+	capacity  atomic.Pointer[client.ClaimCapacity]
 }
 
 type claimResp struct {
@@ -24,7 +25,10 @@ type claimResp struct {
 	err  error
 }
 
-func (s *stubClaimer) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error) {
+func (s *stubClaimer) ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string,
+	lease time.Duration, headroom *client.Headroom, capacity *client.ClaimCapacity,
+) (*store.Node, error) {
+	s.capacity.Store(capacity)
 	idx := int(s.calls.Add(1)) - 1
 	if idx >= len(s.responses) {
 		<-ctx.Done()
@@ -174,7 +178,7 @@ func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
 		"--controller=http://controller",
 		"--metrics-addr=",
 		"--claim-nodes=false",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--claim-nodes=false requires --also-claim-triggers") {
 		t.Fatalf("runRunnerCLI() error = %v, want claim-nodes/trigger-loop validation", err)
 	}
@@ -186,7 +190,7 @@ func TestRunRunnerCLI_WarmTriggerRunnerRefusesDirectNodeClaims(t *testing.T) {
 		"--metrics-addr=",
 		"--also-claim-triggers",
 		"--trigger-runner=warm",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "requires --claim-nodes=false") {
 		t.Fatalf("runRunnerCLI() error = %v, want remote-agent race validation", err)
 	}
@@ -198,7 +202,7 @@ func TestRunRunnerCLI_TriggerRunnerRequiresTriggerLoop(t *testing.T) {
 		"--metrics-addr=",
 		"--trigger-runner=warm",
 		"--claim-nodes=false",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "requires --also-claim-triggers") {
 		t.Fatalf("runRunnerCLI() error = %v, want trigger-loop validation", err)
 	}
@@ -213,7 +217,7 @@ func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
 		"--gitcache=http://cache",
 		"--trigger-runner=k8s",
 		"--trigger-runner-image=img",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=k8s") {
 		t.Fatalf("runRunnerCLI() error = %v, want the same rejection BuildK8sRunnerFactory returns", err)
 	}
@@ -229,8 +233,66 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 		"--gitcache=http://cache",
 		"--trigger-runner=warm",
 		"--trigger-runner-image=img",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=warm") {
 		t.Fatalf("runRunnerCLI() error = %v, want warm fallback service-account validation", err)
+	}
+}
+
+func TestRunPoolLoop_InsufficientCreditsKeepsPollingAndLogsOnce(t *testing.T) {
+	stub := &stubClaimer{responses: []claimResp{
+		{err: store.ErrInsufficientCredits},
+		{err: store.ErrInsufficientCredits},
+		{err: store.ErrInsufficientCredits},
+		{node: fakeNode("a")},
+		{err: store.ErrInsufficientCredits},
+	}}
+
+	var executed atomic.Int64
+	exec := func(ctx context.Context, n *store.Node, holderID string) { executed.Add(1) }
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://stub",
+		HolderPrefix:  "test",
+		MaxConcurrent: 1,
+		PollInterval:  time.Millisecond,
+		MaxClaims:     1,
+		SourceName:    "test runner",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runPoolLoop(ctx, cfg, stub, exec, nil, logger); err != nil {
+		t.Fatalf("runPoolLoop: %v", err)
+	}
+	if got := executed.Load(); got != 1 {
+		t.Fatalf("exec calls = %d, want 1: a spent balance must not stop the loop", got)
+	}
+	if got := strings.Count(logs.String(), "credit balance is spent"); got != 1 {
+		t.Fatalf("credit refusal logged %d times, want 1", got)
+	}
+}
+
+func TestPoolLoop_AdvertisesItsSlotsWithEachClaim(t *testing.T) {
+	stub := &stubClaimer{responses: []claimResp{{node: fakeNode("a")}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runPoolLoop(ctx, normalizePoolLoopConfig(PoolLoopConfig{
+			ControllerURL: "http://controller.invalid", MaxConcurrent: 3, MaxClaims: 1,
+		}), stub, func(context.Context, *store.Node, string) {}, nil, slog.New(slog.DiscardHandler))
+	}()
+	<-done
+
+	capacity := stub.capacity.Load()
+	if capacity == nil {
+		t.Fatal("claim advertised no capacity")
+	}
+	if capacity.MaxConcurrent != 3 || capacity.ActiveClaims != 0 {
+		t.Fatalf("advertised capacity = %+v, want 3 slots with none in flight", capacity)
 	}
 }

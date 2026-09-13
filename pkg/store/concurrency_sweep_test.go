@@ -150,9 +150,11 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 
 func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	s := storetest.Open(t)
+	// safety: the holder is expired by hand below, so a lease long enough to
+	// outlive a slow Postgres round trip keeps W queued on a loaded box.
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
-		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
+		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue, Lease: 10 * time.Second,
 	})
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rW/n", RunID: "rW", NodeID: "n",

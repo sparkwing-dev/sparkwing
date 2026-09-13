@@ -63,6 +63,7 @@ var apiReadRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics",
+	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause",
 	"GET /api/v1/runs/{id}/steps",
 	"GET /api/v1/runs/{id}/events",
@@ -76,6 +77,7 @@ var apiReadRoutes = []string{
 	"GET /api/v1/triggers/spawned-child",
 	"GET /api/v1/concurrency/{key}/state",
 	"GET /api/v1/concurrency/{key}/holder",
+	"GET /api/v1/object-store/breaker",
 	"GET /api/v1/pipelines/{name}/latest",
 	"GET /api/v1/pipelines/{name}/profile",
 	"GET /api/v1/crons",
@@ -88,6 +90,7 @@ var apiReadRoutes = []string{
 // truncates each into a clean EOF the client reads as completion.
 var apiStreamRoutes = []string{
 	"GET /api/v1/concurrency/{key}/notify",
+	"GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream",
 	"GET /api/v1/artifacts/{key}",
 	"POST /api/v1/gitcache/seed",
 	"POST /api/v1/gitcache/git/register",

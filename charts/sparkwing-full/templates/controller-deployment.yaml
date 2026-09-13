@@ -92,8 +92,35 @@ spec:
             {{- with .Values.controller.argon2MemoryBudgetMB }}
             - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
             {{- end }}
+            {{- with .Values.controller.defaultPreferLabels }}
+            - {{ printf "--default-prefer-labels=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.placementHold }}
+            - {{ printf "--placement-hold=%s" . | quote }}
+            {{- end }}
+            {{- with .Values.controller.placementLiveness }}
+            - {{ printf "--placement-liveness=%s" . | quote }}
+            {{- end }}
             {{- if gt (int .Values.controller.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
+            {{- end }}
+            {{- if .Values.controller.requireAuth }}
+            - "--require-auth"
+            {{- end }}
+            {{- /*
+              The key and the first admin token arrive as mounted files
+              rather than environment variables: an environment entry is
+              readable through /proc and is inherited by anything the
+              container execs, while a file is read once at startup.
+            */}}
+            {{- if .Values.controller.secretsKey.name }}
+            - {{ printf "--secrets-key-file=%s/%s" (include "sparkwing-full.controller.secretsKeyDir" .) .Values.controller.secretsKey.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.secretsPreviousKey.name }}
+            - {{ printf "--secrets-previous-key-file=%s/%s" (include "sparkwing-full.controller.secretsPreviousKeyDir" .) .Values.controller.secretsPreviousKey.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.bootstrapAdminToken.name }}
+            - {{ printf "--bootstrap-admin-token-file=%s/%s" (include "sparkwing-full.controller.bootstrapAdminTokenDir" .) .Values.controller.bootstrapAdminToken.key | quote }}
             {{- end }}
           env:
             - name: SPARKWING_HOME
@@ -133,13 +160,6 @@ spec:
                   name: {{ index $bundleToken "name" | quote }}
                   key: {{ index $bundleToken "key" | quote }}
             {{- end }}
-            {{- if .Values.controller.secretsKey.name }}
-            - name: SPARKWING_SECRETS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.secretsKey.name | quote }}
-                  key: {{ .Values.controller.secretsKey.key | quote }}
-            {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-controller"
             {{- with .Values.controller.extraEnv }}
@@ -157,6 +177,21 @@ spec:
               mountPath: /data
             - name: scratch
               mountPath: /tmp
+            {{- if .Values.controller.secretsKey.name }}
+            - name: secrets-key
+              mountPath: {{ include "sparkwing-full.controller.secretsKeyDir" . | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.controller.secretsPreviousKey.name }}
+            - name: secrets-previous-key
+              mountPath: {{ include "sparkwing-full.controller.secretsPreviousKeyDir" . | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.controller.bootstrapAdminToken.name }}
+            - name: bootstrap-admin-token
+              mountPath: {{ include "sparkwing-full.controller.bootstrapAdminTokenDir" . | quote }}
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           startupProbe:
@@ -188,3 +223,18 @@ spec:
           {{- end }}
         - name: scratch
           emptyDir: {}
+        {{- if .Values.controller.secretsKey.name }}
+        - name: secrets-key
+          secret:
+            secretName: {{ .Values.controller.secretsKey.name | quote }}
+        {{- end }}
+        {{- if .Values.controller.secretsPreviousKey.name }}
+        - name: secrets-previous-key
+          secret:
+            secretName: {{ .Values.controller.secretsPreviousKey.name | quote }}
+        {{- end }}
+        {{- if .Values.controller.bootstrapAdminToken.name }}
+        - name: bootstrap-admin-token
+          secret:
+            secretName: {{ .Values.controller.bootstrapAdminToken.name | quote }}
+        {{- end }}

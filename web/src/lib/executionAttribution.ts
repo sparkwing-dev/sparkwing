@@ -67,6 +67,21 @@ export function executionAttemptOrdinal(
     : null;
 }
 
+// A node nobody expressed a preference for has no placement story, and an
+// unclaimed one has no runner to name yet.
+export function placementLabel(node: Node): string | null {
+  const holder = node.claimed_by?.trim();
+  if (!holder) return null;
+  switch (node.placement_reason) {
+    case "preference":
+      return `${holder} (preferred)`;
+    case "fallback":
+      return `${holder} (fallback after the local-first hold)`;
+    default:
+      return null;
+  }
+}
+
 export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
   const location = normalizeLocation(attempt?.location);
   const locationLabel =

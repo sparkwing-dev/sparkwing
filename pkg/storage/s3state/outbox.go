@@ -14,12 +14,25 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 // DefaultOutboxDrainInterval bounds how often the drainer polls the
 // outbox for queued writes when the object store is reachable again.
 const DefaultOutboxDrainInterval = 5 * time.Second
+
+// DefaultOutboxMaxReplayAttempts caps consecutive failed replay cycles.
+// A bucket that refuses every write is not going to accept the
+// thirteenth, and each attempt is a billed request, so the drainer stops
+// and reports rather than retrying for as long as the process lives.
+const DefaultOutboxMaxReplayAttempts = 12
+
+// DefaultOutboxReplayMaxBackoff ceilings the wait between failed replay
+// cycles. With the default interval and attempt cap the drainer spends
+// its whole budget over roughly twenty minutes instead of twelve a
+// minute forever.
+const DefaultOutboxReplayMaxBackoff = 5 * time.Minute
 
 // DefaultOutboxMaxRows caps the queue. Each row is one key's whole
 // blob, and a key holds at most one row, so this is a ceiling on
@@ -48,11 +61,14 @@ func replayableKind(kind OutboxKind) bool {
 // Backed by a single-file SQLite database; safe for one writer per
 // process.
 type Outbox struct {
-	db       *sql.DB
-	art      storage.ArtifactStore
-	interval time.Duration
-	maxRows  int
-	logger   *slog.Logger
+	db          *sql.DB
+	art         storage.ArtifactStore
+	interval    time.Duration
+	maxRows     int
+	maxAttempts int
+	backoff     objectguard.Backoff
+	stallPath   string
+	logger      *slog.Logger
 
 	mu       sync.Mutex
 	drainSem chan struct{}
@@ -60,8 +76,9 @@ type Outbox struct {
 	stopOnce sync.Once
 	wg       sync.WaitGroup
 
-	stallMu sync.Mutex
-	stalled *outboxStall
+	stallMu   sync.Mutex
+	stalled   *outboxStall
+	exhausted error
 }
 
 type outboxHead struct {
@@ -90,6 +107,10 @@ func OpenOutbox(path string, art storage.ArtifactStore, interval time.Duration) 
 }
 
 func openOutbox(path string, art storage.ArtifactStore, interval time.Duration, logger *slog.Logger) (*Outbox, error) {
+	return openOutboxWithReplayPolicy(path, art, interval, logger, DefaultOutboxMaxReplayAttempts, DefaultOutboxReplayMaxBackoff)
+}
+
+func openOutboxWithReplayPolicy(path string, art storage.ArtifactStore, interval time.Duration, logger *slog.Logger, maxAttempts int, maxBackoff time.Duration) (*Outbox, error) {
 	if art == nil {
 		return nil, errors.New("s3state: OpenOutbox requires an artifact store")
 	}
@@ -121,17 +142,23 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		return nil, fmt.Errorf("s3state: outbox index: %w", err)
 	}
 	o := &Outbox{
-		db:       db,
-		art:      art,
-		interval: interval,
-		maxRows:  DefaultOutboxMaxRows,
-		logger:   logger,
-		drainSem: make(chan struct{}, 1),
-		stopCh:   make(chan struct{}),
+		db:          db,
+		art:         art,
+		interval:    interval,
+		maxRows:     DefaultOutboxMaxRows,
+		maxAttempts: maxAttempts,
+		logger:      logger,
+		drainSem:    make(chan struct{}, 1),
+		stopCh:      make(chan struct{}),
 	}
 	if o.interval <= 0 {
 		o.interval = DefaultOutboxDrainInterval
 	}
+	if maxBackoff <= 0 {
+		maxBackoff = DefaultOutboxReplayMaxBackoff
+	}
+	o.backoff = objectguard.Backoff{Base: o.interval, Max: maxBackoff}
+	o.stallPath = "s3 state outbox replay (" + path + ")"
 	o.wg.Add(1)
 	go o.drainLoop()
 	return o, nil
@@ -319,17 +346,70 @@ func deepestOutboxErrorFingerprint(err error) string {
 
 func (o *Outbox) drainLoop() {
 	defer o.wg.Done()
-	t := time.NewTicker(o.interval)
+	t := time.NewTimer(o.interval)
 	defer t.Stop()
+	failures, exhausted := 0, false
 	for {
 		select {
 		case <-o.stopCh:
 			return
 		case <-t.C:
-			head, err := o.drain(context.Background())
-			o.reportDrainResult(head, err)
 		}
+		head, err := o.drain(context.Background())
+		o.reportDrainResult(head, err)
+		if err == nil {
+			if exhausted {
+				o.clearReplayExhausted()
+			}
+			failures, exhausted = 0, false
+			t.Reset(o.interval)
+			continue
+		}
+		failures++
+		if o.maxAttempts > 0 && failures >= o.maxAttempts {
+			if !exhausted {
+				exhausted = true
+				o.reportReplayExhausted(head, failures, err)
+			}
+			// safety: the ceiling, not a return, because a bucket that comes back
+			// hours later still holds the only copy of these runs' state.
+			t.Reset(o.backoff.Max)
+			continue
+		}
+		t.Reset(o.backoff.Delay(failures))
 	}
+}
+
+func (o *Outbox) reportReplayExhausted(head outboxHead, attempts int, err error) {
+	wrapped := fmt.Errorf("s3state: outbox replay gave up on %s %q after %d consecutive failures: %w", head.kind, head.key, attempts, err)
+	o.stallMu.Lock()
+	o.exhausted = wrapped
+	o.stallMu.Unlock()
+	objectguard.ReportStall(o.stallPath, wrapped)
+	o.logger.Error("s3 state outbox replay gave up",
+		"kind", head.kind,
+		"key", head.key,
+		"attempts", attempts,
+		"error", err,
+	)
+}
+
+func (o *Outbox) clearReplayExhausted() {
+	o.stallMu.Lock()
+	o.exhausted = nil
+	o.stallMu.Unlock()
+	objectguard.ClearStall(o.stallPath)
+	o.logger.Info("s3 state outbox replay resumed")
+}
+
+// ReplayStalled reports the error background replay gave up on, and nil
+// while it is still making progress. A stalled drainer retries at its
+// backoff ceiling rather than stopping, and the same error reaches an
+// operator through the controller's health route.
+func (o *Outbox) ReplayStalled() error {
+	o.stallMu.Lock()
+	defer o.stallMu.Unlock()
+	return o.exhausted
 }
 
 // Close stops the background drainer. Queued rows remain on disk and
@@ -337,6 +417,7 @@ func (o *Outbox) drainLoop() {
 func (o *Outbox) Close() error {
 	o.stopOnce.Do(func() { close(o.stopCh) })
 	o.wg.Wait()
+	objectguard.ClearStall(o.stallPath)
 	return o.db.Close()
 }
 

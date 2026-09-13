@@ -91,6 +91,22 @@ controller:
   # inside resources.limits.memory below.
   argon2MemoryBudgetMB: 256
 
+  # Label terms a node whose plan declares no Prefers of its own prefers its
+  # runner to advertise, in the Prefers term syntax. Empty leaves such a node
+  # to the first claimant.
+  defaultPreferLabels: []
+
+  # How long a node is held back from a claim-mode runner that does not
+  # advertise its preference, measured from the node's ready time, while a
+  # runner that does advertise it is live and has a slot. Empty keeps the
+  # controller default of 20s; "0s" claims first-in-first-out regardless of
+  # preference.
+  placementHold: ""
+
+  # How recently a claim-mode runner must have polled for a claim to count as
+  # live for the hold above. Empty keeps the controller default of 30s.
+  placementLiveness: ""
+
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""
@@ -112,6 +128,37 @@ controller:
     # Empty name disables; controller runs with plaintext secrets.
     name: ""
     key: key
+
+  # The key stored secret values were sealed under before secretsKey.
+  # Read-only: a value that does not open under secretsKey is tried
+  # against this one, which is what keeps every value readable across a
+  # key change. Run `sparkwing secrets rotate --profile <name>` to
+  # re-encrypt everything under secretsKey, then clear this.
+  secretsPreviousKey:
+    # Empty name disables; the controller holds one key.
+    name: ""
+    key: key
+
+  # The first admin token, read before the listener binds. When the
+  # tokens table is empty the controller stores that token's hash as an
+  # admin credential, so a provisioned controller never serves a request
+  # unauthenticated and requireAuth is satisfied on its first start.
+  # Ignored once any token exists. The value has to look like a minted
+  # token: "swu_" followed by at least 28 characters, for example
+  # `printf 'swu_%s' "$(openssl rand -hex 24)"`.
+  bootstrapAdminToken:
+    # Empty name disables; the controller bootstraps through an open window.
+    name: ""
+    key: token
+
+  # Refuse to start when no live token exists, which turns an
+  # accidentally open controller into a failed rollout instead of a
+  # running hole. An upgrade of a cluster that already holds a token
+  # needs nothing else. A fresh install needs bootstrapAdminToken set
+  # alongside it, or the pod crash-loops with no way to mint the first
+  # token; the render does not refuse that pairing, because it cannot
+  # see what the state DB already holds.
+  requireAuth: false
 
   # State DB lives on a PVC. Single-instance, so RWO is fine.
   storage:

@@ -631,6 +631,31 @@ func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID str
 	return out, rows.Err()
 }
 
+// TriggerExecutionAttemptBelongsToLiveClaim reports whether fence still holds
+// the trigger claim that opened the attempt at ordinal, whether or not that
+// attempt has finished. It authorizes a log append for the same reason
+// [Store.NodeExecutionAttemptBelongsToLiveClaim] does: the closing lines of a
+// node land after its attempt is closed.
+func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error) {
+	if ordinal < 1 || fence.ClaimGeneration < 1 {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx, `SELECT 1
+  FROM node_execution_attempts a
+  JOIN triggers t ON t.id = a.run_id
+	WHERE a.run_id = ? AND a.node_id = ? AND a.attempt_ordinal = ?
+	  AND a.claim_generation = ? AND a.holder_id = 'trigger:' || a.coordinator_id
+	  AND t.claim_principal = ? AND t.claim_token_prefix = ?
+	  AND t.claim_seq = ? AND `+triggerClaimLiveSQL("t."), runID, nodeID, ordinal,
+		fence.ClaimGeneration, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
+		fence.ClaimGeneration, now.UnixNano()).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error) {
 	if ordinal < 1 || fence.ClaimGeneration < 1 {
 		return false, nil

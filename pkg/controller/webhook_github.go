@@ -258,10 +258,10 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	// safety: the repository comes from the unverified body only to choose which secret must have signed it.
 	rawRepo := githubPayloadRepo(body)
 	claimedRepo, repoWellFormed := normalizeGitHubRepo(rawRepo)
-	secret := s.githubWebhookSecretFor(pipeline, claimedRepo)
-	if secret == "" {
+	resolved := s.resolveGitHubWebhook(r.Context(), pipeline, claimedRepo)
+	if resolved.secret == "" {
 		// safety: answering 503 only for a slug that has no secret of its own would read out the secret table.
-		if s.githubWebhookHasScopedSecret() {
+		if resolved.scoped {
 			writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
 			return
 		}
@@ -270,7 +270,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !verifyGitHubSignature(r.Header.Get("X-Hub-Signature-256"), body, secret) {
+	if !verifyGitHubSignature(r.Header.Get("X-Hub-Signature-256"), body, resolved.secret) {
 		writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
 		return
 	}
@@ -283,7 +283,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// safety: 404 rather than 403 so the status cannot be walked to enumerate the binding table.
-	if !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
+	if !resolved.bound && !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
 		s.logger.Warn("github webhook rejected",
 			"pipeline", pipeline, "repo", claimedRepo, "reason", "repository not bound to pipeline")
 		writeError(w, http.StatusNotFound, errGitHubWebhookUnbound)

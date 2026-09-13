@@ -32,6 +32,10 @@ type AcquireSlotResponse struct {
 	QueueLength int
 	Holders     []WaiterHolder
 }
+type ClaimCapacity struct {
+	MaxConcurrent int
+	ActiveClaims  int
+}
 type Client struct {
 }
 func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error
@@ -40,18 +44,23 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
+func (c *Client) AppendNodeLiveLog(ctx context.Context, runID, nodeID string, data []byte) error
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
 func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error)
+func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, capacity *ClaimCapacity) (*store.Node, error)
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) ClearCronOverride(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) Close() error
 func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
+func (c *Client) ConnectGitHubWebhook(
+	ctx context.Context, req controller.GitHubWebhookBindingRequest,
+) (*controller.GitHubWebhookBindingResponse, error)
 func (c *Client) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
@@ -65,6 +74,9 @@ func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
 func (c *Client) DeleteSecretForRepo(ctx context.Context, name, repo string) error
 func (c *Client) DisarmCron(ctx context.Context, name string) (*crons.ScheduleView, error)
+func (c *Client) DisconnectGitHubWebhook(
+	ctx context.Context, pipeline, repo string,
+) (*controller.GitHubWebhookDisconnectResponse, error)
 func (c *Client) EnqueueTrigger(
 	ctx context.Context,
 	pipeline string,
@@ -132,12 +144,14 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
+func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
 func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
 func (c *Client) PauseCron(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
 func (c *Client) PutCronRepo(ctx context.Context, req CronRepoRequest) (*CronReposResponse, error)
+func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (*LiveLogChunk, error)
 func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
 func (c *Client) RecordContention(ctx context.Context, pipeline string) error
 func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
@@ -146,11 +160,13 @@ func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedB
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
+func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
 func (c *Client) ResumeCron(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
+func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error)
 func (c *Client) RunCronNow(ctx context.Context, name string) (*crons.RunEnvelope, error)
 func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*crons.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
@@ -161,6 +177,7 @@ func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md s
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
 func (c *Client) Token() string
 func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
@@ -210,6 +227,7 @@ type CronReposResponse struct {
 }
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
+var ErrNoLiveLog = errors.New("controller holds no live log for this node")
 type ExecutorClaim struct {
 	ExecutorName   string
 	HolderID       string
@@ -242,9 +260,38 @@ type HeartbeatSlotResponse struct {
 type HeartbeatStatus struct {
 	CancelRequested bool
 }
+type LiveLogChunk struct {
+	Start int64
+
+	Next int64
+
+	Data string
+
+	Done bool
+}
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
+type ObjectStoreBreaker struct {
+	Enabled bool
+	Reset   string
+	Tripped bool
+	Classes []ObjectStoreClassState
+	Cleared []string
+}
+type ObjectStoreClassState struct {
+	Class         string
+	PerMinute     int
+	PerDay        int
+	MinuteUsed    int
+	DayUsed       int
+	Allowed       uint64
+	Refused       uint64
+	Trips         uint64
+	Tripped       bool
+	TrippedAt     time.Time
+	TrippedWindow string
+}
 type Secret struct {
 	Name      string
 	Value     string
@@ -255,6 +302,14 @@ type Secret struct {
 	Bound     bool
 	CreatedAt int64
 	UpdatedAt int64
+}
+type SecretRotation struct {
+	Rotated int
+	Skipped []SecretRotationSkip
+}
+type SecretRotationSkip struct {
+	Name string
+	Repo string
 }
 type StateWaiter struct {
 	RunID         string
@@ -290,6 +345,13 @@ type TriggerResponse struct {
 	RunID  string
 	Status string
 }
+type UnavailableError struct {
+	RetryAfter time.Duration
+
+	Err error
+}
+func (e *UnavailableError) Error() string
+func (e *UnavailableError) Unwrap() error
 const UnavailableRetries = 3
 type WaiterHolder struct {
 	HolderID       string

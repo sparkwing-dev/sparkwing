@@ -1,7 +1,9 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -90,5 +92,49 @@ func TestShipCompileOutput_PostsEvenWhenCtxCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("ship never POSTed despite cancelled parent ctx")
+	}
+}
+
+func TestBinaryCacheOutcome(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		fetched  bool
+		compiled bool
+		want     string
+	}{
+		{name: "already in this pod's cache", want: "local"},
+		{name: "pulled from the gitcache", fetched: true, want: "remote"},
+		{name: "built here", compiled: true, want: "compiled"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := binaryCacheOutcome(test.fetched, test.compiled); got != test.want {
+				t.Fatalf("binaryCacheOutcome(%v, %v) = %q, want %q", test.fetched, test.compiled, got, test.want)
+			}
+		})
+	}
+}
+
+func TestLogBinaryReadyCarriesTheCompileMeasurement(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+
+	logBinaryReady(logger, "run-42", triggerBinary{
+		path:  "/tmp/pipeline",
+		cache: binaryCacheCompiled,
+		build: 187 * time.Second,
+	})
+
+	var record map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &record); err != nil {
+		t.Fatalf("log record is not JSON (%v): %s", err, buf.String())
+	}
+	for key, want := range map[string]any{
+		"run_id":       "run-42",
+		"binary_cache": "compiled",
+		"build_ms":     float64(187000),
+	} {
+		if got := record[key]; got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
 	}
 }

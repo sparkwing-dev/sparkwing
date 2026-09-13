@@ -133,6 +133,10 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
+| `runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at startup. Empty warms the SDK at the runner image's version. | `[]` |
+| `runner.goCache.persistence.enabled` | Mount a PVC over `GOCACHE` and `GOMODCACHE` so the caches outlive the pod. | `false` |
+| `runner.goCache.persistence.size` | Go cache PVC size. | `20Gi` |
+| `runner.goCache.persistence.accessModes` | Access modes on that claim. Needs `ReadWriteMany` above one replica. | `[ReadWriteMany]` |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
 | `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
@@ -250,6 +254,36 @@ Set `volumePermissions.enabled=false` when the mount is already owned by
 `podSecurityContext.runAsUser:podSecurityContext.fsGroup`. The opt-out is also
 required by Restricted Pod Security, which rejects the default UID 0 init
 container.
+
+### Go caches across restarts
+
+The runner compiles a repository's pipeline on the first claim of each source
+hash, then publishes the binary to the cache service, so later runs of the same
+source skip the compile. Every source change still pays one, and a two-CPU pod
+takes three to five minutes to compile from empty Go caches.
+`runner.maxClaimsBeforeRestart` restarts a runner after 25 claims, and a restart
+that reschedules the pod leaves the next compile with nothing.
+
+Two settings shorten it, and they compose:
+
+```bash
+--set runner.goCache.persistence.enabled=true \
+--set runner.goCache.persistence.storageClassName=efs-sc
+```
+
+`runner.goCache.persistence` mounts one PersistentVolumeClaim over both Go
+cache paths. Every replica mounts that claim, so the StorageClass must serve
+`ReadWriteMany` unless `runner.replicas` is 1; the chart refuses to render
+otherwise. Sharing is safe and useful: the go command locks both caches and
+addresses their contents by hash, so one pod's compile warms the whole pool.
+Point `runner.goCache.persistence.existingClaim` at a claim you already manage
+to skip the one the chart creates.
+
+`runner.goCache.warmModules` downloads modules into `GOMODCACHE` while the
+claim loop starts. An empty list warms the Sparkwing SDK at the runner image's
+own version, which most of a pipeline's dependency graph hangs off. Name your
+own modules to widen it, or set `["off"]` to start cold. A failed warm logs and
+leaves the compile to fetch what it needs.
 
 ## RBAC
 

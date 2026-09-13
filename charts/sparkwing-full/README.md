@@ -235,7 +235,10 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.githubWebhookSecret.name` | Secret holding `webhook-secret`. | `""` |
 | `controller.githubStatusToken.name` | Secret holding a GitHub token with commit-status write access. | `""` |
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
-| `controller.secretsKey.name` | Secret holding 32-byte encryption key. | `""` |
+| `controller.secretsKey.name` | Secret holding 32-byte encryption key, mounted as a file and named with `--secrets-key-file`. | `""` |
+| `controller.secretsPreviousKey.name` | Secret holding the key values were sealed under before `secretsKey`; read-only fallback for the window before `sparkwing secrets rotate` runs. | `""` |
+| `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
+| `controller.requireAuth` | Refuse to start when no live token exists. On an upgrade of a cluster that already holds a token it needs nothing else; on a fresh install without `bootstrapAdminToken` the controller crash-loops, because the window that would mint the first token is exactly what the flag closes. The render does not refuse that pairing, because it cannot see what the state DB holds. | `false` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
 | `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. Include the web pod's source, or dashboard logins all share one budget; when the pod IP is unknown, use the cluster pod CIDR. | `[]` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
@@ -292,6 +295,8 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
 | `sparkwing-runner-bundle.runner.automountServiceAccountToken` | Mount the runner pod's API token for `k8s` or `warm` trigger execution. | `false` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
+| `sparkwing-runner-bundle.runner.goCache.persistence.enabled` | Mount a PVC over the runner's `GOCACHE` and `GOMODCACHE`. | `false` |
+| `sparkwing-runner-bundle.runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at runner startup. | `[]` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
 The automatic controller URL follows the chart's default resource names. If

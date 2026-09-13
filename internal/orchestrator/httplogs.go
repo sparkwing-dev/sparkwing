@@ -4,16 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -22,6 +26,7 @@ import (
 type HTTPLogs struct {
 	client storage.LogStore
 	logger *slog.Logger
+	live   LiveLogSink
 }
 
 func NewHTTPLogs(baseURL string, httpClient *http.Client, logger *slog.Logger) *HTTPLogs {
@@ -43,6 +48,16 @@ func NewLogStoreBackend(s storage.LogStore, logger *slog.Logger) *HTTPLogs {
 		logger = slog.Default()
 	}
 	return &HTTPLogs{client: s, logger: logger}
+}
+
+// WithLiveSink mirrors every line to sink for the controller's live
+// view, on top of the durable write. A durable surface that already
+// serves a live read keeps sink unused.
+func (h *HTTPLogs) WithLiveSink(sink LiveLogSink) *HTTPLogs {
+	if sink != nil && !liveLogsRedundant(h.client) {
+		h.live = sink
+	}
+	return h
 }
 
 var _ LogBackend = (*HTTPLogs)(nil)
@@ -73,8 +88,9 @@ func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delega
 	if !requiresAttempt {
 		attempt, _ = store.ExecutionAttemptOrdinalFromContext(ctx)
 	}
-	return &httpNodeLog{
-		ctx:             context.WithoutCancel(ctx),
+	nodeCtx := context.WithoutCancel(ctx)
+	l := &httpNodeLog{
+		ctx:             nodeCtx,
 		client:          h.client,
 		logger:          h.logger,
 		runID:           runID,
@@ -82,7 +98,17 @@ func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delega
 		delegate:        delegate,
 		requiresAttempt: requiresAttempt,
 		attempt:         attempt,
-	}, nil
+	}
+	if h.live != nil {
+		l.live = logbatch.New(
+			&liveLogStore{sink: h.live, ctx: nodeCtx},
+			logbatch.WithFlushInterval(liveLogFlushInterval),
+			logbatch.WithBufferThreshold(liveLogFlushBytes),
+			logbatch.WithMaxObjects(math.MaxInt32),
+			logbatch.WithMaxBytes(math.MaxInt64),
+		)
+	}
+	return l, nil
 }
 
 type httpNodeLog struct {
@@ -94,6 +120,8 @@ type httpNodeLog struct {
 	runID           string
 	nodeID          string
 	delegate        sparkwing.Logger
+	live            *logbatch.Store
+	liveFailed      bool
 	closed          bool
 	requiresAttempt bool
 	attempt         int
@@ -112,7 +140,13 @@ var (
 	httpNodeLogRetryBackoff  = 200 * time.Millisecond
 )
 
+// safety: one append is one object-store PUT, so an unreachable log store must
+// not cost a doubling series that keeps growing per line.
+const httpNodeLogRetryMaxBackoff = 2 * time.Second
+
 var httpNodeLogDropCooldown = 5 * time.Second
+
+const httpNodeLogFinishTimeout = 10 * time.Second
 
 const httpNodeLogPendingLimit = 4 << 20
 
@@ -179,6 +213,30 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	l.appendWithRetry(payload)
+	l.appendLive(payload)
+}
+
+// safety: a live view that cannot be written is reported once and then
+// left alone. The durable copy is the record, so losing the live tail
+// must never fail the node.
+func (l *httpNodeLog) appendLive(payload []byte) {
+	if l.live == nil {
+		return
+	}
+	if err := l.live.Append(l.ctx, l.runID, l.nodeID, payload); err != nil {
+		l.mu.Lock()
+		first := !l.liveFailed
+		l.liveFailed = true
+		l.mu.Unlock()
+		if first {
+			l.logger.Warn(
+				"live log mirror unavailable; the durable copy is unaffected",
+				"run_id", l.runID,
+				"node_id", l.nodeID,
+				"err", err,
+			)
+		}
+	}
 }
 
 func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
@@ -235,9 +293,11 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 		}
 	}
 	if len(payload) == 0 {
+		l.collectFlushLosses()
 		return
 	}
 	l.appendBoundWithRetry(ordinal, payload)
+	l.collectFlushLosses()
 }
 
 func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
@@ -246,8 +306,9 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 	}
 	var lastErr error
 	for retry := 0; retry < httpNodeLogRetryAttempts; retry++ {
-		if retry > 0 {
-			time.Sleep(httpNodeLogRetryBackoff << (retry - 1))
+		if retry > 0 && httpNodeLogRetryBackoff > 0 {
+			backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
+			time.Sleep(backoff.Delay(retry - 1))
 		}
 		attemptCtx := l.ctx
 		if ordinal > 0 {
@@ -268,7 +329,7 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 			}
 			l.mu.Unlock()
 			l.logger.Error(
-				"logs append rejected; failing run",
+				"logs append rejected; the rest of this node's log is lost",
 				"run_id", l.runID,
 				"node_id", l.nodeID,
 				"err", err,
@@ -303,11 +364,53 @@ func (l *httpNodeLog) dropSuppressed() bool {
 	return true
 }
 
+// Close hands the node's last lines to the store. A batching store
+// holds them until something asks for them, and the node finishing is
+// that something; a write-through store has nothing left to do. It
+// blocks for at most the live mirror's flush budget plus the durable
+// one, twenty seconds in all, and holds the node's write lock while it
+// does, so the node reports terminal only once its log is complete.
 func (l *httpNodeLog) Close() error {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
 	l.mu.Lock()
+	already := l.closed
 	l.closed = true
 	l.mu.Unlock()
-	return nil
+	if already {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(l.ctx, httpNodeLogFinishTimeout)
+	defer cancel()
+	if l.live != nil {
+		if lerr := l.live.Close(); lerr != nil {
+			l.logger.Warn(
+				"live log mirror did not flush its last batch; the durable copy is unaffected",
+				"run_id", l.runID,
+				"node_id", l.nodeID,
+				"err", lerr,
+			)
+		}
+	}
+	err := storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
+	l.collectFlushLosses()
+	return err
+}
+
+// safety: a buffering store writes many lines per request, so one failed
+// request loses a whole batch. Folding that into the node's own count is
+// what makes the batch visible to the logs_drop event.
+func (l *httpNodeLog) collectFlushLosses() {
+	lines, bytes := storage.FlushLosses(l.client, l.runID, l.nodeID)
+	if lines == 0 {
+		return
+	}
+	l.mu.Lock()
+	l.dropCount += lines
+	if l.dropReason == "" {
+		l.dropReason = fmt.Sprintf("a failed log flush discarded %d line(s), %d byte(s)", lines, bytes)
+	}
+	l.mu.Unlock()
 }
 
 func (l *httpNodeLog) Fatal() error {

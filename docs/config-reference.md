@@ -17,7 +17,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `profile` | `string` | no | Profile names the project profile (from Config.Profiles) that applies when neither --profile nor pipeline.profile is set. Empty means "no default" -- a pipeline without its own profile: still runs (against the sqlite-only test/dev shape). Wholesale-replaced by pipeline.profile when set. |
+| `profile` | `string` | no | Profile names the profile that applies when neither --profile nor pipeline.profile is set. The name resolves against Config.Profiles first and the user's profiles.yaml second, so a repo can default to a connection whose token stays out of the checkout. Empty means "no default" -- a pipeline without its own profile: still runs (against the sqlite-only test/dev shape). Wholesale-replaced by pipeline.profile when set. |
 | `args` | `map[string]string` | no | Args supplies per-arg default values for every pipeline. Each key is layered under pipeline.args (pipeline wins per-key), and the merged map sits in the priority chain between schema.Computed and the explicit operator CLI flag. |
 | `guards` | `pipelines.Guards` | no | Guards apply to every pipeline. Wholesale-replaced by a pipeline that declares its own non-empty guards block. |
 | `requires` | `[]string` | no | Requires are runner labels every pipeline's jobs must satisfy in addition to their own Job.Requires(). Wholesale- replaced by pipeline.requires when set. |

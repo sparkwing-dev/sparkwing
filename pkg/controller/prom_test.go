@@ -54,6 +54,9 @@ func TestMetrics_EndpointReachable(t *testing.T) {
 	mustContain := []string{
 		"sparkwing_pending_nodes",
 		"sparkwing_active_runners",
+		"sparkwing_object_store_requests_total",
+		"sparkwing_object_store_trips_total",
+		"sparkwing_object_store_tripped",
 		"go_goroutines",
 		"process_resident_memory_bytes",
 	}
@@ -366,5 +369,42 @@ func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
 		if strings.Contains(body, method) {
 			t.Errorf("invented method %q leaked into a metric label", method)
 		}
+	}
+}
+
+func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
+	base, st, cleanup := newAuthedTestServer(t)
+	defer cleanup()
+
+	raw, _, err := st.CreateToken("pool", store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	const hits = `sparkwing_auth_token_cache_total{result="hit"}`
+	before := metricSampleValue(t, scrape(t, base), hits)
+	for range 3 {
+		req, err := http.NewRequest(http.MethodGet, base+"/api/v1/auth/whoami", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+raw)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("whoami: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("whoami status = %d, want 200", resp.StatusCode)
+		}
+	}
+
+	body := scrape(t, base)
+	if got := metricSampleValue(t, body, hits); got < before+2 {
+		t.Errorf("cache hits = %v, want at least %v: only the first of three polls verifies", got, before+2)
+	}
+	if !strings.Contains(body, "sparkwing_auth_hashing_rejected_total") {
+		t.Errorf("/metrics does not report the argon2 budget's rejections:\n%s", body)
 	}
 }

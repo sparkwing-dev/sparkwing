@@ -81,7 +81,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := map[string]any{"status": "ok", "auth": authState}
+	objectStore, objectStoreProblems := objectStoreHealth()
+	problems = append(problems, objectStoreProblems...)
+
+	resp := map[string]any{"status": "ok", "auth": authState, "object_store": objectStore}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
@@ -522,6 +525,8 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.finalizeMeteredNode(r, runID, nodeID)
+	s.liveLogs.Finish(runID, nodeID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1367,6 +1372,7 @@ type claimNodeReq struct {
 	LeaseSecs      int             `json:"lease_secs,omitempty"`
 	Labels         []string        `json:"labels,omitempty"`
 	Headroom       *claimHeadroom  `json:"headroom,omitempty"`
+	Capacity       *claimCapacity  `json:"capacity,omitempty"`
 	Binding        json.RawMessage `json:"execution_binding,omitempty"`
 }
 
@@ -1374,6 +1380,11 @@ type claimHeadroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
+}
+
+type claimCapacity struct {
+	MaxConcurrent int `json:"max_concurrent"`
+	ActiveClaims  int `json:"active_claims"`
 }
 
 var errAssistedOfferRequired = errors.New("credential is enrolled; assisted offer protocol is required")
@@ -1404,6 +1415,17 @@ func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
 		MemoryBytes: h.MemoryBytes,
 		QueueDepth:  h.QueueDepth,
 		UpdatedAt:   time.Now(),
+	})
+}
+
+func (s *Server) placementContext(ctx context.Context, claimer presenceKey) context.Context {
+	if s.placement.hold <= 0 {
+		return ctx
+	}
+	return store.WithClaimPlacement(ctx, store.ClaimPlacement{
+		DefaultPrefers: s.placement.defaultPrefers,
+		Hold:           s.placement.hold,
+		Live:           s.runnerPresence.live(time.Now(), s.placement.liveness, claimer),
 	})
 }
 
@@ -1446,6 +1468,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
 		})
 		if err != nil {
+			if s.writeCreditsRefusal(w, r, err) {
+				return
+			}
 			if writeExecutionAdmissionError(w, err) {
 				return
 			}
@@ -1481,16 +1506,27 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if body.Capacity != nil && (body.Capacity.MaxConcurrent < 0 || body.Capacity.ActiveClaims < 0) {
+		writeError(w, http.StatusBadRequest, errors.New("capacity must carry non-negative max_concurrent and active_claims"))
+		return
+	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
-	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
+	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
+	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
+	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
+		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if s.writeCreditsRefusal(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.runnerPresence.awarded(claimer)
 	writeClaimedNode(w, r, s, n)
 }
 
@@ -1573,6 +1609,7 @@ func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.finalizeMeteredNode(r, r.PathValue("id"), r.PathValue("nodeID"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1593,6 +1630,9 @@ func validExecutionAttemptResult(outcome, reason string) bool {
 	}
 }
 
+// safety: an append is authorized by the claim the writer still holds, not by
+// its execution attempt still being open, because a node's closing lines land
+// after the executor closes the attempt.
 func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Request) {
 	hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
 	if hasNodeIdentity && hasTriggerIdentity {
@@ -1613,7 +1653,7 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		}
 		ordinal, parseErr := strconv.Atoi(r.Header.Get(store.AttemptOrdinalHeader))
 		if parseErr == nil && ordinal > 0 {
-			held, err = s.store.NodeExecutionAttemptIsLive(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
+			held, err = s.store.NodeExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
 		}
 	} else if hasTriggerIdentity {
 		generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
@@ -1628,7 +1668,7 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		} else {
 			ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
 			if ordinalErr == nil && ordinal > 0 {
-				held, err = s.store.TriggerExecutionAttemptIsLive(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
+				held, err = s.store.TriggerExecutionAttemptBelongsToLiveClaim(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
 			}
 		}
 	} else {
@@ -1772,6 +1812,12 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// safety: the runner abandons a node whose claim the controller refuses,
+	// which is how a cancellation for an empty balance reaches it.
+	if s.chargeMeteredHeartbeat(r, runID, nodeID) {
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -69,6 +69,7 @@ const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
 func Argon2Concurrency(budget int64) int
 const Argon2HashBytes = int64(argonMemory) << 10
+func Argon2Shed() int64
 func Argon2Slots() int
 const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const BounceBounced = "bounced"
@@ -81,6 +82,14 @@ type ClaimIdentity struct {
 	TokenPrefix string
 }
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
+type ClaimPlacement struct {
+	DefaultPrefers []string
+
+	Hold time.Duration
+
+	Live []RunnerPresence
+}
+func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
@@ -145,6 +154,54 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
+type CreditCharge struct {
+	ID          string
+	RunID       string
+	NodeID      string
+	TokenPrefix string
+	Kind        string
+	Seconds     int64
+	AmountMicro int64
+	ChargedAt   time.Time
+}
+const CreditChargeRefund = "refund"
+const CreditChargeReservation = "reservation"
+type CreditChargeResult struct {
+	Charge *CreditCharge
+
+	BalanceMicro int64
+
+	ExhaustedFor time.Duration
+
+	Cancel bool
+
+	ForgivenSeconds int64
+}
+const CreditChargeUsage = "usage"
+const CreditClaimFloorSeconds = 60
+type CreditGrant struct {
+	ID          string
+	Kind        string
+	AmountMicro int64
+	Reference   string
+	CreatedBy   string
+	CreatedAt   time.Time
+}
+const CreditGrantFree = "free"
+const CreditGrantPaid = "paid"
+const CreditHistoryMaxLimit = 1000
+type CreditState struct {
+	GrantedMicro       int64
+	ChargedMicro       int64
+	BalanceMicro       int64
+	RateMicroPerSecond int64
+	GraceSeconds       int64
+	MaxChargeSeconds   int64
+	BurnWindow         time.Duration
+	BurnMicro          int64
+	ExhaustedAt        *time.Time
+}
+const CreditsPerDollar = 100
 type CronDeclaration struct {
 	Cron         string
 	TZ           string
@@ -253,6 +310,9 @@ const DefaultConcurrencyCacheCap = 10_000
 const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
+const DefaultCreditGraceSeconds = 60
+const DefaultCreditMaxChargeSeconds = 30
+const DefaultCreditRateMicro = 20_000
 const DefaultLeaseDuration = 3 * time.Minute
 func DetectDialect(dsn string) Dialect
 type Dialect int
@@ -266,7 +326,9 @@ var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already clai
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
+var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidCredentials = errors.New("invalid username or password")
 var ErrInvalidToken = errors.New("invalid token")
 var ErrLockHeld = errors.New("held by another holder")
@@ -287,6 +349,8 @@ type Event struct {
 	TS      time.Time
 	Payload json.RawMessage
 }
+const EventKindCreditsBlocked = "credits_blocked"
+const EventKindCreditsExhausted = "credits_exhausted"
 type ExecutionAttempt struct {
 	RunID            string
 	NodeID           string
@@ -418,6 +482,7 @@ type ExecutorSchedulingSummary struct {
 }
 func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
+const FailureCreditsExhausted = "credits_exhausted"
 const FailureLogsAuth = "logs_auth"
 const FailureLogsDropped = "logs_dropped"
 const FailureNoProgressTimeout = "no_progress_timeout"
@@ -427,8 +492,24 @@ const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureVerify = "verify"
+func FormatCredits(micro int64) string
+type GitHubWebhookBinding struct {
+	Pipeline  string
+	Repo      string
+	Secret    string
+	Events    []string
+	HookID    int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
+type InsufficientCreditsError struct {
+	BalanceMicro  int64
+	RequiredMicro int64
+}
+func (e *InsufficientCreditsError) Error() string
+func (e *InsufficientCreditsError) Unwrap() error
 const InvocationSecretArgsKey = "secret_args"
 func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
@@ -463,6 +544,8 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (m MetricSample) OneShot() bool
+const MicroCreditsPerCredit = 1_000_000
+const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
@@ -506,6 +589,10 @@ type Node struct {
 	AvoidExecutorKind        string
 	AvoidExecutorID          string
 	AvoidUntil               *time.Time
+
+	PlacementReason string
+
+	PlacementHoldFrom *time.Time
 
 	NeedsLabels []string
 
@@ -583,6 +670,7 @@ type NodeUsage struct {
 	MaxRSSBytes int64
 	Wall        time.Duration
 }
+func NormalizeGitHubWebhookRepo(repo string) string
 const OnLimitCancelOthers = "cancel_others"
 const OnLimitCoalesce = "coalesce"
 const OnLimitFail = "fail"
@@ -639,6 +727,9 @@ type PipelineProfile struct {
 
 	PrevSustainedCores float64
 }
+const PlacementFallback = "fallback"
+const PlacementNone = "none"
+const PlacementPreferred = "preference"
 const PrefixLen = 12
 type ProfileObservation struct {
 	Duration        time.Duration
@@ -741,6 +832,13 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+type RunnerPresence struct {
+	Name string
+
+	Labels []string
+
+	FreeSlots int
+}
 type SchemaRequirement struct {
 	Name    string
 	AddedBy string
@@ -796,12 +894,17 @@ func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
+func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
+func (s *Store) CancelNodeForExhaustedCredits(
+	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
+) (err error)
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
+func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string, executor ExecutorIdentity) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
@@ -828,12 +931,23 @@ func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
+func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
+func (s *Store) CreateTokenWith(
+	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
+) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
+func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
+func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
+func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
+func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
+func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
+func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
+func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
@@ -845,6 +959,7 @@ func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix stri
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID string) (ExecutorClaimRoundResult, error)
+func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
@@ -864,6 +979,7 @@ func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approva
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
+func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
@@ -875,6 +991,9 @@ func (s *Store) GetSecretForRepo(name, repo string) (*Secret, error)
 func (s *Store) GetSecretForRun(name, repo string) (*Secret, error)
 func (s *Store) GetSecretRow(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
+func (s *Store) GrantCredits(
+	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
+) (_ *CreditGrant, err error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
@@ -882,12 +1001,15 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
+func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
+func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error)
 func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error)
 func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
+func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
@@ -912,8 +1034,10 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
+func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
+func (s *Store) OldestWaitingReadyNode(ctx context.Context) (runID, nodeID string, err error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
@@ -928,6 +1052,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
+func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
@@ -958,9 +1083,13 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error
+func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
+func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
+func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
 func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
@@ -972,14 +1101,17 @@ func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) er
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
+func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error)
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
+func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
@@ -999,6 +1131,8 @@ type Token struct {
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
 	ReplacedBy string
+
+	Metered bool
 }
 func (t *Token) HasScope(scope string) bool
 func (t *Token) IsValid(now time.Time) bool
@@ -1006,6 +1140,9 @@ func TokenKindFromPrefix(raw string) string
 const TokenKindRunner = "runner"
 const TokenKindService = "service"
 const TokenKindUser = "user"
+type TokenOptions struct {
+	Metered bool
+}
 const TokenPrefixIndexName = "idx_tokens_prefix"
 const TokenPrefixRunner = "swr"
 const TokenPrefixService = "sws"
@@ -1073,6 +1210,8 @@ type User struct {
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }
+func ValidCreditGrantKind(kind string) bool
+func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
 const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"
@@ -1098,6 +1237,7 @@ type WaiterResolution struct {
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
+func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context

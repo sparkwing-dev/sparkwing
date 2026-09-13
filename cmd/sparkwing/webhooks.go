@@ -26,9 +26,13 @@ func runWebhooks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdWebhooks, os.Stderr)
-		return errors.New("webhooks: subcommand required (list|deliveries|replay)")
+		return errors.New("webhooks: subcommand required (connect|disconnect|list|deliveries|replay)")
 	}
 	switch args[0] {
+	case "connect":
+		return runWebhooksConnect(args[1:])
+	case "disconnect":
+		return runWebhooksDisconnect(args[1:])
 	case "list":
 		return runWebhooksList(args[1:])
 	case "deliveries":

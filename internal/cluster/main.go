@@ -29,7 +29,7 @@ func MainWithVersion(version string) {
 	case "worker":
 		err = runWorkerCLI(os.Args[2:])
 	case "runner":
-		err = runRunnerCLI(os.Args[2:])
+		err = runRunnerCLI(os.Args[2:], version)
 	case "agent":
 		err = runAgentCLI(os.Args[2:], buildinfo.Read("sparkwing-runner", version))
 	case "wingd":

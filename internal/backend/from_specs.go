@@ -26,12 +26,18 @@ func FromSpecs(
 	}
 
 	var logStore storage.LogStore
+	var logCloser []io.Closer
 	if logsSpec != nil {
 		ls, err := storeurl.OpenLogStoreFromSpec(ctx, *logsSpec, profileLookup)
 		if err != nil {
 			return nil, nopCloser{}, fmt.Errorf("logs backend: %w", err)
 		}
 		logStore = ls
+		// safety: a batching logs backend holds its last lines until Close,
+		// so the caller's shutdown has to reach it.
+		if c, ok := ls.(io.Closer); ok {
+			logCloser = append(logCloser, c)
+		}
 	}
 
 	switch stateSpec.Type {
@@ -46,7 +52,7 @@ func FromSpecs(
 		}
 		b := NewStoreBackend(st, paths, logStore)
 		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, false))
-		return b, &multiCloser{closers: []io.Closer{st}}, nil
+		return b, &multiCloser{closers: append([]io.Closer{st}, logCloser...)}, nil
 
 	case backends.TypeS3, backends.TypeGCS, backends.TypeAzureBlob:
 		art, err := storeurl.OpenArtifactStoreFromSpec(ctx, *stateSpec, profileLookup)
@@ -55,7 +61,7 @@ func FromSpecs(
 		}
 		b := NewS3Backend(art, logStore)
 		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, true))
-		return b, nopCloser{}, nil
+		return b, &multiCloser{closers: logCloser}, nil
 
 	case backends.TypeController:
 		ss, err := storeurl.OpenStateStoreFromSpec(ctx, *stateSpec, profileLookup)
@@ -68,7 +74,7 @@ func FromSpecs(
 		}
 		b := NewClientBackend(c, logStore)
 		b.SetCapabilities(capabilitiesFor(stateSpec, logsSpec, artifactsSpec, false))
-		return b, &multiCloser{closers: []io.Closer{c}}, nil
+		return b, &multiCloser{closers: append([]io.Closer{c}, logCloser...)}, nil
 
 	default:
 		return nil, nopCloser{}, fmt.Errorf("state backend type %q not supported by the dashboard", stateSpec.Type)

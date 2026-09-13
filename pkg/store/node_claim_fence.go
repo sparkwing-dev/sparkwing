@@ -123,6 +123,35 @@ func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID st
 	return err == nil, err
 }
 
+// NodeExecutionAttemptBelongsToLiveClaim reports whether fence still holds the
+// node's claim and owns the attempt at ordinal, whether or not that attempt has
+// finished. An executor writes a node's closing lines after it closes the
+// attempt, so a log append is authorized by the claim rather than by the
+// attempt still being open; use [Store.NodeExecutionAttemptIsLive] where a
+// running attempt is what matters.
+func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error) {
+	if ordinal < 1 {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx, `SELECT 1 FROM nodes n
+	WHERE n.run_id = ? AND n.node_id = ? AND n.claimed_by = ?
+	  AND n.claim_principal = ? AND n.claim_token_prefix = ?
+	  AND n.claim_membership_id = ? AND n.reservation_id = ? AND n.claim_generation = ?
+		   AND `+nodeClaimLiveSQL("n.")+` AND n.`+nodeNotDone+`
+	   AND EXISTS (SELECT 1 FROM node_execution_attempts a
+       WHERE a.run_id = n.run_id AND a.node_id = n.node_id
+         AND a.claim_generation = n.claim_generation AND a.attempt_ordinal = ?
+         AND a.holder_id = n.claimed_by AND a.membership_id = n.claim_membership_id
+		 AND a.reservation_id = n.reservation_id)`,
+		runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
+		fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, now.UnixNano(), ordinal).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
 	fence, ok := NodeClaimFenceFromContext(ctx)
 	var held int

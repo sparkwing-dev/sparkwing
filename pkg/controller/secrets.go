@@ -245,3 +245,49 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// safety: a row held as plaintext and one sealed under the previous key both
+// come out under the current key, so dropping the previous key loses nothing.
+func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
+	if s.secretsCipher == nil {
+		writeError(w, http.StatusBadRequest,
+			errors.New("secrets cipher: no key configured, so there is nothing to rotate to"))
+		return
+	}
+	skipped := []secretsRotateSkip{}
+	total, err := s.store.RotateSecretValues(r.Context(), func(sec store.Secret) (string, error) {
+		binding := bindingForRow(&sec)
+		plain := sec.Value
+		if secrets.IsEncrypted(plain) {
+			opened, oerr := openSecret(s.secretsCipher, binding, plain)
+			if oerr != nil {
+				// safety: one unreadable row must not cost every other row its rotation, so it keeps its bytes.
+				s.logger.Error("secret rotate: open envelope", "name", sec.Name, "repo", sec.Repo, "err", oerr)
+				skipped = append(skipped, secretsRotateSkip{Name: sec.Name, Repo: sec.Repo})
+				return sec.Value, nil
+			}
+			plain = opened
+		}
+		return sealSecret(s.secretsCipher, binding, plain)
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	principal := "anonymous"
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		principal = p.Name
+	}
+	s.logger.Info("secrets rotated", "count", total-len(skipped), "skipped", len(skipped), "principal", principal)
+	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: total - len(skipped), Skipped: skipped})
+}
+
+type secretsRotateResponse struct {
+	Rotated int                 `json:"rotated"`
+	Skipped []secretsRotateSkip `json:"skipped"`
+}
+
+type secretsRotateSkip struct {
+	Name string `json:"name"`
+	Repo string `json:"repo,omitempty"`
+}

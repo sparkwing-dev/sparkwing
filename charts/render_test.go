@@ -345,11 +345,58 @@ type renderedSecurityContext struct {
 type renderedVolumeMount struct {
 	Name      string `yaml:"name"`
 	MountPath string `yaml:"mountPath"`
+	SubPath   string `yaml:"subPath"`
 }
 
 type renderedVolume struct {
 	Name     string         `yaml:"name"`
 	EmptyDir map[string]any `yaml:"emptyDir"`
+	Secret   *struct {
+		SecretName string `yaml:"secretName"`
+	} `yaml:"secret"`
+	PersistentVolumeClaim *struct {
+		ClaimName string `yaml:"claimName"`
+	} `yaml:"persistentVolumeClaim"`
+}
+
+type renderedClaim struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name        string            `yaml:"name"`
+		Annotations map[string]string `yaml:"annotations"`
+	} `yaml:"metadata"`
+	Spec struct {
+		AccessModes      []string `yaml:"accessModes"`
+		StorageClassName string   `yaml:"storageClassName"`
+		Resources        struct {
+			Requests struct {
+				Storage string `yaml:"storage"`
+			} `yaml:"requests"`
+		} `yaml:"resources"`
+	} `yaml:"spec"`
+}
+
+func claimDocument(t *testing.T, rendered string) renderedClaim {
+	t.Helper()
+	var doc renderedClaim
+	dec := yaml.NewDecoder(strings.NewReader(rendered))
+	for {
+		if err := dec.Decode(&doc); err != nil {
+			t.Fatalf("no PersistentVolumeClaim in the rendered output (%v):\n%s", err, rendered)
+		}
+		if doc.Kind == "PersistentVolumeClaim" {
+			return doc
+		}
+	}
+}
+
+func claimVolume(volumes []renderedVolume, name string) string {
+	for _, volume := range volumes {
+		if volume.Name == name && volume.PersistentVolumeClaim != nil {
+			return volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	return ""
 }
 
 type renderedContainer struct {
@@ -625,6 +672,182 @@ func renderRunner(t *testing.T, sets ...string) string {
 func renderRunnerInNamespace(t *testing.T, namespace string, sets ...string) string {
 	t.Helper()
 	return helmRenderInNamespace(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", namespace, sets...)
+}
+
+func goCachePaths(t *testing.T, container renderedContainer) (string, string) {
+	t.Helper()
+	var build, mod string
+	for _, env := range container.Env {
+		switch env.Name {
+		case "GOCACHE":
+			build = env.Value
+		case "GOMODCACHE":
+			mod = env.Value
+		}
+	}
+	if build == "" || mod == "" {
+		t.Fatalf("runner env = %+v, want GOCACHE and GOMODCACHE", container.Env)
+	}
+	return build, mod
+}
+
+func TestRunnerGoCachesAreEphemeralByDefault(t *testing.T) {
+	rendered := renderRunner(t)
+	pod := deploymentDocument(t, rendered).Spec.Template.Spec
+	if claim := claimVolume(pod.Volumes, "go-cache"); claim != "" {
+		t.Fatalf("default runner mounts Go cache claim %q; persistence is opt-in", claim)
+	}
+	container := runnerContainer(t, rendered)
+	build, mod := goCachePaths(t, container)
+	for _, path := range []string{build, mod} {
+		for _, mount := range container.VolumeMounts {
+			if mount.MountPath == path && mount.Name != "sparkwing-home" {
+				t.Errorf("default runner mounts %q from %q, want the Sparkwing home emptyDir", path, mount.Name)
+			}
+		}
+	}
+	if _, ok := hasFlag(container.Args, "--warm-modules"); ok {
+		t.Errorf("default runner args carry a warm list: %v", container.Args)
+	}
+
+	for _, resource := range renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default")) {
+		if resource.Kind == "PersistentVolumeClaim" && strings.HasSuffix(resource.Metadata.Name, "-runner-gocache") {
+			t.Fatalf("default install claims %q; persistence is opt-in", resource.Metadata.Name)
+		}
+	}
+}
+
+func TestRunnerGoCachePersistenceCoversBothCachePaths(t *testing.T) {
+	rendered := renderRunner(t, "runner.goCache.persistence.enabled=true")
+	container := runnerContainer(t, rendered)
+	build, mod := goCachePaths(t, container)
+
+	wantMounts := []renderedVolumeMount{
+		{Name: "go-cache", MountPath: build, SubPath: "gocache"},
+		{Name: "go-cache", MountPath: mod, SubPath: "gomodcache"},
+	}
+	for _, want := range wantMounts {
+		if !slices.Contains(container.VolumeMounts, want) {
+			t.Errorf("runner mounts = %+v, want %+v", container.VolumeMounts, want)
+		}
+	}
+
+	pod := deploymentDocument(t, rendered).Spec.Template.Spec
+	if got := claimVolume(pod.Volumes, "go-cache"); got != "sparkwing-sparkwing-runner-bundle-runner-gocache" {
+		t.Errorf("go-cache volume claim = %q", got)
+	}
+
+	if len(pod.InitContainers) != 1 {
+		t.Fatalf("init containers = %d, want the ownership initializer", len(pod.InitContainers))
+	}
+	init := pod.InitContainers[0]
+	for _, want := range append([]string{"65534:65534", "/tmp/sparkwing"}, build, mod) {
+		if !containsArg(init.Args, want) {
+			t.Errorf("ownership init args = %v, want %q; a kubelet-created mount point is owned by root", init.Args, want)
+		}
+	}
+	for _, want := range wantMounts {
+		if !slices.Contains(init.VolumeMounts, want) {
+			t.Errorf("ownership init mounts = %+v, want %+v", init.VolumeMounts, want)
+		}
+	}
+}
+
+func TestRunnerGoCacheClaimCarriesTheOperatorsStorage(t *testing.T) {
+	claim := claimDocument(t, helmRender(t, "./sparkwing-runner-bundle", "templates/runner-gocache-pvc.yaml", "sparkwing",
+		"runner.goCache.persistence.enabled=true",
+		"runner.goCache.persistence.size=50Gi",
+		"runner.goCache.persistence.storageClassName=efs-sc"))
+	if claim.Metadata.Name != "sparkwing-sparkwing-runner-bundle-runner-gocache" {
+		t.Errorf("claim name = %q", claim.Metadata.Name)
+	}
+	if !reflect.DeepEqual(claim.Spec.AccessModes, []string{"ReadWriteMany"}) {
+		t.Errorf("claim access modes = %v, want ReadWriteMany for a pool that shares one claim", claim.Spec.AccessModes)
+	}
+	if claim.Spec.Resources.Requests.Storage != "50Gi" || claim.Spec.StorageClassName != "efs-sc" {
+		t.Errorf("claim storage = %+v", claim.Spec)
+	}
+	if claim.Metadata.Annotations["helm.sh/resource-policy"] != "keep" {
+		t.Errorf("claim annotations = %v, want the caches to survive helm uninstall", claim.Metadata.Annotations)
+	}
+}
+
+func TestRunnerGoCacheTakesAnExistingClaim(t *testing.T) {
+	rendered := helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"runner.goCache.persistence.enabled=true",
+		"runner.goCache.persistence.existingClaim=team-go-cache")
+	resources := renderedResources(t, rendered)
+	for _, resource := range resources {
+		if resource.Kind == "PersistentVolumeClaim" && strings.HasSuffix(resource.Metadata.Name, "-runner-gocache") {
+			t.Fatalf("chart claimed %q beside the operator's own claim", resource.Metadata.Name)
+		}
+	}
+	pod := deploymentDocument(t, helmRender(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing",
+		"runner.goCache.persistence.enabled=true",
+		"runner.goCache.persistence.existingClaim=team-go-cache")).Spec.Template.Spec
+	if got := claimVolume(pod.Volumes, "go-cache"); got != "team-go-cache" {
+		t.Errorf("go-cache volume claim = %q, want the operator's claim", got)
+	}
+}
+
+func TestRunnerGoCacheAboveOneReplicaRequiresReadWriteMany(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+		"runner.goCache.persistence.enabled=true",
+		"runner.goCache.persistence.accessModes={ReadWriteOnce}")
+	if !strings.Contains(out, "needs ReadWriteMany") {
+		t.Fatalf("render error = %q, want the access-mode mismatch named", out)
+	}
+}
+
+func TestRunnerGoCacheOnOneReplicaAcceptsReadWriteOnce(t *testing.T) {
+	claim := claimDocument(t, helmRender(t, "./sparkwing-runner-bundle", "templates/runner-gocache-pvc.yaml", "sparkwing",
+		"runner.replicas=1",
+		"runner.goCache.persistence.enabled=true",
+		"runner.goCache.persistence.accessModes={ReadWriteOnce}"))
+	if !reflect.DeepEqual(claim.Spec.AccessModes, []string{"ReadWriteOnce"}) {
+		t.Fatalf("claim access modes = %v, want the operator's ReadWriteOnce", claim.Spec.AccessModes)
+	}
+}
+
+func TestRunnerWarmModulesRenderAsOneFlag(t *testing.T) {
+	args := runnerContainer(t, renderRunner(t,
+		"runner.goCache.warmModules={github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines}")).Args
+	got, ok := hasFlag(args, "--warm-modules=")
+	if !ok {
+		t.Fatalf("runner args = %v, want a warm list", args)
+	}
+	if want := "--warm-modules=github.com/sparkwing-dev/sparkwing@v0.49.0,example.com/pipelines"; got != want {
+		t.Fatalf("warm flag = %q, want %q", got, want)
+	}
+}
+
+func TestFullChartVendorsTheRunnerGoCache(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
+		"sparkwing-runner-bundle.runner.goCache.persistence.enabled=true",
+		"sparkwing-runner-bundle.runner.goCache.warmModules={example.com/pipelines@v1.0.0}"))
+	runner := componentResource(t, resources, "Deployment", "runner")
+	container := resourceContainer(t, runner)
+	if !containsArg(container.Args, "--warm-modules=example.com/pipelines@v1.0.0") {
+		t.Errorf("vendored runner args = %v, want the warm list", container.Args)
+	}
+	build, mod := goCachePaths(t, container)
+	for _, want := range []renderedVolumeMount{
+		{Name: "go-cache", MountPath: build, SubPath: "gocache"},
+		{Name: "go-cache", MountPath: mod, SubPath: "gomodcache"},
+	} {
+		if !slices.Contains(container.VolumeMounts, want) {
+			t.Errorf("vendored runner mounts = %+v, want %+v", container.VolumeMounts, want)
+		}
+	}
+	found := false
+	for _, resource := range resources {
+		if resource.Kind == "PersistentVolumeClaim" && strings.HasSuffix(resource.Metadata.Name, "-runner-gocache") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("vendored bundle rendered no Go cache claim")
+	}
 }
 
 func TestRunnerTriggerRunnerDefaultsToInProcess(t *testing.T) {
@@ -2146,5 +2369,135 @@ func TestFullChartCarriesTheJobCeiling(t *testing.T) {
 		"sparkwing-runner-bundle.runner.jobCeiling.cpu=8")
 	if !strings.Contains(rendered, "SPARKWING_K8S_CPU_CEILING") {
 		t.Error("flagship chart carries no job ceiling env; the vendored sub-chart may be stale")
+	}
+}
+
+func secretVolume(volumes []renderedVolume, name string) string {
+	for _, volume := range volumes {
+		if volume.Name == name && volume.Secret != nil {
+			return volume.Secret.SecretName
+		}
+	}
+	return ""
+}
+
+func TestFullChartCarriesControllerCredentialsAsFiles(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		set    string
+		flag   string
+		volume string
+		mount  string
+		env    string
+	}{
+		{
+			name:   "secrets key",
+			set:    "controller.secretsKey.name=sparkwing-secrets-key",
+			flag:   "--secrets-key-file=/etc/sparkwing/secrets-key/key",
+			volume: "secrets-key",
+			mount:  "/etc/sparkwing/secrets-key",
+			env:    "SPARKWING_SECRETS_KEY",
+		},
+		{
+			name:   "previous secrets key",
+			set:    "controller.secretsPreviousKey.name=sparkwing-secrets-key-old",
+			flag:   "--secrets-previous-key-file=/etc/sparkwing/secrets-previous-key/key",
+			volume: "secrets-previous-key",
+			mount:  "/etc/sparkwing/secrets-previous-key",
+			env:    "SPARKWING_SECRETS_PREVIOUS_KEY",
+		},
+		{
+			name:   "bootstrap admin token",
+			set:    "controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin",
+			flag:   "--bootstrap-admin-token-file=/etc/sparkwing/bootstrap-admin-token/token",
+			volume: "bootstrap-admin-token",
+			mount:  "/etc/sparkwing/bootstrap-admin-token",
+			env:    "SPARKWING_BOOTSTRAP_ADMIN_TOKEN",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sets := []string{test.set}
+			if test.volume == "secrets-previous-key" {
+				sets = append(sets, "controller.secretsKey.name=sparkwing-secrets-key")
+			}
+			rendered := helmRender(t, "./sparkwing-full",
+				"templates/controller-deployment.yaml", "sparkwing", sets...)
+			container := runnerContainer(t, rendered)
+			if !slices.Contains(container.Args, test.flag) {
+				t.Fatalf("args = %+v, want %s", container.Args, test.flag)
+			}
+			if !hasMount(container.VolumeMounts, test.volume, test.mount) {
+				t.Fatalf("volume mounts = %+v, want %s at %s", container.VolumeMounts, test.volume, test.mount)
+			}
+			secretName := strings.TrimPrefix(test.set[strings.Index(test.set, "=")+1:], "")
+			if got := secretVolume(deploymentDocument(t, rendered).Spec.Template.Spec.Volumes, test.volume); got != secretName {
+				t.Fatalf("volume %s reads Secret %q, want %q", test.volume, got, secretName)
+			}
+			for _, e := range container.Env {
+				if e.Name == test.env {
+					t.Fatalf("%s still reaches the container as an environment variable", test.env)
+				}
+			}
+		})
+	}
+}
+
+func TestFullChartRendersRequireAuth(t *testing.T) {
+	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing"))
+	if slices.Contains(container.Args, "--require-auth") {
+		t.Fatalf("args = %+v, want no --require-auth by default", container.Args)
+	}
+	container = runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing", "controller.requireAuth=true"))
+	if !slices.Contains(container.Args, "--require-auth") {
+		t.Fatalf("args = %+v, want --require-auth", container.Args)
+	}
+}
+
+func TestFullChartRefusesAPreviousSecretsKeyWithoutACurrentOne(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.secretsPreviousKey.name=sparkwing-secrets-key-old")
+	if !strings.Contains(out, "controller.secretsKey.name") {
+		t.Fatalf("render error does not name the missing current key:\n%s", out)
+	}
+}
+
+func TestFullChartRendersRequireAuthWithoutABootstrapToken(t *testing.T) {
+	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
+		"templates/controller-deployment.yaml", "sparkwing", "controller.requireAuth=true"))
+	for _, arg := range container.Args {
+		if strings.HasPrefix(arg, "--bootstrap-admin-token-file") {
+			t.Fatalf("args = %+v, want no bootstrap token flag", container.Args)
+		}
+	}
+}
+
+func TestControllerPlacementFlagsRender(t *testing.T) {
+	controllerArgs := func(sets ...string) []string {
+		return webArgs(t, helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...))
+	}
+
+	for _, flag := range []string{"--default-prefer-labels=", "--placement-hold=", "--placement-liveness="} {
+		if got, ok := hasFlag(controllerArgs(), flag); ok {
+			t.Fatalf("default args carry %q, want the controller's own default", got)
+		}
+	}
+
+	configured := controllerArgs(
+		"controller.defaultPreferLabels[0]=location=local",
+		"controller.defaultPreferLabels[1]=team-a",
+		"controller.placementHold=45s",
+		"controller.placementLiveness=90s",
+	)
+	if got, _ := hasFlag(configured, "--default-prefer-labels="); got != "--default-prefer-labels=location=local,team-a" {
+		t.Fatalf("default prefer labels flag = %q", got)
+	}
+	if got, _ := hasFlag(configured, "--placement-hold="); got != "--placement-hold=45s" {
+		t.Fatalf("placement hold flag = %q", got)
+	}
+	if got, _ := hasFlag(configured, "--placement-liveness="); got != "--placement-liveness=90s" {
+		t.Fatalf("placement liveness flag = %q", got)
 	}
 }

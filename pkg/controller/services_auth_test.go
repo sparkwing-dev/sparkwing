@@ -31,6 +31,7 @@ func TestServices_RequiresABearer(t *testing.T) {
 		EnableAuthFromStore().
 		WithCachePodURL("http://cache.internal:8080").
 		WithLogsURL("http://logs.internal:8081").
+		WithDashboardURL("https://dash.internal").
 		Handler())
 	t.Cleanup(srv.Close)
 
@@ -62,5 +63,37 @@ func TestServices_RequiresABearer(t *testing.T) {
 	}
 	if body.CachePod != "http://cache.internal:8080" {
 		t.Fatalf("cache_pod = %q", body.CachePod)
+	}
+	if body.Dashboard != "https://dash.internal" {
+		t.Fatalf("dashboard = %q", body.Dashboard)
+	}
+}
+
+func TestServices_AnnouncesADashboardOnItsOwn(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	srv := httptest.NewServer(controller.New(st, nil).
+		WithDashboardURL("https://dash.internal").
+		Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/api/v1/services")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body controller.ServicesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Dashboard != "https://dash.internal" || body.CachePod != "" || body.Logs != "" {
+		t.Fatalf("services = %+v", body)
 	}
 }

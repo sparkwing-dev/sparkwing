@@ -140,21 +140,7 @@ func (s *Store) ListSecrets() ([]Secret, error) {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []Secret
-	for rows.Next() {
-		var sec Secret
-		var maskedInt, sharedInt int
-		var created, updated int64
-		if err := rows.Scan(&sec.Name, &sec.Value, &sec.Principal, &sec.Repo, &maskedInt, &sharedInt, &created, &updated); err != nil {
-			return nil, err
-		}
-		sec.Masked = maskedInt != 0
-		sec.Shared = sharedInt != 0
-		sec.CreatedAt = time.Unix(created, 0).UTC()
-		sec.UpdatedAt = time.Unix(updated, 0).UTC()
-		out = append(out, sec)
-	}
-	return out, nil
+	return scanSecretRows(rows)
 }
 
 // DeleteSecret removes the row owned by repo ("" for the unscoped
@@ -236,6 +222,79 @@ func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, no
 			return nil, err
 		}
 		out = append(out, repo)
+	}
+	return out, rows.Err()
+}
+
+// RotateSecretValues rewrites the stored value of every secret row with
+// whatever reseal returns for it, in one transaction, so a key change
+// either lands for the whole table or for none of it. Every other column
+// keeps its value, including updated_at: the secret did not change, only
+// the bytes it is stored as. Returns the number of rows rewritten.
+//
+// reseal sees the row as stored, which for an encrypted table means the
+// envelope in Secret.Value; returning an error abandons the rotation.
+func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error) {
+	if reseal == nil {
+		return 0, errors.New("secrets: reseal function required")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+
+	// safety: SQLite serves one connection, so the whole table materializes before any write on this transaction.
+	current, err := selectSecretsTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, sec := range current {
+		value, rerr := reseal(sec)
+		if rerr != nil {
+			return 0, rerr
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE secrets SET value = ? WHERE name = ? AND repo = ?`,
+			value, sec.Name, sec.Repo,
+		); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(current), nil
+}
+
+func selectSecretsTx(ctx context.Context, tx *storeTx) (secs []Secret, err error) {
+	rows, err := tx.QueryContext(ctx, `
+        SELECT name, value, principal, repo, masked, shared, created_at, updated_at
+          FROM secrets
+         ORDER BY name, repo`+tx.forUpdate())
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	return scanSecretRows(rows)
+}
+
+func scanSecretRows(rows *sql.Rows) ([]Secret, error) {
+	var out []Secret
+	for rows.Next() {
+		var sec Secret
+		var maskedInt, sharedInt int
+		var created, updated int64
+		if err := rows.Scan(&sec.Name, &sec.Value, &sec.Principal, &sec.Repo,
+			&maskedInt, &sharedInt, &created, &updated); err != nil {
+			return nil, err
+		}
+		sec.Masked = maskedInt != 0
+		sec.Shared = sharedInt != 0
+		sec.CreatedAt = time.Unix(created, 0).UTC()
+		sec.UpdatedAt = time.Unix(updated, 0).UTC()
+		out = append(out, sec)
 	}
 	return out, rows.Err()
 }

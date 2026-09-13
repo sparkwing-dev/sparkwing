@@ -2,7 +2,10 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"io"
+	"log/slog"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -14,6 +17,8 @@ type ClientBackend struct {
 	logStore storage.LogStore
 
 	caps Capabilities
+
+	liveLogWarn sync.Once
 }
 
 func NewClientBackend(c *client.Client, logStore storage.LogStore) *ClientBackend {
@@ -63,4 +68,40 @@ func (b *ClientBackend) StreamNodeLog(ctx context.Context, runID, nodeID string)
 		return nil, nil
 	}
 	return b.logStore.Stream(ctx, runID, nodeID)
+}
+
+var _ LiveLogReader = (*ClientBackend)(nil)
+
+// safety: a node with no buffer is the ordinary case once it finishes, so
+// only that answer is silent; any other failure is reported once and the
+// caller still falls back to the durable copy rather than failing the read.
+func (b *ClientBackend) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error) {
+	rc, err := b.c.StreamNodeLiveLog(ctx, runID, nodeID, since)
+	if err != nil {
+		b.noteLiveLogFailure("stream", runID, nodeID, err)
+		return nil, nil
+	}
+	return rc, nil
+}
+
+func (b *ClientBackend) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) ([]byte, int64, bool, bool, error) {
+	chunk, err := b.c.ReadNodeLiveLog(ctx, runID, nodeID, since)
+	if err != nil {
+		b.noteLiveLogFailure("read", runID, nodeID, err)
+		return nil, 0, false, false, nil
+	}
+	if chunk == nil {
+		return nil, 0, false, false, nil
+	}
+	return []byte(chunk.Data), chunk.Next, chunk.Done, true, nil
+}
+
+func (b *ClientBackend) noteLiveLogFailure(op, runID, nodeID string, err error) {
+	if errors.Is(err, client.ErrNoLiveLog) || errors.Is(err, context.Canceled) {
+		return
+	}
+	b.liveLogWarn.Do(func() {
+		slog.Warn("live log unavailable; reading the durable copy instead",
+			"op", op, "run_id", runID, "node_id", nodeID, "error", err)
+	})
 }

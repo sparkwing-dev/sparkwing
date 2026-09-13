@@ -14,11 +14,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const casMaxRetries = 16
+
+// safety: contention clears in a round trip or two, so the ceiling stays low;
+// full jitter is what stops two writers racing for one key from colliding again
+// on every attempt, which is how a bounded loop bills its whole cap in
+// milliseconds.
+var casBackoff = objectguard.Backoff{Base: 20 * time.Millisecond, Max: 500 * time.Millisecond}
 
 const maxTriggerIDAttempts = 8
 
@@ -173,6 +180,9 @@ func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) e
 		if !errors.Is(err, storage.ErrPreconditionFailed) {
 			return err
 		}
+		if err := casBackoff.Wait(ctx, attempt); err != nil {
+			return err
+		}
 	}
 	return fmt.Errorf("WriteNodeDispatch: seq contention for %s/%s after %d attempts", d.RunID, d.NodeID, casMaxRetries)
 }
@@ -289,6 +299,9 @@ func (b *Backend) CreateDebugPause(ctx context.Context, p store.DebugPause) erro
 			return nil
 		}
 		if !errors.Is(err, storage.ErrPreconditionFailed) {
+			return err
+		}
+		if err := casBackoff.Wait(ctx, attempt); err != nil {
 			return err
 		}
 	}
@@ -414,6 +427,9 @@ func (b *Backend) releasePauseRecord(ctx context.Context, cw storage.Conditional
 		if !errors.Is(err, storage.ErrPreconditionFailed) {
 			return false, err
 		}
+		if err := casBackoff.Wait(ctx, attempt); err != nil {
+			return false, err
+		}
 	}
 	return false, fmt.Errorf("ReleaseDebugPause: contention on %s after %d attempts", key, casMaxRetries)
 }
@@ -452,6 +468,9 @@ func (b *Backend) CreateApproval(ctx context.Context, a store.Approval) error {
 			return b.SetNodeStatus(ctx, a.RunID, a.NodeID, store.NodeStatusApprovalPending)
 		}
 		if !errors.Is(err, storage.ErrPreconditionFailed) {
+			return err
+		}
+		if err := casBackoff.Wait(ctx, attempt); err != nil {
 			return err
 		}
 	}
@@ -508,6 +527,9 @@ func (b *Backend) ResolveApproval(ctx context.Context, runID, nodeID, resolution
 		}
 		if _, err := cw.PutIfMatch(ctx, key, bytes.NewReader(body), etag); err != nil {
 			if errors.Is(err, storage.ErrPreconditionFailed) {
+				if werr := casBackoff.Wait(ctx, attempt); werr != nil {
+					return nil, werr
+				}
 				continue
 			}
 			return nil, err
@@ -682,8 +704,7 @@ func (b *Backend) EnqueueTriggerWithEnv(
 	// safety: the record goes first because the index is itself a PutIfAbsent and
 	// cannot be rewritten, so an index naming a record that failed to land would
 	// hand every retry of this spawn the same id of a trigger that never exists.
-	// An id another enqueue already took is re-minted rather than reported, since
-	// two callers can mint the same one.
+	// A taken id is re-minted, not reported, since two callers can mint the same.
 	for attempt := 1; ; attempt++ {
 		tg.ID = runID
 		body, err := json.Marshal(tg)
@@ -696,6 +717,9 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		}
 		if !errors.Is(err, storage.ErrPreconditionFailed) || attempt == maxTriggerIDAttempts {
 			return "", err
+		}
+		if werr := casBackoff.Wait(ctx, attempt); werr != nil {
+			return "", werr
 		}
 		runID, err = b.triggerIDMinter()
 		if err != nil {

@@ -21,9 +21,36 @@ const KeySize = chacha20poly1305.KeySize
 
 type Cipher struct {
 	aead cipher.AEAD
+	// safety: read-only keys an envelope may still carry; sealing always uses aead.
+	previous []cipher.AEAD
 }
 
 func NewCipher(key []byte) (*Cipher, error) {
+	aead, err := newAEAD(key)
+	if err != nil {
+		return nil, err
+	}
+	return &Cipher{aead: aead}, nil
+}
+
+// NewCipherWithPrevious returns a cipher that seals under key and opens an
+// envelope under key first and previous second. It is the read path a key
+// change needs: values sealed under the old key keep opening until every
+// one of them has been re-encrypted, after which previous can be dropped.
+func NewCipherWithPrevious(key, previous []byte) (*Cipher, error) {
+	c, err := NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	prev, err := newAEAD(previous)
+	if err != nil {
+		return nil, fmt.Errorf("previous key: %w", err)
+	}
+	c.previous = []cipher.AEAD{prev}
+	return c, nil
+}
+
+func newAEAD(key []byte) (cipher.AEAD, error) {
 	if len(key) != KeySize {
 		return nil, fmt.Errorf("secrets cipher: key must be %d bytes, got %d", KeySize, len(key))
 	}
@@ -31,7 +58,7 @@ func NewCipher(key []byte) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("secrets cipher: init: %w", err)
 	}
-	return &Cipher{aead: aead}, nil
+	return aead, nil
 }
 
 func (c *Cipher) Seal(plain string) (string, error) {
@@ -117,10 +144,15 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 	}
 	nonce, ct := raw[:nsz], raw[nsz:]
 	plain, err := c.aead.Open(nil, nonce, ct, aad)
-	if err != nil {
-		return "", fmt.Errorf("secrets cipher: open: %w", err)
+	if err == nil {
+		return string(plain), nil
 	}
-	return string(plain), nil
+	for _, prev := range c.previous {
+		if plain, perr := prev.Open(nil, nonce, ct, aad); perr == nil {
+			return string(plain), nil
+		}
+	}
+	return "", fmt.Errorf("secrets cipher: open: %w", err)
 }
 
 func IsEncrypted(v string) bool {

@@ -1,7 +1,9 @@
 package store_test
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,5 +67,102 @@ func TestSecretsCRUD(t *testing.T) {
 	}
 	if err := s.DeleteSecret("api_token", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("DeleteSecret twice: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestRotateSecretValues_RewritesEveryRowInOneTransaction(t *testing.T) {
+	s := storetest.Open(t)
+	now := time.Date(2026, 5, 3, 8, 0, 0, 0, time.UTC)
+
+	rows := []store.Secret{
+		{Name: "api_token", Value: "old:abc", Principal: "alice", Masked: true},
+		{Name: "api_token", Value: "old:def", Principal: "alice", Repo: "acme/web", Masked: true},
+		{Name: "region", Value: "old:us-east-1", Principal: "bot", Shared: true},
+	}
+	for _, row := range rows {
+		if err := s.CreateOrReplaceSecret(row, now); err != nil {
+			t.Fatalf("CreateOrReplaceSecret(%s/%s): %v", row.Name, row.Repo, err)
+		}
+	}
+
+	rotated, err := s.RotateSecretValues(context.Background(), func(sec store.Secret) (string, error) {
+		return "new:" + strings.TrimPrefix(sec.Value, "old:"), nil
+	})
+	if err != nil {
+		t.Fatalf("RotateSecretValues: %v", err)
+	}
+	if rotated != len(rows) {
+		t.Fatalf("rotated=%d want %d", rotated, len(rows))
+	}
+
+	got, err := s.ListSecrets()
+	if err != nil {
+		t.Fatalf("ListSecrets: %v", err)
+	}
+	for _, sec := range got {
+		if !strings.HasPrefix(sec.Value, "new:") {
+			t.Fatalf("secret %s/%s value=%q, want the rewritten value", sec.Name, sec.Repo, sec.Value)
+		}
+		if !sec.UpdatedAt.Equal(now) {
+			t.Fatalf("secret %s/%s updated_at=%v, want the rotation to leave it at %v",
+				sec.Name, sec.Repo, sec.UpdatedAt, now)
+		}
+	}
+	scoped, err := s.GetSecretRow("api_token", "acme/web")
+	if err != nil {
+		t.Fatalf("GetSecretRow: %v", err)
+	}
+	if scoped.Value != "new:def" {
+		t.Fatalf("repo-scoped value=%q, want new:def", scoped.Value)
+	}
+	if scoped.Principal != "alice" || !scoped.Masked {
+		t.Fatalf("rotation changed columns other than value: %+v", scoped)
+	}
+}
+
+func TestRotateSecretValues_LeavesEveryRowOnFailure(t *testing.T) {
+	s := storetest.Open(t)
+	now := time.Date(2026, 5, 3, 8, 0, 0, 0, time.UTC)
+
+	for _, name := range []string{"first", "second", "third"} {
+		if err := s.CreateOrReplaceSecret(store.Secret{
+			Name: name, Value: "old:" + name, Principal: "alice", Masked: true,
+		}, now); err != nil {
+			t.Fatalf("CreateOrReplaceSecret(%s): %v", name, err)
+		}
+	}
+
+	boom := errors.New("cannot open")
+	if _, err := s.RotateSecretValues(context.Background(), func(sec store.Secret) (string, error) {
+		if sec.Name == "second" {
+			return "", boom
+		}
+		return "new:" + sec.Name, nil
+	}); !errors.Is(err, boom) {
+		t.Fatalf("RotateSecretValues err=%v, want the reseal failure", err)
+	}
+
+	got, err := s.ListSecrets()
+	if err != nil {
+		t.Fatalf("ListSecrets: %v", err)
+	}
+	for _, sec := range got {
+		if sec.Value != "old:"+sec.Name {
+			t.Fatalf("secret %s value=%q after an abandoned rotation, want it untouched", sec.Name, sec.Value)
+		}
+	}
+}
+
+func TestRotateSecretValues_EmptyTable(t *testing.T) {
+	s := storetest.Open(t)
+	rotated, err := s.RotateSecretValues(context.Background(), func(store.Secret) (string, error) {
+		t.Fatal("reseal called on an empty table")
+		return "", nil
+	})
+	if err != nil {
+		t.Fatalf("RotateSecretValues: %v", err)
+	}
+	if rotated != 0 {
+		t.Fatalf("rotated=%d want 0", rotated)
 	}
 }

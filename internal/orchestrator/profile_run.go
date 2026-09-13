@@ -19,7 +19,7 @@ func resolveActiveProfile(pipelineYAML *pipelines.Pipeline, projectCfg *projectc
 		return resolveProjectProfile(pipelineYAML.Profile, projectCfg, "pipeline")
 	}
 	if projectCfg != nil && projectCfg.Defaults.Profile != "" {
-		return resolveProjectProfile(projectCfg.Defaults.Profile, projectCfg, "defaults.profile")
+		return resolveDefaultProfile(projectCfg.Defaults.Profile, projectCfg)
 	}
 	return nil, &profile.Chain{Source: profile.ChainSourceNone}, nil
 }
@@ -92,6 +92,26 @@ func resolveUserProfile(name string) (*profile.Profile, *profile.Chain, error) {
 		return nil, nil, fmt.Errorf("--profile %s: %w", name, err)
 	}
 	return p, &chain, nil
+}
+
+// safety: defaults.profile may name a connection `sparkwing cloud connect`
+// wrote to the user's profiles.yaml, which is where its token stays, so the
+// project block is preferred but not required.
+func resolveDefaultProfile(name string, cfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
+	if cfg != nil && cfg.Profiles != nil {
+		if p, ok := cfg.Profiles[name]; ok && p != nil {
+			return p, &profile.Chain{Selected: name, Source: profile.ChainSourceProjectDefault}, nil
+		}
+	}
+	p, chain, err := resolveUserProfile(name)
+	if err != nil {
+		if !errors.Is(err, profile.ErrProfileNotFound) {
+			return nil, nil, err
+		}
+		return nil, nil, fmt.Errorf("defaults.profile names profile %q, which is declared neither in sparkwing.yaml profiles nor in %s",
+			name, userProfilesPathForError())
+	}
+	return p, &profile.Chain{Selected: chain.Selected, Source: profile.ChainSourceProjectDefault}, nil
 }
 
 func resolveProjectProfile(name string, cfg *projectconfig.Config, origin string) (*profile.Profile, *profile.Chain, error) {

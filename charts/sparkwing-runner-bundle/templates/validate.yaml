@@ -36,3 +36,6 @@
 {{- if and .Values.resourceQuota.enabled (not .Values.limitRange.enabled) -}}
 {{- fail "sparkwing-runner-bundle: resourceQuota.enabled=true requires limitRange.enabled=true, whose default and defaultRequest give a pod that declares no resources something for the quota to count. Without it the API server rejects every such pod in the namespace" -}}
 {{- end -}}
+{{- if and .Values.runner.goCache.persistence.enabled (gt (int .Values.runner.replicas) 1) (not (has "ReadWriteMany" .Values.runner.goCache.persistence.accessModes)) -}}
+{{- fail (printf "sparkwing-runner-bundle: runner.goCache.persistence with runner.replicas=%d needs ReadWriteMany in runner.goCache.persistence.accessModes, because every replica mounts the one claim. Set runner.replicas=1 to keep a ReadWriteOnce volume" (int .Values.runner.replicas)) -}}
+{{- end -}}

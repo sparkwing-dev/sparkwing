@@ -72,6 +72,9 @@ const (
 	FailureVerify             = "verify"
 	FailureQueueTimeout       = "queue_timeout"
 	FailureRunnerLeaseExpired = "runner_lease_expired"
+	// FailureCreditsExhausted: the controller's prepaid credit balance ran
+	// out and the node was cancelled after the grace period.
+	FailureCreditsExhausted = "credits_exhausted"
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403
 	// against the controller's auth surface. The run's structured
 	// logs are unrecoverable; better to fail loud than report
@@ -597,6 +600,14 @@ CREATE TABLE IF NOT EXISTS nodes (
     claim_worker_id   TEXT NOT NULL DEFAULT '',
     claim_executor_kind TEXT NOT NULL DEFAULT '',
     claim_reservation_id TEXT NOT NULL DEFAULT '',
+    -- placement_reason: why the claiming runner got this node --
+    -- 'preference', 'fallback', 'none', or '' for a node no claim path
+    -- decided.
+    placement_reason TEXT NOT NULL DEFAULT '',
+    -- placement_hold_from: when the node became claimable, which the
+    -- local-first hold runs from. Separate from ready_at because a
+    -- label-mismatch bump moves ready_at and must not restart the hold.
+    placement_hold_from INTEGER,
     -- status_detail: phase string runners write for the dashboard.
     status_detail    TEXT NOT NULL DEFAULT '',
     -- last_heartbeat: runner liveness; for UI, not lease enforcement.
@@ -1031,7 +1042,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 34
+const expectedSchemaVersion = 37
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1895,6 +1906,13 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyNamedCronsMigrationSQLite(ctx, tx)
 	case 34:
 		return applyCronBranchMigrationSQLite(ctx, tx)
+	case 35:
+		return applyCreditsMigrationSQLite(ctx, tx)
+	case 36:
+		return ensureColumnsSQLite(ctx, tx, "nodes", nodePlacementCols)
+	case 37:
+		_, err := tx.ExecContext(ctx, githubWebhookBindingsTableSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2203,6 +2221,13 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyNamedCronsMigrationPostgres(ctx, tx)
 	case 34:
 		return applyCronBranchMigrationPostgres(ctx, tx)
+	case 35:
+		return applyCreditsMigrationPostgres(ctx, tx)
+	case 36:
+		return addColumnsTx(ctx, tx, "nodes", nodePlacementColsPostgres)
+	case 37:
+		_, err := tx.ExecContext(ctx, githubWebhookBindingsTablePostgres)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2403,6 +2428,8 @@ var columnMigrations = []columnSpec{
 		"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
 		"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
 		"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+		"placement_reason":       "TEXT NOT NULL DEFAULT ''",
+		"placement_hold_from":    "INTEGER",
 		"claim_executor":         "TEXT NOT NULL DEFAULT ''",
 		"claim_cores":            "DOUBLE PRECISION NOT NULL DEFAULT 0",
 		"claim_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
@@ -2606,6 +2633,16 @@ var nodeExecutorClaimColsPostgres = map[string]string{
 	"claim_memory_bytes": "BIGINT NOT NULL DEFAULT 0",
 	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
 	"claim_slot":         "BIGINT NOT NULL DEFAULT -1",
+}
+
+var nodePlacementCols = map[string]string{
+	"placement_reason":    "TEXT NOT NULL DEFAULT ''",
+	"placement_hold_from": "INTEGER",
+}
+
+var nodePlacementColsPostgres = map[string]string{
+	"placement_reason":    "TEXT NOT NULL DEFAULT ''",
+	"placement_hold_from": "BIGINT",
 }
 
 var nodeDispatchRedactionCols = map[string]string{
@@ -3818,6 +3855,15 @@ type Node struct {
 	AvoidExecutorID          string             `json:"-"`
 	AvoidUntil               *time.Time         `json:"-"`
 
+	// PlacementReason names why the claiming runner got this node:
+	// "preference", "fallback" after the local-first hold window, or "none"
+	// when it carried no preference. Empty on a node no claim path decided.
+	PlacementReason string `json:"placement_reason,omitempty"`
+	// PlacementHoldFrom is when the node became claimable, which the
+	// local-first hold runs from. It survives the ready_at bump a
+	// label-mismatched claim applies, so the hold expires on schedule.
+	PlacementHoldFrom *time.Time `json:"placement_hold_from,omitempty"`
+
 	// NeedsLabels: runner labels required (AND semantics). Empty = any.
 	NeedsLabels []string `json:"needs_labels,omitempty"`
 	// PrefersLabels orders soft executor preferences.
@@ -4240,6 +4286,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, o
 	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
+	   placement_reason, placement_hold_from,
 	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
@@ -4248,6 +4295,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	var policyHash, supervisorRequirementsHash, bodyRequirementsHash, pipeline string
 	var policyVersion, bodyProtocol int
 	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
+	var holdFromNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
 	err := rs.Scan(&n.RunID, &n.NodeID, &n.Status, &n.Outcome,
@@ -4265,7 +4313,8 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&policyJSON, &policyHash, &policyVersion, &bodyProtocol,
 		&supervisorRequirementsJSON, &supervisorRequirementsHash,
 		&bodyRequirementsJSON, &bodyRequirementsHash,
-		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS, &pipeline)
+		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
+		&n.PlacementReason, &holdFromNS, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -4298,6 +4347,10 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	if readyNS.Valid {
 		t := time.Unix(0, readyNS.Int64)
 		n.ReadyAt = &t
+	}
+	if holdFromNS.Valid {
+		t := time.Unix(0, holdFromNS.Int64)
+		n.PlacementHoldFrom = &t
 	}
 	if offerStartedNS.Valid {
 		t := time.Unix(0, offerStartedNS.Int64)
@@ -4781,10 +4834,11 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	res, err := tx.ExecContext(
 		ctx,
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
+		                  placement_hold_from = COALESCE(placement_hold_from, ?),
 		                  offer_started_at = COALESCE(offer_started_at, ?),
 		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
 		  WHERE run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), target, runID, nodeID,
+		now.UnixNano(), now.UnixNano(), now.UnixNano(), target, runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -4858,13 +4912,14 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
    SET status = ?, outcome = '', error = '', output_json = NULL,
-       started_at = NULL, finished_at = NULL, ready_at = NULL, offer_started_at = NULL,
+       started_at = NULL, finished_at = NULL, ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL,
        offer_priority_target = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_base_priority = 0, claim_priority = 0, claim_worker_id = '', claim_executor_kind = '',
        claim_reservation_id = '', claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
+       credit_charged_through = 0,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
  WHERE run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
 		nodeStatusPending, runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
@@ -4889,7 +4944,7 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 	}
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET ready_at = NULL, offer_started_at = NULL
+		`UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
 		  WHERE run_id = ? AND node_id = ?
 		    AND claimed_by IS NULL AND `+nodeNotDone,
 		runID, nodeID,
@@ -4924,6 +4979,12 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // Label-mismatched candidates have their ready_at bumped 1us so they
 // don't starve the FIFO queue.
 //
+// A [ClaimPlacement] on ctx adds the local-first hold: a candidate whose
+// preference runnerLabels does not satisfy is passed over while a live runner
+// that satisfies it has a slot and the hold window from the node's ready time
+// has not run out. Every claim stamps why the node went where it did, as one of
+// [PlacementPreferred], [PlacementFallback], or [PlacementNone].
+//
 // claimant is the authenticated token the claim answers to;
 // [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
 // only that token afterwards. Pass the zero value when the caller is
@@ -4940,88 +5001,253 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
-	labelSet := make(map[string]struct{}, len(runnerLabels))
-	for _, l := range runnerLabels {
-		if l != "" && l != "local" && !strings.HasPrefix(l, "location=") {
-			labelSet[l] = struct{}{}
-		}
-	}
+	labels := newClaimLabels(runnerLabels)
+	placement, _ := ClaimPlacementFromContext(ctx)
 
-	const maxCandidates = 64
-	for range maxCandidates {
-		tx, err := s.beginTx(ctx)
+	for range maxClaimAttempts {
+		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement)
 		if err != nil {
 			return nil, err
 		}
-		if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
-			_ = tx.Rollback()
+		if err := s.bumpMismatchedNodes(ctx, mismatched); err != nil {
 			return nil, err
 		}
-		n := &nodeRecord{}
-		err = scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+		if target == nil {
+			return nil, notFound("ready node", "")
+		}
+		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement)
+		if err != nil {
+			return nil, err
+		}
+		if claimed != nil {
+			return claimed, nil
+		}
+	}
+	return nil, notFound("ready node", "")
+}
+
+const (
+	// safety: one read walks this many queued nodes and the rounds look past
+	// held or unsuitable ones, so a poll costs reads and never a transaction
+	// per candidate.
+	claimScanBatch  = 64
+	claimScanRounds = 8
+	// safety: bounds the races this claim loses to another runner between
+	// reading a candidate and awarding it.
+	maxClaimAttempts = 8
+)
+
+// safety: carries only what a placement decision needs, so the scan reads
+// narrow rows and only the awarded node is read in full.
+type claimCandidate struct {
+	runID    string
+	nodeID   string
+	readyAt  int64
+	holdFrom *time.Time
+	needs    []string
+	prefers  []string
+	decision placementDecision
+}
+
+// safety: walks the queue outside any transaction, so a poll that takes nothing
+// writes nothing and holds no lock.
+func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement) (*claimCandidate, []nodeKey, error) {
+	var mismatched []nodeKey
+	var cursor *claimCandidate
+	for range claimScanRounds {
+		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range batch {
+			n := &batch[i]
+			if !labelsSatisfied(n.needs, labels.hard) {
+				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
+				continue
+			}
+			n.decision = placement.decide(n.needs, n.prefers, labels, n.holdFrom, time.Now())
+			if n.decision.hold {
+				continue
+			}
+			return n, mismatched, nil
+		}
+		if len(batch) < claimScanBatch {
+			return nil, mismatched, nil
+		}
+		cursor = &batch[len(batch)-1]
+	}
+	return nil, mismatched, nil
+}
+
+func (s *Store) readClaimCandidates(ctx context.Context, coordinatorID string, after *claimCandidate) ([]claimCandidate, error) {
+	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
+	keyset := ""
+	if after != nil {
+		keyset = ` AND (ready_at > ? OR (ready_at = ? AND (run_id > ? OR (run_id = ? AND node_id > ?))))`
+		args = append(args, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
+	}
+	args = append(args, claimScanBatch)
+	rows, err := s.query(ctx, `SELECT run_id, node_id, ready_at, placement_hold_from, needs_labels, prefers_labels
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)
- ORDER BY ready_at ASC
-	 LIMIT 1`+s.forUpdateSkipLocked(),
-			time.Now().UnixNano(), coordinatorID, "", ""), n)
-		if err != nil {
-			_ = tx.Rollback()
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+keyset+`
+ ORDER BY ready_at ASC, run_id ASC, node_id ASC
+	 LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsOrLog(rows)
+	var out []claimCandidate
+	for rows.Next() {
+		var candidate claimCandidate
+		var holdFromNS sql.NullInt64
+		var needsJSON, prefersJSON []byte
+		if err := rows.Scan(&candidate.runID, &candidate.nodeID, &candidate.readyAt,
+			&holdFromNS, &needsJSON, &prefersJSON); err != nil {
 			return nil, err
 		}
-
-		if !labelsSatisfied(n.NeedsLabels, labelSet) {
-			bump := time.Now().UnixNano()
-			if n.ReadyAt != nil {
-				cand := n.ReadyAt.UnixNano() + int64(time.Microsecond)
-				bump = max(bump, cand)
-			}
-			if _, err := tx.ExecContext(
-				ctx,
-				`UPDATE nodes SET ready_at = ?
-				  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
-				bump, n.RunID, n.NodeID,
-			); err != nil {
-				_ = tx.Rollback()
-				return nil, err
-			}
-			if err := tx.Commit(); err != nil {
-				return nil, err
-			}
+		if holdFromNS.Valid {
+			t := time.Unix(0, holdFromNS.Int64)
+			candidate.holdFrom = &t
+		} else {
+			t := time.Unix(0, candidate.readyAt)
+			// safety: a row written before the hold-from column existed has only
+			// ready_at to run its hold from, which a bump may since have moved.
+			candidate.holdFrom = &t
+		}
+		if !decodeCandidateLabels(candidate.runID, candidate.nodeID, needsJSON, &candidate.needs) ||
+			!decodeCandidateLabels(candidate.runID, candidate.nodeID, prefersJSON, &candidate.prefers) {
 			continue
 		}
+		out = append(out, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, rows.Close()
+}
 
-		now := time.Now()
-		expires := now.Add(lease)
+// safety: a rollback after a successful commit reports ErrTxDone, which is the
+// ordinary path; any other failure lost a cleanup and is worth a line.
+func rollbackOrLog(tx *storeTx) {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		slog.Warn("rolling back a store transaction failed", "err", err)
+	}
+}
+
+// safety: closes the cursor on an early return, where the caller's own Close
+// never runs; a second close after that one reports nothing.
+func closeRowsOrLog(rows *sql.Rows) {
+	if err := rows.Close(); err != nil {
+		slog.Warn("closing a store row cursor failed", "err", err)
+	}
+}
+
+// safety: the same column carries a node's hard requirements, so a row whose
+// labels will not decode is passed over rather than claimed as unconstrained.
+// It waits, and the queue deadline fails it where an operator can see it.
+func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		slog.Warn("skipping a claim candidate whose labels will not decode",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return false
+	}
+	return true
+}
+
+// safety: moves the nodes this runner's labels rule out behind the clock so
+// they do not starve the queue behind them.
+func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	for _, key := range keys {
 		if _, err := tx.ExecContext(
 			ctx,
-			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
-			        lease_expires_at = ?, coordinator_id = ?, executor_kind = '', executor_id = '',
-			        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
-			        claim_generation = claim_generation + 1
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
-			    AND required_coordinator_id = '' AND required_executor_location = ''
-			    AND `+nodeExecutionUnsealed,
-			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
-			coordinatorID, n.RunID, n.NodeID,
+			`UPDATE nodes SET ready_at = `+s.greatest()+`(?, ready_at + ?)
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`,
+			time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID,
 		); err != nil {
-			_ = tx.Rollback()
-			return nil, err
+			return err
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		n.ClaimedBy = holderID
-		n.LeaseExpiresAt = &expires
-		n.CoordinatorID = coordinatorID
-		n.ExecutorLocation = "unknown"
-		n.ClaimGeneration++
-		return &n.Node, nil
 	}
-	return nil, notFound("ready node", "")
+	return tx.Commit()
+}
+
+// safety: returns nil when another runner took the node between the scan and
+// the award, which the caller answers by scanning again.
+func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, claimant ClaimIdentity,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement,
+) (*Node, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rollbackOrLog(tx)
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	expires := now.Add(lease)
+	res, err := tx.ExecContext(
+		ctx,
+		`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+		        lease_expires_at = ?, coordinator_id = ?, executor_kind = '', executor_id = '',
+		        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
+		        credit_charged_through = 0,
+		        placement_reason = ?, claim_generation = claim_generation + 1
+		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
+		    AND ready_at IS NOT NULL AND `+nodeNotDone+`
+		    AND required_coordinator_id = '' AND required_executor_location = ''
+		    AND `+nodeExecutionUnsealed,
+		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
+		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	awarded, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if awarded == 0 {
+		return nil, nil
+	}
+	if err := reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+		return nil, err
+	}
+	// safety: a preference the controller supplies for every node it never
+	// hears about decides nothing per node, so only an overridden preference or
+	// one the plan declared itself earns an event on every claim.
+	if candidate.decision.reason == PlacementFallback ||
+		(candidate.decision.reason == PlacementPreferred && candidate.decision.nodeOwned) {
+		if _, err := appendEventTx(ctx, tx, candidate.runID, candidate.nodeID, "node_placed", nodePlacementEvent{
+			HolderID: holderID, Reason: candidate.decision.reason,
+			Prefers: placement.prefersFor(candidate.prefers),
+		}, now); err != nil {
+			return nil, err
+		}
+	}
+	n := &nodeRecord{}
+	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+ FROM nodes WHERE run_id = ? AND node_id = ?`, candidate.runID, candidate.nodeID), n); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &n.Node, nil
 }
 
 func labelsSatisfied(needed []string, have map[string]struct{}) bool {
@@ -5330,7 +5556,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
 		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
+		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+		        credit_charged_through = 0
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {

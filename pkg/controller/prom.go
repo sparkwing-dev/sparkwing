@@ -9,6 +9,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 var (
@@ -69,7 +72,25 @@ var (
 		},
 		[]string{"route", "method"},
 	)
+
+	authTokenCacheTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sparkwing_auth_token_cache_total",
+			Help: "Bearer verifications by how the verified-token cache answered them: hit, miss, or coalesced onto a verification already in flight for the same token.",
+		},
+		[]string{"result"},
+	)
 )
+
+const (
+	authCacheHit       = "hit"
+	authCacheMiss      = "miss"
+	authCacheCoalesced = "coalesced"
+)
+
+func observeAuthCache(result string) {
+	authTokenCacheTotal.WithLabelValues(result).Inc()
+}
 
 func init() {
 	metricsRegistry.MustRegister(
@@ -80,6 +101,9 @@ func init() {
 		activeRunnersGauge,
 		httpRequestsTotal,
 		httpRequestDurationSeconds,
+		authTokenCacheTotal,
+		objectStoreCollector{},
+		hashingBudgetCollector{},
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
@@ -173,4 +197,70 @@ func routeFromPattern(pattern string) string {
 		return ""
 	}
 	return rest
+}
+
+var (
+	objectStoreRequestsDesc = prometheus.NewDesc(
+		"sparkwing_object_store_requests_total",
+		"Object-store requests the process-wide request budget saw, by request class and whether the budget let them reach the store.",
+		[]string{"class", "outcome"}, nil,
+	)
+
+	objectStoreTripsDesc = prometheus.NewDesc(
+		"sparkwing_object_store_trips_total",
+		"Times an object-store request class exhausted its budget and began refusing requests.",
+		[]string{"class"}, nil,
+	)
+
+	objectStoreTrippedDesc = prometheus.NewDesc(
+		"sparkwing_object_store_tripped",
+		"1 while an object-store request class is refusing requests, 0 otherwise. Sampled at scrape time.",
+		[]string{"class"}, nil,
+	)
+)
+
+// safety: read at scrape time rather than mirrored, so the limiter stays the
+// one place that knows how much budget is spent, and the class label takes only
+// the four names objectguard mints, never a caller-supplied string.
+type objectStoreCollector struct{}
+
+func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- objectStoreRequestsDesc
+	ch <- objectStoreTripsDesc
+	ch <- objectStoreTrippedDesc
+}
+
+func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
+	limiter, err := objectguard.Shared()
+	if err != nil {
+		return
+	}
+	for _, c := range limiter.State().Classes {
+		class := string(c.Class)
+		ch <- prometheus.MustNewConstMetric(objectStoreRequestsDesc, prometheus.CounterValue, float64(c.Allowed), class, "allowed")
+		ch <- prometheus.MustNewConstMetric(objectStoreRequestsDesc, prometheus.CounterValue, float64(c.Refused), class, "refused")
+		ch <- prometheus.MustNewConstMetric(objectStoreTripsDesc, prometheus.CounterValue, float64(c.Trips), class)
+		tripped := 0.0
+		if c.Tripped {
+			tripped = 1
+		}
+		ch <- prometheus.MustNewConstMetric(objectStoreTrippedDesc, prometheus.GaugeValue, tripped, class)
+	}
+}
+
+var authHashingRejectedDesc = prometheus.NewDesc(
+	"sparkwing_auth_hashing_rejected_total",
+	"Credential verifications the argon2id memory budget shed rather than queued, answered 503 with a Retry-After.",
+	nil, nil,
+)
+
+// safety: read at scrape time from the store's own counter, so the budget stays the one place that knows what it shed.
+type hashingBudgetCollector struct{}
+
+func (hashingBudgetCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- authHashingRejectedDesc
+}
+
+func (hashingBudgetCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(authHashingRejectedDesc, prometheus.CounterValue, float64(store.Argon2Shed()))
 }
