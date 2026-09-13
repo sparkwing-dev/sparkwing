@@ -239,7 +239,7 @@ func TestRun_ArtifactsEndpoint(t *testing.T) {
 
 // safety: the real bundle is gitignored, so a checkout that has not built the
 // dashboard has none to serve; the suite carries its own shell instead.
-func fixtureBundle() fstest.MapFS {
+func fixtureShell() fstest.MapFS {
 	return fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
 			`<!doctype html><title>Sparkwing</title>` +
@@ -250,7 +250,7 @@ func fixtureBundle() fstest.MapFS {
 func startLocalws(t *testing.T, opts Options) string {
 	t.Helper()
 	if opts.Bundle == nil {
-		opts.Bundle = fixtureBundle()
+		opts.Bundle = fixtureShell()
 	}
 	ln := pickListener(t)
 	t.Cleanup(func() { _ = ln.Close() })
@@ -271,12 +271,12 @@ func startLocalws(t *testing.T, opts Options) string {
 	stop := func() {
 		stopOnce.Do(func() {
 			cancel()
-			timer := time.NewTimer(time.Second)
+			timer := time.NewTimer(10 * time.Second)
 			defer timer.Stop()
 			select {
 			case <-done:
 			case <-timer.C:
-				stopErr = fmt.Errorf("localws did not stop within 1s")
+				stopErr = fmt.Errorf("localws did not stop within 10s")
 			}
 		})
 		if stopErr != nil && !stopReported {
@@ -290,10 +290,13 @@ func startLocalws(t *testing.T, opts Options) string {
 	}
 	t.Cleanup(stop)
 
-	client := &http.Client{Timeout: 250 * time.Millisecond}
+	// safety: a -race build of this package needs seconds to open its store
+	// and mount the controller, so the wait is sized for that, not for the
+	// tenth of a second an uninstrumented one takes.
+	client := &http.Client{Timeout: time.Second}
 	retry := time.NewTicker(20 * time.Millisecond)
 	defer retry.Stop()
-	deadline := time.NewTimer(3 * time.Second)
+	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	for {
 		select {
