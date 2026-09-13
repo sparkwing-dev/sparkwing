@@ -234,7 +234,7 @@ func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, no
 //
 // reseal sees the row as stored, which for an encrypted table means the
 // envelope in Secret.Value; returning an error abandons the rotation.
-func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (int, error) {
+func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error) {
 	if reseal == nil {
 		return 0, errors.New("secrets: reseal function required")
 	}
@@ -242,7 +242,7 @@ func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (str
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 
 	// safety: SQLite serves one connection, so the whole table materializes before any write on this transaction.
 	current, err := selectSecretsTx(ctx, tx)
@@ -268,7 +268,7 @@ func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (str
 	return len(current), nil
 }
 
-func selectSecretsTx(ctx context.Context, tx *storeTx) ([]Secret, error) {
+func selectSecretsTx(ctx context.Context, tx *storeTx) (secs []Secret, err error) {
 	rows, err := tx.QueryContext(ctx, `
         SELECT name, value, principal, repo, masked, shared, created_at, updated_at
           FROM secrets
@@ -276,7 +276,7 @@ func selectSecretsTx(ctx context.Context, tx *storeTx) ([]Secret, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	return scanSecretRows(rows)
 }
 
