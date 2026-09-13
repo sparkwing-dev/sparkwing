@@ -17,7 +17,7 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 ARG SPARKWING_IMAGE_REFRESH=local
 RUN test -n "${SPARKWING_IMAGE_REFRESH}" && \
     apk upgrade --no-cache && \
-    apk add --no-cache ca-certificates git git-daemon openssh-client
+    apk add --no-cache ca-certificates git git-daemon openssh-client procps-ng
 # safety: OpenSSH aborts when the Kubernetes uid has no passwd entry.
 RUN echo "sparkwing:x:1000:1000::/tmp:/sbin/nologin" >> /etc/passwd
 # safety: cache misses compile consumer pipelines with this matching toolchain.
