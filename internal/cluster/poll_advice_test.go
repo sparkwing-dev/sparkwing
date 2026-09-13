@@ -145,9 +145,10 @@ func TestRunExecutorLiveness_SurvivesAShedHeartbeat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
-	if err := runExecutorLiveness(ctx, "agent-1", 10*time.Millisecond,
-		staticHeadroom(), ctrl, discardLogger()); err != nil {
-		t.Fatalf("a shed heartbeat tore the membership down: %v", err)
+	err := runExecutorLiveness(ctx, "agent-1", 10*time.Millisecond,
+		staticHeadroom(), ctrl, discardLogger())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("liveness ended with %v; a shed heartbeat must not end it before its context does", err)
 	}
 	if got := ctrl.attempts(); got <= ctrl.shed {
 		t.Errorf("liveness stopped after %d attempts; it must keep beating past a shed one", got)
@@ -162,9 +163,10 @@ func TestRunExecutorLiveness_FailsOnceSilencePassesTheLeaseWindow(t *testing.T) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := runExecutorLiveness(ctx, "agent-1", 10*time.Millisecond,
-		staticHeadroom(), ctrl, discardLogger()); err == nil {
-		t.Fatal("liveness survived past its silence window; the controller has stopped seeing this agent")
+	err := runExecutorLiveness(ctx, "agent-1", 10*time.Millisecond,
+		staticHeadroom(), ctrl, discardLogger())
+	if err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("liveness ended with %v; past its silence window it must report the heartbeat failure", err)
 	}
 }
 

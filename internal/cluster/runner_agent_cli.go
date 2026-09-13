@@ -96,6 +96,8 @@ func runAgentMembershipLoop(ctx context.Context, cfg agentconfig.Config, member 
 	defer cancel()
 	errCh := make(chan error, member.MaxConcurrent+1)
 	go func() {
+		// safety: liveness ends only on a fatal heartbeat or a cancelled
+		// context, and the return below turns a cancelled one into a clean stop.
 		errCh <- runExecutorLiveness(runCtx, member.Name, interval, provider, ctrl, logger)
 	}()
 	instanceID := time.Now().UnixNano()
@@ -125,18 +127,15 @@ var maxExecutorHeartbeatSilence = 3 * time.Minute
 func runExecutorLiveness(ctx context.Context, name string, interval time.Duration, provider headroomProvider, ctrl executorMembershipClient, logger *slog.Logger) error {
 	lastOK := time.Now()
 	shed := newShedLog(shedWarnInterval)
-	for ctx.Err() == nil {
+	for {
 		sleepOrCancel(ctx, interval)
 		if ctx.Err() != nil {
-			break
+			return ctx.Err()
 		}
 		err := heartbeatExecutor(ctx, name, provider, ctrl, logger)
 		if err == nil {
 			lastOK = time.Now()
 			continue
-		}
-		if ctx.Err() != nil {
-			break
 		}
 		silence := time.Since(lastOK)
 		wait, transient := unavailableBackoff(err, 0)
@@ -152,7 +151,6 @@ func runExecutorLiveness(ctx context.Context, name string, interval time.Duratio
 		}
 		sleepOrCancel(ctx, wait)
 	}
-	return nil
 }
 
 func heartbeatExecutor(ctx context.Context, executorName string, provider headroomProvider, ctrl executorMembershipClient, logger *slog.Logger) error {
