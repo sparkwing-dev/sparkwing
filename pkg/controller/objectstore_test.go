@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
@@ -137,7 +138,7 @@ func freezeBucket(t *testing.T, limit objectguard.CeilingLimit, bytes, objects i
 	}
 	ceiling := limiter.Ceiling()
 	t.Cleanup(func() { ceiling.Configure(objectguard.CeilingConfig{}) })
-	ceiling.Configure(objectguard.CeilingConfig{Limit: limit})
+	ceiling.Configure(objectguard.CeilingConfig{Limit: limit, Reconcile: time.Hour})
 	ceiling.Observe(objectguard.Usage{Bytes: bytes, Objects: objects})
 	return ceiling
 }
@@ -226,6 +227,32 @@ func TestObjectStoreResetBreaker_ThawsAFrozenCeiling(t *testing.T) {
 	ceiling.Observe(objectguard.Usage{Bytes: 10, Objects: 9})
 	if !ceiling.Frozen() {
 		t.Error("the measurement after a thaw left a bucket over its ceiling writable")
+	}
+}
+
+func TestObjectStoreResetBreaker_RefusesAThawNothingWouldEnd(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	limiter, err := objectguard.Shared()
+	if err != nil {
+		t.Fatalf("shared limiter: %v", err)
+	}
+	ceiling := limiter.Ceiling()
+	t.Cleanup(func() { ceiling.Configure(objectguard.CeilingConfig{}) })
+	ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 1000}})
+	ceiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
+
+	resp, err := http.Post(base+"/api/v1/object-store/reset-breaker", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post reset-breaker: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("reset with no measurement scheduled got %d, want 409", resp.StatusCode)
+	}
+	if !ceiling.Frozen() {
+		t.Error("the refused thaw cleared the freeze anyway")
 	}
 }
 
