@@ -468,6 +468,9 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
 	}
 	runID, err := svc.RunNow(r.Context(), sched.ID)
 	if err != nil {
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("launch cron schedule: %w", err))
 		return
 	}

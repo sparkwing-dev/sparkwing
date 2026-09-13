@@ -423,3 +423,49 @@ func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {
 		t.Fatalf("armed_by = %q, want the arming principal", rows[0].ArmedBy)
 	}
 }
+
+// safety: run-now is a launch like any other, so a guard has to refuse it with
+// the same code every other surface answers.
+func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
+	f := newCronsFixture(t)
+	ctx := context.Background()
+	body := map[string]any{
+		"repo_url": cronTestRepoURL,
+		"branch":   "main",
+		"sha":      cronTestSHA,
+		"schedules": []map[string]any{
+			{"pipeline": "nightly", "cron": "0 3 * * *"},
+		},
+	}
+	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, body, http.StatusOK, nil)
+	rows, err := f.store.ListCronSchedules(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list schedules = %d rows, %v", len(rows), err)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-already", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed a run: %v", err)
+	}
+	if err := f.store.SetComputeLimit(ctx, store.ComputeLimitGlobalRunsPerHour, 1); err != nil {
+		t.Fatalf("set the guard: %v", err)
+	}
+
+	var refusal struct {
+		Code  string `json:"code"`
+		Limit string `json:"limit"`
+	}
+	f.call(http.MethodPost, "/api/v1/crons/"+rows[0].ID+"/run", f.writer, nil,
+		http.StatusTooManyRequests, &refusal)
+	if refusal.Code != controller.ComputeLimitRefusedCode ||
+		refusal.Limit != store.ComputeLimitGlobalRunsPerHour {
+		t.Fatalf("refusal = %+v, want the hourly guard named", refusal)
+	}
+	triggers, err := f.store.ListTriggers(ctx, store.TriggerFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list triggers: %v", err)
+	}
+	if len(triggers) != 0 {
+		t.Fatalf("the refused run-now left %d triggers behind", len(triggers))
+	}
+}

@@ -3971,6 +3971,8 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
 		return err
 	}
+	// safety: this transaction takes the compute-guard key alone; a later edit
+	// that adds the executor eligibility lock here must take it first.
 	if err := enforceNodesPerRunTx(ctx, tx, n.RunID, n.NodeID); err != nil {
 		return err
 	}

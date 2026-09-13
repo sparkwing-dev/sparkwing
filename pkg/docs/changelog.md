@@ -42,6 +42,9 @@ unlock.
   through, and the run records a `compute_limit_blocked` event that `sparkwing
   runs status` prints on its `guard:` line. A run past `max_run_seconds` loses
   its node on the next heartbeat with the failure reason `compute_limit`.
+  Upgrade note: a controller schedule armed before this release carries no
+  principal, so its launches meet only `max_global_runs_per_hour` until the
+  repository's next push records one.
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
