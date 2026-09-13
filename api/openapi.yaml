@@ -5168,6 +5168,31 @@ components:
         cleared:
           type: array
           items: {type: string}
+        ceiling: {$ref: "#/components/schemas/ObjectStoreCeiling"}
+        thawed: {type: boolean}
+    ObjectStoreCeiling:
+      x-sparkwing-go-type: internal/objectguard.CeilingState
+      type: object
+      description: The bucket-size ceiling, what the bucket holds, and whether object writes are frozen.
+      properties:
+        enforced: {type: boolean}
+        max_bytes: {type: integer}
+        max_objects: {type: integer}
+        warn_bytes: {type: integer}
+        warn_objects: {type: integer}
+        bytes: {type: integer}
+        objects: {type: integer}
+        counted_at: {type: string, format: date-time}
+        reconciled_at: {type: string, format: date-time}
+        reconcile_interval: {type: string}
+        warning: {type: boolean}
+        frozen: {type: boolean}
+        thawed: {type: boolean}
+        frozen_at: {type: string, format: date-time}
+        frozen_reason: {type: string}
+        freezes_total: {type: integer}
+        refused_total: {type: integer}
+        measurement_incomplete: {type: boolean}
     ObjectStoreBreakerClass:
       x-sparkwing-go-type: internal/objectguard.ClassState
       type: object

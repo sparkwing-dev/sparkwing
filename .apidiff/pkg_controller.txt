@@ -154,7 +154,11 @@ type ObjectStoreBreakerResponse struct {
 
 	Classes []objectguard.ClassState
 
+	Ceiling objectguard.CeilingState
+
 	Cleared []string
+
+	Thawed bool
 }
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 type PoolConfig struct {
@@ -218,6 +222,7 @@ func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
+func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server

@@ -282,7 +282,28 @@ type ObjectStoreBreaker struct {
 	Reset   string
 	Tripped bool
 	Classes []ObjectStoreClassState
+	Ceiling ObjectStoreCeiling
 	Cleared []string
+	Thawed  bool
+}
+type ObjectStoreCeiling struct {
+	Enforced     bool
+	MaxBytes     int64
+	MaxObjects   int64
+	WarnBytes    int64
+	WarnObjects  int64
+	Bytes        int64
+	Objects      int64
+	CountedAt    time.Time
+	ReconciledAt time.Time
+	Reconcile    string
+	Warning      bool
+	Frozen       bool
+	Thawed       bool
+	FrozenAt     time.Time
+	FrozenReason string
+	Freezes      uint64
+	Refused      uint64
 }
 type ObjectStoreClassState struct {
 	Class         string
