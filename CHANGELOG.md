@@ -28,6 +28,7 @@ unlock.
   peer daemons read as a machine holding none. The report carries them under
   `faulted_peers`. A peer that never answered the dial, or that ran out of
   doctor's budget, stays out of the report.
+
 ### Removed
 
 - **cli:** The retired `dashboard` noun reads as an unknown subcommand. The
