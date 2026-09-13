@@ -276,6 +276,13 @@ unlock.
 
 ### Fixed
 
+- **controller:** The executor offer routes `mark-ready`, `revoke-ready` and
+  `finalize-ready` take `runs.state` plus the live claim on the run's trigger,
+  the gate `auto-retry/reset` already carried. They required `admin`, so a
+  warm-pool dispatcher running on the documented runner scope set answered every
+  run with `403` at the first readiness call and the node stayed pending. A node
+  claim still cannot open a round, and an `admin` token reaches all three exactly
+  as before.
 - **wingd:** A nested run reattaching to a restored lease keeps its own
   identity. The `reattach` message carries an optional `run_id` and the daemon
   grants the member it names. Memberships previously went out in the lease's

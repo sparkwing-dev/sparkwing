@@ -98,18 +98,18 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs/stream` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.write` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `nodes.claim` |

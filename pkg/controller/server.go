@@ -868,12 +868,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))
 	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePrepareNodeClaim)))
-	// safety: readiness is a dispatcher decision; a runner token must not skip a node's dependencies.
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleMarkNodeReady)))
+	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
+	// to the live claim on the run's trigger rather than to the scope alone. A node claim
+	// never satisfies them, which keeps a runner from skipping its node's dependencies.
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleMarkNodeReady))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleResetNodeForAutoRetry))))
-	// safety: revoke-ready acts only on an unclaimed node, so claim ownership can never stand in for admin.
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRevokeNodeReady)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinalizeNodeReady)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleRevokeNodeReady))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinalizeNodeReady))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))

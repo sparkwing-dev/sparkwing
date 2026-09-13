@@ -690,7 +690,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Stamp `ready_at` so pool runners can claim the node.
       responses:
@@ -702,7 +702,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Atomically null `ready_at` iff the node is not claimed.
       responses:
@@ -3162,7 +3162,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Resolve an executor offer round or release coordinator fallback.
       description: |
