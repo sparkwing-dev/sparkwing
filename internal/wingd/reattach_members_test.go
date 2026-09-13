@@ -163,4 +163,14 @@ func TestReattachNamingARunTheLeaseDoesNotHoldIsRefused(t *testing.T) {
 	if len(c.members) != 0 {
 		t.Fatalf("a refused reattach took members %v", c.members)
 	}
+
+	for _, run := range []string{"parent-run", "child-run"} {
+		conn, peer := handlerConn(t, d)
+		grant := mustGrantFrame(t, callAndRead(t, peer, func() {
+			d.handleReattach(conn, &wingwire.Reattach{LeaseToken: token, RunID: run})
+		}))
+		if grant.RunID != run {
+			t.Fatalf("after the refusal %s was granted %q", run, grant.RunID)
+		}
+	}
 }

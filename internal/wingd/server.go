@@ -1228,6 +1228,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	reclaimed, claimed := d.claimUnreclaimedMemberLocked(leaseID, requestID, req.RunID)
 	if !claimed {
 		d.mu.Unlock()
+		d.cfg.logf("reattach: lease %s holds no unreclaimed member named %s", leaseID, req.RunID)
 		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "reattach", Policy: wingwire.PolicyFail}); err != nil {
 			d.cfg.logf("reattach: refuse %s: %v", req.RunID, err)
 		}
@@ -1257,14 +1258,17 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 // safety: a nested run's parent and child present the same lease token, so each
 // reattach claims one member; one connection owning them all releases the whole
 // lease when any one run ends. A client naming runID claims that member and
-// nothing else; a frame that names no run predates the field, and its members go
-// out in order after the lease's request.
+// nothing else; a frame that names no run leaves members going out in order
+// after the lease's request, which is what gave a child the parent's identity.
 func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID, runID string) (member string, claimed bool) {
 	remaining := d.reattachMembers[id]
 	if len(remaining) == 0 {
+		if runID != "" && runID != requestID {
+			return "", false
+		}
 		delete(d.reattachMembers, id)
 		delete(d.reattachWait, id)
-		return requestID, runID == "" || runID == requestID
+		return requestID, true
 	}
 	want := runID
 	if want == "" {
