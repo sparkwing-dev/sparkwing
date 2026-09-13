@@ -14,6 +14,8 @@ type Services struct {
 	CachePod string `json:"cache_pod,omitempty"`
 
 	Logs string `json:"logs,omitempty"`
+
+	Dashboard string `json:"dashboard,omitempty"`
 }
 
 var ErrNoController = errors.New("discovery: no controller URL configured")

@@ -27,16 +27,24 @@ type ServicesResponse struct {
 	// both on one mux) needs no announcement, because there the
 	// controller URL is already the right answer.
 	Logs string `json:"logs,omitempty"`
+
+	// Dashboard is the externally-reachable URL a human opens to watch
+	// this controller's runs. `sparkwing cloud connect` prints it, so an
+	// operator who has just connected reaches the web view without being
+	// told the address out of band. Empty when the controller wasn't
+	// started with --dashboard-url.
+	Dashboard string `json:"dashboard,omitempty"`
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, _ *http.Request) {
-	if s.cachePodURL == "" && s.logsURL == "" {
+	if s.cachePodURL == "" && s.logsURL == "" && s.dashboardURL == "" {
 		http.Error(w, "no services announced", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ServicesResponse{
-		CachePod: s.cachePodURL,
-		Logs:     s.logsURL,
+		CachePod:  s.cachePodURL,
+		Logs:      s.logsURL,
+		Dashboard: s.dashboardURL,
 	})
 }

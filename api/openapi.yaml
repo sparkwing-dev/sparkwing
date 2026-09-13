@@ -2539,13 +2539,13 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the cache and logs URLs a runner should use.
+      summary: Announce the cache, logs, and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
         started without the matching flag; a co-located laptop deployment
-        announces neither, because there the controller URL is already the
-        right answer.
+        announces none of them, because there the controller URL is already
+        the right answer.
       responses:
         "200":
           description: The announced URLs.
@@ -2557,6 +2557,7 @@ paths:
                 properties:
                   cache_pod: {type: string}
                   logs: {type: string}
+                  dashboard: {type: string}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: This controller announces no services.}
 
