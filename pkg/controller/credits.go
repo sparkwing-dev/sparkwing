@@ -246,7 +246,10 @@ func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
 		return
 	}
 	s.settleNodeLedger(r, runID, nodeID, settlement)
-	if settlement.Metering == store.MeteringFree {
+	// safety: an open window means the ledger priced this node as cloud work,
+	// whatever the credential says now, so a token un-metered mid-run is not
+	// counted under both placements.
+	if settlement.Metering == store.MeteringFree && !settlement.ChargeWindowOpen {
 		addLocalNodeSeconds(settlement.Seconds)
 	}
 }

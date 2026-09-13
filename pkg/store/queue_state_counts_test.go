@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -142,13 +143,74 @@ func TestCreditLedgerTotals_SettledSecondsNeverFall(t *testing.T) {
 	assertSettledSecondsNeverFall(t, storetest.Open(t))
 }
 
-// The three reads behind the figure must agree with each other, and only
-// Postgres can disagree: its default isolation takes a snapshot per statement,
-// so a claim landing between the charge sum and the reservation sum would be
-// counted by one and not the other. This run needs a server; without one the
-// SQLite run above is the only coverage.
-func TestCreditLedgerTotals_SettledSecondsNeverFallOnPostgres(t *testing.T) {
-	assertSettledSecondsNeverFall(t, storetest.OpenPostgres(t))
+// This is the guard for the isolation level beginSnapshotReadTx names. Only
+// Postgres can disagree with itself: under its default isolation each
+// statement takes its own snapshot, so a claim landing between the charge sum
+// and the reservation sum is counted by one and not the other, and the figure
+// drops by a reservation. A sequential run cannot see that, so this one samples
+// while claims and finishes land. Reverting the isolation reds it. The run
+// needs a server; without one the SQLite test above is the only coverage.
+func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgres(t *testing.T) {
+	s := storetest.OpenPostgres(t)
+	ctx := context.Background()
+
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100_000_000_000, "invoice", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	claimant := meteredClaimant(t, s, "pool")
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "run-conc", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	churn, stop := context.WithCancel(ctx)
+	defer stop()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; churn.Err() == nil; i++ {
+			node := "node-" + strconv.Itoa(i)
+			if err := s.CreateNode(churn, store.Node{
+				RunID: "run-conc", NodeID: node, Status: "pending",
+			}); err != nil {
+				return
+			}
+			if err := s.MarkNodeReady(churn, "run-conc", node); err != nil {
+				return
+			}
+			if _, err := s.ClaimNextReadyNode(churn, claimant, "holder-"+strconv.Itoa(i), time.Minute, nil); err != nil {
+				return
+			}
+			if _, err := s.FinalizeNodeCredits(churn, "run-conc", node, claimant.TokenPrefix, time.Now()); err != nil {
+				return
+			}
+		}
+	}()
+
+	high := int64(-1)
+	deadline := time.Now().Add(2 * time.Second)
+	samples := 0
+	for time.Now().Before(deadline) {
+		totals, err := s.CreditLedgerTotals(ctx)
+		if err != nil {
+			t.Fatalf("CreditLedgerTotals: %v", err)
+		}
+		if totals.SettledSeconds < high {
+			t.Fatalf("settled seconds fell from %d to %d while claims were landing",
+				high, totals.SettledSeconds)
+		}
+		if totals.SettledSeconds > high {
+			high = totals.SettledSeconds
+		}
+		samples++
+	}
+	stop()
+	<-done
+
+	if samples < 10 {
+		t.Errorf("took %d samples in two seconds, too few to catch a torn read", samples)
+	}
 }
 
 func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
