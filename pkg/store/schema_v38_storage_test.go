@@ -24,8 +24,11 @@ func TestSchemaV38_UpgradeFromAStoreStampedAt37(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 	for _, stmt := range []string{
-		`DROP TABLE storage_usage`,
+		`DROP TABLE storage_run_usage`,
+		`DROP TABLE storage_month_usage`,
 		`DROP TABLE storage_quotas`,
+		`DROP INDEX idx_events_ts`,
+		`DROP INDEX idx_node_metrics_ts`,
 	} {
 		if _, err := seeded.DB().Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
@@ -54,16 +57,19 @@ func TestSchemaV38_UpgradeFromAStoreStampedAt37(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write a quota after the upgrade: %v", err)
 	}
-	now := time.Now().UTC()
-	if err := upgraded.ReserveStorage(ctx, "alice", "r1", 1024, 1, now); err != nil {
-		t.Fatalf("reserve after the upgrade: %v", err)
+	if err := upgraded.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "n1", Status: "pending"}); err != nil {
+		t.Fatalf("create a node after the upgrade: %v", err)
 	}
-	usage, err := upgraded.StorageUsageFor(ctx, "alice", "r1", now)
+	if _, err := upgraded.AppendEventCharged(ctx, "alice", "r1", "n1", "note", make([]byte, 32)); err != nil {
+		t.Fatalf("charge after the upgrade: %v", err)
+	}
+	month := store.StorageMonth(time.Now().UTC())
+	usage, err := upgraded.StorageUsageFor(ctx, "alice", "r1", month)
 	if err != nil {
 		t.Fatalf("usage after the upgrade: %v", err)
 	}
-	if usage.RunBytes != 1024 || usage.RunObjects != 1 {
-		t.Fatalf("usage = %+v, want the reserved kilobyte and object", usage)
+	if usage.RunBytes != 32 || usage.MonthBytes != 32 {
+		t.Fatalf("usage = %+v, want the charged 32 bytes", usage)
 	}
 	if _, err := upgraded.GetRun(ctx, "r1"); err != nil {
 		t.Fatalf("the run seeded before the upgrade: %v", err)

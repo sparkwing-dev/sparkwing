@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,11 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID string) {
+func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID, status string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
-		ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now().UTC(),
+		ID: runID, Pipeline: "p", Status: status, StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create run %s: %v", runID, err)
 	}
@@ -47,7 +48,7 @@ func countRows(t *testing.T, st *store.Store, query string) int64 {
 func TestSweepRetentionRemovesOnlyRowsPastTheWindow(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	seedRunWithNode(t, st, "r1", "n1")
+	seedRunWithNode(t, st, "r1", "n1", "success")
 	now := time.Now().UTC()
 
 	appendEventAt(t, st, "r1", "n1", "old", now.Add(-40*24*time.Hour))
@@ -87,10 +88,66 @@ func TestSweepRetentionRemovesOnlyRowsPastTheWindow(t *testing.T) {
 	}
 }
 
+func TestSweepRetentionSparesARunThatIsStillGoing(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	seedRunWithNode(t, st, "running", "n1", "running")
+	seedRunWithNode(t, st, "finished", "n1", "success")
+	now := time.Now().UTC()
+	appendEventAt(t, st, "running", "n1", "old", now.Add(-40*24*time.Hour))
+	appendEventAt(t, st, "finished", "n1", "old", now.Add(-40*24*time.Hour))
+	if err := st.SetStorageSettings(ctx, store.StorageSettings{EventRetentionDays: 30}); err != nil {
+		t.Fatalf("set settings: %v", err)
+	}
+	swept, err := st.SweepRetention(ctx, now)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.Events != 1 {
+		t.Fatalf("swept %d events, want only the finished run's", swept.Events)
+	}
+	left, err := st.ListEventsAfter(ctx, "running", 0, 0)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(left) != 1 {
+		t.Fatalf("the running run kept %d events, want 1", len(left))
+	}
+}
+
+func TestSweepRetentionRemovesMoreThanOneBatch(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	seedRunWithNode(t, st, "r1", "n1", "success")
+	now := time.Now().UTC()
+	old := now.Add(-40 * 24 * time.Hour).UnixNano()
+	rows := store.RetentionSweepBatch + 7
+	for i := range rows {
+		if _, err := st.DB().Exec(storetest.Rebind(st,
+			`INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
+             VALUES (?, ?, ?, 1, 1, 0)`), "r1", "n1", old+int64(i)); err != nil {
+			t.Fatalf("seed metric %d: %v", i, err)
+		}
+	}
+	if err := st.SetStorageSettings(ctx, store.StorageSettings{NodeMetricRetentionDays: 30}); err != nil {
+		t.Fatalf("set settings: %v", err)
+	}
+	swept, err := st.SweepRetention(ctx, now)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.NodeMetrics != int64(rows) {
+		t.Fatalf("swept %d metric rows, want %d across more than one batch", swept.NodeMetrics, rows)
+	}
+	if got := countRows(t, st, `SELECT COUNT(*) FROM node_metrics`); got != 0 {
+		t.Fatalf("metric rows left = %d, want 0", got)
+	}
+}
+
 func TestSweepRetentionLeavesTheRunAndItsForeignKeysIntact(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	seedRunWithNode(t, st, "r1", "n1")
+	seedRunWithNode(t, st, "r1", "n1", "success")
 	now := time.Now().UTC()
 	appendEventAt(t, st, "r1", "n1", "old", now.Add(-40*24*time.Hour))
 	if err := st.AddNodeMetricSample(ctx, "r1", "n1", store.MetricSample{
@@ -128,7 +185,7 @@ func TestSweepRetentionLeavesTheRunAndItsForeignKeysIntact(t *testing.T) {
 func TestSweepRetentionRemovesNothingWithoutAWindow(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	seedRunWithNode(t, st, "r1", "n1")
+	seedRunWithNode(t, st, "r1", "n1", "success")
 	now := time.Now().UTC()
 	appendEventAt(t, st, "r1", "n1", "ancient", now.Add(-9999*time.Hour))
 	swept, err := st.SweepRetention(ctx, now)
@@ -143,20 +200,45 @@ func TestSweepRetentionRemovesNothingWithoutAWindow(t *testing.T) {
 	}
 }
 
-func TestDatabaseSizeReportsBytes(t *testing.T) {
+func TestDatabaseSizeFallsAfterASweep(t *testing.T) {
 	st := storetest.Open(t)
-	size, err := st.DatabaseSize(context.Background())
+	ctx := context.Background()
+	seedRunWithNode(t, st, "r1", "n1", "success")
+	now := time.Now().UTC()
+	old := now.Add(-40 * 24 * time.Hour).UnixNano()
+	for i := range 20000 {
+		if _, err := st.DB().Exec(storetest.Rebind(st,
+			`INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
+             VALUES (?, ?, ?, 1, 1, 0)`), "r1", "n1", old+int64(i)); err != nil {
+			t.Fatalf("seed metric %d: %v", i, err)
+		}
+	}
+	before, err := st.DatabaseSize(ctx)
 	if err != nil {
-		t.Fatalf("size: %v", err)
+		t.Fatalf("size before: %v", err)
 	}
-	if size.TotalBytes <= 0 {
-		t.Fatalf("total bytes = %d, want a positive size", size.TotalBytes)
+	if before.TotalBytes <= 0 || before.SampledAt.IsZero() {
+		t.Fatalf("size before = %+v, want a positive size and a sample time", before)
 	}
-	if size.SampledAt.IsZero() {
-		t.Fatal("the sample carries no time")
+	if err := st.SetStorageSettings(ctx, store.StorageSettings{NodeMetricRetentionDays: 30}); err != nil {
+		t.Fatalf("set settings: %v", err)
 	}
-	if st.Dialect() == store.DialectPostgres && len(size.Tables) == 0 {
-		t.Fatal("postgres reported no per-table sizes")
+	if _, err := st.SweepRetention(ctx, now); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	after, err := st.DatabaseSize(ctx)
+	if err != nil {
+		t.Fatalf("size after: %v", err)
+	}
+	if st.Dialect() == store.DialectPostgres {
+		if len(after.Tables) == 0 {
+			t.Fatal("postgres reported no per-table sizes")
+		}
+		return
+	}
+	if after.TotalBytes >= before.TotalBytes {
+		t.Fatalf("size after the sweep = %d, want below %d; an alarm raised before a sweep would never clear",
+			after.TotalBytes, before.TotalBytes)
 	}
 }
 
@@ -171,11 +253,9 @@ func TestStorageSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("a fresh store reads %+v, want retention off and no default tier", zero)
 	}
 	want := store.StorageSettings{
-		EventRetentionDays:      store.CloudEventRetentionDays,
-		NodeMetricRetentionDays: store.CloudNodeMetricRetentionDays,
-		BackupRetentionDays:     store.CloudBackupRetentionDays,
+		EventRetentionDays:      30,
+		NodeMetricRetentionDays: 14,
 		DatabaseAlarmBytes:      1 << 30,
-		BackupAlarmBytes:        2 << 30,
 		DefaultTier:             store.StorageTierFree,
 	}
 	if err := st.SetStorageSettings(ctx, want); err != nil {
@@ -232,30 +312,34 @@ func TestStorageQuotaFallsBackToTheDefaultTier(t *testing.T) {
 	if len(rows) != 1 || rows[0].Principal != "alice" {
 		t.Fatalf("quota rows = %+v, want one for alice", rows)
 	}
+	for _, bad := range []string{"", "has space", "semi;colon"} {
+		if err := st.SetStorageQuota(ctx, store.StorageQuota{Principal: bad, Tier: store.StorageTierFree}); err == nil {
+			t.Fatalf("principal %q was accepted", bad)
+		}
+	}
 }
 
-func TestReserveStorageRefusesEachLimit(t *testing.T) {
-	now := time.Now().UTC()
+func TestChargedEventRefusesEachLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		quota   store.StorageQuota
-		bytes   int64
-		objects int64
+		payload int
 		limit   string
 	}{
-		{"bytes per run", store.StorageQuota{Principal: "alice", MaxBytesPerRun: 100}, 101, 0, store.StorageLimitBytesPerRun},
-		{"bytes per month", store.StorageQuota{Principal: "alice", MaxBytesPerMonth: 100}, 101, 0, store.StorageLimitBytesPerMonth},
-		{"objects per run", store.StorageQuota{Principal: "alice", MaxObjectsPerRun: 2}, 0, 3, store.StorageLimitObjectsPerRun},
+		{"bytes per run", store.StorageQuota{Principal: "alice", MaxBytesPerRun: 8}, 9, store.StorageLimitBytesPerRun},
+		{"bytes per month", store.StorageQuota{Principal: "alice", MaxBytesPerMonth: 8}, 9, store.StorageLimitBytesPerMonth},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := storetest.Open(t)
 			ctx := context.Background()
+			seedRunWithNode(t, st, "r1", "n1", "running")
 			if err := st.SetStorageQuota(ctx, tc.quota); err != nil {
 				t.Fatalf("set quota: %v", err)
 			}
-			err := st.ReserveStorage(ctx, "alice", "r1", tc.bytes, tc.objects, now)
+			payload := make([]byte, tc.payload)
+			_, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "note", payload)
 			if !errors.Is(err, store.ErrStorageQuota) {
-				t.Fatalf("reserve error = %v, want a quota refusal", err)
+				t.Fatalf("charge error = %v, want a quota refusal", err)
 			}
 			var refusal *store.StorageQuotaError
 			if !errors.As(err, &refusal) {
@@ -264,64 +348,171 @@ func TestReserveStorageRefusesEachLimit(t *testing.T) {
 			if refusal.Limit != tc.limit {
 				t.Fatalf("refusal names %q, want %q", refusal.Limit, tc.limit)
 			}
-			usage, uerr := st.StorageUsageFor(ctx, "alice", "r1", now)
+			if got := countRows(t, st, `SELECT COUNT(*) FROM events`); got != 0 {
+				t.Fatalf("a refused event wrote %d rows, want 0", got)
+			}
+			usage, uerr := st.StorageUsageFor(ctx, "alice", "r1", store.StorageMonth(time.Now().UTC()))
 			if uerr != nil {
 				t.Fatalf("usage: %v", uerr)
 			}
-			if usage.RunBytes != 0 || usage.RunObjects != 0 {
-				t.Fatalf("a refused write was counted: %+v", usage)
+			if usage.RunBytes != 0 || usage.MonthBytes != 0 {
+				t.Fatalf("a refused write was charged: %+v", usage)
 			}
 		})
 	}
 }
 
-func TestReserveStorageAccumulatesUnderTheLimit(t *testing.T) {
+func TestChargedManifestRefusesTheObjectLimit(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
+	seedRunWithNode(t, st, "r1", "n1", "running")
 	if err := st.SetStorageQuota(ctx, store.StorageQuota{
-		Principal: "alice", MaxBytesPerRun: 100, MaxBytesPerMonth: 150, MaxObjectsPerRun: 5,
+		Principal: "alice", MaxObjectsPerRun: 1,
 	}); err != nil {
 		t.Fatalf("set quota: %v", err)
 	}
-	for range 2 {
-		if err := st.ReserveStorage(ctx, "alice", "r1", 40, 1, now); err != nil {
-			t.Fatalf("reserve: %v", err)
-		}
+	if err := st.SetNodeArtifactManifestCharged(ctx, "alice", "r1", "n1", "sha256:a"); err != nil {
+		t.Fatalf("the first manifest: %v", err)
 	}
-	usage, err := st.StorageUsageFor(ctx, "alice", "r1", now)
+	err := st.SetNodeArtifactManifestCharged(ctx, "alice", "r1", "n1", "sha256:b")
+	var refusal *store.StorageQuotaError
+	if !errors.As(err, &refusal) || refusal.Limit != store.StorageLimitObjectsPerRun {
+		t.Fatalf("the second manifest returned %v, want an objects-per-run refusal", err)
+	}
+	node, err := st.GetNode(ctx, "r1", "n1")
 	if err != nil {
-		t.Fatalf("usage: %v", err)
+		t.Fatalf("get node: %v", err)
 	}
-	if usage.RunBytes != 80 || usage.RunObjects != 2 || usage.MonthBytes != 80 {
-		t.Fatalf("usage = %+v, want 80 bytes and 2 objects", usage)
-	}
-	if err := st.ReserveStorage(ctx, "alice", "r1", 40, 0, now); !errors.Is(err, store.ErrStorageQuota) {
-		t.Fatalf("the third write returned %v, want a per-run refusal", err)
-	}
-	if err := st.ReserveStorage(ctx, "alice", "r2", 40, 0, now); err != nil {
-		t.Fatalf("a second run under the month limit: %v", err)
-	}
-	if err := st.ReserveStorage(ctx, "alice", "r3", 40, 0, now); !errors.Is(err, store.ErrStorageQuota) {
-		t.Fatalf("a third run past the month limit returned %v, want a refusal", err)
-	}
-	top, err := st.TopStorageTeams(ctx, store.StorageMonth(now), 5)
-	if err != nil {
-		t.Fatalf("top teams: %v", err)
-	}
-	if len(top) != 1 || top[0].Principal != "alice" || top[0].Bytes != 120 || top[0].Runs != 2 {
-		t.Fatalf("top teams = %+v, want alice with 120 bytes over 2 runs", top)
+	if node.ArtifactManifest != "sha256:a" {
+		t.Fatalf("manifest = %q, want the first one; the refused write was committed", node.ArtifactManifest)
 	}
 }
 
-func TestReserveStorageWritesNothingWithoutAQuota(t *testing.T) {
+func TestChargedWriteAccumulatesUnderTheLimit(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
-	if err := st.ReserveStorage(ctx, "alice", "r1", 1<<30, 1000, now); err != nil {
-		t.Fatalf("reserve without a quota: %v", err)
+	seedRunWithNode(t, st, "r1", "n1", "running")
+	seedRunWithNode(t, st, "r2", "n1", "running")
+	month := store.StorageMonth(time.Now().UTC())
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{
+		Principal: "alice", MaxBytesPerRun: 40, MaxBytesPerMonth: 60,
+	}); err != nil {
+		t.Fatalf("set quota: %v", err)
 	}
-	if got := countRows(t, st, `SELECT COUNT(*) FROM storage_usage`); got != 0 {
-		t.Fatalf("usage rows = %d, want none while quotas are off", got)
+	payload := make([]byte, 16)
+	for i := range 2 {
+		if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", fmt.Sprintf("note%d", i), payload); err != nil {
+			t.Fatalf("charge %d: %v", i, err)
+		}
+	}
+	usage, err := st.StorageUsageFor(ctx, "alice", "r1", month)
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if usage.RunBytes != 32 || usage.MonthBytes != 32 {
+		t.Fatalf("usage = %+v, want 32 bytes charged to the run and the month", usage)
+	}
+	if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "third", payload); !errors.Is(err, store.ErrStorageQuota) {
+		t.Fatalf("the third write on r1 returned %v, want a per-run refusal", err)
+	}
+	if _, err := st.AppendEventCharged(ctx, "alice", "r2", "n1", "first", payload); err != nil {
+		t.Fatalf("a second run under the month limit: %v", err)
+	}
+	if _, err := st.AppendEventCharged(ctx, "alice", "r2", "n1", "second", payload); !errors.Is(err, store.ErrStorageQuota) {
+		t.Fatalf("a write past the month limit returned %v, want a refusal", err)
+	}
+	top, err := st.TopStorageTeams(ctx, month, 5)
+	if err != nil {
+		t.Fatalf("top teams: %v", err)
+	}
+	if len(top) != 1 || top[0].Principal != "alice" || top[0].Bytes != 48 {
+		t.Fatalf("top teams = %+v, want alice with 48 bytes", top)
+	}
+}
+
+func TestChargedWriteIsBilledToTheMonthItIsWrittenIn(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	seedRunWithNode(t, st, "r1", "n1", "running")
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{
+		Principal: "alice", MaxBytesPerMonth: 64,
+	}); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "note", make([]byte, 16)); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	thisMonth, err := st.StorageUsageFor(ctx, "alice", "r1", store.StorageMonth(now))
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if thisMonth.MonthBytes != 16 {
+		t.Fatalf("this month = %d bytes, want 16", thisMonth.MonthBytes)
+	}
+	last, err := st.StorageUsageFor(ctx, "alice", "r1", store.StorageMonth(now.AddDate(0, -1, 0)))
+	if err != nil {
+		t.Fatalf("usage for the previous month: %v", err)
+	}
+	if last.MonthBytes != 0 {
+		t.Fatalf("the previous month reads %d bytes, want 0", last.MonthBytes)
+	}
+}
+
+func TestChargedRunUsageCascadesWithItsRun(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	seedRunWithNode(t, st, "r1", "n1", "running")
+	month := store.StorageMonth(time.Now().UTC())
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{
+		Principal: "alice", MaxBytesPerRun: 1024, MaxBytesPerMonth: 1024,
+	}); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "note", make([]byte, 32)); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if err := st.DeleteRun(ctx, "r1"); err != nil {
+		t.Fatalf("delete run: %v", err)
+	}
+	if got := countRows(t, st, `SELECT COUNT(*) FROM storage_run_usage`); got != 0 {
+		t.Fatalf("per-run usage rows after the run was deleted = %d, want 0", got)
+	}
+	usage, err := st.StorageUsageFor(ctx, "alice", "", month)
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if usage.MonthBytes != 32 {
+		t.Fatalf("the month total reads %d, want 32; a deleted run must not refund the month", usage.MonthBytes)
+	}
+}
+
+func TestChargedWriteCountsNothingWithoutAQuota(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	seedRunWithNode(t, st, "r1", "n1", "running")
+	if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "note", make([]byte, 4096)); err != nil {
+		t.Fatalf("charge without a quota: %v", err)
+	}
+	for _, table := range []string{"storage_run_usage", "storage_month_usage"} {
+		if got := countRows(t, st, `SELECT COUNT(*) FROM `+table); got != 0 {
+			t.Fatalf("%s holds %d rows, want none while quotas are off", table, got)
+		}
+	}
+}
+
+func TestChargedWriteRefusesARunThatDoesNotExist(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{
+		Principal: "alice", MaxBytesPerRun: 1024,
+	}); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	if _, err := st.AppendEventCharged(ctx, "alice", "ghost", "", "note", make([]byte, 8)); err == nil {
+		t.Fatal("a charge against a run that does not exist was accepted")
+	}
+	if got := countRows(t, st, `SELECT COUNT(*) FROM storage_run_usage`); got != 0 {
+		t.Fatalf("per-run usage rows = %d, want none for a run that does not exist", got)
 	}
 }

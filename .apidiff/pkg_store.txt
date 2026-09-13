@@ -91,9 +91,6 @@ type ClaimPlacement struct {
 }
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
-const CloudBackupRetentionDays = 30
-const CloudEventRetentionDays = 30
-const CloudNodeMetricRetentionDays = 14
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
@@ -504,7 +501,6 @@ const FailureVerify = "verify"
 func FormatCredits(micro int64) string
 var FreeTierQuota = StorageQuota{
 	Tier:             StorageTierFree,
-	RetentionDays:    14,
 	MaxBytesPerRun:   10 << 20,
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
@@ -698,7 +694,6 @@ func OpenReadOnly(path string) (*Store, error)
 func OpenReadOnlySnapshot(path string) (*Store, error)
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
-	RetentionDays:    90,
 	MaxBytesPerRun:   1 << 30,
 	MaxBytesPerMonth: 100 << 30,
 	MaxObjectsPerRun: 100_000,
@@ -795,7 +790,9 @@ type RetentionSweep struct {
 	NodeMetrics      int64
 	EventCutoff      time.Time
 	NodeMetricCutoff time.Time
+	Reclaimed        bool
 }
+const RetentionSweepBatch = 5000
 const RetrySourceAuto = "auto"
 const RetrySourceManual = "manual"
 type Run struct {
@@ -921,7 +918,6 @@ func StorageMonth(t time.Time) string
 type StorageQuota struct {
 	Principal        string
 	Tier             string
-	RetentionDays    int64
 	MaxBytesPerRun   int64
 	MaxBytesPerMonth int64
 	MaxObjectsPerRun int64
@@ -940,9 +936,7 @@ func (e *StorageQuotaError) Unwrap() error
 type StorageSettings struct {
 	EventRetentionDays      int64
 	NodeMetricRetentionDays int64
-	BackupRetentionDays     int64
 	DatabaseAlarmBytes      int64
-	BackupAlarmBytes        int64
 
 	DefaultTier string
 }
@@ -952,7 +946,6 @@ type StorageTeamUsage struct {
 	Month     string
 	Bytes     int64
 	Objects   int64
-	Runs      int64
 }
 const StorageTierFree = "free"
 const StorageTierPaid = "paid"
@@ -974,6 +967,9 @@ func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
+func (s *Store) AppendEventCharged(
+	ctx context.Context, principal, runID, nodeID, kind string, payload []byte,
+) (_ int64, err error)
 func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
@@ -1153,9 +1149,6 @@ func (s *Store) RequirementSkew(ctx context.Context) (*SkewError, error)
 func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error)
 func (s *Store) Requirements(ctx context.Context) ([]string, error)
 func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, error)
-func (s *Store) ReserveStorage(
-	ctx context.Context, principal, runID string, bytes, objects int64, now time.Time,
-) (err error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetExecutorLiveness(ctx context.Context) error
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
@@ -1181,6 +1174,9 @@ func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLoc
 func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
+func (s *Store) SetNodeArtifactManifestCharged(
+	ctx context.Context, principal, runID, nodeID, manifestDigest string,
+) (err error)
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
@@ -1194,7 +1190,7 @@ func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StorageQuotaFor(ctx context.Context, principal string) (StorageQuota, error)
 func (s *Store) StorageSettings(ctx context.Context) (StorageSettings, error)
-func (s *Store) StorageUsageFor(ctx context.Context, principal, runID string, now time.Time) (StorageUsage, error)
+func (s *Store) StorageUsageFor(ctx context.Context, principal, runID, month string) (StorageUsage, error)
 func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSweep, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
@@ -1308,6 +1304,7 @@ type User struct {
 	LastLoginAt *time.Time
 }
 func ValidCreditGrantKind(kind string) bool
+func ValidStoragePrincipal(name string) bool
 func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
 const WaiterCached WaiterStatus = "cached"
