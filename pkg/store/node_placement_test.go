@@ -433,7 +433,7 @@ func TestClaimPlacement_HeldPollCostsOneRead(t *testing.T) {
 		}
 	}
 	perPoll := time.Since(before) / 20
-	if perPoll > 15*time.Millisecond {
+	if perPoll > 15*time.Millisecond*raceBudgetScale {
 		t.Fatalf("a held poll over %d queued nodes took %v, which reads as a write per held node",
 			store.ClaimScanBatchForTest, perPoll)
 	}
