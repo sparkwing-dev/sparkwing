@@ -69,7 +69,9 @@ type BudgetError struct {
 
 func (e *BudgetError) Error() string {
 	return fmt.Sprintf(
-		"object-store %s budget exceeded: the per-%s limit of %d %s requests is spent, so the breaker tripped at %s and refuses further %s requests; clear it with `sparkwing cluster object-store reset-breaker` or raise SPARKWING_OBJECT_STORE_%s_PER_%s",
+		"object-store %s budget exceeded: the per-%s limit of %d %s requests is spent, so the breaker tripped at %s and refuses further %s requests. "+
+			"The budget belongs to this process alone: let it through with SPARKWING_OBJECT_STORE_BREAKER=off, or raise SPARKWING_OBJECT_STORE_%s_PER_%s. "+
+			"On a controller, `sparkwing cluster object-store reset-breaker --profile NAME` clears that process without restarting it",
 		e.Class, e.Window, e.Limit, e.Class,
 		e.Tripped.UTC().Format(time.RFC3339), e.Class,
 		upper(string(e.Class)), upper(string(e.Window)),
@@ -77,6 +79,11 @@ func (e *BudgetError) Error() string {
 }
 
 func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
+
+// RetryableError reports the refusal as final. The SDK retryer asks
+// before re-sending, and a budget that is spent is not going to be
+// unspent by another attempt.
+func (e *BudgetError) RetryableError() bool { return false }
 
 func upper(s string) string {
 	out := []byte(s)
@@ -272,10 +279,16 @@ func (l *Limiter) limitFor(st *classCounters, w Window) int {
 	return st.limit.PerMinute
 }
 
+// safety: a minute trip always clears on the minute roll, because the day budget
+// still bounds the total and one burst must not fail writes closed until
+// midnight. A day trip clears on the day roll only when configured to.
 func (l *Limiter) rollWindows(st *classCounters, now time.Time) {
 	if st.minuteStart.IsZero() || now.Sub(st.minuteStart) >= time.Minute {
 		st.minuteStart = now.Truncate(time.Minute)
 		st.minuteUsed = 0
+		if st.tripped && st.trippedWindow == WindowMinute {
+			st.clearTrip()
+		}
 	}
 	day := now.Truncate(24 * time.Hour)
 	if st.dayStart.IsZero() {
@@ -286,19 +299,31 @@ func (l *Limiter) rollWindows(st *classCounters, now time.Time) {
 		st.dayStart = day
 		st.dayUsed = 0
 		if l.reset == TripResetDay {
-			st.tripped = false
-			st.trippedWindow = ""
+			st.clearTrip()
 		}
 	}
 }
 
+func (st *classCounters) clearTrip() {
+	st.tripped = false
+	st.trippedWindow = ""
+	st.trippedAt = time.Time{}
+}
+
 // Reset clears every class's tripped state and both window counters,
-// which is what the operator reset verb performs. Lifetime totals and
-// the trip count survive so the metrics keep their history.
-func (l *Limiter) Reset() {
+// which is what the operator reset verb performs. It returns the classes
+// that were tripped. Lifetime totals and the trip count survive so the
+// metrics keep their history.
+func (l *Limiter) Reset() []Class {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var cleared []Class
 	for _, c := range Classes() {
-		l.ResetClass(c)
+		if l.resetLocked(c) {
+			cleared = append(cleared, c)
+		}
 	}
+	return cleared
 }
 
 // ResetClass clears one class's tripped state and window counters. It
@@ -306,14 +331,16 @@ func (l *Limiter) Reset() {
 func (l *Limiter) ResetClass(c Class) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.resetLocked(c)
+}
+
+func (l *Limiter) resetLocked(c Class) bool {
 	st, ok := l.counters[c]
 	if !ok {
 		return false
 	}
 	was := st.tripped
-	st.tripped = false
-	st.trippedWindow = ""
-	st.trippedAt = time.Time{}
+	st.clearTrip()
 	st.minuteUsed = 0
 	st.dayUsed = 0
 	return was

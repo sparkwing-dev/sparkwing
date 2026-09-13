@@ -526,9 +526,11 @@ func (b *Backend) flushLoop() {
 			return
 		case <-t.C:
 		}
-		attempted, failed := b.flushAllDirty()
+		_, failed := b.flushAllDirty()
 		b.evictIdleReads(time.Now().Add(-b.readTTL))
-		if attempted == 0 || failed < attempted {
+		// safety: one healthy run must not pay for the rest, so the cadence
+		// returns only once every dirty run landed.
+		if failed == 0 {
 			stalled = 0
 			t.Reset(b.flushInterval)
 			continue
@@ -1266,6 +1268,11 @@ func RunIDFromStateKey(key string) (string, bool) {
 
 func isTransient(err error) bool {
 	if err == nil {
+		return false
+	}
+	// safety: a spent request budget is the one failure that must never queue.
+	// Staging it would turn a guard against a runaway loop into a buffer for one.
+	if errors.Is(err, objectguard.ErrBudgetExceeded) {
 		return false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

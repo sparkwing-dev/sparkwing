@@ -67,6 +67,7 @@ type Outbox struct {
 	maxRows     int
 	maxAttempts int
 	backoff     objectguard.Backoff
+	stallPath   string
 	logger      *slog.Logger
 
 	mu       sync.Mutex
@@ -157,6 +158,7 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		maxBackoff = DefaultOutboxReplayMaxBackoff
 	}
 	o.backoff = objectguard.Backoff{Base: o.interval, Max: maxBackoff}
+	o.stallPath = "s3 state outbox replay (" + path + ")"
 	o.wg.Add(1)
 	go o.drainLoop()
 	return o, nil
@@ -346,7 +348,7 @@ func (o *Outbox) drainLoop() {
 	defer o.wg.Done()
 	t := time.NewTimer(o.interval)
 	defer t.Stop()
-	failures := 0
+	failures, exhausted := 0, false
 	for {
 		select {
 		case <-o.stopCh:
@@ -356,14 +358,23 @@ func (o *Outbox) drainLoop() {
 		head, err := o.drain(context.Background())
 		o.reportDrainResult(head, err)
 		if err == nil {
-			failures = 0
+			if exhausted {
+				o.clearReplayExhausted()
+			}
+			failures, exhausted = 0, false
 			t.Reset(o.interval)
 			continue
 		}
 		failures++
 		if o.maxAttempts > 0 && failures >= o.maxAttempts {
-			o.reportReplayExhausted(head, failures, err)
-			return
+			if !exhausted {
+				exhausted = true
+				o.reportReplayExhausted(head, failures, err)
+			}
+			// safety: the ceiling, not a return, because a bucket that comes back
+			// hours later still holds the only copy of these runs' state.
+			t.Reset(o.backoff.Max)
+			continue
 		}
 		t.Reset(o.backoff.Delay(failures))
 	}
@@ -374,6 +385,7 @@ func (o *Outbox) reportReplayExhausted(head outboxHead, attempts int, err error)
 	o.stallMu.Lock()
 	o.exhausted = wrapped
 	o.stallMu.Unlock()
+	objectguard.ReportStall(o.stallPath, wrapped)
 	o.logger.Error("s3 state outbox replay gave up",
 		"kind", head.kind,
 		"key", head.key,
@@ -382,9 +394,18 @@ func (o *Outbox) reportReplayExhausted(head outboxHead, attempts int, err error)
 	)
 }
 
-// ReplayStalled reports the error that stopped background replay, and
-// nil while the drainer is still attempting. Queued rows stay on disk;
-// an explicit Drain or the next OpenOutbox resumes them.
+func (o *Outbox) clearReplayExhausted() {
+	o.stallMu.Lock()
+	o.exhausted = nil
+	o.stallMu.Unlock()
+	objectguard.ClearStall(o.stallPath)
+	o.logger.Info("s3 state outbox replay resumed")
+}
+
+// ReplayStalled reports the error background replay gave up on, and nil
+// while it is still making progress. A stalled drainer retries at its
+// backoff ceiling rather than stopping, and the same error reaches an
+// operator through the controller's health route.
 func (o *Outbox) ReplayStalled() error {
 	o.stallMu.Lock()
 	defer o.stallMu.Unlock()
@@ -396,6 +417,7 @@ func (o *Outbox) ReplayStalled() error {
 func (o *Outbox) Close() error {
 	o.stopOnce.Do(func() { close(o.stopCh) })
 	o.wg.Wait()
+	objectguard.ClearStall(o.stallPath)
 	return o.db.Close()
 }
 

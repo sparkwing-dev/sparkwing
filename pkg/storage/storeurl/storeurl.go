@@ -149,7 +149,7 @@ const SDKMaxBackoff = 5 * time.Second
 // safety: the only S3 client this repository constructs, so every object-store
 // request passes the process-wide request budget and the SDK retryer is capped
 // in exactly one place.
-func newS3Client(ctx context.Context) (objectguard.S3API, error) {
+func newS3Client(ctx context.Context) (*awss3.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRetryer(func() aws.Retryer {
 		return retry.NewStandard(func(o *retry.StandardOptions) {
 			o.MaxAttempts = SDKMaxAttempts
@@ -172,9 +172,14 @@ func newS3Client(ctx context.Context) (objectguard.S3API, error) {
 			o.UsePathStyle = true
 		})
 	}
-	limiter, lerr := objectguard.Shared()
+	limiter, lerr := sharedLimiter()
 	if lerr != nil {
 		return nil, fmt.Errorf("object-store request budget: %w", lerr)
 	}
-	return objectguard.GuardS3(limiter, awss3.NewFromConfig(cfg, opts...)), nil
+	opts = append(opts, objectguard.WithBudget(limiter))
+	return awss3.NewFromConfig(cfg, opts...), nil
 }
+
+// hack: an indirection so a test can hand newS3Client a budget of its own
+// instead of the process-wide one, which is built once and never rebuilt.
+var sharedLimiter = objectguard.Shared
