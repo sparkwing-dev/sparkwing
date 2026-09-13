@@ -107,12 +107,7 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 			startedAt:  linuxProcessStart(now, uptime, proc.startTicks),
 		}
 	}
-	owners := ownedProcessOwners(roots, processes)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, s.seenSince, now, arbitratedCores)
-	s.last, s.lastAt, s.seenSince = next, now, scanStart
-	return byRoot, true
+	return s.creditScan(processes, roots, scanStart, now, arbitratedCores), true
 }
 
 type linuxProc struct {

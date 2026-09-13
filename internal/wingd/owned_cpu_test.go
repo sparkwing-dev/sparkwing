@@ -226,15 +226,17 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 
 	sampler.forgetSamples(reheldAt)
 
-	// safety: the counter stays under what the window could hold at these cores, so
-	// the capacity bound cannot refuse this credit. Raise it past that and the test
-	// passes without ever reaching the date gate it is about.
-	processes = process(50)
+	const reheldCounter, cores = 50.0, 8.0
+	reheldNow := reheldAt.Add(10 * time.Second)
+	if ceiling := reheldNow.Sub(sampler.lastAt).Seconds() * cores; reheldCounter > ceiling {
+		t.Fatalf("re-held counter %v is over the %v cores-seconds this window could hold, so the capacity bound refuses the credit and the date gate below decides nothing: lower the counter rather than letting this test pass for a reason it is not about",
+			reheldCounter, ceiling)
+	}
+	processes = process(reheldCounter)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
 		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
-		sampler.lastAt,
-		sampler.seenSince, reheldAt.Add(10*time.Second), 8)
+		sampler.lastAt, sampler.seenSince, reheldNow, cores)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("re-held tree was charged %v cores; want no figure, because the daemon watched none of the hour that CPU ran in",
@@ -477,5 +479,55 @@ func TestOwnedCPU_ATreeWithAnUndatableProcessReportsNoFigure(t *testing.T) {
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("tree reported %v cores beside a process it could not date; want no figure, because the rest of the tree is short by an unknown amount and a short figure still subtracts from external",
 			figure)
+	}
+}
+
+func TestOwnedProcSampler_ASecondScanDatesAProcessFromWhenTheFirstBeganListing(t *testing.T) {
+	firstScanStart := time.Unix(100, 0)
+	firstNow := firstScanStart.Add(50 * time.Millisecond)
+	secondNow := firstNow.Add(5 * time.Second)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	child := processIdentity{pid: 11, startTicks: 1001}
+	held := []OwnedRoot{{PID: 10, HeldSince: firstScanStart.Add(-time.Hour)}}
+	oldRoot := ownedProcess{parentPID: 1, identity: root, cpuSeconds: 1, startedAt: firstScanStart.Add(-time.Hour)}
+
+	sampler := &ownedProcSampler{}
+	sampler.creditScan(map[int]ownedProcess{10: oldRoot}, held, firstScanStart, firstNow, 8)
+
+	byRoot := sampler.creditScan(map[int]ownedProcess{
+		10: oldRoot,
+		11: {parentPID: 10, identity: child, cpuSeconds: 3, startedAt: firstScanStart.Add(20 * time.Millisecond)},
+	}, held, firstNow, secondNow, 8)
+
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: the scan it is missing from was already listing when the child began, so its absence there is not evidence of age",
+			figure, reported)
+	}
+}
+
+func TestProcessStartFromCreation_KeepsTheMonotonicReadingTheScanBoundsCarry(t *testing.T) {
+	now := time.Now()
+	createdAt := now.Add(-5 * time.Second).Round(0)
+
+	started := processStartFromCreation(now, createdAt)
+
+	if started.Round(0) != createdAt {
+		t.Fatalf("process dated %v; want the creation stamp %v, because the age is what the platform reported",
+			started.Round(0), createdAt)
+	}
+	if started == started.Round(0) {
+		t.Fatalf("process start %v carries no monotonic reading; want one, because a comparison against the scan bounds then falls back to the wall clock and a step larger than the dating slack moves the admit bound",
+			started)
+	}
+}
+
+func TestProcessStartFromCreation_RefusesAProcessCreatedAfterTheScan(t *testing.T) {
+	now := time.Now()
+
+	started := processStartFromCreation(now, now.Add(time.Second).Round(0))
+
+	if !started.IsZero() {
+		t.Fatalf("process dated %v; want no date, because a creation stamp after the scan is a clock the daemon cannot measure against",
+			started)
 	}
 }

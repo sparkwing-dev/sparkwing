@@ -205,6 +205,23 @@ func (s *ownedProcSampler) forgetSamples(now time.Time) {
 	s.last, s.lastAt, s.seenSince = nil, now, now
 }
 
+// safety: seenSince is when this scan began listing, not when it finished. A
+// process born between the two is absent from a reading already underway, so
+// dating it against the finish refuses a credit the tree earned.
+func (s *ownedProcSampler) creditScan(
+	processes map[int]ownedProcess,
+	roots []OwnedRoot,
+	scanStart, now time.Time,
+	arbitratedCores float64,
+) map[int]float64 {
+	owners := ownedProcessOwners(roots, processes)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, s.seenSince, now, arbitratedCores)
+	s.last, s.lastAt, s.seenSince = next, now, scanStart
+	return byRoot
+}
+
 func ownedCPUByRoot(
 	previous map[processIdentity]cpuSample,
 	processes map[int]ownedProcess,

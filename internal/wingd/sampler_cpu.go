@@ -3,6 +3,7 @@ package wingd
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 type cpuTotals struct {
@@ -84,4 +85,17 @@ func parseProcUptime(data string) (float64, bool) {
 		return 0, false
 	}
 	return seconds, true
+}
+
+func processStartFromCreation(now, createdAt time.Time) time.Time {
+	// safety: the returned time keeps now's monotonic reading, which is what a
+	// later comparison against the scan bounds needs. A creation stamp is a wall
+	// value, and comparing one against a monotonic reading drops both sides to the
+	// wall clock, where a step larger than the dating slack moves the bound and
+	// nothing goes red.
+	age := now.Sub(createdAt)
+	if age < 0 {
+		return time.Time{}
+	}
+	return now.Add(-age)
 }
