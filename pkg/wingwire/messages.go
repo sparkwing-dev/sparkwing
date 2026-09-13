@@ -420,15 +420,15 @@ type ResourceState struct {
 // attributed is [ResourceState.ExternalSource] on the cores row, which reads
 // [ExternalUnattributed] when it did not.
 type ExternalAttribution struct {
-	// Samples is how many host CPU readings the daemon has attributed, the
+	// Samples is how many host CPU readings the daemon has taken, the
 	// denominator the counts below are read against. A reading is counted
-	// under at most one of them, worst cause first, so subtracting all four
-	// from Samples leaves the readings that attributed cleanly.
+	// under at most one of them, worst cause first, so subtracting the
+	// counts below from Samples leaves the readings that attributed cleanly.
 	Samples int64 `json:"samples"`
-	// SamplerUnreadable is how many readings measured no CPU for any of the
-	// daemon's own runs, because the process sampler returned nothing. The
-	// whole host reading was charged to the machine. A count that tracks
-	// Samples means the sampler cannot read this host at all, which is a
+	// SamplerUnreadable is how many readings the process sampler could not
+	// turn into a usable figure: it returned nothing, or it returned more
+	// CPU than the host itself ran, which cannot be true. The whole host
+	// reading was charged to the machine. A count that tracks Samples is a
 	// fault on the box rather than a passing condition.
 	SamplerUnreadable int64 `json:"sampler_unreadable"`
 	// RunsWithoutProcess is how many readings ran while a holding run
@@ -437,19 +437,20 @@ type ExternalAttribution struct {
 	// is a fault rather than a passing condition.
 	RunsWithoutProcess int64 `json:"runs_without_process"`
 	// RunsProcessGone is how many readings ran while a holding run this
-	// daemon had already measured stopped yielding a figure: it died without
-	// releasing its admission, or its process became unreadable. Either way
-	// it holds capacity nothing can use and has its share charged to the
-	// machine, so unlike RunsAwaitingMeasure this count rising is a fault
-	// rather than the expected shape.
+	// daemon had already measured stopped yielding a figure. The run may
+	// have died without releasing its admission, its process may have become
+	// unreadable, or its process tree may have taken in work the daemon
+	// cannot date. Each holds capacity nothing can use and charges that
+	// run's share to the machine, so unlike RunsAwaitingMeasure this count
+	// rising wants someone to look rather than being the expected shape.
 	RunsProcessGone int64 `json:"runs_process_gone"`
 	// RunsAwaitingMeasure is how many readings ran while a holding run had
-	// no CPU figure yet, either because a run's CPU is a rate between two
-	// readings and it has only one, or because it began holding after the
-	// reading was taken. Either way that run is charged to the machine for
-	// one reading and attributed from the next. A host starting runs
-	// continuously always has one such run, so this count rising with
-	// Samples is the expected shape rather than a fault.
+	// no CPU figure the daemon could stand behind: it began holding after
+	// the reading was taken, or it has been held since before the daemon
+	// started watching it, so how much of its CPU belongs to this reading
+	// is unknowable. That run is charged to the machine until a reading
+	// covers it. A run that has merely just started is not counted here --
+	// it is measured from its first reading.
 	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
 }
 

@@ -63,7 +63,7 @@ func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float6
 	if len(roots) == 0 {
 		return stat, nil, true, nil
 	}
-	byRoot, measured := d.ownedSampler.CPUUsage(roots)
+	byRoot, measured := d.ownedSampler.CPUUsage(roots, stat.TotalCores)
 	return stat, byRoot, measured, nil
 }
 
@@ -75,13 +75,13 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	d.mu.Lock()
 	now := d.now()
 	ownedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
+	impossible := false
 	if stat.CPUMeasured && ownedBusy > stat.BusyCores {
-		// safety: this daemon's runs cannot have used more CPU than the host ran, so
-		// a larger figure is a sampler reporting something impossible. Charging the
-		// difference to nobody would understate external and over-admit, so the
-		// reading is capped and reported as one that did not attribute.
-		ownedBusy = stat.BusyCores
-		awaitingMeasure = true
+		// safety: this daemon's runs cannot have used more CPU than the host ran. A
+		// larger figure is impossible, and trimming it to fit would leave external at
+		// zero -- which is the over-admission it was meant to stop -- so the reading
+		// is treated as one that measured nothing and charges the host in full.
+		ownedBusy, ownedMeasured, impossible = 0, false, true
 	}
 	if stat.CPUMeasured {
 		d.attribution.samples++
@@ -90,7 +90,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		// the readings that attributed. A sampler that read nothing explains every
 		// run's missing figure, so the per-run causes say nothing more.
 		switch {
-		case !ownedMeasured:
+		case !ownedMeasured, impossible:
 			d.attribution.samplerUnreadable++
 		case withoutProcess:
 			d.attribution.runsWithoutProcess++
@@ -99,7 +99,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		case awaitingMeasure:
 			d.attribution.runsAwaitingMeasure++
 		}
-		attributed := ownedMeasured && !withoutProcess && !awaitingMeasure && !processGone
+		attributed := ownedMeasured && !impossible && !withoutProcess && !awaitingMeasure && !processGone
 		unattributed := 0.0
 		if !attributed {
 			unattributed = 1
@@ -306,7 +306,7 @@ func (d *Daemon) holderSample() []OwnedRoot {
 	sort.Ints(pids)
 	roots := make([]OwnedRoot, 0, len(pids))
 	for _, pid := range pids {
-		roots = append(roots, OwnedRoot{PID: pid, Since: since[pid]})
+		roots = append(roots, OwnedRoot{PID: pid, HeldSince: since[pid]})
 	}
 	return roots
 }

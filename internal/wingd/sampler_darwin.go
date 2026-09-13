@@ -79,7 +79,7 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot) (map[int]float64, bool) {
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, totalCores float64) (map[int]float64, bool) {
 	if len(roots) == 0 {
 		return nil, true
 	}
@@ -135,6 +135,7 @@ func (p *platformSampler) SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]
 		previous,
 		elapsedSeconds,
 		roots,
+		previousAt,
 		now,
 		stat.TotalCores,
 	)

@@ -22,13 +22,18 @@ func attributionHost(totalCores, busy float64) HostStat {
 }
 
 type perRootOwnedSampler struct {
-	byRoot   map[int]float64
-	measured bool
-	roots    []int
+	byRoot    map[int]float64
+	measured  bool
+	roots     []int
+	heldSince map[int]time.Time
 }
 
-func (s *perRootOwnedSampler) CPUUsage(roots []OwnedRoot) (map[int]float64, bool) {
+func (s *perRootOwnedSampler) CPUUsage(roots []OwnedRoot, _ float64) (map[int]float64, bool) {
 	s.roots = rootPIDsOf(roots)
+	s.heldSince = make(map[int]time.Time, len(roots))
+	for _, root := range roots {
+		s.heldSince[root.PID] = root.HeldSince
+	}
 	return s.byRoot, s.measured
 }
 
@@ -252,12 +257,13 @@ func TestRefreshHeadroom_VerdictOutlastsTheReadingThatCausedIt(t *testing.T) {
 	tick()
 	delete(d.byRun, "quiet")
 
-	readingsUntilWeightSpent := 0
-	for weight := 1.0; weight >= unattributedResidual; weight *= 1 - loadEMAAlpha {
-		readingsUntilWeightSpent++
+	if loadEMAAlpha != 0.4 || unattributedResidual != 0.05 {
+		t.Fatalf("alpha %v, residual %v: the reading count below was derived by hand from 0.4 and 0.05, so re-derive it rather than letting this test follow the constants and stop being able to fail",
+			loadEMAAlpha, unattributedResidual)
 	}
+	const readingsUntilWeightSpentAtAlphaPointFour = 6
 
-	for range readingsUntilWeightSpent - 1 {
+	for range readingsUntilWeightSpentAtAlphaPointFour - 1 {
 		tick()
 		if src := queueRow(t, queueState(t, d), "cores").ExternalSource; src != wingwire.ExternalUnattributed {
 			t.Fatalf("cores external source = %q, want %q: the bad reading still holds more than the residual share of the figure, so the verdict must not clear before the figure does",
@@ -321,20 +327,43 @@ func TestRefreshHeadroom_AShortRunIsCreditedFromItsFirstReading(t *testing.T) {
 }
 
 func TestRefreshHeadroom_ARunHeldSinceBeforeTheWindowIsNotCreditedOnSight(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	processes := map[int]ownedProcess{
+		4242: {parentPID: 1, identity: processIdentity{pid: 4242, startTicks: 7}, cpuSeconds: 2},
+	}
+	lastAt := now.Add(-time.Second)
+
+	held := []OwnedRoot{{PID: 4242, HeldSince: now.Add(-time.Hour)}}
+	byRoot, _ := ownedCPUByRoot(nil, processes, ownedProcessOwners(held, processes), held, lastAt, now, 8)
+	if _, figure := byRoot[4242]; figure {
+		t.Errorf("owned CPU by root = %v; want no figure: the run was held since long before this reading, so how much of its CPU belongs to the reading is unknowable",
+			byRoot)
+	}
+
+	fresh := []OwnedRoot{{PID: 4242, HeldSince: now.Add(-500 * time.Millisecond)}}
+	byRoot, _ = ownedCPUByRoot(nil, processes, ownedProcessOwners(fresh, processes), fresh, lastAt, now, 8)
+	if math.Abs(byRoot[4242]-2) > 0.0001 {
+		t.Errorf("owned CPU by root = %v, want 2.0: a run that began holding inside this reading ran all its CPU inside it", byRoot)
+	}
+}
+
+func TestRefreshHeadroom_SharedTreeTakesTheEarliestHold(t *testing.T) {
 	d := newHeadroomDaemon(t, 10, 0.2)
 	d.sampler = &countingHostSampler{stat: attributionHost(10, 8.5)}
-	d.ownedSampler = &perRootOwnedSampler{byRoot: map[int]float64{}, measured: true}
-	d.byRun["old"] = &conn{runID: "old", role: roleHolder, pid: 4242, startAt: d.now().Add(-24 * time.Hour)}
+	sampler := &perRootOwnedSampler{byRoot: map[int]float64{}, measured: true}
+	d.ownedSampler = sampler
+	now := d.now()
+	d.byRun["early"] = &conn{runID: "early", role: roleHolder, pid: 4242, startAt: now.Add(-time.Hour)}
+	d.byRun["late"] = &conn{runID: "late", role: roleHolder, pid: 4242, startAt: now}
 
 	d.refreshHeadroom()
 
-	cores := queueRow(t, queueState(t, d), "cores")
-	if math.Abs(cores.External-8.5) > coresEpsilon {
-		t.Errorf("external cores = %.2f, want the whole 8.50 charged: a run held since long before this reading did not run its lifetime of CPU inside the window, so crediting that total would understate external and over-admit",
-			cores.External)
+	if len(sampler.heldSince) != 1 {
+		t.Fatalf("sampled roots = %v, want one root for one process tree", sampler.heldSince)
 	}
-	if got := queueAttribution(t, d); got.RunsAwaitingMeasure != 1 {
-		t.Errorf("runs-awaiting-measure = %d, want 1: a run the daemon has no reading for and cannot bound is unmeasured, and must say so", got.RunsAwaitingMeasure)
+	if got := sampler.heldSince[4242]; !got.Equal(now.Add(-time.Hour)) {
+		t.Errorf("root held since %v, want the earlier hold %v: two runs sharing a process tree share its age, and the later hold would let a tree older than the window look new enough to credit",
+			got, now.Add(-time.Hour))
 	}
 }
 
@@ -343,10 +372,10 @@ type baselineOwnedSampler struct {
 	seen  map[int]bool
 }
 
-func (s *baselineOwnedSampler) CPUUsage(roots []OwnedRoot) (map[int]float64, bool) {
+func (s *baselineOwnedSampler) CPUUsage(roots []OwnedRoot, _ float64) (map[int]float64, bool) {
 	byRoot := make(map[int]float64, len(roots))
 	for _, root := range roots {
-		if s.seen[root.PID] || !root.Since.IsZero() {
+		if s.seen[root.PID] || !root.HeldSince.IsZero() {
 			byRoot[root.PID] = s.cores[root.PID]
 		}
 		s.seen[root.PID] = true

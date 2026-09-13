@@ -9,7 +9,7 @@ import (
 func heldRoots(pids ...int) []OwnedRoot {
 	roots := make([]OwnedRoot, 0, len(pids))
 	for _, pid := range pids {
-		roots = append(roots, OwnedRoot{PID: pid, Since: time.Unix(0, 0)})
+		roots = append(roots, OwnedRoot{PID: pid, HeldSince: time.Unix(0, 0)})
 	}
 	return roots
 }
@@ -28,7 +28,7 @@ func TestOwnedCPU_ReapedChildIsNotCountedAgainThroughParent(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now, ownedFirstSightWindow)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-1) > 0.0001 {
@@ -47,7 +47,7 @@ func TestOwnedCPU_PIDReuseNeedsANewBaseline(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now, ownedFirstSightWindow)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if _, figure := byRoot[10]; figure || usage != 0 {
@@ -69,7 +69,7 @@ func TestOwnedCPU_NewChildIsCreditedBesideTheMeasuredParentDelta(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now, ownedFirstSightWindow)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
 	usage := sumOwnedCPU(byRoot)
 
 	if math.Abs(usage-5) > 0.0001 {
@@ -93,10 +93,10 @@ func TestOwnedCPU_AProcessOlderThanTheWindowIsNotCreditedToIt(t *testing.T) {
 		},
 	}
 	for name, processes := range cases {
-		roots := []OwnedRoot{{PID: 10, Since: now.Add(-time.Second)}}
+		roots := []OwnedRoot{{PID: 10, HeldSince: now.Add(-time.Second)}}
 		owners := ownedProcessOwners(roots, processes)
 
-		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now, ownedFirstSightWindow)
+		byRoot, _ := ownedCPUByRoot(nil, processes, owners, roots, now.Add(-time.Second), now, 8)
 
 		if _, figure := byRoot[10]; figure {
 			t.Errorf("%s: owned CPU by root = %v; want no figure at all: more CPU than the window could hold proves the process predates it, and crediting that total would understate external and over-admit",
@@ -131,7 +131,7 @@ func TestOwnedCPU_ARootWithoutItsOwnBaselineReportsNoFigure(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(7), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now, ownedFirstSightWindow)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
 
 	if _, figure := byRoot[7]; figure {
 		t.Fatalf("owned CPU by root = %v; want no figure for a root that re-execed: its own process has no baseline, so the tree's sum covers only the surviving child and is silently short",
@@ -172,7 +172,7 @@ func TestOwnedCPU_SumsEveryMeasuredProcessUnderOneRoot(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
-	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now, ownedFirstSightWindow)
+	byRoot, _ := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
 
 	if math.Abs(byRoot[10]-4) > 0.0001 {
 		t.Fatalf("owned CPU by root = %v; want the root's own 1 core plus its child's 3 summed into one tree, not the last one read", byRoot)

@@ -139,7 +139,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 	}
 	if a := qs.ExternalAttribution; a != nil {
 		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\t%d\t%d\n", a.Samples,
-			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsAwaitingMeasure, a.RunsProcessGone)
+			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsProcessGone, a.RunsAwaitingMeasure)
 	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
