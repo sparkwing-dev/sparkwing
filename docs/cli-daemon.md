@@ -134,13 +134,13 @@ sparkwing daemon status -o json
 
 Drain an answering wingd and leave it stopped
 
-Drains an answering daemon through the same wire request a restart uses and
-waits for its admission socket to go quiet. No successor is launched, and the
-supervisor exits with the worker it started, so the pair stays down until the
-next run needs a daemon. An absent daemon is a no-op and exits zero.
+Drains an answering daemon through the same wire request a restart uses, then
+waits for its admission socket to go quiet and its election lock to be
+released. No successor is launched, and the supervisor exits with the worker it
+started, so the pair stays down until the next run needs a daemon. An absent
+daemon is a no-op and exits zero.
 
-Existing holders are reported as they were when the daemon began draining; a
-run still holding admission finishes against the store it already opened.
+A run still holding admission finishes against the store it already opened.
 
 ### Flags
 

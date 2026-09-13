@@ -20,12 +20,17 @@ func TestDaemonStopIsDispatched(t *testing.T) {
 
 func TestDaemonStopReportsWhatItStopped(t *testing.T) {
 	asked := wingdclient.Options{}
+	inspections := 0
 	deps := daemonStopDeps{
-		stop: func(_ context.Context, opts wingdclient.Options) (wingdclient.StopResult, error) {
+		stop: func(_ context.Context, opts wingdclient.Options) error {
 			asked = opts
-			return wingdclient.StopResult{StoppedVersion: "v0.37.4", HoldersRemaining: 2, Stopped: true}, nil
+			return nil
 		},
 		inspect: func(context.Context, string) (daemonReport, error) {
+			inspections++
+			if inspections == 1 {
+				return daemonReport{Running: true, Healthy: true, BinaryVersion: "v0.37.4"}, nil
+			}
 			return daemonReport{Socket: "/tmp/stopped.sock"}, nil
 		},
 	}
@@ -41,18 +46,20 @@ func TestDaemonStopReportsWhatItStopped(t *testing.T) {
 	if report.Running || !report.Stopped {
 		t.Fatalf("report = %+v", report)
 	}
-	if report.PreviousVersion != "v0.37.4" || report.HoldersRemaining != 2 {
-		t.Fatalf("report = %+v", report)
+	if report.PreviousVersion != "v0.37.4" {
+		t.Fatalf("the report does not name the build it stopped: %+v", report)
 	}
 	if asked.Version == "" {
 		t.Error("stop was asked without the installed version")
 	}
 }
 
-func TestDaemonStopOnAnAbsentDaemonSucceeds(t *testing.T) {
+func TestDaemonStopOnAnAbsentDaemonStopsNothing(t *testing.T) {
+	stops := 0
 	deps := daemonStopDeps{
-		stop: func(context.Context, wingdclient.Options) (wingdclient.StopResult, error) {
-			return wingdclient.StopResult{}, wingdclient.ErrNoDaemon
+		stop: func(context.Context, wingdclient.Options) error {
+			stops++
+			return nil
 		},
 		inspect: func(context.Context, string) (daemonReport, error) {
 			return daemonReport{Socket: "/tmp/stopped.sock"}, nil
@@ -62,6 +69,9 @@ func TestDaemonStopOnAnAbsentDaemonSucceeds(t *testing.T) {
 	out := captureStdout(t, func() { runErr = runDaemonStopWith([]string{"-o", "json"}, deps) })
 	if runErr != nil {
 		t.Fatalf("an absent daemon must be a no-op: %v", runErr)
+	}
+	if stops != 0 {
+		t.Errorf("an absent daemon was drained %d time(s)", stops)
 	}
 	var report daemonReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
@@ -74,11 +84,9 @@ func TestDaemonStopOnAnAbsentDaemonSucceeds(t *testing.T) {
 
 func TestDaemonStopRefusesToClaimADaemonStillAnswering(t *testing.T) {
 	deps := daemonStopDeps{
-		stop: func(context.Context, wingdclient.Options) (wingdclient.StopResult, error) {
-			return wingdclient.StopResult{StoppedVersion: "v0.37.4"}, nil
-		},
+		stop: func(context.Context, wingdclient.Options) error { return nil },
 		inspect: func(context.Context, string) (daemonReport, error) {
-			return daemonReport{Running: true}, nil
+			return daemonReport{Running: true, BinaryVersion: "v0.37.4"}, nil
 		},
 	}
 	err := runDaemonStopWith([]string{"-o", "json"}, deps)

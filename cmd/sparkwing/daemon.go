@@ -33,7 +33,6 @@ type daemonReport struct {
 	Draining            bool     `json:"draining"`
 	Restarted           bool     `json:"restarted"`
 	Stopped             bool     `json:"stopped"`
-	HoldersRemaining    int      `json:"holders_remaining,omitempty"`
 	BinaryVersion       string   `json:"binary_version,omitempty"`
 	RunningRevision     string   `json:"running_revision,omitempty"`
 	PreviousVersion     string   `json:"previous_version,omitempty"`
@@ -314,13 +313,13 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 
 func runDaemonStop(args []string) error {
 	return runDaemonStopWith(args, daemonStopDeps{
-		stop:    wingdclient.StopRunning,
+		stop:    wingdclient.Stop,
 		inspect: inspectDaemon,
 	})
 }
 
 type daemonStopDeps struct {
-	stop    func(context.Context, wingdclient.Options) (wingdclient.StopResult, error)
+	stop    func(context.Context, wingdclient.Options) error
 	inspect func(context.Context, string) (daemonReport, error)
 }
 
@@ -340,37 +339,32 @@ func runDaemonStopWith(args []string, deps daemonStopDeps) error {
 	if err != nil {
 		return err
 	}
-	result, err := deps.stop(ctx, wingdclient.Options{
+	before, err := deps.inspect(ctx, *home)
+	if err != nil {
+		return err
+	}
+	if !before.Running {
+		return emitDaemonReport(before, format)
+	}
+	stopErr := deps.stop(ctx, wingdclient.Options{
 		Home:    *home,
 		Version: installedVersion(),
 		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 	})
-	if errors.Is(err, wingdclient.ErrNoDaemon) {
-		report, inspectErr := deps.inspect(ctx, *home)
-		if inspectErr != nil {
-			return inspectErr
-		}
-		return emitDaemonReport(report, format)
+	if stopErr != nil && !errors.Is(stopErr, wingdclient.ErrNoDaemon) {
+		return fmt.Errorf("daemon stop: %w", stopErr)
 	}
+	report, err := deps.inspect(ctx, *home)
 	if err != nil {
-		return fmt.Errorf("daemon stop: %w", err)
+		return err
 	}
-	if !result.Stopped {
-		answering := result.StoppedVersion
-		if answering == "" {
-			answering = "the daemon"
-		}
+	if report.Running {
 		return fmt.Errorf("daemon stop: %s still answers after %s; run `sparkwing daemon status` for what it reports",
-			answering, daemonStopTimeout)
-	}
-	report, inspectErr := deps.inspect(ctx, *home)
-	if inspectErr != nil {
-		return inspectErr
+			report.BinaryVersion, daemonStopTimeout)
 	}
 	report.Stopped = true
-	report.HoldersRemaining = result.HoldersRemaining
-	report.PreviousVersion = result.StoppedVersion
-	report.PreviousRevision = versionRevision(result.StoppedVersion)
+	report.PreviousVersion = before.BinaryVersion
+	report.PreviousRevision = versionRevision(before.BinaryVersion)
 	return emitDaemonReport(report, format)
 }
 
@@ -423,9 +417,6 @@ func emitDaemonReport(report daemonReport, output string) error {
 				was = " (was " + report.PreviousVersion + ")"
 			}
 			fmt.Fprintf(os.Stdout, "wingd is stopped%s\n", was)
-			if report.HoldersRemaining > 0 {
-				fmt.Fprintf(os.Stdout, "%d holder(s) were still admitted when it drained\n", report.HoldersRemaining)
-			}
 			return nil
 		}
 		if !report.Running {
