@@ -226,12 +226,11 @@ alarm alone: sizes and table names are on the `admin` view of
 `GET /api/v1/storage`.
 
 The size is sampled on the same timer. SQLite counts the pages it holds less
-the pages on its free list, and a sweep hands free pages back through
-`PRAGMA incremental_vacuum` on a database created with incremental
-auto-vacuum, so the alarm clears once the rows are gone; on a database created
-without it the sample still falls, and shrinking the file itself is a `VACUUM`
-the operator runs. Postgres sums `pg_total_relation_size` over its relations
-and names the largest.
+the pages on its free list, so the sample falls as soon as a sweep removes the
+rows and an alarm clears without anyone reclaiming anything; the file keeps its
+size on disk until an operator runs `VACUUM`, which is the step that returns
+the space to the filesystem. Postgres sums `pg_total_relation_size` over its
+relations and names the largest.
 
 ### Per-team storage quotas
 
@@ -241,6 +240,14 @@ install that never enabled quotas reads. The free tier allows ten megabytes
 per run, a gigabyte per month, and a thousand objects per run; the paid tier
 allows a gigabyte per run, a hundred gigabytes per month, and a hundred
 thousand objects per run.
+
+Read the byte limits narrowly on this release: they bound the bytes the
+controller itself stores, which is run-event payloads, and they do not bound
+artifact content. A runner writes artifact blobs straight to the object store,
+and the controller sees only the manifest digest, so `max_objects_per_run` is
+what bounds artifacts today, by capping how many manifests one run may
+publish. Counting artifact bytes needs the manifest to carry its entries'
+sizes, which it does not yet.
 
 Hold one team to a tier, or to limits of your own, with
 `PUT /api/v1/storage/quotas/{principal}` (scope `admin`):
