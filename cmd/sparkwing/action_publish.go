@@ -215,7 +215,18 @@ func resolveArtifactStore(ctx context.Context, profileName, urlFlag string) (sto
 func artifactStoreURL(p *profile.Profile, spec backends.Spec) (string, error) {
 	switch spec.Type {
 	case backends.TypeFilesystem:
-		return "fs://" + spec.Path, nil
+		// safety: fs:// takes an absolute or ~-rooted path, and a spec path is
+		// opened relative to the working directory, so anything else is resolved
+		// against the same directory the upload used.
+		path := spec.Path
+		if !strings.HasPrefix(path, "~") {
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return "", fmt.Errorf("pipeline publish: profile %q cache path %q: %w", p.Name, path, err)
+			}
+			path = abs
+		}
+		return "fs://" + path, nil
 	case backends.TypeS3:
 		location := "s3://" + spec.Bucket
 		if prefix := strings.Trim(spec.Prefix, "/"); prefix != "" {

@@ -71,6 +71,26 @@ func TestResolveArtifactStoreReportsAnS3ProfileAsAnS3URL(t *testing.T) {
 	}
 }
 
+func TestArtifactStoreURLReportsARelativeCachePathAsOneTheFlagAccepts(t *testing.T) {
+	writePublishProfiles(t, "cache-dir")
+	p, err := resolveProfile("team")
+	if err != nil {
+		t.Fatalf("resolveProfile: %v", err)
+	}
+
+	location, err := artifactStoreURL(p, *p.Surfaces().BinaryCache())
+	if err != nil {
+		t.Fatalf("artifactStoreURL: %v", err)
+	}
+
+	if !strings.HasPrefix(location, "fs:///") {
+		t.Fatalf("location = %q, want an absolute fs:// URL", location)
+	}
+	if _, err := storeurl.OpenArtifactStore(context.Background(), location); err != nil {
+		t.Fatalf("the reported location is not one --artifact-store accepts: %v", err)
+	}
+}
+
 func TestResolveArtifactStorePrefersTheExplicitURL(t *testing.T) {
 	writePublishProfiles(t, t.TempDir())
 
