@@ -146,35 +146,52 @@ func ValidateRawToken(raw, kind string) error {
 }
 
 // CreateTokenIfNoneExist stores raw as a token for principal when the
-// tokens table holds no rows at all, and reports whether it wrote one.
-// The emptiness check and the insert share one transaction, so two
-// processes bootstrapping the same database write one token between
-// them. Only the argon2 hash of raw reaches the table; the caller
-// already holds the credential itself.
+// tokens table holds no token that authenticates at now, and reports
+// whether it wrote one. Live means the same thing here as it does to a
+// bearer lookup: not revoked, and not past its expiry. A table holding
+// only revoked or expired rows is therefore bootstrapped again, which is
+// what lets an operator recover a cluster whose only credential was
+// revoked or ran out.
+//
+// The test and the insert are one statement, so concurrent replicas write
+// one row between them: the second either matches the row the first wrote
+// or collides on the prefix index, and both answer false.
+//
+// Only the argon2 hash of raw reaches the table; the caller already holds
+// the credential itself.
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error) {
+	if principal == "" {
+		return false, errors.New("tokens: principal is required")
+	}
 	if err := ValidateRawToken(raw, kind); err != nil {
 		return false, err
 	}
-	ctx := context.Background()
-	tx, err := s.beginTx(ctx)
+	hash, err := hashToken(raw)
 	if err != nil {
-		return false, fmt.Errorf("tokens: bootstrap: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	var existing int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tokens`).Scan(&existing); err != nil {
-		return false, fmt.Errorf("tokens: bootstrap: count: %w", err)
-	}
-	if existing > 0 {
-		return false, nil
-	}
-	if _, err := insertTokenRow(ctx, tx, raw, principal, kind, scopes, 0, now); err != nil {
 		return false, err
 	}
-	if err := tx.Commit(); err != nil {
+	ts := now.UTC().Unix()
+	res, err := s.execNoCtx(`
+        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
+        SELECT ?, ?, ?, ?, ?, ?, NULL
+         WHERE NOT EXISTS (
+               SELECT 1 FROM tokens
+                WHERE revoked_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > ?)
+         )
+    `, hash, raw[:PrefixLen], principal, kind, strings.Join(dedupeScopes(scopes), ","), ts, ts)
+	if err != nil {
+		// safety: the prefix is derived from raw, so a collision is the peer that wrote this same credential first.
+		if isTokenPrefixCollision(err) {
+			return false, nil
+		}
 		return false, fmt.Errorf("tokens: bootstrap: %w", err)
 	}
-	return true, nil
+	n, rerr := res.RowsAffected()
+	if rerr != nil {
+		return false, fmt.Errorf("tokens: bootstrap: %w", rerr)
+	}
+	return n == 1, nil
 }
 
 func createTokenRow(
