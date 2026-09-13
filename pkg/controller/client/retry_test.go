@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -111,5 +112,44 @@ func TestClientStopsRetryingAtTheBound(t *testing.T) {
 	}
 	if got := attempts.Load(); got != UnavailableRetries+1 {
 		t.Fatalf("server saw %d attempt(s), want %d", got, UnavailableRetries+1)
+	}
+}
+
+func TestClaimShedByTheBudgetIsAnUnavailableError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"unavailable","message":"authentication is busy, retry shortly"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, srv.Client())
+	_, err := c.ClaimNodeWithCapacity(context.Background(), "holder", nil, time.Minute, nil, nil)
+	var shed *UnavailableError
+	if !errors.As(err, &shed) {
+		t.Fatalf("ClaimNodeWithCapacity error = %v (%T), want an UnavailableError", err, err)
+	}
+	if shed.RetryAfter != time.Second {
+		t.Fatalf("RetryAfter = %s, want 1s as the controller sent it", shed.RetryAfter)
+	}
+	if !strings.Contains(shed.Error(), "unavailable") {
+		t.Fatalf("error text %q dropped the controller's reason", shed.Error())
+	}
+}
+
+func TestUnavailableWithoutRetryAfterStaysAPlainError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, srv.Client())
+	_, err := c.ClaimNodeWithCapacity(context.Background(), "holder", nil, time.Minute, nil, nil)
+	var shed *UnavailableError
+	if errors.As(err, &shed) {
+		t.Fatalf("a 503 that named no Retry-After became %v, want a plain error", err)
+	}
+	if err == nil {
+		t.Fatal("a 503 claim returned no error")
 	}
 }

@@ -1787,6 +1787,15 @@ func controllerLacksRoute(route string) error {
 }
 
 func readHTTPError(resp *http.Response) error {
+	err := classifyHTTPError(resp)
+	// safety: a server that named a Retry-After is asking to be polled again, which a claim loop must not log as a failure.
+	if wait, ok := parseRetryAfter(resp); ok && resp.StatusCode == http.StatusServiceUnavailable {
+		return &UnavailableError{RetryAfter: wait, Err: err}
+	}
+	return err
+}
+
+func classifyHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var executionError executionAdmissionErrorWire
 	if resp.StatusCode == http.StatusConflict && json.Unmarshal(body, &executionError) == nil {

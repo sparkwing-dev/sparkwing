@@ -276,6 +276,20 @@ unlock.
 
 ### Fixed
 
+- **controller + runner:** A polling fleet no longer draws `503` answers out of
+  the argon2 budget. Concurrent requests carrying one bearer token share a
+  single verification and answer from a cache keyed by the token's prefix and a
+  SHA-256 of the credential, so a token costs one hash per 60-second window
+  rather than one per request; the raw token is no longer held in controller
+  memory between requests. `sparkwing_auth_token_cache_total` reports
+  verifications by `hit`, `miss` and `coalesced`, and
+  `sparkwing_auth_hashing_rejected_total` reports what the memory budget shed.
+  A claim or heartbeat answered `503` with a `Retry-After` is backoff for the
+  pool, trigger and executor loops: they wait the header out, capped at 30
+  seconds, log it at debug and warn at most once a minute, where every shed
+  poll used to print an error line. Revocation, rotation and the cache window
+  behave as [docs/auth.md](docs/auth.md) describes.
+
 - **controller:** The executor offer routes `mark-ready`, `revoke-ready` and
   `finalize-ready` take `runs.state` plus the live claim on the run's trigger,
   the gate `auto-retry/reset` already carried. They required `admin`, so a
