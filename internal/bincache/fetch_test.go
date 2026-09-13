@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 func TestRepoNameFromURL(t *testing.T) {
@@ -36,20 +38,6 @@ func TestRepoNameFromURL(t *testing.T) {
 		if got := RepoNameFromURL(c.in); got != c.want {
 			t.Errorf("RepoNameFromURL(%q) = %q, want %q", c.in, got, c.want)
 		}
-	}
-}
-
-func TestClaimedRepoNameFromURL_DistinguishesEqualBasenames(t *testing.T) {
-	first := ClaimedRepoNameFromURL("https://git.example.com/acme/widgets.git")
-	second := ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git")
-	if first == second {
-		t.Fatalf("claim-scoped names collide: %q", first)
-	}
-	if !strings.HasPrefix(first, "repo-") || len(first) != 64 {
-		t.Fatalf("claim-scoped name = %q", first)
-	}
-	if got := ClaimedRepoNameFromURL("  https://git.example.com/acme/widgets.git  "); got != first {
-		t.Fatalf("normalized claim-scoped name = %q, want %q", got, first)
 	}
 }
 
@@ -534,7 +522,7 @@ func TestControllerRunGitcacheURL_UsesClaimScopedRepoIdentity(t *testing.T) {
 	controller := "https://controller.example"
 	gcURL := controller + "/api/v1/runs/run-123/gitcache"
 	repoURL := "https://git.example.com/acme/widgets.git"
-	if got := controllerClaimedRepoName(gcURL, controller, repoURL); got != ClaimedRepoNameFromURL(repoURL) {
+	if got := controllerClaimedRepoName(gcURL, controller, repoURL); got != sourceurl.ClaimedRepoNameFromURL(repoURL) {
 		t.Fatalf("claim-scoped name = %q", got)
 	}
 	if got := controllerClaimedRepoName("https://cache.example", controller, repoURL); got != "" {

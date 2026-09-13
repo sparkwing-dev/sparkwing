@@ -1,6 +1,7 @@
 package sourceurl
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net"
 	"net/url"
@@ -249,4 +250,17 @@ func parseNumericLabel(label string) (uint64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// ClaimedRepoNameFromURL derives the gitcache name for a repository URL. It
+// hashes the normalized URL so that equal basenames under different owners
+// cannot share a claim-scoped cache authorization path.
+func ClaimedRepoNameFromURL(repoURL string) string {
+	if normalized, err := ValidateCloneURL(repoURL); err == nil {
+		repoURL = normalized
+	} else {
+		repoURL = strings.TrimSpace(repoURL)
+	}
+	sum := sha256.Sum256([]byte(repoURL))
+	return fmt.Sprintf("repo-%x", sum)[:64]
 }

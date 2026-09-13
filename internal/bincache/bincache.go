@@ -306,7 +306,7 @@ func controllerClaimedRepoName(gcURL, controllerURL, repoURL string) string {
 		!controllerRunGitcacheProxyPath(cache.Path, controller.Path) {
 		return ""
 	}
-	return ClaimedRepoNameFromURL(repoURL)
+	return sourceurl.ClaimedRepoNameFromURL(repoURL)
 }
 
 func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string) (sparkwingDir string, err error) {
@@ -802,17 +802,6 @@ func RepoNameFromURL(repoURL string) string {
 		return repoURL[i+1:]
 	}
 	return repoURL
-}
-
-// ClaimedRepoNameFromURL prevents equal basenames from sharing a claim-scoped cache authorization path.
-func ClaimedRepoNameFromURL(repoURL string) string {
-	if normalized, err := sourceurl.ValidateCloneURL(repoURL); err == nil {
-		repoURL = normalized
-	} else {
-		repoURL = strings.TrimSpace(repoURL)
-	}
-	sum := sha256.Sum256([]byte(repoURL))
-	return fmt.Sprintf("repo-%x", sum)[:64]
 }
 
 func RepoURLFromGitHub(fullName string) string {

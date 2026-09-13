@@ -2,6 +2,7 @@ package sourceurl
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -270,5 +271,19 @@ func TestRedactSCPUser(t *testing.T) {
 		if got != "redacted@github.com:acme/repo.git" {
 			t.Fatalf("Redact SCP URL = %q", got)
 		}
+	}
+}
+
+func TestClaimedRepoNameFromURL_DistinguishesEqualBasenames(t *testing.T) {
+	first := ClaimedRepoNameFromURL("https://git.example.com/acme/widgets.git")
+	second := ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git")
+	if first == second {
+		t.Fatalf("claim-scoped names collide: %q", first)
+	}
+	if !strings.HasPrefix(first, "repo-") || len(first) != 64 {
+		t.Fatalf("claim-scoped name = %q", first)
+	}
+	if got := ClaimedRepoNameFromURL("  https://git.example.com/acme/widgets.git  "); got != first {
+		t.Fatalf("normalized claim-scoped name = %q, want %q", got, first)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 func TestHandleHealth(t *testing.T) {
@@ -1266,7 +1267,7 @@ func TestGitRegisterValidatesTheName(t *testing.T) {
 func TestGitRegisterAcceptsClaimScopedRepoName(t *testing.T) {
 	srv := newTestServer(t, "s3cret")
 	repoURL := "https://example.invalid/acme/widgets.git"
-	name := bincache.ClaimedRepoNameFromURL(repoURL)
+	name := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	if code := registerName(t, srv, name, repoURL, "s3cret"); code != http.StatusOK {
 		t.Fatalf("register claim-scoped name length %d = %d, want 200", len(name), code)
 	}
