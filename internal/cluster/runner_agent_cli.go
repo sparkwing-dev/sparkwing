@@ -189,6 +189,23 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	return out, nil
 }
 
+// EnrolledExecutionUnavailable is the whole message an agent prints when its
+// configuration selects enrolled mode, which the controller refuses on both
+// the claim route and the offer route.
+const EnrolledExecutionUnavailable = "enrolled execution is not available; " +
+	"remove name and coordinators from agent.yaml to run in claim mode, " +
+	"or pass --allow-enrolled-preview to start the unfinished enrolled path"
+
+// CheckEnrolledExecutionAvailable refuses a configuration that would enter
+// enrolled mode. allowPreview lets a developer of enrolled execution run the
+// unfinished path anyway.
+func CheckEnrolledExecutionAvailable(cfg AgentConfig, allowPreview bool) error {
+	if !cfg.registered || allowPreview {
+		return nil
+	}
+	return errors.New(EnrolledExecutionUnavailable)
+}
+
 func agentCoordinators(cfg AgentConfig) []AgentCoordinatorConfig {
 	if len(cfg.Coordinators) > 0 {
 		return cfg.Coordinators
@@ -451,6 +468,8 @@ func RunAgentCLI(args []string) error {
 func runAgentCLI(args []string, identity buildinfo.Identity) error {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to agent.yaml (default: ~/.config/sparkwing/agent.yaml)")
+	allowEnrolledPreview := fs.Bool("allow-enrolled-preview", false,
+		"start an enrolled configuration against the unfinished enrolled execution path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -469,6 +488,9 @@ func runAgentCLI(args []string, identity buildinfo.Identity) error {
 	}
 	cfg, err := ValidateAgentConfig(*raw)
 	if err != nil {
+		return err
+	}
+	if err := CheckEnrolledExecutionAvailable(cfg, *allowEnrolledPreview); err != nil {
 		return err
 	}
 

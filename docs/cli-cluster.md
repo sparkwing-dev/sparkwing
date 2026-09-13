@@ -20,6 +20,7 @@ local dashboard with 'sparkwing serve'.
 
 - `status` -- Connectivity + fleet + queue health check against a remote cluster
 - `agents` -- Inspect the controller's fleet view
+- `runners` -- Enroll and retire this machine as a runner
 - `worker` -- Claim triggers from a profile's controller and run them in-process
 - `gc` -- Sweep stale warm-PVC state
 - `users` -- Manage dashboard login users
@@ -269,6 +270,112 @@ sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --w
 
 # Bump, sync, wait, then tail pod logs
 sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs
+```
+
+## `sparkwing cluster runners`
+
+Enroll and retire this machine as a runner
+
+Turns one machine into a runner for the selected profile's
+controller in a single command. 'add' mints a scoped runner token, writes the
+owner-only agent config, and installs the user service. 'remove' stops that
+service and revokes the token.
+
+Use 'sparkwing cluster agents list' to see the runners a controller knows
+about.
+
+### Subcommands
+
+- `add` -- Mint a runner token, write the config, start the service
+- `remove` -- Stop the runner service and revoke its token
+
+### Examples
+
+```sh
+# Enroll this machine
+sparkwing cluster runners add --profile prod --name dev-laptop
+
+# Retire this machine
+sparkwing cluster runners remove --profile prod
+```
+
+## `sparkwing cluster runners add`
+
+Mint a runner token, write the config, start the service
+
+Mints a runner token carrying nodes.claim, triggers.claim,
+runs.state, secrets.read and logs.write against the profile's controller,
+writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
+the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
+Windows it prints the manual supervision steps instead.
+
+The config is written in claim mode, which is the mode that executes work.
+An existing config is never replaced without --force, because the token it
+holds stays live until it is revoked.
+
+Nothing is minted until the config validates and the machine answers: a
+missing sparkwing-runner, an unreachable service manager, or an unusable
+setting fails first. If a step after the mint fails, the output names the live
+token and the command that revokes it.
+
+The command prints the token prefix and the revoke command. The raw token
+reaches only the config file.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--name NAME` | Runner name, shown in the dashboard (required) |
+| `--labels CSV` | Comma-separated self-asserted placement labels |
+| `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
+| `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
+| `--logs URL` | Logs service URL (default: the profile's logs surface) |
+| `--config PATH` | Agent config to write (default: ~/.config/sparkwing/agent.yaml) |
+| `--force` | Replace an existing agent config |
+| `--no-service` | Write the config without installing or starting the service |
+| `--profile NAME` | Profile naming the controller to enroll against (required) |
+
+### Examples
+
+```sh
+# Enroll this machine
+sparkwing cluster runners add --profile prod --name dev-laptop
+
+# Enroll with a capacity ceiling and labels
+sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4 --contribution 4,8gb --labels linux,arch=amd64
+
+# Write the config and supervise the agent yourself
+sparkwing cluster runners add --profile prod --name dev-laptop --no-service
+```
+
+## `sparkwing cluster runners remove`
+
+Stop the runner service and revoke its token
+
+Reads the token out of the agent config, stops and removes the
+user service, then revokes that token on the profile's controller. The service
+stops first, so a claim in flight finishes against a credential that still
+authenticates. A prefix the controller reports as anything but a runner token
+is refused, naming what it found.
+
+A service file that runs a different agent config is left alone.
+
+The config file stays on disk holding the revoked token; 'runners add --force'
+replaces it.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--config PATH` | Agent config to read the token from (default: ~/.config/sparkwing/agent.yaml) |
+| `--no-service` | Revoke the token without touching the service |
+| `--profile NAME` | Profile naming the controller that issued the token (required) |
+
+### Examples
+
+```sh
+# Retire this machine
+sparkwing cluster runners remove --profile prod
 ```
 
 ## `sparkwing cluster status`

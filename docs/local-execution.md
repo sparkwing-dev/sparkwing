@@ -471,13 +471,20 @@ when testing deterministic placement.
 
 ### Remote machine capacity
 
-`sparkwing-runner agent` has separate legacy and enrolled modes.
+`sparkwing-runner agent` has separate legacy and enrolled modes. Claim mode is
+the mode that executes work: an agent whose configuration sets `name` or
+`coordinators` refuses to start and exits non-zero, saying that enrolled
+execution is not available and that removing both keys runs it in claim mode.
+`--allow-enrolled-preview` starts that configuration anyway, against the
+unfinished enrolled path, for the developers of that path. The rest of this
+section describes the enrolled design the refusal holds back.
 
 The name-less singular configuration uses the existing outbound FIFO
 `/api/v1/nodes/claim` loop. Its `labels` are self-asserted placement terms,
-not administrator-trusted capabilities. The bundled service installer writes
-this format. Existing files keep their `local_admission` setting, including an
-explicit `false`; when enabled, legacy local admission happens after a claim.
+not administrator-trusted capabilities. `sparkwing cluster runners add` and the
+bundled service installer both write this format. Existing files keep their
+`local_admission` setting, including an explicit `false`; when enabled, legacy
+local admission happens after a claim.
 
 Named or plural configuration selects enrolled assisted-offer mode. Before
 starting it, a controller administrator binds the executor to the exact prefix
@@ -500,6 +507,10 @@ also becomes immutable attribution and a hard requirement for an agent-loss
 retry. Capabilities, priority range, concurrency ceiling, and
 resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
+
+`sparkwing fleet agents enroll` prints a `coordinators` membership for this
+shape, so the agent refuses the merged config until enrolled execution ships or
+`--allow-enrolled-preview` is passed.
 
 Set `name` for one enrolled coordinator, or use `coordinators` for several.
 Every membership needs a distinct revocable token and its enrolled name;

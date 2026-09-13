@@ -47,6 +47,7 @@ var allCommands = []*Command{
 	&cmdHealth,
 	&cmdWebhooks, &cmdWebhooksList, &cmdWebhooksDeliveries, &cmdWebhooksReplay,
 	&cmdAgents, &cmdAgentsList, &cmdAgentsEnroll, &cmdClusterConcurrency,
+	&cmdRunners, &cmdRunnersAdd, &cmdRunnersRemove,
 	&cmdFleet, &cmdFleetInit, &cmdFleetAgents, &cmdFleetAgentsEnroll,
 	&cmdSparks, &cmdSparksCatalog, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup, &cmdSparksInflate,

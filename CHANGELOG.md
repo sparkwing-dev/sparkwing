@@ -22,6 +22,22 @@ unlock.
 
 ### Added
 
+- **cli:** `sparkwing cluster runners add --profile P --name NAME` enrolls the
+  machine it runs on in one command: it mints a runner token scoped to
+  `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and
+  `logs.write` on the profile's controller, writes
+  `~/.config/sparkwing/agent.yaml` at mode 0600 in the claim-mode format the
+  service installer writes, installs and starts the user service (a systemd
+  user unit on Linux, a LaunchAgent on macOS), and prints the token prefix with
+  the command that revokes it. On Windows it prints the manual supervision
+  steps. `--max-concurrent`, `--contribution` and `--labels` set the ceilings
+  and placement terms, `--no-service` stops at the config, and an existing
+  config is replaced only with `--force`. `sparkwing cluster runners remove
+  --profile P` stops the service and then revokes the token.
+  `install/service-install.sh` is unchanged and still installs the same unit
+  and plist. The command refuses a host that cannot supervise a runner, and an
+  agent config that does not validate, before it mints anything, and it names
+  the live token and its revoke command whenever a step after the mint fails.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the
@@ -31,6 +47,20 @@ unlock.
 
 ### Changed
 
+- **cli:** `sparkwing fleet agents enroll` says that the `coordinators` block it
+  prints selects enrolled mode, which `sparkwing-runner agent` refuses to start
+  without `--allow-enrolled-preview`, and points at `sparkwing cluster runners
+  add` for a machine that must execute work. The command and its output are
+  otherwise unchanged.
+- **runner (Breaking):** `sparkwing-runner agent` refuses to start when
+  `agent.yaml` sets `name` or `coordinators`. That configuration selects
+  enrolled mode, which the controller refuses on both the claim route and the
+  offer route, so the agent polled and logged an error on every slot while
+  claiming nothing. It now exits non-zero naming the state. Remove both keys to
+  run the claim-mode loop the service installer writes; see the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-refuses-to-start).
+  `--allow-enrolled-preview` restores the polling behavior for the developers of
+  the enrolled path.
 - **config (Breaking):** A trigger key under `on:` that carries no value is
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a

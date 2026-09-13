@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -572,5 +573,56 @@ func TestExecutorOfferSlotReleasesReservationWhenControllerHangsAfterFirstOffer(
 	}
 	if len(ctrl.offers) < 2 {
 		t.Fatalf("offers = %d, want first response plus hung retry", len(ctrl.offers))
+	}
+}
+
+func TestCheckEnrolledExecutionAvailable_RefusesEveryEnrolledShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  AgentConfig
+	}{
+		{"named singular", AgentConfig{Controller: "http://x", Name: "desk", Token: "tok"}},
+		{"coordinators", AgentConfig{Controller: "http://x", Coordinators: []AgentCoordinatorConfig{
+			{Name: "desk", Controller: "http://x", Token: "tok"},
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := ValidateAgentConfig(tc.cfg)
+			if err != nil {
+				t.Fatalf("validate: %v", err)
+			}
+			err = CheckEnrolledExecutionAvailable(cfg, false)
+			if err == nil || err.Error() != EnrolledExecutionUnavailable {
+				t.Fatalf("refusal = %v, want %q", err, EnrolledExecutionUnavailable)
+			}
+			if err := CheckEnrolledExecutionAvailable(cfg, true); err != nil {
+				t.Fatalf("preview override: %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckEnrolledExecutionAvailable_AdmitsClaimMode(t *testing.T) {
+	cfg, err := ValidateAgentConfig(AgentConfig{Controller: "http://x", Token: "tok", HolderPrefix: "desk"})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := CheckEnrolledExecutionAvailable(cfg, false); err != nil {
+		t.Fatalf("claim mode refused: %v", err)
+	}
+}
+
+func TestRunAgentCLI_EnrolledConfigRefusesBeforePolling(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	body := "controller: http://127.0.0.1:1\nname: desk\ntoken: tok\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fssecure.SecurePrivateConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	err := runAgentCLI([]string{"--config", path}, buildinfo.Identity{})
+	if err == nil || err.Error() != EnrolledExecutionUnavailable {
+		t.Fatalf("runAgentCLI = %v, want %q", err, EnrolledExecutionUnavailable)
 	}
 }
