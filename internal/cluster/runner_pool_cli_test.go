@@ -178,7 +178,7 @@ func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
 		"--controller=http://controller",
 		"--metrics-addr=",
 		"--claim-nodes=false",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--claim-nodes=false requires --also-claim-triggers") {
 		t.Fatalf("runRunnerCLI() error = %v, want claim-nodes/trigger-loop validation", err)
 	}
@@ -190,7 +190,7 @@ func TestRunRunnerCLI_WarmTriggerRunnerRefusesDirectNodeClaims(t *testing.T) {
 		"--metrics-addr=",
 		"--also-claim-triggers",
 		"--trigger-runner=warm",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "requires --claim-nodes=false") {
 		t.Fatalf("runRunnerCLI() error = %v, want remote-agent race validation", err)
 	}
@@ -202,7 +202,7 @@ func TestRunRunnerCLI_TriggerRunnerRequiresTriggerLoop(t *testing.T) {
 		"--metrics-addr=",
 		"--trigger-runner=warm",
 		"--claim-nodes=false",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "requires --also-claim-triggers") {
 		t.Fatalf("runRunnerCLI() error = %v, want trigger-loop validation", err)
 	}
@@ -217,7 +217,7 @@ func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
 		"--gitcache=http://cache",
 		"--trigger-runner=k8s",
 		"--trigger-runner-image=img",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=k8s") {
 		t.Fatalf("runRunnerCLI() error = %v, want the same rejection BuildK8sRunnerFactory returns", err)
 	}
@@ -233,7 +233,7 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 		"--gitcache=http://cache",
 		"--trigger-runner=warm",
 		"--trigger-runner-image=img",
-	})
+	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=warm") {
 		t.Fatalf("runRunnerCLI() error = %v, want warm fallback service-account validation", err)
 	}

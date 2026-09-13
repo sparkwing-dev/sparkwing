@@ -227,8 +227,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		shipCompileOutput(ctx, opts, trigger.ID, buildErr, logger)
 		return awaitHeartbeat(), buildErr
 	}
-	logger.Info("trigger loop: binary ready",
-		"run_id", trigger.ID, "bin", binary.path)
+	logBinaryReady(logger, trigger.ID, binary)
 	defer binary.release()
 
 	execErr := execHandleTrigger(childCtx, binary.path, filepath.Dir(sparkwingDir), trigger, opts, logger)
@@ -382,6 +381,37 @@ func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func(string, stri
 type triggerBinary struct {
 	path  string
 	lease *bincache.Lease
+
+	cache string
+
+	build time.Duration
+}
+
+const (
+	binaryCacheLocal = "local"
+
+	binaryCacheRemote = "remote"
+
+	binaryCacheCompiled = "compiled"
+)
+
+func binaryCacheOutcome(fetched, compiled bool) string {
+	switch {
+	case compiled:
+		return binaryCacheCompiled
+	case fetched:
+		return binaryCacheRemote
+	default:
+		return binaryCacheLocal
+	}
+}
+
+func logBinaryReady(logger *slog.Logger, runID string, binary triggerBinary) {
+	logger.Info("trigger loop: binary ready",
+		"run_id", runID,
+		"bin", binary.path,
+		"binary_cache", binary.cache,
+		"build_ms", binary.build.Milliseconds())
 }
 
 func (b triggerBinary) release() {
@@ -391,19 +421,21 @@ func (b triggerBinary) release() {
 }
 
 func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, logger *slog.Logger) (triggerBinary, error) {
+	start := time.Now()
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-trigger-loop-bin")
 		if cerr := bincache.CompilePipeline(context.Background(), sparkwingDir, tmp); cerr != nil {
 			return triggerBinary{}, cerr
 		}
-		return triggerBinary{path: tmp}, nil
+		return triggerBinary{path: tmp, cache: binaryCacheCompiled, build: time.Since(start)}, nil
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
 		return triggerBinary{}, err
 	}
 	compiled := false
+	fetched := false
 	binaryCacheURL := opts.GitcacheURL
 	if bincache.ControllerGitcacheToken(opts.GitcacheURL, opts.ControllerURL, opts.Token) != "" {
 		binaryCacheURL = ""
@@ -411,6 +443,7 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
 		if binaryCacheURL != "" {
 			if fetchErr := bincache.TryBinary(context.Background(), binaryCacheURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
+				fetched = true
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("trigger loop: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
@@ -427,7 +460,12 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}
 	}
-	return triggerBinary{path: lease.Path(), lease: lease}, nil
+	return triggerBinary{
+		path:  lease.Path(),
+		lease: lease,
+		cache: binaryCacheOutcome(fetched, compiled),
+		build: time.Since(start),
+	}, nil
 }
 
 func triggerSourceURL(trigger *store.Trigger) (string, error) {
