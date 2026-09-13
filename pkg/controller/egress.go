@@ -21,6 +21,11 @@ import (
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 	if m != nil {
 		m = m.WithLogger(s.logger)
+		// safety: only a controller with a store drains the meter, and only
+		// a meter somebody drains may park a month's closing totals.
+		if s.store != nil {
+			m = m.WithPersistence()
+		}
 	}
 	s.egress = m
 	return s
@@ -68,6 +73,13 @@ func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
 	return s.meterOn(class, egress.SlotDownload, next)
 }
 
+// safety: the gitcache proxy is the checkout path every node takes, so it
+// is byte-metered but holds no slot; a concurrency cap there refuses the
+// clone rather than the download it was meant to bound.
+func (s *Server) meteredBytes(class egress.Class, next http.Handler) http.Handler {
+	return s.meterOn(class, "", next)
+}
+
 // safety: one browser tab per node multiplies a live stream without
 // limit, so the stream surface counts its own slot; a stream lasts as
 // long as its node and a download does not.
@@ -92,12 +104,18 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		release, err := s.egress.Open(principal, slot)
-		if err != nil {
-			s.writeEgressRefusal(w, r, class, err)
-			return
+		if slot != "" {
+			// safety: a pool shares one bearer, so the slot counts the pod
+			// the request names and falls back to the principal only when
+			// nothing names one.
+			holder := egress.SlotIdentity(r, principal, store.ClaimHolderHeader)
+			release, err := s.egress.Open(holder, slot)
+			if err != nil {
+				s.writeEgressRefusal(w, r, class, err)
+				return
+			}
+			defer release()
 		}
-		defer release()
 		next.ServeHTTP(s.egress.Serve(w, r, principal, class), r)
 	})
 }

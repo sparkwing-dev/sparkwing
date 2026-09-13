@@ -38,6 +38,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -70,6 +71,12 @@ const AnonymousPrincipal = "anonymous"
 // instead of opening it. The fold lasts until the month rolls, which is
 // when a meter drops the principals that spent nothing.
 const OverflowPrincipal = "(overflow)"
+
+// MaxPendingUsages bounds the closing-month totals a meter parks for a
+// drain it is still waiting on. It sits above one month roll at the
+// principal cap, so a drain that runs monthly never reaches it and one
+// that has stopped entirely is capped rather than unbounded.
+const MaxPendingUsages = 2 * MaxPrincipals
 
 // MaxPrincipals bounds how many principals one meter tracks. A
 // controller mints tokens under an operator's hand, so the cap sits far
@@ -222,19 +229,23 @@ type PrincipalState struct {
 // State is the whole meter at a point in time, as the health route and
 // the top-consumers view report it.
 type State struct {
-	MonthlyBytesPerPrincipal int64            `json:"monthly_bytes_per_principal"`
-	DailyAlarmBytes          int64            `json:"daily_alarm_bytes"`
-	MaxStreamsPerPrincipal   int              `json:"max_streams_per_principal"`
-	MaxDownloadsPerPrincipal int              `json:"max_downloads_per_principal"`
-	Month                    string           `json:"month"`
-	Day                      string           `json:"day"`
-	GlobalMonthBytes         int64            `json:"global_month_bytes"`
-	GlobalDayBytes           int64            `json:"global_day_bytes"`
-	Alarm                    bool             `json:"alarm"`
-	AlarmSince               time.Time        `json:"alarm_since,omitzero"`
-	Refused                  uint64           `json:"refused_total"`
-	Principals               int              `json:"principals"`
-	Top                      []PrincipalState `json:"top,omitempty"`
+	MonthlyBytesPerPrincipal int64     `json:"monthly_bytes_per_principal"`
+	DailyAlarmBytes          int64     `json:"daily_alarm_bytes"`
+	MaxStreamsPerPrincipal   int       `json:"max_streams_per_principal"`
+	MaxDownloadsPerPrincipal int       `json:"max_downloads_per_principal"`
+	Month                    string    `json:"month"`
+	Day                      string    `json:"day"`
+	GlobalMonthBytes         int64     `json:"global_month_bytes"`
+	GlobalDayBytes           int64     `json:"global_day_bytes"`
+	Alarm                    bool      `json:"alarm"`
+	AlarmSince               time.Time `json:"alarm_since,omitzero"`
+	Refused                  uint64    `json:"refused_total"`
+	Principals               int       `json:"principals"`
+	// Pending is the closing-month totals waiting for the next drain, and
+	// PendingDropped how many the backlog cap has discarded.
+	Pending        int              `json:"pending,omitempty"`
+	PendingDropped uint64           `json:"pending_dropped,omitempty"`
+	Top            []PrincipalState `json:"top,omitempty"`
 }
 
 // TopConsumers is how many principals [Meter.State] reports.
@@ -282,16 +293,20 @@ type Meter struct {
 	principals map[string]*principalCounters
 	// safety: a month roll zeroes a principal's counter, so the closing
 	// total is parked here for the next Dirty rather than lost between
-	// the roll and the flush that would have persisted it.
-	pending    []Usage
-	month      string
-	monthBytes int64
-	day        string
-	dayBytes   int64
-	alarm      bool
-	alarmSince time.Time
-	refused    uint64
-	overflowed bool
+	// the roll and the flush that would have persisted it. Only a meter
+	// whose owner drains it parks anything; see [Meter.WithPersistence].
+	persists       bool
+	pending        []Usage
+	pendingDropped uint64
+	pendingWarned  bool
+	month          string
+	monthBytes     int64
+	day            string
+	dayBytes       int64
+	alarm          bool
+	alarmSince     time.Time
+	refused        uint64
+	overflowed     bool
 }
 
 // New builds a Meter on cfg. A zero Config counts every byte and
@@ -312,6 +327,17 @@ func (m *Meter) WithLogger(l *slog.Logger) *Meter {
 	if l != nil {
 		m.logger = l
 	}
+	return m
+}
+
+// WithPersistence marks this meter as one whose owner drains it with
+// [Meter.Dirty] and persists what comes out. Only such a meter parks a
+// month's closing totals for the next drain; a meter nobody drains would
+// otherwise accumulate one entry per principal per month roll forever.
+func (m *Meter) WithPersistence() *Meter {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.persists = true
 	return m
 }
 
@@ -417,6 +443,37 @@ func Bodyless(r *http.Request) bool {
 	return r != nil && r.Method == http.MethodHead
 }
 
+// RunnerHeader names the pod behind a request when the client sends one.
+// A runner pool shares one bearer, so the principal alone cannot tell
+// twenty pods apart and a concurrency cap keyed on it would refuse
+// nineteen of them at once.
+const RunnerHeader = "X-Sparkwing-Runner"
+
+// SlotIdentity returns the name a concurrency slot is counted under: the
+// pod behind the request where one is named, and the principal where
+// none is. Byte budgets always key on the principal, because the bill is
+// the team's; only the concurrency caps key on the pod, because holding
+// a response open is the pod's doing.
+//
+// The identity is cooperative. A caller that invents a pod name gets its
+// own slots, so these caps bound an honest pool's burst rather than a
+// caller working around them; the byte budget, which no header can move,
+// is what bounds that one.
+//
+// fallbacks are the headers to try after [RunnerHeader], in order, which
+// lets a caller offer an identity its own protocol already carries.
+func SlotIdentity(r *http.Request, principal string, fallbacks ...string) string {
+	if r == nil {
+		return principal
+	}
+	for _, header := range append([]string{RunnerHeader}, fallbacks...) {
+		if v := strings.TrimSpace(r.Header.Get(header)); v != "" {
+			return principal + "/" + v
+		}
+	}
+	return principal
+}
+
 // Open reserves one of principal's slots and returns the release the
 // caller defers. A principal already at the cap gets a
 // *ConcurrencyError and a release that does nothing.
@@ -465,6 +522,7 @@ func (m *Meter) Dirty() []Usage {
 	defer m.mu.Unlock()
 	out := m.pending
 	m.pending = nil
+	m.pendingWarned = false
 	for name, st := range m.principals {
 		if !st.dirty {
 			continue
@@ -540,8 +598,13 @@ func (m *Meter) State() State {
 		AlarmSince:               m.alarmSince,
 		Refused:                  m.refused,
 		Principals:               len(m.principals),
+		PendingDropped:           m.pendingDropped,
 	}
 	for name, st := range m.principals {
+		// safety: the view puts a principal's day beside the process's, so
+		// this rolls each one to now; without it a read after midnight
+		// showed yesterday's per-principal bytes against a zeroed global.
+		m.rollPrincipal(name, st, now)
 		if st.monthBytes == 0 && st.dayBytes == 0 && st.streams == 0 && st.downloads == 0 {
 			continue
 		}
@@ -563,6 +626,7 @@ func (m *Meter) State() State {
 	if len(out.Top) > TopConsumers {
 		out.Top = out.Top[:TopConsumers]
 	}
+	out.Pending = len(m.pending)
 	return out
 }
 
@@ -625,7 +689,7 @@ func (m *Meter) rollPrincipal(name string, st *principalCounters, now time.Time)
 	month, day := now.Format("2006-01"), now.Format("2006-01-02")
 	if st.month != month {
 		if st.dirty {
-			m.pending = append(m.pending, Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
+			m.park(Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
 			st.dirty = false
 		}
 		st.month = month
@@ -655,6 +719,26 @@ func (m *Meter) rollGlobal(now time.Time) {
 		m.alarm = false
 		m.alarmSince = time.Time{}
 	}
+}
+
+// safety: a meter nobody drains parks nothing, and one whose drain has
+// stopped drops its oldest entry rather than growing without bound; the
+// store keeps a high-water mark, so a dropped entry costs history and
+// never hands back spend.
+func (m *Meter) park(u Usage) {
+	if !m.persists {
+		return
+	}
+	if len(m.pending) >= MaxPendingUsages {
+		m.pending = m.pending[1:]
+		m.pendingDropped++
+		if !m.pendingWarned {
+			m.pendingWarned = true
+			m.logger.Warn("egress usage backlog full",
+				"pending", len(m.pending), "limit", MaxPendingUsages)
+		}
+	}
+	m.pending = append(m.pending, u)
 }
 
 func (m *Meter) evictIdle(now time.Time) {

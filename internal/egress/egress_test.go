@@ -484,6 +484,7 @@ func TestPrincipalsPastTheCapShareTheOverflowBudget(t *testing.T) {
 
 func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
 	m, clock := meterAt(t, egress.Config{}, "2026-09-30T23:59:59Z")
+	m.WithPersistence()
 	m.Record("alice", egress.ClassArtifact, 400)
 
 	// safety: the flush that would have persisted September lands after
@@ -533,5 +534,133 @@ func TestConcurrentRecordsRunTheAlarmBranchUnderContention(t *testing.T) {
 	wg.Wait()
 	if m.State().Refused != 0 {
 		t.Error("the daily alarm refused a request")
+	}
+}
+
+// safety: only the controller drains a meter, so a logs or cache meter
+// that parked a closing total per principal per month would grow for the
+// life of the process.
+func TestAnUndrainedMeterParksNothingAcrossManyMonths(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{}, "2026-01-15T10:00:00Z")
+	for month := 1; month <= 36; month++ {
+		*clock = at(t, fmt.Sprintf("%04d-%02d-15T10:00:00Z", 2026+(month-1)/12, (month-1)%12+1))
+		for p := range 20 {
+			m.Record(fmt.Sprintf("p%d", p), egress.ClassLog, 100)
+		}
+	}
+	state := m.State()
+	if state.Pending != 0 {
+		t.Fatalf("an undrained meter parked %d usages across 36 month rolls, want 0", state.Pending)
+	}
+	if got := m.Dirty(); len(got) != 20 {
+		t.Fatalf("Dirty = %d usages, want only the live month's 20", len(got))
+	}
+}
+
+func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{}, "2026-01-15T10:00:00Z")
+	m.WithPersistence()
+
+	*clock = at(t, "2026-01-15T10:00:00Z")
+	m.Record("alice", egress.ClassLog, 100)
+	*clock = at(t, "2026-02-15T10:00:00Z")
+	m.Record("alice", egress.ClassLog, 5)
+	if state := m.State(); state.Pending != 1 {
+		t.Fatalf("Pending = %d, want January parked for the next drain", state.Pending)
+	}
+	if got := m.Dirty(); len(got) != 2 || got[0].Month != "2026-01" {
+		t.Fatalf("Dirty = %+v, want January then February", got)
+	}
+	if state := m.State(); state.Pending != 0 {
+		t.Fatalf("Pending after a drain = %d, want 0", state.Pending)
+	}
+
+	// safety: a drain that has stopped must cap rather than grow; the store
+	// keeps a high-water mark, so a dropped entry costs history alone.
+	for i := range egress.MaxPendingUsages + 100 {
+		*clock = at(t, fmt.Sprintf("2026-%02d-15T10:00:00Z", i%12+1))
+		m.Record(fmt.Sprintf("p%d", i), egress.ClassLog, 1)
+	}
+	state := m.State()
+	if state.Pending > egress.MaxPendingUsages {
+		t.Fatalf("Pending = %d, want at most the cap of %d", state.Pending, egress.MaxPendingUsages)
+	}
+	if state.PendingDropped == 0 {
+		t.Fatal("the backlog filled without reporting a drop")
+	}
+}
+
+func TestSlotIdentityPrefersThePodOverThePrincipal(t *testing.T) {
+	principal := "pool"
+	bare := httptest.NewRequest(http.MethodGet, "/a", nil)
+	if got := egress.SlotIdentity(bare, principal); got != principal {
+		t.Errorf("a request naming no pod = %q, want the principal", got)
+	}
+
+	withHolder := httptest.NewRequest(http.MethodGet, "/a", nil)
+	withHolder.Header.Set("X-Sparkwing-Claim-Holder", "holder-7")
+	if got := egress.SlotIdentity(withHolder, principal, "X-Sparkwing-Claim-Holder"); got != "pool/holder-7" {
+		t.Errorf("a claim holder = %q, want pool/holder-7", got)
+	}
+
+	withRunner := httptest.NewRequest(http.MethodGet, "/a", nil)
+	withRunner.Header.Set(egress.RunnerHeader, "runner-3")
+	withRunner.Header.Set("X-Sparkwing-Claim-Holder", "holder-7")
+	// safety: the runner header wins, so a pod that names itself is counted
+	// as itself even while it holds a claim.
+	if got := egress.SlotIdentity(withRunner, principal, "X-Sparkwing-Claim-Holder"); got != "pool/runner-3" {
+		t.Errorf("a runner header = %q, want pool/runner-3", got)
+	}
+
+	if got := egress.SlotIdentity(nil, principal); got != principal {
+		t.Errorf("no request = %q, want the principal", got)
+	}
+}
+
+// safety: twenty pods under one bearer must each get the pool's cap, not
+// share one; a shared cap refused nineteen of them at a cap of eight.
+func TestAPoolsPodsHoldTheirOwnSlots(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{MaxDownloadsPerPrincipal: 1}, "2026-09-13T10:00:00Z")
+	var releases []func()
+	for pod := range 20 {
+		req := httptest.NewRequest(http.MethodGet, "/a", nil)
+		req.Header.Set(egress.RunnerHeader, fmt.Sprintf("pod-%d", pod))
+		release, err := m.Open(egress.SlotIdentity(req, "pool"), egress.SlotDownload)
+		if err != nil {
+			t.Fatalf("pod %d was refused its first download: %v", pod, err)
+		}
+		releases = append(releases, release)
+	}
+	// safety: the cap still applies within one pod.
+	req := httptest.NewRequest(http.MethodGet, "/a", nil)
+	req.Header.Set(egress.RunnerHeader, "pod-0")
+	if _, err := m.Open(egress.SlotIdentity(req, "pool"), egress.SlotDownload); err == nil {
+		t.Fatal("one pod's second simultaneous download was admitted past the cap")
+	}
+	for _, release := range releases {
+		release()
+	}
+}
+
+func TestStateRollsEachPrincipalsDayWithTheProcesss(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{}, "2026-09-13T23:59:00Z")
+	m.Record("alice", egress.ClassArtifact, 400)
+	if state := m.State(); state.GlobalDayBytes != 400 || state.Top[0].DayBytes != 400 {
+		t.Fatalf("before the roll = %+v", state)
+	}
+
+	*clock = at(t, "2026-09-14T00:00:01Z")
+	state := m.State()
+	if state.GlobalDayBytes != 0 {
+		t.Fatalf("GlobalDayBytes after the roll = %d, want 0", state.GlobalDayBytes)
+	}
+	// safety: the view puts the two side by side, so a principal still
+	// showing yesterday's bytes against a zeroed global reads as a bug in
+	// the meter.
+	if len(state.Top) != 1 || state.Top[0].DayBytes != 0 {
+		t.Fatalf("per-principal day after the roll = %+v, want 0 beside the global", state.Top)
+	}
+	if state.Top[0].MonthBytes != 400 {
+		t.Fatalf("the month was rolled with the day: %+v", state.Top)
 	}
 }
