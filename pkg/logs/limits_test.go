@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -898,11 +899,37 @@ func TestLogs_DeletingARunRemeasuresAndThawsTheStore(t *testing.T) {
 	if err := fix.client.DeleteRun(ctx, "run-1"); err != nil {
 		t.Fatalf("delete run: %v", err)
 	}
+	// safety: the walk the delete triggers runs off the request, so the test waits
+	// for it rather than asserting on a race it would sometimes win.
+	deadline := time.Now().Add(5 * time.Second)
+	for fix.server.StoreCeiling().Frozen && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if fix.server.StoreCeiling().Frozen {
-		t.Error("deleting the only run left the store frozen, so an operator has to wait out the interval")
+		t.Fatal("deleting the only run left the store frozen, so an operator has to wait out the interval")
 	}
 	if err := fix.client.Append(ctx, "run-2", "step-a", []byte("after\n")); err != nil {
 		t.Errorf("append after the delete freed space: %v", err)
+	}
+}
+
+func TestLogs_MeasurementStopsWhenItsContextDoes(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 1 << 20},
+		Reconcile: time.Hour,
+	})
+	if err := fix.client.Append(context.Background(), "run-1", "step-a", []byte("hello\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := fix.server.MeasureStore(ctx)
+	if !errors.Is(err, objectguard.ErrMeasurementPartial) {
+		t.Fatalf("MeasureStore on a cancelled context = %v, want a partial measurement", err)
+	}
+	if !fix.server.StoreCeiling().Incomplete {
+		t.Error("an abandoned walk did not mark the ceiling incomplete")
 	}
 }
 

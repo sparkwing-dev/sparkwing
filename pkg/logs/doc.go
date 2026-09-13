@@ -37,6 +37,14 @@
 // [BinaryDropMarker], and a search stopped by a budget reports Truncated
 // on its [SearchResponse].
 //
+// # One service per process
+//
+// The store ceiling's Prometheus collector reads a package-level
+// pointer to the ceiling of the most recently constructed [Server], so
+// /metrics describes one logs service: the deployment shape. A process
+// that builds a second Server keeps serving both, and the gauges follow
+// the later one.
+//
 // # Storage shape (v1)
 //
 // One file per (run_id, node_id) under `root/runs/<run_id>/<node_id>.log`,

@@ -263,6 +263,7 @@ func New(cfg Config) (*Server, error) {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	setMeasureContext(ctx)
 	measureStore(ctx)
 	s.wg.Add(3)
 	go func() {

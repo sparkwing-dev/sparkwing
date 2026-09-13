@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -464,12 +465,32 @@ func TestStoreCeilingMeasureRouteThawsAfterSpaceIsFreed(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	handleStoreCeilingMeasure(w, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/measure", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("measure status %d, want 200: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("measure status %d, want 202: %s", w.Code, w.Body.String())
 	}
-	if storeCeiling.Frozen() {
-		t.Error("the store stayed frozen after the volume was emptied and re-measured")
+	var body struct {
+		Measuring bool `json:"measuring"`
+		Started   bool `json:"started"`
 	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode measure response: %v", err)
+	}
+	if !body.Measuring || !body.Started {
+		t.Errorf("the measure response reports %+v", body)
+	}
+	waitUntil(t, "the store thaws after the volume is emptied", func() bool { return !storeCeiling.Frozen() })
+}
+
+func waitUntil(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if done() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting until %s", what)
 }
 
 func TestStoreCeilingAdminRoutesNeedTheBearerToken(t *testing.T) {
@@ -564,5 +585,41 @@ func TestOverwritingAnObjectCountsTheDifferenceNotASecondObject(t *testing.T) {
 	}
 	if state.Bytes != 4 {
 		t.Errorf("the key counted %d bytes, want the 4 it now holds", state.Bytes)
+	}
+}
+
+func TestStoreMeasurementStopsWhenItsContextDoes(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 1 << 20},
+		Reconcile: time.Hour,
+	})
+	if err := os.WriteFile(filepath.Join(cacheDir, "a.tar.gz"), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	measureStore(ctx)
+
+	state := storeCeiling.State()
+	if !state.Incomplete {
+		t.Error("an abandoned walk did not mark the ceiling incomplete")
+	}
+	if !state.ReconciledAt.IsZero() {
+		t.Error("a partial walk was folded in as a measurement")
+	}
+}
+
+func TestStoreCeilingThawRefusalNamesTheMeasureRoute(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 16}})
+	storeCeiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
+
+	w := httptest.NewRecorder()
+	handleStoreCeilingThaw(w, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/thaw", nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "/admin/store-ceiling/measure") {
+		t.Errorf("the refusal %q does not name the route that does work", w.Body.String())
 	}
 }

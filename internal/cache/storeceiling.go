@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
@@ -37,15 +38,16 @@ var storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
 func storeDirs() []string { return []string{artifactsDir, cacheDir, uploadsDir} }
 
 func measureStore(ctx context.Context) {
-	err := storeCeiling.ReconcileWith(ctx, func(context.Context) (objectguard.Usage, error) {
+	err := storeCeiling.ReconcileWith(ctx, func(ctx context.Context) (objectguard.Usage, error) {
 		usage := objectguard.Usage{ObservedAt: time.Now().UTC()}
 		for _, dir := range storeDirs() {
-			bytes, files, err := treeUsage(dir)
+			bytes, files, partial, err := treeUsage(ctx, dir)
+			usage.Bytes += bytes
+			usage.Objects += files
+			usage.Partial = usage.Partial || partial
 			if err != nil {
 				return objectguard.Usage{}, err
 			}
-			usage.Bytes += bytes
-			usage.Objects += files
 		}
 		return usage, nil
 	})
@@ -55,15 +57,19 @@ func measureStore(ctx context.Context) {
 }
 
 // perf: one walk per reconciliation interval, never per request, because each
-// stored object already adds its own bytes to the running count.
-func treeUsage(dir string) (bytes, files int64, err error) {
+// stored object already adds its own bytes to the running count. The walk stops
+// when its context does, and says so, so a shutdown does not wait out a store
+// with a million files in it.
+func treeUsage(ctx context.Context, dir string) (bytes, files int64, partial bool, err error) {
 	// #nosec G703 -- the roots come from the service's own configuration
 	walkErr := filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			return nil
+			// safety: the check sits on directory entries, so a deep tree is abandoned
+			// promptly without paying a context read per file.
+			return ctx.Err()
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -73,12 +79,47 @@ func treeUsage(dir string) (bytes, files int64, err error) {
 		files++
 		return nil
 	})
+	switch {
+	case walkErr == nil:
+		return bytes, files, false, nil
 	// safety: a tree the service has not created yet is empty, not a failed
 	// measurement; anything else leaves the running count in place.
-	if walkErr != nil && !errors.Is(walkErr, fs.ErrNotExist) {
-		return 0, 0, fmt.Errorf("walk %s: %w", dir, walkErr)
+	case errors.Is(walkErr, fs.ErrNotExist):
+		return bytes, files, false, nil
+	case errors.Is(walkErr, context.Canceled), errors.Is(walkErr, context.DeadlineExceeded):
+		return bytes, files, true, nil
+	default:
+		return 0, 0, false, fmt.Errorf("walk %s: %w", dir, walkErr)
 	}
-	return bytes, files, nil
+}
+
+// safety: the walk outlives the request that asked for it, so a caller who hangs
+// up does not abandon a measurement half way and leave the total wrong.
+var (
+	measureCtx      atomic.Pointer[context.Context]
+	measureInFlight atomic.Bool
+)
+
+func setMeasureContext(ctx context.Context) { measureCtx.Store(&ctx) }
+
+func serviceContext() context.Context {
+	if ctx := measureCtx.Load(); ctx != nil {
+		return *ctx
+	}
+	return context.Background()
+}
+
+// safety: a burst of admin calls costs one walk, because a second measurement
+// would read the same trees and race the first one's total.
+func measureStoreAsync() bool {
+	if !measureInFlight.CompareAndSwap(false, true) {
+		return false
+	}
+	go func() {
+		defer measureInFlight.Store(false)
+		measureStore(serviceContext())
+	}()
+	return true
 }
 
 // safety: one shape for the ceiling wherever it is read, so the health route and
@@ -131,21 +172,33 @@ func handleStoreCeilingThaw(w http.ResponseWriter, r *http.Request) {
 	}
 	thawed, err := storeCeiling.Thaw()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		// safety: the refusal names the lever this service actually offers, because the
+		// operator reading it cannot schedule a measurement without a restart.
+		http.Error(w, err.Error()+
+			". POST /admin/store-ceiling/measure walks the store now, which is what clears a freeze "+
+			"once space has been freed", http.StatusConflict)
 		return
 	}
 	writeStoreCeilingJSON(w, r, map[string]any{"thawed": thawed, "store_ceiling": storeCeilingState()})
 }
 
 // safety: measuring on demand is what turns a delete on the volume into uploads
-// flowing again, rather than a wait for the end of the interval.
+// flowing again, rather than a wait for the end of the interval. The walk runs
+// off the request, so its cost does not become the caller's latency and a
+// disconnect cannot abandon it.
 func handleStoreCeilingMeasure(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	measureStore(r.Context())
-	writeStoreCeilingJSON(w, r, map[string]any{"store_ceiling": storeCeilingState()})
+	started := measureStoreAsync()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSONBody(w, r, map[string]any{
+		"measuring":     true,
+		"started":       started,
+		"store_ceiling": storeCeilingState(),
+	})
 }
 
 func writeStoreCeilingJSON(w http.ResponseWriter, r *http.Request, body map[string]any) {

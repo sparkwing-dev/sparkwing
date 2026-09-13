@@ -1,7 +1,6 @@
 package logs
 
 import (
-	"context"
 	"errors"
 	"os"
 	"sync"
@@ -46,15 +45,23 @@ func (s *Server) storeCeilingHealth() (map[string]any, []string) {
 
 const rfc3339 = "2006-01-02T15:04:05Z07:00"
 
-// safety: remeasuring runs on the caller's context so a deletion during shutdown
-// does not walk the store after the server is gone.
-func (s *Server) remeasureAfterDelete(ctx context.Context) {
+// safety: the walk outlives the delete that triggered it, on the service's own
+// context rather than the request's, so a caller who hangs up neither abandons
+// the measurement nor pays for it in latency. One walk at a time: a burst of
+// deletes costs one.
+func (s *Server) remeasureAfterDelete() {
 	if !s.ceiling.Enforced() {
 		return
 	}
-	if err := s.MeasureStore(ctx); err != nil {
-		s.logger.Error("logs store", "op", "measure store", "err", err)
+	if !s.measuring.CompareAndSwap(false, true) {
+		return
 	}
+	go func() {
+		defer s.measuring.Store(false)
+		if err := s.MeasureStore(s.sweepContext()); err != nil {
+			s.logger.Error("logs store", "op", "measure store", "err", err)
+		}
+	}()
 }
 
 var (

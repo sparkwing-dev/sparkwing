@@ -133,17 +133,13 @@ func (s *Server) StoreCeiling() objectguard.CeilingState { return s.ceiling.Stat
 // ceiling, which is what the sweeper does on the reconciliation
 // interval. It is a no-op while no ceiling is set.
 func (s *Server) MeasureStore(ctx context.Context) error {
-	return s.ceiling.ReconcileWith(ctx, func(context.Context) (objectguard.Usage, error) {
+	return s.ceiling.ReconcileWith(ctx, func(ctx context.Context) (objectguard.Usage, error) {
 		root, err := s.openRunsRoot()
 		if err != nil {
 			return objectguard.Usage{}, err
 		}
 		defer s.closeRoot(root, "measure store")
-		usage, err := storeUsage(root)
-		if err != nil {
-			return objectguard.Usage{}, err
-		}
-		return usage, nil
+		return storeUsage(ctx, root)
 	})
 }
 
@@ -156,8 +152,10 @@ func (s *Server) closeRoot(root *os.Root, op string) {
 }
 
 // perf: one walk of the store per reconciliation interval, never per append,
-// because the append path already knows what it wrote.
-func storeUsage(root *os.Root) (objectguard.Usage, error) {
+// because the append path already knows what it wrote. The walk stops when its
+// context does and reports the total as partial, so a shutdown or a deadline
+// does not wait out a store of a million files.
+func storeUsage(ctx context.Context, root *os.Root) (objectguard.Usage, error) {
 	d, err := root.Open(".")
 	if err != nil {
 		return objectguard.Usage{}, err
@@ -172,31 +170,43 @@ func storeUsage(root *os.Root) (objectguard.Usage, error) {
 		if !e.IsDir() {
 			continue
 		}
-		bytes, files := treeUsage(root, e.Name())
+		bytes, files, partial := treeUsage(ctx, root, e.Name())
 		usage.Bytes += bytes
 		usage.Objects += files
+		if partial {
+			usage.Partial = true
+			break
+		}
 	}
 	return usage, nil
 }
 
-func treeUsage(root *os.Root, path string) (bytes, files int64) {
+func treeUsage(ctx context.Context, root *os.Root, path string) (bytes, files int64, partial bool) {
+	// safety: the check sits on each directory rather than each file, so a deep
+	// tree is abandoned promptly without a context read per log file.
+	if ctx.Err() != nil {
+		return 0, 0, true
+	}
 	info, err := root.Stat(path)
 	if err != nil {
-		return 0, 0
+		return 0, 0, false
 	}
 	if !info.IsDir() {
-		return info.Size(), 1
+		return info.Size(), 1, false
 	}
 	entries, err := readDirAt(root, path)
 	if err != nil {
-		return 0, 0
+		return 0, 0, false
 	}
 	for _, entry := range entries {
-		b, f := treeUsage(root, filepath.Join(path, entry.Name()))
+		b, f, p := treeUsage(ctx, root, filepath.Join(path, entry.Name()))
 		bytes += b
 		files += f
+		if p {
+			return bytes, files, true
+		}
 	}
-	return bytes, files
+	return bytes, files, false
 }
 
 type inFlightBytes struct {
