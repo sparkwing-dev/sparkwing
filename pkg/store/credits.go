@@ -380,16 +380,16 @@ type CreditLedgerTotals struct {
 	SettledSeconds int64
 }
 
-// CreditLedgerTotals reports the ledger's lifetime sums under one read
-// transaction, so grants and charges come from the same snapshot. A controller
-// exports them as metrics, where they survive a restart the way an in-process
-// counter does not.
+// CreditLedgerTotals reports the ledger's lifetime sums under one repeatable
+// read, so the grant, charge and reservation figures agree with each other
+// even while claims land. A controller exports them as metrics, where they
+// survive a restart the way an in-process counter does not.
 //
 // Both sums scan a covering index over a table that is never pruned, so a
 // caller samples them on a slow timer rather than on every sweep.
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error) {
 	var out CreditLedgerTotals
-	tx, err := s.beginTx(ctx)
+	tx, err := s.beginSnapshotReadTx(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -417,18 +417,16 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 		return out, err
 	}
 
-	// safety: a reservation is charged up front and refunded at finish, so
-	// counting it whole would make the seconds total fall by the refund. The
-	// part a finish right now would still return is held back instead, which
-	// is what makes the remainder a figure that only grows.
-	now := time.Now().UnixNano()
+	// safety: counting a reservation whole would make the seconds total fall
+	// by its refund, so the part a finish right now would still return is held
+	// back. The database's clock measures that part, because a sampler's own
+	// clock lets a second controller or an NTP step pull the figure backwards.
 	var refundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN credit_charged_through > ?
-                                         THEN (credit_charged_through - ?) / ?
+		`SELECT COALESCE(SUM(CASE WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
+                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
                                          ELSE 0 END), 0)
                    FROM nodes WHERE credit_charged_through != 0`,
-		now, now, int64(time.Second),
 	).Scan(&refundable); err != nil {
 		return out, err
 	}

@@ -7527,33 +7527,47 @@ const (
 	MeteringPaid
 )
 
-// SettledNodeSeconds reports the wall seconds one finished node ran and how the
-// credential that claimed it was metered. The node's own claim carries the
-// answer, so a caller that settles a node on behalf of another principal still
-// attributes the work to the runner that did it.
-func (s *Store) SettledNodeSeconds(ctx context.Context, runID, nodeID string) (float64, NodeMetering, error) {
+// NodeSettlement is what one node's own row says about settling it: how long it
+// ran, the credential that claimed it, how that credential was metered, and
+// whether a credit reservation is still open against it.
+type NodeSettlement struct {
+	Seconds          float64
+	ClaimTokenPrefix string
+	Metering         NodeMetering
+	// ChargeWindowOpen reports a reservation the ledger has not released. It
+	// stays true for a node whose claiming credential was revoked, so a
+	// terminal node always has something to settle against.
+	ChargeWindowOpen bool
+}
+
+// NodeSettlement reads what settling one node needs from the node's own row.
+// The claim recorded there names the credential the ledger priced the work
+// against, so a finish posted by another principal settles the same way.
+func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error) {
+	var out NodeSettlement
 	var startedAt, finishedAt sql.NullInt64
+	var chargedThrough int64
 	var metered sql.NullBool
 	err := s.queryRow(ctx,
-		`SELECT started_at, finished_at,
+		`SELECT started_at, finished_at, claim_token_prefix, credit_charged_through,
                         (SELECT metered FROM tokens WHERE prefix = nodes.claim_token_prefix)
                    FROM nodes WHERE run_id = ? AND node_id = ?`,
 		runID, nodeID,
-	).Scan(&startedAt, &finishedAt, &metered)
+	).Scan(&startedAt, &finishedAt, &out.ClaimTokenPrefix, &chargedThrough, &metered)
 	if err != nil {
-		return 0, MeteringUnknown, err
+		return out, err
 	}
-	metering := MeteringUnknown
+	out.ChargeWindowOpen = chargedThrough != 0
 	if metered.Valid {
-		metering = MeteringFree
+		out.Metering = MeteringFree
 		if metered.Bool {
-			metering = MeteringPaid
+			out.Metering = MeteringPaid
 		}
 	}
-	if !startedAt.Valid || !finishedAt.Valid || finishedAt.Int64 <= startedAt.Int64 {
-		return 0, metering, nil
+	if startedAt.Valid && finishedAt.Valid && finishedAt.Int64 > startedAt.Int64 {
+		out.Seconds = time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds()
 	}
-	return time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds(), metering, nil
+	return out, nil
 }
 
 // CountActiveRunners counts distinct claimed_by within `window`.

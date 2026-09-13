@@ -139,7 +139,20 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 // outstanding, not when usage bills past it, and not when the finish refunds
 // the part the node never used.
 func TestCreditLedgerTotals_SettledSecondsNeverFall(t *testing.T) {
-	s := storetest.Open(t)
+	assertSettledSecondsNeverFall(t, storetest.Open(t))
+}
+
+// The three reads behind the figure must agree with each other, and only
+// Postgres can disagree: its default isolation takes a snapshot per statement,
+// so a claim landing between the charge sum and the reservation sum would be
+// counted by one and not the other. This run needs a server; without one the
+// SQLite run above is the only coverage.
+func TestCreditLedgerTotals_SettledSecondsNeverFallOnPostgres(t *testing.T) {
+	assertSettledSecondsNeverFall(t, storetest.OpenPostgres(t))
+}
+
+func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
+	t.Helper()
 	ctx := context.Background()
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 200_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -201,7 +214,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFall(t *testing.T) {
 	}
 }
 
-func TestSettledNodeSeconds_ReadsTheNodesOwnClaimCredential(t *testing.T) {
+func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -220,12 +233,18 @@ func TestSettledNodeSeconds_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	_, metering, err := s.SettledNodeSeconds(ctx, "run-settled", "metered")
+	settlement, err := s.NodeSettlement(ctx, "run-settled", "metered")
 	if err != nil {
-		t.Fatalf("SettledNodeSeconds: %v", err)
+		t.Fatalf("NodeSettlement: %v", err)
 	}
-	if metering != store.MeteringPaid {
-		t.Errorf("metering = %v, want paid for a node a metered credential claimed", metering)
+	if settlement.Metering != store.MeteringPaid {
+		t.Errorf("metering = %v, want paid for a node a metered credential claimed", settlement.Metering)
+	}
+	if settlement.ClaimTokenPrefix != claimant.TokenPrefix {
+		t.Errorf("claim prefix = %q, want the credential the node recorded", settlement.ClaimTokenPrefix)
+	}
+	if !settlement.ChargeWindowOpen {
+		t.Error("a claimed metered node reports no open charge window")
 	}
 
 	readyNode(t, s, "run-settled-local", "plain")
@@ -239,14 +258,17 @@ func TestSettledNodeSeconds_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	if err := s.FinishNode(ctx, "run-settled-local", "plain", "success", "", nil); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
-	seconds, metering, err := s.SettledNodeSeconds(ctx, "run-settled-local", "plain")
+	local, err := s.NodeSettlement(ctx, "run-settled-local", "plain")
 	if err != nil {
-		t.Fatalf("SettledNodeSeconds: %v", err)
+		t.Fatalf("NodeSettlement: %v", err)
 	}
-	if metering != store.MeteringUnknown {
-		t.Errorf("metering = %v, want unknown for a node whose claim credential is not on file", metering)
+	if local.Metering != store.MeteringUnknown {
+		t.Errorf("metering = %v, want unknown for a node whose claim credential is not on file", local.Metering)
 	}
-	if seconds < 0 {
-		t.Errorf("seconds = %v, want a non-negative wall time", seconds)
+	if local.ChargeWindowOpen {
+		t.Error("an unmetered claim opened a charge window")
+	}
+	if local.Seconds < 0 {
+		t.Errorf("seconds = %v, want a non-negative wall time", local.Seconds)
 	}
 }
