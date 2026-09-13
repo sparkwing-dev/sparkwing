@@ -1404,7 +1404,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Try to acquire a slot under a concurrency key.
       description: |
@@ -1441,7 +1441,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Extend a holder's lease.
       requestBody:
@@ -1476,7 +1476,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Release a slot. Idempotent.
       requestBody:
@@ -1574,7 +1574,7 @@ paths:
   /api/v1/concurrency/{key}/holder:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Read one holder's slot.
       parameters:
@@ -1596,7 +1596,7 @@ paths:
   /api/v1/concurrency/{key}/resolve:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Resolve one waiter's standing in a single read.
       description: |

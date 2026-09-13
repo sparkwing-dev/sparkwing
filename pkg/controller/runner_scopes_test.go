@@ -231,6 +231,106 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 	}
 }
 
+// A pipeline that declares a concurrency group or a memoized node moves its
+// slot from the process holding the run's claim, on the documented runner scope
+// set. Another bearer of the same scopes reaches none of it, and the two
+// cross-run routes stay admin.
+func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	now := time.Now().UTC()
+	strangerRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner, runnerScopes, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken other-pool: %v", err)
+	}
+	adminRaw, _, err := f.store.CreateToken("ops", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken ops: %v", err)
+	}
+
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+	seedRepoTrigger(t, f.store, "memo-run", "acme/web")
+	trigger, err := c.ClaimTrigger(ctx)
+	if err != nil || trigger == nil {
+		t.Fatalf("ClaimTrigger = (%+v, %v)", trigger, err)
+	}
+
+	const key = "deploy-prod"
+	holderID := trigger.ID + "/build"
+	acquire := client.AcquireSlotRequest{
+		HolderID: holderID, RunID: trigger.ID, NodeID: "build",
+		Max: 1, Cost: 1, Lease: time.Minute,
+	}
+	resp, err := c.AcquireSlot(ctx, key, acquire)
+	if err != nil {
+		t.Fatalf("AcquireSlot holding the run's claim: %v", err)
+	}
+	if !resp.Granted {
+		t.Fatalf("AcquireSlot kind = %q, want the slot granted", resp.Kind)
+	}
+	if _, err := c.HeartbeatSlot(ctx, key, holderID, time.Minute); err != nil {
+		t.Fatalf("HeartbeatSlot holding the run's claim: %v", err)
+	}
+	if _, err := c.ObserveSlot(ctx, key, holderID); err != nil {
+		t.Fatalf("ObserveSlot holding the run's claim: %v", err)
+	}
+	if _, err := c.ResolveWaiter(ctx, key, trigger.ID, "build", "", "", "", false); err != nil {
+		t.Fatalf("ResolveWaiter holding the run's claim: %v", err)
+	}
+
+	stranger := client.NewWithToken(f.url, nil, strangerRaw)
+	if _, err := stranger.AcquireSlot(ctx, key, acquire); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("AcquireSlot on a pool token that holds no claim on the run = %v, want 403 claim_required", err)
+	}
+	if _, err := stranger.HeartbeatSlot(ctx, key, holderID, time.Minute); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("HeartbeatSlot on another run's holder = %v, want 403 claim_required", err)
+	}
+	if _, err := stranger.ObserveSlot(ctx, key, holderID); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("ObserveSlot on another run's holder = %v, want 403 claim_required", err)
+	}
+	if err := stranger.ReleaseSlot(ctx, key, holderID, "success", "", "", 0); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("ReleaseSlot on another run's holder = %v, want 403 claim_required", err)
+	}
+	if _, err := stranger.ResolveWaiter(ctx, key, trigger.ID, "build", "", "", "", false); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("ResolveWaiter on another run = %v, want 403 claim_required", err)
+	}
+
+	if _, err := c.ForceReleaseSuperseded(ctx, key); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: missing_scope") {
+		t.Fatalf("ForceReleaseSuperseded on the runner scope set = %v, want 403 missing_scope", err)
+	}
+	if _, err := c.CancelWaiter(ctx, key, trigger.ID, "build"); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: missing_scope") {
+		t.Fatalf("CancelWaiter on the runner scope set = %v, want 403 missing_scope", err)
+	}
+
+	if err := c.ReleaseSlot(ctx, key, holderID, "success", "", "", 0); err != nil {
+		t.Fatalf("ReleaseSlot holding the run's claim: %v", err)
+	}
+
+	admin := client.NewWithToken(f.url, nil, adminRaw)
+	if _, err := admin.AcquireSlot(ctx, key, client.AcquireSlotRequest{
+		HolderID: "ops/manual", RunID: trigger.ID, Max: 1, Cost: 1, Lease: time.Minute,
+	}); err != nil {
+		t.Fatalf("AcquireSlot on an admin token: %v", err)
+	}
+	if _, err := admin.HeartbeatSlot(ctx, key, "ops/manual", time.Minute); err != nil {
+		t.Fatalf("HeartbeatSlot on an admin token: %v", err)
+	}
+	if _, err := admin.ForceReleaseSuperseded(ctx, key); err != nil {
+		t.Fatalf("ForceReleaseSuperseded on an admin token: %v", err)
+	}
+	if err := admin.ReleaseSlot(ctx, key, "ops/manual", "success", "", "", 0); err != nil {
+		t.Fatalf("ReleaseSlot on an admin token: %v", err)
+	}
+}
+
 func TestTriggerClaimMutation_RequiresExactTokenAndGeneration(t *testing.T) {
 	f, ownerRaw := newScopedFixture(t, runnerScopes)
 	otherRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner,

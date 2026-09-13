@@ -852,14 +852,17 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("POST /api/v1/maintenance/reconcile-orphans", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReconcileOrphans)))
 
-	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAcquireSlot)))
-	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeatSlot)))
-	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReleaseSlot)))
-	mux.Handle("GET /api/v1/concurrency/{key}/holder", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObserveSlot)))
+	// safety: a slot is a cross-run lock, so the routes that move one bind to the
+	// live claim on the run they name rather than to the scope alone. force-release
+	// and cancel-waiter act on rows another run owns and stay admin.
+	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleAcquireSlot))))
+	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleHeartbeatSlot))))
+	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleReleaseSlot))))
+	mux.Handle("GET /api/v1/concurrency/{key}/holder", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot))))
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState)))
 	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
 	mux.Handle("GET /api/v1/concurrency/{key}/notify", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify)))
-	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResolveWaiter)))
+	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))))
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 

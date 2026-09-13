@@ -276,6 +276,17 @@ unlock.
 
 ### Fixed
 
+- **controller:** The concurrency slot routes `acquire`, `heartbeat`,
+  `release`, `holder` and `resolve` take `runs.state` plus a live claim on the
+  run the request names, so a pipeline that declares a concurrency group or a
+  memoized node runs under a runner token. They required `admin`, and
+  `RemoteBackends` points the orchestrator's concurrency backend at them, so
+  every such pipeline failed with `403` on a hosted controller whose runners are
+  not admins. `acquire` and `resolve` name their run; `heartbeat`, `release` and
+  `holder` name a holder whose row names the run. A caller holding no live claim
+  on that run gets `403 claim_required`. `force-release` and `cancel-waiter` act
+  on rows another run owns and still require `admin`, and an `admin` token
+  reaches all seven exactly as before.
 - **controller:** The executor offer routes `mark-ready`, `revoke-ready` and
   `finalize-ready` take `runs.state` plus the live claim on the run's trigger,
   the gate `auto-retry/reset` already carried. They required `admin`, so a
