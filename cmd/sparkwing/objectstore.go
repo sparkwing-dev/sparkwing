@@ -56,8 +56,7 @@ func runClusterObjectStoreStatus(args []string) error {
 	if *outputFormat == "json" {
 		return json.NewEncoder(os.Stdout).Encode(state)
 	}
-	renderObjectStoreBreaker(state)
-	return nil
+	return renderObjectStoreBreaker(state)
 }
 
 func objectStoreClient(on, cmd string) (*client.Client, error) {
@@ -98,11 +97,10 @@ func runClusterObjectStoreResetBreaker(args []string) error {
 	if *outputFormat == "json" {
 		return json.NewEncoder(os.Stdout).Encode(state)
 	}
-	renderObjectStoreBreaker(state)
-	return nil
+	return renderObjectStoreBreaker(state)
 }
 
-func renderObjectStoreBreaker(state *client.ObjectStoreBreaker) {
+func renderObjectStoreBreaker(state *client.ObjectStoreBreaker) error {
 	fmt.Printf("breaker: enabled=%t tripped=%t reset=%s\n", state.Enabled, state.Tripped, state.Reset)
 	if len(state.Cleared) > 0 {
 		fmt.Printf("cleared: %v\n", state.Cleared)
@@ -113,5 +111,5 @@ func renderObjectStoreBreaker(state *client.ObjectStoreBreaker) {
 		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%t\n",
 			c.Class, c.PerMinute, c.PerDay, c.MinuteUsed, c.DayUsed, c.Trips, c.Tripped)
 	}
-	_ = tw.Flush()
+	return tw.Flush()
 }
