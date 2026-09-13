@@ -89,20 +89,19 @@ func TestResolveCloneURL_EnvOverride(t *testing.T) {
 
 func TestCacheCloneURL_FormatVariants(t *testing.T) {
 	cases := []struct {
-		name, in string
+		name, in, want string
 	}{
-		{"ssh", "git@github.com:owner/repo.git"},
-		{"https", "https://github.com/owner/repo.git"},
-		{"no-suffix", "git@host:owner/repo"},
+		{"ssh", "git@github.com:owner/repo.git", "http://c/git/repo-b1cd17c6cfc6f18ca212b7e8ac47cfe7429102823006de2bc18203527bf"},
+		{"https", "https://github.com/owner/repo.git", "http://c/git/repo-bc40893b43beea6303cb93d2e61df787840b4e09dcf293506e68491b9a0"},
+		{"no-suffix", "git@host:owner/repo", "http://c/git/repo-c0fd43e6c91cc975a9984a19b2ee89b0d5e73839898d897d45fd3eb72c3"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			want := "http://c/git/" + sourceurl.ClaimedRepoNameFromURL(c.in)
-			if got := cacheCloneURL("http://c", c.in); got != want {
-				t.Fatalf("got %q, want %q", got, want)
+			if got := cacheCloneURL("http://c", c.in); got != c.want {
+				t.Fatalf("got %q, want %q", got, c.want)
 			}
-			if got := cacheCloneURL("http://c/", c.in); got != want {
-				t.Fatalf("trailing-slash base: got %q, want %q", got, want)
+			if got := cacheCloneURL("http://c/", c.in); got != c.want {
+				t.Fatalf("trailing-slash base: got %q, want %q", got, c.want)
 			}
 		})
 	}

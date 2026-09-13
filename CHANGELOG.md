@@ -22,11 +22,13 @@ unlock.
 
 ### Fixed
 
-- **sdk:** `git.Clone` asks a gitcache for the name every other sparkwing
-  producer registers -- the hash of the normalized clone URL -- instead of the
-  URL's basename. Two repositories whose paths end in the same segment, such as
-  `acme/utils` and `other/utils`, no longer name one cache entry. A cache that
-  does not serve the name still falls back to upstream.
+- **sdk:** `git.Clone` asks a gitcache for the hash of the clone URL instead of
+  the URL's basename. Two repositories whose paths end in the same segment, such
+  as `acme/utils` and `other/utils`, named one cache entry, so a registered
+  basename could serve the wrong repository. A deployment that registered a
+  repository under its basename, as `GITCACHE_REPOS` aliases do, no longer serves
+  `git.Clone` from the cache; those clones fall back to upstream until the
+  repository is also registered under the hashed name.
 
 ## [v0.50.1] - 2026-09-13
 
