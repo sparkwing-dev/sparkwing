@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -44,6 +45,12 @@ import (
 // be relative to in-memory writes. Tuned to give the dashboard a
 // sub-second freshness floor without bursting object-store PUTs.
 const DefaultFlushInterval = 500 * time.Millisecond
+
+// DefaultFlushMaxBackoff ceilings the wait between flush cycles that
+// every dirty run failed. Without it a store that refuses writes is
+// re-asked twice a second for as long as the process lives, which is
+// the shape that bills without making progress.
+const DefaultFlushMaxBackoff = 30 * time.Second
 
 // DefaultBufferThreshold triggers an early flush when pending
 // envelopes since the last flush exceed this many bytes.
@@ -509,16 +516,25 @@ func (b *Backend) markFlushed(rs *runState, delivered bool) {
 
 func (b *Backend) flushLoop() {
 	defer b.wg.Done()
-	t := time.NewTicker(b.flushInterval)
+	backoff := objectguard.Backoff{Base: b.flushInterval, Max: DefaultFlushMaxBackoff}
+	t := time.NewTimer(b.flushInterval)
 	defer t.Stop()
+	stalled := 0
 	for {
 		select {
 		case <-b.stopCh:
 			return
 		case <-t.C:
-			b.flushAllDirty()
-			b.evictIdleReads(time.Now().Add(-b.readTTL))
 		}
+		attempted, failed := b.flushAllDirty()
+		b.evictIdleReads(time.Now().Add(-b.readTTL))
+		if attempted == 0 || failed < attempted {
+			stalled = 0
+			t.Reset(b.flushInterval)
+			continue
+		}
+		stalled++
+		t.Reset(backoff.Delay(stalled))
 	}
 }
 
@@ -536,10 +552,14 @@ func (b *Backend) dirtyRunIDs() []string {
 	return ids
 }
 
-func (b *Backend) flushAllDirty() {
+func (b *Backend) flushAllDirty() (attempted, failed int) {
 	for _, id := range b.dirtyRunIDs() {
-		_ = b.tryFlushRun(context.Background(), id)
+		attempted++
+		if err := b.tryFlushRun(context.Background(), id); err != nil {
+			failed++
+		}
 	}
+	return attempted, failed
 }
 
 // Close stops the background flush goroutine and synchronously

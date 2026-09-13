@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
@@ -70,7 +71,19 @@ func retryAfter(resp *http.Response) (time.Duration, bool) {
 	if wait > MaxUnavailableWait {
 		wait = MaxUnavailableWait
 	}
-	return wait, true
+	return wait + retryJitter(wait), true
+}
+
+// safety: the spread is added to the server's delay rather than drawn across
+// it, because a caller that woke early would answer an invitation the server
+// has not yet made.
+
+// #nosec G404 -- retry spread, not a security decision
+func retryJitter(wait time.Duration) time.Duration {
+	if wait <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int64N(int64(wait/4) + 1))
 }
 
 func drain(resp *http.Response) {

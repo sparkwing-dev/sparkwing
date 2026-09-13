@@ -90,6 +90,13 @@ the state backend, report an error when the run's terminal state is
 still queued locally, and `sparkwing run` prints that error and exits
 non-zero, because the bucket is the run's only copy and the outbox
 sits on a disk a CI runner discards at job end.
+Replay is bounded: the drainer waits an exponentially growing,
+fully jittered interval between cycles that made no progress, and after
+twelve consecutive failures it gives up, logs `s3 state outbox replay
+gave up`, and stops. Queued rows stay on disk and resume on the next
+process start, so a bucket that refuses every write costs a dozen
+requests rather than one every five seconds for as long as the host
+lives.
 Cache and log writes are not buffered this way: a cache write that
 can't reach the bucket surfaces the error, and the step recomputes on
 a later run rather than reading a half-written result.

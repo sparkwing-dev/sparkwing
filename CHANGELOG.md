@@ -22,6 +22,27 @@ unlock.
 
 ### Added
 
+- **storage + controller:** Every object-store client a process builds draws on
+  one request budget, counting `put`, `get`, `list` and `delete` separately
+  against a per-minute rate and a per-day total. A class that spends either
+  budget trips: requests of that class are refused with an error naming the
+  class and the limit, nothing queues, and the other classes keep serving on
+  their own budgets. Defaults are 1200 put, 3000 get, 600 list and 600 delete a
+  minute, and 200000/500000/100000/100000 a day, so normal load never reaches
+  them and a retry loop with no sleep trips in under two seconds. Override with
+  `SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE` and
+  `SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY`; `SPARKWING_OBJECT_STORE_TRIP_RESET`
+  picks whether a tripped class clears on the day roll (`day`) or waits for an
+  operator (`manual`); `SPARKWING_OBJECT_STORE_BREAKER=off` counts without
+  refusing. The controller reports the budget on `GET /api/v1/health` under
+  `object_store` and exports `sparkwing_object_store_requests_total`,
+  `sparkwing_object_store_trips_total` and `sparkwing_object_store_tripped`.
+- **cli + controller:** `sparkwing cluster object-store reset-breaker --profile
+  NAME` clears a tripped object-store budget on a controller and prints the
+  budget as it stands, over the new admin-scoped `POST
+  /api/v1/object-store/reset-breaker`. `GET /api/v1/object-store/breaker` reads
+  the same state without changing it, and `Client.ResetObjectStoreBreaker` and
+  `Client.ObjectStoreBreakerState` reach both from Go.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the
@@ -31,6 +52,18 @@ unlock.
 
 ### Changed
 
+- **storage:** Every retry path that can reach an object store now waits an
+  exponentially growing, fully jittered interval between attempts and stops at a
+  stated cap. The AWS SDK retryer is pinned to 4 attempts and a 5s backoff
+  ceiling; the state backend's conditional-write loops space their 16 attempts
+  instead of spinning; the state outbox gives up after 12 consecutive failed
+  replay cycles, logging `s3 state outbox replay gave up` and leaving the rows
+  on disk for the next process start; the state flush loop backs off to a 30s
+  ceiling while nothing lands; concurrency compare-and-swap retries grow to a
+  250ms ceiling; the hosted daemon transport caps one call at 32 attempts; and a
+  log append retry and a controller 503 retry each carry jitter. A bucket that
+  refuses every write now costs a bounded number of requests rather than one per
+  loop iteration for as long as the process lives.
 - **config (Breaking):** A trigger key under `on:` that carries no value is
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a
