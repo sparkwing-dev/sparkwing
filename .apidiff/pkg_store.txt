@@ -517,6 +517,8 @@ type Node struct {
 
 	PlacementReason string
 
+	PlacementHoldFrom *time.Time
+
 	NeedsLabels []string
 
 	PrefersLabels []string
@@ -755,9 +757,11 @@ type RunFilter struct {
 	RootOnly       bool
 }
 type RunnerPresence struct {
-	Name       string
-	Labels     []string
-	AtCapacity bool
+	Name string
+
+	Labels []string
+
+	FreeSlots int
 }
 type SchemaRequirement struct {
 	Name    string

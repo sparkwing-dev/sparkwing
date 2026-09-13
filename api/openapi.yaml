@@ -3608,6 +3608,17 @@ components:
         prefers_labels:
           type: array
           items: {type: string}
+        placement_reason:
+          type: string
+          enum: ["", preference, fallback, none]
+          description: >-
+            Why the claiming runner got this node: it advertised the node's preference, it took the node as a fallback once the local-first hold expired, or the node carried no preference. Empty on a node no claim path decided.
+        placement_hold_from:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the node became claimable, which the local-first hold runs from. Held apart from `ready_at`, which a label-mismatched claim moves to keep the queue in motion.
         requested_cores: {type: number}
         requested_memory_bytes: {type: integer, format: int64}
         requested_slots: {type: integer}

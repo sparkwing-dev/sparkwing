@@ -602,7 +602,10 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 		steps := stepsByNode[n.NodeID]
 		annotations := n.Annotations
 		placement := placementLine(n)
-		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || placement != "" || hasNonPassedStep(steps) || hasStepSummary(steps)
+		// safety: a preference that was honored is the ordinary case and would
+		// expand every node in the run; only an overridden one is news.
+		expandsForPlacement := n.PlacementReason == store.PlacementFallback
+		shouldRender := force || len(annotations) > 0 || n.Summary != "" || n.StatusDetail != "" || expandsForPlacement || hasNonPassedStep(steps) || hasStepSummary(steps)
 		if !shouldRender {
 			continue
 		}
@@ -642,8 +645,6 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	}
 }
 
-// safety: a node nobody preferred has no placement story worth a line, and an
-// unclaimed one has no runner to name yet.
 func placementLine(n *store.Node) string {
 	if n.ClaimedBy == "" {
 		return ""

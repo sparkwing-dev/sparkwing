@@ -130,18 +130,32 @@ which claims nodes.
 
 A warm cloud pool polls every 500ms, so first-in-first-out hands it every node
 before a developer's own machine asks. The controller holds a node back from a
-claim-mode runner whose labels do not satisfy the node's `Prefers`, while a
-runner that does satisfy it polled inside `--placement-liveness` (default 30s)
-and its last report left it a free slot. The hold runs `--placement-hold`
-(default 20s) from the node's ready time; after it, the next eligible runner
-takes the node. A node with no `Prefers` falls back to `--default-prefer-labels`
-(comma-separated terms, empty by default), and a node with neither is claimed
-first-in-first-out as before.
+claim-mode runner whose labels do not satisfy the node's `Prefers` while another
+runner is worth waiting for. A runner is worth waiting for when all four hold:
+it advertises the preference, it satisfies the node's `Requires` as well, it
+polled inside `--placement-liveness` (default 30s), and its last poll advertised
+a slot it has not since spent. The hold runs `--placement-hold` (default 20s)
+from the node's hold-from time, which is when it became claimable; after that,
+the next eligible runner takes it. A node with no `Prefers` falls back to
+`--default-prefer-labels` (comma-separated terms, empty by default), and a node
+with neither is claimed first-in-first-out as before.
 
 The rule reorders the queue and never widens it: `Requires` stays a hard filter,
-and a held node blocks nothing behind it. A runner advertises its ceiling and
-in-flight claims with each claim, so a saturated preferred runner holds nothing
-back.
+and a held node blocks nothing behind it. Three cases deliberately hold nothing
+back, because each is a runner that cannot be counted on to take the node:
+
+- a runner whose claim carries no `capacity` block, which said nothing about
+  having room and is what a runner from before this protocol sends;
+- a runner at its advertised ceiling, counting the nodes this controller has
+  handed it since its last poll;
+- a runner this controller has never awarded a node to. Labels are
+  self-asserted, so polling alone would let any claim credential reserve the
+  queue for a machine that never executes anything. Hand claim tokens only to
+  machines you trust to poll honestly, and watch them in `GET /api/v1/agents`,
+  which reports the labels and ceiling each one asserted.
+
+A runner's hold-from time survives the 1us `ready_at` bump a label-mismatched
+claim applies, so a mixed fleet polling constantly cannot restart the window.
 
 Each claim records on the node which runner took it and why, as the
 `placement_reason` field (`preference`, `fallback`, or `none`) and a

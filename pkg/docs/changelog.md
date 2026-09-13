@@ -23,23 +23,31 @@ unlock.
 ### Added
 
 - **controller:** Local-first placement on the claim path. A node is held back
-  from a claim-mode runner whose labels do not satisfy its `Prefers` while a
-  runner that does satisfy them polled inside `--placement-liveness` (default
-  30s) and its last report left it a free slot. The hold runs `--placement-hold`
-  (default 20s) from the node's ready time, after which any eligible runner
-  takes it. `--default-prefer-labels` supplies a preference for nodes whose plan
-  declares none; empty, its default, leaves those nodes first-in-first-out.
-  `Requires` is unchanged: preferences reorder the claim queue and never widen
-  it. The chart exposes all three as `controller.defaultPreferLabels`,
-  `controller.placementHold`, and `controller.placementLiveness`. Each claim stamps `placement_reason` (`preference`, `fallback`, `none`) on
-  the node and writes a `node_placed` event, and `sparkwing runs status` and the
-  dashboard's node panel name the runner and the reason under a node the
-  preference decided.
+  from a claim-mode runner whose labels do not satisfy its `Prefers` while
+  another runner is worth waiting for: one that advertises the preference,
+  satisfies the node's `Requires`, polled inside `--placement-liveness`
+  (default 30s), and advertised a slot it has not since spent. The hold runs
+  `--placement-hold` (default 20s) from when the node became claimable, after
+  which any eligible runner takes it. `--default-prefer-labels` supplies a
+  preference for nodes whose plan declares none; empty, its default, leaves
+  those nodes first-in-first-out. `Requires` is unchanged: preferences reorder
+  the claim queue and never widen it. The chart exposes all three as
+  `controller.defaultPreferLabels`, `controller.placementHold`, and
+  `controller.placementLiveness`. Each claim stamps `placement_reason`
+  (`preference`, `fallback`, `none`) on the node, a declared or overridden
+  preference writes a `node_placed` event, and `sparkwing runs status` and the
+  dashboard's node panel name the runner and the reason.
+- **store:** Schema 36 adds `nodes.placement_reason` and
+  `nodes.placement_hold_from`, both additive with defaults an older binary
+  keeps writing. The hold-from column is what the local-first window runs
+  from, so the `ready_at` bump a label-mismatched claim applies cannot restart
+  it.
 - **controller + runner:** `POST /api/v1/nodes/claim` accepts a `capacity`
   object carrying the runner's `max_concurrent` and `active_claims`, which
-  `pkg/controller/client.Client.ClaimNodeWithCapacity` sends and the agents view
-  reports for a claim-mode runner alongside the labels it asserted. A saturated
-  runner holds no node back for itself.
+  `pkg/controller/client.Client.ClaimNodeWithCapacity` sends and the agents
+  view reports for a claim-mode runner alongside the labels it asserted. A
+  runner that sends no `capacity` block, one at its ceiling, and one this
+  controller has never awarded a node to each hold nothing back.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the
