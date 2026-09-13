@@ -309,7 +309,9 @@ pipelines:
   launches it and lets admission order the two.
 - `catch_up` is how long after its due minute a fire may still happen
   when the host was asleep or the timer ran late. Default `1h`, floor
-  `2m`. An older due minute is recorded as missed.
+  `2m`, ceiling `24h`. A window over the ceiling is lowered to it when
+  the schedule is evaluated, and `sparkwing crons show` marks the
+  effective window clamped. An older due minute is recorded as missed.
 - `args` supplies argument values for this cadence's runs, keyed by CLI
   flag name exactly like `args:` on the pipeline. They sit above
   `pipeline.args` and below a host's own override for the schedule, so

@@ -44,10 +44,34 @@ unlock.
   `on: {webhook: {pathh: /review}}` loaded clean and exposed the pipeline on
   the empty path. Keys under `on.pre_commit`, `on.pre_push` and
   `on.post_commit` are still matched loosely.
+- **localws:** `Options.Bundle` serves a caller-supplied dashboard bundle in
+  place of the one embedded in the binary. A source build embeds no bundle, so
+  `Run` previously refused to start; supplying an `fs.FS` lets a test or an
+  embedder serve a dashboard of its own. Leaving it nil keeps the embedded
+  bundle and its existing check, and a bundle carrying no `index.html` at its
+  root is refused at startup rather than served as a silent 404.
 - **dashboard:** The queue page lists connection-only leases in their own
   "Connected (no resources held)" table, with its own count beside the holding
   one. Those rows leave the holder table, so a lease appears in one table or
   the other, and the page groups admission the way `sparkwing queue` does.
+
+### Changed
+
+- **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
+  host override asking for more is evaluated with 24h: `sparkwing crons
+  install` warns at arm time, naming the schedule, the declared window and the
+  effective one, and `sparkwing crons show` prints the effective window in its
+  EFFECTIVE column marked `(clamped)`. Windows of 24h and under behave exactly
+  as before.
+
+### Fixed
+
+- **cli:** A schedule under `overlap: skip` no longer suppresses itself for
+  longer than a day. The tick asked whether the previous run was still active
+  using the declared catch-up window, so a run no consumer ever claimed read as
+  active for the whole of that window and every later instant recorded
+  `skipped-overlap` without firing. The window that question is asked with is
+  now capped at 24h, the same one the miss decision reads.
 - **dashboard:** The queue page counts a running pipeline once. Its
   zero-resource orchestration lease no longer adds to the "holding" figure
   beside the participant that holds the cores, which is the occupancy

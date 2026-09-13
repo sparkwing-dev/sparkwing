@@ -309,8 +309,12 @@ type Row struct {
 	StateDetail string `json:"state_detail,omitempty"`
 	Lock        Lock   `json:"lock"`
 	// Effective is the cadence this row actually runs: the declaration with
-	// the host's override laid over it.
+	// the host's override laid over it, and its catch-up window lowered to
+	// [cronspec.MaxCatchUp] when it asks for more.
 	Effective store.CronDeclaration `json:"effective"`
+	// CatchUpClamped reports that Effective.CatchUp is the ceiling rather
+	// than the window the declaration or the override asked for.
+	CatchUpClamped bool `json:"catch_up_clamped,omitempty"`
 	// OverrideFields names the declared fields this host has overridden.
 	OverrideFields []string `json:"override_fields,omitempty"`
 	// OverrideStale reports an override whose declaration has moved under
@@ -325,6 +329,9 @@ func newRow(ctx context.Context, s store.CronSchedule, ck checkouts) Row {
 		loc = time.UTC
 	}
 	lock := lockOf(ctx, s, ck)
+	eff := s.Effective()
+	declared := eff.CatchUp
+	eff.CatchUp = ClampCatchUp(declared)
 	return Row{
 		CronSchedule:   s,
 		Display:        DisplayName(s),
@@ -332,7 +339,8 @@ func newRow(ctx context.Context, s store.CronSchedule, ck checkouts) Row {
 		State:          stateOf(s),
 		StateDetail:    stateDetail(s, lock),
 		Lock:           lock,
-		Effective:      s.Effective(),
+		Effective:      eff,
+		CatchUpClamped: eff.CatchUp != declared,
 		OverrideFields: overrideFields(s),
 		OverrideStale:  overrideStale(s),
 		Location:       loc,
@@ -464,7 +472,18 @@ func prepare(s store.CronSchedule) (evaluable, error) {
 	if err != nil {
 		return evaluable{}, err
 	}
-	return evaluable{schedule: parsed, loc: loc, catchUp: catchUp, args: t.Args}, nil
+	return evaluable{schedule: parsed, loc: loc, catchUp: ClampCatchUp(catchUp), args: t.Args}, nil
+}
+
+// ClampCatchUp lowers a declared catch-up window to [cronspec.MaxCatchUp]. Both
+// the miss decision and the overlap check read the window this returns, so a
+// schedule can never declare a window long enough to hold a run that nothing
+// will claim active for ever.
+func ClampCatchUp(d time.Duration) time.Duration {
+	if d > cronspec.MaxCatchUp {
+		return cronspec.MaxCatchUp
+	}
+	return d
 }
 
 func (e evaluable) nextAfter(at time.Time) *time.Time {

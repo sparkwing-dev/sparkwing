@@ -284,7 +284,7 @@ func renderCronsOverride(row crons.Row, format string) error {
 	}
 	eff := row.Effective
 	fmt.Fprintf(os.Stdout, "%s now runs %s %s, overlap %s, catch up %s\n",
-		row.Display, eff.Cron, cronsZoneLabel(eff.TZ), eff.Overlap, eff.CatchUp)
+		row.Display, eff.Cron, cronsZoneLabel(eff.TZ), eff.Overlap, cronsCatchUpLabel(row))
 	if len(eff.Args) > 0 {
 		fmt.Fprintf(os.Stdout, "  args: %s\n", renderArgs(eff.Args))
 	}
@@ -361,6 +361,13 @@ func cronsArgsLabel(args map[string]string) string {
 		return "-"
 	}
 	return renderArgs(args)
+}
+
+func cronsCatchUpLabel(row crons.Row) string {
+	if row.CatchUpClamped {
+		return row.Effective.CatchUp.String() + " (clamped)"
+	}
+	return row.Effective.CatchUp.String()
 }
 
 // safety: the store keeps an override's own fields, so a renderer has to name

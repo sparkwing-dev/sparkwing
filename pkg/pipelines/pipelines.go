@@ -400,8 +400,9 @@ type ScheduleTrigger struct {
 	// running: "skip" (default) records the fire as skipped, "queue" launches it anyway and lets admission order it.
 	Overlap string `yaml:"overlap,omitempty"`
 	// CatchUp is how long after its due minute a fire may still happen when the host was asleep or the
-	// timer was late, as a Go duration such as 1h or 30m. Default 1h; values under 2m are rejected. A due
-	// minute older than the window is recorded as missed.
+	// timer was late, as a Go duration such as 1h or 30m. Default 1h; values under 2m are rejected, and a
+	// value over 24h is lowered to 24h when the schedule is evaluated. A due minute older than the window
+	// is recorded as missed.
 	CatchUp string `yaml:"catch_up,omitempty"`
 	// Args supplies argument values for this cadence's runs, keyed by CLI flag name exactly like
 	// `args:` on the pipeline. They sit above pipeline.args and below a host's own override for the

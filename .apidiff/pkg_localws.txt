@@ -25,6 +25,8 @@ type Options struct {
 	Version string
 
 	Instance string
+
+	Bundle fs.FS
 }
 func Run(ctx context.Context, opts Options) (retErr error)
 type VersionInfo struct {
