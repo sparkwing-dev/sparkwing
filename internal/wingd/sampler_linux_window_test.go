@@ -17,7 +17,9 @@ func TestLinuxSampleOwned_RecordsTheListingBoundAndTheReadBoundApart(t *testing.
 	}
 
 	sampler := newOwnedCPUSampler()
-	sampler.sampleOwnedFrom(clock, []OwnedRoot{{PID: os.Getpid(), HeldSince: base}}, 8)
+	if _, ok := sampler.sampleOwnedFrom(clock, []OwnedRoot{{PID: os.Getpid(), HeldSince: base}}, 8); !ok {
+		t.Fatal("the scan could not list this machine's processes, so it never reached the bounds this test is about")
+	}
 
 	if readings != 2 {
 		t.Fatalf("the scan read the clock %d times; want two, one bound either side of the listing", readings)

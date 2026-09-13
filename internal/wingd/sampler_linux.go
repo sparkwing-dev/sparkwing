@@ -96,7 +96,9 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 
 // safety: the clock is a parameter so a test can name which reading became which
 // bound. Pairing them the other way shortens the window every first-sight credit
-// is divided by, which inflates each one by however long the listing took.
+// is divided by, which inflates each one by however long the listing took. It
+// must return a time carrying a monotonic reading, because a dating path given
+// a wall-only clock refuses every root and charges the whole machine.
 func (s *ownedProcSampler) sampleOwnedFrom(
 	clock func() time.Time,
 	roots []OwnedRoot,
