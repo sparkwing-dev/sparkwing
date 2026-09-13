@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -40,25 +39,36 @@ func TestInstallToGreenHarnessRunsOnTheCheckoutAndRecordsRatherThanGates(t *test
 
 func TestInstallToGreenRecordsAnUnreachableProxyAsSkippedAndFailsEverythingElse(t *testing.T) {
 	record := `{"total_seconds":45.2,"green":true}`
-	measured, err := installToGreenOutcome(record+"\n", nil)
+	logged, measured, err := installToGreenOutcome(record+"\n", nil)
 	if err != nil {
 		t.Fatalf("a measured run must not fail the lane: %v", err)
 	}
-	if measured != record {
-		t.Errorf("the lane logged %q, want the harness record %q", measured, record)
+	if !measured {
+		t.Error("a run that produced a record was not counted as measured")
+	}
+	if logged != record {
+		t.Errorf("the lane logged %q, want the harness record %q", logged, record)
 	}
 
-	unreachable := &sparkwing.ExecError{Command: installToGreenCommand, ExitCode: installToGreenUnavailable}
-	measured, err = installToGreenOutcome("", unreachable)
+	skipped := `{"measured":false,"green":false,"phase":"scaffold","started_at":"2026-09-13T21:26:05Z","reason":"could not reach the module proxy"}`
+	unreachable := &sparkwing.ExecError{
+		Command:  installToGreenCommand,
+		Stdout:   skipped + "\n",
+		ExitCode: installToGreenUnavailable,
+	}
+	logged, measured, err = installToGreenOutcome("", unreachable)
 	if err != nil {
 		t.Fatalf("an unreachable proxy must not fail the lane: %v", err)
 	}
-	if !strings.Contains(measured, "skipped") {
-		t.Errorf("an unreachable proxy logged %q, which does not say the measurement was skipped", measured)
+	if measured {
+		t.Error("an unreachable proxy was counted as a measurement")
+	}
+	if logged != skipped {
+		t.Errorf("the lane logged %q, want the harness record naming the phase and the time", logged)
 	}
 
 	notGreen := &sparkwing.ExecError{Command: installToGreenCommand, ExitCode: 1}
-	if _, err := installToGreenOutcome("", notGreen); err == nil {
+	if _, _, err := installToGreenOutcome("", notGreen); err == nil {
 		t.Error("a demo path that never reached green passed the lane")
 	}
 }

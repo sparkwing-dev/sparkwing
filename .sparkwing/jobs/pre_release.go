@@ -24,20 +24,24 @@ const (
 	installToGreenUnavailable = 75
 )
 
-func measureInstallToGreen(jobContext context.Context) (string, error) {
-	measured, err := sparkwing.Bash(jobContext, installToGreenCommand).Run()
-	return installToGreenOutcome(measured.Stdout, err)
+func measureInstallToGreen(jobContext context.Context) (string, bool, error) {
+	result, err := sparkwing.Bash(jobContext, installToGreenCommand).Run()
+	return installToGreenOutcome(result.Stdout, err)
 }
 
-func installToGreenOutcome(stdout string, err error) (string, error) {
+func installToGreenOutcome(stdout string, err error) (string, bool, error) {
 	if err == nil {
-		return strings.TrimSpace(stdout), nil
+		return strings.TrimSpace(stdout), true, nil
 	}
 	var execErr *sparkwing.ExecError
 	if errors.As(err, &execErr) && execErr.ExitCode == installToGreenUnavailable {
-		return "skipped, the module proxy was unreachable so nothing was measured", nil
+		record := strings.TrimSpace(execErr.Stdout)
+		if record == "" {
+			record = strings.TrimSpace(execErr.Stderr)
+		}
+		return record, false, nil
 	}
-	return "", err
+	return "", false, err
 }
 
 func runMarkdownlint(jobContext context.Context) error {
@@ -225,10 +229,12 @@ func (preRelease *PreRelease) run(jobContext context.Context) error {
 	} else {
 		sparkwing.Info(jobContext, "public installer release verification: passed")
 	}
-	if measured, err := measureInstallToGreen(jobContext); err != nil {
+	if record, measured, err := measureInstallToGreen(jobContext); err != nil {
 		failures = append(failures, fmt.Sprintf("install-to-green harness: %v", err))
+	} else if measured {
+		sparkwing.Info(jobContext, "install-to-green: %s", record)
 	} else {
-		sparkwing.Info(jobContext, "install-to-green: %s", measured)
+		sparkwing.Warn(jobContext, "install-to-green: no measurement taken: %s", record)
 	}
 
 	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell.sh").Run(); err != nil {
