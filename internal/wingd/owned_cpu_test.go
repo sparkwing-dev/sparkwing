@@ -208,7 +208,12 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 	reheldAt := releasedAt.Add(time.Hour)
 	identity := processIdentity{pid: 10, startTicks: 1000}
 	process := func(cpuSeconds float64) map[int]ownedProcess {
-		return map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: cpuSeconds}}
+		return map[int]ownedProcess{10: {
+			parentPID:  1,
+			identity:   identity,
+			cpuSeconds: cpuSeconds,
+			startedAt:  firstAt.Add(time.Second),
+		}}
 	}
 	sampler := &ownedProcSampler{}
 	held := []OwnedRoot{{PID: 10, HeldSince: firstAt.Add(-time.Hour)}}
@@ -217,16 +222,16 @@ func TestOwnedCPU_ReholdingATreeAfterAnIdleStretchChargesItNothingForTheGap(t *t
 	_, next := ownedCPUByRoot(
 		map[processIdentity]cpuSample{identity: {cpuSeconds: 40, at: firstAt}},
 		processes, ownedProcessOwners(held, processes), held, firstAt, firstAt, releasedAt, 8)
-	sampler.last, sampler.lastAt = next, releasedAt
+	sampler.last, sampler.lastAt, sampler.seenSince = next, releasedAt, firstAt
 
 	sampler.forgetSamples(reheldAt)
 
-	processes = process(3650)
+	processes = process(50)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
 	byRoot, _ := ownedCPUByRoot(
 		sampler.last, processes, ownedProcessOwners(rehold, processes), rehold,
 		sampler.lastAt,
-		sampler.lastAt, reheldAt.Add(10*time.Second), 8)
+		sampler.seenSince, reheldAt.Add(10*time.Second), 8)
 
 	if figure, reported := byRoot[10]; reported {
 		t.Fatalf("re-held tree was charged %v cores; want no figure, because the daemon watched none of the hour that CPU ran in",
@@ -395,7 +400,7 @@ func TestOwnedCPU_AProcessDatedOneTickBeforeTheScanKeepsItsCredit(t *testing.T) 
 			parentPID:  10,
 			identity:   child,
 			cpuSeconds: 3,
-			startedAt:  scanStart.Add(-processDatingSlack / 2),
+			startedAt:  scanStart.Add(-5 * time.Millisecond),
 		},
 	}
 	held := []OwnedRoot{{PID: 10, HeldSince: scanStart.Add(-time.Hour)}}
@@ -419,7 +424,8 @@ func TestStartedInWindow_AdmitsOnlyAProcessThePreviousScanCouldNotHaveSeen(t *te
 		"undatable process":        {time.Time{}, scanStart, false},
 		"no previous scan":         {scanStart.Add(time.Second), time.Time{}, false},
 		"running before the scan":  {scanStart.Add(-time.Hour), scanStart, false},
-		"a tick before the scan":   {scanStart.Add(-processDatingSlack / 2), scanStart, true},
+		"a tick before the scan":   {scanStart.Add(-5 * time.Millisecond), scanStart, true},
+		"a second before the scan": {scanStart.Add(-time.Second), scanStart, false},
 		"born during the scan":     {scanStart.Add(time.Millisecond), scanStart, true},
 		"born inside the window":   {now.Add(-time.Second), scanStart, true},
 		"dated after this reading": {now.Add(time.Hour), scanStart, false},
