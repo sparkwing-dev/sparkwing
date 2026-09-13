@@ -287,6 +287,37 @@ func TestCronsShowMarksAnOverrideTheRepoHasMovedUnder(t *testing.T) {
 	}
 }
 
+func TestCronsInstallWarnsAndShowMarksACatchUpAboveTheCeiling(t *testing.T) {
+	_, _ = cronsTestHome(t)
+	repo := cronsTestRepo(t, `pipelines:
+  - name: every-minute
+    entrypoint: EveryMinute
+    on:
+      schedule:
+        cron: "* * * * *"
+        where: local
+        catch_up: 720h
+`)
+
+	install := captureStdout(t, func() {
+		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons install: %v", err)
+		}
+	})
+	if !strings.Contains(install, "declares catch up 720h0m0s") || !strings.Contains(install, "24h0m0s") {
+		t.Fatalf("the arm did not warn that the window was clamped:\n%s", install)
+	}
+
+	show := captureStdout(t, func() {
+		if err := runCronsShow([]string{"every-minute", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons show: %v", err)
+		}
+	})
+	if !strings.Contains(show, "720h0m0s") || !strings.Contains(show, "24h0m0s (clamped)") {
+		t.Fatalf("show does not print the effective window and mark it clamped:\n%s", show)
+	}
+}
+
 func TestCronsLockUnlockAndDisarmEmitOneRecordPerFormat(t *testing.T) {
 	_, _ = cronsTestHome(t)
 	cronsFakeProver(t)
