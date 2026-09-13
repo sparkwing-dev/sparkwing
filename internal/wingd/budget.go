@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -136,7 +137,10 @@ func parsePercent(tok string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("budget: %q is not a percentage", tok)
 	}
-	if n <= 0 || n > 100 {
+	// safety: the bound admits the percentages it can stand behind rather than
+	// refusing the ones it cannot, because a NaN passes every refusal written as
+	// a comparison and then reads as no cap at all.
+	if !(n > 0 && n <= 100) {
 		return 0, fmt.Errorf("budget: percentage %q out of range; want (0, 100]", tok)
 	}
 	return n / 100, nil
@@ -154,7 +158,10 @@ func parseCoreCount(tok string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("budget: %q is not a core count, percentage, or memory size", tok)
 	}
-	if n <= 0 {
+	// safety: the bound admits the core counts it can stand behind. A NaN passes
+	// every refusal written as a comparison, and a NaN cap then reads as no cap,
+	// so a budget the operator typed grants the whole machine with enforcement off.
+	if !(n > 0) || math.IsInf(n, 0) {
 		return 0, fmt.Errorf("budget: cores %q must be positive", tok)
 	}
 	return n, nil

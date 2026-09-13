@@ -110,17 +110,25 @@ func (s *ownedProcSampler) sampleOwnedFrom(
 		return nil, false
 	}
 	now := clock()
-	uptime := linuxUptime()
+	processes := linuxOwnedProcesses(procs, now, linuxUptime())
+	return s.creditScan(processes, roots, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
+}
+
+// safety: a process is credited the counter covering its own execution. The
+// tree total a parent carries already holds every child it reaped, and each
+// live child is credited its own row, so crediting the tree total here counts
+// one reaped child under every ancestor it had.
+func linuxOwnedProcesses(procs map[int]linuxProc, now time.Time, uptimeSeconds float64) map[int]ownedProcess {
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
 		processes[processID] = ownedProcess{
 			parentPID:  proc.parentPID,
 			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
 			cpuSeconds: proc.selfCPUSeconds,
-			startedAt:  linuxProcessStart(now, uptime, proc.startTicks),
+			startedAt:  linuxProcessStart(now, uptimeSeconds, proc.startTicks),
 		}
 	}
-	return s.creditScan(processes, roots, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
+	return processes
 }
 
 type linuxProc struct {
