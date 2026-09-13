@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,12 +32,19 @@ type cronsInstallReport struct {
 }
 
 type cronsRepoResult struct {
-	Repo        string         `json:"repo"`
-	Schedules   []cronsArmed   `json:"schedules,omitempty"`
-	Controller  []string       `json:"controller,omitempty"`
-	Withdrawals []string       `json:"withdrawals,omitempty"`
-	Rebased     []crons.Rebase `json:"rebased,omitempty"`
-	Error       string         `json:"error,omitempty"`
+	Repo        string            `json:"repo"`
+	Schedules   []cronsArmed      `json:"schedules,omitempty"`
+	Controller  []string          `json:"controller,omitempty"`
+	Withdrawals []string          `json:"withdrawals,omitempty"`
+	Rebased     []crons.Rebase    `json:"rebased,omitempty"`
+	Clamped     []cronsCatchUpCap `json:"clamped,omitempty"`
+	Error       string            `json:"error,omitempty"`
+}
+
+type cronsCatchUpCap struct {
+	Name      string `json:"name"`
+	Declared  string `json:"declared"`
+	Effective string `json:"effective"`
 }
 
 type cronsArmed struct {
@@ -113,6 +121,7 @@ func runCronsInstall(args []string) error {
 			result.Controller = armed.Controller
 			result.Withdrawals = armed.Withdrawals
 			result.Rebased = armed.Rebased
+			result.Clamped = cronsClampedCatchUps(armed.Schedules)
 			report.Armed += armed.Armed
 			report.Refreshed += armed.Refreshed
 			report.Withdrawn += armed.Withdrawn
@@ -255,6 +264,7 @@ func renderCronsInstall(report cronsInstallReport, format string) error {
 				fmt.Fprintf(os.Stdout, "re-based the override on %s: it was set against %s, now %s\n",
 					rb.Name, cronsDeclarationLabel(rb.From), cronsDeclarationLabel(rb.To))
 			}
+			renderCronsClamped(os.Stdout, r.Clamped)
 		}
 	}
 	if multi {
@@ -270,6 +280,30 @@ func renderCronsInstall(report cronsInstallReport, format string) error {
 		fmt.Fprintf(os.Stdout, "timer: %s\n", report.TimerSkip)
 	}
 	return nil
+}
+
+func renderCronsClamped(w io.Writer, caps []cronsCatchUpCap) {
+	for _, c := range caps {
+		fmt.Fprintf(w, "warning: %s declares catch up %s; a tick honors at most %s, so it runs with that\n",
+			c.Name, c.Declared, c.Effective)
+	}
+}
+
+func cronsClampedCatchUps(schedules []store.CronSchedule) []cronsCatchUpCap {
+	var out []cronsCatchUpCap
+	for _, s := range schedules {
+		declared := s.Effective().CatchUp
+		effective := crons.ClampCatchUp(declared)
+		if effective == declared {
+			continue
+		}
+		out = append(out, cronsCatchUpCap{
+			Name:      crons.DisplayName(s),
+			Declared:  declared.String(),
+			Effective: effective.String(),
+		})
+	}
+	return out
 }
 
 func runCronsUninstall(args []string) error {

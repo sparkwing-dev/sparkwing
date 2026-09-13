@@ -358,6 +358,11 @@ func RowFromView(v ScheduleView) Row {
 			row.Override.CatchUp = &d
 		}
 	}
+	// safety: the wire carries the window the evaluator settled on, not the
+	// fact that it lowered one, so the marker is the gap between that window
+	// and the declaration the view also carries -- an evaluator that does not
+	// clamp leaves no gap and draws no marker.
+	row.CatchUpClamped = row.Effective.CatchUp != row.CronSchedule.Effective().CatchUp
 	return row
 }
 

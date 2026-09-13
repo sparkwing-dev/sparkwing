@@ -6,6 +6,11 @@ import "time"
 // that fires a few seconds late never reports a miss.
 const MinCatchUp = 2 * time.Minute
 
+// MaxCatchUp is the longest catch-up window a tick honors. A window beyond it
+// outlives the run bookkeeping the overlap check reads, so a schedule declaring
+// one is evaluated with this instead.
+const MaxCatchUp = 24 * time.Hour
+
 // MaxMissed caps the backlog Decide counts.
 const MaxMissed = 10000
 
