@@ -17,6 +17,7 @@ import (
 type stubClaimer struct {
 	responses []claimResp
 	calls     atomic.Int64
+	capacity  atomic.Pointer[client.ClaimCapacity]
 }
 
 type claimResp struct {
@@ -24,7 +25,10 @@ type claimResp struct {
 	err  error
 }
 
-func (s *stubClaimer) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error) {
+func (s *stubClaimer) ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string,
+	lease time.Duration, headroom *client.Headroom, capacity *client.ClaimCapacity,
+) (*store.Node, error) {
+	s.capacity.Store(capacity)
 	idx := int(s.calls.Add(1)) - 1
 	if idx >= len(s.responses) {
 		<-ctx.Done()
@@ -232,5 +236,27 @@ func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T
 	})
 	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=warm") {
 		t.Fatalf("runRunnerCLI() error = %v, want warm fallback service-account validation", err)
+	}
+}
+
+func TestPoolLoop_AdvertisesItsSlotsWithEachClaim(t *testing.T) {
+	stub := &stubClaimer{responses: []claimResp{{node: fakeNode("a")}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runPoolLoop(ctx, normalizePoolLoopConfig(PoolLoopConfig{
+			ControllerURL: "http://controller.invalid", MaxConcurrent: 3, MaxClaims: 1,
+		}), stub, func(context.Context, *store.Node, string) {}, nil, slog.New(slog.DiscardHandler))
+	}()
+	<-done
+
+	capacity := stub.capacity.Load()
+	if capacity == nil {
+		t.Fatal("claim advertised no capacity")
+	}
+	if capacity.MaxConcurrent != 3 || capacity.ActiveClaims != 0 {
+		t.Fatalf("advertised capacity = %+v, want 3 slots with none in flight", capacity)
 	}
 }
