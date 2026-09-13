@@ -24,6 +24,16 @@ func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadF
 func (c *Client) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 func DefaultLimits() Limits
+const EgressBudgetCode = "egress_budget_exceeded"
+type EgressRefusalBody struct {
+	Error      string
+	Code       string
+	Principal  string
+	LimitBytes int64
+	UsedBytes  int64
+	Month      string
+}
+const EgressStreamLimitCode = "egress_stream_limit"
 var ErrClaimConflict = errors.New("logs append claim is no longer current")
 type Limits struct {
 	MaxNodeBytes int64
@@ -77,6 +87,8 @@ type ServeOptions struct {
 	Logger *slog.Logger
 
 	Limits *Limits
+
+	Egress *egress.Meter
 }
 func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 func ServeWith(ctx context.Context, opts ServeOptions) error
@@ -87,6 +99,7 @@ func (s *Server) Handler() http.Handler
 func (s *Server) StartSweeper(ctx context.Context)
 func (s *Server) SweepOnce(now time.Time) (int, error)
 func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration) *Server
+func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithLimits(l Limits) *Server
 const TruncationMarker = "[sparkwing-logs] truncated: byte cap reached\n"
 
