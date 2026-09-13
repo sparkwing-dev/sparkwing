@@ -76,6 +76,7 @@ reported as the run started. Phase columns are seconds.
 | 2026-09-13 | build | v0.50.1 | 30.2 | 59.7 | 0.6 | 11.0 | 47.2 | 0.8 |
 | 2026-09-13 | binary | v0.50.1 | 25.3 | 65.6 | 1.0 | 12.7 | 51.4 | 0.5 |
 | 2026-09-13 | binary | v0.50.1 | 36.7 | 61.0 | 0.9 | 10.7 | 49.0 | 0.4 |
+| 2026-09-13 | binary | v0.50.1 | 13.6 | 57.0 | 0.4 | 10.2 | 45.2 | 1.1 |
 
 The first compile dominates every row. It is the SDK's whole dependency tree
 built from source into an empty build cache, so the lever that moves the number
