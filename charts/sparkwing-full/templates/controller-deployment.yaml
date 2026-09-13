@@ -108,7 +108,8 @@ spec:
                   (dict "flag" "--warn-bucket-bytes" "value" $bucket.warnBytes)
                   (dict "flag" "--warn-bucket-objects" "value" $bucket.warnObjects)
                   (dict "flag" "--bucket-reconcile" "value" $bucket.reconcile)
-                  (dict "flag" "--bucket-store" "value" $bucket.store) }}
+                  (dict "flag" "--bucket-store" "value" $bucket.store)
+                  (dict "flag" "--bucket-measure-pages" "value" $bucket.measurePages) }}
             {{- $value := $limit.value }}
             {{- if not (kindIs "invalid" $value) }}
             {{- if ne (toString $value) "" }}

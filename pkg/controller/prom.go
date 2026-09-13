@@ -253,6 +253,12 @@ var (
 		"Object writes the bucket ceiling refused.",
 		nil, nil,
 	)
+
+	objectStoreCeilingIncompleteDesc = prometheus.NewDesc(
+		"sparkwing_object_store_bucket_ceiling_measurement_incomplete",
+		"1 while the last bucket measurement stopped early and was discarded, so the total is the running count. Sampled at scrape time.",
+		nil, nil,
+	)
 )
 
 // safety: read at scrape time rather than mirrored, so the limiter stays the
@@ -270,6 +276,7 @@ func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- objectStoreCeilingFrozenDesc
 	ch <- objectStoreCeilingFreezesDesc
 	ch <- objectStoreCeilingRefusedDesc
+	ch <- objectStoreCeilingIncompleteDesc
 }
 
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric) {
@@ -310,6 +317,11 @@ func collectCeiling(ch chan<- prometheus.Metric, c objectguard.CeilingState) {
 	ch <- prometheus.MustNewConstMetric(objectStoreCeilingFrozenDesc, prometheus.GaugeValue, frozen)
 	ch <- prometheus.MustNewConstMetric(objectStoreCeilingFreezesDesc, prometheus.CounterValue, float64(c.Freezes))
 	ch <- prometheus.MustNewConstMetric(objectStoreCeilingRefusedDesc, prometheus.CounterValue, float64(c.Refused))
+	incomplete := 0.0
+	if c.Incomplete {
+		incomplete = 1
+	}
+	ch <- prometheus.MustNewConstMetric(objectStoreCeilingIncompleteDesc, prometheus.GaugeValue, incomplete)
 }
 
 var authHashingRejectedDesc = prometheus.NewDesc(

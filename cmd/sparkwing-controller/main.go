@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
+	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -145,6 +147,11 @@ func run(args []string) error {
 			"s3://bucket/prefix. It is read on the reconciliation interval and never "+
 			"served, so the controller exposes none of it. Empty counts only the writes "+
 			"this process makes (env: SPARKWING_OBJECT_STORE_URL)")
+	bucketMeasurePages := fs.Int("bucket-measure-pages", envMeasurePages(),
+		"listings one bucket measurement may spend before it stops and reports itself "+
+			"incomplete. Each listing covers a thousand objects, so the default bounds a "+
+			"measurement at a million; raise it for a larger bucket, or leave the ceiling "+
+			"on its running count (env: SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES)")
 	bucketReconcile := fs.Duration("bucket-reconcile", ceilingDefaults.Ceiling.Reconcile,
 		"how often the controller measures the whole bucket and replaces the running "+
 			"count with the measurement. Writes are counted as they happen, so this "+
@@ -272,8 +279,11 @@ func run(args []string) error {
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
 	}
+	if *bucketMeasurePages < 1 {
+		return fmt.Errorf("--bucket-measure-pages must be at least 1; a measurement that lists nothing can only be incomplete")
+	}
 	if *bucketStoreURL != "" {
-		bucketStore, berr := storeurl.OpenMeasurementStore(ctx, *bucketStoreURL)
+		bucketStore, berr := storeurl.OpenMeasurementStore(ctx, *bucketStoreURL, *bucketMeasurePages)
 		if berr != nil {
 			return fmt.Errorf("--bucket-store: %w", berr)
 		}
@@ -457,6 +467,23 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kube config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
+}
+
+// safety: an unreadable page budget must not silently become the default, because
+// the operator set it to cover a bucket the default cannot walk.
+func envMeasurePages() int {
+	raw := strings.TrimSpace(os.Getenv("SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES"))
+	if raw == "" {
+		return s3store.DefaultMaxUsagePages
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		fmt.Fprintf(os.Stderr,
+			"sparkwing-controller: SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES=%q is not a page count; keeping %d\n",
+			raw, s3store.DefaultMaxUsagePages)
+		return s3store.DefaultMaxUsagePages
+	}
+	return n
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.

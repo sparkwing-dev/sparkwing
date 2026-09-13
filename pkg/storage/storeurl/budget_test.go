@@ -200,7 +200,7 @@ func TestMeasurementStoreStaysOutsideTheListBudget(t *testing.T) {
 		t.Error("an ordinary client listed past a spent list budget")
 	}
 
-	measured, err := OpenMeasurementStore(context.Background(), "s3://bucket/prefix")
+	measured, err := OpenMeasurementStore(context.Background(), "s3://bucket/prefix", 0)
 	if err != nil {
 		t.Fatalf("OpenMeasurementStore: %v", err)
 	}

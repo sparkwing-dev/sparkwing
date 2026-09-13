@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -307,9 +308,25 @@ func TestMetrics_BucketCeilingIsExported(t *testing.T) {
 		`sparkwing_object_store_bucket_ceiling{unit="bytes"} 1000`,
 		`sparkwing_object_store_bucket_ceiling{unit="objects"} 50`,
 		"sparkwing_object_store_bucket_ceiling_frozen 1",
+		"sparkwing_object_store_bucket_ceiling_measurement_incomplete 0",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics do not carry %q", want)
 		}
+	}
+}
+
+func TestMetrics_BucketCeilingReportsAnIncompleteMeasurement(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+	ceiling := freezeBucket(t, objectguard.CeilingLimit{MaxBytes: 1000}, 4096, 12)
+
+	if err := ceiling.ReconcileWith(t.Context(), func(context.Context) (objectguard.Usage, error) {
+		return objectguard.Usage{Bytes: 8, Objects: 1, Partial: true}, nil
+	}); err == nil {
+		t.Fatal("a partial measurement was folded in")
+	}
+	if !strings.Contains(scrape(t, base), "sparkwing_object_store_bucket_ceiling_measurement_incomplete 1") {
+		t.Error("metrics do not report the discarded measurement")
 	}
 }

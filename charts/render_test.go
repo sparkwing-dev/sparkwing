@@ -2519,14 +2519,16 @@ func TestControllerBucketCeilingFlagsComeFromValues(t *testing.T) {
 		"controller.bucketCeiling.maxObjects=5000000",
 		"controller.bucketCeiling.warnBytes=879609302220",
 		"controller.bucketCeiling.reconcile=30m",
-		"controller.bucketCeiling.store=s3://sparkwing-prod/artifacts")
+		"controller.bucketCeiling.store=s3://sparkwing-prod/artifacts",
+		"controller.bucketCeiling.measurePages=4000")
 	container := deploymentDocument(t, rendered).Spec.Template.Spec.Containers[0]
 	for flag, want := range map[string]string{
-		"--max-bucket-bytes":   "1099511627776",
-		"--max-bucket-objects": "5000000",
-		"--warn-bucket-bytes":  "879609302220",
-		"--bucket-reconcile":   "30m",
-		"--bucket-store":       "s3://sparkwing-prod/artifacts",
+		"--max-bucket-bytes":     "1099511627776",
+		"--max-bucket-objects":   "5000000",
+		"--warn-bucket-bytes":    "879609302220",
+		"--bucket-reconcile":     "30m",
+		"--bucket-store":         "s3://sparkwing-prod/artifacts",
+		"--bucket-measure-pages": "4000",
 	} {
 		if got := equalsArgValue(container.Args, flag); got != want {
 			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, container.Args)

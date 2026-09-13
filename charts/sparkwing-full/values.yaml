@@ -133,6 +133,11 @@ controller:
     # s3://bucket/prefix. Read on the interval above and never served.
     # Empty counts only the writes the controller itself makes.
     store: ""
+    # Listings one measurement may spend before it stops and reports
+    # itself incomplete. Each listing covers a thousand objects, so the
+    # default of 1000 bounds a measurement at a million; raise it for a
+    # larger bucket.
+    measurePages: ""
 
   cache:
     # Which sparkwing-cache the controller's gitcache proxy forwards

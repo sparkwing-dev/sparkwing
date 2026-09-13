@@ -150,15 +150,15 @@ const SDKMaxBackoff = 5 * time.Second
 // request passes the process-wide request budget and the SDK retryer is capped
 // in exactly one place.
 // OpenMeasurementStore opens raw for measurement alone: reading the
-// store's own total, never serving it.
+// store's own total, never serving it. maxPages bounds how many
+// listings one measurement spends; zero takes the backend's default.
 //
 // Its requests stay outside the process-wide request budget on purpose.
 // Totalling a bucket costs one LIST per thousand keys, so a bucket of a
 // million objects would spend twice the whole per-minute list budget in
 // one pass and leave every other reader refused for the rest of the
-// minute. The measurement is bounded by its own schedule instead: one
-// caller per reconciliation window, and the window is the operator's.
-func OpenMeasurementStore(ctx context.Context, raw string) (storage.ArtifactStore, error) {
+// minute. The page cap and the caller's deadline bound it instead.
+func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storage.ArtifactStore, error) {
 	scheme, rest, err := splitScheme(raw)
 	if err != nil {
 		return nil, err
@@ -174,7 +174,9 @@ func OpenMeasurementStore(ctx context.Context, raw string) (storage.ArtifactStor
 	if err != nil {
 		return nil, err
 	}
-	return s3store.NewArtifactStore(bucket, prefix, client), nil
+	store := s3store.NewArtifactStore(bucket, prefix, client)
+	store.MaxUsagePages = maxPages
+	return store, nil
 }
 
 func newS3Client(ctx context.Context, budgeted bool) (*awss3.Client, error) {
