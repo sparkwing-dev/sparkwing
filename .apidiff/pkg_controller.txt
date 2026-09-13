@@ -191,6 +191,7 @@ func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
+func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) StopAssistedClaims()

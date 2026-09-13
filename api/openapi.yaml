@@ -3736,10 +3736,28 @@ paths:
   /api/v1/storage:
     get:
       x-sparkwing-scope: runs.read
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [storage]
+      summary: Read the storage policy, the caller's quota, and this month's usage.
+      description: |
+        `settings` are the controller-wide retention windows and alarm size;
+        every window is a whole number of days and zero is unbounded, which
+        is what a controller that set none reads. `quota` is the allowance
+        the calling token's team is held to, taken from its own row when it
+        has one and from `default_tier` otherwise, and an unlimited quota
+        refuses nothing. `usage` is what that team has stored over the
+        current calendar month. `alarm` says whether the last size sample
+        passed `database_alarm_bytes`.
+
+        An operator caller also receives `database`, the last size sample the
+        maintenance timer took, `quotas`, every team with a quota row, and
+        `largest_teams`, the month's heaviest teams. Every other caller
+        receives none of those.
       responses:
-        default: {description: Undescribed.}
+        "200":
+          description: Storage policy, quota, and usage.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StorageState"}
 
   /api/v1/storage/quotas/{principal}:
     parameters:
@@ -3749,18 +3767,62 @@ paths:
         schema: {type: string}
     put:
       x-sparkwing-scope: admin
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [storage]
+      summary: Set one team's storage allowance.
+      description: |
+        `principal` is the token principal the quota is filed under, 1 to 128
+        characters of letters, digits, or `-_.:@`; anything else is refused.
+        Naming a `tier` and leaving every limit zero takes that tier's
+        limits, so a team moves between tiers without restating three
+        numbers. A limit of zero is unbounded, so a quota may cap bytes
+        without capping objects. The answer is the stored quota.
+
+        Run events are charged their payload bytes and a published artifact
+        manifest is charged one object, each inside the transaction that
+        writes it, so a refused write is never stored and never billed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StorageQuota"}
       responses:
-        default: {description: Undescribed.}
+        "200":
+          description: The stored quota.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StorageQuota"}
+        "400": {$ref: "#/components/responses/BadRequest"}
 
   /api/v1/storage/settings:
     put:
       x-sparkwing-scope: admin
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [storage]
+      summary: Set the retention windows, the alarm size, and the default tier.
+      description: |
+        Writes every field, so a caller reads `GET /api/v1/storage` first,
+        changes what it means to change, and writes the result back. A
+        retention window is a whole number of days and zero is unbounded; an
+        hourly timer removes the events and per-node metric samples of
+        finished runs once they pass their window, in bounded batches, and
+        leaves a run that is still going untouched however old its rows.
+
+        `database_alarm_bytes` of zero raises no alarm. Passing it logs a
+        warning and sets `database.alarm` on `GET /api/v1/health`, which
+        never changes the status that route reports. `default_tier` holds
+        every principal without a quota row to that tier, and an empty
+        default leaves them unlimited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StorageSettings"}
       responses:
-        default: {description: Undescribed.}
+        "200":
+          description: The stored settings.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StorageSettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
 
 components:
   securitySchemes:
@@ -4260,6 +4322,68 @@ components:
         metered:
           type: boolean
           description: The operator marked this token as one whose node claims cost credits.
+    StorageSettings:
+      x-sparkwing-go-type: pkg/controller.storageSettingsJSON
+      type: object
+      description: Controller-wide storage policy. Zero is unbounded everywhere.
+      properties:
+        event_retention_days: {type: integer, format: int64, description: Days a finished run's events are kept; 0 keeps them forever.}
+        node_metric_retention_days: {type: integer, format: int64, description: Days a finished run's metric samples are kept; 0 keeps them forever.}
+        database_alarm_bytes: {type: integer, format: int64, description: Size past which the controller warns; 0 raises no alarm.}
+        default_tier: {type: string, description: free or paid; empty leaves a team without a quota row unlimited.}
+    StorageQuota:
+      x-sparkwing-go-type: pkg/controller.storageQuotaJSON
+      type: object
+      description: One team's storage allowance. A zero limit is unbounded.
+      properties:
+        principal: {type: string, description: The token principal this quota is filed under.}
+        tier: {type: string, description: free or paid; supplies the limits when they are all zero.}
+        max_bytes_per_run: {type: integer, format: int64}
+        max_bytes_per_month: {type: integer, format: int64}
+        max_objects_per_run: {type: integer, format: int64}
+    StorageUsage:
+      x-sparkwing-go-type: pkg/controller.storageUsageJSON
+      type: object
+      description: What one team stored over one calendar month.
+      properties:
+        month: {type: string, description: Calendar month as YYYY-MM in UTC.}
+        month_bytes: {type: integer, format: int64}
+        month_objects: {type: integer, format: int64}
+    StorageTeamUsage:
+      x-sparkwing-go-type: pkg/controller.storageTeamJSON
+      type: object
+      description: One row of the month's heaviest teams.
+      properties:
+        principal: {type: string}
+        bytes: {type: integer, format: int64}
+        objects: {type: integer, format: int64}
+    DatabaseSize:
+      x-sparkwing-go-type: pkg/store.DatabaseSize
+      type: object
+      description: A size sample, counting the pages a database holds and never the free pages a delete left behind.
+      properties:
+        total_bytes: {type: integer, format: int64}
+        tables: {type: array, description: Per-relation sizes; Postgres only., items: {$ref: "#/components/schemas/TableSize"}}
+        sampled_at: {type: string, format: date-time}
+    TableSize:
+      x-sparkwing-go-type: pkg/store.TableSize
+      type: object
+      description: One relation's size on disk, indexes included.
+      properties:
+        name: {type: string}
+        bytes: {type: integer, format: int64}
+    StorageState:
+      x-sparkwing-go-type: pkg/controller.storageStateJSON
+      type: object
+      description: Storage policy and usage as one caller sees it.
+      properties:
+        settings: {$ref: "#/components/schemas/StorageSettings"}
+        quota: {$ref: "#/components/schemas/StorageQuota"}
+        usage: {$ref: "#/components/schemas/StorageUsage"}
+        database: {$ref: "#/components/schemas/DatabaseSize"}
+        alarm: {type: boolean, description: Whether the last size sample passed the alarm size.}
+        quotas: {type: array, description: Every team with a quota row; admin only., items: {$ref: "#/components/schemas/StorageQuota"}}
+        largest_teams: {type: array, description: The month's heaviest teams; admin only., items: {$ref: "#/components/schemas/StorageTeamUsage"}}
     CreditState:
       x-sparkwing-go-type: pkg/controller.creditStateJSON
       type: object

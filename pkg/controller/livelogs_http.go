@@ -61,9 +61,6 @@ func (s *Server) handleAppendNodeLiveLog(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusRequestEntityTooLarge, fmt.Errorf("live log batch exceeds %d bytes", liveLogAppendLimit))
 		return
 	}
-	if !s.reserveStorage(w, r, runID, int64(len(data)), 0) {
-		return
-	}
 	s.liveLogs.Append(runID, nodeID, data)
 	w.WriteHeader(http.StatusNoContent)
 }

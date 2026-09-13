@@ -25,25 +25,30 @@ unlock.
 - **controller + store:** Retention, per-team storage quotas, and a
   database-size alarm, all off on an existing install. `PUT
   /api/v1/storage/settings` (scope `admin`) sets the event and node-metric
-  retention windows in days, the backup window an S3 lifecycle rule enforces,
-  the sizes worth an alarm, and the tier a team without a quota row inherits;
-  `GET /api/v1/storage` reads them back with the caller's quota and the
-  month's usage, and adds the database sample and the largest teams of the
-  month for an admin. Every window is a whole number of days and zero is
-  unbounded, so a controller that sets nothing keeps exactly what it kept
-  before. An hourly timer compacts the rows past their window and resamples
-  the database size, which SQLite answers from its page count and Postgres
-  from `pg_total_relation_size` per relation; a database over
-  `database_alarm_bytes` logs a warning and sets `database.alarm` on `GET
-  /api/v1/health` without degrading the reported status. `PUT
-  /api/v1/storage/quotas/{principal}` holds one team to the free or paid tier
-  or to limits of its own: bytes per run, bytes per month, and objects per
-  run. Log appends, run events and published artifact manifests count against
-  the calling token's team, and a write past a limit is refused with `413` and
-  a reason naming the limit, the team, what it has stored and what the write
-  asked for. Schema v38 adds the `storage_quotas` and `storage_usage` tables
-  and declares no requirement, so a binary predating it still opens the
-  database.
+  retention windows in days, the size worth an alarm, and the tier a team
+  without a quota row inherits; `GET /api/v1/storage` reads them back with the
+  caller's quota and the month's usage, and adds the database sample, every
+  quota row, and the month's heaviest teams for an operator. Every window is a
+  whole number of days and zero is unbounded, so a controller that sets
+  nothing keeps exactly what it kept before. An hourly timer removes the
+  events and metric samples of finished runs past their window, in batches of
+  5000, and leaves a run that is still going untouched; it then resamples the
+  database size, which SQLite answers as the pages it holds less its free list
+  and Postgres as the sum of `pg_total_relation_size`, so an alarm clears once
+  the rows are gone. A database over `database_alarm_bytes` logs a warning and
+  sets `database.alarm` on `GET /api/v1/health` without degrading the reported
+  status; that route answers without a token, so it publishes the alarm alone.
+  `PUT /api/v1/storage/quotas/{principal}` holds one team to the free or paid
+  tier or to limits of its own: bytes per run, bytes per month, and objects
+  per run. Run events are charged their payload bytes and a published artifact
+  manifest one object, each inside the transaction that writes it, so a
+  refused write is never stored and a failed one is never billed; live logs
+  are not charged, because the controller buffers them in memory and stores
+  nothing. A write past a limit is refused with `413` and a reason naming the
+  limit, the team, what it has stored and what the write asked for. Schema v38
+  adds the `storage_quotas`, `storage_run_usage` and `storage_month_usage`
+  tables plus timestamp indexes on `events` and `node_metrics`, and declares
+  no requirement, so a binary predating it still opens the database.
 
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
