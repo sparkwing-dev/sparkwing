@@ -29,8 +29,8 @@ unlock.
   `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS`) set the ceilings and
   `--warn-bucket-bytes` and `--warn-bucket-objects` set the marks health
   reports as a warning; all four default to 0, which leaves the bucket
-  unlimited and every existing install unchanged. Above a ceiling the
-  breaker refuses object writes with an error naming the measurement and
+  unlimited and every existing install unchanged. At or above a ceiling
+  the breaker refuses object writes with an error naming the measurement and
   the ceiling, while reads and deletes keep working so the bucket can get
   back under it. The controller counts each write's bytes as it happens
   and replaces the running total with one paginated listing of the
@@ -43,9 +43,9 @@ unlock.
   /api/v1/health` reports `object_store.ceiling` as `frozen` and
   `warning`; `GET /api/v1/object-store/breaker` and `sparkwing cluster
   object-store status` carry the totals and the ceilings, and `sparkwing
-  cluster object-store reset-breaker` thaws a freeze until the next
-  A thaw holds until the next measurement, so writes counted in between do
-  not freeze the bucket again. One replica measures per window under a
+  cluster object-store reset-breaker` thaws a freeze. A thaw holds until
+  the next measurement, so writes counted in between do not freeze the
+  bucket again. One replica measures per window under a
   store-wide lease, and the measurement's requests sit outside the
   object-store request budget, because totalling a large bucket would
   otherwise spend the whole per-minute list budget in one pass. A
