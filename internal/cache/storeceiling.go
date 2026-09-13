@@ -185,7 +185,6 @@ func handleStoreCeilingMeasure(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	//nolint:contextcheck // the walk must outlive the request that asked for it; the service context bounds it.
 	started := measureStoreAsync()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
