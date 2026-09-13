@@ -196,8 +196,8 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		if perr != nil {
 			return 0, false, fmt.Errorf("budget: %q is not a memory size", tok)
 		}
-		// safety: the cluster layer narrows this to an int64, and the conversion of a
-		// value the target cannot hold is the architecture's choice, not Go's.
+		// safety: an admitted size must convert to a positive int64, and the conversion
+		// of one the target cannot hold is the architecture's choice, not Go's.
 		size := n * u.scale
 		if !positiveFinite(size) || size >= math.MaxInt64 || uint64(size) == 0 {
 			return 0, false, fmt.Errorf("budget: memory %q must be positive and hold in a byte count", tok)

@@ -101,8 +101,8 @@ func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) 
 	if uptimeSeconds <= 0 {
 		return time.Time{}
 	}
-	// safety: a NaN age converts to a zero Duration and dates the process at the scan
-	// instant, so the bound admits the ages it can stand behind rather than refusing.
+	// safety: a NaN age converts to a zero Duration, dating the process at the scan
+	// instant, so this admits rather than refuses.
 	age := uptimeSeconds - startSeconds
 	if age >= 0 {
 		return datedOrUndatable(now, time.Duration(age*float64(time.Second)))

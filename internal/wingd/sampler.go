@@ -264,7 +264,7 @@ func ownedCPUByRoot(
 		if !seen {
 			if !startedInWindow(process.startedAt, seenSince, now) {
 				// safety: a counter covering time nobody watched charges this window for
-				// CPU that ran outside it, and admission grants against the difference.
+				// CPU that ran outside it.
 				unreadable[root] = struct{}{}
 				continue
 			}

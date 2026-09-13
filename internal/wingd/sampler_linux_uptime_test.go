@@ -32,7 +32,7 @@ func TestLinuxSampleOwned_KeepsATreeWhoseNewChildTheScanCanDate(t *testing.T) {
 	}()
 
 	// safety: a sparse /proc scans in microseconds, and one tick of child CPU exceeds
-	// that window's ceiling, so the capacity bound would decide in the date gate's place.
+	// that window's ceiling, so the capacity bound would decide here instead.
 	time.Sleep(50 * time.Millisecond)
 
 	byRoot, ok := sampler.sampleOwnedFrom(time.Now, roots, cores)
