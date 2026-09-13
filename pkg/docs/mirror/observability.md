@@ -528,8 +528,8 @@ unlimited until an operator sets one.
 | Flag | Controller | Logs | Cache | What it does |
 |------|-----------|------|-------|--------------|
 | `--egress-monthly-bytes` | yes | yes | no | Bytes one principal may download in a UTC month. Past it, its downloads answer `429` with a `Retry-After` naming the wait until the month rolls. |
-| `--egress-max-downloads` | yes | yes | no | Metered downloads one principal may hold open at once. Past it, a further one answers `429`. |
-| `--egress-max-log-streams` | yes | yes | no | Live log streams one principal may hold open at once. Past it, a further stream answers `429`. |
+| `--egress-max-downloads` | yes | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
+| `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
 
 Each service reads its own environment variables:
@@ -561,6 +561,29 @@ A service running with auth off resolves every request to `anonymous`,
 which is one shared budget for the same reason; that is the laptop-local
 shape, where no budget is set anyway.
 
+### A bearer can be a pool
+
+A runner pool shares one token, so twenty pods are one principal. The
+byte budget is keyed on the principal deliberately: the bill is the
+team's, however many pods spent it. The **concurrency caps are not**.
+They are keyed on the pod behind the request, taken from
+`X-Sparkwing-Runner` when a client sends one and otherwise from the
+claim-holder header a runner already carries, falling back to the
+principal only when nothing names a pod. A cap of eight keyed on the
+principal would refuse twelve of a twenty-pod pool while the byte budget
+sat untouched.
+
+That identity is cooperative: a caller that invents a pod name gets its
+own slots. The concurrency caps therefore bound an honest pool's burst
+and the blast radius of a stuck client; the monthly byte budget, which
+keys on the principal and cannot be moved by a header, is what bounds a
+caller that is trying to get around it.
+
+For the same reason the gitcache proxy routes take no slot at all. They
+are the checkout path every node walks, so a cap there refuses the clone
+rather than the download it was meant to bound. Those routes are still
+byte-metered, and still refused when the monthly byte budget is spent.
+
 ### The alarm
 
 The monthly budget refuses; the daily threshold only alarms. The
@@ -583,15 +606,19 @@ nothing, because it is not the download the budget is for.
 
 A budget is checked before a response starts, not during it, so a
 principal at zero can still finish whatever it already has in flight.
-The concurrency caps are what bound that overshoot: the most a principal
+The concurrency caps are what bound that overshoot: the most one caller
 can take past its monthly budget is `--egress-max-downloads` plus
-`--egress-max-log-streams` times the largest object those routes serve.
-Leave them unlimited and the overshoot is unbounded.
+`--egress-max-log-streams` times the largest object those routes serve,
+multiplied by the pods behind the bearer, since each pod holds its own
+slots. Leave the caps unlimited and the overshoot is unbounded.
 
 ### Persistence and history
 
-Counting is in memory. The controller persists each principal's month
-total to its store on the maintenance sweep and reloads it at startup,
+Counting is in memory, and only the controller drains it: the logs
+service and the cache count without parking anything, so neither
+accumulates a backlog for a flush that will never come. The controller
+persists each principal's month total to its store on the maintenance
+sweep and reloads it at startup,
 so a restart resumes the month rather than handing everyone a fresh
 budget; no response costs a store write. That sweep also prunes totals
 older than thirteen months, once a month rather than on every tick. The
@@ -612,4 +639,7 @@ The persisted number is the high-water mark of any one writer, not the
 sum of them. Within a writer the total only rises, which is what makes a
 restart safe; across writers the row reflects the busier replica and the
 quieter one's bytes are not added to it. Size the budget for one
-process, and run one controller, which is what the chart does.
+process, and run one controller. The chart enforces that:
+`controller.replicas` above 1 fails to render, because the same second
+replica that would corrupt the local state DB would also double a
+per-principal budget and split the daily alarm below its threshold.

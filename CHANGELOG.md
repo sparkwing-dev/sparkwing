@@ -113,8 +113,12 @@ unlock.
   downloads past a UTC-month byte total with `429`, a `Retry-After` naming
   the wait until the month rolls, and a body whose `error` member says who
   spent what against which limit; `--egress-max-downloads` and
-  `--egress-max-log-streams` cap what one principal holds open at once,
-  which is what bounds how far a burst carries it past the byte budget.
+  `--egress-max-log-streams` cap what one caller holds open at once, which
+  is what bounds how far a burst carries it past the byte budget; those
+  caps key on the pod behind the request, because a runner pool shares one
+  token and a cap keyed on the principal would refuse most of the pool, and
+  the gitcache proxy routes take no slot at all since they are the checkout
+  path.
   `--egress-daily-alarm-bytes` refuses nothing on any service and raises an
   alarm reported as `egress.alarm` on the health route, as a line in
   `problems`, and as a `warn` log line carrying `day_bytes` and
@@ -130,7 +134,9 @@ unlock.
   at startup, and prunes past thirteen months, so no response costs a store
   write and a restart resumes the month. `GET /api/v1/egress` (scope
   `admin`) reports the budgets, the day and month totals, the alarm, and the
-  principals that have downloaded the most. Documented under [Egress
+  principals that have downloaded the most. `controller.replicas` above 1
+  now fails to render, because a second replica both corrupts the local
+  state DB and doubles a per-principal budget. Documented under [Egress
   budgets](docs/observability.md#egress-budgets).
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
