@@ -62,6 +62,31 @@ unlock.
   default to a connection whose token stays out of the checkout. A name neither
   file declares now fails where the profile is resolved rather than where the
   project file is parsed.
+- **cli + controller:** `sparkwing cluster webhooks connect --profile P --repo
+  OWNER/NAME --pipeline NAME` registers both sides of a GitHub trigger in one
+  command. It generates a 32-byte secret, stores the binding on the controller
+  through `POST /api/v1/webhooks/github/bindings` (scope `admin`), creates or
+  updates the repository's webhook with the `gh` CLI so it posts to the
+  controller's delivery URL for that pipeline, and asks GitHub for a ping so
+  the status the controller answered is part of the output. The secret is
+  never printed and never passed on a command line; it reaches `gh` on stdin
+  and the controller seals it with the secrets key when one is configured.
+  `--events` selects the events (default `push,pull_request`). `sparkwing
+  cluster webhooks disconnect` removes the binding and then deletes the
+  webhook the controller was bound to, and reports either side that was
+  already absent.
+  Stored bindings add to the `GITHUB_WEBHOOK_BINDINGS` document rather than
+  replacing it: a binding supplies the secret and allows its repository for
+  that pipeline, the document keeps every pipeline and repository it already
+  covered, and a pipeline the document leaves unchecked stays unchecked.
+- **controller:** `sparkwing-controller --external-url` (env
+  `SPARKWING_EXTERNAL_URL`) declares the base URL GitHub reaches this
+  controller at, which the bindings route announces as each pipeline's
+  delivery URL. Unset, the route answers with the URL the request arrived at.
+- **store:** Schema v37 adds `github_webhook_bindings`, holding one row per
+  connected pipeline and repository with its signing secret, events, and
+  GitHub hook id. The migration is additive, so a controller built before it
+  opens the migrated database unchanged.
 - **cli:** `sparkwing cluster runners add --profile P --name NAME` enrolls the
   machine it runs on in one command: it mints a runner token scoped to
   `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read` and

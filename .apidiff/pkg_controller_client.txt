@@ -58,6 +58,9 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 func (c *Client) ClearCronOverride(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) Close() error
 func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
+func (c *Client) ConnectGitHubWebhook(
+	ctx context.Context, req controller.GitHubWebhookBindingRequest,
+) (*controller.GitHubWebhookBindingResponse, error)
 func (c *Client) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
@@ -71,6 +74,9 @@ func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
 func (c *Client) DeleteSecretForRepo(ctx context.Context, name, repo string) error
 func (c *Client) DisarmCron(ctx context.Context, name string) (*crons.ScheduleView, error)
+func (c *Client) DisconnectGitHubWebhook(
+	ctx context.Context, pipeline, repo string,
+) (*controller.GitHubWebhookDisconnectResponse, error)
 func (c *Client) EnqueueTrigger(
 	ctx context.Context,
 	pipeline string,

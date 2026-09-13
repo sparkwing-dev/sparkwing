@@ -62,6 +62,88 @@ filters, custom pull-request action filters, or pull-request base-branch
 matching. Enforce those policies at the event source or in pipeline code;
 do not treat the `on:` fields as authorization controls.
 
+### Connecting a repository
+
+One command registers both sides:
+
+```bash
+sparkwing cluster webhooks connect --profile prod \
+  --repo your-org/my-app --pipeline build-deploy
+```
+
+It generates a 32-byte secret, stores the binding on the controller, creates
+the repository's webhook through the `gh` CLI so it posts to the controller's
+delivery URL for that pipeline, and asks GitHub to ping it. The output names
+the delivery URL, the hook id, the events, and the status the controller
+answered the ping with. A ping the controller refused fails the command, so a
+wrong URL or an unreachable controller is reported at connect time rather than
+at the first push.
+
+`--events` selects the events (default `push,pull_request`). Running connect
+again on the same repository and pipeline updates that webhook in place and
+rotates the secret on both sides. The secret is never printed, never passed on
+a command line, and no route reads it back; it reaches `gh` on stdin and the
+controller seals it with the secrets key when one is configured.
+
+```bash
+sparkwing cluster webhooks disconnect --profile prod \
+  --repo your-org/my-app --pipeline build-deploy
+```
+
+Disconnect removes the binding and then deletes the webhook on GitHub. The
+controller answers with the webhook it was bound to, so a repository
+connected to two controllers under the same pipeline name loses only this
+one; a webhook written by hand is matched by its pipeline path instead. Every
+deleted hook is printed with its URL, and either side already being absent is
+reported rather than failing.
+
+The delivery URL comes from the controller. Start it with `--external-url`
+(env `SPARKWING_EXTERNAL_URL`) set to the base URL GitHub reaches it at; a
+controller without one answers with the URL the connect request arrived at,
+which is right whenever the operator reaches the controller where GitHub does.
+
+The command needs `gh` authenticated with admin rights on the repository, and
+a profile whose controller token carries the `admin` scope.
+
+### Where the secret and the allow-list live
+
+The controller resolves each delivery against two sources:
+
+1. The bindings `sparkwing cluster webhooks connect` stores, one row per
+   pipeline and repository.
+2. The `GITHUB_WEBHOOK_BINDINGS` document in the controller's environment,
+   which names per-pipeline repository allow-lists and per-pipeline or
+   per-repository secrets, plus the single `GITHUB_WEBHOOK_SECRET`.
+
+Stored bindings add to the document rather than replacing it. For one
+pipeline and repository the stored secret wins, and the stored binding allows
+that repository whatever the document says, including a document entry that
+refuses every repository. Everywhere else the document still decides: a
+pipeline it names keeps its allow-list, a repository it gives a secret keeps
+that secret, and a pipeline it does not name stays unchecked, so connecting
+one repository never starts refusing deliveries an existing install accepts.
+
+### The manual equivalent
+
+Without the `gh` CLI, do the same three things by hand:
+
+1. Add a webhook on the repository (Settings, Webhooks, Add webhook) with the
+   payload URL `https://<controller>/webhooks/github/<pipeline>`, content type
+   `application/json`, a secret you generate, and the `push` and
+   `pull request` events.
+2. Give the controller that secret: name the pipeline and repository in the
+   `GITHUB_WEBHOOK_BINDINGS` document, or post the binding yourself:
+
+   ```bash
+   curl -sS -X POST https://<controller>/api/v1/webhooks/github/bindings \
+     -H "Authorization: Bearer $SPARKWING_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"pipeline":"build-deploy","repo":"your-org/my-app","secret":"<secret>"}'
+   ```
+
+3. Redeliver the ping from the webhook's Recent Deliveries tab and check the
+   controller answered 200.
+
 ## Pull request triggers
 
 ```yaml

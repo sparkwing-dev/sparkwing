@@ -27,7 +27,7 @@ local dashboard with 'sparkwing serve'.
 - `tokens` -- Manage controller API tokens
 - `credits` -- Inspect and top up the prepaid credit balance
 - `image` -- Rollout helpers for images referenced by a gitops repo
-- `webhooks` -- Inspect and replay GitHub webhooks
+- `webhooks` -- Connect, inspect, and replay GitHub webhooks
 - `concurrency` -- Inspect a single concurrency namespace: holders + queue
 - `object-store` -- Operate the controller's object-store request budget
 
@@ -902,14 +902,17 @@ sparkwing cluster users list --profile prod
 
 ## `sparkwing cluster webhooks`
 
-Inspect and replay GitHub webhooks
+Connect, inspect, and replay GitHub webhooks
 
-Inspect GitHub webhooks through the installed 'gh' command and its
-credentials. The deliveries view joins delivery records with Sparkwing
-triggers and run outcomes.
+Manage GitHub webhooks through the installed 'gh' command and its
+credentials. 'connect' registers a repository against a pipeline on both
+sides and 'disconnect' removes it; the deliveries view joins delivery
+records with Sparkwing triggers and run outcomes.
 
 ### Subcommands
 
+- `connect` -- Connect a GitHub repository to a pipeline
+- `disconnect` -- Remove a repository's webhook and its controller binding
 - `list` -- List GitHub hooks configured on a repo
 - `deliveries` -- List recent deliveries for a hook, joined with trigger state
 - `replay` -- Queue a redelivery of a specific delivery UUID
@@ -917,11 +920,50 @@ triggers and run outcomes.
 ### Examples
 
 ```sh
+# Connect a repository to a pipeline
+sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build
+
 # List hooks on a repo
 sparkwing cluster webhooks list --repo your-org/my-app
 
 # Recent deliveries for a hook
 sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
+```
+
+## `sparkwing cluster webhooks connect`
+
+Connect a GitHub repository to a pipeline
+
+Registers both sides of a webhook in one command. It generates a
+signing secret, stores the binding on the controller, creates or
+updates the repository's webhook through 'gh' so it posts to the
+controller's delivery URL for this pipeline, and asks GitHub for a
+ping so the answer the controller gave is part of the output.
+
+The secret is never printed and never passed in a command line; the
+controller stores it and verifies every delivery's HMAC against it.
+Re-running the command rotates the secret on both sides.
+
+The delivery URL comes from the controller: its --external-url when
+it announces one, and otherwise the URL this command reached it at.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--repo OWNER/NAME` | GitHub repo (owner can be omitted if gh has a default) (required) |
+| `--pipeline NAME` | Pipeline the deliveries fire (required) |
+| `--events LIST` | Comma-separated GitHub events (default: push,pull_request) |
+| `--profile NAME` | Profile name (the controller that stores the binding) (required) |
+
+### Examples
+
+```sh
+# Connect push and pull-request triggers
+sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build
+
+# Connect pushes only
+sparkwing cluster webhooks connect --profile prod --repo your-org/my-app --pipeline build --events push
 ```
 
 ## `sparkwing cluster webhooks deliveries`
@@ -951,6 +993,35 @@ take a time filter). Default: 24h.
 ```sh
 # Recent deliveries for a hook
 sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
+```
+
+## `sparkwing cluster webhooks disconnect`
+
+Remove a repository's webhook and its controller binding
+
+Removes the binding the controller verifies deliveries against, then
+deletes the webhook on GitHub through 'gh'. The controller answers with
+the webhook it was bound to, so a repository connected to two
+controllers under the same pipeline name loses only this one. A webhook
+written by hand is matched by its pipeline path instead, and every
+deleted hook is printed with its URL.
+
+Either side already being absent is reported rather than failing, so a
+half-finished connect is cleaned up by running this once.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--repo OWNER/NAME` | GitHub repo (required) |
+| `--pipeline NAME` | Pipeline the webhook fires (required) |
+| `--profile NAME` | Profile name (the controller holding the binding) (required) |
+
+### Examples
+
+```sh
+# Disconnect a repository
+sparkwing cluster webhooks disconnect --profile prod --repo your-org/my-app --pipeline build
 ```
 
 ## `sparkwing cluster webhooks list`

@@ -122,6 +122,8 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/users",
 	"POST /api/v1/users",
 	"DELETE /api/v1/users/{name}",
+	"POST /api/v1/webhooks/github/bindings",
+	"DELETE /api/v1/webhooks/github/bindings",
 	"GET /metrics",
 	"POST /webhooks/github/{pipeline}",
 }

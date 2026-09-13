@@ -3678,6 +3678,61 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/webhooks/github/bindings:
+    delete:
+      x-sparkwing-scope: admin
+      tags: [webhooks]
+      summary: Disconnect one repository from one pipeline.
+      description: |
+        Removes the stored binding, so deliveries from that repository are
+        verified against the `GITHUB_WEBHOOK_BINDINGS` document and the
+        shared secret again, and refused where neither covers them. Delete
+        the webhook on GitHub first; `sparkwing cluster webhooks disconnect`
+        does both in that order.
+      parameters:
+        - in: query
+          name: pipeline
+          required: true
+          schema: {type: string}
+          description: Pipeline the binding fires.
+        - in: query
+          name: repo
+          required: true
+          schema: {type: string}
+          description: Repository slug, owner/name.
+      responses:
+        "200":
+          description: Whether a binding was there to remove.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubWebhookDisconnectResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+    post:
+      x-sparkwing-scope: admin
+      tags: [webhooks]
+      summary: Connect one repository to one pipeline.
+      description: |
+        Stores the secret deliveries from this repository to this pipeline
+        are signed with, and adds the repository to that pipeline's
+        allow-list. The binding takes precedence over the
+        `GITHUB_WEBHOOK_BINDINGS` document for the same pipeline and
+        repository, and adds to it everywhere else. Posting again replaces
+        the secret, which is how a connect rotates it. The secret is sealed
+        with the controller's secrets key when one is configured, and no
+        route reads it back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GitHubWebhookBindingRequest"}
+      responses:
+        "201":
+          description: The stored binding and the URL GitHub must deliver to.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubWebhookBindingResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4227,6 +4282,39 @@ components:
         charges:
           type: array
           items: {$ref: "#/components/schemas/CreditCharge"}
+    GitHubWebhookBindingRequest:
+      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingRequest
+      type: object
+      required: [pipeline, repo, secret]
+      properties:
+        pipeline: {type: string, description: Pipeline the deliveries fire.}
+        repo: {type: string, description: Repository slug (owner/name) stored folded to lower case.}
+        secret: {type: string, description: HMAC secret the repository's deliveries are signed with.}
+        events: {type: array, items: {type: string}, description: GitHub events the webhook subscribes to.}
+        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub.}
+    GitHubWebhookBindingResponse:
+      x-sparkwing-go-type: pkg/controller.GitHubWebhookBindingResponse
+      type: object
+      description: One stored binding. It never carries the secret.
+      required: [pipeline, repo, delivery_url, created_at, updated_at]
+      properties:
+        pipeline: {type: string}
+        repo: {type: string}
+        events: {type: array, items: {type: string}}
+        hook_id: {type: integer, format: int64}
+        delivery_url: {type: string, description: Where GitHub posts this pipeline's deliveries.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
+    GitHubWebhookDisconnectResponse:
+      x-sparkwing-go-type: pkg/controller.GitHubWebhookDisconnectResponse
+      type: object
+      required: [pipeline, repo, removed, delivery_url]
+      properties:
+        pipeline: {type: string}
+        repo: {type: string}
+        removed: {type: boolean, description: False when the controller held no such binding.}
+        delivery_url: {type: string, description: Where the removed binding's deliveries were posted.}
+        hook_id: {type: integer, format: int64, description: Id of the webhook on GitHub the binding recorded.}
     CreateGrantRequest:
       x-sparkwing-go-type: pkg/controller.createGrantReq
       type: object

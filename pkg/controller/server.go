@@ -60,6 +60,7 @@ type Server struct {
 	cachePodURL  string
 	logsURL      string
 	dashboardURL string
+	externalURL  string
 
 	cacheURL   string
 	cacheToken string
@@ -964,6 +965,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
+
+	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook)))
+	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
