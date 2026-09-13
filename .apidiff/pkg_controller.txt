@@ -226,6 +226,7 @@ type ServicesResponse struct {
 
 	Dashboard string
 }
+const StorageMaintenanceInterval = time.Hour
 type TrendPoint struct {
 	Bucket    string
 	Total     int

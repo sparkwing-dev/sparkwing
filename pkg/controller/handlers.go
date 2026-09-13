@@ -84,7 +84,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	objectStore, objectStoreProblems := objectStoreHealth()
 	problems = append(problems, objectStoreProblems...)
 
-	resp := map[string]any{"status": "ok", "auth": authState, "object_store": objectStore}
+	resp := map[string]any{
+		"status": "ok", "auth": authState,
+		"object_store": objectStore, "database": s.storageHealth(),
+	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
@@ -593,6 +596,9 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 				Claimant: claimIdentity(r), ClaimGeneration: generation,
 			}))
 		}
+	}
+	if !s.reserveStorage(w, r, runID, int64(len(body.Payload)), 0) {
+		return
 	}
 	seq, err := s.store.AppendEvent(r.Context(), runID, body.NodeID, body.Kind, body.Payload)
 	if errors.Is(err, store.ErrLockHeld) {
@@ -1879,6 +1885,9 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !s.reserveStorage(w, r, runID, 0, 1) {
 		return
 	}
 	if err := s.store.SetNodeArtifactManifest(r.Context(), runID, nodeID, body.ManifestDigest); err != nil {

@@ -194,3 +194,61 @@ reach the repository with its configured Git credentials.
 **A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
+
+## Bound storage growth
+
+A controller keeps every event, every per-node metric sample and every backup
+forever until an operator sets a window. Retention is off on an existing
+install and stays off after an upgrade; a cloud-provisioned controller turns it
+on.
+
+Read the current policy with `GET /api/v1/storage` and write it with
+`PUT /api/v1/storage/settings` (scope `admin`):
+
+```bash
+curl -sS -X PUT "$CONTROLLER/api/v1/storage/settings" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"event_retention_days":30,"node_metric_retention_days":14,
+       "backup_retention_days":30,"database_alarm_bytes":8589934592,
+       "default_tier":"free"}'
+```
+
+Every window is a whole number of days and zero is unbounded. The controller
+compacts rows past their window on an hourly timer, never on a request.
+`backup_retention_days` records the window the bucket's own lifecycle rule
+enforces; set the same number on the S3 lifecycle rule for the backup prefix,
+because the controller does not write or expire backup objects itself.
+
+`database_alarm_bytes` and `backup_alarm_bytes` set the sizes worth a warning.
+Passing one logs a warning and sets `database.alarm` on `GET /api/v1/health`;
+neither degrades the reported status, so an alarm is a signal to read rather
+than a controller that stopped working. The size comes from a timer sample:
+SQLite reports its page count and Postgres the sum of `pg_total_relation_size`
+over its relations, with the largest tables named in the field.
+
+### Per-team storage quotas
+
+`default_tier` holds every principal without a quota row of its own to a
+tier's limits, and an empty default leaves them unlimited, which is what an
+install that never enabled quotas reads. The free tier allows fourteen days of
+retention, ten megabytes per run, a gigabyte per month, and a thousand objects
+per run; the paid tier allows ninety days, a gigabyte per run, a hundred
+gigabytes per month, and a hundred thousand objects per run.
+
+Hold one team to a tier, or to limits of your own, with
+`PUT /api/v1/storage/quotas/{principal}` (scope `admin`):
+
+```bash
+curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"tier":"paid"}'
+```
+
+Log appends, run events, and published artifact manifests count against the
+team the calling token names. A write past a limit is refused with
+`413` and a reason naming the limit, the team, what it has already stored, and
+what the write asked for, which is what the CLI prints. `GET /api/v1/storage`
+shows a caller its own quota and the month's usage, and shows an admin the
+database sample and the largest teams of the month.

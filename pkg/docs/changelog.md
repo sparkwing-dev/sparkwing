@@ -22,6 +22,29 @@ unlock.
 
 ### Added
 
+- **controller + store:** Retention, per-team storage quotas, and a
+  database-size alarm, all off on an existing install. `PUT
+  /api/v1/storage/settings` (scope `admin`) sets the event and node-metric
+  retention windows in days, the backup window an S3 lifecycle rule enforces,
+  the sizes worth an alarm, and the tier a team without a quota row inherits;
+  `GET /api/v1/storage` reads them back with the caller's quota and the
+  month's usage, and adds the database sample and the largest teams of the
+  month for an admin. Every window is a whole number of days and zero is
+  unbounded, so a controller that sets nothing keeps exactly what it kept
+  before. An hourly timer compacts the rows past their window and resamples
+  the database size, which SQLite answers from its page count and Postgres
+  from `pg_total_relation_size` per relation; a database over
+  `database_alarm_bytes` logs a warning and sets `database.alarm` on `GET
+  /api/v1/health` without degrading the reported status. `PUT
+  /api/v1/storage/quotas/{principal}` holds one team to the free or paid tier
+  or to limits of its own: bytes per run, bytes per month, and objects per
+  run. Log appends, run events and published artifact manifests count against
+  the calling token's team, and a write past a limit is refused with `413` and
+  a reason naming the limit, the team, what it has stored and what the write
+  asked for. Schema v38 adds the `storage_quotas` and `storage_usage` tables
+  and declares no requirement, so a binary predating it still opens the
+  database.
+
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
