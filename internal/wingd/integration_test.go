@@ -815,7 +815,7 @@ func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing
 	reconnector := ensure(t, home, "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if reclaimed, err := reconnector.Reattach(ctx, lease.Token); err == nil {
+	if reclaimed, err := reconnector.Reattach(ctx, lease.Token, lease.RunID); err == nil {
 		_ = reclaimed.Release()
 		t.Fatal("restart reattached a lease whose run is durably cancelled")
 	}
@@ -1058,7 +1058,7 @@ func TestConcurrentReattachClaimsRestoredLeaseOnlyOnce(t *testing.T) {
 	clients := []*client.Client{ensure(t, home, ""), ensure(t, home, "")}
 	for _, cl := range clients {
 		go func(cl *client.Client) {
-			_, err := cl.Reattach(context.Background(), lease.Token)
+			_, err := cl.Reattach(context.Background(), lease.Token, lease.RunID)
 			results <- err
 		}(cl)
 	}
@@ -1944,7 +1944,7 @@ func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
 
 	reattachedClient := ensure(t, home, "")
-	reattached, err := reattachedClient.Reattach(context.Background(), parentLease.Token)
+	reattached, err := reattachedClient.Reattach(context.Background(), parentLease.Token, parentLease.RunID)
 	if err != nil {
 		t.Fatalf("reattach: %v", err)
 	}

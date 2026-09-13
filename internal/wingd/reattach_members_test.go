@@ -115,3 +115,52 @@ func TestGraceReleasesOnlyTheMembersNoRunReclaimed(t *testing.T) {
 		t.Fatalf("surviving members = %v, want only the reclaimed parent-run", lease.Members)
 	}
 }
+
+func TestReattachNamingItsRunClaimsThatMemberWhicheverReconnectsFirst(t *testing.T) {
+	d, token := restartedDaemonHoldingNestedLease(t)
+
+	child, childPeer := handlerConn(t, d)
+	first := mustGrantFrame(t, callAndRead(t, childPeer, func() {
+		d.handleReattach(child, &wingwire.Reattach{LeaseToken: token, RunID: "child-run"})
+	}))
+	if first.RunID != "child-run" {
+		t.Fatalf("the child reattached first and was granted %q, want child-run", first.RunID)
+	}
+	if len(child.members) != 1 || child.members[0] != "child-run" {
+		t.Fatalf("the child took members %v, want only child-run", child.members)
+	}
+
+	parent, parentPeer := handlerConn(t, d)
+	second := mustGrantFrame(t, callAndRead(t, parentPeer, func() {
+		d.handleReattach(parent, &wingwire.Reattach{LeaseToken: token, RunID: "parent-run"})
+	}))
+	if second.RunID != "parent-run" {
+		t.Fatalf("the parent reattached second and was granted %q, want parent-run", second.RunID)
+	}
+
+	d.mu.Lock()
+	holder := d.byRun["parent-run"]
+	d.mu.Unlock()
+	if holder != parent {
+		t.Fatal("parent-run routes to the child's connection, so the child's death cancels the running parent")
+	}
+}
+
+func TestReattachNamingARunTheLeaseDoesNotHoldIsRefused(t *testing.T) {
+	d, token := restartedDaemonHoldingNestedLease(t)
+
+	c, peer := handlerConn(t, d)
+	reply := callAndRead(t, peer, func() {
+		d.handleReattach(c, &wingwire.Reattach{LeaseToken: token, RunID: "stranger-run"})
+	})
+	evicted, ok := reply.(*wingwire.Evicted)
+	if !ok {
+		t.Fatalf("reply = %#v, want an eviction", reply)
+	}
+	if evicted.Key != "reattach" {
+		t.Fatalf("eviction key = %q, want reattach", evicted.Key)
+	}
+	if len(c.members) != 0 {
+		t.Fatalf("a refused reattach took members %v", c.members)
+	}
+}

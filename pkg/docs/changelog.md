@@ -20,6 +20,16 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **wingd:** A nested run reattaching to a restored lease keeps its own
+  identity. The `reattach` message carries an optional `run_id`, and the
+  daemon grants that member rather than handing memberships out in the
+  lease's own order, which gave a child that reconnected before its parent
+  the parent's run id and let the child's crash cancel the still-running
+  parent. A client that sends no `run_id` is served as before, so no
+  protocol floor moves.
+
 ## [v0.50.1] - 2026-09-13
 
 ### Added
