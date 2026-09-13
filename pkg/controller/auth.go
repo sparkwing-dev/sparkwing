@@ -487,6 +487,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			a.writeAuthFailure(w, err)
 			return
 		}
+		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
 		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
 		next.ServeHTTP(w, r.WithContext(ctx))

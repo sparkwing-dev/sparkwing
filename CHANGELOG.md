@@ -51,6 +51,21 @@ unlock.
   --name N` revokes the profile's token and removes it, naming the prefix and
   the revoke command whenever the credential it holds is not allowed to make
   that call.
+- **controller:** `/metrics` carries the series an operator alerts on and a
+  meter bills from. `sparkwing_queue_depth` reports outstanding nodes by state
+  (`waiting`, `ready`, `claimed`, `running`, `approval_pending`),
+  `sparkwing_node_claim_wait_seconds` the latency from a node becoming
+  claimable to a runner taking it, `sparkwing_claim_unavailable_total` the
+  claim requests answered `503`, and `sparkwing_runners_live` the runners
+  heard from inside the liveness window by the label set they advertised.
+  `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, split
+  from `local` by whether the claiming credential is metered. The
+  `sparkwing_credits_*` family reports the balance, grants by kind, and the
+  reservations, charges and refunds by principal kind, read from the ledger so
+  they survive a restart. Principal names, token prefixes, holder ids and run
+  ids stay out of every label; a runner's self-asserted label set is ordered,
+  deduplicated, and collapsed onto `other` past 32 distinct sets or 120 bytes.
+  Documented in [observability.md](docs/observability.md).
 - **controller:** `sparkwing-controller --dashboard-url URL` announces the
   dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
   client that has just been handed a token can say where to watch its runs. The

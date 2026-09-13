@@ -1030,6 +1030,7 @@ func (s *Server) authenticated(next http.Handler) http.Handler {
 			})
 			return
 		}
+		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
 		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -1311,10 +1312,21 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				setPendingNodes(n)
 			}
-			if n, err := s.store.CountActiveRunners(ctx, 2*time.Minute); err != nil {
+			if n, err := s.store.CountActiveRunners(ctx, runnerLivenessWindow); err != nil {
 				s.logger.Error("active runners sample failed", "err", err)
 			} else {
 				setActiveRunners(n)
+			}
+			if counts, err := s.store.CountNodesByQueueState(ctx); err != nil {
+				s.logger.Error("queue depth sample failed", "err", err)
+			} else {
+				setQueueDepth(counts)
+			}
+			liveRunners.sample(s.runnerPresence.liveLabelSets(time.Now(), runnerLivenessWindow))
+			if totals, err := s.store.CreditLedgerTotals(ctx); err != nil {
+				s.logger.Error("credit ledger sample failed", "err", err)
+			} else {
+				ledgerSnapshot.set(totals)
 			}
 		}
 	}

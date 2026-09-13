@@ -266,6 +266,7 @@ func (l *Loopback) authenticate(next http.Handler) http.Handler {
 		}
 		p := *principal
 		p.Authed = time.Now().UTC()
+		observeRequestPrincipal(p.Kind)
 		next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), &p)))
 	})
 }

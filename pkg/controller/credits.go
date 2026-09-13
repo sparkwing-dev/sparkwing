@@ -236,6 +236,35 @@ func (s *Server) meteredTokenPrefix(r *http.Request) string {
 	return prefix
 }
 
+// safety: the metered credential is the one the ledger bills, so it is also
+// what separates cloud seconds from the operator's own capacity.
+func (s *Server) claimPlacement(r *http.Request) string {
+	if s.meteredTokenPrefix(r) == "" {
+		return placementLocal
+	}
+	return placementCloud
+}
+
+// safety: the wall clock the controller settled is the number a bill is drawn
+// from, so both placements are measured the one way and the label is what
+// separates them.
+func (s *Server) observeSettledNodeSeconds(r *http.Request, runID, nodeID string) {
+	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	if err != nil {
+		s.logger.Warn("sampling settled node seconds failed",
+			"run_id", runID, "node_id", nodeID, "err", err)
+		return
+	}
+	if n == nil || n.StartedAt == nil {
+		return
+	}
+	finished := time.Now()
+	if n.FinishedAt != nil {
+		finished = *n.FinishedAt
+	}
+	observeNodeSeconds(s.claimPlacement(r), finished.Sub(*n.StartedAt).Seconds())
+}
+
 // safety: a balance spent past the grace period cancels the node in this same
 // request, so the run records why instead of waiting out the lease.
 func (s *Server) chargeMeteredHeartbeat(r *http.Request, runID, nodeID string) (stop bool) {
