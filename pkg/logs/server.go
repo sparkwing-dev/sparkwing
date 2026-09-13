@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -44,6 +45,7 @@ type Server struct {
 
 	limits    Limits
 	ceiling   *objectguard.Ceiling
+	sweepCtx  atomic.Pointer[context.Context]
 	appendMu  [appendLockShards]sync.Mutex
 	inFlight  inFlightBytes
 	runTotals runTotals
@@ -510,18 +512,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	resp := fmt.Sprintf(`{"status":"ok","auth":%q}`, authState)
+	ceiling, ceilingProblems := s.storeCeilingHealth()
+	problems = append(problems, ceilingProblems...)
+
+	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling}
 	if len(problems) > 0 {
-		buf, _ := json.Marshal(map[string]any{
-			"status":   "degraded",
-			"auth":     authState,
-			"problems": problems,
-		})
-		resp = string(buf)
+		body["status"] = "degraded"
+		body["problems"] = problems
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		s.logger.Error("logs store", "op", "health", "err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"status":"degraded","auth":%q}`, authState)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, resp)
+	_, _ = w.Write(buf)
 }
 
 func formatBytes(n uint64) string {
@@ -643,9 +652,9 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	// safety: a file that did not exist before this append adds an object to the
-	// store ceiling's count; an append to an existing one adds only its bytes.
-	newFile := nodeSize(root, name) == 0
+	// safety: existence, not size, decides whether this append adds an object, so
+	// an empty node log is not counted again on every line it receives.
+	newFile := !fileExists(root, name)
 	f, err := s.openAppend(root, name)
 	if err != nil {
 		rt.unreserve(int64(len(plan.write)))
@@ -1012,6 +1021,9 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.runTotals.forget(runID)
+	// safety: deleting a run is how an operator brings a frozen store back, so the
+	// total is remeasured here rather than at the end of the reconciliation window.
+	s.remeasureAfterDelete(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 

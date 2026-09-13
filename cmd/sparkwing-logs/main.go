@@ -87,6 +87,12 @@ func run(args []string) error {
 	maxStoreObjects := fs.Int64("max-store-objects", ceilingDefaults.Limit.MaxObjects,
 		"log files across the whole store at or above which every append is refused with 507; "+
 			"0 leaves the count unlimited (env: SPARKWING_LOGS_MAX_STORE_OBJECTS)")
+	warnStoreBytes := fs.Int64("warn-store-bytes", ceilingDefaults.Limit.WarnBytes,
+		"stored bytes at which /api/v1/health reports the store as warning, which refuses "+
+			"nothing; 0 disables the warning (env: SPARKWING_LOGS_WARN_STORE_BYTES)")
+	warnStoreObjects := fs.Int64("warn-store-objects", ceilingDefaults.Limit.WarnObjects,
+		"log files at which /api/v1/health reports the store as warning; 0 disables the "+
+			"warning (env: SPARKWING_LOGS_WARN_STORE_OBJECTS)")
 	storeReconcile := fs.Duration("store-reconcile", ceilingDefaults.Reconcile,
 		"how often the service measures the whole store and replaces its running count with "+
 			"the measurement. Appends are counted as they happen, so this walk is the only "+
@@ -103,6 +109,8 @@ func run(args []string) error {
 		flagValue{"--max-line-bytes", *maxLineBytes},
 		flagValue{"--max-store-bytes", *maxStoreBytes},
 		flagValue{"--max-store-objects", *maxStoreObjects},
+		flagValue{"--warn-store-bytes", *warnStoreBytes},
+		flagValue{"--warn-store-objects", *warnStoreObjects},
 		flagValue{"--store-reconcile", int64(*storeReconcile)},
 		flagValue{"--retention", int64(*retention)},
 		flagValue{"--sweep-interval", int64(*sweepInterval)},
@@ -115,14 +123,16 @@ func run(args []string) error {
 	}
 	// safety: a cap under the marker could not store a cut line and its marker inside
 	// the cap, so the bound the operator asked for would not hold.
-	if marker := int64(len(logs.LineTruncationMarker)); *maxLineBytes > 0 && *maxLineBytes <= marker {
-		return fmt.Errorf("--max-line-bytes must be more than %d, the size of the marker a cut line carries; "+
-			"pass 0 to store a line of any length", marker)
+	if *maxLineBytes > 0 && *maxLineBytes < logs.MinLineBytes {
+		return fmt.Errorf("--max-line-bytes must be at least %d, the size of the marker a cut line carries "+
+			"plus a byte of output; pass 0 to store a line of any length", logs.MinLineBytes)
 	}
 	ceiling := objectguard.CeilingConfig{
 		Limit: objectguard.CeilingLimit{
-			MaxBytes:   *maxStoreBytes,
-			MaxObjects: *maxStoreObjects,
+			MaxBytes:    *maxStoreBytes,
+			MaxObjects:  *maxStoreObjects,
+			WarnBytes:   *warnStoreBytes,
+			WarnObjects: *warnStoreObjects,
 		},
 		Reconcile: *storeReconcile,
 	}
@@ -245,6 +255,12 @@ func storeCeilingFromEnv() (objectguard.CeilingConfig, error) {
 		return cfg, err
 	}
 	if cfg.Limit.MaxObjects, err = envInt64("SPARKWING_LOGS_MAX_STORE_OBJECTS", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.Limit.WarnBytes, err = envInt64("SPARKWING_LOGS_WARN_STORE_BYTES", 0); err != nil {
+		return cfg, err
+	}
+	if cfg.Limit.WarnObjects, err = envInt64("SPARKWING_LOGS_WARN_STORE_OBJECTS", 0); err != nil {
 		return cfg, err
 	}
 	cfg.Reconcile, err = envDuration("SPARKWING_LOGS_STORE_RECONCILE", objectguard.DefaultCeilingReconcile)

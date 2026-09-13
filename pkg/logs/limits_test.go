@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -477,27 +478,49 @@ func TestLogs_LineCapTruncatesTheLongLineAndKeepsTheRest(t *testing.T) {
 	}
 }
 
-func TestLogs_LineCapMarksOneAppendOnceHoweverManyLinesRunLong(t *testing.T) {
+func TestLogs_LineCapMarksEveryCutLineInsideTheCap(t *testing.T) {
 	const cap = 64
 	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: cap})
 	defer stop()
 
-	body := []byte(strings.Repeat("A", 300) + "\n" + strings.Repeat("B", 300) + "\n" + strings.Repeat("C", 300) + "\n")
+	body := []byte(strings.Repeat("A", 300) + "\n" + strings.Repeat("B", 300) + "\nshort\n" +
+		strings.Repeat("C", 300) + "\n")
 	if err := c.Append(context.Background(), "run-1", "step-a", body); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
 	stored := readRun(t, dir, "run-1")
-	if got := strings.Count(stored, logs.LineTruncationMarker); got != 1 {
-		t.Errorf("three long lines in one append earned %d markers, want 1:\n%s", got, stored)
+	if got := strings.Count(stored, logs.LineTruncationMarker); got != 3 {
+		t.Errorf("three cut lines earned %d markers, want one each:\n%s", got, stored)
 	}
-	if int64(len(stored)) > 3*cap {
-		t.Errorf("three capped lines stored %d bytes, want at most %d", len(stored), 3*cap)
+	for _, line := range strings.SplitAfter(stored, "\n") {
+		if len(line) > cap {
+			t.Errorf("stored line of %d bytes exceeds the %d-byte cap: %q", len(line), cap, line)
+		}
+	}
+	if !strings.Contains(stored, "short\n") {
+		t.Errorf("the short line between two cut ones was lost:\n%s", stored)
 	}
 	for _, want := range []string{"AAA", "BBB", "CCC"} {
 		if !strings.Contains(stored, want) {
 			t.Errorf("the append lost its %s line:\n%s", want, stored)
 		}
+	}
+}
+
+func TestLogs_LineCapUnderTheMarkerIsRaisedToAUsableOne(t *testing.T) {
+	_, c, dir, stop := newLimitedServer(t, logs.Limits{MaxLineBytes: 8})
+	defer stop()
+
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte(strings.Repeat("L", 400)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	stored := readRun(t, dir, "run-1")
+	if !strings.Contains(stored, logs.LineTruncationMarker) {
+		t.Errorf("a cap under the marker stored a cut line with no marker:\n%q", stored)
+	}
+	if int64(len(stored)) > logs.MinLineBytes {
+		t.Errorf("stored %d bytes, want at most the raised cap of %d", len(stored), logs.MinLineBytes)
 	}
 }
 
@@ -768,4 +791,131 @@ func TestLogs_StoreCeilingIsOffByDefault(t *testing.T) {
 	if state := s.StoreCeiling(); state.Enforced || state.Frozen {
 		t.Errorf("an unconfigured store reports %+v", state)
 	}
+}
+
+func TestLogs_HealthCarriesTheStoreCeiling(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64, WarnBytes: 16},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 32)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+
+	warned := healthBody(t, fix.url)
+	ceiling, ok := warned["store_ceiling"].(map[string]any)
+	if !ok {
+		t.Fatalf("health carries no store_ceiling: %v", warned)
+	}
+	if ceiling["enforced"] != true || ceiling["warning"] != true || ceiling["frozen"] != false {
+		t.Errorf("a store past its warning mark reports %v", ceiling)
+	}
+	if ceiling["bytes"].(float64) <= 0 || ceiling["objects"].(float64) != 1 {
+		t.Errorf("health reports %v bytes / %v objects", ceiling["bytes"], ceiling["objects"])
+	}
+	if _, ok := ceiling["reconciled_at"]; !ok {
+		t.Error("health reports no reconciled_at after a measurement")
+	}
+	if warned["status"] != "degraded" {
+		t.Errorf("status = %v past the warning mark, want degraded", warned["status"])
+	}
+
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("y", 128)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	frozen := healthBody(t, fix.url)
+	if frozen["store_ceiling"].(map[string]any)["frozen"] != true {
+		t.Errorf("health does not report the freeze: %v", frozen["store_ceiling"])
+	}
+	var named bool
+	for _, p := range frozen["problems"].([]any) {
+		if strings.Contains(p.(string), "ceiling") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("health problems do not name the frozen store: %v", frozen["problems"])
+	}
+}
+
+func TestLogs_MetricsCarryTheStoreCeiling(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64, MaxObjects: 9},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 128)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+
+	resp, err := http.Get(fix.url + "/metrics")
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{
+		"sparkwing_logs_store_bytes",
+		"sparkwing_logs_store_objects",
+		`sparkwing_logs_store_ceiling{unit="bytes"} 64`,
+		`sparkwing_logs_store_ceiling{unit="objects"} 9`,
+		"sparkwing_logs_store_ceiling_frozen 1",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("/metrics does not carry %q", want)
+		}
+	}
+}
+
+func TestLogs_DeletingARunRemeasuresAndThawsTheStore(t *testing.T) {
+	fix := newCeilingServer(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64},
+		Reconcile: time.Hour,
+	})
+	ctx := context.Background()
+
+	if err := fix.client.Append(ctx, "run-1", "step-a", []byte(strings.Repeat("x", 128)+"\n")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := fix.server.MeasureStore(ctx); err != nil {
+		t.Fatalf("MeasureStore: %v", err)
+	}
+	if !fix.server.StoreCeiling().Frozen {
+		t.Fatal("the store did not freeze")
+	}
+
+	if err := fix.client.DeleteRun(ctx, "run-1"); err != nil {
+		t.Fatalf("delete run: %v", err)
+	}
+	if fix.server.StoreCeiling().Frozen {
+		t.Error("deleting the only run left the store frozen, so an operator has to wait out the interval")
+	}
+	if err := fix.client.Append(ctx, "run-2", "step-a", []byte("after\n")); err != nil {
+		t.Errorf("append after the delete freed space: %v", err)
+	}
+}
+
+func healthBody(t *testing.T, base string) map[string]any {
+	t.Helper()
+	resp, err := http.Get(base + "/api/v1/health")
+	if err != nil {
+		t.Fatalf("GET health: %v", err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	return body
 }

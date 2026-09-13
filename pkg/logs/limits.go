@@ -80,9 +80,22 @@ func DefaultLimits() Limits {
 	}
 }
 
-// WithLimits replaces the server's resource bounds. Call it before
-// [Server.Handler]; it is not safe to call on a serving Server.
+// MinLineBytes is the smallest usable line cap: a cut line carries
+// [LineTruncationMarker] inside the cap, so a smaller one could store
+// the marker and nothing else.
+var MinLineBytes = int64(len(LineTruncationMarker)) + 1
+
+// WithLimits replaces the server's resource bounds. A MaxLineBytes
+// under [MinLineBytes] is raised to it, because a cap that cannot hold
+// the marker and a byte of output is not the bound it names. Call it
+// before [Server.Handler]; it is not safe to call on a serving Server.
 func (s *Server) WithLimits(l Limits) *Server {
+	if l.MaxLineBytes > 0 && l.MaxLineBytes < MinLineBytes {
+		s.logger.Warn("logs store", "op", "limits",
+			"max_line_bytes", l.MaxLineBytes, "raised_to", MinLineBytes,
+			"err", "a line cap must leave room for the truncation marker")
+		l.MaxLineBytes = MinLineBytes
+	}
 	s.limits = l
 	return s
 }
@@ -92,9 +105,10 @@ const StoreCeilingSubject = "the log store"
 
 // StoreCeilingRemedy is the operator instruction a refused append ends
 // with.
-const StoreCeilingRemedy = "Delete runs, or set --retention (SPARKWING_LOGS_RETENTION) so the sweeper does, " +
-	"until the next measurement puts the store under the ceiling; raise --max-store-bytes or " +
-	"--max-store-objects to accept more."
+const StoreCeilingRemedy = "Delete a run with DELETE /api/v1/logs/{runID}, or set --retention " +
+	"(SPARKWING_LOGS_RETENTION) so the sweeper does; both measure the store again, so appends " +
+	"resume as soon as it is back under the ceiling. Raise --max-store-bytes or --max-store-objects " +
+	"to accept more."
 
 // WithStoreCeiling bounds the whole log store, not one node or run: at
 // or above either ceiling the service refuses every append with 507
@@ -107,6 +121,7 @@ func (s *Server) WithStoreCeiling(cfg objectguard.CeilingConfig) *Server {
 	cfg.Subject = StoreCeilingSubject
 	cfg.Remedy = StoreCeilingRemedy
 	s.ceiling = objectguard.NewCeiling(cfg)
+	publishStoreCeiling(s.ceiling)
 	return s
 }
 
@@ -321,15 +336,14 @@ func (rt *runTotal) unreserve(n int64) {
 }
 
 // safety: the line cap is applied to the body before the node and run budgets
-// see it, so one unbroken line cannot spend a node's whole allowance. A stored
-// line, marker included, never exceeds the cap, and one append earns at most one
-// marker however many of its lines ran long.
+// see it, so one unbroken line cannot spend a node's whole allowance. Every cut
+// line carries the marker, and the marker counts against the cap, so a stored
+// line never exceeds the bound the operator asked for.
 func capLines(body []byte, limit int64) []byte {
 	if limit <= 0 || int64(len(body)) <= limit {
 		return body
 	}
 	keep := limit - int64(len(LineTruncationMarker))
-	marked := false
 	out := make([]byte, 0, len(body))
 	for len(body) > 0 {
 		line := body
@@ -340,15 +354,14 @@ func capLines(body []byte, limit int64) []byte {
 		switch {
 		case int64(len(line)) <= limit:
 			out = append(out, line...)
-		case marked || keep <= 0:
-			// safety: a cap smaller than the marker cannot carry one, and a second
-			// marker in one append would spend the budget the cap just saved.
+		case keep <= 0:
+			// safety: a cap under the marker cannot carry one, which [Server.WithLimits]
+			// prevents; the line is still cut so the bound holds.
 			out = append(out, truncateRunes(line, limit-1)...)
 			out = append(out, '\n')
 		default:
 			out = append(out, truncateRunes(line, keep)...)
 			out = append(out, LineTruncationMarker...)
-			marked = true
 		}
 		body = rest
 	}
@@ -507,9 +520,11 @@ func (s *Server) StartSweeper(ctx context.Context) {
 	probing := s.limits.MinFreeBytes > 0
 	sweeping := s.limits.Retention > 0 && s.limits.SweepInterval > 0
 	if !probing && !sweeping {
+		s.sweepCtx.Store(&ctx)
 		s.startStoreCeiling(ctx)
 		return
 	}
+	s.sweepCtx.Store(&ctx)
 	if probing {
 		s.refreshFreeSpace()
 	}
@@ -541,9 +556,18 @@ func (s *Server) StartSweeper(ctx context.Context) {
 	}()
 }
 
+// safety: the sweeper's own context, so a measurement it triggers stops when the
+// service does; a direct SweepOnce call outside the sweeper measures unbounded.
+func (s *Server) sweepContext() context.Context {
+	if ctx := s.sweepCtx.Load(); ctx != nil {
+		return *ctx
+	}
+	return context.Background()
+}
+
 // safety: the first measurement runs before the service accepts appends, so a
-// store that is already over its ceiling refuses from the first request rather
-// than after the first interval.
+// store already over its ceiling refuses from the first request rather than
+// after the first interval.
 func (s *Server) startStoreCeiling(ctx context.Context) {
 	if !s.ceiling.Enforced() {
 		return
@@ -615,7 +639,7 @@ func (s *Server) SweepOnce(now time.Time) (int, error) {
 	// favor, so the store is measured again rather than staying frozen on bytes
 	// that are gone.
 	if ceilingSweep && s.ceiling.Enforced() {
-		if err := s.MeasureStore(context.Background()); err != nil {
+		if err := s.MeasureStore(s.sweepContext()); err != nil {
 			s.logger.Error("logs store", "op", "measure store", "err", err)
 		}
 	}
