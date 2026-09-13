@@ -4,10 +4,12 @@ import "testing"
 
 func TestParseBudget_RefusesACapItCannotStandBehind(t *testing.T) {
 	for _, raw := range []string{
-		"nancores", "infcores", "nan%", "inf%", "nan", "inf",
-		// every unit the memory path accepts reaches the same parse, and a cap
-		// the operator typed for memory goes missing the same silent way.
-		"nanmb", "infgb", "nankib", "inft", "nanb", "infkb",
+		"nancores", "infcores", "-infcores", "nan", "inf",
+		"nan%", "inf%", "-inf%",
+		"nangb", "infgb", "nanmb", "infinitygb",
+		// a finite size overflows the byte count the cluster layer narrows to an
+		// int64, and a finite size below one byte rounds to no cap at all.
+		"1e10gb", "17179869184gb", "0.0000001kb",
 	} {
 		budget, err := ParseBudget(raw)
 		if err == nil {
@@ -15,7 +17,7 @@ func TestParseBudget_RefusesACapItCannotStandBehind(t *testing.T) {
 				raw, budget)
 		}
 	}
-	for _, raw := range []string{"2cores", "4gb", "50%", "512mib"} {
+	for _, raw := range []string{"2cores", "8gb", "50%", "512mib", "4,8gb"} {
 		if _, err := ParseBudget(raw); err != nil {
 			t.Errorf("ParseBudget(%q) errored (%v); a cap the daemon can hold a run to must still parse", raw, err)
 		}

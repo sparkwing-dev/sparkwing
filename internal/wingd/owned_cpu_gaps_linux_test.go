@@ -49,4 +49,15 @@ func TestLinuxOwnedProcesses_CreditsAProcessItsOwnCPUAndNotItsTreeTotal(t *testi
 	if processes[10].identity != (processIdentity{pid: 10, startTicks: 600}) {
 		t.Errorf("owned process identity = %v, want pid 10 at start ticks 600", processes[10].identity)
 	}
+	if got := processes[10].parentPID; got != 1 {
+		t.Errorf("owned process parent PID = %v, want 1: the parent is what walks this process up to a root, so one wired to the wrong parent is credited against a tree it never ran under",
+			got)
+	}
+	if got, want := processes[10].startedAt, now.Add(-3594*time.Second); !got.Equal(want) {
+		t.Errorf("owned process start = %v, want %v: a start this scan cannot date is refused first-sight credit, so the tree's owned CPU reads short and admission grants against the difference",
+			got, want)
+	}
+	if processes[10].startedAt == processes[10].startedAt.Round(0) {
+		t.Error("owned process start carries no monotonic reading; a comparison against the scan bounds then falls back to the wall clock, where a step moves the admit bound")
+	}
 }

@@ -199,10 +199,16 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		if perr != nil {
 			return 0, false, fmt.Errorf("budget: %q is not a memory size", tok)
 		}
-		if !positiveFinite(n) {
-			return 0, false, fmt.Errorf("budget: memory %q must be positive", tok)
+		// safety: the product is what must hold, not the operand. A size the byte
+		// count cannot represent converts by a rule the target architecture picks,
+		// so one string the operator typed reads as no cap on one machine and as a
+		// negative reserve on another, and a size that rounds to zero reads as no
+		// cap everywhere.
+		size := n * u.scale
+		if !positiveFinite(size) || size >= math.MaxInt64 || uint64(size) == 0 {
+			return 0, false, fmt.Errorf("budget: memory %q must be positive and hold in a byte count", tok)
 		}
-		return uint64(n * u.scale), true, nil
+		return uint64(size), true, nil
 	}
 	return 0, false, nil
 }
