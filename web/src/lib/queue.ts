@@ -189,7 +189,7 @@ export function groupHolders(holders: QueueHolder[]): HolderGroup[] {
   }));
 }
 
-export function queueLifecycleHolders(
+export function queueLifecycleRows(
   holders: QueueHolder[],
   waiters: QueueWaiter[],
 ): QueueHolder[] {
@@ -206,6 +206,22 @@ export function queueLifecycleHolders(
         waitingOwners.has(h.run_id));
     return !orchestrationWait;
   });
+}
+
+// Occupancy is a capacity figure, so a connection-only lease is not a holder.
+export function queueLifecycleHolders(
+  holders: QueueHolder[],
+  waiters: QueueWaiter[],
+): QueueHolder[] {
+  return queueLifecycleRows(holders, waiters).filter((h) => !h.connection_only);
+}
+
+// A connected lease stays listed while its own run waits for admission, which
+// is how the CLI groups it.
+export function queueLifecycleConnections(
+  holders: QueueHolder[],
+): QueueHolder[] {
+  return holders.filter((h) => !!h.connection_only);
 }
 
 export function daemonUptimeLabel(qs: QueueState): string {

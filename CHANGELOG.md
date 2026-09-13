@@ -28,6 +28,20 @@ unlock.
   use sit at or below capacity less reserved and external, so at most one grant
   crosses the line -- and lists the holders priced from estimates rather than
   pins. Machine output is unchanged.
+### Added
+
+- **dashboard:** The queue page lists connection-only leases in their own
+  "Connected (no resources held)" table, with its own count beside the holding
+  one. Those rows leave the holder table, so a lease appears in one table or
+  the other, and the page groups admission the way `sparkwing queue` does.
+
+### Fixed
+
+- **dashboard:** The queue page counts a running pipeline once. Its
+  zero-resource orchestration lease no longer adds to the "holding" figure
+  beside the participant that holds the cores, which is the occupancy
+  `sparkwing queue` reports. The capacity page still lists every lease in one
+  table.
 
 ## [v0.50.1] - 2026-09-13
 
