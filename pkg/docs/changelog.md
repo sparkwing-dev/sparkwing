@@ -26,17 +26,22 @@ unlock.
   the credit ledger bills it. `max_concurrent_runners` caps the cloud runners
   one principal holds, `max_global_runners` caps the whole controller with
   `runner_alarm` warning below it, `max_run_seconds` caps the wall-clock time a
-  run may hold cloud runners for, `max_nodes_per_run` bounds a dynamic fan-out,
-  `max_runs_per_hour` bounds a retry loop, and `min_cron_interval_seconds` is
-  the shortest cadence a controller schedule may declare. Every guard is zero
-  by default, which is unlimited. `GET /api/v1/compute-limits` reads them with
-  the cloud runners in use per principal, `PUT /api/v1/compute-limits` sets them
-  under `admin`, and `sparkwing cluster limits show|set` is the same surface on
-  the command line. Work a guard refuses answers `429` with
-  `"code": "compute_limit"`, and the run records a `compute_limit_blocked` event
-  that `sparkwing runs status` prints on its `guard:` line. A run past
-  `max_run_seconds` loses its node on the next heartbeat with the failure
-  reason `compute_limit`.
+  run may hold cloud runners for, `max_nodes_per_run` bounds a metered
+  principal's dynamic fan-out, `max_runs_per_hour` bounds its retry loop,
+  `max_global_nodes_per_run` and `max_global_runs_per_hour` are the operator's
+  equivalents across every principal, and `min_cron_interval_seconds` is the
+  shortest cadence a controller schedule may declare, checked both when a
+  repository arms it and when the tick is about to fire it. Every guard is zero
+  by default, which is unlimited, and the per-principal pair applies only to a
+  principal holding a metered token, so local work is untouched.
+  `GET /api/v1/compute-limits` reads them with the cloud runners in use per
+  principal, `PUT /api/v1/compute-limits` sets them under `admin`, and
+  `sparkwing cluster limits show|set` is the same surface on the command line.
+  Work a guard refuses answers `429` with `"code": "compute_limit"` and a
+  `Retry-After`, which a runner reads as a standing condition and keeps polling
+  through, and the run records a `compute_limit_blocked` event that `sparkwing
+  runs status` prints on its `guard:` line. A run past `max_run_seconds` loses
+  its node on the next heartbeat with the failure reason `compute_limit`.
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and

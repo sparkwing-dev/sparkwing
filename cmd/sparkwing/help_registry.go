@@ -2235,12 +2235,12 @@ var cmdLimits = Command{
 	Path:     "sparkwing cluster limits",
 	Synopsis: "Read and set the compute guards",
 	Description: `Compute guards bound what the controller starts before the credit
-ledger bills it: the cloud runners one principal holds at once, the
-cloud runners the whole controller holds, the wall-clock seconds a run
-may hold them for, the nodes one run may carry, the runs created per
-hour, and the shortest interval a cloud schedule may declare. Every
-guard is zero by default, which is unlimited, so a controller that sets
-none behaves as it did before the guards existed.`,
+ledger bills it: the cloud runners one principal holds at once, the cloud
+runners the whole controller holds, the wall-clock seconds a run may hold them
+for, the nodes one run may carry, the runs created per hour, and the shortest
+interval a cloud schedule may declare. Every guard is zero by default, which is
+unlimited, so a controller that sets none behaves as it did before the guards
+existed.`,
 	SubcommandOrder: []string{"show", "set"},
 	Examples: []Example{
 		{"Read the guards and what they measure", "sparkwing cluster limits show --profile prod"},
@@ -2270,9 +2270,11 @@ var cmdLimitsSet = Command{
 	Synopsis: "Set one compute guard",
 	Description: `Sets one guard to a ceiling, or to zero to remove it. The guards are
 max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
-max_nodes_per_run, max_runs_per_hour and min_cron_interval_seconds.
-A claim past a runner guard answers 429 and the run records a
-compute_limit_blocked event. Requires the admin scope.`,
+max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
+max_global_runs_per_hour and min_cron_interval_seconds. The per-principal
+guards bind a principal holding a metered token; the max_global_ pair binds
+every run. Work past a guard answers 429 with a Retry-After and the run records
+a compute_limit_blocked event. Requires the admin scope.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "GUARD", Desc: "Guard to set", Required: true, Group: "Input"},
 		{Name: "value", Argument: "N", Desc: "Ceiling; 0 removes it", Required: true, Group: "Input"},

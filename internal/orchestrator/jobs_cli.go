@@ -584,16 +584,22 @@ type runEventLister interface {
 }
 
 func latestComputeGuardRefusal(ctx context.Context, b runEventLister, runID string) (computeGuardRefusal, bool) {
+	const page = 500
 	var found computeGuardRefusal
 	var ok bool
 	var after int64
 	for {
-		events, err := b.ListEventsAfter(ctx, runID, after, 500)
+		events, err := b.ListEventsAfter(ctx, runID, after, page)
 		if err != nil || len(events) == 0 {
 			break
 		}
+		// safety: the contract is seq > after, ascending; a backend that
+		// ignores after would otherwise replay one page forever.
+		last := events[len(events)-1].Seq
+		if last <= after {
+			break
+		}
 		for _, event := range events {
-			after = event.Seq
 			if event.Kind != store.EventKindComputeLimitBlocked || len(event.Payload) == 0 {
 				continue
 			}
@@ -601,6 +607,10 @@ func latestComputeGuardRefusal(ctx context.Context, b runEventLister, runID stri
 			if json.Unmarshal(event.Payload, &payload) == nil && payload.Limit != "" {
 				found, ok = payload, true
 			}
+		}
+		after = last
+		if len(events) < page {
+			break
 		}
 	}
 	return found, ok

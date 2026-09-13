@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -46,11 +47,16 @@ type computeLimitsResp struct {
 func runComputeLimitsShow(args []string) error {
 	fs := flag.NewFlagSet(cmdLimitsShow.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
+	outputFormat := fs.StringP("output", "o", "",
+		"output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	if err := parseAndCheck(cmdLimitsShow, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return err
+	}
+	format, err := resolveTTYAwareOutput(*outputFormat, cmdLimitsShow.Path)
+	if err != nil {
 		return err
 	}
 	prof, err := resolveProfile(*on)
@@ -64,13 +70,16 @@ func runComputeLimitsShow(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *outputFormat == "json" {
+	if format == "json" {
 		_, err := os.Stdout.Write(append(resp, '\n'))
 		return err
 	}
 	var view computeLimitsResp
 	if err := json.Unmarshal(resp, &view); err != nil {
 		return fmt.Errorf("decode: %w", err)
+	}
+	if format == "plain" {
+		return writeComputeLimitsPlain(os.Stdout, view)
 	}
 	return renderComputeLimits(os.Stdout, view)
 }
@@ -122,10 +131,36 @@ func renderComputeLimits(w io.Writer, view computeLimitsResp) error {
 	if view.Usage.AlarmReached {
 		fmt.Fprintf(tw, "ALARM\treached\n")
 	}
-	for principal, held := range view.Usage.ByPrincipal {
-		fmt.Fprintf(tw, "  %s\t%d\n", principal, held)
+	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
+		fmt.Fprintf(tw, "  %s\t%d\n", principal, view.Usage.ByPrincipal[principal])
 	}
 	return tw.Flush()
+}
+
+func writeComputeLimitsPlain(w io.Writer, view computeLimitsResp) error {
+	for _, name := range store.ComputeLimitNames() {
+		if _, err := fmt.Fprintf(w, "%s\t%d\n", name, view.Limits[name]); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "runners\t%d\n", view.Usage.Runners); err != nil {
+		return err
+	}
+	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
+		if _, err := fmt.Fprintf(w, "runners.%s\t%d\n", principal, view.Usage.ByPrincipal[principal]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedPrincipals(held map[string]int64) []string {
+	out := make([]string, 0, len(held))
+	for principal := range held {
+		out = append(out, principal)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func computeLimitLabel(value int64) string {
