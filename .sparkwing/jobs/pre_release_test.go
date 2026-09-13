@@ -5,7 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
@@ -32,6 +35,31 @@ func TestInstallToGreenHarnessRunsOnTheCheckoutAndRecordsRatherThanGates(t *test
 	}
 	if _, err := os.Stat(filepath.Join("..", "..", "bin", "install-to-green.sh")); err != nil {
 		t.Fatalf("the release lane runs a harness that is not in the checkout: %v", err)
+	}
+}
+
+func TestInstallToGreenRecordsAnUnreachableProxyAsSkippedAndFailsEverythingElse(t *testing.T) {
+	record := `{"total_seconds":45.2,"green":true}`
+	measured, err := installToGreenOutcome(record+"\n", nil)
+	if err != nil {
+		t.Fatalf("a measured run must not fail the lane: %v", err)
+	}
+	if measured != record {
+		t.Errorf("the lane logged %q, want the harness record %q", measured, record)
+	}
+
+	unreachable := &sparkwing.ExecError{Command: installToGreenCommand, ExitCode: installToGreenUnavailable}
+	measured, err = installToGreenOutcome("", unreachable)
+	if err != nil {
+		t.Fatalf("an unreachable proxy must not fail the lane: %v", err)
+	}
+	if !strings.Contains(measured, "skipped") {
+		t.Errorf("an unreachable proxy logged %q, which does not say the measurement was skipped", measured)
+	}
+
+	notGreen := &sparkwing.ExecError{Command: installToGreenCommand, ExitCode: 1}
+	if _, err := installToGreenOutcome("", notGreen); err == nil {
+		t.Error("a demo path that never reached green passed the lane")
 	}
 }
 

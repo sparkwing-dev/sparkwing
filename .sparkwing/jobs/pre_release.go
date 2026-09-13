@@ -19,7 +19,26 @@ const (
 	// safety: no --target-seconds, so a loaded builder records a slow
 	// measurement instead of reddening the release lane.
 	installToGreenCommand = "bash bin/install-to-green.sh --build --output json"
+	// safety: the harness reserves this status for a module proxy it could
+	// not reach, which measured nothing and is not a release defect.
+	installToGreenUnavailable = 75
 )
+
+func measureInstallToGreen(jobContext context.Context) (string, error) {
+	measured, err := sparkwing.Bash(jobContext, installToGreenCommand).Run()
+	return installToGreenOutcome(measured.Stdout, err)
+}
+
+func installToGreenOutcome(stdout string, err error) (string, error) {
+	if err == nil {
+		return strings.TrimSpace(stdout), nil
+	}
+	var execErr *sparkwing.ExecError
+	if errors.As(err, &execErr) && execErr.ExitCode == installToGreenUnavailable {
+		return "skipped, the module proxy was unreachable so nothing was measured", nil
+	}
+	return "", err
+}
 
 func runMarkdownlint(jobContext context.Context) error {
 	_, err := sparkwing.Bash(jobContext, markdownlintCommand).Run()
@@ -206,10 +225,10 @@ func (preRelease *PreRelease) run(jobContext context.Context) error {
 	} else {
 		sparkwing.Info(jobContext, "public installer release verification: passed")
 	}
-	if measured, err := sparkwing.Bash(jobContext, installToGreenCommand).Run(); err != nil {
+	if measured, err := measureInstallToGreen(jobContext); err != nil {
 		failures = append(failures, fmt.Sprintf("install-to-green harness: %v", err))
 	} else {
-		sparkwing.Info(jobContext, "install-to-green: %s", strings.TrimSpace(measured.Stdout))
+		sparkwing.Info(jobContext, "install-to-green: %s", measured)
 	}
 
 	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell.sh").Run(); err != nil {
