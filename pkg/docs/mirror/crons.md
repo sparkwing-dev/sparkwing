@@ -247,7 +247,9 @@ cursor -- the last due instant it resolved -- and resolves each one:
   the two.
 - **missed**: the instant fell outside the catch-up window, which happens when
   the host was asleep or off. A backlog is recorded as one row naming how many
-  instants it covers, not one row per instant.
+  instants it covers, not one row per instant. The window a tick honors is at
+  most 24h; a declaration or an override asking for more runs with 24h, which
+  `crons install` warns about and `crons show` marks clamped.
 - **failed**: the launch itself did not happen. The schedule records why and
   the tick carries on to the others.
 
