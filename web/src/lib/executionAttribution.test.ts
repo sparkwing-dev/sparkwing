@@ -6,6 +6,7 @@ import {
   executionAttempts,
   executionAttemptsNewestFirst,
   executionDisplay,
+  placementLabel,
 } from "./executionAttribution";
 
 function node(fields: Partial<Node>): Node {
@@ -119,5 +120,38 @@ describe("executionDisplay", () => {
     assert.equal(unknown.locationLabel, "Location unknown");
     assert.notEqual(local.className, cloud.className);
     assert.notEqual(cloud.className, unknown.className);
+  });
+});
+
+describe("placementLabel", () => {
+  it("names the runner a preference chose", () => {
+    assert.equal(
+      placementLabel(
+        node({ claimed_by: "runner:laptop:1", placement_reason: "preference" }),
+      ),
+      "runner:laptop:1 (preferred)",
+    );
+  });
+
+  it("says a fallback followed the hold", () => {
+    assert.equal(
+      placementLabel(
+        node({ claimed_by: "runner:cloudpod:1", placement_reason: "fallback" }),
+      ),
+      "runner:cloudpod:1 (fallback after the local-first hold)",
+    );
+  });
+
+  it("says nothing about a node nobody preferred", () => {
+    assert.equal(
+      placementLabel(
+        node({ claimed_by: "runner:cloudpod:1", placement_reason: "none" }),
+      ),
+      null,
+    );
+  });
+
+  it("says nothing about an unclaimed node", () => {
+    assert.equal(placementLabel(node({ placement_reason: "preference" })), null);
   });
 });

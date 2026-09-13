@@ -188,6 +188,8 @@ export interface Node {
   execution_started_at?: string;
   execution_attempts?: ExecutionAttempt[];
   status_detail?: string;
+  placement_reason?: string;
+  claimed_by?: string;
   last_heartbeat?: string;
   failure_reason?: string;
   exit_code?: number;
