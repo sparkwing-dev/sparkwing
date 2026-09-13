@@ -129,6 +129,12 @@ budget grammar as local admission. The contribution defaults to `50%,50%`;
 the reserve defaults to empty because the contribution already retains half
 the machine for other work.
 
+A runner warms its Go module cache at startup from `--warm-modules` (or
+`SPARKWING_WARM_MODULES`), a comma-separated list of module paths with an
+optional `@version`; it defaults to the SDK at the runner's own version, and
+`off` disables it. The warm runs in the background and a failed download only
+logs, so a cold cache never blocks a claim.
+
 The installer writes the token to `~/.config/sparkwing/agent.yaml` with mode
 `0600`. The service uses that file rather than embedding the token in its
 launchd plist or systemd unit. The contribution caps reported capacity; the

@@ -36,7 +36,7 @@ var configDirProviders = map[string]bool{
 var configDirWriters = []string{
 	"cmd/sparkwing/configure_init.go",
 	"cmd/sparkwing/versionhold.go",
-	"internal/cluster/runner_agent_cli.go",
+	"internal/agentconfig/agentconfig.go",
 	"internal/configguard/configguard.go",
 	"internal/profile/profile.go",
 	"internal/repos/repos.go",
