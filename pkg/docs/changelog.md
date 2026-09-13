@@ -342,6 +342,13 @@ unlock.
 
 ### Fixed
 
+- **cluster:** Warm-mode Kubernetes Job fallback starts `sparkwing-runner
+  run-node` instead of `sparkwing run-node`. The runner image installs only
+  `sparkwing-runner`, so every fallback pod failed to start with "executable
+  file not found in $PATH" and its node ended without a terminal state.
+  `sparkwing-runner` gains a `run-node` verb that runs the same code the
+  sparkwing CLI's `run-node` runs; `sparkwing run-node` is unchanged.
+
 - **controller:** The concurrency slot routes `acquire`, `heartbeat`,
   `release`, `holder` and `resolve` take `runs.state` plus a live claim on the
   run the request names, so a pipeline that declares a concurrency group or a
