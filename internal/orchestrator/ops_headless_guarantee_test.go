@@ -150,24 +150,33 @@ func stopHomeDaemon(t *testing.T, home string) {
 	})
 }
 
-func moduleRootDir(t *testing.T) string {
-	t.Helper()
-	// safety: a reproducible build trims the compiled-in source path, so resolving the
-	// repository from runtime.Caller yields a module path the filesystem does not hold.
+// safety: a reproducible build trims the compiled-in source path, so resolving the
+// repository from runtime.Caller yields a module path the filesystem does not hold.
+// This resolves at package initialization because tests in this package change the
+// working directory, and a later walk would start from wherever one of them left it.
+var moduleRootAtInit, moduleRootInitErr = func() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("resolve working directory: %v", err)
+		return "", err
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("no go.mod above the working directory")
+			return "", errors.New("no go.mod above the working directory")
 		}
 		dir = parent
 	}
+}()
+
+func moduleRootDir(t *testing.T) string {
+	t.Helper()
+	if moduleRootInitErr != nil {
+		t.Fatalf("resolve repository root: %v", moduleRootInitErr)
+	}
+	return moduleRootAtInit
 }
 
 func repoRootDir(t *testing.T) string {

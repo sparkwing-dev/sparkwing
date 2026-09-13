@@ -122,7 +122,9 @@ func buildSubmitCLI(t *testing.T) string {
 
 // safety: a reproducible build trims the compiled-in source path, so resolving the
 // repository from runtime.Caller yields a module path the filesystem does not hold.
-func moduleRoot() (string, error) {
+// This resolves at package initialization because tests in this package change the
+// working directory, and a later walk would start from wherever one of them left it.
+var moduleRootDir, moduleRootErr = func() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("resolve working directory: %w", err)
@@ -137,6 +139,10 @@ func moduleRoot() (string, error) {
 		}
 		dir = parent
 	}
+}()
+
+func moduleRoot() (string, error) {
+	return moduleRootDir, moduleRootErr
 }
 
 // safety: the dashboard bundle is a gitignored artifact of bin/build-web.sh, so
