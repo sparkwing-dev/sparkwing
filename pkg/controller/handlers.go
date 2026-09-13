@@ -129,6 +129,9 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -485,6 +488,9 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.CreateNode(r.Context(), body); err != nil {
+		if s.writeComputeLimitRefusal(w, r, runID, body.NodeID, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1471,6 +1477,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			if s.writeCreditsRefusal(w, r, err) {
 				return
 			}
+			if s.writeComputeLimitRefusal(w, r, body.RunID, body.NodeID, err) {
+				return
+			}
 			if writeExecutionAdmissionError(w, err) {
 				return
 			}
@@ -1521,6 +1530,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if s.writeCreditsRefusal(w, r, err) {
+			return
+		}
+		if s.writeClaimComputeLimitRefusal(w, r, err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
@@ -1816,7 +1828,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	// safety: the runner abandons a node whose claim the controller refuses,
 	// which is how a cancellation for an empty balance reaches it.
-	if s.chargeMeteredHeartbeat(r, runID, nodeID) {
+	if s.chargeMeteredHeartbeat(r, runID, nodeID) || s.stopForWallClockLimit(r, runID, nodeID) {
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}

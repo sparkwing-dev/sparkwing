@@ -312,6 +312,15 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	for _, entry := range entries {
+		if refusal := s.cronIntervalRefusal(r, entry.Trigger.Cron); refusal != nil {
+			if s.writeComputeLimitRefusal(w, r, "", "", refusal) {
+				return
+			}
+			writeError(w, http.StatusInternalServerError, refusal)
+			return
+		}
+	}
 	report, err := s.cronService().ArmPushed(r.Context(), crons.ArmPush{
 		RepoURL: repoURL,
 		Branch:  body.Branch,
@@ -512,6 +521,13 @@ func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
 	if fields.Empty() {
 		writeError(w, http.StatusBadRequest,
 			errors.New("name at least one of cron, tz, overlap, catch_up or args"))
+		return
+	}
+	if refusal := s.cronIntervalRefusal(r, body.Cron); refusal != nil {
+		if s.writeComputeLimitRefusal(w, r, "", "", refusal) {
+			return
+		}
+		writeError(w, http.StatusInternalServerError, refusal)
 		return
 	}
 	svc := s.cronService()

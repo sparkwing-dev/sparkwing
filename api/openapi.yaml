@@ -3733,6 +3733,20 @@ paths:
               schema: {$ref: "#/components/schemas/GitHubWebhookBindingResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
+  /api/v1/compute-limits:
+    get:
+      x-sparkwing-scope: runs.read
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+    put:
+      x-sparkwing-scope: admin
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
 components:
   securitySchemes:
     bearerToken:

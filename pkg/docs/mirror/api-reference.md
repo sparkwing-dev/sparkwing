@@ -17,6 +17,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
+| `GET` | `/api/v1/compute-limits` | `runs.read` |
+| `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
