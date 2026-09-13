@@ -62,6 +62,12 @@ unlock.
   name failed outright on any machine where a cache answered. `Clone` derives
   the cache name from the URL's basename, so a name nothing registered costs a
   failed request and a line on stderr rather than the clone.
+- **run:** `sparkwing run --sw-ref <ref>` removes the temporary git worktree it
+  checked the ref out into. Every earlier `--sw-ref` run left one registered in
+  the repository and a `$TMPDIR/sparkwing-from-*` directory beside it; reap
+  those with `git worktree prune` and by deleting the directories. The teardown
+  was a deferred call, and the exec path exits the process to carry the
+  pipeline's status, which skips defers.
 - **cli:** `sparkwing -o json run PIPELINE` refuses instead of handing `-o json`
   to the pipeline, which rejected it as an unknown flag. A run's stream is
   pretty on a terminal and NDJSON when piped, and `SPARKWING_LOG_FORMAT`
