@@ -121,6 +121,9 @@ func TestSchemaV35RepairsAV35StoreMissingTheChargeKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.DB().Exec(`DROP INDEX IF EXISTS idx_credit_charges_kind_amount`); err != nil {
+		t.Fatalf("drop the index over the charge kind: %v", err)
+	}
 	if _, err := st.DB().Exec(`ALTER TABLE credit_charges DROP COLUMN kind`); err != nil {
 		t.Fatalf("strip the charge kind: %v", err)
 	}

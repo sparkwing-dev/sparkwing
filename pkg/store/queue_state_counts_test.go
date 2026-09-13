@@ -124,4 +124,62 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 		t.Errorf("balance = %d, want the refund to raise it above %d",
 			settled.BalanceMicro, totals.BalanceMicro)
 	}
+	if settled.BilledSeconds < 0 || settled.BilledSeconds > store.CreditClaimFloorSeconds {
+		t.Errorf("billed seconds = %d, want the net of a reservation the node barely used",
+			settled.BilledSeconds)
+	}
+	if want := settled.BilledSeconds * store.DefaultCreditRateMicro; want != 25_000_000-settled.BalanceMicro {
+		t.Errorf("billed seconds %d price to %d micro, but the balance fell by %d: the seconds and the bill disagree",
+			settled.BilledSeconds, want, 25_000_000-settled.BalanceMicro)
+	}
+}
+
+func TestSettledNodeSeconds_ReadsTheNodesOwnClaimCredential(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	claimant := meteredClaimant(t, s, "pool")
+	readyNode(t, s, "run-settled", "metered")
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "holder-metered", time.Minute, nil); err != nil {
+		t.Fatalf("metered claim: %v", err)
+	}
+	if err := s.StartNode(ctx, "run-settled", "metered"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := s.FinishNode(ctx, "run-settled", "metered", "success", "", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	_, metered, err := s.SettledNodeSeconds(ctx, "run-settled", "metered")
+	if err != nil {
+		t.Fatalf("SettledNodeSeconds: %v", err)
+	}
+	if !metered {
+		t.Error("a node claimed by a metered credential reported unmetered")
+	}
+
+	readyNode(t, s, "run-settled-local", "plain")
+	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "laptop", TokenPrefix: "swr_plain"},
+		"holder-plain", time.Minute, nil); err != nil {
+		t.Fatalf("unmetered claim: %v", err)
+	}
+	if err := s.StartNode(ctx, "run-settled-local", "plain"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := s.FinishNode(ctx, "run-settled-local", "plain", "success", "", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	seconds, metered, err := s.SettledNodeSeconds(ctx, "run-settled-local", "plain")
+	if err != nil {
+		t.Fatalf("SettledNodeSeconds: %v", err)
+	}
+	if metered {
+		t.Error("a node claimed by a credential the operator never metered reported metered")
+	}
+	if seconds < 0 {
+		t.Errorf("seconds = %v, want a non-negative wall time", seconds)
+	}
 }

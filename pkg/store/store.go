@@ -1042,7 +1042,18 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 37
+// safety: the operational samplers read these aggregates on a timer, so each
+// one scans an index rather than the table it sums.
+var observabilityIndexes = `
+CREATE INDEX IF NOT EXISTS idx_nodes_outstanding
+    ON nodes(status, ready_at, claimed_by)
+    WHERE ` + nodeNotDone + `;
+CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
+    ON credit_grants(kind, amount_micro);
+CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
+    ON credit_charges(kind, amount_micro, seconds);`
+
+const expectedSchemaVersion = 38
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1913,6 +1924,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 37:
 		_, err := tx.ExecContext(ctx, githubWebhookBindingsTableSQLite)
 		return err
+	case 38:
+		_, err := tx.ExecContext(ctx, observabilityIndexes)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2227,6 +2241,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "nodes", nodePlacementColsPostgres)
 	case 37:
 		_, err := tx.ExecContext(ctx, githubWebhookBindingsTablePostgres)
+		return err
+	case 38:
+		_, err := tx.ExecContext(ctx, observabilityIndexes)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -7464,20 +7481,23 @@ func QueueStates() []string {
 
 // CountNodesByQueueState counts the nodes sitting in each queue state, keyed
 // by the [QueueStates] names. Terminal nodes are absent: the answer is the
-// work still outstanding, which is what a queue-depth alert reads.
+// work still outstanding, which is what a queue-depth alert reads. The read is
+// bounded by the outstanding-node index rather than the table.
 func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, error) {
 	var waiting, ready, claimed, running, approval int
 	err := s.queryRow(ctx,
 		`SELECT
-                    COALESCE(SUM(CASE WHEN status = 'pending' AND ready_at IS NULL THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = 'pending' AND ready_at IS NOT NULL
+                    COALESCE(SUM(CASE WHEN status = ? AND ready_at IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = ? AND ready_at IS NOT NULL
                                       AND (claimed_by IS NULL OR claimed_by = '') THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = 'pending' AND claimed_by IS NOT NULL
+                    COALESCE(SUM(CASE WHEN status = ? AND claimed_by IS NOT NULL
                                       AND claimed_by != '' THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0),
-                    COALESCE(SUM(CASE WHEN status = 'approval_pending' THEN 1 ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
                    FROM nodes
-                  WHERE status IN ('pending', 'running', 'approval_pending')`,
+                  WHERE `+nodeNotDone,
+		nodeStatusPending, nodeStatusPending, nodeStatusPending,
+		nodeStatusRunning, NodeStatusApprovalPending,
 	).Scan(&waiting, &ready, &claimed, &running, &approval)
 	if err != nil {
 		return nil, err
@@ -7489,6 +7509,28 @@ func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, err
 		QueueStateRunning:         running,
 		QueueStateApprovalPending: approval,
 	}, nil
+}
+
+// SettledNodeSeconds reports the wall seconds one finished node ran and
+// whether the credential that claimed it was metered. The node's own claim
+// carries the answer, so a caller that settles a node on behalf of another
+// principal still attributes the work to the runner that did it.
+func (s *Store) SettledNodeSeconds(ctx context.Context, runID, nodeID string) (seconds float64, metered bool, err error) {
+	var startedAt, finishedAt sql.NullInt64
+	var meteredFlag sql.NullBool
+	err = s.queryRow(ctx,
+		`SELECT started_at, finished_at,
+                        (SELECT metered FROM tokens WHERE prefix = nodes.claim_token_prefix)
+                   FROM nodes WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID,
+	).Scan(&startedAt, &finishedAt, &meteredFlag)
+	if err != nil {
+		return 0, false, err
+	}
+	if !startedAt.Valid || !finishedAt.Valid || finishedAt.Int64 <= startedAt.Int64 {
+		return 0, meteredFlag.Bool, nil
+	}
+	return time.Duration(finishedAt.Int64 - startedAt.Int64).Seconds(), meteredFlag.Bool, nil
 }
 
 // CountActiveRunners counts distinct claimed_by within `window`.
