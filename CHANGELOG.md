@@ -76,7 +76,10 @@ unlock.
   labels, so an empty fleet reads 0 instead of dropping out of the exposition.
   Documented in [observability.md](docs/observability.md).
 - **store:** `Store.CountNodesByQueueState`, `Store.CreditLedgerTotals` and
-  `Store.SettledNodeSeconds` report the figures the controller exports. Schema
+  `Store.NodeSettlement` report the figures the controller exports. The ledger
+  read runs at repeatable-read isolation and measures its held-back
+  reservations against the database clock, so neither a second controller nor a
+  stepped system clock can pull the seconds figure backwards. Schema
   v38 adds the indexes those reads scan: partial indexes over the nodes that
   have not finished and over the nodes holding a credit reservation, and
   covering indexes on the credit grant and charge kinds. The migration adds
@@ -85,7 +88,10 @@ unlock.
   holds a write lock on that table for its duration; upgrade a large deployment
   in a maintenance window.
 - **controller:** An automatic node retry resets the claim generation along with
-  the rest of the claim state, so the retry's first claim is a first claim.
+  the rest of the claim state, so the retry's first claim is a first claim. A
+  node's finish settles the ledger against the credential recorded on the node
+  rather than the one posting the finish, so a node whose credential was
+  revoked or un-metered mid-run still releases its credit reservation.
 - **controller:** `sparkwing-controller --dashboard-url URL` announces the
   dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
   client that has just been handed a token can say where to watch its runs. The

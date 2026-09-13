@@ -517,3 +517,70 @@ func claimWithLabels(t *testing.T, base, holder string, labels []string) {
 		t.Fatalf("claim poll status = %d", resp.StatusCode)
 	}
 }
+
+// A node's charge window is what holds it in the reservation index and what
+// keeps its reserved seconds out of the billing line, so a finish must release
+// it even when the credential posting the finish is not the metered one that
+// claimed the node.
+func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
+	restoreGlobals(t)
+
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	_, tok, err := st.CreateTokenWith(ctx, "pool", store.TokenKindRunner,
+		[]string{ScopeNodesClaim}, 0, time.Now(), store.TokenOptions{Metered: true})
+	if err != nil {
+		t.Fatalf("mint a metered token: %v", err)
+	}
+	claimant := store.ClaimIdentity{Principal: "pool", TokenPrefix: tok.Prefix}
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-window", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-window", NodeID: "node-a", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-window", "node-a"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+	if _, err := st.ClaimNextReadyNode(ctx, claimant, "holder-window", time.Minute, nil); err != nil {
+		t.Fatalf("metered claim: %v", err)
+	}
+	before, err := st.NodeSettlement(ctx, "run-window", "node-a")
+	if err != nil {
+		t.Fatalf("NodeSettlement: %v", err)
+	}
+	if !before.ChargeWindowOpen {
+		t.Fatal("the metered claim opened no charge window, so this test proves nothing")
+	}
+
+	if err := st.StartNode(ctx, "run-window", "node-a"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := st.FinishNode(ctx, "run-window", "node-a", "success", "", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	// safety: the request carries no credential at all, which is the shape a
+	// revoked or un-metered finisher presents to this path.
+	srv := New(st, nil)
+	srv.settleFinishedNode(httptest.NewRequest(http.MethodPost, "/finish", nil), "run-window", "node-a")
+
+	after, err := st.NodeSettlement(ctx, "run-window", "node-a")
+	if err != nil {
+		t.Fatalf("NodeSettlement after the finish: %v", err)
+	}
+	if after.ChargeWindowOpen {
+		t.Error("the finish left the charge window open, so the node holds a reservation forever")
+	}
+}

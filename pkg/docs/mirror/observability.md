@@ -362,10 +362,11 @@ reserves a minute up front and a finish refunds the part the node did not use,
 so the series counts a reservation as the node consumes it rather than all at
 once: the figure only ever grows, which is what a counter has to do. A node the
 credit-exhaustion sweep cancels settles there. A node whose lease expires keeps
-every second its reservation charged, because the requeue writes no refund. A
+every second its reservation charged, because the requeue writes no refund, and
+it books the unconsumed part at once rather than over the minute: the cloud
+series overstates real runner time by up to one reservation per lease expiry. A
 node whose run fails with no finish reaching the controller keeps the same
-seconds: nothing refunds them, and the reserved minute enters the total as the
-clock passes it.
+seconds, and the reserved minute enters the total as the clock passes it.
 
 The `local` series counts what this controller process settled for an unmetered
 credential, read from the claiming credential recorded on the node, and it
@@ -422,7 +423,7 @@ Sampled series do not refresh at scrape time. `sparkwing_queue_depth`,
 `sparkwing_active_runners` refresh on the controller's reaper loop every 10
 seconds, bounded by an index over the nodes that have not finished. The
 `sparkwing_credits_*` family and `sparkwing_node_seconds_total{placement="cloud"}`
-refresh every 5 minutes, because both ledger sums scan a table that grows with
+refresh every 5 minutes, because the ledger sums scan a table that grows with
 every charge and is never pruned; read them as a slow-moving billing figure
 rather than a live gauge. Those totals come from the ledger rather than an
 in-process counter, so they survive a controller restart.

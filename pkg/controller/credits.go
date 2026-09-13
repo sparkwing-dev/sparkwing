@@ -236,23 +236,28 @@ func (s *Server) meteredTokenPrefix(r *http.Request) string {
 	return prefix
 }
 
-// safety: the node's own claim carries the credential that did the work, so a
-// finish posted by another principal still attributes the seconds to the
-// runner that ran it. Cloud seconds come from the ledger instead, where a
-// cancel or a requeue bills them whether or not a finish reaches this route.
-func (s *Server) observeSettledNodeSeconds(r *http.Request, runID, nodeID string) {
-	seconds, metering, err := s.store.SettledNodeSeconds(r.Context(), runID, nodeID)
+// safety: the node's own claim carries the credential the ledger priced the
+// work against, so a finish posted by another principal settles the same way,
+// and a node whose credential was revoked mid-run still releases its charge
+// window instead of holding a reservation open forever.
+func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
+	settlement, err := s.nodeSettlement(r, runID, nodeID)
 	if err != nil {
-		s.logger.Warn("sampling settled node seconds failed",
+		return
+	}
+	s.settleNodeLedger(r, runID, nodeID, settlement)
+	if settlement.Metering == store.MeteringFree {
+		addLocalNodeSeconds(settlement.Seconds)
+	}
+}
+
+func (s *Server) nodeSettlement(r *http.Request, runID, nodeID string) (store.NodeSettlement, error) {
+	settlement, err := s.store.NodeSettlement(r.Context(), runID, nodeID)
+	if err != nil {
+		s.logger.Warn("reading a node's settlement failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
-		return
 	}
-	// safety: a revoked credential leaves no metering to read, and counting it
-	// as local would bill the operator's own capacity for cloud work.
-	if metering != store.MeteringFree {
-		return
-	}
-	addLocalNodeSeconds(seconds)
+	return settlement, err
 }
 
 // safety: a balance spent past the grace period cancels the node in this same
@@ -309,11 +314,21 @@ func (s *Server) cancelForExhaustedCredits(
 // safety: without this the tail between the last heartbeat and the finish is
 // free, and the unused part of the claim reservation is never refunded.
 func (s *Server) finalizeMeteredNode(r *http.Request, runID, nodeID string) {
-	prefix := s.meteredTokenPrefix(r)
-	if prefix == "" {
+	settlement, err := s.nodeSettlement(r, runID, nodeID)
+	if err != nil {
 		return
 	}
-	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, prefix, time.Now())
+	s.settleNodeLedger(r, runID, nodeID, settlement)
+}
+
+// safety: an open window is the only thing worth settling, and it is also what
+// keeps a node in the reservation index, so it is released whatever the
+// finishing principal presents.
+func (s *Server) settleNodeLedger(r *http.Request, runID, nodeID string, settlement store.NodeSettlement) {
+	if !settlement.ChargeWindowOpen {
+		return
+	}
+	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, settlement.ClaimTokenPrefix, time.Now())
 	if err != nil {
 		s.logger.Warn("settling a metered node failed",
 			"run_id", runID, "node_id", nodeID, "err", err)
