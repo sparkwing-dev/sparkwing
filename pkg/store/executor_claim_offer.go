@@ -963,6 +963,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
        claim_base_priority = ?, claim_priority = ?, claim_worker_id = ?, claim_executor_kind = ?,
 	   claim_reservation_id = ?, coordinator_id = ?, claim_membership_id = ?,
 	   executor_kind = ?, executor_id = ?, executor_location = ?, reservation_id = ?,
+	   credit_charged_through = 0,
 	   claim_generation = claim_generation + 1,
 	   required_coordinator_id = CASE WHEN required_coordinator_id = '' THEN ? ELSE required_coordinator_id END,
 	   required_executor_location = CASE WHEN required_executor_location = '' THEN ? ELSE required_executor_location END
@@ -986,6 +987,9 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	}
 	if changed != 1 {
 		return nil, ErrLockHeld
+	}
+	if err := reserveNodeCreditsTx(ctx, tx, item.Claimant, runID, nodeID, now); err != nil {
+		return nil, err
 	}
 	n.ClaimedBy = item.HolderID
 	n.LeaseExpiresAt = &expires

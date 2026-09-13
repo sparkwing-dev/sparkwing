@@ -30,16 +30,32 @@ const (
 	// balance reaches zero before the controller cancels it.
 	DefaultCreditGraceSeconds = 60
 
-	// CreditClaimFloorSeconds is the runway a claim must be able to pay for.
-	// A node handed to a metered runner is guaranteed a minute of execution
-	// rather than a cancellation on its first heartbeat.
+	// CreditClaimFloorSeconds is the runway a claim reserves up front. The
+	// reservation is taken inside the claim transaction and refunded at
+	// finish, so it both guarantees a claimed node a minute of execution and
+	// bounds how far concurrent runners can drive the balance below zero.
 	CreditClaimFloorSeconds = 60
+
+	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
+	// Heartbeats arrive every three seconds by default, so the cap engages
+	// only when the controller was unreachable or the heartbeat loop stalled,
+	// and the customer is not billed for the gap.
+	DefaultCreditMaxChargeSeconds = 30
 )
 
 // Credit grant kinds.
 const (
 	CreditGrantFree = "free"
 	CreditGrantPaid = "paid"
+)
+
+// Credit charge kinds. A reservation is taken at claim time, usage rows bill
+// the intervals a node actually ran, and a refund returns the unused tail of
+// a reservation when the node finishes early.
+const (
+	CreditChargeReservation = "reservation"
+	CreditChargeUsage       = "usage"
+	CreditChargeRefund      = "refund"
 )
 
 // Run event kinds the credit ledger writes.
@@ -53,14 +69,39 @@ const (
 )
 
 // ErrInsufficientCredits is returned when a metered runner's controller has
-// no balance left to pay for the work it asked for.
+// no balance left to pay for the work it asked for. The claim path returns
+// an [InsufficientCreditsError], which wraps it and names the shortfall.
 var ErrInsufficientCredits = errors.New("insufficient credits")
+
+// InsufficientCreditsError refuses a claim the balance cannot pay for and
+// names both sides of the comparison, so the refusal a runner receives says
+// how much is missing.
+type InsufficientCreditsError struct {
+	BalanceMicro  int64
+	RequiredMicro int64
+}
+
+func (e *InsufficientCreditsError) Error() string {
+	return fmt.Sprintf("insufficient credits: balance %s, need %s",
+		FormatCredits(e.BalanceMicro), FormatCredits(e.RequiredMicro))
+}
+
+// Unwrap reports [ErrInsufficientCredits], so a caller matches the condition
+// with errors.Is without knowing this type.
+func (e *InsufficientCreditsError) Unwrap() error { return ErrInsufficientCredits }
 
 const (
 	metaKeyCreditRateMicro   = "credit_rate_micro_per_second"
 	metaKeyCreditGraceSecs   = "credit_grace_seconds"
+	metaKeyCreditMaxCharge   = "credit_max_charge_seconds"
 	metaKeyCreditExhaustedAt = "credit_exhausted_at"
 )
+
+// CreditHistoryMaxLimit is the most rows of each kind one history read
+// returns.
+const CreditHistoryMaxLimit = 1000
+
+const creditHistoryDefaultLimit = 200
 
 const creditGrantsTableSQLite = `CREATE TABLE IF NOT EXISTS credit_grants (
     id           TEXT PRIMARY KEY,
@@ -79,6 +120,8 @@ const creditChargesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_charges (
     run_id       TEXT NOT NULL,
     node_id      TEXT NOT NULL,
     token_prefix TEXT NOT NULL,
+    -- reservation | usage | refund; a refund carries negative seconds and amount
+    kind         TEXT NOT NULL DEFAULT 'usage',
     seconds      INTEGER NOT NULL,
     amount_micro INTEGER NOT NULL,
     charged_at   INTEGER NOT NULL
@@ -91,14 +134,20 @@ var creditsTablesPostgres = func() string {
 	return r.Replace(creditGrantsTableSQLite) + "\n" + r.Replace(creditChargesTableSQLite)
 }()
 
+// safety: v35 gained the charge kind while it was still unreleased, so a store
+// an earlier commit on this lineage stamped 35 is short of it.
+var creditChargeKindCols = map[string]string{
+	"kind": "TEXT NOT NULL DEFAULT 'usage'",
+}
+
 // safety: metering trusts this operator-set marker alone, never a runner's
 // self-asserted labels.
 var tokensMeteredCols = map[string]string{
 	"metered": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// safety: the anchor makes each heartbeat charge exactly the seconds since the
-// previous charge for that node.
+// safety: a claim reserves through this instant, so a charge bills only the
+// seconds past it and a requeue that clears it cannot bill the idle gap.
 var nodesCreditCols = map[string]string{
 	"credit_charged_through": "INTEGER NOT NULL DEFAULT 0",
 }
@@ -113,8 +162,10 @@ func applyCreditsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if _, err := tx.ExecContext(ctx, creditGrantsTableSQLite); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, creditChargesTableSQLite)
-	return err
+	if _, err := tx.ExecContext(ctx, creditChargesTableSQLite); err != nil {
+		return err
+	}
+	return ensureColumnsSQLite(ctx, tx, "credit_charges", creditChargeKindCols)
 }
 
 func applyCreditsMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -124,8 +175,10 @@ func applyCreditsMigrationPostgres(ctx context.Context, tx *storeTx) error {
 	if err := addColumnsTx(ctx, tx, "nodes", nodesCreditCols); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, creditsTablesPostgres)
-	return err
+	if _, err := tx.ExecContext(ctx, creditsTablesPostgres); err != nil {
+		return err
+	}
+	return addColumnsTx(ctx, tx, "credit_charges", creditChargeKindCols)
 }
 
 // CreditGrant is one row of credit_grants: credits the operator added.
@@ -138,13 +191,15 @@ type CreditGrant struct {
 	CreatedAt   time.Time
 }
 
-// CreditCharge is one row of credit_charges: the cost of one interval of
-// one node's execution on a metered runner.
+// CreditCharge is one row of credit_charges: a claim's reservation, one
+// interval of a node's execution, or the refund of a reservation the node
+// did not use.
 type CreditCharge struct {
 	ID          string
 	RunID       string
 	NodeID      string
 	TokenPrefix string
+	Kind        string
 	Seconds     int64
 	AmountMicro int64
 	ChargedAt   time.Time
@@ -159,6 +214,7 @@ type CreditState struct {
 	BalanceMicro       int64
 	RateMicroPerSecond int64
 	GraceSeconds       int64
+	MaxChargeSeconds   int64
 	BurnWindow         time.Duration
 	BurnMicro          int64
 	ExhaustedAt        *time.Time
@@ -193,6 +249,9 @@ func (s *Store) GrantCredits(ctx context.Context, kind string, amountMicro int64
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO credit_grants (id, kind, amount_micro, reference, created_by, created_at)
         VALUES (?, ?, ?, ?, ?, ?)`,
@@ -219,22 +278,32 @@ func (s *Store) GrantCredits(ctx context.Context, kind string, amountMicro int64
 // controller that was never granted anything reads zero.
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error) {
 	var granted, charged sql.NullInt64
-	if err := s.queryRow(ctx,
-		`SELECT (SELECT SUM(amount_micro) FROM credit_grants),
-		        (SELECT SUM(amount_micro) FROM credit_charges)`).Scan(&granted, &charged); err != nil {
+	if err := s.queryRow(ctx, creditBalanceSQL).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil
 }
 
+const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants),
+        (SELECT SUM(amount_micro) FROM credit_charges)`
+
 func creditBalanceTx(ctx context.Context, tx *storeTx) (int64, error) {
 	var granted, charged sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT (SELECT SUM(amount_micro) FROM credit_grants),
-		        (SELECT SUM(amount_micro) FROM credit_charges)`).Scan(&granted, &charged); err != nil {
+	if err := tx.QueryRowContext(ctx, creditBalanceSQL).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil
+}
+
+// safety: Postgres runs concurrent claims in their own transactions, so the
+// reservation that bounds the balance has to serialize on something; SQLite
+// allows one connection and is already serial.
+func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/credit-ledger")
+	return err
 }
 
 // CreditState reports the ledger together with the rate, the grace period,
@@ -242,9 +311,7 @@ func creditBalanceTx(ctx context.Context, tx *storeTx) (int64, error) {
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
 	out := CreditState{BurnWindow: window}
 	var granted, charged sql.NullInt64
-	if err := s.queryRow(ctx,
-		`SELECT (SELECT SUM(amount_micro) FROM credit_grants),
-		        (SELECT SUM(amount_micro) FROM credit_charges)`).Scan(&granted, &charged); err != nil {
+	if err := s.queryRow(ctx, creditBalanceSQL).Scan(&granted, &charged); err != nil {
 		return out, err
 	}
 	out.GrantedMicro = granted.Int64
@@ -271,6 +338,11 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 		return out, err
 	}
 	out.GraceSeconds = grace
+	maxCharge, err := s.CreditMaxChargeSeconds(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.MaxChargeSeconds = maxCharge
 	exhausted, err := s.creditExhaustedAt(ctx)
 	if err != nil {
 		return out, err
@@ -309,6 +381,21 @@ func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error {
 	return s.setCreditSetting(ctx, metaKeyCreditGraceSecs, secs)
 }
 
+// CreditMaxChargeSeconds returns the most seconds one charge may bill, which
+// is what keeps a controller outage or a stalled heartbeat loop from billing
+// the gap it left behind.
+func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
+	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
+}
+
+// SetCreditMaxChargeSeconds caps the seconds one charge may bill.
+func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error {
+	if secs <= 0 {
+		return errors.New("credits: the charge cap must be positive")
+	}
+	return s.setCreditSetting(ctx, metaKeyCreditMaxCharge, secs)
+}
+
 func (s *Store) creditSetting(ctx context.Context, key string, fallback int64) (int64, error) {
 	var raw string
 	err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&raw)
@@ -318,11 +405,27 @@ func (s *Store) creditSetting(ctx context.Context, key string, fallback int64) (
 	if err != nil {
 		return 0, err
 	}
-	v, perr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if perr != nil {
+	return parseCreditSetting(raw, fallback), nil
+}
+
+func creditSettingTx(ctx context.Context, tx *storeTx, key string, fallback int64) (int64, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fallback, nil
 	}
-	return v, nil
+	if err != nil {
+		return 0, err
+	}
+	return parseCreditSetting(raw, fallback), nil
+}
+
+func parseCreditSetting(raw string, fallback int64) int64 {
+	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 func (s *Store) setCreditSetting(ctx context.Context, key string, v int64) error {
@@ -350,7 +453,8 @@ func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
 	return &at, nil
 }
 
-// ListCreditGrants returns grants newest first, at most limit rows.
+// ListCreditGrants returns grants newest first, at most limit rows and never
+// more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditGrants(ctx context.Context, limit int) ([]CreditGrant, error) {
 	rows, err := s.query(ctx, `SELECT id, kind, amount_micro, reference, created_by, created_at
 	  FROM credit_grants ORDER BY created_at DESC, id DESC LIMIT ?`, creditLimit(limit))
@@ -371,9 +475,10 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) ([]CreditGrant,
 	return out, rows.Err()
 }
 
-// ListCreditCharges returns charges newest first, at most limit rows.
+// ListCreditCharges returns charges newest first, at most limit rows and
+// never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) ([]CreditCharge, error) {
-	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, seconds, amount_micro, charged_at
+	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at
 	  FROM credit_charges ORDER BY charged_at DESC, id DESC LIMIT ?`, creditLimit(limit))
 	if err != nil {
 		return nil, err
@@ -383,7 +488,8 @@ func (s *Store) ListCreditCharges(ctx context.Context, limit int) ([]CreditCharg
 	for rows.Next() {
 		var c CreditCharge
 		var charged int64
-		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Seconds, &c.AmountMicro, &charged); err != nil {
+		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Kind,
+			&c.Seconds, &c.AmountMicro, &charged); err != nil {
 			return nil, err
 		}
 		c.ChargedAt = time.Unix(0, charged).UTC()
@@ -393,14 +499,17 @@ func (s *Store) ListCreditCharges(ctx context.Context, limit int) ([]CreditCharg
 }
 
 func creditLimit(limit int) int {
-	if limit <= 0 || limit > 1000 {
-		return 200
+	if limit <= 0 {
+		return creditHistoryDefaultLimit
+	}
+	if limit > CreditHistoryMaxLimit {
+		return CreditHistoryMaxLimit
 	}
 	return limit
 }
 
-// CreditClaimFloorMicro is what a metered claim must be able to pay for:
-// one minute of cloud runner time at the current rate.
+// CreditClaimFloorMicro is what a metered claim reserves: one minute of
+// cloud runner time at the current rate.
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
 	rate, err := s.CreditRateMicroPerSecond(ctx)
 	if err != nil {
@@ -409,21 +518,54 @@ func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
 	return rate * CreditClaimFloorSeconds, nil
 }
 
-// StartNodeMetering anchors a metered node's charge window at the moment it
-// was claimed, so the first heartbeat charges from the claim rather than
-// from itself. It is a no-op once the node carries an anchor.
-func (s *Store) StartNodeMetering(ctx context.Context, runID, nodeID string, at time.Time) error {
-	_, err := s.exec(ctx,
-		`UPDATE nodes SET credit_charged_through = ?
-		  WHERE run_id = ? AND node_id = ? AND credit_charged_through = 0`,
-		at.UnixNano(), runID, nodeID)
+// safety: reserving inside the claim's own transaction is what keeps concurrent
+// runners from each reading the same balance and claiming against it.
+func reserveNodeCreditsTx(
+	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
+) error {
+	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
+	if err != nil || !metered {
+		return err
+	}
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return err
+	}
+	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
+	if err != nil {
+		return err
+	}
+	required := rate * CreditClaimFloorSeconds
+	balance, err := creditBalanceTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if balance < required {
+		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+	}
+	id, err := newCreditID("charge")
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
+		id, runID, nodeID, claimant.TokenPrefix, CreditChargeReservation,
+		int64(CreditClaimFloorSeconds), required, now.UnixNano()); err != nil {
+		return fmt.Errorf("credits: reserve: %w", err)
+	}
+	through := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
+	_, err = tx.ExecContext(ctx,
+		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
+		through, runID, nodeID)
 	return err
 }
 
-// CreditChargeResult is what one metered heartbeat did to the ledger.
+const insertCreditChargeSQL = `
+        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+// CreditChargeResult is what one charge did to the ledger.
 type CreditChargeResult struct {
-	// Charge is the row written, or nil when less than a second elapsed
-	// since the previous charge for this node.
+	// Charge is the row written, or nil when the charge window had not
+	// advanced by a whole second.
 	Charge *CreditCharge
 	// BalanceMicro is the balance after the charge.
 	BalanceMicro int64
@@ -433,32 +575,53 @@ type CreditChargeResult struct {
 	// Cancel reports that the balance has been empty for longer than the
 	// grace period, so the caller must stop the node.
 	Cancel bool
+	// ForgivenSeconds is the gap the charge cap refused to bill, which is
+	// non-zero only after the controller or the heartbeat loop stalled.
+	ForgivenSeconds int64
 }
 
 // ChargeNodeCredits bills the seconds this node has run since its previous
 // charge and reports whether the balance can still pay for it. Charging is
 // idempotent within a second: a second call in the same second advances
-// nothing and writes no row.
+// nothing and writes no row. A node still inside its claim reservation is
+// charged nothing, because the reservation already paid for that minute.
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
-	var out CreditChargeResult
-	rate, err := s.CreditRateMicroPerSecond(ctx)
-	if err != nil {
-		return out, err
-	}
-	grace, err := s.CreditGraceSeconds(ctx)
-	if err != nil {
-		return out, err
-	}
-	id, err := newCreditID("charge")
-	if err != nil {
-		return out, err
-	}
+	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, false)
+}
 
+// FinalizeNodeCredits settles a metered node when it stops running: it bills
+// the tail since the last charge, refunds whatever is left of the claim
+// reservation, and releases the node's charge window so a later attempt
+// starts its own. It is a no-op for a node that was never metered and for one
+// already settled.
+func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
+	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, true)
+}
+
+func (s *Store) chargeNode(
+	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time, final bool,
+) (CreditChargeResult, error) {
+	var out CreditChargeResult
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return out, err
+	}
+	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
+	if err != nil {
+		return out, err
+	}
+	grace, err := creditSettingTx(ctx, tx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
+	if err != nil {
+		return out, err
+	}
+	maxCharge, err := creditSettingTx(ctx, tx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
+	if err != nil {
+		return out, err
+	}
 
 	var anchor int64
 	err = tx.QueryRowContext(ctx,
@@ -472,34 +635,25 @@ func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefi
 	}
 
 	nowNS := now.UnixNano()
-	switch {
-	case anchor == 0 || anchor > nowNS:
+	charge, forgiven, through, err := settleChargeWindow(
+		ctx, tx, chargeWindow{
+			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix,
+			Anchor: anchor, NowNS: nowNS, Rate: rate, MaxCharge: maxCharge, Final: final,
+		})
+	if err != nil {
+		return out, err
+	}
+	out.Charge = charge
+	out.ForgivenSeconds = forgiven
+	if through != anchor {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-			nowNS, runID, nodeID); err != nil {
+			through, runID, nodeID); err != nil {
 			return out, err
 		}
-	default:
-		seconds := (nowNS - anchor) / int64(time.Second)
-		if seconds > 0 {
-			amount := rate * seconds
-			through := anchor + seconds*int64(time.Second)
-			if _, err := tx.ExecContext(ctx, `
-                INSERT INTO credit_charges (id, run_id, node_id, token_prefix, seconds, amount_micro, charged_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				id, runID, nodeID, tokenPrefix, seconds, amount, nowNS); err != nil {
-				return out, fmt.Errorf("credits: insert charge: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-				through, runID, nodeID); err != nil {
-				return out, err
-			}
-			out.Charge = &CreditCharge{
-				ID: id, RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix,
-				Seconds: seconds, AmountMicro: amount, ChargedAt: now.UTC(),
-			}
-		}
+	}
+	if final && anchor == 0 {
+		return out, tx.Commit()
 	}
 
 	balance, err := creditBalanceTx(ctx, tx)
@@ -507,42 +661,115 @@ func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefi
 		return out, err
 	}
 	out.BalanceMicro = balance
-
-	if balance > 0 {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
-			return out, err
-		}
-		if err := tx.Commit(); err != nil {
-			return out, err
-		}
-		return out, nil
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO NOTHING`,
-		metaKeyCreditExhaustedAt, strconv.FormatInt(nowNS, 10), nowNS); err != nil {
+	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, balance, nowNS, grace)
+	if err != nil {
 		return out, err
-	}
-	var stampedRaw string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt).Scan(&stampedRaw); err != nil {
-		return out, err
-	}
-	stamped, perr := strconv.ParseInt(strings.TrimSpace(stampedRaw), 10, 64)
-	if perr != nil {
-		stamped = nowNS
 	}
 	if err := tx.Commit(); err != nil {
 		return out, err
 	}
-	out.ExhaustedFor = time.Duration(nowNS - stamped)
-	if out.ExhaustedFor < 0 {
-		out.ExhaustedFor = 0
-	}
-	out.Cancel = out.ExhaustedFor >= time.Duration(grace)*time.Second
+	out.ExhaustedFor = exhaustedFor
+	out.Cancel = cancel
 	return out, nil
+}
+
+type chargeWindow struct {
+	RunID, NodeID, TokenPrefix string
+	Anchor, NowNS              int64
+	Rate, MaxCharge            int64
+	Final                      bool
+}
+
+// safety: the returned instant is zero once a final settle has released the
+// window, so a later attempt on the same node anchors its own.
+func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*CreditCharge, int64, int64, error) {
+	// safety: a node claimed before this schema carries no anchor, so charging
+	// starts at this call rather than billing every second before it.
+	if w.Anchor == 0 {
+		if w.Final {
+			return nil, 0, 0, nil
+		}
+		return nil, 0, w.NowNS, nil
+	}
+
+	if w.NowNS <= w.Anchor {
+		if !w.Final {
+			return nil, 0, w.Anchor, nil
+		}
+		refund := (w.Anchor - w.NowNS) / int64(time.Second)
+		if refund <= 0 {
+			return nil, 0, 0, nil
+		}
+		charge, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -refund, -w.Rate*refund)
+		return charge, 0, 0, err
+	}
+
+	seconds := (w.NowNS - w.Anchor) / int64(time.Second)
+	forgiven := int64(0)
+	through := w.Anchor + seconds*int64(time.Second)
+	if w.MaxCharge > 0 && seconds > w.MaxCharge {
+		forgiven = seconds - w.MaxCharge
+		seconds = w.MaxCharge
+		// safety: the gap is forgiven rather than deferred, so the anchor
+		// catches up to now instead of lagging by it on every later charge.
+		through = w.NowNS
+	}
+	settled := through
+	if w.Final {
+		settled = 0
+	}
+	if seconds <= 0 {
+		return nil, forgiven, settled, nil
+	}
+	charge, err := insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, seconds, w.Rate*seconds)
+	return charge, forgiven, settled, err
+}
+
+func insertCreditChargeTx(
+	ctx context.Context, tx *storeTx, w chargeWindow, kind string, seconds, amount int64,
+) (*CreditCharge, error) {
+	id, err := newCreditID("charge")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
+		id, w.RunID, w.NodeID, w.TokenPrefix, kind, seconds, amount, w.NowNS); err != nil {
+		return nil, fmt.Errorf("credits: insert charge: %w", err)
+	}
+	return &CreditCharge{
+		ID: id, RunID: w.RunID, NodeID: w.NodeID, TokenPrefix: w.TokenPrefix,
+		Kind: kind, Seconds: seconds, AmountMicro: amount,
+		ChargedAt: time.Unix(0, w.NowNS).UTC(),
+	}, nil
+}
+
+func settleCreditExhaustionTx(
+	ctx context.Context, tx *storeTx, balance, nowNS, grace int64,
+) (time.Duration, bool, error) {
+	if balance > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
+			return 0, false, err
+		}
+		return 0, false, nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO NOTHING`,
+		metaKeyCreditExhaustedAt, strconv.FormatInt(nowNS, 10), nowNS); err != nil {
+		return 0, false, err
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt).Scan(&raw); err != nil {
+		return 0, false, err
+	}
+	stamped := parseCreditSetting(raw, nowNS)
+	exhaustedFor := time.Duration(nowNS - stamped)
+	if exhaustedFor < 0 {
+		exhaustedFor = 0
+	}
+	return exhaustedFor, exhaustedFor >= time.Duration(grace)*time.Second, nil
 }
 
 // TokenMetered reports whether the operator marked this token's holder as a
@@ -553,6 +780,21 @@ func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error) {
 	}
 	var metered int64
 	err := s.queryRow(ctx, `SELECT metered FROM tokens WHERE prefix = ?`, prefix).Scan(&metered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return metered != 0, nil
+}
+
+func tokenMeteredTx(ctx context.Context, tx *storeTx, prefix string) (bool, error) {
+	if prefix == "" {
+		return false, nil
+	}
+	var metered int64
+	err := tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE prefix = ?`, prefix).Scan(&metered)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -580,11 +822,6 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 	if n == 0 {
 		return notFound("token", prefix)
 	}
-	// safety: an ambiguous prefix names no single holder, so metering it would
-	// charge for work a stranger's token did.
-	if n > 1 {
-		return fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, n)
-	}
 	return nil
 }
 
@@ -592,6 +829,12 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 // of that kind, which keeps a condition a poller re-observes every half
 // second to one row. It reports whether it wrote.
 func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error) {
+	// safety: the common call finds the event already there, so the read comes
+	// before the transaction rather than inside one opened twice a second.
+	present, err := s.eventKindPresent(ctx, runID, nodeID, kind)
+	if err != nil || present {
+		return false, err
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
@@ -614,6 +857,58 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Store) eventKindPresent(ctx context.Context, runID, nodeID, kind string) (bool, error) {
+	var existing int
+	err := s.queryRow(ctx,
+		`SELECT 1 FROM events WHERE run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
+		runID, nodeID, kind).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// CancelNodeForExhaustedCredits fails a running node whose controller ran out
+// of credit, releases its claim, and records the reason on the run. It
+// settles the node's credits first, so the ledger stops at the instant the
+// node did.
+func (s *Store) CancelNodeForExhaustedCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) error {
+	if _, err := s.FinalizeNodeCredits(ctx, runID, nodeID, tokenPrefix, now); err != nil {
+		return err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE nodes
+   SET `+nodeFailSet+`, error = 'credit balance exhausted', failure_reason = ?, finished_at = ?,
+       claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+       claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+       ready_at = NULL, offer_started_at = NULL, reservation_id = '',
+       credit_charged_through = 0
+ WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
+		FailureCreditsExhausted, now.UnixNano(), runID, nodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE node_execution_attempts
+   SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
+       failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
+ WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
+		now.UnixNano(), FailureCreditsExhausted, runID, nodeID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // OldestWaitingReadyNode names the ready node a claim would have been given,

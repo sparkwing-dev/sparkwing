@@ -72,6 +72,9 @@ const (
 	FailureVerify             = "verify"
 	FailureQueueTimeout       = "queue_timeout"
 	FailureRunnerLeaseExpired = "runner_lease_expired"
+	// FailureCreditsExhausted: the controller's prepaid credit balance ran
+	// out and the node was cancelled after the grace period.
+	FailureCreditsExhausted = "credits_exhausted"
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403
 	// against the controller's auth surface. The run's structured
 	// logs are unrecoverable; better to fail loud than report
@@ -4869,6 +4872,7 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
+       credit_charged_through = 0,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
  WHERE run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
 		nodeStatusPending, runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
@@ -5005,6 +5009,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
 			        lease_expires_at = ?, coordinator_id = ?, executor_kind = '', executor_id = '',
 			        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
+			        credit_charged_through = 0,
 			        claim_generation = claim_generation + 1
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
 			    AND required_coordinator_id = '' AND required_executor_location = ''
@@ -5012,6 +5017,10 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
 			coordinatorID, n.RunID, n.NodeID,
 		); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		if err := reserveNodeCreditsTx(ctx, tx, claimant, n.RunID, n.NodeID, now); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}
@@ -5334,7 +5343,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
 		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
+		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+		        credit_charged_through = 0
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {

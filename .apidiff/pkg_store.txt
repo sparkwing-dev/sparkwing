@@ -150,10 +150,13 @@ type CreditCharge struct {
 	RunID       string
 	NodeID      string
 	TokenPrefix string
+	Kind        string
 	Seconds     int64
 	AmountMicro int64
 	ChargedAt   time.Time
 }
+const CreditChargeRefund = "refund"
+const CreditChargeReservation = "reservation"
 type CreditChargeResult struct {
 	Charge *CreditCharge
 
@@ -162,7 +165,10 @@ type CreditChargeResult struct {
 	ExhaustedFor time.Duration
 
 	Cancel bool
+
+	ForgivenSeconds int64
 }
+const CreditChargeUsage = "usage"
 const CreditClaimFloorSeconds = 60
 type CreditGrant struct {
 	ID          string
@@ -174,12 +180,14 @@ type CreditGrant struct {
 }
 const CreditGrantFree = "free"
 const CreditGrantPaid = "paid"
+const CreditHistoryMaxLimit = 1000
 type CreditState struct {
 	GrantedMicro       int64
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
 	GraceSeconds       int64
+	MaxChargeSeconds   int64
 	BurnWindow         time.Duration
 	BurnMicro          int64
 	ExhaustedAt        *time.Time
@@ -294,6 +302,7 @@ const DefaultConcurrencyHeartbeatInterval = 3 * time.Second
 const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
+const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 const DefaultLeaseDuration = 3 * time.Minute
 func DetectDialect(dsn string) Dialect
@@ -463,6 +472,7 @@ type ExecutorSchedulingSummary struct {
 }
 func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
+const FailureCreditsExhausted = "credits_exhausted"
 const FailureLogsAuth = "logs_auth"
 const FailureLogsDropped = "logs_dropped"
 const FailureNoProgressTimeout = "no_progress_timeout"
@@ -475,6 +485,12 @@ const FailureVerify = "verify"
 func FormatCredits(micro int64) string
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
+type InsufficientCreditsError struct {
+	BalanceMicro  int64
+	RequiredMicro int64
+}
+func (e *InsufficientCreditsError) Error() string
+func (e *InsufficientCreditsError) Unwrap() error
 const InvocationSecretArgsKey = "secret_args"
 func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
@@ -848,6 +864,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
+func (s *Store) CancelNodeForExhaustedCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) error
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
@@ -883,6 +900,7 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
+func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
@@ -900,6 +918,7 @@ func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix stri
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID string) (ExecutorClaimRoundResult, error)
+func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
@@ -1021,6 +1040,7 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
+func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
@@ -1036,7 +1056,6 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
-func (s *Store) StartNodeMetering(ctx context.Context, runID, nodeID string, at time.Time) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
