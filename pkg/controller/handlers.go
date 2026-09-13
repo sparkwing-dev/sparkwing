@@ -1413,7 +1413,7 @@ func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
 	})
 }
 
-func (s *Server) placementContext(ctx context.Context, claimer string) context.Context {
+func (s *Server) placementContext(ctx context.Context, claimer presenceKey) context.Context {
 	if s.placement.hold <= 0 {
 		return ctx
 	}
@@ -1503,7 +1503,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
-	claimer := presenceName(body.HolderID)
+	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
 	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
 	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
 		claimIdentity(r), body.HolderID, lease, body.Labels)
@@ -1515,7 +1515,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.runnerPresence.granted(claimer)
+	s.runnerPresence.awarded(claimer)
 	writeClaimedNode(w, r, s, n)
 }
 
