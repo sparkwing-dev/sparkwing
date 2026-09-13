@@ -293,7 +293,11 @@ in one step (no separate init needed).
 Re-running on an already-set-up laptop re-applies 0700 to
 ~/.config/sparkwing/ and reports each config file's mode, naming any
 that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command reports existing state.`,
+and the permission fix so the command reports existing state.
+
+Run inside a sparkwing project, it also reports whether this
+checkout's declared git hooks fire, and names the command that
+arms them. It installs nothing and changes no git configuration.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "dry-run", Desc: "Probe + report without creating or tightening ~/.config/sparkwing/", Group: "Behavior"},

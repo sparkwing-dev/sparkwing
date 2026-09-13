@@ -23,6 +23,12 @@ unlock.
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
+- **cli:** `sparkwing configure init` reports whether the checkout it stands in
+  runs its declared git hooks, and names the command that arms them. It
+  installs nothing and changes no git configuration; a fresh clone simply no
+  longer has to guess whether its gates fire. The verdict is the same one
+  `sparkwing pipeline hooks survey` computes, and `-o json` carries it as a
+  `hooks` record.
 - **cli:** `sparkwing daemon stop` drains an answering admission daemon and
   leaves it stopped. It uses the same wire drain a restart does, launches no
   successor, and waits for the admission socket to go quiet; the supervisor
