@@ -129,6 +129,14 @@ type HandlerOptions struct {
 	// BundleFS returns it. A source checkout carries no embedded bundle,
 	// so a test that serves the dashboard supplies its own.
 	Bundle fs.FS
+
+	// Listener, when non-nil, supersedes the addr ServeWithOptions was
+	// given: it serves on this pre-built listener and takes ownership of
+	// closing it. Lets a caller reserve a port and hand it over without a
+	// close-then-rebind window another process can race into. addr is
+	// still what the validations and the startup line read, so pass the
+	// listener's own address.
+	Listener net.Listener
 }
 
 // Serve runs the store-backed dashboard on addr. Backend and Paths come
@@ -184,8 +192,16 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
+	lis := opts.Listener
+	if lis == nil {
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		lis = l
+	}
 	fmt.Fprintf(os.Stderr, "sparkwing web: serving http://%s\n", addr)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := srv.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
