@@ -385,6 +385,7 @@ func hookIndex() string {
 	if path == "" {
 		return ""
 	}
+	// #nosec G703 -- naming this index already requires running as this user, so it crosses no privilege boundary
 	if _, err := os.Stat(path); err != nil {
 		return ""
 	}
