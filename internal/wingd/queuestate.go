@@ -84,6 +84,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		RunsWithoutProcess:  d.attribution.runsWithoutProcess,
 		RunsAwaitingMeasure: d.attribution.runsAwaitingMeasure,
 		RunsProcessGone:     d.attribution.runsProcessGone,
+		Attributed:          d.attribution.attributed,
 	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{

@@ -71,12 +71,26 @@ type OwnedRoot struct {
 type OwnedCPUSampler interface {
 	// CPUUsage reports the CPU each root's process tree ran, keyed by the
 	// root pid the caller asked about. A process under more than one root
-	// counts once, against its nearest ancestor root. A root is in the map
-	// only where a figure could be computed for it, so a missing key means
-	// no reading for that root this call and a zero value means it ran no
-	// measurable CPU. measured reports whether the host's process table was
-	// read at all; false leaves byRoot empty and says nothing about any
-	// individual root.
+	// counts once, against its nearest ancestor root.
+	//
+	// Leave a root out of the map where no figure could be computed for it,
+	// and give it a zero only where it ran no measurable CPU. The two answers
+	// grant the same cores, so nothing catches them being swapped: a zero
+	// asserts an attribution that did not happen, which reports the daemon as
+	// measuring cleanly while the CPU it missed goes on being charged to the
+	// machine. What a wrong answer costs is the operator's signal, not the
+	// arithmetic.
+	//
+	// measured reports whether the host's process table was read at all.
+	// Return false where the read itself failed; it leaves byRoot empty and
+	// says nothing about any individual root. An empty map with measured true
+	// says the table was read and every root in it was individually
+	// unreadable, which is counted as a different fault.
+	//
+	// totalCores is the capacity admission divides up, which is a container's
+	// limit where one is set below the machine's. Bound a figure the sampler
+	// cannot otherwise justify against it rather than against the machine,
+	// since cores above it are not the daemon's to hand out.
 	//
 	// A process the sampler has no previous reading for has run all of its
 	// CPU since the reading before this one, so its whole total belongs to

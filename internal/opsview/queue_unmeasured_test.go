@@ -138,7 +138,7 @@ func TestExternalAttributionNote_LeadsWithWhatTheReadingCarries(t *testing.T) {
 	qs := coresUnattributed(&wingwire.ExternalAttribution{
 		Samples: 120, SamplerUnreadable: 7, RunsAwaitingMeasure: 3,
 	})
-	want := "external attribution: this reading carries some of this daemon's own runs' CPU," +
+	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
 		" so external reads high and available reads low by it" +
 		" (since this daemon started: the process sampler read nothing on 7 of 120 readings" +
 		"; a holding run had no CPU figure yet on 3 of 120)"
@@ -149,7 +149,7 @@ func TestExternalAttributionNote_LeadsWithWhatTheReadingCarries(t *testing.T) {
 
 func TestExternalAttributionNote_DropsTheCauseThatDidNotHappen(t *testing.T) {
 	qs := coresUnattributed(&wingwire.ExternalAttribution{Samples: 40, RunsWithoutProcess: 2})
-	want := "external attribution: this reading carries some of this daemon's own runs' CPU," +
+	want := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
 		" so external reads high and available reads low by it" +
 		" (since this daemon started: a holding run reported no process id on 2 of 40)"
 	if got := opsview.ExternalAttributionNote(qs); got != want {
@@ -193,7 +193,17 @@ func TestRenderQueuePlain_CarriesTheAttributionCountsWhenClean(t *testing.T) {
 	if err := opsview.RenderQueue(&out, qs, "plain"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(out.String(), "external-attribution\t900\t0\t0\t0\t0\n") {
-		t.Fatalf("plain output = %q, want the attribution row: a machine reader needs the denominator even when nothing went wrong", out.String())
+	for _, want := range []string{
+		"external-attribution-readings\t900\n",
+		"external-attribution-attributed\t0\n",
+		"external-attribution-sampler-unreadable\t0\n",
+		"external-attribution-runs-without-process\t0\n",
+		"external-attribution-runs-process-gone\t0\n",
+		"external-attribution-runs-awaiting-measure\t0\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("plain output = %q, want the row %q: a machine reader needs the denominator even when nothing went wrong, and one row per count so a later count is additive",
+				out.String(), want)
+		}
 	}
 }

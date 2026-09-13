@@ -91,9 +91,10 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	if stat.CPUMeasured {
 		d.attribution.samples++
 		// safety: one reading is counted under one cause, worst first, so the
-		// counts stay disjoint and a reader can subtract them from samples to get
-		// the readings that attributed. A sampler that read nothing explains every
-		// run's missing figure, so the per-run causes say nothing more.
+		// counts stay disjoint. The readings that attributed are counted outright
+		// rather than left to subtraction, which would call a cause a later daemon
+		// adds a clean reading. A sampler that read nothing explains every run's
+		// missing figure, so the per-run causes say nothing more.
 		switch {
 		case !ownedMeasured, impossible:
 			d.attribution.samplerUnreadable++
@@ -105,6 +106,9 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 			d.attribution.runsAwaitingMeasure++
 		}
 		attributed := ownedMeasured && !impossible && !withoutProcess && !awaitingMeasure && !processGone
+		if attributed {
+			d.attribution.attributed++
+		}
 		unattributed := 0.0
 		if !attributed {
 			unattributed = 1
@@ -250,6 +254,7 @@ type externalAttribution struct {
 	runsWithoutProcess  int64
 	runsAwaitingMeasure int64
 	runsProcessGone     int64
+	attributed          int64
 }
 
 func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure, processGone bool) {

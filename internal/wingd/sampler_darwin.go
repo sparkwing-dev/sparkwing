@@ -106,9 +106,16 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, totalCores float64) (m
 	if !ok {
 		return nil, false
 	}
+	// safety: these are the kernel's own per-process rates rather than a
+	// difference between two readings, so no figure here can predate a window
+	// and HeldSince bounds nothing. The capacity bound still holds: a tree
+	// cannot have run more than admission had to hand out.
 	byRoot := make(map[int]float64, len(rootPIDs))
 	for processID, usage := range cpu {
 		byRoot[ownerByPID[processID]] += usage
+	}
+	for root, owned := range byRoot {
+		byRoot[root] = clampCores(owned, totalCores)
 	}
 	return byRoot, true
 }

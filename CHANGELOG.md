@@ -57,6 +57,26 @@ unlock.
   keeps holding it, where a waiting one is attributed on the next reading. They
   were one count, documented as the expected shape, so a host serving a dead
   lease read as a host doing ordinary work.
+- **admission:** Measure a run's CPU rate only from a reading taken when the
+  current window opened. A reading kept from an earlier window spans intervals
+  nobody was watching that run, so re-holding a released run charged it that
+  whole stretch at once: a run idle for the window it was held read as 3.93
+  cores, and external read 1.07 where the truth was 5.00. A run the daemon has
+  stopped holding is re-measured each reading while its processes live, so
+  holding it again resumes from a figure this window can stand behind.
+- **admission:** Bound a run's CPU against the capacity admission divides up
+  rather than the machine's core count. Under a cgroup limit the two differ, and
+  the looser bound admitted against cores the daemon had no room to grant --
+  eight times looser on a two-core limit.
+- **admission (macOS):** Report no figure for a run whose CPU counter ran
+  backwards, matching every other platform. Reporting zero subtracts nothing
+  from external, which admits against CPU the daemon never measured.
+- **admission:** `QueueState.ExternalAttribution` carries `attributed`, the
+  count of readings that located every holding run's CPU. Read it directly
+  rather than subtracting the fault counts from `samples`: a later daemon may
+  count a cause this build has no field for, and the subtraction would report
+  those readings as clean. `sparkwing queue` plain output now prints one row per
+  count, `external-attribution-<count>`, instead of five positional columns.
 - **admission:** Report no figure for a run whose own process restarted, rather
   than a figure covering only the parts of its process tree that survived. A run
   that re-execs kept its surviving children's CPU and silently lost its own, so
@@ -67,7 +87,7 @@ unlock.
   before it could be credited again, on exactly the busy hosts where runs queue.
 - **admission:** Credit a run from its first reading rather than its second. A
   run's CPU is a rate between two readings, so a process the daemon had not seen
-  before was credited nothing — and a run whose processes are new every reading
+  before was credited nothing -- and a run whose processes are new every reading
   was therefore never credited at all, charging its whole load to the rest of the
   machine for as long as it ran. A process first seen in a tree the daemon was
   already watching has run all of its CPU since the previous reading, so its
@@ -76,16 +96,19 @@ unlock.
   before the window stays unmeasured rather than credited a lifetime average
   that no longer describes it, and so does a process carrying more CPU than the
   window could physically hold, which proves it joined the run's process tree
-  rather than starting inside it. The daemon caps what it credits itself at what
-  the host actually ran, because a larger figure would understate external and
-  admit work the machine has no room for. Measured on a ten-core host where a three-core
+  rather than starting inside it. A reading crediting this daemon more CPU than the
+  host itself ran is impossible, so it is treated as a reading that measured
+  nothing and the host is charged in full: trimming it to fit would land
+  external on exactly zero, which is the over-admission the cap exists to stop. Measured on a ten-core host where a three-core
   run restarts every reading beside a four-core long-lived one: external fell
   from 4.0 cores to the true 1.0, and the budget stopped under-admitting by 47%.
 - **admission:** `ResourceState.ExternalSource` reports a third value,
   `unattributed`, for an External figure the host sampler did read but which
   carries some of sparkwing's own runs' CPU. Read the field as an open set: any
-  value other than `unmeasured` is a real host reading, so branch on `unmeasured`
-  rather than switching on the values a build happens to know. `sparkwing queue`
+  named value other than `unmeasured` is a real host reading, so branch on
+  `unmeasured` rather than switching on the values a build happens to know. An
+  empty value is the exception and means the daemon predates the field, so
+  whether the figure was measured is unknown. `sparkwing queue`
   and the capacity dashboard both say so where it applies.
 
 ### Security

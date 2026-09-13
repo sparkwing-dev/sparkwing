@@ -355,8 +355,10 @@ const (
 	// read, but which carries some of this daemon's own runs' CPU because
 	// their share could not be measured and separated out. The figure is a
 	// real reading that reads high, so Available reads low by the same
-	// amount. [QueueState.ExternalAttribution] says how often that happens
-	// and why.
+	// amount. The label is smoothed across readings rather than describing
+	// the one on screen, so it outlasts the cause that raised it and a
+	// single clean reading does not clear it.
+	// [QueueState.ExternalAttribution] says how often that happens and why.
 	ExternalUnattributed = "unattributed"
 	// ExternalUnmeasured marks a dimension the host sampler could not read.
 	// Renderers print the word, never a byte or core count, because a
@@ -394,9 +396,13 @@ type ResourceState struct {
 	// predate the field.
 	//
 	// Read this as an open set: a later daemon may report a value this build
-	// does not know. Every value other than [ExternalUnmeasured] is a real
-	// host reading, so branch on [ExternalUnmeasured] and treat the rest as
-	// measured rather than switching on the known values and falling through.
+	// does not know. Every named value other than [ExternalUnmeasured] is a
+	// real host reading, so branch on [ExternalUnmeasured] and treat the
+	// other named values as measured rather than switching on the known
+	// values and falling through. Empty is the one value outside that rule:
+	// it says the daemon predates the field, so whether External was
+	// measured is unknown and treating it as measured renders a zero the
+	// daemon never stood behind.
 	ExternalSource string `json:"external_source,omitempty"`
 	// Available is what a new run can actually draw right now: capacity
 	// minus the reserve, minus external load, minus what sparkwing
@@ -422,8 +428,9 @@ type ResourceState struct {
 type ExternalAttribution struct {
 	// Samples is how many host CPU readings the daemon has taken, the
 	// denominator the counts below are read against. A reading is counted
-	// under at most one of them, worst cause first, so subtracting the
-	// counts below from Samples leaves the readings that attributed cleanly.
+	// under at most one of them, worst cause first. Read the readings that
+	// attributed cleanly off Attributed rather than by subtraction, which
+	// would count a cause this build has no field for as clean.
 	Samples int64 `json:"samples"`
 	// SamplerUnreadable is how many readings the process sampler could not
 	// turn into a usable figure: it returned nothing, or it returned more
@@ -440,9 +447,11 @@ type ExternalAttribution struct {
 	// daemon had already measured stopped yielding a figure. The run may
 	// have died without releasing its admission, its process may have become
 	// unreadable, or its process tree may have taken in work the daemon
-	// cannot date. Each holds capacity nothing can use and charges that
-	// run's share to the machine, so unlike RunsAwaitingMeasure this count
-	// rising wants someone to look rather than being the expected shape.
+	// cannot date. Nothing here says which, so a renderer naming one of them
+	// states more than the count carries. Each holds capacity nothing can
+	// use and charges that run's share to the machine, so unlike
+	// RunsAwaitingMeasure this count rising wants someone to look rather
+	// than being the expected shape.
 	RunsProcessGone int64 `json:"runs_process_gone"`
 	// RunsAwaitingMeasure is how many readings ran while a holding run had
 	// no CPU figure the daemon could stand behind: it began holding after
@@ -452,6 +461,12 @@ type ExternalAttribution struct {
 	// covers it. A run that has merely just started is not counted here --
 	// it is measured from its first reading.
 	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
+	// Attributed is how many readings located every holding run's CPU and
+	// subtracted it, which is the condition the other counts are absences
+	// of. It is carried rather than left to be worked out by subtraction,
+	// because a later daemon may count a cause this build has no field for
+	// and a subtraction would then report those readings as clean.
+	Attributed int64 `json:"attributed"`
 }
 
 // Holder is one run currently holding admission, or a connected run carrying

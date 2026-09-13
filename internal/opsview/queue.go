@@ -138,8 +138,19 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
 	if a := qs.ExternalAttribution; a != nil {
-		fmt.Fprintf(w, "external-attribution\t%d\t%d\t%d\t%d\t%d\n", a.Samples,
-			a.SamplerUnreadable, a.RunsWithoutProcess, a.RunsProcessGone, a.RunsAwaitingMeasure)
+		for _, row := range []struct {
+			key   string
+			count int64
+		}{
+			{"readings", a.Samples},
+			{"attributed", a.Attributed},
+			{"sampler-unreadable", a.SamplerUnreadable},
+			{"runs-without-process", a.RunsWithoutProcess},
+			{"runs-process-gone", a.RunsProcessGone},
+			{"runs-awaiting-measure", a.RunsAwaitingMeasure},
+		} {
+			fmt.Fprintf(w, "external-attribution-%s\t%d\n", row.key, row.count)
+		}
 	}
 	if n := unmeasuredWaiters(qs); n > 0 {
 		fmt.Fprintf(w, "unmeasured-waiters\t%d\n", n)
@@ -437,7 +448,7 @@ func ExternalAttributionNote(qs wingwire.QueueState) string {
 	if qs.IgnoreExternal || a == nil || a.Samples == 0 || !coresExternalUnattributed(qs) {
 		return ""
 	}
-	note := "external attribution: this reading carries some of this daemon's own runs' CPU," +
+	note := "external attribution: recent readings carry some of this daemon's own runs' CPU," +
 		" so external reads high and available reads low by it"
 	if causes := externalAttributionCauses(a); causes != "" {
 		note += " (since this daemon started: " + causes + ")"
@@ -455,9 +466,6 @@ func coresExternalUnattributed(qs wingwire.QueueState) bool {
 }
 
 func externalAttributionCauses(a *wingwire.ExternalAttribution) string {
-	if a == nil || a.Samples == 0 {
-		return ""
-	}
 	var clauses []string
 	if a.SamplerUnreadable > 0 {
 		clauses = append(clauses, fmt.Sprintf("the process sampler read nothing on %d of %d readings",
@@ -468,7 +476,7 @@ func externalAttributionCauses(a *wingwire.ExternalAttribution) string {
 			a.RunsWithoutProcess, a.Samples))
 	}
 	if a.RunsProcessGone > 0 {
-		clauses = append(clauses, fmt.Sprintf("a holding run had died without releasing on %d of %d",
+		clauses = append(clauses, fmt.Sprintf("a measured holding run stopped yielding a figure on %d of %d",
 			a.RunsProcessGone, a.Samples))
 	}
 	if a.RunsAwaitingMeasure > 0 {
