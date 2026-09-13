@@ -393,6 +393,11 @@ logs:
     # Log files across the whole store at or above which every append is
     # refused with 507. Empty leaves the count unlimited.
     maxStoreObjects: ""
+    # Stored bytes at which /api/v1/health reports the store as warning,
+    # refusing nothing. Empty disables the warning.
+    warnStoreBytes: ""
+    # Log files at which /api/v1/health reports the store as warning.
+    warnStoreObjects: ""
     # How often the service walks the store and replaces its running
     # count with the measurement (default 1h); "0" measures once at
     # startup.

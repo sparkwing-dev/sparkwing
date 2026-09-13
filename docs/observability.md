@@ -449,11 +449,19 @@ further writes are refused with an error naming the ceiling and the
 measurement, and health reports the freeze. Reads and deletes keep
 working, because deleting is how a store gets back under its ceiling.
 
-| Service | What it bounds | Refusal |
-|--------|------|-------------|
-| `sparkwing-cache` | the artifact, dependency-archive and upload trees | `507` on upload |
-| `sparkwing-logs` | the whole log store | `507` on append |
-| `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error |
+| Service | What it bounds | Refusal | State on |
+|--------|------|-------------|------|
+| `sparkwing-cache` | the artifact, dependency-archive and upload trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
+| `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
+| `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
+
+Each of the three reports `frozen`, `warning` and
+`measurement_incomplete` on its health route and raises a `problems`
+entry for each, so a frozen or warning store shows as degraded wherever
+health is read. The services also carry their counted bytes and objects
+and the time of the last measurement; the controller keeps its totals on
+the admin-scoped breaker route, because its health answers without a
+token.
 
 The three are independent: each measures the store it owns and freezes
 only its own writes, so no service waits on another to decide. The
@@ -499,14 +507,22 @@ the ceiling too. It counts only what it has written since it started,
 because the measurement belongs to the controller; treat that as a
 backstop on one process rather than a second view of the bucket.
 
-Two properties keep the measurement from becoming the cost it bounds.
+Three properties keep the measurement from becoming the cost it bounds.
 One replica measures per window: the controllers claim a store-wide
-lease, so N replicas cost one listing rather than N. And the
-measurement's requests sit outside the object-store request budget,
-because totalling a million-object bucket spends twice the per-minute
-list budget in one pass and would otherwise leave every other reader
-refused for the rest of the minute; the reconciliation window is what
-bounds it instead.
+lease, so N replicas cost one listing rather than N. The measurement's
+requests sit outside the object-store request budget, because totalling
+a million-object bucket spends twice the per-minute list budget in one
+pass and would otherwise leave every other reader refused for the rest
+of the minute. And the walk itself is bounded, at a thousand listings
+and at half the reconciliation interval, whichever comes first.
+
+A measurement that stops at either bound is discarded rather than folded
+in, because a total short of the truth would thaw a store that is still
+full. The ceiling then reports `measurement_incomplete` on health and in
+`sparkwing_object_store_bucket_ceiling_measurement_incomplete`, and
+keeps counting writes until a measurement finishes. A bucket that keeps
+reporting incomplete wants a longer `--bucket-reconcile`, a narrower
+prefix, or S3 Inventory in place of the listing.
 
 `GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
 `warning` alone, because that route answers without a token; the totals
@@ -527,9 +543,12 @@ Clearing a freeze is an operator decision:
 sparkwing cluster object-store reset-breaker --profile prod
 ```
 
-That thaws the bucket and holds the thaw until the next measurement:
-writes counted in between do not freeze it again, so the operator gets
-the whole window to act. The measurement then decides, and freezes again
+A thaw is refused while no measurement is scheduled
+(`--bucket-reconcile 0`), because nothing would ever end it and the
+ceiling would be off until the process restarts; raise the ceiling
+instead. Otherwise it thaws the bucket and holds the thaw until the next
+measurement: writes counted in between do not freeze it again, so the
+operator gets the whole window to act. The measurement then decides, and freezes again
 while the bucket is still over the ceiling. Raise the ceiling on the
 controller to keep writes flowing, or delete objects until the
 measurement falls back under it.
@@ -550,7 +569,17 @@ and an error naming its own flags.
 Each service counts what it stores as it stores it and walks its own
 trees on `--store-reconcile` (hourly by default, `0` measures once at
 startup). The walk is local file I/O rather than billed requests, and a
-measurement that finds the store back under its ceiling thaws it, so
-deleting runs, or letting the logs sweeper delete them under
-`--retention`, brings writes back on the next interval. The chart
-carries all of these as `cache.limits.*` and `logs.limits.*`.
+measurement that finds the store back under its ceiling thaws it.
+`--warn-store-bytes` and `--warn-store-objects` mark the store as
+warning on health without refusing anything. The chart carries all of
+these as `cache.limits.*` and `logs.limits.*`.
+
+Neither service waits out the interval to recover. Deleting a run with
+`DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
+`--retention`, measures the log store again on the spot. The cache
+serves no delete of its own, so it carries two bearer-gated admin
+routes: `POST /admin/store-ceiling/measure` walks the trees now, which
+is what turns freeing space on the volume into uploads flowing again,
+and `POST /admin/store-ceiling/thaw` accepts uploads until the next
+measurement. Both answer with the ceiling state, and the thaw is refused
+with `409` when no measurement is scheduled.

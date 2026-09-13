@@ -182,6 +182,16 @@ refusing anything, and `--store-reconcile`
 at startup) is how often the service walks its trees and replaces its
 running count with the measurement. All of
 them are off until set, and the chart carries them as `cache.limits.*`.
+`GET /health` reports the store under `store_ceiling` (frozen, warning,
+counted bytes and objects, and when it was last measured), and the same
+state is exported as `sparkwing.cache.store_*`.
+
+The cache serves no delete, so recovery runs through two bearer-gated
+admin routes. `POST /admin/store-ceiling/measure` walks the trees
+immediately, which is how freeing space on the volume turns into uploads
+flowing again rather than a wait for the interval, and `POST
+/admin/store-ceiling/thaw` accepts uploads until the next measurement (a
+`409` when none is scheduled). Both answer with the ceiling state.
 
 ### Guarantees
 

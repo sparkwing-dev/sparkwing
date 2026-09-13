@@ -64,12 +64,28 @@ unlock.
   `--warn-store-bytes`, `--warn-store-objects` and `--store-reconcile`
   bound its artifact, dependency-archive and upload trees, and
   `sparkwing-logs --max-store-bytes`, `--max-store-objects` and
-  `--store-reconcile` bound the log store. Each service measures the
+  `--store-reconcile` (plus `--warn-store-bytes` and
+  `--warn-store-objects`) bound the log store. Each service measures the
   store it owns, refuses its own writes with `507` naming its own flags
   while frozen, keeps reads and deletes working, and thaws on the
   measurement that finds the store back under the ceiling. Every one is
   off by default, and the chart carries them as `cache.limits.*` and
   `logs.limits.*`.
+
+  All three report the ceiling where it can be watched: `store_ceiling`
+  on each service's health route (frozen, warning,
+  `measurement_incomplete`, counted bytes and objects, and the last
+  measurement), a `problems` entry for each, and metrics
+  (`sparkwing_logs_store_*`, `sparkwing.cache.store_*`). Recovery does
+  not wait out the interval: deleting a run measures the log store
+  again, and the cache carries two bearer-gated admin routes, `POST
+  /admin/store-ceiling/measure` to walk the trees now and `POST
+  /admin/store-ceiling/thaw` to accept uploads until the next
+  measurement. A thaw is refused with `409` when no measurement is
+  scheduled, because nothing would end it. A measurement is bounded at a
+  thousand listings and half the interval, and one that stops early is
+  discarded rather than folded in, leaving `measurement_incomplete`
+  behind.
 - **cache:** `sparkwing-cache --max-artifact-bytes` and
   `--max-cache-archive-bytes` (env `SPARKWING_CACHE_MAX_ARTIFACT_BYTES`,
   `SPARKWING_CACHE_MAX_ARCHIVE_BYTES`) set the size cap for one uploaded
@@ -80,10 +96,10 @@ unlock.
   warning and the node proceeds, as it already did.
 - **logs:** `sparkwing-logs --max-line-bytes` (env
   `SPARKWING_LOGS_MAX_LINE_BYTES`) caps one log line, marker included:
-  a longer line is stored cut to the cap, on a UTF-8 rune boundary, with
-  a `[sparkwing-logs] truncated: line byte cap reached` marker in place
-  of its tail, and one append earns one marker however many of its lines
-  ran long. `--binary-ratio` (env `SPARKWING_LOGS_BINARY_RATIO`) drops an
+  every line past it is stored cut to the cap, on a UTF-8 rune boundary,
+  with a `[sparkwing-logs] truncated: line byte cap reached` marker in
+  place of its tail. A cap too small to hold the marker and a byte of
+  output is refused at startup. `--binary-ratio` (env `SPARKWING_LOGS_BINARY_RATIO`) drops an
   append whose share of non-text bytes runs above it and stores one
   `[sparkwing-logs] dropped` line for that node log; control bytes count,
   and so does any byte above `0x7f` outside a valid UTF-8 sequence, which

@@ -2640,10 +2640,12 @@ func TestLogsStoreCeilingFlagsComeFromValues(t *testing.T) {
 	args := runnerContainer(t, renderLogs(t,
 		"logs.limits.maxStoreBytes=107374182400",
 		"logs.limits.maxStoreObjects=500000",
+		"logs.limits.warnStoreBytes=85899345920",
 		"logs.limits.storeReconcile=0")).Args
 	for flag, want := range map[string]string{
 		"--max-store-bytes":   "107374182400",
 		"--max-store-objects": "500000",
+		"--warn-store-bytes":  "85899345920",
 		"--store-reconcile":   "0",
 	} {
 		if got := argValue(args, flag); got != want {

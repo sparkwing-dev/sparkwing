@@ -617,11 +617,13 @@ failure.
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
   | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
-  | `--max-line-bytes` (`SPARKWING_LOGS_MAX_LINE_BYTES`) | 0 (off) | Byte cap for one log line, marker included: a longer line is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail, and one append earns one marker however many of its lines ran long. The cut lands on a UTF-8 rune boundary. Must exceed the marker's own length. |
+  | `--max-line-bytes` (`SPARKWING_LOGS_MAX_LINE_BYTES`) | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
   | `--binary-ratio` (`SPARKWING_LOGS_BINARY_RATIO`) | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
   | `--max-store-bytes` (`SPARKWING_LOGS_MAX_STORE_BYTES`) | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
   | `--max-store-objects` (`SPARKWING_LOGS_MAX_STORE_OBJECTS`) | 0 (off) | Same ceiling counted in log files. |
-  | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. |
+  | `--warn-store-bytes` (`SPARKWING_LOGS_WARN_STORE_BYTES`) | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
+  | `--warn-store-objects` (`SPARKWING_LOGS_WARN_STORE_OBJECTS`) | 0 (off) | Same warning counted in log files. |
+  | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
   the matches it found with `"truncated": true`. Search also requires
