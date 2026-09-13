@@ -10,8 +10,12 @@ working with the network unplugged.
 
 **Sparkwing Cloud** is a hosted controller for when a team needs one
 dashboard, one run history, and work scheduled across everybody's
-machines. One command connects a repository and a machine to it, and it
-picks up the work when your laptops are closed.
+machines. It picks up the work when your laptops are closed, and one
+command connects this machine to it:
+
+```bash
+sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+```
 
 Start local. Read [Install](#install) and [Quick start](#quick-start),
 then [Sparkwing Cloud](#sparkwing-cloud) when you want a team to see the
