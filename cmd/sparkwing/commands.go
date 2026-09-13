@@ -41,7 +41,7 @@ var allCommands = []*Command{
 	&cmdJobsCancel, &cmdJobsBounce, &cmdJobsPrune, &cmdJobsTimeline, &cmdJobsSummary, &cmdJobsGrep,
 	&cmdJobsConsumer, &cmdJobsConsumerStart, &cmdJobsConsumerStatus, &cmdJobsConsumerStop,
 	&cmdHooks, &cmdHooksInstall, &cmdHooksUninstall, &cmdHooksStatus, &cmdHooksSurvey, &cmdHooksFire,
-	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete,
+	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete, &cmdSecretRotate,
 	&cmdTriggers, &cmdTriggersList, &cmdTriggersGet,
 	&cmdImage, &cmdImageRollout,
 	&cmdHealth,

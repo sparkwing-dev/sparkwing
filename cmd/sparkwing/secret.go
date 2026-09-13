@@ -23,7 +23,7 @@ func runSecret(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSecret, os.Stderr)
-		return errors.New("secret: subcommand required (set|get|list|delete)")
+		return errors.New("secret: subcommand required (set|get|list|delete|rotate)")
 	}
 	switch args[0] {
 	case "set":
@@ -34,6 +34,8 @@ func runSecret(args []string) error {
 		return runSecretList(args[1:])
 	case "delete", "rm", "remove":
 		return runSecretDelete(args[1:])
+	case "rotate":
+		return runSecretRotate(args[1:])
 	default:
 		PrintHelp(cmdSecret, os.Stderr)
 		return fmt.Errorf("secret: unknown subcommand %q", args[0])
@@ -354,5 +356,48 @@ func runSecretDelete(args []string) error {
 		return fmt.Errorf("secret delete: %w", err)
 	}
 	fmt.Fprintf(os.Stdout, "secret %q deleted (on: %s)\n", name, prof.Name)
+	return nil
+}
+
+func runSecretRotate(args []string) error {
+	fs := flag.NewFlagSet(cmdSecretRotate.Path, flag.ContinueOnError)
+	v := bindFlags(cmdSecretRotate, fs)
+	if err := parseAndCheck(cmdSecretRotate, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	prof, err := resolveProfile(v.String("profile"))
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "secret rotate"); err != nil {
+		return err
+	}
+	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	result, err := c.RotateSecrets(ctx)
+	if err != nil {
+		return fmt.Errorf("secret rotate: %w", err)
+	}
+	fmt.Fprintf(os.Stdout,
+		"%d secret(s) re-encrypted under the current key (on: %s)\n", result.Rotated, prof.Name)
+	if len(result.Skipped) == 0 {
+		fmt.Fprintln(os.Stdout, "the previous key can now be dropped")
+		return nil
+	}
+	fmt.Fprintf(os.Stdout,
+		"%d secret(s) opened under no configured key and were left as they are:\n", len(result.Skipped))
+	for _, skip := range result.Skipped {
+		if skip.Repo == "" {
+			fmt.Fprintf(os.Stdout, "  %s\n", skip.Name)
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "  %s (repo %s)\n", skip.Name, skip.Repo)
+	}
+	fmt.Fprintln(os.Stdout,
+		"re-set those secrets, or name the key they were sealed under, before dropping the previous key")
 	return nil
 }

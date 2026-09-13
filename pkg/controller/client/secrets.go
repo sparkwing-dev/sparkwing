@@ -112,6 +112,35 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
 	return body.Secrets, nil
 }
 
+// SecretRotation reports what a rotation did: how many rows it rewrote
+// under the current key, and the rows it left alone because they opened
+// under no key the controller holds. A skipped row keeps the bytes it
+// had, so the previous key is still needed until those rows are re-set.
+type SecretRotation struct {
+	Rotated int                  `json:"rotated"`
+	Skipped []SecretRotationSkip `json:"skipped"`
+}
+
+// SecretRotationSkip names one row a rotation left as it was. Repo is
+// empty for the unscoped row.
+type SecretRotationSkip struct {
+	Name string `json:"name"`
+	Repo string `json:"repo,omitempty"`
+}
+
+// RotateSecrets re-encrypts every stored secret under the key the
+// controller holds now. Run it after moving the controller onto a new
+// key with the old one still configured as the previous key; once it
+// returns with nothing skipped, the old key can be dropped. The
+// controller refuses when it has no key at all.
+func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error) {
+	var body SecretRotation
+	if err := c.post(ctx, "/api/v1/secrets/rotate", nil, http.StatusOK, &body); err != nil {
+		return SecretRotation{}, err
+	}
+	return body, nil
+}
+
 // DeleteSecret removes the row by name. Returns store.ErrNotFound
 // when no row existed.
 func (c *Client) DeleteSecret(ctx context.Context, name string) error {

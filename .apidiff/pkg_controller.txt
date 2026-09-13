@@ -37,6 +37,7 @@ func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
 func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
+const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
 
@@ -58,6 +59,7 @@ const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 type GitHubWebhookBinding struct {
 	Repos  []string
 	Secret string

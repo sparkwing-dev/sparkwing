@@ -8,6 +8,15 @@
 {{- if and .Values.controller.secretsKey.name (not .Values.controller.secretsKey.key) -}}
 {{- fail "sparkwing-full: controller.secretsKey.key is required when controller.secretsKey.name is set" -}}
 {{- end -}}
+{{- if and .Values.controller.secretsPreviousKey.name (not .Values.controller.secretsPreviousKey.key) -}}
+{{- fail "sparkwing-full: controller.secretsPreviousKey.key is required when controller.secretsPreviousKey.name is set" -}}
+{{- end -}}
+{{- if and .Values.controller.secretsPreviousKey.name (not .Values.controller.secretsKey.name) -}}
+{{- fail "sparkwing-full: controller.secretsPreviousKey.name without controller.secretsKey.name gives the controller a key to read old values with and none to write new ones under, which it refuses to start on. Set controller.secretsKey.name to the key values are sealed under now" -}}
+{{- end -}}
+{{- if and .Values.controller.bootstrapAdminToken.name (not .Values.controller.bootstrapAdminToken.key) -}}
+{{- fail "sparkwing-full: controller.bootstrapAdminToken.key is required when controller.bootstrapAdminToken.name is set" -}}
+{{- end -}}
 {{- if and .Values.web.tokenSecret.name (not .Values.web.tokenSecret.key) -}}
 {{- fail "sparkwing-full: web.tokenSecret.key is required when web.tokenSecret.name is set" -}}
 {{- end -}}

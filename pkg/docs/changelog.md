@@ -74,6 +74,38 @@ unlock.
   `storage.FlushNode` calls it for a store that has it. A write-through
   store needs neither.
 
+- **controller:** `--bootstrap-admin-token-file PATH`
+  (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN` carries the value itself) stores the first
+  admin token before the listener binds, so a provisioned controller never
+  serves a request unauthenticated and `--require-auth` is satisfied on a first
+  start. Only the token's argon2 hash reaches the database, under the principal
+  `bootstrap:admin`. A tokens table holding a token that still authenticates is
+  left alone; one holding only revoked or expired rows is bootstrapped again,
+  which recovers a cluster whose last credential was revoked or ran out. The
+  value has to carry a minted token's shape, `swu_` followed by at least 28
+  characters. `charts/sparkwing-full` gains
+  `controller.bootstrapAdminToken.name` and `controller.requireAuth`.
+- **controller + cli:** `--secrets-previous-key-file PATH`
+  (`SPARKWING_SECRETS_PREVIOUS_KEY`) is a read-only fallback for secret
+  encryption: a stored value that does not open under the current key is tried
+  against the previous one, so a key change keeps every value readable.
+  `sparkwing secrets rotate --profile NAME` (`POST /api/v1/secrets/rotate`,
+  admin) then re-encrypts every stored secret under the current key in one
+  transaction, after which the previous key can be dropped. A value the
+  controller was holding as plaintext comes out encrypted, which turns
+  encryption on for an existing database without re-setting each secret.
+  A row that opens under no configured key keeps the bytes it had and is named
+  in the response, so one unreadable value costs the others nothing.
+  Encryption stays opt-in: a controller with no key configured is unchanged and
+  the rotate route answers `400`. `charts/sparkwing-full` gains
+  `controller.secretsPreviousKey.name`, and now delivers the encryption keys and
+  the bootstrap token as mounted files rather than environment variables; the
+  controller clears either variable from its environment as it reads it.
+- **pkg/store:** `Store.CreateTokenIfNoneExist` writes a caller-supplied token
+  when the tokens table is empty, checking and inserting in one transaction, and
+  `Store.RotateSecretValues` rewrites every secret row's stored value through a
+  caller-supplied function in one transaction. `store.ValidateRawToken` reports
+  whether a credential minted elsewhere carries a usable shape.
 - **controller:** `Server.WithMetricsListener` serves the Prometheus endpoint on
   a socket the caller already holds, instead of binding the address
   `WithMetricsAddr` names. A caller that lets the operating system assign the

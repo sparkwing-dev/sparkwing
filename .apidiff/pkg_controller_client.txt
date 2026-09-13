@@ -153,6 +153,7 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 func (c *Client) ResumeCron(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
+func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error)
 func (c *Client) RunCronNow(ctx context.Context, name string) (*crons.RunEnvelope, error)
 func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*crons.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
@@ -268,6 +269,14 @@ type Secret struct {
 	Bound     bool
 	CreatedAt int64
 	UpdatedAt int64
+}
+type SecretRotation struct {
+	Rotated int
+	Skipped []SecretRotationSkip
+}
+type SecretRotationSkip struct {
+	Name string
+	Repo string
 }
 type StateWaiter struct {
 	RunID         string

@@ -463,6 +463,7 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (m MetricSample) OneShot() bool
+const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
@@ -828,6 +829,7 @@ func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
+func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
@@ -958,6 +960,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error
+func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (int, error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
@@ -1073,6 +1076,7 @@ type User struct {
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }
+func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
 const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"

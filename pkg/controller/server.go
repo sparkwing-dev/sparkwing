@@ -919,6 +919,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListSecrets)))
 	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
+	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)

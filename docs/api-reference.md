@@ -123,6 +123,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/secrets` | `admin` |
 | `POST` | `/api/v1/secrets` | `admin` |
+| `POST` | `/api/v1/secrets/rotate` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` |
 | `GET` | `/api/v1/secrets/{name}` | `secrets.read` |
 | `GET` | `/api/v1/services` | `authenticated` |
