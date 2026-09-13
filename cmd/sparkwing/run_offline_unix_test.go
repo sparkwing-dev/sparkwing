@@ -31,13 +31,20 @@ const offlineMarkerEnv = "OFFLINE_FIXTURE_MARKER"
 
 const offlineStopTimeout = 30 * time.Second
 
-// TestRun_PinnedPipelineRunsWithTheNetworkDenied is the local product's
-// offline promise as an executed fact: one run downloads modules and compiles,
-// and the next run is green with every outbound request funneled into a
-// recorder that answers nothing.
+// TestRun_PinnedPipelineRunsWithTheNetworkDenied runs a pipeline whose spark is
+// pinned to an exact tag twice: once where modules may be downloaded, then again
+// where the only reachable module proxy and the only reachable HTTP proxy are a
+// recorder that answers 502 and logs what asked. The second run has to be green.
+//
+// Denial and observation are one mechanism. GOPROXY is the recorder, so a module
+// fetch is refused and logged by the same request; HTTP_PROXY and HTTPS_PROXY
+// are the recorder, so git over https is too; GIT_CONFIG_GLOBAL and
+// GIT_CONFIG_NOSYSTEM empty the git configuration that could rewrite an https
+// remote into ssh. HOME, GOMODCACHE and GOCACHE are the fixture's own, so every
+// byte the denied runs read was put there by the first run.
 func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if testing.Short() {
-		t.Skip("the offline guarantee compiles a pipeline binary; run without -short")
+		t.Skip("the offline guarantee downloads modules and compiles a pipeline binary; run without -short")
 	}
 	goBin, err := exec.LookPath("go")
 	if err != nil {
@@ -47,48 +54,39 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if err != nil {
 		t.Skip("git not on PATH")
 	}
-	userHome := os.Getenv("HOME")
-	if userHome == "" {
-		t.Skip("HOME is unset; the go build cache and git configuration hang off it")
-	}
 	cli := buildSubmitCLI(t)
 
+	fixtureHome := t.TempDir()
+	offlineUnlockModuleCache(t, filepath.Join(fixtureHome, "go", "pkg", "mod"))
 	sparkwingHome := t.TempDir()
 	t.Setenv("SPARKWING_HOME", sparkwingHome)
-	t.Setenv("GOWORK", "off")
 	offlineStopDaemon(t, sparkwingHome)
 
 	// safety: a sparkwing on the developer's PATH would host the admission
 	// daemon for this home, and the operator's binary is not this test's to
 	// start; the fixture PATH carries the two tools a run actually needs.
 	toolPath := offlineToolPath(t, goBin, gitBin)
-	repoDir, sparkwingDir := offlineWriteFixture(t, toolPath, userHome)
+	repoDir, sparkwingDir := offlineWriteFixture(t, gitBin, toolPath, fixtureHome)
 	marker := filepath.Join(t.TempDir(), "ran.txt")
 
-	connected := offlineBaseEnv(userHome, toolPath, sparkwingHome, marker)
-	offlineRunGo(t, sparkwingDir, connected, "mod", "tidy")
+	connected := offlineConnectedEnv(fixtureHome, toolPath, sparkwingHome, marker)
+	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, connected, "mod", "tidy"); tidyErr != nil {
+		t.Skipf("this host cannot download the fixture's modules, so there is no first build to go offline from: %v\n%s",
+			tidyErr, out)
+	}
 
 	firstOut, err := offlineRunCLI(cli, repoDir, connected, "run", "offline")
 	if err != nil {
-		t.Fatalf("first run failed while the network was reachable: %v\n%s", err, firstOut)
+		t.Fatalf("first run failed after its modules downloaded: %v\n%s", err, firstOut)
 	}
 	if !strings.Contains(firstOut, "compiling .sparkwing/") {
 		t.Fatalf("the first run did not compile the pipeline binary, so the second proves nothing:\n%s", firstOut)
 	}
 
 	denier := offlineNewDenier(t)
-	denied := append(offlineBaseEnv(userHome, toolPath, sparkwingHome, marker),
-		"GOPROXY=off",
-		"GOSUMDB=off",
-		"GOPRIVATE=*",
-		"HTTP_PROXY="+denier.url,
-		"HTTPS_PROXY="+denier.url,
-		"http_proxy="+denier.url,
-		"https_proxy="+denier.url,
-		"NO_PROXY=",
-		"no_proxy=",
-	)
+	denied := offlineDeniedEnv(fixtureHome, toolPath, sparkwingHome, marker, denier.url)
 
+	cached := denier.mark()
 	secondOut, err := offlineRunCLI(cli, repoDir, denied, "run", "offline")
 	if err != nil {
 		t.Fatalf("the second run failed with no network reachable: %v\n%s", err, secondOut)
@@ -99,10 +97,11 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if strings.Contains(secondOut, "compiling .sparkwing/") {
 		t.Fatalf("the second run rebuilt the pipeline binary instead of reusing the cached one:\n%s", secondOut)
 	}
-	if reached := denier.reached(); len(reached) > 0 {
+	if reached := denier.since(cached); len(reached) > 0 {
 		t.Fatalf("the second run tried to reach the network: %v\n%s", reached, secondOut)
 	}
 
+	read := denier.mark()
 	listing, err := offlineRunCLI(cli, repoDir, denied, "runs", "list", "-o", "json")
 	if err != nil {
 		t.Fatalf("reading the run history with no network reachable: %v\n%s", err, listing)
@@ -114,11 +113,14 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if sources[0] != "cached" || sources[1] != "compiled" {
 		t.Fatalf("binary sources newest first = %v, want [cached compiled]", sources)
 	}
-	if reached := denier.reached(); len(reached) > 0 {
+	if reached := denier.since(read); len(reached) > 0 {
 		t.Fatalf("reading the run history tried to reach the network: %v", reached)
 	}
 
+	// safety: a latest pin asks the module proxy, which is the recorder, so
+	// this phase is also the proof that the denial is armed.
 	offlineTrackLatest(t, sparkwingDir)
+	tracking := denier.mark()
 	trackingOut, err := offlineRunCLI(cli, repoDir, denied, "run", "offline")
 	if err == nil {
 		t.Fatalf("a latest pin resolved with no network reachable:\n%s", trackingOut)
@@ -126,16 +128,25 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if !strings.Contains(trackingOut, "--sw-no-update") {
 		t.Fatalf("the offline failure does not name the flag that skips resolution:\n%s", trackingOut)
 	}
-	if len(denier.reached()) == 0 {
-		t.Fatal("a latest pin reached no proxy, so the denied environment is not in the request path")
+	if len(denier.since(tracking)) == 0 {
+		t.Fatalf("a latest pin reached no proxy, so the denied environment is not in the request path:\n%s", trackingOut)
 	}
 
+	// safety: the manifest changed, so this run compiles instead of reusing the
+	// cached binary, and it must do so from the cache the first run filled.
+	skipped := denier.mark()
 	skippedOut, err := offlineRunCLI(cli, repoDir, denied, "run", "offline", "--sw-no-update")
 	if err != nil {
 		t.Fatalf("--sw-no-update did not carry a latest pin through an offline run: %v\n%s", err, skippedOut)
 	}
+	if !strings.Contains(skippedOut, "compiling .sparkwing/") {
+		t.Fatalf("the offline compile did not happen, so it proves nothing about building without a proxy:\n%s", skippedOut)
+	}
 	if got := offlineMarkerLines(t, marker); len(got) != 3 {
 		t.Fatalf("pipeline body ran %d times, want one per run", len(got))
+	}
+	if reached := denier.since(skipped); len(reached) > 0 {
+		t.Fatalf("the offline compile tried to reach the network: %v\n%s", reached, skippedOut)
 	}
 }
 
@@ -159,10 +170,16 @@ func offlineNewDenier(t *testing.T) *offlineDenier {
 	return d
 }
 
-func (d *offlineDenier) reached() []string {
+func (d *offlineDenier) mark() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return append([]string(nil), d.seen...)
+	return len(d.seen)
+}
+
+func (d *offlineDenier) since(mark int) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.seen[mark:]...)
 }
 
 func offlineStopDaemon(t *testing.T, home string) {
@@ -178,6 +195,24 @@ func offlineStopDaemon(t *testing.T, home string) {
 	})
 }
 
+// safety: the module cache is written read-only, so the temporary directory
+// holding it cannot be removed until every entry is writable again. This
+// cleanup is registered after the directory's own, so it runs first.
+func offlineUnlockModuleCache(t *testing.T, modCache string) {
+	t.Helper()
+	t.Cleanup(func() {
+		err := filepath.WalkDir(modCache, func(path string, _ os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			return os.Chmod(path, 0o700)
+		})
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("make the fixture module cache removable: %v", err)
+		}
+	})
+}
+
 func offlineToolPath(t *testing.T, tools ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -189,17 +224,37 @@ func offlineToolPath(t *testing.T, tools ...string) string {
 	return dir
 }
 
-func offlineBaseEnv(userHome, toolPath, sparkwingHome, marker string) []string {
+func offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker string) []string {
 	return []string{
-		"HOME=" + userHome,
+		"HOME=" + fixtureHome,
 		"PATH=" + toolPath,
-		"SPARKWING_HOME=" + sparkwingHome,
-		"SPARKWING_LOG_FORMAT=quiet",
+		"GOMODCACHE=" + filepath.Join(fixtureHome, "go", "pkg", "mod"),
+		"GOCACHE=" + filepath.Join(fixtureHome, "go", "build"),
 		"GOWORK=off",
 		"GOTOOLCHAIN=local",
-		"GOFLAGS=-mod=mod",
+		"SPARKWING_HOME=" + sparkwingHome,
+		"SPARKWING_LOG_FORMAT=quiet",
 		offlineMarkerEnv + "=" + marker,
 	}
+}
+
+func offlineConnectedEnv(fixtureHome, toolPath, sparkwingHome, marker string) []string {
+	return append(offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker), "GOFLAGS=-mod=mod")
+}
+
+func offlineDeniedEnv(fixtureHome, toolPath, sparkwingHome, marker, recorder string) []string {
+	return append(offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker),
+		"GOPROXY="+recorder,
+		"GOFLAGS=-mod=readonly",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"HTTP_PROXY="+recorder,
+		"HTTPS_PROXY="+recorder,
+		"http_proxy="+recorder,
+		"https_proxy="+recorder,
+		"NO_PROXY=",
+		"no_proxy=",
+	)
 }
 
 func offlineMarkerLines(t *testing.T, marker string) []string {
@@ -225,14 +280,12 @@ func offlineRunCLI(cli, dir string, env []string, args ...string) (string, error
 	return string(out), err
 }
 
-func offlineRunGo(t *testing.T, dir string, env []string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("go", args...)
+func offlineRunGo(goBin, dir string, env []string, args ...string) (string, error) {
+	cmd := exec.Command(goBin, args...)
 	cmd.Dir = dir
 	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
-	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func offlineBinarySources(t *testing.T, listing string) []string {
@@ -255,7 +308,7 @@ func offlineBinarySources(t *testing.T, listing string) []string {
 	return sources
 }
 
-func offlineWriteFixture(t *testing.T, toolPath, userHome string) (repoDir, sparkwingDir string) {
+func offlineWriteFixture(t *testing.T, gitBin, toolPath, fixtureHome string) (repoDir, sparkwingDir string) {
 	t.Helper()
 	root := t.TempDir()
 	sparkDir := filepath.Join(root, "spark")
@@ -281,9 +334,9 @@ func offlineWriteFixture(t *testing.T, toolPath, userHome string) (repoDir, spar
 	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), offlineFixtureJobs)
 	writeFile(t, filepath.Join(sparkwingDir, "main.go"), offlineFixtureMain)
 
-	cmd := exec.Command("git", "init", "-q")
+	cmd := exec.Command(gitBin, "init", "-q")
 	cmd.Dir = repoDir
-	cmd.Env = []string{"HOME=" + userHome, "PATH=" + toolPath}
+	cmd.Env = []string{"HOME=" + fixtureHome, "PATH=" + toolPath, "GIT_CONFIG_NOSYSTEM=1"}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v\n%s", repoDir, err, out)
 	}
