@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -109,8 +111,10 @@ func quoteScopes(scopes []string) string {
 
 // Authenticator converts a raw bearer token into a Principal. Hot
 // path: prefix-segment lookup in the tokens table (indexed) -> argon2
-// verify only on matched rows. An in-memory cache keeps repeated
-// lookups cheap.
+// verify only on matched rows. An in-memory cache holds the verified
+// answer for its TTL, and concurrent requests carrying one token share
+// a single verification, so a polling fleet costs one argon2 hash per
+// token per window rather than one per request.
 type Authenticator struct {
 	store       *store.Store
 	cache       sync.Map
@@ -118,11 +122,18 @@ type Authenticator struct {
 	generations sync.Map
 	negCache    sync.Map
 	negCount    atomic.Int64
+	flights     sync.Map
 	prefixes    *ratelimit.Limiter
 	trusted     []netip.Prefix
 	logger      *slog.Logger
 	now         func() time.Time
 	afterLookup func()
+}
+
+type authFlight struct {
+	done      chan struct{}
+	principal *Principal
+	err       error
 }
 
 type authCacheEntry struct {
@@ -210,32 +221,84 @@ func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 		return nil, errMissingBearer
 	}
 	now := a.now()
+	key := authCacheKey(raw)
 
-	if a.cacheTTL > 0 {
-		if v, ok := a.cache.Load(raw); ok {
-			e := v.(*authCacheEntry)
-			switch {
-			case !now.Before(e.expires):
-				a.cache.Delete(raw)
-			// safety: a cached entry outlives the row's own clock, so expiry and revocation are rechecked on every hit.
-			case !e.tokenLive(now):
-				a.cache.Delete(raw)
-				return nil, store.ErrTokenRevoked
-			default:
-				cp := *e.principal
-				cp.Authed = now
-				return &cp, nil
-			}
-		}
+	if p, err := a.cached(key, now); p != nil || err != nil {
+		return p, err
 	}
 
 	if store.TokenKindFromPrefix(raw) == "" || len(raw) < store.PrefixLen {
 		return nil, errInvalidBearer
 	}
 	// safety: a replayed wrong guess answers from this cache, so one raw token costs at most one argon2 verification.
-	if reason, ok := a.recentFailure(raw, now); ok {
+	if reason, ok := a.recentFailure(key, now); ok {
 		return nil, reason
 	}
+
+	flight, leader := a.joinFlight(key)
+	if !leader {
+		observeAuthCache(authCacheCoalesced)
+		<-flight.done
+		return flight.result(now)
+	}
+	p, err := a.verify(raw, key, client, now)
+	a.flights.Delete(key)
+	flight.principal, flight.err = p, err
+	close(flight.done)
+	return flight.result(now)
+}
+
+// safety: the key is a prefix and a digest, so a heap dump yields no usable credential.
+func authCacheKey(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return tokenPrefixOf(raw) + ":" + base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func (a *Authenticator) cached(key string, now time.Time) (*Principal, error) {
+	if a.cacheTTL <= 0 {
+		return nil, nil
+	}
+	v, ok := a.cache.Load(key)
+	if !ok {
+		observeAuthCache(authCacheMiss)
+		return nil, nil
+	}
+	e := v.(*authCacheEntry)
+	switch {
+	case !now.Before(e.expires):
+		a.cache.Delete(key)
+		observeAuthCache(authCacheMiss)
+		return nil, nil
+	// safety: a cached entry outlives the row's own clock, so expiry and revocation are rechecked on every hit.
+	case !e.tokenLive(now):
+		a.cache.Delete(key)
+		return nil, store.ErrTokenRevoked
+	default:
+		observeAuthCache(authCacheHit)
+		cp := *e.principal
+		cp.Authed = now
+		return &cp, nil
+	}
+}
+
+// safety: the second arrival waits on the first rather than hashing again, which is what
+// bounds argon2 under a polling fleet.
+func (a *Authenticator) joinFlight(key string) (*authFlight, bool) {
+	mine := &authFlight{done: make(chan struct{})}
+	v, loaded := a.flights.LoadOrStore(key, mine)
+	return v.(*authFlight), !loaded
+}
+
+func (f *authFlight) result(now time.Time) (*Principal, error) {
+	if f.err != nil || f.principal == nil {
+		return nil, f.err
+	}
+	cp := *f.principal
+	cp.Authed = now
+	return &cp, nil
+}
+
+func (a *Authenticator) verify(raw, key, client string, now time.Time) (*Principal, error) {
 	// safety: a guesser varying the secret half never repeats a raw token, so only this budget bounds its hashing.
 	budget := failureKey(raw[:store.PrefixLen], client)
 	if !a.prefixes.Peek(budget, now) {
@@ -249,7 +312,7 @@ func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 			a.prefixes.Penalize(budget, now)
 		}
 		if authRejection(err) {
-			a.rememberFailure(raw, err, now)
+			a.rememberFailure(key, err, now)
 		}
 		return nil, err
 	}
@@ -275,7 +338,7 @@ func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 
 	// safety: an Invalidate that landed during this read must win, or the revoked row is re-cached for a full TTL.
 	if a.cacheTTL > 0 && a.generation(prefix) == gen {
-		a.cache.Store(raw, &authCacheEntry{
+		a.cache.Store(key, &authCacheEntry{
 			principal: principal,
 			expires:   now.Add(a.cacheTTL),
 			tokenExp:  tok.ExpiresAt,
@@ -340,20 +403,20 @@ func (a *Authenticator) bumpGeneration(prefix string) {
 	v.(*atomic.Uint64).Add(1)
 }
 
-func (a *Authenticator) recentFailure(raw string, now time.Time) (error, bool) {
-	v, ok := a.negCache.Load(raw)
+func (a *Authenticator) recentFailure(key string, now time.Time) (error, bool) {
+	v, ok := a.negCache.Load(key)
 	if !ok {
 		return nil, false
 	}
 	e := v.(*authFailureEntry)
 	if !now.Before(e.expires) {
-		a.forgetFailure(raw)
+		a.forgetFailure(key)
 		return nil, false
 	}
 	return e.reason, true
 }
 
-func (a *Authenticator) rememberFailure(raw string, reason error, now time.Time) {
+func (a *Authenticator) rememberFailure(key string, reason error, now time.Time) {
 	// safety: a store or capacity error is transient, so caching it would answer 401 for a valid token after recovery.
 	if !authRejection(reason) {
 		return
@@ -362,7 +425,7 @@ func (a *Authenticator) rememberFailure(raw string, reason error, now time.Time)
 		a.evictFailures(now)
 	}
 	entry := &authFailureEntry{reason: reason, expires: now.Add(negativeAuthCacheTTL)}
-	if _, loaded := a.negCache.Swap(raw, entry); !loaded {
+	if _, loaded := a.negCache.Swap(key, entry); !loaded {
 		a.negCount.Add(1)
 	}
 }
@@ -379,8 +442,8 @@ func (a *Authenticator) evictFailures(now time.Time) {
 	})
 }
 
-func (a *Authenticator) forgetFailure(raw string) {
-	if _, loaded := a.negCache.LoadAndDelete(raw); loaded {
+func (a *Authenticator) forgetFailure(key string) {
+	if _, loaded := a.negCache.LoadAndDelete(key); loaded {
 		a.negCount.Add(-1)
 	}
 }
@@ -440,6 +503,7 @@ func (a *Authenticator) writeAuthFailure(w http.ResponseWriter, err error) {
 			Message: err.Error(),
 		})
 	case errors.Is(err, store.ErrHashingBusy):
+		a.log().Debug("auth.hashing_busy", "retry_after", authBusyRetryAfter)
 		setRetryAfter(w, authBusyRetryAfter)
 		writeAuthError(w, http.StatusServiceUnavailable, authErrorBody{
 			Code:    "unavailable",
