@@ -136,9 +136,7 @@ type ownedProcess struct {
 	parentPID  int
 	identity   processIdentity
 	cpuSeconds float64
-	// startedAt is when the process began, or the zero time where this platform
-	// cannot date it.
-	startedAt time.Time
+	startedAt  time.Time
 }
 
 func ownersByNearestRoot(parentOf map[int]int, rootPIDs map[int]struct{}) map[int]int {
@@ -324,10 +322,10 @@ func creditableRoots(
 	return creditable
 }
 
-// startedInWindow reports whether a process began inside the reading window, which
-// is what makes its whole counter attributable to that window. A platform that
-// cannot date a process answers no, and the tree goes unmeasured.
 func startedInWindow(startedAt, lastAt, now time.Time) bool {
+	// safety: beginning inside the window is what makes a process's whole counter
+	// this window's. A platform that cannot date one answers no, leaving the tree
+	// unmeasured rather than credited CPU that ran before anyone was watching.
 	if startedAt.IsZero() || lastAt.IsZero() {
 		return false
 	}

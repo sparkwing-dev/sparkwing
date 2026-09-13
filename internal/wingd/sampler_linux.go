@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -96,18 +95,18 @@ func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float6
 	if !ok {
 		return nil, false
 	}
-	boot := linuxBootTime()
+	now := time.Now()
+	uptime := linuxUptime()
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
 		processes[processID] = ownedProcess{
 			parentPID:  proc.parentPID,
 			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
 			cpuSeconds: proc.selfCPUSeconds,
-			startedAt:  linuxProcessStart(boot, proc.startTicks),
+			startedAt:  linuxProcessStart(now, uptime, proc.startTicks),
 		}
 	}
 	owners := ownedProcessOwners(roots, processes)
-	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, now, arbitratedCores)
@@ -228,40 +227,33 @@ func readMemAvailable() (uint64, bool) {
 	return 0, false
 }
 
-// linuxProcessStart dates a process from the boot instant its start ticks count
-// from. A zero boot time leaves the process undated rather than dated wrongly.
-func linuxProcessStart(boot time.Time, startTicks uint64) time.Time {
-	if boot.IsZero() {
+func linuxProcessStart(now time.Time, uptimeSeconds float64, startTicks uint64) time.Time {
+	// safety: start ticks and uptime both count from boot, so comparing them
+	// survives a wall-clock adjustment that would move a boot-time reading.
+	if uptimeSeconds <= 0 {
 		return time.Time{}
 	}
-	return boot.Add(time.Duration(float64(startTicks) / linuxClockTicks * float64(time.Second)))
+	age := uptimeSeconds - float64(startTicks)/linuxClockTicks
+	if age < 0 {
+		return time.Time{}
+	}
+	return now.Add(-time.Duration(age * float64(time.Second)))
 }
 
-// linuxBootTime reads the instant the kernel counts process start ticks from.
-// The value is fixed for the life of the machine, so it is read once.
-func linuxBootTime() time.Time {
-	bootTimeOnce.Do(func() {
-		data, err := os.ReadFile("/proc/stat")
-		if err != nil {
-			return
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			seconds, ok := strings.CutPrefix(line, "btime ")
-			if !ok {
-				continue
-			}
-			epoch, err := strconv.ParseInt(strings.TrimSpace(seconds), 10, 64)
-			if err != nil {
-				return
-			}
-			bootTime = time.Unix(epoch, 0)
-			return
-		}
-	})
-	return bootTime
+func linuxUptime() float64 {
+	// safety: a zero return leaves every process undated, so a tree the daemon
+	// has no reading for goes unmeasured rather than credited on a bad date.
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0
+	}
+	seconds, _, ok := strings.Cut(strings.TrimSpace(string(data)), " ")
+	if !ok {
+		seconds = strings.TrimSpace(string(data))
+	}
+	value, err := strconv.ParseFloat(seconds, 64)
+	if err != nil {
+		return 0
+	}
+	return value
 }
-
-var (
-	bootTimeOnce sync.Once
-	bootTime     time.Time
-)

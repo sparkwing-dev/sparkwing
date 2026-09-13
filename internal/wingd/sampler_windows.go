@@ -238,9 +238,9 @@ func windowsFiletimeTicks(value windows.Filetime) uint64 {
 	return uint64(value.HighDateTime)<<32 | uint64(value.LowDateTime)
 }
 
-// windowsProcessStart dates a process from its creation filetime, which counts
-// hundred-nanosecond intervals from the start of 1601.
 func windowsProcessStart(startTicks uint64) time.Time {
+	// safety: a creation filetime counts hundred-nanosecond intervals from 1601,
+	// so it dates a process directly where linux needs the boot clock.
 	if startTicks == 0 {
 		return time.Time{}
 	}
