@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -234,11 +233,11 @@ func TestUnknownTriggerNamesEveryChoice(t *testing.T) {
 }
 
 func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate the SDK source")
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
 	}
-	sdk := filepath.Join(filepath.Dir(filename), "..", "..", "sparkwing")
+	sdk := filepath.Join(root, "sparkwing")
 	entries, err := os.ReadDir(sdk)
 	if err != nil {
 		t.Fatal(err)

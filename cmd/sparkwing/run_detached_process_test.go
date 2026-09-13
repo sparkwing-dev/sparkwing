@@ -120,16 +120,31 @@ func buildSubmitCLI(t *testing.T) string {
 	return submitCLIBin
 }
 
+// safety: a reproducible build trims the compiled-in source path, so resolving the
+// repository from runtime.Caller yields a module path the filesystem does not hold.
+func moduleRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("no go.mod above the working directory")
+		}
+		dir = parent
+	}
+}
+
 // safety: the dashboard bundle is a gitignored artifact of bin/build-web.sh, so
 // without a stub this binary's dashboard depends on the developer's build state.
 func seededBundleOverlay(dir string) (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", errors.New("cannot resolve this test's source path")
-	}
-	root, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
+	root, err := moduleRoot()
 	if err != nil {
-		return "", fmt.Errorf("resolve repository root: %w", err)
+		return "", err
 	}
 	if _, err = os.Stat(filepath.Join(root, "internal", "web", "next-out")); err != nil {
 		return "", fmt.Errorf("locate the embedded dashboard directory: %w", err)
