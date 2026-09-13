@@ -575,6 +575,10 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(testPath)
 	}
 
+	egressState, egressProblems := egressHealth()
+	problems = append(problems, egressProblems...)
+	resp["egress"] = egressState
+
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
