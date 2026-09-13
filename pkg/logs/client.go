@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -24,6 +25,36 @@ type Client struct {
 	baseURL     string
 	http        *http.Client
 	defaultHTTP bool
+	// safety: read by every request and written after the client is already
+	// serving, so it is an atomic rather than a plain field.
+	runnerIdentity atomic.Pointer[string]
+}
+
+// WithRunnerIdentity names the runner this client speaks for, matching
+// the controller client's identity of the same name. The logs service
+// caps concurrent reads and streams per runner, so a pool sharing one
+// token sets distinct identities and each pod keeps its own slots; a
+// client that sets none is counted under its principal, which a whole
+// pool shares. It returns the same client for chaining and is safe to
+// call after the client is already serving requests.
+func (c *Client) WithRunnerIdentity(id string) *Client {
+	c.runnerIdentity.Store(&id)
+	return c
+}
+
+// RunnerIdentity reports the identity this client sends, or the empty
+// string when it sends none.
+func (c *Client) RunnerIdentity() string {
+	if id := c.runnerIdentity.Load(); id != nil {
+		return *id
+	}
+	return ""
+}
+
+func (c *Client) setRunnerIdentity(req *http.Request) {
+	if id := c.RunnerIdentity(); id != "" {
+		req.Header.Set(store.RunnerIdentityHeader, id)
+	}
 }
 
 // NewClient returns a Client targeting the given logs-service URL.
@@ -215,6 +246,7 @@ func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadF
 	if err != nil {
 		return nil, err
 	}
+	c.setRunnerIdentity(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -259,6 +291,7 @@ func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadClose
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	c.setRunnerIdentity(req)
 	client := c.http
 	if c.defaultHTTP {
 		streamClient := *client
@@ -305,6 +338,7 @@ func (c *Client) ReadRun(ctx context.Context, runID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.setRunnerIdentity(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

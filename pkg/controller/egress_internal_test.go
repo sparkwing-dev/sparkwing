@@ -117,3 +117,39 @@ func TestTheSweepPrunesMonthsPastRetentionExactlyOnce(t *testing.T) {
 		t.Fatalf("rows after a second sweep = %+v, want the stale row left for next month", rows)
 	}
 }
+
+// safety: the sweep drains this meter whenever the server has a store, so
+// marking it must not depend on where in the builder chain the call lands.
+func TestPersistenceDoesNotDependOnBuilderOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(*store.Store) *Server
+	}{
+		{"meter first", func(st *store.Store) *Server {
+			return New(st, nil).WithEgressMeter(egress.New(egress.Config{})).WithCacheURL("http://cache")
+		}},
+		{"meter last", func(st *store.Store) *Server {
+			return New(st, nil).WithCacheURL("http://cache").WithEgressMeter(egress.New(egress.Config{}))
+		}},
+		{"config carries it", func(st *store.Store) *Server {
+			return New(st, nil).WithEgressMeter(egress.New(egress.Config{Persisted: true}))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			if !tc.build(st).egress.State().Persisted {
+				t.Fatal("the meter does not park a closing month, so the sweep would drop it")
+			}
+		})
+	}
+
+	// safety: a server with no store drains nothing, so its meter must not
+	// park either.
+	if New(nil, nil).WithEgressMeter(egress.New(egress.Config{})).egress.State().Persisted {
+		t.Error("a storeless controller marked its meter as drained")
+	}
+}

@@ -22,7 +22,9 @@ func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) Read(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadFilter) ([]byte, error)
 func (c *Client) ReadRun(ctx context.Context, runID string) ([]byte, error)
+func (c *Client) RunnerIdentity() string
 func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
+func (c *Client) WithRunnerIdentity(id string) *Client
 func DefaultLimits() Limits
 const EgressBudgetCode = "egress_budget_exceeded"
 const EgressDownloadLimitCode = "egress_download_limit"
