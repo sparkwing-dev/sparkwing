@@ -520,3 +520,45 @@ func TestConcurrentRunCreationNeverPassesTheHourlyGuard(t *testing.T) {
 		t.Fatalf("concurrent creation wrote %d runs past a cap of 3", len(runs))
 	}
 }
+
+// safety: a claim by a token the operator never marked metered costs nothing,
+// so the runner guards and the alarm must not see it at all.
+func TestRunnerGuardsLeaveUnmeteredClaimsAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	_, tok, err := s.CreateTokenWith(ctx, "agent:local", store.TokenKindRunner,
+		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{})
+	if err != nil {
+		t.Fatalf("mint a local token: %v", err)
+	}
+	local := store.ClaimIdentity{Principal: "agent:local", TokenPrefix: tok.Prefix}
+	readyNode(t, s, "run-a", "build")
+	readyNode(t, s, "run-b", "build")
+	setLimit(t, s, store.ComputeLimitGlobalRunners, 1)
+	setLimit(t, s, store.ComputeLimitConcurrentRunners, 1)
+	setLimit(t, s, store.ComputeLimitRunnerAlarm, 1)
+
+	for i, pod := range []string{"pod-1", "pod-2"} {
+		n, err := s.ClaimNextReadyNode(ctx, local, pod, time.Minute, nil)
+		if err != nil {
+			t.Fatalf("claim %d on an unmetered token: %v", i, err)
+		}
+		if n == nil {
+			t.Fatalf("claim %d awarded nothing", i)
+		}
+	}
+	usage, err := s.ComputeUsage(ctx)
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if usage.Runners != 0 || usage.AlarmReached {
+		t.Fatalf("usage = %+v, want unmetered claims counted as no cloud runners", usage)
+	}
+	runners, alarm, err := s.ComputeAlarmState(ctx)
+	if err != nil {
+		t.Fatalf("alarm state: %v", err)
+	}
+	if runners != 0 || alarm != 1 {
+		t.Fatalf("alarm state = (%d, %d), want no runners against an alarm of one", runners, alarm)
+	}
+}
