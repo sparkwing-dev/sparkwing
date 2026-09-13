@@ -42,3 +42,6 @@ internal/web/next-out/*
 /doccheck
 
 /internal/web/.build-state/
+
+# per-worktree golangci-lint cache the delivery guidance points GOLANGCI_LINT_CACHE at
+.golangci-cache/
