@@ -49,7 +49,15 @@ func DefaultPaths() (Paths, error) {
 
 // safety: bound before any test can redirect HOME, so a suite that fakes a home
 // directory cannot move the home this refuses.
-var operatorHome, _ = os.UserHomeDir()
+var operatorHome = resolveOperatorHome()
+
+func resolveOperatorHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
+}
 
 func isOperatorHome(root string) bool {
 	if operatorHome == "" {
