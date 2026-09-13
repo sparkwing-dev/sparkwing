@@ -164,7 +164,24 @@ node logs a warning and proceeds without the dependency cache.
 `--max-artifact-bytes` (`SPARKWING_CACHE_MAX_ARTIFACT_BYTES`) is the
 same cap for one uploaded artifact, also 500 MB. Both caps are applied
 before the first byte reaches the volume, so one pipeline cannot spend a
-team's quota, or the bucket ceiling, on a single object.
+team's quota, or the store ceiling, on a single object. The SDK skips an
+upload over 500 MB client-side before it asks; that constant is the
+client's own, and the service's cap is what actually holds.
+
+`--max-store-bytes` and `--max-store-objects`
+(`SPARKWING_CACHE_MAX_STORE_BYTES`, `SPARKWING_CACHE_MAX_STORE_OBJECTS`)
+bound the artifact, dependency-archive and upload trees together rather
+than one object. At or above either one the service refuses every upload
+with `507` naming the ceiling, while reads and deletes keep working, and
+a later measurement that finds the store back under the ceiling thaws
+it. `--warn-store-bytes` and `--warn-store-objects`
+(`SPARKWING_CACHE_WARN_STORE_BYTES`,
+`SPARKWING_CACHE_WARN_STORE_OBJECTS`) mark the store as warning without
+refusing anything, and `--store-reconcile`
+(`SPARKWING_CACHE_STORE_RECONCILE`, hourly by default, `0` measures once
+at startup) is how often the service walks its trees and replaces its
+running count with the measurement. All of
+them are off until set, and the chart carries them as `cache.limits.*`.
 
 ### Guarantees
 

@@ -22,8 +22,8 @@ unlock.
 
 ### Added
 
-- **controller:** A global bucket ceiling freezes object writes once the
-  object store holds more than it should. `sparkwing-controller
+- **controller + cache + logs:** Storage ceilings freeze writes once a
+  store holds more than it should. `sparkwing-controller
   --max-bucket-bytes` and `--max-bucket-objects` (env
   `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES`,
   `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS`) set the ceilings and
@@ -44,13 +44,32 @@ unlock.
   `warning`; `GET /api/v1/object-store/breaker` and `sparkwing cluster
   object-store status` carry the totals and the ceilings, and `sparkwing
   cluster object-store reset-breaker` thaws a freeze until the next
-  measurement. New metrics:
+  A thaw holds until the next measurement, so writes counted in between do
+  not freeze the bucket again. One replica measures per window under a
+  store-wide lease, and the measurement's requests sit outside the
+  object-store request budget, because totalling a large bucket would
+  otherwise spend the whole per-minute list budget in one pass. A
+  multipart upload counts its bytes on the parts and its key on the
+  completion, and an abort is never refused. New metrics:
   `sparkwing_object_store_bucket_bytes`,
   `sparkwing_object_store_bucket_objects`,
   `sparkwing_object_store_bucket_ceiling`,
   `sparkwing_object_store_bucket_ceiling_frozen`,
   `sparkwing_object_store_bucket_ceiling_freezes_total`, and
   `sparkwing_object_store_bucket_ceiling_refused_total`.
+
+  The hosted write path does not run through the controller, so the two
+  services that store what pipelines produce carry the same ceiling:
+  `sparkwing-cache --max-store-bytes`, `--max-store-objects`,
+  `--warn-store-bytes`, `--warn-store-objects` and `--store-reconcile`
+  bound its artifact, dependency-archive and upload trees, and
+  `sparkwing-logs --max-store-bytes`, `--max-store-objects` and
+  `--store-reconcile` bound the log store. Each service measures the
+  store it owns, refuses its own writes with `507` naming its own flags
+  while frozen, keeps reads and deletes working, and thaws on the
+  measurement that finds the store back under the ceiling. Every one is
+  off by default, and the chart carries them as `cache.limits.*` and
+  `logs.limits.*`.
 - **cache:** `sparkwing-cache --max-artifact-bytes` and
   `--max-cache-archive-bytes` (env `SPARKWING_CACHE_MAX_ARTIFACT_BYTES`,
   `SPARKWING_CACHE_MAX_ARCHIVE_BYTES`) set the size cap for one uploaded
@@ -60,18 +79,23 @@ unlock.
   byte reaches the volume; a dependency-cache save that is refused logs a
   warning and the node proceeds, as it already did.
 - **logs:** `sparkwing-logs --max-line-bytes` (env
-  `SPARKWING_LOGS_MAX_LINE_BYTES`) caps one log line, storing a longer
-  line cut to the cap with a `[sparkwing-logs] truncated: line byte cap
-  reached` marker in place of its tail, so one unbroken line cannot spend
-  a node's whole allowance. `--binary-ratio` (env
-  `SPARKWING_LOGS_BINARY_RATIO`) drops an append whose share of control
-  bytes runs above it, leaving one `[sparkwing-logs] dropped` line per
-  node log; bytes above `0x7f` are not counted, so UTF-8 text in any
-  language is stored as sent. Both default to 0, which is off.
+  `SPARKWING_LOGS_MAX_LINE_BYTES`) caps one log line, marker included:
+  a longer line is stored cut to the cap, on a UTF-8 rune boundary, with
+  a `[sparkwing-logs] truncated: line byte cap reached` marker in place
+  of its tail, and one append earns one marker however many of its lines
+  ran long. `--binary-ratio` (env `SPARKWING_LOGS_BINARY_RATIO`) drops an
+  append whose share of non-text bytes runs above it and stores one
+  `[sparkwing-logs] dropped` line for that node log; control bytes count,
+  and so does any byte above `0x7f` outside a valid UTF-8 sequence, which
+  catches a gzip or tar blob while leaving text in any language stored as
+  sent. Both default to 0, which is off.
 - **sdk:** `storage.UsageReporter` is the optional capability an
   `ArtifactStore` exposes when it can total its own contents, reached
   through `storage.Usage`, which reports false for a backend that cannot
-  measure itself. The S3 store implements it with one paginated listing.
+  measure itself. The S3 store implements it with one paginated listing,
+  and `storeurl.OpenMeasurementStore` opens a store for that measurement
+  alone, outside the request budget. `store.RunBucketMeasureLeased` runs
+  one measurement per window however many processes share the store.
 
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`

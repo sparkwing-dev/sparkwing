@@ -14,6 +14,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
+// safety: a client-side skip, not the server's cap. It saves uploading an
+// archive the cache service would refuse, and the service's own
+// --max-cache-archive-bytes is the bound that actually holds; an operator who
+// lowers that will see refusals here rather than skips.
 var remoteDepCacheMaxBytes = int64(500 << 20)
 
 const depCacheHTTPTimeout = 10 * time.Minute
@@ -211,7 +215,8 @@ func (r *remoteDepCache) store(ctx context.Context, key, dir string) (int64, err
 		return 0, err
 	}
 	if size > remoteDepCacheMaxBytes {
-		return 0, fmt.Errorf("archive is %s, over the cache service's %s limit; not uploading",
+		return 0, fmt.Errorf("archive is %s, over the %s this client uploads; not uploading. "+
+			"The cache service's own limit is --max-cache-archive-bytes",
 			humanBytes(size), humanBytes(remoteDepCacheMaxBytes))
 	}
 
