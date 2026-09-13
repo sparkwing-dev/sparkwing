@@ -12,7 +12,7 @@ func TestBundleMissingReasonNamesTheBuildStepWhenOnlyTheGitkeepIsEmbedded(t *tes
 		t.Fatal("a bundle holding only .gitkeep must not read as a built dashboard")
 	}
 	if !strings.Contains(reason, "bin/build-web.sh") {
-		t.Errorf("skip reason does not name the command that builds the bundle: %q", reason)
+		t.Errorf("the reason does not name the command that builds the bundle: %q", reason)
 	}
 }
 
