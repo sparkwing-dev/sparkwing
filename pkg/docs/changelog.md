@@ -20,16 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **sdk:** `sparkwing/git.Clone` falls back to upstream on any gitcache
-  failure, which is what its doc comment promises. It fell back only for a 401,
-  a 3xx, or a credential prompt, and a cache answers a name it does not serve
-  with a 404 that git reports as "repository not found", so a clone of such a
-  name failed outright on any machine where a cache answered. `Clone` derives
-  the cache name from the URL's basename, so a name nothing registered costs a
-  failed request and a line on stderr rather than the clone.
-
 ### Added
 
 - **cli:** `sparkwing configure init` reports whether the checkout it stands in
@@ -65,6 +55,13 @@ unlock.
 
 ### Fixed
 
+- **sdk:** `sparkwing/git.Clone` falls back to upstream on any gitcache
+  failure, which is what its doc comment promises. It fell back only for a 401,
+  a 3xx, or a credential prompt, and a cache answers a name it does not serve
+  with a 404 that git reports as "repository not found", so a clone of such a
+  name failed outright on any machine where a cache answered. `Clone` derives
+  the cache name from the URL's basename, so a name nothing registered costs a
+  failed request and a line on stderr rather than the clone.
 - **cli:** `sparkwing -o json run PIPELINE` refuses instead of handing `-o json`
   to the pipeline, which rejected it as an unknown flag. A run's stream is
   pretty on a terminal and NDJSON when piped, and `SPARKWING_LOG_FORMAT`
