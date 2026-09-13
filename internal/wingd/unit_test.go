@@ -206,6 +206,9 @@ func newHeadroomDaemon(t *testing.T, totalCores, frac float64) *Daemon {
 		t.Fatalf("new ledger: %v", err)
 	}
 	d.ledger = lg
+	// safety: a live sensor mixes the real machine's cgroup into a stand-in
+	// sampler's figures, so a verdict here would turn on the box's core count.
+	d.container = nil
 	return d
 }
 

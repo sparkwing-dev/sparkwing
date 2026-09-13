@@ -115,34 +115,33 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
-func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
-	if len(roots) == 0 {
-		return 0, true
-	}
+func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
 	procs, ok := windowsProcesses()
 	if !ok {
-		return 0, false
+		return nil, false
 	}
 	children := windowsProcessChildren(procs)
+	readable := make([]OwnedRoot, 0, len(roots))
 	for _, root := range roots {
-		if _, ok := procs[root]; !ok {
+		if _, ok := procs[root.PID]; !ok {
 			continue
 		}
-		if !windowsTreeMeasured(collectSubtree(root, children), procs) {
-			s.mu.Lock()
-			s.last = map[processIdentity]cpuSample{}
-			s.mu.Unlock()
-			return 0, false
+		if !windowsTreeMeasured(collectSubtree(root.PID, children), procs) {
+			continue
 		}
+		readable = append(readable, root)
+	}
+	if len(readable) == 0 {
+		return nil, true
 	}
 	processes := windowsOwnedProcesses(procs, children)
-	owned := ownedProcessIdentities(roots, processes)
+	owners := ownedProcessOwners(readable, processes)
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fraction, measured, next := ownedCPUFromProcesses(s.last, processes, owned, now)
-	s.last = next
-	return fraction, measured
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, readable, s.lastAt, now, arbitratedCores)
+	s.last, s.lastAt = next, now
+	return byRoot, true
 }
 
 func windowsProcesses() (map[int]windowsProc, bool) {

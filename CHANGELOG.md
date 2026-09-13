@@ -20,16 +20,135 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.0] - 2026-09-12
+
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
+- **admission:** `sparkwing queue` reports how many host CPU readings the daemon
+  could not separate its own runs' work out of, over how many it took, through
+  the new `wingwire.ExternalAttribution` on `QueueState`
 
 ### Changed
 
 - **install (Breaking):** `install/install.sh` is the public CLI installer, the
   script `https://sparkwing.dev/install.sh` serves. The runner service
   installer it displaced now lives at `install/service-install.sh`, unchanged.
-  See [installer paths](docs/migrations/_unreleased.md#installer-paths).
+  See [installer paths](docs/migrations/v0.50.0.md#installer-paths).
+- **development:** A test binary no longer reaches the operator's home or daemon.
+  `SPARKWING_HOME` naming the default home is refused under `go test`, with the
+  fix in the message, and a test that hosts the admission daemon names its
+  binary in `SPARKWING_WINGD_BIN` rather than taking whatever `PATH` offers. A
+  suite that sets neither keeps the sandbox home and the standalone runs store
+  it already had.
+
+### Fixed
+
+- **dashboard:** A log line over 1 MiB says so. Such a line ends the scan for
+  the whole rest of the file, so `GET /api/v1/runs/{id}/logs/{node}` and the
+  live SSE tail stopped at it and still answered 200, and
+  `GET /api/v1/runs/{id}/logs/search` and `GET /api/v1/runs/grep` silently
+  stopped scanning that node. The two log routes now close with a notice
+  naming the limit and pointing at `format=raw`, which streams the log
+  unrendered and complete, and the two search routes carry `"truncated": true`.
+- **config:** A pipeline's `on:` and `guards:` mappings reject a key outside
+  their schema, naming the field and the line. Only the pipeline entry's own
+  keys were checked before, so `on: {pre-commit: {}}` loaded clean and
+  installed no hook, and `guards: {rejct: [...]}` loaded clean and dropped the
+  reject fence. Keys nested deeper, such as `on.push.branches`, are still
+  matched loosely.
+
+
+- **admission:** Attribute host CPU to each holding run separately, so a run
+  starting or finishing no longer costs the daemon the measurement of every
+  other run. The daemon subtracts its own runs' CPU from the host reading to
+  avoid billing itself for work it admitted; it previously took that
+  measurement as one total and threw the whole total away whenever the set of
+  holding runs moved while the reading was in flight. On a busy host, where
+  runs start and finish constantly, that charged the daemon's own work to the
+  rest of the machine and drove the grantable budget toward zero, so a host
+  with spare capacity ran its queue one run at a time. CPU is now summed per
+  run and only the runs still holding are credited, so a run starting or
+  finishing costs the runs already measured nothing. A run's CPU is a rate
+  between two readings, so a run is credited from its second reading on and the
+  one before that is charged to the machine; `sparkwing queue` counts those
+  readings rather than leaving the gap silent. A run whose process tree
+  contains another holding run's tree is counted once, against the nearer run.
+- **admission:** Report a run that died without releasing its admission
+  separately from one still waiting for its first CPU figure. Both leave a run's
+  CPU charged to the machine, but a dead run holds capacity nothing can use and
+  keeps holding it, where a waiting one is attributed on the next reading. They
+  were one count, documented as the expected shape, so a host serving a dead
+  lease read as a host doing ordinary work.
+- **admission (macOS):** A host sampler that cannot report host busy and owned
+  CPU from one process table no longer gets a second, separate owned-CPU
+  reading on macOS; it reports that it cannot measure, as every other platform
+  in that position already did. The daemon's own macOS sampler is unaffected --
+  it reads both from one table and is the path every release takes. A caller
+  supplying its own non-pairing host sampler on macOS now has owned CPU charged
+  to the machine rather than measured a second way that carried no window and
+  no bound.
+- **admission:** Measure a run's CPU rate only from a reading taken when the
+  current window opened. A reading kept from an earlier window spans intervals
+  nobody was watching that run, so re-holding a released run charged it that
+  whole stretch at once: a run idle for the window it was held read as 3.93
+  cores, and external read 1.07 where the truth was 5.00. A run the daemon has
+  stopped holding is re-measured each reading while its processes live, so
+  holding it again resumes from a figure this window can stand behind.
+- **admission:** Bound a run's CPU against the capacity admission divides up
+  rather than the machine's core count. Under a cgroup limit the two differ, and
+  the looser bound admitted against cores the daemon had no room to grant --
+  eight times looser on a two-core limit.
+- **admission (macOS):** Report no figure for a run whose CPU counter ran
+  backwards, matching every other platform. Reporting zero subtracts nothing
+  from external, which admits against CPU the daemon never measured.
+- **admission:** `QueueState.ExternalAttribution` carries `attributed`, the
+  count of readings that located every holding run's CPU. Read it directly
+  rather than subtracting the fault counts from `samples`: a later daemon may
+  count a cause this build has no field for, and the subtraction would report
+  those readings as clean. `sparkwing queue` plain output prints one row per
+  count, `external-attribution-<count>`.
+- **admission:** Report no figure for a run whose own process restarted, rather
+  than a figure covering only the parts of its process tree that survived. A run
+  that re-execs kept its surviving children's CPU and silently lost its own, so
+  its share of the host reading was charged to the machine with nothing saying
+  so.
+- **admission (Windows):** Keep every run's CPU baseline when a reading finds no
+  measurable run. Discarding them cost every other run two further readings
+  before it could be credited again, on exactly the busy hosts where runs queue.
+- **admission:** Credit a run from its first reading rather than its second. A
+  run's CPU is a rate between two readings, so a process the daemon had not seen
+  before was credited nothing -- and a run whose processes are new every reading
+  was therefore never credited at all, charging its whole load to the rest of the
+  machine for as long as it ran. A process first seen in a tree the daemon was
+  already watching has run all of its CPU since the previous reading, so its
+  total belongs to that window exactly. A run that began holding inside the
+  window is bounded the same way by how long it has held. A run held since
+  before the window stays unmeasured rather than credited a lifetime average
+  that no longer describes it, and so does a process carrying more CPU than the
+  window could physically hold, which proves it joined the run's process tree
+  rather than starting inside it. A reading crediting this daemon more CPU than the
+  host itself ran is impossible, so it is treated as a reading that measured
+  nothing and the host is charged in full: trimming it to fit would land
+  external on exactly zero, which is the over-admission the cap exists to stop. Measured on a ten-core host where a three-core
+  run restarts every reading beside a four-core long-lived one: external fell
+  from 4.0 cores to the true 1.0, and the budget stopped under-admitting by 47%.
+- **admission:** `ResourceState.ExternalSource` reports a third value,
+  `unattributed`, for an External figure the host sampler did read but which
+  carries some of sparkwing's own runs' CPU. Read the field as an open set: any
+  named value other than `unmeasured` is a real host reading, so branch on
+  `unmeasured` rather than switching on the values a build happens to know. An
+  empty value is the exception and means the daemon predates the field, so
+  whether the figure was measured is unknown. `sparkwing queue`
+  and the capacity dashboard both say so where it applies. See
+  [external source gained a third value](docs/migrations/v0.50.0.md#external-source-gained-a-third-value).
+
+### Removed
+
+- **web:** The analytics page drops its three unbuilt sections
+  Slowest pipelines, failure clustering, and agent utilization rendered
+  placeholder text for views the dashboard does not build. The trend charts
+  stay.
 
 ### Fixed
 

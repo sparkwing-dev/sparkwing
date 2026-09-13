@@ -60,6 +60,18 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	return cores, memBytes
 }
 
+func (s *containerSensor) arbitratedCores(hostCores float64) float64 {
+	// safety: this is the capacity the kernel lets these runs use, which a
+	// sampler bounds an unjustified figure against. No tree here can run more.
+	if s == nil {
+		return hostCores
+	}
+	if cores, _ := s.capacityLimits(); cores > 0 && cores < hostCores {
+		return cores
+	}
+	return hostCores
+}
+
 func (s *containerSensor) apply(stat HostStat) HostStat {
 	if s == nil {
 		return stat

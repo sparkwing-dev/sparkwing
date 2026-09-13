@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"time"
 )
 
 const loadEMAAlpha = 0.4
+
+const unattributedResidual = 0.05
 
 func (d *Daemon) sampleLoop(ctx context.Context) {
 	t := time.NewTicker(d.cfg.sampleInterval())
@@ -37,8 +40,8 @@ func (d *Daemon) refreshHeadroom() {
 }
 
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
-	roots, cohort := d.holderSample()
-	stat, ownedBusy, ownedMeasured, err := d.sampleHostAndOwned(roots)
+	roots := d.holderSample()
+	stat, ownedByRoot, ownedMeasured, err := d.sampleHostAndOwned(roots)
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
 		return
@@ -47,35 +50,74 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 		d.applyCapacity(stat)
 	}
 	stat = d.container.apply(stat)
-	d.applyHeadroomSample(stat, cohort, ownedBusy, ownedMeasured)
+	d.applyHeadroomSample(stat, ownedByRoot, ownedMeasured)
 }
 
-func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, float64, bool, error) {
+func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
+	// safety: the container clamp runs on the stat after this call, so reading
+	// TotalCores off the returned stat would bound owned CPU at the machine's
+	// capacity rather than at the smaller one admission actually hands out.
+	arbitrated := d.container.arbitratedCores(float64(runtime.NumCPU()))
 	if paired, ok := d.sampler.(pairedHostOwnedSampler); ok {
-		return paired.SampleWithOwned(roots)
+		return paired.SampleWithOwned(roots, arbitrated)
 	}
 	stat, err := d.sampler.Sample()
 	if err != nil {
-		return stat, 0, false, err
+		return stat, nil, false, err
 	}
-	if len(roots) == 0 {
-		return stat, 0, true, nil
-	}
-	owned, measured := d.ownedSampler.CPUUsage(roots)
-	return stat, owned, measured, nil
+	// safety: a reading with nothing held still reaches the sampler, because that
+	// is the reading where it drops what it measured and moves its clock. Returning
+	// here instead freezes both, and holding a run again then charges it every
+	// interval nobody held it.
+	byRoot, measured := d.ownedSampler.CPUUsage(roots, arbitrated)
+	return stat, byRoot, measured, nil
 }
 
 func (d *Daemon) applyHeadroom(stat HostStat) {
-	d.applyHeadroomSample(stat, nil, 0, false)
+	d.applyHeadroomSample(stat, nil, true)
 }
 
-func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedBusy float64, ownedMeasured bool) {
+func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64, ownedMeasured bool) {
 	d.mu.Lock()
-	if !sameHolderCohort(sampled, d.holderCohortLocked()) {
-		ownedBusy = 0
-		ownedMeasured = false
-	}
 	now := d.now()
+	ownedBusy, withoutProcess, awaitingMeasure, processGone := d.ownedBusyLocked(ownedByRoot)
+	impossible := false
+	if stat.CPUMeasured && ownedBusy > stat.BusyCores {
+		// safety: this daemon's runs cannot have used more CPU than the host ran. A
+		// larger figure is impossible, and trimming it to fit would leave external at
+		// zero -- which is the over-admission it was meant to stop -- so the reading
+		// is treated as one that measured nothing and charges the host in full.
+		ownedBusy, ownedMeasured, impossible = 0, false, true
+	}
+	if stat.CPUMeasured {
+		d.attribution.samples++
+		// safety: one reading is counted under one cause, worst first, so the
+		// counts stay disjoint. A sampler that read nothing explains every run's
+		// missing figure, so the per-run causes say nothing more.
+		switch {
+		case !ownedMeasured, impossible:
+			d.attribution.samplerUnreadable++
+		case withoutProcess:
+			d.attribution.runsWithoutProcess++
+		case processGone:
+			d.attribution.runsProcessGone++
+		case awaitingMeasure:
+			d.attribution.runsAwaitingMeasure++
+		}
+		attributed := ownedMeasured && !impossible && !withoutProcess && !awaitingMeasure && !processGone
+		if attributed {
+			d.attribution.attributed++
+		}
+		unattributed := 0.0
+		if !attributed {
+			unattributed = 1
+		}
+		if !d.unattributedInit {
+			d.smoothedUnattributed, d.unattributedInit = unattributed, true
+		} else {
+			d.smoothedUnattributed = loadEMAAlpha*unattributed + (1-loadEMAAlpha)*d.smoothedUnattributed
+		}
+	}
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
 	}
@@ -90,6 +132,8 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedB
 	if !stat.CPUMeasured {
 		d.smoothedExternal = 0
 		d.externalInit = false
+		d.smoothedUnattributed = 0
+		d.unattributedInit = false
 	} else if !d.externalInit {
 		d.smoothedExternal = rawExternal
 		d.externalInit = true
@@ -137,6 +181,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedB
 	// table that does not balance against the headroom admission is on.
 	d.reservedCores = reservedCores
 	d.externalCores = externalCores
+	d.externalAttributed = d.smoothedUnattributed < unattributedResidual
 	d.reservedMem = reservedMem
 	d.externalMem = externalMem
 	d.cpuMeasured = stat.CPUMeasured
@@ -202,44 +247,77 @@ func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) f
 	return external
 }
 
-type holderCohort map[*conn]int
+type externalAttribution struct {
+	samples             int64
+	samplerUnreadable   int64
+	runsWithoutProcess  int64
+	runsAwaitingMeasure int64
+	runsProcessGone     int64
+	attributed          int64
+}
 
-func (d *Daemon) holderSample() ([]int, holderCohort) {
+func (d *Daemon) ownedBusyLocked(ownedByRoot map[int]float64) (owned float64, withoutProcess, awaitingMeasure, processGone bool) {
+	counted := map[int]struct{}{}
+	for _, c := range d.byRun {
+		if c.role != roleHolder {
+			continue
+		}
+		if c.pid <= 0 {
+			withoutProcess = true
+			continue
+		}
+		if _, done := counted[c.pid]; done {
+			continue
+		}
+		counted[c.pid] = struct{}{}
+		cores, measured := ownedByRoot[c.pid]
+		if !measured {
+			// safety: a run this daemon has already measured, whose process is now
+			// gone while it still holds, is a run that died without releasing. That
+			// is a fault, where a run waiting for its second reading is not, and the
+			// two are only separable by remembering which pids had a figure.
+			if _, seen := d.measuredPIDs[c.pid]; seen {
+				processGone = true
+			} else {
+				awaitingMeasure = true
+			}
+			continue
+		}
+		d.measuredPIDs[c.pid] = struct{}{}
+		owned += cores
+	}
+	for pid := range d.measuredPIDs {
+		if _, held := counted[pid]; !held {
+			delete(d.measuredPIDs, pid)
+		}
+	}
+	return owned, withoutProcess, awaitingMeasure, processGone
+}
+
+func (d *Daemon) holderSample() []OwnedRoot {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	cohort := d.holderCohortLocked()
-	seen := map[int]struct{}{}
-	for _, pid := range cohort {
-		seen[pid] = struct{}{}
+	since := map[int]time.Time{}
+	for _, c := range d.byRun {
+		if c.role != roleHolder || c.pid <= 0 {
+			continue
+		}
+		// safety: two runs sharing a process tree are one root, and the earlier
+		// hold bounds how old that tree's processes can be.
+		if held, seen := since[c.pid]; !seen || c.startAt.Before(held) {
+			since[c.pid] = c.startAt
+		}
 	}
-	pids := make([]int, 0, len(seen))
-	for pid := range seen {
+	pids := make([]int, 0, len(since))
+	for pid := range since {
 		pids = append(pids, pid)
 	}
 	sort.Ints(pids)
-	return pids, cohort
-}
-
-func (d *Daemon) holderCohortLocked() holderCohort {
-	cohort := holderCohort{}
-	for _, c := range d.byRun {
-		if c.role == roleHolder && c.pid > 0 {
-			cohort[c] = c.pid
-		}
+	roots := make([]OwnedRoot, 0, len(pids))
+	for _, pid := range pids {
+		roots = append(roots, OwnedRoot{PID: pid, HeldSince: since[pid]})
 	}
-	return cohort
-}
-
-func sameHolderCohort(a, b holderCohort) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for c, pid := range a {
-		if b[c] != pid {
-			return false
-		}
-	}
-	return true
+	return roots
 }
 
 func coresContention(stat HostStat, load, usedCores float64) float64 {

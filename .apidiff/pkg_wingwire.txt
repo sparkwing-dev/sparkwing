@@ -148,7 +148,21 @@ type EvictionCount struct {
 	Key   string
 	Count int
 }
+type ExternalAttribution struct {
+	Samples int64
+
+	SamplerUnreadable int64
+
+	RunsWithoutProcess int64
+
+	RunsProcessGone int64
+
+	RunsAwaitingMeasure int64
+
+	Attributed int64
+}
 const ExternalMeasured = "measured"
+const ExternalUnattributed = "unattributed"
 const ExternalUnmeasured = "unmeasured"
 type Grant struct {
 	RunID      string
@@ -298,6 +312,8 @@ type QueueState struct {
 	ExternalMeasurementAgeMS int64
 
 	CapacityChange *CapacityChange
+
+	ExternalAttribution *ExternalAttribution
 
 	Runners []RunnerHeadroom
 }

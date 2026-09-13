@@ -38,6 +38,25 @@ func TestDefaultPaths_StillHonorsSparkwingHome(t *testing.T) {
 	}
 }
 
+func TestDefaultPaths_RefusesTheOperatorHomeUnderTest(t *testing.T) {
+	if operatorHome == "" {
+		t.Skip("no home directory to refuse")
+	}
+	real := filepath.Join(operatorHome, ".sparkwing")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", real)
+
+	p, err := DefaultPaths()
+	if err == nil {
+		t.Fatalf("DefaultPaths resolved the operator's own home %s from a test binary", p.Root)
+	}
+	for _, want := range []string{real, "SPARKWING_HOME", "t.TempDir()"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q omits %q, so it does not name the fix", err.Error(), want)
+		}
+	}
+}
+
 func TestUnderTest(t *testing.T) {
 	if !UnderTest() {
 		t.Fatalf("UnderTest() is false inside a test binary; os.Args[0] = %q", os.Args[0])

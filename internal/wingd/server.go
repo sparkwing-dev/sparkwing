@@ -66,18 +66,24 @@ type Daemon struct {
 	lastActivity        time.Time
 	startedAt           time.Time
 
-	loadInit         bool
-	externalInit     bool
-	smoothedLoad     float64
-	smoothedExternal float64
-	headroomInit     bool
-	appliedCores     float64
-	appliedMem       uint64
+	loadInit             bool
+	externalInit         bool
+	unattributedInit     bool
+	smoothedUnattributed float64
+	smoothedLoad         float64
+	smoothedExternal     float64
+	headroomInit         bool
+	appliedCores         float64
+	appliedMem           uint64
 
-	reservedCores float64
-	externalCores float64
-	reservedMem   uint64
-	externalMem   uint64
+	reservedCores      float64
+	externalCores      float64
+	externalAttributed bool
+	reservedMem        uint64
+	externalMem        uint64
+
+	attribution  externalAttribution
+	measuredPIDs map[int]struct{}
 
 	cpuMeasured bool
 	memMeasured bool
@@ -142,6 +148,7 @@ func New(cfg Config) (*Daemon, error) {
 		quit:                make(chan struct{}),
 		conns:               map[*conn]struct{}{},
 		byRun:               map[string]*conn{},
+		measuredPIDs:        map[int]struct{}{},
 		leaseRun:            map[admission.LeaseID]string{},
 		leaseCharge:         map[admission.LeaseID]wingwire.HostResources{},
 		leaseMembers:        map[admission.LeaseID][]string{},
