@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.0] - 2026-09-12
+
 ### Added
 
 - **development:** Reuse validated frontend exports during candidate installs while retaining fresh builds when inputs or outputs change
