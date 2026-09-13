@@ -22,6 +22,12 @@ unlock.
 
 ### Fixed
 
+- **runner:** A pipeline source fetch registers a repository with the gitcache
+  under the hash of its clone URL instead of the URL's basename. Two
+  repositories whose paths end in the same segment claimed one registered name,
+  and the second one's fetch failed with a name-already-registered conflict. The
+  cache keys its mirror by URL, so a repository already registered under another
+  name keeps it and gains the hashed one.
 - **sdk:** `git.Clone` asks a gitcache for the hash of the clone URL instead of
   the URL's basename. Two repositories whose paths end in the same segment, such
   as `acme/utils` and `other/utils`, named one cache entry, so a registered

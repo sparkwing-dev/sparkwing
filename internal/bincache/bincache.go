@@ -325,10 +325,7 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 	}
 	name := cacheName
 	if name == "" {
-		name = RepoNameFromURL(repoSSH)
-	}
-	if name == "" {
-		return "", fmt.Errorf("FetchPipelineSource: cannot derive repo name from %q", repoSSH)
+		name = sourceurl.ClaimedRepoNameFromURL(repoSSH)
 	}
 
 	if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil {
@@ -792,16 +789,6 @@ func seedBundle(ctx context.Context, endpoint, token, repoURL, bundle, sha strin
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
-}
-
-func RepoNameFromURL(repoURL string) string {
-	repoURL = strings.TrimSpace(repoURL)
-	repoURL = strings.TrimSuffix(repoURL, "/")
-	repoURL = strings.TrimSuffix(repoURL, ".git")
-	if i := strings.LastIndexAny(repoURL, "/:"); i >= 0 {
-		return repoURL[i+1:]
-	}
-	return repoURL
 }
 
 func RepoURLFromGitHub(fullName string) string {

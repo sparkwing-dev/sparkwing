@@ -19,27 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-func TestRepoNameFromURL(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"git@github.com:sparkwing-dev/sparkwing.git", "sparkwing"},
-		{"git@github.com:sparkwing-dev/sparkwing", "sparkwing"},
-		{"https://github.com/acme/another-repo.git", "another-repo"},
-		{"https://github.com/acme/another-repo", "another-repo"},
-		{"https://github.com/acme/another-repo/", "another-repo"},
-		{"sparkwing-dev/sparkwing", "sparkwing"},
-		{"sparkwing", "sparkwing"},
-		{"sparkwing.git", "sparkwing"},
-		{"  sparkwing  ", "sparkwing"},
-		{"", ""},
-	}
-	for _, c := range cases {
-		if got := RepoNameFromURL(c.in); got != c.want {
-			t.Errorf("RepoNameFromURL(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
+const testRepoSSH = "git@github.com:sparkwing-dev/sparkwing.git"
 
 func gitExecPath(t *testing.T) string {
 	t.Helper()
@@ -142,7 +122,7 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 
 func TestFetchPipelineSource_PinsToExactSHA(t *testing.T) {
 	repoParent := t.TempDir()
-	oldSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	oldSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
@@ -169,7 +149,7 @@ func TestFetchPipelineSource_PinsToExactSHA(t *testing.T) {
 
 func TestFetchPipelineSource_BranchTipFallback_WhenNoSHA(t *testing.T) {
 	repoParent := t.TempDir()
-	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
@@ -190,7 +170,7 @@ func TestFetchPipelineSource_BranchTipFallback_WhenNoSHA(t *testing.T) {
 
 func TestFetchPipelineSource_BadSHA(t *testing.T) {
 	repoParent := t.TempDir()
-	makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
@@ -244,7 +224,7 @@ func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 	mustGit(work, "add", ".")
 	mustGit(work, "commit", "--quiet", "-m", "no .sparkwing")
 
-	bare := filepath.Join(repoParent, "noSparkwing.git")
+	bare := filepath.Join(repoParent, sourceurl.ClaimedRepoNameFromURL("git@github.com:your-org/noSparkwing.git")+".git")
 	mustGit("", "clone", "--bare", "--quiet", work, bare)
 	mustGit(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
 	if err := os.WriteFile(filepath.Join(bare, "git-daemon-export-ok"), nil, 0o644); err != nil {
@@ -267,7 +247,7 @@ func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 
 func TestFetchPipelineSource_RegistersWithCache(t *testing.T) {
 	repoParent := t.TempDir()
-	_, _ = makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	_, _ = makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 
 	execPath := gitExecPath(t)
 	if execPath == "" {
@@ -297,15 +277,57 @@ func TestFetchPipelineSource_RegistersWithCache(t *testing.T) {
 	if len(registered) != 1 {
 		t.Fatalf("want 1 register call, got %d: %v", len(registered), registered)
 	}
-	want := "name=sparkwing repo=git@github.com:sparkwing-dev/sparkwing.git"
+	want := "name=" + sourceurl.ClaimedRepoNameFromURL(testRepoSSH) + " repo=" + testRepoSSH
 	if registered[0] != want {
 		t.Errorf("register call: got %q, want %q", registered[0], want)
 	}
 }
 
+func TestFetchPipelineSource_RegistersDistinctNamesForEqualBasenames(t *testing.T) {
+	repoParent := t.TempDir()
+	first := "git@github.com:acme/utils.git"
+	second := "git@github.com:other/utils.git"
+	for _, repoURL := range []string{first, second} {
+		makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(repoURL), "main")
+	}
+
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable")
+	}
+	registered := map[string]string{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/git/register", func(w http.ResponseWriter, r *http.Request) {
+		name, repoURL := r.URL.Query().Get("name"), r.URL.Query().Get("repo")
+		if bound, ok := registered[name]; ok && bound != repoURL {
+			http.Error(w, "name is already registered to another repository", http.StatusConflict)
+			return
+		}
+		registered[name] = repoURL
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.Handle("/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/git",
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	for _, repoURL := range []string{first, second} {
+		if _, err := FetchPipelineSource(context.Background(), srv.URL, repoURL, "main", "", t.TempDir()); err != nil {
+			t.Fatalf("FetchPipelineSource(%s): %v", repoURL, err)
+		}
+	}
+	if len(registered) != 2 {
+		t.Fatalf("two repositories registered %d name(s): %v", len(registered), registered)
+	}
+}
+
 func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) {
 	repoParent := t.TempDir()
-	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
 	if execPath == "" {
 		t.Skip("git --exec-path unavailable")
@@ -344,7 +366,7 @@ func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) 
 
 func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t *testing.T) {
 	repoParent := t.TempDir()
-	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
 	if execPath == "" {
 		t.Skip("git --exec-path unavailable")
@@ -440,8 +462,8 @@ func TestFetchPipelineSource_DirectCacheRedirectsStayAtConfiguredOrigin(t *testi
 
 func TestFetchPipelineWorkspaceSource_RestoresRawGitBlobs(t *testing.T) {
 	repoParent := t.TempDir()
-	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
-	bareRepo := filepath.Join(repoParent, "sparkwing.git")
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
+	bareRepo := filepath.Join(repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH)+".git")
 	tree, err := exec.Command("git", "-C", bareRepo, "rev-parse", tipSHA+"^{tree}").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +554,7 @@ func TestControllerRunGitcacheURL_UsesClaimScopedRepoIdentity(t *testing.T) {
 
 func TestFetchPipelineSourceWithCredentials_UsesOnlyTheDirectCacheToken(t *testing.T) {
 	repoParent := t.TempDir()
-	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
 	if execPath == "" {
 		t.Skip("git --exec-path unavailable")
