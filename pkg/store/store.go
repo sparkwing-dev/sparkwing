@@ -1031,7 +1031,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 34
+const expectedSchemaVersion = 35
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1895,6 +1895,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyNamedCronsMigrationSQLite(ctx, tx)
 	case 34:
 		return applyCronBranchMigrationSQLite(ctx, tx)
+	case 35:
+		return applyCreditsMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2203,6 +2205,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyNamedCronsMigrationPostgres(ctx, tx)
 	case 34:
 		return applyCronBranchMigrationPostgres(ctx, tx)
+	case 35:
+		return applyCreditsMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
