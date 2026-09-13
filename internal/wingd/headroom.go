@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"time"
 )
@@ -53,8 +54,12 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 }
 
 func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
+	// safety: the container clamp runs on the stat after this call, so reading
+	// TotalCores off the returned stat would bound owned CPU at the machine's
+	// capacity rather than at the smaller one admission actually hands out.
+	arbitrated := d.container.arbitratedCores(float64(runtime.NumCPU()))
 	if paired, ok := d.sampler.(pairedHostOwnedSampler); ok {
-		return paired.SampleWithOwned(roots)
+		return paired.SampleWithOwned(roots, arbitrated)
 	}
 	stat, err := d.sampler.Sample()
 	if err != nil {
@@ -63,7 +68,7 @@ func (d *Daemon) sampleHostAndOwned(roots []OwnedRoot) (HostStat, map[int]float6
 	if len(roots) == 0 {
 		return stat, nil, true, nil
 	}
-	byRoot, measured := d.ownedSampler.CPUUsage(roots, stat.TotalCores)
+	byRoot, measured := d.ownedSampler.CPUUsage(roots, arbitrated)
 	return stat, byRoot, measured, nil
 }
 

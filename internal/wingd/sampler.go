@@ -30,7 +30,7 @@ type HostSampler interface {
 }
 
 type pairedHostOwnedSampler interface {
-	SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error)
+	SampleWithOwned(roots []OwnedRoot, arbitratedCores float64) (HostStat, map[int]float64, bool, error)
 }
 
 type hostSamplerOnly struct {
@@ -111,8 +111,6 @@ func newProcSampler() *procSampler {
 func (p *procSampler) CPUUsage(pid int) (ProcUsage, bool) { return p.sample(pid) }
 
 func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids) }
-
-const ownedFirstSightWindow = 30 * time.Second
 
 type processIdentity struct {
 	pid        int
@@ -205,7 +203,7 @@ func ownedCPUByRoot(
 		if _, ok := creditable[root]; !ok {
 			continue
 		}
-		prior, seen := previous[identity]
+		prior, seen := usableBaseline(previous, identity, lastAt)
 		if !seen {
 			firstSight[root] += process.cpuSeconds
 			continue
@@ -230,28 +228,31 @@ func ownedCPUByRoot(
 		}
 		byRoot[root] += credit
 	}
-	carryLiveBaselines(previous, processes, next)
+	measureUnownedSurvivors(previous, processes, next, now)
 	return byRoot, next
 }
 
-// carryLiveBaselines keeps the reading for a process the daemon has stopped
-// owning but that is still running, so re-holding its tree resumes from the
-// figure already taken rather than meeting the tree as new.
-func carryLiveBaselines(
+// measureUnownedSurvivors keeps measuring a process the daemon has stopped
+// owning but that is still running, so re-holding its tree charges it the CPU
+// this reading covers rather than everything it ran while nobody held it.
+func measureUnownedSurvivors(
 	previous map[processIdentity]cpuSample,
 	processes map[int]ownedProcess,
 	next map[processIdentity]cpuSample,
+	now time.Time,
 ) {
-	for identity, prior := range previous {
+	for identity := range previous {
 		if _, taken := next[identity]; taken {
 			continue
 		}
-		// A reading is worth keeping only while the process it measured is still
-		// running, so matching the whole identity is what drops it at that process's
-		// death rather than at whenever its pid next comes free.
-		if process, alive := processes[identity.pid]; alive && process.identity == identity {
-			next[identity] = prior
+		process, alive := processes[identity.pid]
+		if !alive || process.identity != identity {
+			continue
 		}
+		// safety: this reading is what the sample must carry. Keeping the older one
+		// would leave its window open across every interval nobody held the tree, and
+		// re-holding would then charge the tree that whole stretch of CPU at once.
+		next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
 	}
 }
 
@@ -268,7 +269,7 @@ func creditableRoots(
 		if !ok {
 			continue
 		}
-		if _, based := previous[process.identity]; based {
+		if _, based := usableBaseline(previous, process.identity, lastAt); based {
 			creditable[root.PID] = struct{}{}
 			continue
 		}
@@ -280,6 +281,22 @@ func creditableRoots(
 		}
 	}
 	return creditable
+}
+
+// usableBaseline reports the reading a rate can be measured from, which is one
+// taken when this window opened. An older reading spans intervals nobody was
+// watching the tree, so a rate drawn from it charges this window for CPU that
+// ran outside it.
+func usableBaseline(
+	previous map[processIdentity]cpuSample,
+	identity processIdentity,
+	lastAt time.Time,
+) (cpuSample, bool) {
+	prior, seen := previous[identity]
+	if !seen || prior.at.Before(lastAt) {
+		return cpuSample{}, false
+	}
+	return prior, true
 }
 
 func firstSightCredit(cpuSeconds, window, totalCores float64) (float64, bool) {
@@ -385,6 +402,7 @@ func darwinCPUFromSnapshot(
 	}
 	fractions := make(map[int]float64, len(processes))
 	firstSeen := make(map[int]float64, len(processes))
+	backwards := map[int]struct{}{}
 	var host float64
 	for processID, process := range processes {
 		// bug: this snapshot carries no process start time, so a pid the OS
@@ -402,7 +420,8 @@ func darwinCPUFromSnapshot(
 			continue
 		}
 		delta := process.cpuSeconds - prior.cpuSeconds
-		if delta <= 0 {
+		if delta < 0 {
+			backwards[processID] = struct{}{}
 			continue
 		}
 		fraction := delta / elapsedSeconds
@@ -435,9 +454,6 @@ func darwinCPUFromSnapshot(
 	owners := ownersByNearestRoot(parentOf, rootPIDs)
 	byRoot := make(map[int]float64, len(rootPIDs))
 	unbounded := map[int]struct{}{}
-	for root := range creditable {
-		byRoot[root] = 0
-	}
 	for processID := range processes {
 		root, ok := owners[processID]
 		if !ok {
@@ -448,6 +464,13 @@ func darwinCPUFromSnapshot(
 		}
 		if fraction, measured := fractions[processID]; measured {
 			byRoot[root] += fraction
+			continue
+		}
+		if _, ran := backwards[processID]; ran {
+			// safety: a counter that ran backwards is unreadable, so the tree it sits
+			// under gets no figure. Reporting zero for it subtracts nothing from
+			// external, which admits against CPU this daemon never measured.
+			unbounded[root] = struct{}{}
 			continue
 		}
 		credit, sighted := firstSeen[processID]

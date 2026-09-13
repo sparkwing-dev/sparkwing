@@ -291,3 +291,18 @@ func TestDarwinCPUSnapshotMalformedInputIsUnmeasured(t *testing.T) {
 		}
 	}
 }
+
+func TestDarwinCPUSnapshotGivesNoFigureForABackwardsCounter(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	lastAt := now.Add(-10 * time.Second)
+	previous, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 8:20.00\n")
+	current, _ := parseDarwinCPUSnapshot("1 0 0:00.00\n100 1 0:03.00\n")
+	roots := []OwnedRoot{{PID: 100, HeldSince: now.Add(-time.Hour)}}
+
+	_, _, byRoot, _ := darwinCPUFromSnapshot(current, previous, 10, roots, lastAt, now, 8)
+
+	if figure, reported := byRoot[100]; reported {
+		t.Fatalf("backwards counter reported %v cores; want no figure, because reporting zero subtracts nothing from external and admits against CPU the daemon never measured",
+			figure)
+	}
+}

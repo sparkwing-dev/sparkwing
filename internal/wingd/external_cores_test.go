@@ -28,17 +28,19 @@ func (s *blockingOwnedCPUSampler) CPUUsage(roots []OwnedRoot, _ float64) (map[in
 }
 
 type fixedOwnedCPUSampler struct {
-	fraction float64
-	measured bool
-	roots    []int
+	fraction        float64
+	measured        bool
+	roots           []int
+	arbitratedCores float64
 }
 
 type pairedHostSampler struct {
-	stat      HostStat
-	owned     float64
-	measured  bool
-	pairCalls int
-	hostCalls int
+	stat            HostStat
+	owned           float64
+	measured        bool
+	pairCalls       int
+	hostCalls       int
+	arbitratedCores float64
 }
 
 func (s *pairedHostSampler) Sample() (HostStat, error) {
@@ -46,13 +48,15 @@ func (s *pairedHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
 }
 
-func (s *pairedHostSampler) SampleWithOwned(roots []OwnedRoot) (HostStat, map[int]float64, bool, error) {
+func (s *pairedHostSampler) SampleWithOwned(roots []OwnedRoot, arbitratedCores float64) (HostStat, map[int]float64, bool, error) {
 	s.pairCalls++
+	s.arbitratedCores = arbitratedCores
 	return s.stat, ownedOnFirstRoot(rootPIDsOf(roots), s.owned), s.measured, nil
 }
 
-func (s *fixedOwnedCPUSampler) CPUUsage(roots []OwnedRoot, _ float64) (map[int]float64, bool) {
+func (s *fixedOwnedCPUSampler) CPUUsage(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
 	s.roots = rootPIDsOf(roots)
+	s.arbitratedCores = arbitratedCores
 	return ownedOnFirstRoot(s.roots, s.fraction), s.measured
 }
 
@@ -374,5 +378,21 @@ func TestNewHonorsExplicitOwnedCPUSamplerWithDefaultHost(t *testing.T) {
 	}
 	if _, paired := d.sampler.(pairedHostOwnedSampler); paired {
 		t.Fatal("default host retained paired owned sampling and would ignore the explicit sampler")
+	}
+}
+
+func TestRefreshHeadroom_OwnedCPUIsBoundedByTheContainerLimitNotTheMachine(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0)
+	d.container = newContainerSensor(writeCgroupV2(t, map[string]string{"cpu.max": "200000 100000"}))
+	owned := &fixedOwnedCPUSampler{fraction: 1, measured: true}
+	d.sampler = &countingHostSampler{stat: HostStat{TotalCores: 64, BusyCores: 4, CPUMeasured: true}}
+	d.ownedSampler = owned
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+
+	d.refreshHeadroom()
+
+	if owned.arbitratedCores != 2 {
+		t.Fatalf("owned sampler was bounded at %v cores; want the container's 2, because the clamp that produces it runs after the sample and a bound at the machine's count admits against cores nobody can grant",
+			owned.arbitratedCores)
 	}
 }

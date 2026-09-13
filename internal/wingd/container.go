@@ -60,6 +60,20 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	return cores, memBytes
 }
 
+// arbitratedCores is the core count admission divides up: a container limit
+// where one is set below the machine's, and the machine's capacity otherwise.
+// The owned-CPU sampler bounds against this rather than against the host, so a
+// figure it cannot justify is caught at the capacity runs are admitted from.
+func (s *containerSensor) arbitratedCores(hostCores float64) float64 {
+	if s == nil {
+		return hostCores
+	}
+	if cores, _ := s.capacityLimits(); cores > 0 && cores < hostCores {
+		return cores
+	}
+	return hostCores
+}
+
 func (s *containerSensor) apply(stat HostStat) HostStat {
 	if s == nil {
 		return stat

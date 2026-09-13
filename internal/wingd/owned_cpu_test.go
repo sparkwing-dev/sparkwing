@@ -43,7 +43,7 @@ func TestOwnedCPU_PIDReuseNeedsANewBaseline(t *testing.T) {
 		{pid: 10, startTicks: 1000}: {cpuSeconds: 1, at: previousAt},
 	}
 	processes := map[int]ownedProcess{
-		10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 2000}, cpuSeconds: 100},
+		10: {parentPID: 1, identity: processIdentity{pid: 10, startTicks: 2000}, cpuSeconds: 3},
 	}
 	owners := ownedProcessOwners(heldRoots(10), processes)
 
@@ -131,7 +131,7 @@ func TestOwnedCPU_ARootWithoutItsOwnBaselineReportsNoFigure(t *testing.T) {
 	}
 	owners := ownedProcessOwners(heldRoots(7), processes)
 
-	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(10), now.Add(-time.Second), now, 8)
+	byRoot, next := ownedCPUByRoot(previous, processes, owners, heldRoots(7), now.Add(-time.Second), now, 8)
 
 	if _, figure := byRoot[7]; figure {
 		t.Fatalf("owned CPU by root = %v; want no figure for a root that re-execed: its own process has no baseline, so the tree's sum covers only the surviving child and is silently short",
@@ -195,13 +195,11 @@ func TestOwnedCPU_OverlappingRootsCountTheirUnionOnce(t *testing.T) {
 	}
 }
 
-func TestOwnedCPU_ReholdingATreeResumesFromTheFigureAlreadyTaken(t *testing.T) {
+func TestOwnedCPU_ReholdingATreeIsNotChargedForTheGapItWasNotHeld(t *testing.T) {
 	firstAt := time.Unix(100, 0)
 	releasedAt := firstAt.Add(10 * time.Second)
 	reheldAt := releasedAt.Add(10 * time.Second)
 	identity := processIdentity{pid: 10, startTicks: 1000}
-	// The tree has burned 40 CPU-seconds before the daemon ever reads it and
-	// burns one more core's worth across each ten-second reading.
 	process := func(cpuSeconds float64) map[int]ownedProcess {
 		return map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: cpuSeconds}}
 	}
@@ -212,20 +210,19 @@ func TestOwnedCPU_ReholdingATreeResumesFromTheFigureAlreadyTaken(t *testing.T) {
 		map[processIdentity]cpuSample{identity: {cpuSeconds: 40, at: firstAt}},
 		processes, ownedProcessOwners(held, processes), held, firstAt, releasedAt, 8)
 
-	// The run is released, so the daemon owns nothing and asks about no roots.
-	processes = process(60)
+	// Nobody holds the tree, and across that stretch it burns six cores' worth.
+	processes = process(110)
 	_, afterRelease := ownedCPUByRoot(afterFirst, processes, nil, nil, releasedAt, reheldAt, 8)
 
-	// The same tree is held again, inside this reading's window, which is the one
-	// case the sampler will credit a tree it has no baseline for.
+	// It is held again, and runs nothing at all while held.
+	processes = process(110)
 	rehold := []OwnedRoot{{PID: 10, HeldSince: reheldAt.Add(time.Second)}}
-	processes = process(70)
 	byRoot, _ := ownedCPUByRoot(
 		afterRelease, processes, ownedProcessOwners(rehold, processes), rehold,
 		reheldAt, reheldAt.Add(10*time.Second), 8)
 
-	if math.Abs(byRoot[10]-1) > 0.0001 {
-		t.Fatalf("re-held tree CPU = %v cores; want the one core it ran this window, not its whole lifetime spread over it",
+	if byRoot[10] != 0 {
+		t.Fatalf("re-held tree CPU = %v cores; want none, because it ran none while held and the daemon cannot charge it for a stretch nobody held it",
 			byRoot[10])
 	}
 }
@@ -244,5 +241,76 @@ func TestOwnedCPU_ATreeThatRanNothingReportsZeroRatherThanNoReading(t *testing.T
 	if !reported || figure != 0 {
 		t.Fatalf("idle tree reports %v with a figure %v; want zero cores reported, because an absent key means no reading and would charge the host for a run that ran nothing",
 			figure, reported)
+	}
+}
+
+func TestOwnedCPU_ReleasingOneOfTwoRootsLeavesTheOtherMeasurable(t *testing.T) {
+	firstAt := time.Unix(100, 0)
+	secondAt := firstAt.Add(10 * time.Second)
+	thirdAt := secondAt.Add(10 * time.Second)
+	kept := processIdentity{pid: 10, startTicks: 1000}
+	released := processIdentity{pid: 20, startTicks: 2000}
+	table := func(keptCPU, releasedCPU float64) map[int]ownedProcess {
+		return map[int]ownedProcess{
+			10: {parentPID: 1, identity: kept, cpuSeconds: keptCPU},
+			20: {parentPID: 1, identity: released, cpuSeconds: releasedCPU},
+		}
+	}
+	both := []OwnedRoot{
+		{PID: 10, HeldSince: firstAt.Add(-time.Hour)},
+		{PID: 20, HeldSince: firstAt.Add(-time.Hour)},
+	}
+	onlyKept := []OwnedRoot{{PID: 10, HeldSince: firstAt.Add(-time.Hour)}}
+
+	processes := table(10, 10)
+	_, afterBoth := ownedCPUByRoot(
+		map[processIdentity]cpuSample{
+			kept:     {cpuSeconds: 0, at: firstAt},
+			released: {cpuSeconds: 0, at: firstAt},
+		},
+		processes, ownedProcessOwners(both, processes), both, firstAt, secondAt, 8)
+
+	// Only one root is released. The other keeps the sampler running, so the
+	// released tree is still seen every reading.
+	processes = table(20, 90)
+	_, afterRelease := ownedCPUByRoot(
+		afterBoth, processes, ownedProcessOwners(onlyKept, processes),
+		onlyKept, secondAt, thirdAt, 8)
+
+	// It is held again and runs nothing while held.
+	processes = table(30, 90)
+	rehold := []OwnedRoot{
+		{PID: 10, HeldSince: firstAt.Add(-time.Hour)},
+		{PID: 20, HeldSince: thirdAt.Add(time.Second)},
+	}
+	byRoot, _ := ownedCPUByRoot(
+		afterRelease, processes, ownedProcessOwners(rehold, processes), rehold,
+		thirdAt, thirdAt.Add(10*time.Second), 8)
+
+	figure, reported := byRoot[20]
+	if !reported || figure != 0 {
+		t.Fatalf("re-held tree reports %v with a figure %v; want a measured zero, because the other root kept the sampler reading this tree every interval it was unheld",
+			figure, reported)
+	}
+}
+
+func TestOwnedCPU_ABaselineFromBeforeThisWindowIsNotARate(t *testing.T) {
+	lastAt := time.Unix(200, 0)
+	now := lastAt.Add(10 * time.Second)
+	identity := processIdentity{pid: 10, startTicks: 1000}
+	// The reading predates the window by a minute, so the CPU between the two
+	// figures covers intervals nobody was watching this tree.
+	previous := map[processIdentity]cpuSample{
+		identity: {cpuSeconds: 5, at: lastAt.Add(-time.Minute)},
+	}
+	processes := map[int]ownedProcess{10: {parentPID: 1, identity: identity, cpuSeconds: 305}}
+	held := []OwnedRoot{{PID: 10, HeldSince: lastAt.Add(-time.Hour)}}
+
+	byRoot, _ := ownedCPUByRoot(
+		previous, processes, ownedProcessOwners(held, processes), held, lastAt, now, 8)
+
+	if _, figure := byRoot[10]; figure {
+		t.Fatalf("stale baseline produced a figure of %v cores; want none, because a rate drawn from it charges this window for CPU that ran outside it",
+			byRoot[10])
 	}
 }
