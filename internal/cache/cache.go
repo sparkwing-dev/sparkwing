@@ -217,6 +217,7 @@ func New(cfg Config) (*Server, error) {
 	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
 	initGitcacheMetrics()
 	initProxyMetrics()
+	initStoreCeilingMetrics()
 	if err := setupSSH(); err != nil {
 		return nil, err
 	}
@@ -234,6 +235,8 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/bin/", requireToken(handleBin))
 	s.mux.HandleFunc("/cache/", requireToken(handleCache))
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
+	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
+	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
 	s.mux.HandleFunc("/uploads/", requireToken(handleUploadDownload))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))

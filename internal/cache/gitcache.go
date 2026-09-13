@@ -575,6 +575,9 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(testPath)
 	}
 
+	problems = append(problems, storeCeilingProblems()...)
+	resp["store_ceiling"] = storeCeilingState()
+
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
@@ -1409,6 +1412,9 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// safety: an overwrite replaces an object rather than adding one, so the
+		// ceiling is measured against what the key already held.
+		storeBytes, storeObjects := storeDelta(path, n)
 		// #nosec G703 -- the cache key is pattern-validated
 		err = os.Rename(tmpPath, path)
 		if err != nil {
@@ -1416,7 +1422,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
-		storeCeiling.Record(n, 1)
+		storeCeiling.Record(storeBytes, storeObjects)
 		// #nosec G706 -- the cache key is pattern-validated
 		log.Printf("cache store: %s (%d bytes)", key, n)
 		w.WriteHeader(http.StatusCreated)
@@ -1557,6 +1563,9 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
+	// safety: an artifact written twice under one path replaces the first, so only
+	// the size difference reaches the ceiling.
+	storeBytes, storeObjects := storeDelta(dest, n)
 	// #nosec G703 -- both names are contained under the artifacts root
 	if err := os.Rename(tmpPath, dest); err != nil {
 		// #nosec G703 -- a staging name this handler created beside the destination
@@ -1565,7 +1574,7 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
-	storeCeiling.Record(n, 1)
+	storeCeiling.Record(storeBytes, storeObjects)
 	// #nosec G706 -- %q escapes control characters in the caller-supplied path
 	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
 	w.Header().Set("Content-Type", "application/json")
@@ -1720,12 +1729,13 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	id := fmt.Sprintf("%x", sha256.Sum256(data))[:16]
 	path := filepath.Join(uploadsDir, id+".tar.gz")
+	storeBytes, storeObjects := storeDelta(path, int64(len(data)))
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	storeCeiling.Record(int64(len(data)), 1)
+	storeCeiling.Record(storeBytes, storeObjects)
 	log.Printf("describe: upload %s (%d bytes)", id, len(data))
 	w.Header().Set("Content-Type", "application/json")
 	writeJSONBody(w, r, map[string]any{"id": id, "size": len(data)})

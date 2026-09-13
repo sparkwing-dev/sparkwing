@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
@@ -374,5 +376,193 @@ func TestStoreMeasurementCountsWhatTheServiceStored(t *testing.T) {
 	}
 	if state.ReconciledAt.IsZero() {
 		t.Error("the measurement recorded no time")
+	}
+}
+
+func ceilingFixture(t *testing.T, cfg objectguard.CeilingConfig) {
+	t.Helper()
+	previous := storeCeiling
+	oldArtifacts, oldCache, oldUploads := artifactsDir, cacheDir, uploadsDir
+	artifactsDir, cacheDir, uploadsDir = t.TempDir(), t.TempDir(), t.TempDir()
+	cfg.Subject, cfg.Remedy = storeCeilingSubject, storeCeilingRemedy
+	storeCeiling = objectguard.NewCeiling(cfg)
+	t.Cleanup(func() {
+		storeCeiling = previous
+		artifactsDir, cacheDir, uploadsDir = oldArtifacts, oldCache, oldUploads
+	})
+}
+
+func TestStoreCeilingThawRouteLetsWritesThroughUntilTheNextMeasurement(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 16},
+		Reconcile: time.Hour,
+	})
+	storeCeiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
+
+	refused := httptest.NewRecorder()
+	handleCache(refused, httptest.NewRequest(http.MethodPut, "/cache/deps-abc123", strings.NewReader("archive")))
+	if refused.Code != http.StatusInsufficientStorage {
+		t.Fatalf("status %d before the thaw, want 507", refused.Code)
+	}
+
+	w := httptest.NewRecorder()
+	handleStoreCeilingThaw(w, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/thaw", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("thaw status %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Thawed  bool `json:"thawed"`
+		Ceiling struct {
+			Frozen bool `json:"frozen"`
+			Thawed bool `json:"thawed"`
+		} `json:"store_ceiling"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode thaw response: %v", err)
+	}
+	if !body.Thawed || body.Ceiling.Frozen || !body.Ceiling.Thawed {
+		t.Errorf("the thaw response reports %+v", body)
+	}
+
+	accepted := httptest.NewRecorder()
+	handleCache(accepted, httptest.NewRequest(http.MethodPut, "/cache/deps-abc123", strings.NewReader("archive")))
+	if accepted.Code != http.StatusCreated {
+		t.Fatalf("status %d after the thaw, want 201: %s", accepted.Code, accepted.Body.String())
+	}
+}
+
+func TestStoreCeilingThawIsRefusedWithNoMeasurementScheduled(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 16}})
+	storeCeiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 3})
+
+	w := httptest.NewRecorder()
+	handleStoreCeilingThaw(w, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/thaw", nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status %d for a thaw nothing would end, want 409", w.Code)
+	}
+	if !storeCeiling.Frozen() {
+		t.Error("the refused thaw cleared the freeze anyway")
+	}
+}
+
+func TestStoreCeilingMeasureRouteThawsAfterSpaceIsFreed(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 32},
+		Reconcile: time.Hour,
+	})
+	blob := filepath.Join(cacheDir, "big.tar.gz")
+	if err := os.WriteFile(blob, []byte(strings.Repeat("x", 128)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	measureStore(t.Context())
+	if !storeCeiling.Frozen() {
+		t.Fatalf("the store did not freeze on a full volume: %+v", storeCeiling.State())
+	}
+
+	if err := os.Remove(blob); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	handleStoreCeilingMeasure(w, httptest.NewRequest(http.MethodPost, "/admin/store-ceiling/measure", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("measure status %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if storeCeiling.Frozen() {
+		t.Error("the store stayed frozen after the volume was emptied and re-measured")
+	}
+}
+
+func TestStoreCeilingAdminRoutesNeedTheBearerToken(t *testing.T) {
+	oldToken := apiToken
+	apiToken = "sw-secret"
+	t.Cleanup(func() { apiToken = oldToken })
+
+	for path, handler := range map[string]http.HandlerFunc{
+		"/admin/store-ceiling/thaw":    handleStoreCeilingThaw,
+		"/admin/store-ceiling/measure": handleStoreCeilingMeasure,
+	} {
+		w := httptest.NewRecorder()
+		requireToken(handler)(w, httptest.NewRequest(http.MethodPost, path, nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("%s answered %d without a token, want 401", path, w.Code)
+		}
+	}
+}
+
+func TestStoreCeilingAdminRoutesRefuseAGet(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{Reconcile: time.Hour})
+	for path, handler := range map[string]http.HandlerFunc{
+		"/admin/store-ceiling/thaw":    handleStoreCeilingThaw,
+		"/admin/store-ceiling/measure": handleStoreCeilingMeasure,
+	} {
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s answered %d to a GET, want 405", path, w.Code)
+		}
+	}
+}
+
+func TestHealthCarriesTheStoreCeiling(t *testing.T) {
+	oldProxy := proxyDir
+	proxyDir = t.TempDir()
+	t.Cleanup(func() { proxyDir = oldProxy })
+	ceilingFixture(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 64, WarnBytes: 16},
+		Reconcile: time.Hour,
+	})
+	storeCeiling.Observe(objectguard.Usage{Bytes: 32, Objects: 2})
+
+	w := httptest.NewRecorder()
+	handleHealthCombined(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var body struct {
+		Status   string         `json:"status"`
+		Problems []string       `json:"problems"`
+		Ceiling  map[string]any `json:"store_ceiling"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if body.Ceiling["enforced"] != true || body.Ceiling["warning"] != true || body.Ceiling["frozen"] != false {
+		t.Errorf("a store past its warning mark reports %v", body.Ceiling)
+	}
+	if body.Ceiling["bytes"].(float64) != 32 || body.Ceiling["objects"].(float64) != 2 {
+		t.Errorf("health reports %v bytes / %v objects, want 32/2", body.Ceiling["bytes"], body.Ceiling["objects"])
+	}
+	if _, ok := body.Ceiling["reconciled_at"]; !ok {
+		t.Error("health reports no reconciled_at after a measurement")
+	}
+	if body.Status != "degraded" {
+		t.Errorf("status = %q past the warning mark, want degraded", body.Status)
+	}
+
+	storeCeiling.Observe(objectguard.Usage{Bytes: 4096, Objects: 9})
+	frozen := httptest.NewRecorder()
+	handleHealthCombined(frozen, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if !strings.Contains(frozen.Body.String(), "uploads are refused") {
+		t.Errorf("health does not name the freeze: %s", frozen.Body.String())
+	}
+}
+
+func TestOverwritingAnObjectCountsTheDifferenceNotASecondObject(t *testing.T) {
+	ceilingFixture(t, objectguard.CeilingConfig{
+		Limit:     objectguard.CeilingLimit{MaxBytes: 1 << 20, MaxObjects: 100},
+		Reconcile: time.Hour,
+	})
+
+	for _, body := range []string{"12345678", "1234"} {
+		w := httptest.NewRecorder()
+		handleCache(w, httptest.NewRequest(http.MethodPut, "/cache/deps-abc123", strings.NewReader(body)))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("put %q: status %d", body, w.Code)
+		}
+	}
+
+	state := storeCeiling.State()
+	if state.Objects != 1 {
+		t.Errorf("two writes to one key counted %d objects, want 1", state.Objects)
+	}
+	if state.Bytes != 4 {
+		t.Errorf("the key counted %d bytes, want the 4 it now holds", state.Bytes)
 	}
 }
