@@ -28,7 +28,7 @@ func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
 // needs charging must claim under a token the operator marked metered.
 func meteredClaimant(t *testing.T, s *store.Store, principal string) store.ClaimIdentity {
 	t.Helper()
-	_, tok, err := s.CreateTokenWith(principal, store.TokenKindRunner,
+	_, tok, err := s.CreateTokenWith(context.Background(), principal, store.TokenKindRunner,
 		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{Metered: true})
 	if err != nil {
 		t.Fatalf("mint a metered token: %v", err)
@@ -599,7 +599,7 @@ func TestTokenMeteredMarkerIsOperatorSet(t *testing.T) {
 		t.Fatal("TokenMetered reported a plain token as metered")
 	}
 
-	_, cloud, err := s.CreateTokenWith("agent:cloud", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
+	_, cloud, err := s.CreateTokenWith(ctx, "agent:cloud", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
 		store.TokenOptions{Metered: true})
 	if err != nil {
 		t.Fatalf("create metered token: %v", err)
@@ -686,7 +686,7 @@ func TestUnmeteredClaimNeitherReservesNorCharges(t *testing.T) {
 func TestTokenRotationCarriesTheMeteredMarker(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	_, cloud, err := s.CreateTokenWith("agent:cloud", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
+	_, cloud, err := s.CreateTokenWith(ctx, "agent:cloud", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
 		store.TokenOptions{Metered: true})
 	if err != nil {
 		t.Fatalf("create: %v", err)

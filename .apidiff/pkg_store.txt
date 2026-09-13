@@ -894,12 +894,14 @@ func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
-func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error)
+func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
-func (s *Store) CancelNodeForExhaustedCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) error
+func (s *Store) CancelNodeForExhaustedCredits(
+	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
+) (err error)
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
@@ -930,7 +932,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
-func (s *Store) CreateTokenWith(principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions) (string, *Token, error)
+func (s *Store) CreateTokenWith(
+	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
+) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
@@ -987,7 +991,9 @@ func (s *Store) GetSecretForRepo(name, repo string) (*Secret, error)
 func (s *Store) GetSecretForRun(name, repo string) (*Secret, error)
 func (s *Store) GetSecretRow(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
-func (s *Store) GrantCredits(ctx context.Context, kind string, amountMicro int64, reference, createdBy string) (*CreditGrant, error)
+func (s *Store) GrantCredits(
+	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
+) (_ *CreditGrant, err error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
@@ -995,8 +1001,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
-func (s *Store) ListCreditCharges(ctx context.Context, limit int) ([]CreditCharge, error)
-func (s *Store) ListCreditGrants(ctx context.Context, limit int) ([]CreditGrant, error)
+func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
+func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error)
 func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error)
 func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)

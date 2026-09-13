@@ -235,7 +235,8 @@ unlock.
   already running starts being charged. `tokens list` gained a METERED column.
   Metering is an operator decision recorded against the token: a runner's
   self-asserted labels never make its work billable.
-- **store:** `CreateTokenWith` mints a token carrying `TokenOptions`,
+- **store:** `CreateTokenWith` mints a token carrying `TokenOptions` under the
+  caller's context,
   `SetTokenMetered` and `TokenMetered` read and write the metering marker, and
   `GrantCredits`, `CreditBalanceMicro`, `CreditState`, `ListCreditGrants`,
   `ListCreditCharges`, `ChargeNodeCredits`, `FinalizeNodeCredits`, and

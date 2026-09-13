@@ -38,7 +38,7 @@ func newCreditsFixture(t *testing.T, metered bool) creditsFixture {
 	if err != nil {
 		t.Fatalf("admin token: %v", err)
 	}
-	runner, runnerTok, err := st.CreateTokenWith("pool", store.TokenKindRunner,
+	runner, runnerTok, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
 		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
 		0, now, store.TokenOptions{Metered: metered})
 	if err != nil {

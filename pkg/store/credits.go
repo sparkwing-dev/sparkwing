@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -228,7 +229,9 @@ func ValidCreditGrantKind(kind string) bool {
 // GrantCredits adds credits to the ledger and returns the row it wrote.
 // A grant that lifts the balance above zero clears the exhaustion stamp, so
 // a node cancelled for an empty balance is the last one cancelled.
-func (s *Store) GrantCredits(ctx context.Context, kind string, amountMicro int64, reference, createdBy string) (*CreditGrant, error) {
+func (s *Store) GrantCredits(
+	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
+) (_ *CreditGrant, err error) {
 	if !ValidCreditGrantKind(kind) {
 		return nil, fmt.Errorf("credits: unknown grant kind %q", kind)
 	}
@@ -248,7 +251,7 @@ func (s *Store) GrantCredits(ctx context.Context, kind string, amountMicro int64
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return nil, err
 	}
@@ -420,9 +423,13 @@ func creditSettingTx(ctx context.Context, tx *storeTx, key string, fallback int6
 	return parseCreditSetting(raw, fallback), nil
 }
 
+// safety: a settings row nothing can parse must not break reading a balance,
+// so the default stands and the unusable value is named in the log.
 func parseCreditSetting(raw string, fallback int64) int64 {
 	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	if err != nil {
+		slog.Warn("credits: a stored setting is not an integer; using the default",
+			"value", raw, "default", fallback, "err", err)
 		return fallback
 	}
 	return v
@@ -445,8 +452,8 @@ func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
 	if err != nil {
 		return nil, err
 	}
-	ns, perr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if perr != nil {
+	ns := parseCreditSetting(raw, 0)
+	if ns == 0 {
 		return nil, nil
 	}
 	at := time.Unix(0, ns).UTC()
@@ -455,13 +462,13 @@ func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
 
 // ListCreditGrants returns grants newest first, at most limit rows and never
 // more than [CreditHistoryMaxLimit].
-func (s *Store) ListCreditGrants(ctx context.Context, limit int) ([]CreditGrant, error) {
+func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
 	rows, err := s.query(ctx, `SELECT id, kind, amount_micro, reference, created_by, created_at
 	  FROM credit_grants ORDER BY created_at DESC, id DESC LIMIT ?`, creditLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []CreditGrant
 	for rows.Next() {
 		var g CreditGrant
@@ -477,13 +484,13 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) ([]CreditGrant,
 
 // ListCreditCharges returns charges newest first, at most limit rows and
 // never more than [CreditHistoryMaxLimit].
-func (s *Store) ListCreditCharges(ctx context.Context, limit int) ([]CreditCharge, error) {
+func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
 	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at
 	  FROM credit_charges ORDER BY charged_at DESC, id DESC LIMIT ?`, creditLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	var out []CreditCharge
 	for rows.Next() {
 		var c CreditCharge
@@ -600,13 +607,13 @@ func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPre
 
 func (s *Store) chargeNode(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time, final bool,
-) (CreditChargeResult, error) {
+) (_ CreditChargeResult, err error) {
 	var out CreditChargeResult
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return out, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return out, err
 	}
@@ -828,7 +835,7 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 // AppendEventOnce writes an event unless the run or node already carries one
 // of that kind, which keeps a condition a poller re-observes every half
 // second to one row. It reports whether it wrote.
-func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error) {
+func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
 	// safety: the common call finds the event already there, so the read comes
 	// before the transaction rather than inside one opened twice a second.
 	present, err := s.eventKindPresent(ctx, runID, nodeID, kind)
@@ -839,7 +846,7 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	var existing int
 	err = tx.QueryRowContext(ctx,
 		`SELECT 1 FROM events WHERE run_id = ? AND node_id = ? AND kind = ? LIMIT 1`,
@@ -874,7 +881,9 @@ func (s *Store) eventKindPresent(ctx context.Context, runID, nodeID, kind string
 // of credit, releases its claim, and records the reason on the run. It
 // settles the node's credits first, so the ledger stops at the instant the
 // node did.
-func (s *Store) CancelNodeForExhaustedCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) error {
+func (s *Store) CancelNodeForExhaustedCredits(
+	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
+) (err error) {
 	if _, err := s.FinalizeNodeCredits(ctx, runID, nodeID, tokenPrefix, now); err != nil {
 		return err
 	}
@@ -882,7 +891,7 @@ func (s *Store) CancelNodeForExhaustedCredits(ctx context.Context, runID, nodeID
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
