@@ -597,6 +597,10 @@ CREATE TABLE IF NOT EXISTS nodes (
     claim_worker_id   TEXT NOT NULL DEFAULT '',
     claim_executor_kind TEXT NOT NULL DEFAULT '',
     claim_reservation_id TEXT NOT NULL DEFAULT '',
+    -- placement_reason: why the claiming runner got this node --
+    -- 'preference', 'fallback', 'none', or '' for a node no claim path
+    -- decided.
+    placement_reason TEXT NOT NULL DEFAULT '',
     -- status_detail: phase string runners write for the dashboard.
     status_detail    TEXT NOT NULL DEFAULT '',
     -- last_heartbeat: runner liveness; for UI, not lease enforcement.
@@ -1031,7 +1035,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 34
+const expectedSchemaVersion = 35
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1895,6 +1899,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyNamedCronsMigrationSQLite(ctx, tx)
 	case 34:
 		return applyCronBranchMigrationSQLite(ctx, tx)
+	case 35:
+		return ensureColumnsSQLite(ctx, tx, "nodes", nodePlacementCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2203,6 +2209,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyNamedCronsMigrationPostgres(ctx, tx)
 	case 34:
 		return applyCronBranchMigrationPostgres(ctx, tx)
+	case 35:
+		return addColumnsTx(ctx, tx, "nodes", nodePlacementCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2403,6 +2411,7 @@ var columnMigrations = []columnSpec{
 		"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
 		"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
 		"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+		"placement_reason":       "TEXT NOT NULL DEFAULT ''",
 		"claim_executor":         "TEXT NOT NULL DEFAULT ''",
 		"claim_cores":            "DOUBLE PRECISION NOT NULL DEFAULT 0",
 		"claim_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
@@ -2606,6 +2615,10 @@ var nodeExecutorClaimColsPostgres = map[string]string{
 	"claim_memory_bytes": "BIGINT NOT NULL DEFAULT 0",
 	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
 	"claim_slot":         "BIGINT NOT NULL DEFAULT -1",
+}
+
+var nodePlacementCols = map[string]string{
+	"placement_reason": "TEXT NOT NULL DEFAULT ''",
 }
 
 var nodeDispatchRedactionCols = map[string]string{
@@ -3818,6 +3831,11 @@ type Node struct {
 	AvoidExecutorID          string             `json:"-"`
 	AvoidUntil               *time.Time         `json:"-"`
 
+	// PlacementReason names why the claiming runner got this node:
+	// "preference", "fallback" after the local-first hold window, or "none"
+	// when it carried no preference. Empty on a node no claim path decided.
+	PlacementReason string `json:"placement_reason,omitempty"`
+
 	// NeedsLabels: runner labels required (AND semantics). Empty = any.
 	NeedsLabels []string `json:"needs_labels,omitempty"`
 	// PrefersLabels orders soft executor preferences.
@@ -4240,6 +4258,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, o
 	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
+	   placement_reason,
 	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
@@ -4265,7 +4284,8 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&policyJSON, &policyHash, &policyVersion, &bodyProtocol,
 		&supervisorRequirementsJSON, &supervisorRequirementsHash,
 		&bodyRequirementsJSON, &bodyRequirementsHash,
-		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS, &pipeline)
+		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
+		&n.PlacementReason, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -4941,11 +4961,20 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 		return nil, err
 	}
 	labelSet := make(map[string]struct{}, len(runnerLabels))
+	preferSet := make(map[string]struct{}, len(runnerLabels))
 	for _, l := range runnerLabels {
-		if l != "" && l != "local" && !strings.HasPrefix(l, "location=") {
+		if l == "" {
+			continue
+		}
+		preferSet[l] = struct{}{}
+		// safety: a runner asserts its own location, so those terms buy it no
+		// hard requirement; the soft preference is the one place they speak.
+		if l != "local" && !strings.HasPrefix(l, "location=") {
 			labelSet[l] = struct{}{}
 		}
 	}
+	placement, _ := ClaimPlacementFromContext(ctx)
+	var heldBack []nodeKey
 
 	const maxCandidates = 64
 	for range maxCandidates {
@@ -4958,16 +4987,21 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			return nil, err
 		}
 		n := &nodeRecord{}
+		args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
+		exclude := ""
+		for _, key := range heldBack {
+			exclude += " AND NOT (run_id = ? AND node_id = ?)"
+			args = append(args, key.runID, key.nodeID)
+		}
 		err = scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+exclude+`
  ORDER BY ready_at ASC
-	 LIMIT 1`+s.forUpdateSkipLocked(),
-			time.Now().UnixNano(), coordinatorID, "", ""), n)
+	 LIMIT 1`+s.forUpdateSkipLocked(), args...), n)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -4995,21 +5029,37 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 		}
 
 		now := time.Now()
+		reason, hold := placement.decide(n.PrefersLabels, preferSet, n.ReadyAt, now)
+		if hold {
+			_ = tx.Rollback()
+			heldBack = append(heldBack, nodeKey{runID: n.RunID, nodeID: n.NodeID})
+			continue
+		}
 		expires := now.Add(lease)
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
 			        lease_expires_at = ?, coordinator_id = ?, executor_kind = '', executor_id = '',
 			        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
-			        claim_generation = claim_generation + 1
+			        placement_reason = ?, claim_generation = claim_generation + 1
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
 			    AND required_coordinator_id = '' AND required_executor_location = ''
 			    AND `+nodeExecutionUnsealed,
 			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
-			coordinatorID, n.RunID, n.NodeID,
+			coordinatorID, reason, n.RunID, n.NodeID,
 		); err != nil {
 			_ = tx.Rollback()
 			return nil, err
+		}
+		// safety: a node nobody preferred would put an event on every claim in
+		// every deployment and say nothing about placement.
+		if reason != PlacementNone {
+			if _, err := appendEventTx(ctx, tx, n.RunID, n.NodeID, "node_placed", nodePlacementEvent{
+				HolderID: holderID, Reason: reason, Prefers: placement.prefersFor(n.PrefersLabels),
+			}, now); err != nil {
+				_ = tx.Rollback()
+				return nil, err
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
@@ -5018,6 +5068,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 		n.LeaseExpiresAt = &expires
 		n.CoordinatorID = coordinatorID
 		n.ExecutorLocation = "unknown"
+		n.PlacementReason = reason
 		n.ClaimGeneration++
 		return &n.Node, nil
 	}
