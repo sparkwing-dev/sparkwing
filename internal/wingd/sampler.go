@@ -95,9 +95,10 @@ type OwnedCPUSampler interface {
 
 type ownedProcSampler struct {
 	//lint:ignore U1000 used by platform implementations
-	mu     sync.Mutex
-	last   map[processIdentity]cpuSample
-	lastAt time.Time
+	mu        sync.Mutex
+	last      map[processIdentity]cpuSample
+	lastAt    time.Time
+	seenSince time.Time
 }
 
 func newOwnedCPUSampler() *ownedProcSampler {
@@ -136,6 +137,7 @@ type ownedProcess struct {
 	parentPID  int
 	identity   processIdentity
 	cpuSeconds float64
+	startedAt  time.Time
 }
 
 func ownersByNearestRoot(parentOf map[int]int, rootPIDs map[int]struct{}) map[int]int {
@@ -200,7 +202,30 @@ func (s *ownedProcSampler) forgetSamples(now time.Time) {
 	// no later window can span a stretch this sampler sat out.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.last, s.lastAt = nil, now
+	s.last, s.lastAt, s.seenSince = nil, now, now
+}
+
+// safety: one argument, because two adjacent times of the same type invite a
+// transposition that dates against the scan's end.
+type scanWindow struct {
+	startedListingAt time.Time
+	readAt           time.Time
+}
+
+func (s *ownedProcSampler) creditScan(
+	processes map[int]ownedProcess,
+	roots []OwnedRoot,
+	window scanWindow,
+	arbitratedCores float64,
+) map[int]float64 {
+	owners := ownedProcessOwners(roots, processes)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// safety: both ends of every window come from readAt, so the offset between it and
+	// the counter reads cancels across readings.
+	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, s.seenSince, window.readAt, arbitratedCores)
+	s.last, s.lastAt, s.seenSince = next, window.readAt, window.startedListingAt
+	return byRoot
 }
 
 func ownedCPUByRoot(
@@ -209,6 +234,7 @@ func ownedCPUByRoot(
 	owners map[processIdentity]int,
 	roots []OwnedRoot,
 	lastAt time.Time,
+	seenSince time.Time,
 	now time.Time,
 	arbitratedCores float64,
 ) (map[int]float64, map[processIdentity]cpuSample) {
@@ -236,6 +262,12 @@ func ownedCPUByRoot(
 		}
 		prior, seen := previous[identity]
 		if !seen {
+			if !startedInWindow(process.startedAt, seenSince, now) {
+				// safety: a counter covering time nobody watched charges this window for
+				// CPU that ran outside it.
+				unreadable[root] = struct{}{}
+				continue
+			}
 			firstSight[root] += process.cpuSeconds
 			continue
 		}
@@ -311,6 +343,17 @@ func creditableRoots(
 		}
 	}
 	return creditable
+}
+
+const processDatingSlack = 10 * time.Millisecond
+
+func startedInWindow(startedAt, seenSince, now time.Time) bool {
+	// safety: the slack is a clock tick, because a start time and an uptime each floor
+	// to one and a process dated a tick early is not evidence it predates the scan.
+	if seenSince.IsZero() {
+		return false
+	}
+	return !startedAt.Before(seenSince.Add(-processDatingSlack)) && !startedAt.After(now)
 }
 
 func firstSightCredit(cpuSeconds, window, arbitratedCores float64) (float64, bool) {

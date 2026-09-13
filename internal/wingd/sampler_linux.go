@@ -91,25 +91,39 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 }
 
 func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
+	return s.sampleOwnedFrom(time.Now, roots, arbitratedCores)
+}
+
+// safety: the clock must carry a monotonic reading; a wall-only one refuses every
+// root and charges the whole machine.
+func (s *ownedProcSampler) sampleOwnedFrom(
+	clock func() time.Time,
+	roots []OwnedRoot,
+	arbitratedCores float64,
+) (map[int]float64, bool) {
+	scanStart := clock()
 	procs, ok := linuxProcesses()
 	if !ok {
 		return nil, false
 	}
+	now := clock()
+	processes := linuxOwnedProcesses(procs, now, linuxUptime())
+	return s.creditScan(processes, roots, scanWindow{startedListingAt: scanStart, readAt: now}, arbitratedCores), true
+}
+
+// safety: the tree total a parent carries already holds every child it reaped, so
+// crediting it here counts one reaped child under every ancestor it had.
+func linuxOwnedProcesses(procs map[int]linuxProc, now time.Time, uptimeSeconds float64) map[int]ownedProcess {
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
 		processes[processID] = ownedProcess{
 			parentPID:  proc.parentPID,
 			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
 			cpuSeconds: proc.selfCPUSeconds,
+			startedAt:  linuxProcessStart(now, uptimeSeconds, proc.startTicks),
 		}
 	}
-	owners := ownedProcessOwners(roots, processes)
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	byRoot, next := ownedCPUByRoot(s.last, processes, owners, roots, s.lastAt, now, arbitratedCores)
-	s.last, s.lastAt = next, now
-	return byRoot, true
+	return processes
 }
 
 type linuxProc struct {
@@ -223,4 +237,20 @@ func readMemAvailable() (uint64, bool) {
 		return kb * 1024, true
 	}
 	return 0, false
+}
+
+func linuxProcessStart(now time.Time, uptimeSeconds float64, startTicks uint64) time.Time {
+	return processStartFromUptime(now, uptimeSeconds, float64(startTicks)/linuxClockTicks)
+}
+
+func linuxUptime() float64 {
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0
+	}
+	seconds, ok := parseProcUptime(string(data))
+	if !ok {
+		return 0
+	}
+	return seconds
 }

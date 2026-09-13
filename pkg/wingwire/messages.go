@@ -457,13 +457,11 @@ type ExternalAttribution struct {
 	// RunsAwaitingMeasure this count rising wants someone to look rather
 	// than being the expected shape.
 	RunsProcessGone int64 `json:"runs_process_gone"`
-	// RunsAwaitingMeasure is how many readings ran while a holding run had
-	// no CPU figure the daemon could stand behind: it began holding after
-	// the reading was taken, or it has been held since before the daemon
-	// started watching it, so how much of its CPU belongs to this reading
-	// is unknowable. That run is charged to the machine until a reading
-	// covers it. A run that has merely just started is not counted here --
-	// it is measured from its first reading.
+	// RunsAwaitingMeasure is how many readings ran while a holding run had no
+	// CPU figure the daemon could stand behind, so that run was charged to the
+	// machine. A count that rises and settles while runs come and go reports
+	// runs the daemon has yet to measure. One that keeps pace with Samples
+	// while runs are healthy reports a host it cannot measure at all.
 	RunsAwaitingMeasure int64 `json:"runs_awaiting_measure"`
 	// Attributed is how many readings located every holding run's CPU and
 	// subtracted it, which is the condition the other counts are absences
