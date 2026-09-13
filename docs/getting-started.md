@@ -339,7 +339,47 @@ sparkwing pipeline trigger build --profile dev  # run on the "dev" cluster
 sparkwing pipeline trigger build --profile prod # run on the "prod" cluster
 ```
 
-Cluster names are profiles you configure with `sparkwing configure profiles
-add`. Sparkwing itself does not run in-cluster locally - clusters named by
-`--profile` are user-managed deploy targets, not local sparkwing
-deployments.
+Cluster names are profiles. `sparkwing cloud connect` writes one; see
+[Connecting to a controller](#connecting-to-a-controller). Sparkwing itself
+does not run in-cluster locally - clusters named by `--profile` are
+user-managed deploy targets, not local sparkwing deployments.
+
+## Connecting to a controller
+
+One command connects this machine to a controller:
+
+```bash
+sparkwing cloud connect --controller https://api.sparkwing.example --admin-token-stdin
+```
+
+It reads an admin token from stdin, mints a user token carrying `runs.read`,
+`runs.write`, `triggers.read`, `logs.read` and `approvals.write`, writes the
+profile into `~/.config/sparkwing/profiles.yaml`, and prints the dashboard URL
+the controller announces along with the same probes `sparkwing configure
+profiles test` runs. The admin token is never stored. Nothing here asks you to
+edit YAML.
+
+The profile is named after the controller host - `api-sparkwing-example` above
+- unless you pass `--name`. Pass a token someone minted for you with
+`--token-stdin` instead of `--admin-token-stdin`. An existing profile of that
+name is replaced only with `--force`, because the token it holds stays live
+until it is revoked.
+
+Add `--set-default` inside a repository to write `defaults.profile` into its
+`.sparkwing/sparkwing.yaml`, so runs in that checkout select the connection
+with no flag. The name resolves against the project's own `profiles:` block
+first and `profiles.yaml` second, so the token stays out of the checkout.
+
+```bash
+sparkwing cloud status --profile prod        # principal, scopes, and probes
+sparkwing cloud disconnect --name prod --admin-token-stdin   # revoke and remove
+```
+
+Disconnect revokes the profile's token. The profile's own token revokes only
+when it carries `admin`, so `--admin-token-stdin` supplies one that does; a
+revoke the credential is not allowed to make leaves the token live and names
+the prefix and the command that finishes the job. `--keep-token` removes the
+profile and touches no credential.
+
+To run work on this machine for that controller, enroll it as a runner with
+`sparkwing cluster runners add --profile prod --name this-laptop`.

@@ -7,7 +7,9 @@ and per-endpoint scope annotations.
 
 Raw tokens are `<prefix>_<entropy>`:
 
-- `swu_...` -- user. Created for humans (`sparkwing cluster tokens create --type user`).
+- `swu_...` -- user. Created for humans (`sparkwing cluster tokens create --type user`,
+  or `sparkwing cloud connect --admin-token-stdin`, which mints one and writes the
+  profile that holds it).
 - `swr_...` -- runner. Created for remote machine agents or pool replicas.
 - `sws_...` -- service. Created for in-cluster back-channel callers.
 

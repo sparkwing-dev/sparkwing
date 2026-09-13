@@ -389,6 +389,8 @@ func runSparkwing(args []string) error {
 	case "crons":
 		return runCrons(args[1:])
 
+	case "cloud":
+		return runCloud(args[1:])
 	case "cluster":
 		return runCluster(args[1:])
 	case "fleet":

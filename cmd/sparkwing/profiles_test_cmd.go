@@ -11,7 +11,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -55,18 +54,7 @@ func runProfilesTest(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	report := profileTestReport{Profile: prof.Name, OK: true}
-
-	report.Probes = append(report.Probes, probeController(ctx, prof))
-	report.Probes = append(report.Probes, probeAuth(ctx, prof))
-	report.Probes = append(report.Probes, probeLogs(ctx, prof))
-	report.Probes = append(report.Probes, probeGitcache(ctx, prof))
-
-	for _, p := range report.Probes {
-		if p.Status == "fail" {
-			report.OK = false
-		}
-	}
+	report := probeProfile(ctx, prof)
 
 	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
@@ -80,16 +68,9 @@ func runProfilesTest(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "profile: %s\n", prof.Name)
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	for _, p := range report.Probes {
-		latency := ""
-		if p.LatencyMS > 0 {
-			latency = fmt.Sprintf("(%dms)", p.LatencyMS)
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-			p.Name, p.Status, orDash(p.Target), strings.TrimSpace(p.Detail), latency)
+	if err := writeProbeTable(os.Stdout, report); err != nil {
+		return err
 	}
-	_ = tw.Flush()
 	if !report.OK {
 		return errors.New("one or more probes failed")
 	}

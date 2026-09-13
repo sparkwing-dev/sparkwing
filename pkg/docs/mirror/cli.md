@@ -84,6 +84,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
 | `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |
+| `cloud` | Connect this machine to a controller: connect / status / disconnect |
 | `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
 | `secrets` | Secrets, laptop dotenv or controller-stored with `--profile`: set / get / list / delete |
 | `configure` | Laptop-local config: init / profiles / xrepo |
