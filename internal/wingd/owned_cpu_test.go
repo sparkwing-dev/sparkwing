@@ -458,6 +458,11 @@ func TestParseProcUptime_RefusesAnythingItCannotRead(t *testing.T) {
 		"not a number": "unknown 1\n",
 		"zero":         "0 0\n",
 		"negative":     "-1 0\n",
+		// safety: ParseFloat reads each of these without reporting an error, and
+		// a bound written as a comparison admits a NaN.
+		"the IEEE not-a-number": "nan 0\n",
+		"positive infinity":     "inf 0\n",
+		"spelled-out infinity":  "Infinity 0\n",
 	} {
 		if got, ok := parseProcUptime(data); ok || got != 0 {
 			t.Errorf("%s: parseProcUptime = %v, %v; want refused, because a bad uptime dates every process wrongly rather than leaving it undated",
@@ -505,6 +510,27 @@ func TestOwnedProcSampler_ASecondScanDatesAProcessFromWhenTheFirstBeganListing(t
 
 	if figure, reported := byRoot[10]; !reported || math.Abs(figure-0.6) > 0.0001 {
 		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want the child's three CPU-seconds over the five-second window: the scan it is missing from was already listing when the child began, so its absence there is not evidence of age",
+			figure, reported)
+	}
+}
+
+func TestOwnedProcSampler_ReHoldingAfterAnIdleStretchDatesFromWhenItStoppedWatching(t *testing.T) {
+	idleAt := time.Unix(100, 0)
+	scanStart := idleAt.Add(2 * time.Second)
+	now := scanStart.Add(50 * time.Millisecond)
+	root := processIdentity{pid: 10, startTicks: 1000}
+	held := []OwnedRoot{{PID: 10, HeldSince: idleAt.Add(time.Second)}}
+	processes := map[int]ownedProcess{
+		10: {parentPID: 1, identity: root, cpuSeconds: 3, startedAt: idleAt.Add(time.Second)},
+	}
+
+	sampler := &ownedProcSampler{}
+	sampler.forgetSamples(idleAt)
+
+	byRoot := sampler.creditScan(processes, held, scanWindow{startedListingAt: scanStart, readAt: now}, 8)
+
+	if figure, reported := byRoot[10]; !reported || math.Abs(figure-3.0/2.05) > 0.0001 {
+		t.Fatalf("tree reports a figure %[2]v carrying %[1]v; want its three CPU-seconds over the 2.05-second window: the sampler stopped watching at a known instant, and a run begun after that instant ran every one of those seconds inside the window",
 			figure, reported)
 	}
 }
@@ -575,6 +601,10 @@ func TestProcessStartFromUptime_RefusesADateItCannotStandBehind(t *testing.T) {
 		"unreadable uptime":          {0, 0},
 		"negative uptime":            {-1, 0},
 		"a start after the boot ran": {10, 3600},
+		// safety: a NaN age converts to a zero Duration, so the process dates to
+		// the instant of the scan -- inside every window, and carrying a monotonic
+		// reading, so asking the result whether it kept one answers yes.
+		"an uptime that is not a number": {math.NaN(), 60},
 	} {
 		if got := processStartFromUptime(now, tc.uptimeSeconds, tc.startSeconds); !got.IsZero() {
 			t.Errorf("%s: process start = %v; want undated, so the tree goes unmeasured rather than credited on a bad date", name, got)

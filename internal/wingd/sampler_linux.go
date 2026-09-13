@@ -91,12 +91,23 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 }
 
 func (s *ownedProcSampler) sampleOwned(roots []OwnedRoot, arbitratedCores float64) (map[int]float64, bool) {
-	scanStart := time.Now()
+	return s.sampleOwnedFrom(time.Now, roots, arbitratedCores)
+}
+
+// safety: the clock is a parameter so a test can name which reading became which
+// bound. Pairing them the other way shortens the window every first-sight credit
+// is divided by, which inflates each one by however long the listing took.
+func (s *ownedProcSampler) sampleOwnedFrom(
+	clock func() time.Time,
+	roots []OwnedRoot,
+	arbitratedCores float64,
+) (map[int]float64, bool) {
+	scanStart := clock()
 	procs, ok := linuxProcesses()
 	if !ok {
 		return nil, false
 	}
-	now := time.Now()
+	now := clock()
 	uptime := linuxUptime()
 	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {

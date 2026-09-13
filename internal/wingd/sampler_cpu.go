@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -81,7 +82,10 @@ func parseProcUptime(data string) (float64, bool) {
 		return 0, false
 	}
 	seconds, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil || seconds <= 0 {
+	// safety: ParseFloat reads "nan" and "inf" without reporting an error, and a
+	// bound written as a comparison admits a NaN, because every comparison
+	// against one is false.
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
 		return 0, false
 	}
 	return seconds, true
@@ -107,11 +111,16 @@ func processStartFromUptime(now time.Time, uptimeSeconds, startSeconds float64) 
 	if uptimeSeconds <= 0 {
 		return time.Time{}
 	}
+	// safety: the bound admits the ages this can stand behind rather than refusing
+	// the ages it cannot, because a NaN age passes every refusal written as a
+	// comparison and converts to a zero Duration. That dates the process at the
+	// instant of the scan, which is inside every window and carries a monotonic
+	// reading, so the dated result answers every later question correctly.
 	age := uptimeSeconds - startSeconds
-	if age < 0 {
-		return time.Time{}
+	if age >= 0 {
+		return datedOrUndatable(now, time.Duration(age*float64(time.Second)))
 	}
-	return datedOrUndatable(now, time.Duration(age*float64(time.Second)))
+	return time.Time{}
 }
 
 func datedOrUndatable(now time.Time, age time.Duration) time.Time {
