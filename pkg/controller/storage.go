@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -89,8 +90,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 			s.logger.Info("compacted retained rows",
 				"events", swept.Events, "node_metrics", swept.NodeMetrics,
 				"event_retention_days", settings.EventRetentionDays,
-				"node_metric_retention_days", settings.NodeMetricRetentionDays,
-				"free_pages_reclaimed", swept.Reclaimed)
+				"node_metric_retention_days", settings.NodeMetricRetentionDays)
 		}
 	}
 	size, err := s.store.DatabaseSize(ctx)
@@ -281,8 +281,8 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 	principal := r.PathValue("principal")
 	if !store.ValidStoragePrincipal(principal) {
-		writeError(w, http.StatusBadRequest,
-			errors.New("principal must be 1 to 128 characters of letters, digits, or -_.:@"))
+		writeError(w, http.StatusBadRequest, fmt.Errorf(
+			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
 		return
 	}
 	var body storageQuotaJSON

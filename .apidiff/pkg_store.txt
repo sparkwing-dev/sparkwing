@@ -790,7 +790,6 @@ type RetentionSweep struct {
 	NodeMetrics      int64
 	EventCutoff      time.Time
 	NodeMetricCutoff time.Time
-	Reclaimed        bool
 }
 const RetentionSweepBatch = 5000
 const RetrySourceAuto = "auto"
@@ -915,6 +914,7 @@ const StorageLimitBytesPerMonth = "bytes_per_month"
 const StorageLimitBytesPerRun = "bytes_per_run"
 const StorageLimitObjectsPerRun = "objects_per_run"
 func StorageMonth(t time.Time) string
+const StoragePrincipalMaxLen = 256
 type StorageQuota struct {
 	Principal        string
 	Tier             string

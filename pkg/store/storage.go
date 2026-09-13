@@ -149,7 +149,6 @@ type RetentionSweep struct {
 	NodeMetrics      int64
 	EventCutoff      time.Time
 	NodeMetricCutoff time.Time
-	Reclaimed        bool
 }
 
 // TableSize is one table's total size on disk, indexes and toast included.
@@ -349,13 +348,6 @@ func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSwe
 		}
 		out.NodeMetrics = n
 	}
-	if out.Events > 0 || out.NodeMetrics > 0 {
-		reclaimed, rerr := s.reclaimFreePages(ctx)
-		if rerr != nil {
-			return out, fmt.Errorf("storage: reclaim free pages: %w", rerr)
-		}
-		out.Reclaimed = reclaimed
-	}
 	return out, nil
 }
 
@@ -401,32 +393,10 @@ func (s *Store) rowIdentifier() string {
 	return "rowid"
 }
 
-// safety: a delete leaves free pages behind, so a size alarm raised before a
-// sweep would never clear; incremental auto-vacuum hands those pages back
-// without the exclusive lock a full VACUUM takes.
-func (s *Store) reclaimFreePages(ctx context.Context) (bool, error) {
-	if s.dialect == DialectPostgres {
-		return false, nil
-	}
-	var mode int64
-	if err := s.queryRow(ctx, `PRAGMA auto_vacuum`).Scan(&mode); err != nil {
-		return false, err
-	}
-	if mode != sqliteAutoVacuumIncremental {
-		return false, nil
-	}
-	if _, err := s.exec(ctx, `PRAGMA incremental_vacuum`); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-const sqliteAutoVacuumIncremental = 2
-
 // DatabaseSize samples how much room the metadata database occupies. SQLite
 // answers with the pages it holds less the pages on its free list, so a sweep
-// shrinks the sample whether or not the file itself shrank; Postgres answers
-// per relation and the total is their sum.
+// shrinks the sample even though the file keeps its size until an operator
+// runs VACUUM; Postgres answers per relation and the total is their sum.
 func (s *Store) DatabaseSize(ctx context.Context) (DatabaseSize, error) {
 	if s.dialect == DialectPostgres {
 		return s.postgresDatabaseSize(ctx)
@@ -494,22 +464,17 @@ func TierQuota(tier string) (StorageQuota, bool) {
 	}
 }
 
-// ValidStoragePrincipal reports whether a name may key a quota row. It is the
-// shape a token's principal already has, so a quota cannot be filed under a
-// name no token can ever present.
+// StoragePrincipalMaxLen is the longest principal a quota row may be filed
+// under. It is a storage bound, not a naming rule.
+const StoragePrincipalMaxLen = 256
+
+// ValidStoragePrincipal reports whether a name may key a quota row. A token
+// principal is a free-form label, so this refuses only what cannot be a
+// principal at all: nothing and something longer than any token carries.
+// Narrowing it further would leave an existing team unable to hold a quota
+// while a default tier still bound it.
 func ValidStoragePrincipal(name string) bool {
-	if name == "" || len(name) > 128 {
-		return false
-	}
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '-', r == '_', r == '.', r == ':', r == '@':
-		default:
-			return false
-		}
-	}
-	return true
+	return name != "" && len(name) <= StoragePrincipalMaxLen
 }
 
 // SetStorageQuota writes one team's allowance. A quota naming a known tier and

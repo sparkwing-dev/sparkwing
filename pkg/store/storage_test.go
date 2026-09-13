@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -312,9 +313,9 @@ func TestStorageQuotaFallsBackToTheDefaultTier(t *testing.T) {
 	if len(rows) != 1 || rows[0].Principal != "alice" {
 		t.Fatalf("quota rows = %+v, want one for alice", rows)
 	}
-	for _, bad := range []string{"", "has space", "semi;colon"} {
+	for _, bad := range []string{"", strings.Repeat("x", store.StoragePrincipalMaxLen+1)} {
 		if err := st.SetStorageQuota(ctx, store.StorageQuota{Principal: bad, Tier: store.StorageTierFree}); err == nil {
-			t.Fatalf("principal %q was accepted", bad)
+			t.Fatalf("principal of length %d was accepted", len(bad))
 		}
 	}
 }
@@ -514,5 +515,32 @@ func TestChargedWriteRefusesARunThatDoesNotExist(t *testing.T) {
 	}
 	if got := countRows(t, st, `SELECT COUNT(*) FROM storage_run_usage`); got != 0 {
 		t.Fatalf("per-run usage rows = %d, want none for a run that does not exist", got)
+	}
+}
+
+// A token principal is a free-form label, so a team already carrying one of
+// these has to be able to hold a quota; refusing it would leave a default
+// tier binding a team no operator could ever raise.
+func TestStorageQuotaAcceptsThePrincipalsTokensCarry(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, name := range []string{"acme corp", "team/prod", "Ünicode", "a+b", "unix-peer:1000"} {
+		if _, _, err := st.CreateToken(name, store.TokenKindRunner,
+			[]string{"runs.read"}, 0, now); err != nil {
+			t.Fatalf("a token for %q was refused, so this case proves nothing: %v", name, err)
+		}
+		if err := st.SetStorageQuota(ctx, store.StorageQuota{
+			Principal: name, Tier: store.StorageTierFree,
+		}); err != nil {
+			t.Fatalf("a quota for principal %q was refused: %v", name, err)
+		}
+		q, err := st.StorageQuotaFor(ctx, name)
+		if err != nil {
+			t.Fatalf("read the quota for %q: %v", name, err)
+		}
+		if q.MaxBytesPerRun != store.FreeTierQuota.MaxBytesPerRun {
+			t.Fatalf("quota for %q = %+v, want the free tier", name, q)
+		}
 	}
 }

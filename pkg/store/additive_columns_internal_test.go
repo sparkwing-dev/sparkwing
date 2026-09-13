@@ -48,8 +48,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v37 adds one table nothing older reads and no column, so an
 	// older binary keeps writing the migrated database.
 	37: nil,
-	// safety: v38 adds two tables nothing older reads and no column, so an
-	// older binary keeps writing the migrated database.
+	// safety: v38 adds three tables nothing older reads and two indexes, and
+	// no column, so an older binary keeps writing the migrated database.
 	38: nil,
 }
 

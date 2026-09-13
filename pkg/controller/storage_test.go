@@ -271,9 +271,14 @@ func TestStorageSettingsAndQuotaRoutes(t *testing.T) {
 		t.Fatalf("quota = %+v, want the paid tier limits", quota)
 	}
 
-	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/not%20a%20name", f.admin,
+	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme%20corp", f.admin,
+		`{"tier":"paid"}`, false); code != http.StatusOK {
+		t.Fatalf("a principal a token may carry = %d %s, want 200", code, body)
+	}
+	if code, body := f.request(t, http.MethodPut,
+		"/api/v1/storage/quotas/"+strings.Repeat("x", store.StoragePrincipalMaxLen+1), f.admin,
 		`{"tier":"paid"}`, false); code != http.StatusBadRequest {
-		t.Fatalf("a malformed principal = %d %s, want 400", code, body)
+		t.Fatalf("an over-long principal = %d %s, want 400", code, body)
 	}
 	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme", f.admin,
 		`{"tier":"platinum"}`, false); code != http.StatusBadRequest {
