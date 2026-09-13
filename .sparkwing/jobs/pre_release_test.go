@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -21,6 +22,16 @@ func TestActionlintCommandIsPinned(t *testing.T) {
 	const want = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
 	if actionlintCommand != want {
 		t.Fatalf("actionlint command = %q, want exactly %q", actionlintCommand, want)
+	}
+}
+
+func TestInstallToGreenHarnessRunsOnTheCheckoutAndRecordsRatherThanGates(t *testing.T) {
+	const want = "bash bin/install-to-green.sh --build --output json"
+	if installToGreenCommand != want {
+		t.Fatalf("install-to-green command = %q, want exactly %q", installToGreenCommand, want)
+	}
+	if _, err := os.Stat(filepath.Join("..", "..", "bin", "install-to-green.sh")); err != nil {
+		t.Fatalf("the release lane runs a harness that is not in the checkout: %v", err)
 	}
 }
 
