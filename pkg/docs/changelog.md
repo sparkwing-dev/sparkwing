@@ -32,7 +32,7 @@ unlock.
 - **install (Breaking):** `install/install.sh` is the public CLI installer, the
   script `https://sparkwing.dev/install.sh` serves. The runner service
   installer it displaced now lives at `install/service-install.sh`, unchanged.
-  See [installer paths](docs/migrations/_unreleased.md#installer-paths).
+  See [installer paths](docs/migrations/v0.50.0.md#installer-paths).
 - **development:** A test binary no longer reaches the operator's home or daemon.
   `SPARKWING_HOME` naming the default home is refused under `go test`, with the
   fix in the message, and a test that hosts the admission daemon names its
@@ -145,7 +145,8 @@ unlock.
   `unmeasured` rather than switching on the values a build happens to know. An
   empty value is the exception and means the daemon predates the field, so
   whether the figure was measured is unknown. `sparkwing queue`
-  and the capacity dashboard both say so where it applies.
+  and the capacity dashboard both say so where it applies. See
+  [external source gained a third value](docs/migrations/v0.50.0.md#external-source-gained-a-third-value).
 
 ### Security
 
