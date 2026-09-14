@@ -136,6 +136,20 @@ unlock.
 
 ### Changed
 
+- **release pipeline:** A release is a tag push. `sparkwing run
+  release` now does five things -- resolve a version, rename the changelog
+  `[Unreleased]` section to it, commit, tag, push the branch and the tag -- and
+  its one precondition is that the version outranks the newest tag origin
+  carries. The broad gate, the pre-release tier, the template proof and the
+  contract preflight no longer run locally at the tag boundary: the hosted
+  release workflow runs every one of them against the tagged source before it
+  builds, publishes, or creates the GitHub release, so a red check publishes
+  nothing and the fix is a later patch tag. The workflow re-checks the version
+  with `bin/check-release-tag-order.sh` before any of that.
+- **cli:** A repository that pins an SDK version whose binaries the release
+  workflow has not published yet no longer fails every hook with a 404. The
+  toolchain fetch warns and falls back to the newest published release, so a
+  repository can pin a version the moment its tag exists.
 - **controller (Breaking):** A metered runner second is priced by the node's cpu
   class from the default rate table, which carries GitHub Actions' Linux x64
   rates: 2-core 10,000 micro-credits a second, 4-core 20,000, 8-core 36,667,
@@ -202,6 +216,15 @@ unlock.
 
 ### Removed
 
+- **release pipeline:** The `check-branch-published` and
+  `gate-release-lineage` nodes, and the tip check inside `push-tag`, are gone.
+  The pipeline no longer refuses a checkout that origin has moved ahead of, or
+  a line that does not contain the newest release tag, so a release can be cut
+  from any commit whose version is ahead of the previous one. The
+  `bump-self-replace` and `restore-self-replace` nodes are gone with them: a
+  released binary stamps its own tag into a fresh scaffold, and the committed
+  SDK pin is carried forward by the `pre-release` tier's existing auto-bump,
+  which resolves the newest released tag itself.
 - **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
   and the fleet CLI
 
