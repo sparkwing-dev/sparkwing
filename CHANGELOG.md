@@ -157,7 +157,11 @@ unlock.
   touches, up to eight of them. `gate` keeps every step it had, gains those
   three contract gates, and no git hook fires it any more: `sparkwing run gate`
   runs it on demand and hosted CI runs it on every pull request and every push
-  to main.
+  to main. Every scoped step in the push tier reads the commits being pushed,
+  never the index, so a file left staged cannot narrow what a push is judged
+  against. An existing checkout keeps running the old hook until
+  `sparkwing pipeline hooks install` rewrites the scripts, because each script
+  names its pipeline.
 
 - **pkg/store + controller:** The credit surfaces added this cycle carry less
   machinery. The derived runner cap is cached once rather than once per

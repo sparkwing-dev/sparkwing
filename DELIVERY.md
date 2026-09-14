@@ -25,20 +25,28 @@ launcher when testing isolated tool state.
   pull request and every push to main; no git hook fires either.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` is the proof they fire; a definition alone
-  proves nothing.
-- **What the two hooks cost:** measured on a 16-core Linux host with a
-  one-package change, warm caches: `pre-commit` 1.2 s wall (0.8 s inside the
-  run, slowest step `comments` at 0.66 s) and `pre-push` 1.7 s wall (1.3 s
-  inside the run, slowest step `formatters` at 1.24 s, with `build-touched` at
-  0.55 s). Both tiers run their steps in parallel, so each costs what its
-  slowest step costs. A commit and a push together stay under three seconds,
-  against a budget of ten; a change to the pipeline module adds about three
-  seconds to the first run after it, which recompiles `.sparkwing/`.
-- **Which tier decides a merge:** hosted CI on main is the merge check of
-  record, and the two hooks are the fast path that catches the cheap mistakes
-  before a push costs a round trip. Read a disagreement between them as the
-  hosted result plus a gate bug. Run `sparkwing run gate` yourself when a
-  change is broad enough that a hosted red would cost more than the wait.
+  proves nothing. A hook script names its pipeline, so a checkout whose hooks
+  were installed when the pre-push hook ran `gate` keeps running `gate` until
+  `sparkwing pipeline hooks install` rewrites them.
+- **What the two hooks cost:** measured on this 16-core Linux host beside one
+  other agent's suite. A change to a Go file invalidates the cached
+  `.sparkwing/` pipeline binary, because that module replaces the SDK with the
+  checkout itself, so the first hook run after one pays about 2.5 s to
+  recompile it: a one-package Go change measured 3.4 s to commit (0.77 s inside
+  the run) and 4.1 s to push (1.6 s inside the run), and a push whose binary is
+  already warm measured 1.9 s (1.4 s inside the run). A docs-only change
+  measured 1.2 s to commit and 1.7 s to push. The worst case seen was 6.8 s for
+  a push that both recompiled and failed. Both tiers run their steps in
+  parallel, so each costs what its slowest step costs: `comments` at 0.8 s in
+  the commit tier, `formatters` at 1.2 s and the two touched compiles at about
+  2 s in the push tier. A commit and a push together stay under the ten seconds
+  the tiers are budgeted.
+- **Which tier decides a merge:** the hooks judge what they can in seconds and
+  nothing more, so main may go red. The release is the gate that must be green:
+  `gate` and `pre-release` run in hosted CI on every pull request and every
+  push to main, and the release pipeline runs them again at the boundary. Run
+  `sparkwing run gate` yourself when a change is broad enough that a hosted red
+  would cost more than the wait.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
