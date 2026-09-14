@@ -7024,7 +7024,11 @@ func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, r
 SELECT id FROM runs
  WHERE status = ?
    AND last_heartbeat_at IS NOT NULL
-   AND last_heartbeat_at < ?`, runStatusRunning, cutoff)
+   AND last_heartbeat_at < ?
+   AND NOT EXISTS (
+       SELECT 1 FROM triggers t
+        WHERE t.id = runs.id AND `+triggerRequeuedSQL("t.")+`)`,
+		runStatusRunning, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -7049,6 +7053,78 @@ SELECT id FROM runs
 		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
 			return nil, err
 		}
+	}
+	return ids, nil
+}
+
+// safety: this is the deadline the requeued-trigger exclusions answer to, or a
+// queue no runner serves would hold a run open for good. An executing run
+// answers only to the heartbeat the stale-running sweep reads, because the
+// claimant that spawned the work can die while the work runs on.
+func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline, staleHeartbeat time.Duration, reason string) ([]string, error) {
+	now := time.Now()
+	cutoff := now.Add(-deadline).UnixNano()
+	heartbeatCutoff := now.Add(-staleHeartbeat).UnixNano()
+	nowNS := now.UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT r.id
+  FROM runs r
+  JOIN triggers t ON t.id = r.id
+ WHERE r.finished_at IS NULL
+   AND r.status IN (?, ?)
+   AND `+triggerRequeuedSQL("t.")+`
+   AND r.started_at > 0
+   AND r.started_at < ?
+   AND t.available_at < ?
+   AND (r.status = ?
+        OR (r.last_heartbeat_at IS NOT NULL AND r.last_heartbeat_at < ?))`,
+		runStatusPending, runStatusRunning, cutoff, cutoff,
+		runStatusPending, heartbeatCutoff)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			closeRowsOrLog(rows)
+			return nil, err
+		}
+		candidates = append(candidates, id)
+	}
+	closeRowsOrLog(rows)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for _, id := range candidates {
+		// safety: a claimant can take the run between the select and this write,
+		// so the status the select read is re-asserted rather than trusted.
+		res, err := s.exec(ctx, `
+UPDATE runs SET status = ?, error = ?, finished_at = ?
+ WHERE id = ? AND finished_at IS NULL AND status IN (?, ?)`,
+			runStatusFailed, reason, nowNS, id, runStatusPending, runStatusRunning)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected == 0 {
+			continue
+		}
+		if err := s.cascadeOrphanedNodes(ctx, id, reason, nowNS); err != nil {
+			return nil, err
+		}
+		// safety: the trigger outlives the run it names, so a late claimant would
+		// compile and execute a child for a run this sweep already failed.
+		if err := s.FinishTrigger(ctx, id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
 	}
 	return ids, nil
 }
