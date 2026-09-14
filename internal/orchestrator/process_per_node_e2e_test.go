@@ -286,6 +286,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -437,6 +438,14 @@ type Bouncer struct {
 	sparkwing.Produces[BounceOut]
 }
 
+func selfCPUNanos() int64 {
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		return 0
+	}
+	return ru.Utime.Nano() + ru.Stime.Nano()
+}
+
 func (j *Bouncer) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (BounceOut, error) {
 		attempt := RecordAttempt()
@@ -444,10 +453,18 @@ func (j *Bouncer) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			// Burn CPU the exit accounting can see, then wait to be
 			// killed. Deliberately ignores ctx: a bounce is a kill, not
 			// a cancellation the body can cooperate with.
-			deadline := time.Now().Add(1500 * time.Millisecond)
+			// safety: the check downstream reads CPU time, so burn CPU rather than wall
+			// time. A loaded machine deschedules this loop, and a spin bounded by the
+			// clock then accrues whatever share it was given rather than the amount the
+			// check is written against.
 			spin := 0
-			for time.Now().Before(deadline) {
+			started := selfCPUNanos()
+			wallStop := time.Now().Add(60 * time.Second)
+			for time.Now().Before(wallStop) {
 				spin++
+				if spin%8192 == 0 && selfCPUNanos()-started >= int64(1500*time.Millisecond) {
+					break
+				}
 			}
 			_ = spin
 			time.Sleep(10 * time.Minute)
