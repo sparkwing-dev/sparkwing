@@ -30,6 +30,9 @@ administrative routes. This is not an OS sandbox: the pipeline keeps every
 file, network, and process permission of the agent OS user. Use a dedicated
 account whose reach every enrolled repository may have. Sparkwing does not
 join a tailnet or configure host networking.
+[threat-model.md](threat-model.md) states what that boundary isolates, what it
+does not, and what an operator does about the rest when a teammate's branch
+runs on an enrolled desktop.
 
 Native Windows helpers start the body suspended, assign it to a Job Object
 that kills all members on close and does not permit breakaway, and then resume

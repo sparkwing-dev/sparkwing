@@ -123,6 +123,8 @@ func runRunnersAdd(args []string) error {
 		return err
 	}
 	fmt.Println()
+	fmt.Println("what this machine now accepts, and what it does not isolate: sparkwing docs read --topic threat-model")
+	fmt.Println()
 	fmt.Println("revoke this runner with:")
 	fmt.Printf("  sparkwing cluster runners remove --profile %s\n", prof.Name)
 	fmt.Println("or revoke the token alone with:")
