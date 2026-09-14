@@ -16,12 +16,8 @@ const riskFixtureModule = "riskfixture"
 
 const riskMarkerEnv = "RISK_FIXTURE_MARKER"
 
-// TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk runs a pipeline whose first
-// step declares two risk labels, in a home that has never compiled it, and
-// requires the refusal on that invocation. The labels live in Go source, so
-// they are only legible once the .sparkwing/ binary exists; a dispatcher that
-// reads them from what an earlier run left behind admits the first run of every
-// fresh machine with no gate at all.
+// TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk requires the refusal on the
+// invocation that compiles the pipeline, not only on the one after it.
 func TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the risk gate compiles a fixture pipeline binary; run without -short")
@@ -70,6 +66,49 @@ func TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk(t *testing.T) {
 	}
 	if got := offlineMarkerLines(t, marker); len(got) != 2 || got[0] != "push" || got[1] != "after" {
 		t.Fatalf("the authorized run wrote %q, want the risk-declaring step and the one that needs it", got)
+	}
+}
+
+// TestRun_RefusesASourceTreeItCannotRead requires a refusal, never an
+// admission, when .sparkwing/ holds a file the dispatcher cannot read. The
+// unreadable file is one the Go toolchain ignores, so the pipeline would still
+// build and run: a tree that cannot be weighed is a tree whose labels are
+// unknown.
+func TestRun_RefusesASourceTreeItCannotRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the unreadable-tree refusal builds a fixture pipeline; run without -short")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	cli := buildSubmitCLI(t)
+
+	sparkwingHome := t.TempDir()
+	t.Setenv("SPARKWING_HOME", sparkwingHome)
+	offlineStopDaemon(t, sparkwingHome)
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	repoDir, sparkwingDir := riskWriteFixture(t)
+
+	env := append(os.Environ(),
+		"SPARKWING_HOME="+sparkwingHome,
+		"SPARKWING_LOG_FORMAT=quiet",
+		"GOWORK=off",
+		riskMarkerEnv+"="+marker,
+	)
+	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
+	}
+	if err := os.Symlink("nowhere-at-all", filepath.Join(sparkwingDir, "notes.txt")); err != nil {
+		t.Fatalf("place an unreadable file under %s: %v", sparkwingDir, err)
+	}
+
+	out, err := offlineRunCLI(cli, repoDir, env, "run", "risky")
+	if err == nil {
+		t.Fatalf("a tree the dispatcher cannot read was admitted:\n%s", out)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the refused run executed pipeline work: %v", statErr)
 	}
 }
 

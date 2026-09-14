@@ -34,6 +34,7 @@ type pipelineRun struct {
 	raiseInterrupt func()
 	sparkwingDir   string
 	opts           compileOptions
+	goRun          bool
 	lease          *bincache.Lease
 	source         string
 }
@@ -46,6 +47,7 @@ func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
 		raiseInterrupt: raiseInterrupt,
 		sparkwingDir:   sparkwingDir,
 		opts:           opts,
+		goRun:          os.Getenv("SPARKWING_NO_BINCACHE") != "",
 	}
 }
 
@@ -53,24 +55,26 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
-	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
+	env = withWingdHost(env)
+	key, keyParts, err := bincache.ExplainCacheKey(r.sparkwingDir)
+	if err != nil {
+		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)
+	}
+	if r.goRun {
+		ensureDescribeFromSource(r.ctx, r.sparkwingDir, key, env)
 		return nil
 	}
-	// safety: a tree whose cache key cannot be computed runs through `go run .`,
-	// which publishes no binary, so there is nothing to materialize or describe.
-	if key, keyParts, keyErr := bincache.ExplainCacheKey(r.sparkwingDir); keyErr == nil {
-		lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, withWingdHost(env))
-		if err != nil {
-			return err
-		}
-		r.lease, r.source = lease, source
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env)
+	if err != nil {
+		return err
 	}
+	r.lease, r.source = lease, source
 	return nil
 }
 
 func (r *pipelineRun) exec(args, env []string) error {
 	env = withWingdHost(env)
-	if r.lease == nil {
+	if r.goRun {
 		r.stopSignals()
 		return runGo(r.sparkwingDir, append([]string{"run", "."}, args...), env, r.opts.AfterChild)
 	}
@@ -173,24 +177,6 @@ func pipelineBinary(
 	lease.RecordUse(sparkwingDir, keyParts)
 	ensureDescribeCache(ctx, sparkwingDir, key, lease.Path())
 	return lease, source, nil
-}
-
-// safety: what a pipeline declares lives in its compiled binary, so a home
-// that holds no build of it can answer for a declaration only after this.
-func ensurePipelineDeclarations(ctx context.Context, sparkwingDir string, env []string, opts compileOptions) error {
-	if err := resolveSparks(ctx, sparkwingDir, opts); err != nil {
-		return err
-	}
-	if key, keyParts, keyErr := bincache.ExplainCacheKey(sparkwingDir); keyErr == nil {
-		lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, env)
-		if err != nil {
-			return err
-		}
-		return lease.Release()
-	}
-	// safety: an unkeyable tree runs through `go run .`, which publishes no
-	// binary to read a declaration from; the caller proceeds without them.
-	return nil
 }
 
 func ensureDescribeCache(ctx context.Context, sparkwingDir, key, binPath string) {

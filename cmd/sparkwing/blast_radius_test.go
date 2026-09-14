@@ -163,9 +163,9 @@ func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 	}
 }
 
-func TestLookupCachedRisks_DegradesGracefully(t *testing.T) {
+func TestDeclaredRisks_DegradesGracefully(t *testing.T) {
 	tmp := t.TempDir()
-	if got := lookupCachedRisks(context.Background(), tmp, "any"); got != nil {
-		t.Errorf("lookupCachedRisks on missing cache = %v, want nil", got)
+	if got := declaredRisks(context.Background(), tmp, "any"); got != nil {
+		t.Errorf("declaredRisks with no build to read = %v, want nil", got)
 	}
 }

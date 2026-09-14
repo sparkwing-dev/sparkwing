@@ -315,12 +315,9 @@ func dispatchRun(args []string) error {
 	if err := run.materialize(env); err != nil {
 		return run.finish(err)
 	}
-	findings, err := declaredRisks(context.Background(), dir, pipelineName, env, run.opts)
-	if err != nil {
-		return run.finish(err)
-	}
+	findings := declaredRisks(run.ctx, dir, pipelineName)
 	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
-		return err
+		return run.finish(err)
 	}
 
 	if runNeedsDaemon(flags, passthrough) {
