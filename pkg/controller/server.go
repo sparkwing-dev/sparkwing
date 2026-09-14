@@ -36,10 +36,12 @@ type Server struct {
 
 	loginLimit *loginLimiter
 
-	flood         *floodControl
-	requestBudget *principalBudget
+	flood               *floodControl
+	requestBudget       *principalBudget
+	requestBudgetValues RequestBudget
 
 	idleClaimPoll  time.Duration
+	idlePolls      *idlePollGate
 	lastClaimAward atomic.Int64
 
 	githubWebhookSecret  string
@@ -124,7 +126,9 @@ func (s *Server) WithLocalExecution() *Server {
 	// idle poll costs pickup latency and a shed claim has no fleet to protect;
 	// its callers are unauthenticated, so every runner would share one bucket.
 	s.idleClaimPoll = 0
+	s.idlePolls = nil
 	s.requestBudget = newPrincipalBudget(RequestBudget{})
+	s.requestBudgetValues = RequestBudget{}
 	return s
 }
 

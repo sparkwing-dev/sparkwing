@@ -60,14 +60,16 @@ type RequestBudget struct {
 // naming the real refill delay, and logged at warn with the runner and the
 // route class.
 func (s *Server) WithRequestBudget(b RequestBudget) *Server {
+	s.requestBudgetValues = b
 	s.requestBudget = newPrincipalBudget(b)
 	return s
 }
 
 const (
-	budgetWindow     = time.Minute
-	budgetClassClaim = "claim"
-	budgetClassBeat  = "heartbeat"
+	budgetWindow        = time.Minute
+	budgetClassClaim    = "claim"
+	budgetClassBeat     = "heartbeat"
+	budgetClassIdlePoll = "idle_poll"
 )
 
 type principalBudget struct {
@@ -144,7 +146,13 @@ func runnerIdentity(r *http.Request) string {
 }
 
 func (s *Server) claimBudgeted(next http.Handler) http.Handler {
-	return s.budgeted(budgetClassClaim, next)
+	budgeted := s.budgeted(budgetClassClaim, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.admitIdleClaimPoll(w, r) {
+			return
+		}
+		budgeted.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) heartbeatBudgeted(next http.Handler) http.Handler {

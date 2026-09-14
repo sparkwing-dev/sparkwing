@@ -1222,7 +1222,7 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			s.writeClaimPollAdvice(w)
+			s.writeClaimPollAdvice(w, r)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -1583,7 +1583,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
-				s.writeClaimPollAdvice(w)
+				s.writeClaimPollAdvice(w, r)
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -1595,7 +1595,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "pending")
 			} else {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
-				s.writeClaimPollAdvice(w)
+				s.writeClaimPollAdvice(w, r)
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -1622,7 +1622,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			s.writeClaimPollAdvice(w)
+			s.writeClaimPollAdvice(w, r)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
