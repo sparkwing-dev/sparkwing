@@ -37,7 +37,6 @@ unlock.
   `store.CPUClassMemoryBytes`, `store.CPUClassMemoryBytesPerCore` and
   `store.DefaultWarmCPUClassCores` are the store surface. Local claim-mode
   agents are unmetered and claim by their labels as before.
-
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a node gets past its claim reservation, and the cap on
@@ -51,10 +50,10 @@ unlock.
   ones its `--rate-micro`, `--grace-seconds` and `--max-charge-seconds` flags
   name. The defaults are unchanged: a self-hosted controller still gives a node
   60 seconds of grace.
-- **pkg/store:** `PoolHeartbeatInterval`, `DispatchedHeartbeatInterval` and
-  `MaxNodeHeartbeatInterval` name the node heartbeat cadences in one place, and
-  the pooled, dispatched and warm-pool runners read their defaults from them
-  instead of each carrying a literal. No cadence changed.
+- **pkg/store:** `PoolHeartbeatInterval` and `DispatchedHeartbeatInterval` name
+  the node heartbeat cadences in one place, and the pooled, dispatched and
+  warm-pool runners read their defaults from them instead of each carrying a
+  literal. No cadence changed.
 - **controller:** `max_concurrent_runners` scales with recent paid credit
   A metered principal's cap is now the base plus one more base for every
   `runner_scale_step_credits` of `paid` credit granted in the last 30 days,
@@ -74,8 +73,8 @@ unlock.
   `GET /api/v1/compute-limits` reports the result as
   `usage.derived_runner_cap` with the `usage.recent_paid_micro` behind it, and
   `sparkwing cluster limits show` prints a `DERIVED RUNNER CAP` line. The
-  derivation is cached for a minute per principal so a claim costs no ledger
-  query, and a grant or reversal retires the cache at once.
+  derivation is cached for a minute so a claim costs no ledger query, and a
+  grant or reversal retires the cache at once.
   `store.RunnerCapFor` is its store surface.
 
 - **controller + cli:** A credit grant carrying a non-empty `reference` is now
@@ -112,9 +111,9 @@ unlock.
   the granted series, so summing that series over `kind` stays the money paid
   in. Schema v42 adds the `reverses` column and a unique index over non-empty
   `(kind, reference)` grants, both additive, so the previous release still
-  opens the database; the index is retried on every open and skipped while
-  older grants repeat a reference, which `GET /api/v1/health` reports as
-  `database.credit_grant_key` and the controller logs at every start.
+  opens the database; the migration skips the index while older grants repeat a
+  reference and logs the pairs, so an operator deleting them recreates the key
+  by hand.
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a running node gets on an empty balance, and the cap
@@ -147,9 +146,35 @@ unlock.
   another name: once a table exists, a `PUT` naming the scalar, alone or beside
   `rate_table`, answers `400` and says to write the table. A stored table this build cannot read
   is an error rather than a silent fallback.
+- **ci:** A new `sleepcheck` gate refuses a test that sleeps or waits on the wall clock.
+  `internal/sleepcheck` fails any `_test.go` that calls `time.Sleep`,
+  `time.After`, `time.Tick`, `time.NewTimer` or `time.NewTicker`, or takes one
+  of them as a value, or that reads `time.Now`, `time.Since` or `time.Until` as
+  a wait: an ordering comparison, a loop condition, or a
+  `context.WithTimeout` or `WithDeadline` argument. Each finding names the
+  alternative on one line, which is a signaled condition from the code under
+  test, an injected or fake clock, or `testing/synctest`. A `time.Now()` that
+  only stamps a fixture value stays allowed, and a file that dot-imports `time`
+  is refused because an unqualified `Sleep` cannot be judged. The new
+  `test-sleeps` step runs the checker in `pre-commit` and `gate` over the
+  change since origin/main, so a new offender fails from the first run while
+  the tests written before the rule keep passing until they are edited.
 
 ### Changed
 
+- **pkg/store + controller:** The credit surfaces added this cycle carry less
+  machinery. The derived runner cap is cached once rather than once per
+  principal, because the ledger records no principal and every principal
+  derived the same cap, so `store.RunnerCapFor` takes only a time. The grant
+  key is created by the v42 migration, which already runs once under the
+  migration lock and skips the index while older grants repeat a reference,
+  rather than being retried on every open; a store already past v42 keeps the
+  key exactly as it stands, and `GET /api/v1/health` no longer reports
+  `database.credit_grant_key`. `store.SetCreditSettings` is the only credit
+  writer: `SetCreditRateMicroPerSecond`, `SetCreditGraceSeconds`,
+  `SetCreditMaxChargeSeconds` and the per-setting siblings are removed, as
+  is `MaxNodeHeartbeatInterval`, which named the same cadence as
+  `DispatchedHeartbeatInterval`. No cadence, default or cap arithmetic changed.
 - **controller (Breaking):** A metered runner second is priced by the node's cpu
   class from the default rate table, which carries GitHub Actions' Linux x64
   rates: 2-core 10,000 micro-credits a second, 4-core 20,000, 8-core 36,667,
@@ -163,9 +188,9 @@ unlock.
 - **pkg/store:** The credit setters now bound what they accept, because a rate
   near the int64 maximum overflowed the reservation a claim takes and let a
   claim the ledger had to refuse succeed, then billed the next heartbeat
-  9.2e18 micro-credits. `SetCreditRateMicroPerSecond` takes 1 to
-  `MaxCreditRateMicro` (a million credits a second, where it previously took
-  zero and any positive value), and `SetCreditMaxChargeSeconds` takes
+  9.2e18 micro-credits. `SetCreditSettings` takes a rate of 1 to
+  `MaxCreditRateMicro` (a million credits a second, where the setting
+  previously took zero and any positive value) and a charge cap of
   `MinCreditMaxChargeSeconds` to `MaxCreditMaxChargeSeconds` (one second past
   the longest heartbeat cadence, to one day, where it previously took any
   positive value). A cap at or under the cadence truncated and forgave part of

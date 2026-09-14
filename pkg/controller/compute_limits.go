@@ -100,7 +100,7 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 		out.Limits[name] = v
 	}
 	if limits.ConcurrentRunners > 0 {
-		derived, err := s.store.RunnerCapFor(r.Context(), requestPrincipalName(r), time.Now())
+		derived, err := s.store.RunnerCapFor(r.Context(), time.Now())
 		if err != nil {
 			return computeLimitsJSON{}, err
 		}
@@ -111,15 +111,6 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 		}
 	}
 	return out, nil
-}
-
-// safety: the cap is derived per principal, so an unauthenticated read is
-// measured against no principal rather than against the last caller's.
-func requestPrincipalName(r *http.Request) string {
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
-		return p.Name
-	}
-	return ""
 }
 
 // safety: a runner tells this apart from a transport failure and keeps polling

@@ -470,7 +470,8 @@ func TestChargeCapForgivesAStalledGap(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := s.SetCreditMaxChargeSeconds(ctx, 10); err != nil {
+	capSeconds := int64(10)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{MaxChargeSeconds: &capSeconds}); err != nil {
 		t.Fatalf("set the charge cap: %v", err)
 	}
 	rewindChargeWindow(t, s, "run-stall", "build", time.Now().Add(-time.Hour))
@@ -506,7 +507,8 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, floor, "", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := s.SetCreditGraceSeconds(ctx, 30); err != nil {
+	grace := int64(30)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -806,7 +808,8 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if err := s.SetCreditRateMicroPerSecond(ctx, store.MaxCreditRateMicro); err != nil {
+	highest := int64(store.MaxCreditRateMicro)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &highest}); err != nil {
 		t.Fatalf("the highest allowed rate was refused: %v", err)
 	}
 	floor, err := s.CreditClaimFloorMicro(ctx)
@@ -823,7 +826,8 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 		"zero":                 0,
 		"negative":             -1,
 	} {
-		if err := s.SetCreditRateMicroPerSecond(ctx, rate); !errors.Is(err, store.ErrInvalidCreditSetting) {
+		if _, err := s.SetCreditSettings(ctx,
+			store.CreditSettingsUpdate{RateMicroPerSecond: &rate}); !errors.Is(err, store.ErrInvalidCreditSetting) {
 			t.Errorf("%s was accepted as a rate: %v", name, err)
 		}
 	}
@@ -863,10 +867,12 @@ func TestCreditSettingsBoundTheChargeCap(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if err := s.SetCreditMaxChargeSeconds(ctx, store.MinCreditMaxChargeSeconds); err != nil {
+	lowest := store.MinCreditMaxChargeSeconds
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{MaxChargeSeconds: &lowest}); err != nil {
 		t.Fatalf("the lowest allowed cap was refused: %v", err)
 	}
-	if err := s.SetCreditMaxChargeSeconds(ctx, store.MaxCreditMaxChargeSeconds); err != nil {
+	highest := int64(store.MaxCreditMaxChargeSeconds)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{MaxChargeSeconds: &highest}); err != nil {
 		t.Fatalf("the highest allowed cap was refused: %v", err)
 	}
 	for name, cap := range map[string]int64{
@@ -875,21 +881,10 @@ func TestCreditSettingsBoundTheChargeCap(t *testing.T) {
 		"zero":                 0,
 		"the int64 maximum":    math.MaxInt64,
 	} {
-		if err := s.SetCreditMaxChargeSeconds(ctx, cap); !errors.Is(err, store.ErrInvalidCreditSetting) {
+		if _, err := s.SetCreditSettings(ctx,
+			store.CreditSettingsUpdate{MaxChargeSeconds: &cap}); !errors.Is(err, store.ErrInvalidCreditSetting) {
 			t.Errorf("%s was accepted as a charge cap: %v", name, err)
 		}
-	}
-}
-
-func TestCreditMaxChargeFloorClearsTheLongestHeartbeat(t *testing.T) {
-	longest := int64(store.MaxNodeHeartbeatInterval / time.Second)
-	if store.MinCreditMaxChargeSeconds != longest+1 {
-		t.Fatalf("charge cap floor = %d, want one past the %ds heartbeat cadence",
-			store.MinCreditMaxChargeSeconds, longest)
-	}
-	if store.PoolHeartbeatInterval > store.MaxNodeHeartbeatInterval ||
-		store.DispatchedHeartbeatInterval > store.MaxNodeHeartbeatInterval {
-		t.Fatal("a declared heartbeat cadence is longer than the one the cap is judged against")
 	}
 }
 

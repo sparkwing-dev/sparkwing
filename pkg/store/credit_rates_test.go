@@ -133,7 +133,8 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 		}
 	}
 
-	if err := s.SetCreditRateMicroPerSecond(ctx, 50_000); err != nil {
+	single := int64(50_000)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); err != nil {
 		t.Fatalf("set the single rate: %v", err)
 	}
 	table, err = s.CreditRateTable(ctx)
@@ -168,7 +169,8 @@ func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 		t.Fatalf("single rate = %d, want the four-core price 20000", rate)
 	}
 
-	if err := s.SetCreditRateMicroPerSecond(ctx, 21_000); err != nil {
+	single := int64(21_000)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); err != nil {
 		t.Fatalf("set the single rate: %v", err)
 	}
 	table, err := s.CreditRateTable(ctx)
@@ -409,7 +411,9 @@ func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
 		t.Fatalf("Validate refused the ceiling itself: %v", err)
 	}
 	s := storetest.Open(t)
-	if err := s.SetCreditRateMicroPerSecond(context.Background(), store.MaxCreditRateMicro+1); err == nil {
+	past := int64(store.MaxCreditRateMicro) + 1
+	if _, err := s.SetCreditSettings(context.Background(),
+		store.CreditSettingsUpdate{RateMicroPerSecond: &past}); err == nil {
 		t.Fatal("the single rate accepted a value above the ceiling")
 	}
 }
@@ -477,13 +481,16 @@ func TestTheWarmCPUClassDefaultsToTwoCoresAndRefusesANegative(t *testing.T) {
 	if cores != store.DefaultWarmCPUClassCores {
 		t.Fatalf("warm class = %d, want %d", cores, store.DefaultWarmCPUClassCores)
 	}
-	if err := s.SetWarmCPUClassCores(ctx, 0); err != nil {
+	retired := int64(0)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{WarmCPUClassCores: &retired}); err != nil {
 		t.Fatalf("retire the warm pool: %v", err)
 	}
 	if cores, err := s.WarmCPUClassCores(ctx); err != nil || cores != 0 {
 		t.Fatalf("warm class = %d, %v; want 0", cores, err)
 	}
-	if err := s.SetWarmCPUClassCores(ctx, -1); err == nil {
+	negative := int64(-1)
+	if _, err := s.SetCreditSettings(ctx,
+		store.CreditSettingsUpdate{WarmCPUClassCores: &negative}); err == nil {
 		t.Fatal("a negative warm class was accepted")
 	}
 }

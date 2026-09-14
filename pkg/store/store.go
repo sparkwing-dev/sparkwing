@@ -111,7 +111,7 @@ type Store struct {
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
 	runnerCapMu     sync.Mutex
-	runnerCaps      map[string]runnerCapEntry
+	runnerCapCache  runnerCapEntry
 	runnerCapEpoch  uint64
 }
 
@@ -1604,9 +1604,6 @@ func (s *Store) migrate() error {
 		})
 	}
 	if err != nil {
-		return err
-	}
-	if err := s.ensureCreditGrantReferenceIndex(ctx); err != nil {
 		return err
 	}
 	_, err = s.ensureControllerAuthority(ctx)
@@ -5179,7 +5176,7 @@ func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (wa
 	return warmClassFilter{table: table, warmCores: cores, active: true}, nil
 }
 
-// safety: a warm runner shares one machine with its neighbours, so a node whose
+// safety: a warm runner shares one machine with its neighbors, so a node whose
 // class is larger than the pool serves is passed over here and executed on a
 // node sized to that class instead. The filter reads the same charge the ledger
 // prices, so what a node is billed and where it runs cannot disagree.
@@ -5200,15 +5197,16 @@ func (f warmClassFilter) refuses(ctx context.Context, q rowQuerier, runID, nodeI
 	return f.refusesCharge(charge), nil
 }
 
+// safety: a request no class covers is passed through, because the claim that
+// prices it fails the node with the class to add and a filter that hid the node
+// would leave it queued forever.
 func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 	if !f.active {
 		return false
 	}
 	class, err := f.table.ClassForResource(charge)
 	if err != nil {
-		// safety: a request no class covers is refused at the claim that prices
-		// it rather than by a warm runner that already took it.
-		return errors.Is(err, ErrUnpricedCPUClass)
+		return false
 	}
 	return class.Cores > f.warmCores
 }

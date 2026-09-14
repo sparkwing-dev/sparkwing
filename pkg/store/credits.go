@@ -74,19 +74,16 @@ const (
 	PoolHeartbeatInterval = 3 * time.Second
 
 	// DispatchedHeartbeatInterval is how often a dispatched node and a warm
-	// pool runner renew theirs.
-	DispatchedHeartbeatInterval = 5 * time.Second
-
-	// MaxNodeHeartbeatInterval is the longest cadence any metered node
+	// pool runner renew theirs, which is the longest cadence any metered node
 	// renews on.
-	MaxNodeHeartbeatInterval = DispatchedHeartbeatInterval
+	DispatchedHeartbeatInterval = 5 * time.Second
 )
 
 // MinCreditMaxChargeSeconds is the lowest charge cap an operator may set: one
 // second past the longest heartbeat cadence. A cap at the cadence itself
 // truncates every tick that arrives a little late and forgives the remainder,
 // so the ledger would undercharge ordinary work rather than only a stall.
-const MinCreditMaxChargeSeconds = int64(MaxNodeHeartbeatInterval/time.Second) + 1
+const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 
 // Credit grant kinds. A reversal carries a negative amount and names the
 // paid grant it takes back, which is how a refunded card payment leaves the
@@ -299,85 +296,35 @@ func applyCreditsMigrationPostgres(ctx context.Context, tx *storeTx) error {
 }
 
 func applyCreditReferenceMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	return ensureColumnsSQLite(ctx, tx, "credit_grants", creditGrantReversesCols)
+	if err := ensureColumnsSQLite(ctx, tx, "credit_grants", creditGrantReversesCols); err != nil {
+		return err
+	}
+	return createCreditGrantReferenceIndex(ctx, tx)
 }
 
 func applyCreditReferenceMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	return addColumnsTx(ctx, tx, "credit_grants", creditGrantReversesCols)
-}
-
-// safety: two openers that both find the key missing both create it, and
-// Postgres answers the loser with a pg_class duplicate key rather than
-// honoring IF NOT EXISTS, so the attempt runs under the lock the migrations
-// hold.
-func (s *Store) ensureCreditGrantReferenceIndex(ctx context.Context) error {
-	if s.dialect != DialectPostgres {
-		_, err := s.createCreditGrantReferenceIndex(ctx, storeExecer{s: s})
+	if err := addColumnsTx(ctx, tx, "credit_grants", creditGrantReversesCols); err != nil {
 		return err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if _, err := tx.ExecContext(ctx, migrateAdvisoryLock); err != nil {
-		return fmt.Errorf("acquire migrate advisory lock: %w", err)
-	}
-	raced, err := s.createCreditGrantReferenceIndex(ctx, tx)
-	if err != nil {
-		return err
-	}
-	// safety: the refused create leaves the transaction unable to commit, so
-	// the rollback the defer runs is what a lost race wants anyway.
-	if raced {
-		return nil
-	}
-	return tx.Commit()
+	return createCreditGrantReferenceIndex(ctx, tx)
 }
 
 // safety: grants written before the reference became a key may already repeat
 // one, and refusing to open a ledger over an operator note costs more than the
 // index buys; the grant path enforces the rule inside the ledger lock anyway.
-// The attempt repeats on every open, so deleting the duplicates enforces the key.
-func (s *Store) createCreditGrantReferenceIndex(ctx context.Context, q migrationQueryExecer) (bool, error) {
-	present, err := s.CreditGrantReferenceIndexPresent(ctx)
-	if err != nil || present {
-		return false, err
-	}
-	dupes, err := duplicateGrantReferences(ctx, q)
+func createCreditGrantReferenceIndex(ctx context.Context, tx *storeTx) error {
+	dupes, err := duplicateGrantReferences(ctx, tx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if len(dupes) > 0 {
 		slog.Warn("credits: grants repeat a reference, so the database does not enforce the grant key; "+
-			"delete the duplicate rows and restart to enforce it",
+			"delete the duplicate rows and recreate the index to enforce it",
 			"references", strings.Join(dupes, ", "))
-		return false, nil
+		return nil
 	}
-	if _, err := q.ExecContext(ctx, creditGrantReferenceIndex); err != nil {
-		if isUniqueViolation(err) || strings.Contains(err.Error(), "already exists") {
-			return true, nil
-		}
-		return false, err
-	}
-	return false, nil
-}
-
-// CreditGrantReferenceIndexPresent reports whether the database enforces one
-// grant per kind and non-empty reference. It is false only while grants
-// written before the key existed still repeat a reference.
-func (s *Store) CreditGrantReferenceIndexPresent(ctx context.Context) (bool, error) {
-	q := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_credit_grants_reference'`
-	if s.dialect == DialectPostgres {
-		q = `SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		     WHERE c.relname = 'idx_credit_grants_reference' AND c.relkind = 'i'
-		       AND n.nspname = ANY (current_schemas(true))`
-	}
-	var count int
-	if err := s.queryRow(ctx, q).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	_, err = tx.ExecContext(ctx, creditGrantReferenceIndex)
+	return err
 }
 
 func duplicateGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
@@ -609,7 +556,7 @@ func (s *Store) RecordCreditGrant(
 	if err := tx.Commit(); err != nil {
 		return CreditGrantResult{}, err
 	}
-	s.invalidateRunnerCaps()
+	s.invalidateRunnerCap()
 	return CreditGrantResult{Grant: grant, Created: true}, nil
 }
 
@@ -840,16 +787,6 @@ func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
 }
 
-// SetCreditRateMicroPerSecond prices a cloud runner second, between one
-// micro-credit and MaxCreditRateMicro. Charges already written keep the rate
-// they were charged at.
-func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error {
-	if err := validCreditRate(micro); err != nil {
-		return err
-	}
-	return s.setCreditSetting(ctx, metaKeyCreditRateMicro, micro)
-}
-
 // safety: the rate table writes its four-core entry here, so it passes through
 // the same bound the setting's own caller does.
 func setCreditRateMicroTx(ctx context.Context, tx *storeTx, micro int64) error {
@@ -865,30 +802,11 @@ func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
 }
 
-// SetCreditGraceSeconds sets the window between a node consuming the
-// reservation its claim paid for on an empty balance and its cancellation.
-// Zero cancels it at the first heartbeat past that reservation.
-func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error {
-	if err := validCreditGrace(secs); err != nil {
-		return err
-	}
-	return s.setCreditSetting(ctx, metaKeyCreditGraceSecs, secs)
-}
-
 // CreditMaxChargeSeconds returns the most seconds one charge may bill, which
 // is what keeps a controller outage or a stalled heartbeat loop from billing
 // the gap it left behind.
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
-}
-
-// SetCreditMaxChargeSeconds caps the seconds one charge may bill, between
-// MinCreditMaxChargeSeconds and MaxCreditMaxChargeSeconds.
-func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error {
-	if err := validCreditMaxCharge(secs); err != nil {
-		return err
-	}
-	return s.setCreditSetting(ctx, metaKeyCreditMaxCharge, secs)
 }
 
 // CreditSettings are the three values the ledger prices work with.
@@ -961,9 +879,9 @@ func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) 
 	return out, tx.Commit()
 }
 
-// ErrInvalidCreditSetting is the class of every refusal SetCreditSettings and
-// the individual setters return, so a caller answers a bad value differently
-// from a database failure.
+// ErrInvalidCreditSetting is the class of every refusal SetCreditSettings
+// returns, so a caller answers a bad value differently from a database
+// failure.
 var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
 
 func (u CreditSettingsUpdate) byKey() map[string]int64 {
@@ -1037,15 +955,6 @@ func validWarmCPUClass(cores int64) error {
 // controller that set none serves [DefaultWarmCPUClassCores].
 func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
-}
-
-// SetWarmCPUClassCores sets the largest cpu class a warm runner pool serves.
-// Zero sends every metered node to a Kubernetes node of its own.
-func (s *Store) SetWarmCPUClassCores(ctx context.Context, cores int64) error {
-	if err := validWarmCPUClass(cores); err != nil {
-		return err
-	}
-	return s.setCreditSetting(ctx, metaKeyWarmCPUClass, cores)
 }
 
 func validCreditGrace(secs int64) error {

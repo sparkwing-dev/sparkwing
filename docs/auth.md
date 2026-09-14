@@ -169,8 +169,8 @@ already aged out leaves this month's payments alone. The ledger belongs to the
 controller and a controller serves one team, so every metered principal on it
 derives the same cap.
 
-The derivation is held for a minute per principal so a claim costs no ledger
-query, and any grant or reversal retires it at once. A ledger the derivation
+The derivation is held for a minute so a claim costs no ledger query, and any
+grant or reversal retires it at once. A ledger the derivation
 cannot read holds the principal to the static `max_concurrent_runners` and
 names the failure in the controller log. `max_global_runners` is checked first,
 so the controller's own ceiling still refuses a claim a scaled cap would have

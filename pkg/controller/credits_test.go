@@ -301,7 +301,8 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, floor, "", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := f.store.SetCreditGraceSeconds(ctx, 1); err != nil {
+	grace := int64(1)
+	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
 	c := client.NewWithToken(f.url, nil, f.runner)
@@ -938,8 +939,8 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	}
 }
 
-// A claim that asserts its own cpu changes nothing: only the operator's ceiling
-// lowers a class.
+// A claim that asserts its own cpu changes nothing: the class comes from the
+// plan the controller holds.
 func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
@@ -976,7 +977,10 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 		t.Fatalf("a claim asserting its own cpu = %d, want 400", status)
 	}
 
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+	// safety: a sixteen-core node is above the warm class, so it is awarded by
+	// the targeted claim its own Kubernetes node makes.
+	status, body := creditsRequest(t, http.MethodPost,
+		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
 		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
 	if status != http.StatusOK {
 		t.Fatalf("claim = %d: %s", status, body)
@@ -987,5 +991,55 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 	if len(charges) != 1 || charges[0].CPUClassCores != 16 || charges[0].RateMicroPerSecond != 70_000 {
 		t.Fatalf("reservation = %+v, want the 16-core class the plan asked for", charges)
+	}
+}
+
+// A node above the warm class is not in the queue a warm runner polls, so it
+// waits for a Kubernetes node sized to its class.
+func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":8}}]}`),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
+	if status != http.StatusNoContent {
+		t.Fatalf("warm claim = %d: %s", status, body)
+	}
+	node, err := f.store.GetNode(ctx, "run-big", "build")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Claimed || node.Outcome != "" {
+		t.Fatalf("node = claimed %t outcome %q, want it still queued", node.Claimed, node.Outcome)
+	}
+
+	status, body = creditsRequest(t, http.MethodPost,
+		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
+		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60})
+	if status != http.StatusOK {
+		t.Fatalf("targeted claim = %d: %s", status, body)
+	}
+	charges, err := f.store.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatalf("list charges: %v", err)
+	}
+	if len(charges) != 1 || charges[0].CPUClassCores != 8 {
+		t.Fatalf("reservation = %+v, want the 8-core class", charges)
 	}
 }

@@ -702,9 +702,9 @@ func reversePayment(t *testing.T, s *store.Store, credits int64, reference, reve
 	}
 }
 
-func runnerCap(t *testing.T, s *store.Store, principal string) store.RunnerCap {
+func runnerCap(t *testing.T, s *store.Store) store.RunnerCap {
 	t.Helper()
-	derived, err := s.RunnerCapFor(context.Background(), principal, time.Now())
+	derived, err := s.RunnerCapFor(context.Background(), time.Now())
 	if err != nil {
 		t.Fatalf("runner cap: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestRunnerCapIsUnsetUntilThePerPrincipalGuardIs(t *testing.T) {
 	setLimit(t, s, store.ComputeLimitRunnerScaleStepCredits, 5000)
 	grantCredits(t, s, store.CreditGrantPaid, 15000, "pay_1")
 
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 0 {
+	if derived := runnerCap(t, s); derived.Cap != 0 {
 		t.Fatalf("cap = %d with max_concurrent_runners unset, want 0", derived.Cap)
 	}
 }
@@ -732,7 +732,7 @@ func TestRunnerCapIsTheBaseWithoutPaidGrants(t *testing.T) {
 	scaleTo(t, s, 100, 5000)
 	grantCredits(t, s, store.CreditGrantFree, 10000, "welcome")
 
-	derived := runnerCap(t, s, "agent:cloud")
+	derived := runnerCap(t, s)
 	if derived.Cap != 100 || derived.RecentPaidMicro != 0 {
 		t.Fatalf("cap = %+v, want the base of 100 from no paid credit", derived)
 	}
@@ -743,7 +743,7 @@ func TestRunnerCapAddsOneBasePerPaidStep(t *testing.T) {
 	scaleTo(t, s, 100, 5000)
 	grantCredits(t, s, store.CreditGrantPaid, 15000, "pay_1")
 
-	derived := runnerCap(t, s, "agent:cloud")
+	derived := runnerCap(t, s)
 	if derived.Cap != 400 {
 		t.Fatalf("cap = %d after loading 15000 credits at 5000 a step, want 400", derived.Cap)
 	}
@@ -760,7 +760,7 @@ func TestRunnerCapCountsOnlyPaidGrantsInsideTheWindow(t *testing.T) {
 	rewindGrant(t, s, old.ID, time.Now().Add(-store.RunnerScaleWindow-time.Hour))
 	seedRefundCharge(t, s, "charge_refund", 4000, time.Now())
 
-	derived := runnerCap(t, s, "agent:cloud")
+	derived := runnerCap(t, s)
 	if derived.Cap != 400 {
 		t.Fatalf("cap = %d, want 400: a charge refund and a grant past the window earn nothing", derived.Cap)
 	}
@@ -770,12 +770,12 @@ func TestARefundTakesBackTheCapItsPaymentBought(t *testing.T) {
 	s := storetest.Open(t)
 	scaleTo(t, s, 100, 5000)
 	grantCredits(t, s, store.CreditGrantPaid, 15000, "pay_1")
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 400 {
+	if derived := runnerCap(t, s); derived.Cap != 400 {
 		t.Fatalf("cap = %d before the refund, want 400", derived.Cap)
 	}
 
 	reversePayment(t, s, 10000, "refund_1", "pay_1")
-	derived := runnerCap(t, s, "agent:cloud")
+	derived := runnerCap(t, s)
 	if derived.Cap != 200 {
 		t.Fatalf("cap = %d after 10000 of 15000 credits came back, want 200", derived.Cap)
 	}
@@ -801,7 +801,7 @@ func TestARefundIsMatchedToItsPaymentRatherThanItsOwnDate(t *testing.T) {
 			rewindGrant(t, s, g.ID, time.Now().Add(-store.RunnerScaleWindow-time.Hour))
 		}
 	}
-	if derived := runnerCap(t, s, "agent:aged-refund"); derived.Cap != 100 {
+	if derived := runnerCap(t, s); derived.Cap != 100 {
 		t.Fatalf("cap = %d, want 100: an aged refund still takes back the payment", derived.Cap)
 	}
 
@@ -811,7 +811,7 @@ func TestARefundIsMatchedToItsPaymentRatherThanItsOwnDate(t *testing.T) {
 	rewindGrant(t, s, old.ID, time.Now().Add(-store.RunnerScaleWindow-time.Hour))
 	grantCredits(t, s, store.CreditGrantPaid, 10000, "pay_2")
 	reversePayment(t, s, 50000, "refund_old", "pay_old")
-	if derived := runnerCap(t, s, "agent:fresh"); derived.Cap != 300 {
+	if derived := runnerCap(t, s); derived.Cap != 300 {
 		t.Fatalf("cap = %d, want 300: refunding an aged payment leaves this month's alone", derived.Cap)
 	}
 }
@@ -822,11 +822,11 @@ func TestRunnerCapHoldsUnderTheCeiling(t *testing.T) {
 	setLimit(t, s, store.ComputeLimitGlobalRunners, 300)
 	grantCredits(t, s, store.CreditGrantPaid, 15000, "pay_1")
 
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 300 {
+	if derived := runnerCap(t, s); derived.Cap != 300 {
 		t.Fatalf("cap = %d, want the global ceiling of 300", derived.Cap)
 	}
 	setLimit(t, s, store.ComputeLimitRunnerScaleCeiling, 250)
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 250 {
+	if derived := runnerCap(t, s); derived.Cap != 250 {
 		t.Fatalf("cap = %d, want the scale ceiling of 250", derived.Cap)
 	}
 }
@@ -836,7 +836,7 @@ func TestAScaledCapNeverFallsBelowTheStaticGuard(t *testing.T) {
 	scaleTo(t, s, 100, 5000)
 	setLimit(t, s, store.ComputeLimitRunnerScaleCeiling, 10)
 
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 100 {
+	if derived := runnerCap(t, s); derived.Cap != 100 {
 		t.Fatalf("cap = %d under a ceiling of 10, want max_concurrent_runners of 100", derived.Cap)
 	}
 }
@@ -847,7 +847,7 @@ func TestRunnerScaleBaseReplacesTheStaticCap(t *testing.T) {
 	setLimit(t, s, store.ComputeLimitRunnerScaleBase, 100)
 	grantCredits(t, s, store.CreditGrantPaid, 5000, "pay_1")
 
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 200 {
+	if derived := runnerCap(t, s); derived.Cap != 200 {
 		t.Fatalf("cap = %d, want the scale base of 100 doubled by one step", derived.Cap)
 	}
 }
@@ -877,7 +877,7 @@ func TestRunnerCapSurvivesASettingPastItsBound(t *testing.T) {
 	// safety: 1<<58 credits is the value that overflowed the micro conversion.
 	for _, step := range []int64{1 << 58, (1 << 58) + 1, math.MaxInt64} {
 		forceLimit(t, s, store.ComputeLimitRunnerScaleStepCredits, step)
-		derived := runnerCap(t, s, "agent:cloud")
+		derived := runnerCap(t, s)
 		if derived.Cap != 100 {
 			t.Fatalf("cap = %d at a step of %d, want the base of 100", derived.Cap, step)
 		}
@@ -890,7 +890,7 @@ func TestRunnerCapSaturatesAtTheCeilingOnATinyStep(t *testing.T) {
 	setLimit(t, s, store.ComputeLimitRunnerScaleCeiling, store.RunnerScaleMaxRunners)
 	grantCredits(t, s, store.CreditGrantPaid, 15000, "pay_1")
 
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != store.RunnerScaleMaxRunners {
+	if derived := runnerCap(t, s); derived.Cap != store.RunnerScaleMaxRunners {
 		t.Fatalf("cap = %d, want the ceiling of %d", derived.Cap, store.RunnerScaleMaxRunners)
 	}
 }
@@ -899,17 +899,17 @@ func TestRunnerCapIsCachedUntilTheLedgerChanges(t *testing.T) {
 	s := storetest.Open(t)
 	scaleTo(t, s, 100, 5000)
 	grantCredits(t, s, store.CreditGrantPaid, 5000, "pay_1")
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 200 {
+	if derived := runnerCap(t, s); derived.Cap != 200 {
 		t.Fatalf("cap = %d, want 200 from one step", derived.Cap)
 	}
 
 	reversePayment(t, s, 5000, "refund_1", "pay_1")
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 100 {
+	if derived := runnerCap(t, s); derived.Cap != 100 {
 		t.Fatalf("cap = %d after the refund, want the recomputed 100", derived.Cap)
 	}
 
 	grantCredits(t, s, store.CreditGrantPaid, 10000, "pay_2")
-	if derived := runnerCap(t, s, "agent:cloud"); derived.Cap != 300 {
+	if derived := runnerCap(t, s); derived.Cap != 300 {
 		t.Fatalf("cap = %d after a new payment, want 300 rather than a cached 100", derived.Cap)
 	}
 }
