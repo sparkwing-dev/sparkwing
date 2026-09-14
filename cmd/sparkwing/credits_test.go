@@ -235,6 +235,8 @@ func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
 	fs.Int64("rate-micro", 0, "")
 	fs.Int64("grace-seconds", 0, "")
 	fs.Int64("max-charge-seconds", 0, "")
+	fs.String("rate-table", "", "")
+	fs.Int64("billing-cpu-ceiling-cores", 0, "")
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("parse %v: %v", args, err)
 	}
@@ -244,7 +246,10 @@ func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
 func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 	t.Parallel()
 	fs := creditSettingsFlagSet(t, []string{"--grace-seconds", "0"})
-	body := creditSettingsBody(fs, 0, 0, 0)
+	body, err := creditSettingsBody(fs, 0, 0, 0, "", 0)
+	if err != nil {
+		t.Fatalf("body: %v", err)
+	}
 	if len(body) != 1 {
 		t.Fatalf("body = %v, want grace alone", body)
 	}
@@ -253,14 +258,21 @@ func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 	}
 
 	fs = creditSettingsFlagSet(t, []string{"--rate-micro", "30000", "--max-charge-seconds", "45"})
-	body = creditSettingsBody(fs, 30_000, 0, 45)
+	body, err = creditSettingsBody(fs, 30_000, 0, 45, "", 0)
+	if err != nil {
+		t.Fatalf("body: %v", err)
+	}
 	if len(body) != 2 || body["rate_micro_per_second"] != int64(30_000) ||
 		body["max_charge_seconds"] != int64(45) {
 		t.Fatalf("body = %v, want the rate and the cap", body)
 	}
 
 	fs = creditSettingsFlagSet(t, nil)
-	if body = creditSettingsBody(fs, 0, 0, 0); len(body) != 0 {
+	body, err = creditSettingsBody(fs, 0, 0, 0, "", 0)
+	if err != nil {
+		t.Fatalf("empty body: %v", err)
+	}
+	if len(body) != 0 {
 		t.Fatalf("a flagless call built %v, so it would write instead of read", body)
 	}
 }
@@ -406,5 +418,115 @@ func TestRenderCreditStateShowsReversals(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "REVERSED") || !strings.Contains(buf.String(), "400.00 credits") {
 		t.Errorf("credit state output does not report the reversal:\n%s", buf.String())
+	}
+}
+
+func TestCreditSettingsBodyCarriesTheRateTableAsPairs(t *testing.T) {
+	t.Parallel()
+	fs := creditSettingsFlagSet(t, []string{"--rate-table", "2=10000, 8=36667"})
+	table, _ := fs.GetString("rate-table")
+	body, err := creditSettingsBody(fs, 0, 0, 0, table, 0)
+	if err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	pairs, ok := body["rate_table"].(map[string]int64)
+	if !ok {
+		t.Fatalf("rate_table = %#v, want CORES=MICRO pairs", body["rate_table"])
+	}
+	if len(pairs) != 2 || pairs["2"] != 10_000 || pairs["8"] != 36_667 {
+		t.Fatalf("rate_table = %v", pairs)
+	}
+}
+
+func TestRenderCreditSettingsNamesEveryClass(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := renderCreditSettings(&buf, creditSettingsResp{
+		RateMicroPerSecond: store.DefaultCreditRateMicro,
+		RateTable: []creditRateResp{
+			{Cores: 2, MicroPerSecond: 10_000},
+			{Cores: 8, MicroPerSecond: 36_667},
+		},
+		MaxChargeSeconds: store.DefaultCreditMaxChargeSeconds,
+		MicroPerCredit:   store.MicroCreditsPerCredit,
+		CreditsPerDollar: store.CreditsPerDollar,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"2-CORE", "0.010000 credits", "8-CORE", "36667 micro"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("settings output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestCreditHistoryRowsCarryTheClassAndRateEachChargeWasBilledAt(t *testing.T) {
+	t.Parallel()
+	rows := creditHistoryRows(creditHistoryResp{
+		Charges: []creditChargeResp{
+			{
+				ID: "charge-1", RunID: "run-a", NodeID: "build", TokenPrefix: "swr_x",
+				Kind: store.CreditChargeUsage, Seconds: 10, AmountMicro: 366_670,
+				CPUClassCores: 8, RateMicroPerSecond: 36_667, ChargedAt: 200,
+			},
+			{
+				ID: "charge-2", RunID: "run-b", NodeID: "build", TokenPrefix: "swr_x",
+				Kind: store.CreditChargeUsage, Seconds: 10, AmountMicro: 200_000, ChargedAt: 100,
+			},
+		},
+	})
+	if rows[0].CPUClassCores != 8 || rows[0].RateMicroPerSecond != 36_667 {
+		t.Fatalf("classed row = %+v", rows[0])
+	}
+	if rows[1].CPUClassCores != 0 {
+		t.Fatalf("a charge written before the rate table reads class %d", rows[1].CPUClassCores)
+	}
+
+	var buf bytes.Buffer
+	if err := renderCreditHistory(&buf, rows); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "class=8c rate=36667") {
+		t.Errorf("history output does not name the class and rate:\n%s", out)
+	}
+	if strings.Contains(out, "class=0c") {
+		t.Errorf("history output names a class on a row that carries none:\n%s", out)
+	}
+}
+
+func TestCreditSettingsBodyRefusesARateTableThatPricesAClassTwice(t *testing.T) {
+	t.Parallel()
+	fs := creditSettingsFlagSet(t, []string{"--rate-table", "2=10000,2=20000"})
+	table, _ := fs.GetString("rate-table")
+	if _, err := creditSettingsBody(fs, 0, 0, 0, table, 0); err == nil {
+		t.Fatal("--rate-table accepted the same class twice")
+	}
+}
+
+// The flat ladder an unset table prints reads like a priced one, so the output
+// says which of the two it is.
+func TestRenderCreditStateSaysWhenNoRateTableIsSet(t *testing.T) {
+	t.Parallel()
+	var unset, set bytes.Buffer
+	state := creditStateResp{
+		RateMicroPerSecond: store.DefaultCreditRateMicro,
+		RateTable:          []creditRateResp{{Cores: 2, MicroPerSecond: store.DefaultCreditRateMicro}},
+		MicroPerCredit:     store.MicroCreditsPerCredit,
+	}
+	if err := renderCreditState(&unset, state); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	state.RateTableSet = true
+	if err := renderCreditState(&set, state); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(unset.String(), "not set") {
+		t.Errorf("an unset table is not called out:\n%s", unset.String())
+	}
+	if !strings.Contains(set.String(), "set by the operator") {
+		t.Errorf("a set table is not called out:\n%s", set.String())
 	}
 }

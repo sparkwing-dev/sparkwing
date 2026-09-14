@@ -99,6 +99,73 @@ unlock.
   opens the database; the index is retried on every open and skipped while
   older grants repeat a reference, which `GET /api/v1/health` reports as
   `database.credit_grant_key` and the controller logs at every start.
+- **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
+  `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
+  rate, the grace period a running node gets on an empty balance, and the cap
+  on what any one charge may bill, which until now moved only through a code
+  change. An omitted field keeps its setting, so changing one value is a
+  one-field body; a rate at or below zero, a negative grace period, and a
+  charge cap under `store.MinCreditMaxChargeSeconds` are refused, and a refused
+  body writes none of its fields. `sparkwing cluster credits settings` prints
+  the three values and sets the ones its `--rate-micro`, `--grace-seconds` and
+  `--max-charge-seconds` flags name. The defaults are unchanged: a self-hosted
+  controller still gives a node 60 seconds of grace.
+- **controller + CLI:** Metered runner seconds are priced by the node's cpu
+  class. A `rate_table` beside the three settings prices one class per
+  whole-core size, a node is billed at the smallest class covering its resolved
+  cpu request, and a request above the largest class is refused at the claim
+  with `409` and code `unpriced_cpu_class` naming the class to add. Charge rows
+  record the class and the rate they were billed at, so a later change to the
+  table never reprices a charge already written, and `credits show` and
+  `credits history` print both. `sparkwing cluster credits settings
+  --rate-table 2=10000,4=20000,8=36667` writes the ladder, and the route also
+  takes it as a list of `{cores, micro_per_second}` or an object keyed by
+  cores. A node is billed at the class its cpu request falls in, held under the
+  new `billing_cpu_ceiling_cores` setting (`--billing-cpu-ceiling-cores`, zero
+  by default) so a cluster handing out smaller pods than its plans ask for
+  bills what it gives; nothing a claimant reports about itself changes a class.
+  A request above the largest class fails the node with `unpriced_cpu_class`
+  and a `credits_unpriced_class` event rather than leaving it claimable
+  forever. A
+  rate above a million credits a second is refused, because it overflows the
+  reservation a claim multiplies out. An installation that never sets a table
+  bills the default ladder, and that setting is the four-core entry of it under
+  another name: once a table exists, a `PUT` naming the scalar, alone or beside
+  `rate_table`, answers `400` and says to write the table. A stored table this build cannot read
+  is an error rather than a silent fallback.
+
+### Changed
+
+- **controller (Breaking):** A metered runner second is priced by the node's cpu
+  class from the default rate table, which carries GitHub Actions' Linux x64
+  rates: 2-core 10,000 micro-credits a second, 4-core 20,000, 8-core 36,667,
+  16-core 70,000, 32-core 136,667, 64-core 270,000. Until now every node was
+  billed at `credit_rate_micro_per_second` whatever its size, so a metered node
+  that asks for two cores or less now costs half what it did and a node above
+  four cores costs more. The four-core class is that setting under another
+  name, so a controller that repriced it keeps its own four-core price.
+  `sparkwing cluster credits settings --rate-table` sets a ladder of your own,
+  and charges already written keep the class and rate they were billed at.
+- **pkg/store:** The credit setters now bound what they accept, because a rate
+  near the int64 maximum overflowed the reservation a claim takes and let a
+  claim the ledger had to refuse succeed, then billed the next heartbeat
+  9.2e18 micro-credits. `SetCreditRateMicroPerSecond` takes 1 to
+  `MaxCreditRateMicro` (a million credits a second, where it previously took
+  zero and any positive value), and `SetCreditMaxChargeSeconds` takes
+  `MinCreditMaxChargeSeconds` to `MaxCreditMaxChargeSeconds` (one second past
+  the longest heartbeat cadence, to one day, where it previously took any
+  positive value). A cap at or under the cadence truncated and forgave part of
+  every late tick. Refusals are `ErrInvalidCreditSetting`.
+- **controller:** A metered node inside the reservation its claim paid for is
+  no longer cancelled for exhausted credits, and each node now runs its own
+  grace clock from the instant it was charged through when the balance first
+  read empty. A claim reserves and charges for a minute of runway up front, so
+  cancelling inside it billed for time the node never got to use; with a grace
+  period of zero the node lost the whole paid minute. The clock used to run
+  from a ledger-wide stamp, so every node shared one deadline and the grace
+  period barely moved it. Schema v45 adds the `nodes.credit_exhausted_anchor`
+  column that holds each node's own start; it is defaulted, so an older binary
+  keeps writing the migrated database.
 
 ### Fixed
 
@@ -149,29 +216,6 @@ unlock.
   `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
   `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
   add` and the service installer write.
-
-### Changed
-
-- **pkg/store:** The credit setters now bound what they accept, because a rate
-  near the int64 maximum overflowed the reservation a claim takes and let a
-  claim the ledger had to refuse succeed, then billed the next heartbeat
-  9.2e18 micro-credits. `SetCreditRateMicroPerSecond` takes 1 to
-  `MaxCreditRateMicro` (a million credits a second, where it previously took
-  zero and any positive value), and `SetCreditMaxChargeSeconds` takes
-  `MinCreditMaxChargeSeconds` to `MaxCreditMaxChargeSeconds` (one second past
-  the longest heartbeat cadence, to one day, where it previously took any
-  positive value). A cap at or under the cadence truncated and forgave part of
-  every late tick. Refusals are `ErrInvalidCreditSetting`.
-- **controller:** A metered node inside the reservation its claim paid for is
-  no longer cancelled for exhausted credits, and each node now runs its own
-  grace clock from the instant it was charged through when the balance first
-  read empty. A claim reserves and charges for a minute of runway up front, so
-  cancelling inside it billed for time the node never got to use; with a grace
-  period of zero the node lost the whole paid minute. The clock used to run
-  from a ledger-wide stamp, so every node shared one deadline and the grace
-  period barely moved it. Schema v45 adds the `nodes.credit_exhausted_anchor`
-  column that holds each node's own start; it is defaulted, so an older binary
-  keeps writing the migrated database.
 
 ## [v0.50.3] - 2026-09-14
 ### Added

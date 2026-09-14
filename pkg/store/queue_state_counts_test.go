@@ -100,8 +100,8 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 		t.Errorf("grants = free %d / paid %d, want 5000000 / 20000000",
 			totals.GrantedFreeMicro, totals.GrantedPaidMicro)
 	}
-	wantReserved := store.DefaultCreditRateMicro * store.CreditClaimFloorSeconds
-	if totals.ReservedMicro != int64(wantReserved) {
+	wantReserved := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	if totals.ReservedMicro != wantReserved {
 		t.Errorf("reserved = %d, want the claim floor %d", totals.ReservedMicro, wantReserved)
 	}
 	if totals.ChargedMicro != 0 {
@@ -129,7 +129,7 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 		t.Errorf("settled seconds = %d, want the net of a reservation the node barely used",
 			settled.SettledSeconds)
 	}
-	if want := settled.SettledSeconds * store.DefaultCreditRateMicro; want != 25_000_000-settled.BalanceMicro {
+	if want := settled.SettledSeconds * unpinnedNodeRateMicro; want != 25_000_000-settled.BalanceMicro {
 		t.Errorf("settled seconds %d price to %d micro, but the balance fell by %d: the seconds and the bill disagree",
 			settled.SettledSeconds, want, 25_000_000-settled.BalanceMicro)
 	}
@@ -270,7 +270,7 @@ func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 	if err != nil {
 		t.Fatalf("CreditLedgerTotals: %v", err)
 	}
-	if want := atFinish * store.DefaultCreditRateMicro; want != 200_000_000-totals.BalanceMicro {
+	if want := atFinish * unpinnedNodeRateMicro; want != 200_000_000-totals.BalanceMicro {
 		t.Errorf("settled seconds %d price to %d micro but the balance fell by %d",
 			atFinish, want, 200_000_000-totals.BalanceMicro)
 	}

@@ -2174,11 +2174,12 @@ never charged.`,
 
 var cmdCreditsShow = Command{
 	Path:     "sparkwing cluster credits show",
-	Synopsis: "Print the balance, the rate, and the recent burn",
+	Synopsis: "Print the balance, the rate table, and the recent burn",
 	Description: `Prints the balance in credits, what was granted and charged, the
-price of a cloud runner second, the credits burned over the last
-day, the grace period a node gets past the reservation its claim
-paid for, and the cap on what any one charge may bill. A
+price of a cloud runner second at every cpu class, the credits
+burned over the last day, the grace period a node gets past the
+reservation its claim paid for, and the cap on what any one
+charge may bill. A
 controller that was never granted anything reads a zero balance
 and charges nothing, because nothing is metered until an
 operator marks a token.`,
@@ -2225,7 +2226,8 @@ var cmdCreditsHistory = Command{
 their kind and reference, and the reservation a claim took, the
 usage an interval billed, and the refund of a reservation a node
 did not use, each with the run, node, token prefix and seconds
-it covered. Charges render negative because they take credits
+it covered, and the cpu class and rate it was billed at. Charges
+render negative because they take credits
 out and a refund renders positive. -o json emits one JSON record
 per line.`,
 	Flags: []FlagSpec{
@@ -2241,24 +2243,36 @@ per line.`,
 
 var cmdCreditsSettings = Command{
 	Path:     "sparkwing cluster credits settings",
-	Synopsis: "Read or set the credit rate, the grace period, and the charge cap",
-	Description: `Prints the three runtime settings the ledger prices work with,
-and sets the ones named by a flag. The rate is what one cloud
-runner second costs in micro-credits. The grace period is how
-long a node keeps running after it has consumed the reservation
-its claim paid for with the balance at zero: a node inside that
-reservation is never cancelled, because the ledger already took
-payment for it. The charge cap is the most seconds any one
-charge may bill, which forgives a controller outage or a stalled
-heartbeat loop rather than billing the gap. A flag left off
-leaves that setting alone, and a refused value moves nothing.
-Grace zero cancels a metered node at the first heartbeat past
-its reservation, which bounds the unpaid overrun to one
-heartbeat interval per node. Reading needs the runs.read scope
-and setting needs admin.`,
+	Synopsis: "Read or set the credit rate table, the grace period, and the charge cap",
+	Description: `Prints the runtime settings the ledger prices work with, and
+sets the ones named by a flag. The rate table prices one cloud
+runner second at every cpu class, and a node is billed at the
+smaller of the class its cpu request falls in and the class the
+runner executing it reports for itself; a request above the
+largest class that no runner report brings inside it fails the
+node. The rate is what a four-core second costs, which is the
+four-core entry of the table under another name, so a body may
+name one or the other, never both. The billing cpu ceiling
+holds every node's class under a cpu figure the operator sets,
+which is how a cluster that hands out smaller pods than its
+plans ask for bills what it gives; zero bills by the request. The grace period
+is how long a node keeps running after it has consumed the
+reservation its claim paid for with the balance at zero: a node
+inside that reservation is never cancelled, because the ledger
+already took payment for it. The charge cap is the most seconds
+any one charge may bill, which forgives a controller outage or a
+stalled heartbeat loop rather than billing the gap. A flag left
+off leaves that setting alone, and a refused value moves
+nothing. Grace zero cancels a metered node at the first
+heartbeat past its reservation, which bounds the unpaid overrun
+to one heartbeat interval per node. An installation that never
+set a table bills the default ladder. Reading needs the
+runs.read scope and setting needs admin.`,
 	Flags: []FlagSpec{
+		{Name: "rate-table", Argument: "PAIRS", Desc: "Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667", Group: "Input"},
+		{Name: "billing-cpu-ceiling-cores", Argument: "N", Desc: "Hold every node's billed class under N cores; 0 bills by the node's own request", Group: "Input"},
 		{Name: "rate-micro", Argument: "N", Desc: fmt.Sprintf(
-			"Micro-credits one cloud runner second costs, 1 to %d; a million is one credit",
+			"Micro-credits one four-core cloud runner second costs, 1 to %d; refused once a rate table exists",
 			int64(store.MaxCreditRateMicro)), Group: "Input"},
 		{Name: "grace-seconds", Argument: "N", Desc: "Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat", Group: "Input"},
 		{Name: "max-charge-seconds", Argument: "N", Desc: fmt.Sprintf(
@@ -2271,6 +2285,7 @@ and setting needs admin.`,
 		{"Read the settings", "sparkwing cluster credits settings --profile prod"},
 		{"Cut a node off at the first heartbeat past its reservation", "sparkwing cluster credits settings --grace-seconds 0 --profile prod"},
 		{"Reprice a cloud runner second at 0.03 credits", "sparkwing cluster credits settings --rate-micro 30000 --profile prod"},
+		{"Price the six sizes at the GitHub Actions rates", "sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667,16=70000,32=136667,64=270000 --profile prod"},
 	},
 }
 

@@ -180,10 +180,10 @@ never charged.
 
 ### Subcommands
 
-- `show` -- Print the balance, the rate, and the recent burn
+- `show` -- Print the balance, the rate table, and the recent burn
 - `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
 - `history` -- List grants and charges, newest first
-- `settings` -- Read or set the credit rate, the grace period, and the charge cap
+- `settings` -- Read or set the credit rate table, the grace period, and the charge cap
 
 ### Examples
 
@@ -240,7 +240,8 @@ Lists every movement of the ledger newest first: grants with
 their kind and reference, and the reservation a claim took, the
 usage an interval billed, and the refund of a reservation a node
 did not use, each with the run, node, token prefix and seconds
-it covered. Charges render negative because they take credits
+it covered, and the cpu class and rate it was billed at. Charges
+render negative because they take credits
 out and a refund renders positive. -o json emits one JSON record
 per line.
 
@@ -264,28 +265,40 @@ sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="ch
 
 ## `sparkwing cluster credits settings`
 
-Read or set the credit rate, the grace period, and the charge cap
+Read or set the credit rate table, the grace period, and the charge cap
 
-Prints the three runtime settings the ledger prices work with,
-and sets the ones named by a flag. The rate is what one cloud
-runner second costs in micro-credits. The grace period is how
-long a node keeps running after it has consumed the reservation
-its claim paid for with the balance at zero: a node inside that
-reservation is never cancelled, because the ledger already took
-payment for it. The charge cap is the most seconds any one
-charge may bill, which forgives a controller outage or a stalled
-heartbeat loop rather than billing the gap. A flag left off
-leaves that setting alone, and a refused value moves nothing.
-Grace zero cancels a metered node at the first heartbeat past
-its reservation, which bounds the unpaid overrun to one
-heartbeat interval per node. Reading needs the runs.read scope
-and setting needs admin.
+Prints the runtime settings the ledger prices work with, and
+sets the ones named by a flag. The rate table prices one cloud
+runner second at every cpu class, and a node is billed at the
+smaller of the class its cpu request falls in and the class the
+runner executing it reports for itself; a request above the
+largest class that no runner report brings inside it fails the
+node. The rate is what a four-core second costs, which is the
+four-core entry of the table under another name, so a body may
+name one or the other, never both. The billing cpu ceiling
+holds every node's class under a cpu figure the operator sets,
+which is how a cluster that hands out smaller pods than its
+plans ask for bills what it gives; zero bills by the request. The grace period
+is how long a node keeps running after it has consumed the
+reservation its claim paid for with the balance at zero: a node
+inside that reservation is never cancelled, because the ledger
+already took payment for it. The charge cap is the most seconds
+any one charge may bill, which forgives a controller outage or a
+stalled heartbeat loop rather than billing the gap. A flag left
+off leaves that setting alone, and a refused value moves
+nothing. Grace zero cancels a metered node at the first
+heartbeat past its reservation, which bounds the unpaid overrun
+to one heartbeat interval per node. An installation that never
+set a table bills the default ladder. Reading needs the
+runs.read scope and setting needs admin.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--rate-micro N` | Micro-credits one cloud runner second costs, 1 to 1000000000000; a million is one credit |
+| `--rate-table PAIRS` | Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667 |
+| `--billing-cpu-ceiling-cores N` | Hold every node's billed class under N cores; 0 bills by the node's own request |
+| `--rate-micro N` | Micro-credits one four-core cloud runner second costs, 1 to 1000000000000; refused once a rate table exists |
 | `--grace-seconds N` | Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat |
 | `--max-charge-seconds N` | The most seconds any one charge may bill, 6 to 86400 |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
@@ -302,16 +315,20 @@ sparkwing cluster credits settings --grace-seconds 0 --profile prod
 
 # Reprice a cloud runner second at 0.03 credits
 sparkwing cluster credits settings --rate-micro 30000 --profile prod
+
+# Price the six sizes at the GitHub Actions rates
+sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667,16=70000,32=136667,64=270000 --profile prod
 ```
 
 ## `sparkwing cluster credits show`
 
-Print the balance, the rate, and the recent burn
+Print the balance, the rate table, and the recent burn
 
 Prints the balance in credits, what was granted and charged, the
-price of a cloud runner second, the credits burned over the last
-day, the grace period a node gets past the reservation its claim
-paid for, and the cap on what any one charge may bill. A
+price of a cloud runner second at every cpu class, the credits
+burned over the last day, the grace period a node gets past the
+reservation its claim paid for, and the cap on what any one
+charge may bill. A
 controller that was never granted anything reads a zero balance
 and charges nothing, because nothing is metered until an
 operator marks a token.

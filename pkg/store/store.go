@@ -75,6 +75,9 @@ const (
 	// FailureCreditsExhausted: the controller's prepaid credit balance ran
 	// out and the node was cancelled after the grace period.
 	FailureCreditsExhausted = "credits_exhausted"
+	// FailureUnpricedCPUClass: the node's cpu request is above the largest
+	// class the credit rate table prices, so no claim could be billed.
+	FailureUnpricedCPUClass = "unpriced_cpu_class"
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403
 	// against the controller's auth surface. The run's structured
 	// logs are unrecoverable; better to fail loud than report
@@ -1059,7 +1062,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 45
+const expectedSchemaVersion = 46
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1955,6 +1958,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return nil
 	case 45:
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditExhaustionCols)
+	case 46:
+		return applyCreditClassMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2290,6 +2295,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return nil
 	case 45:
 		return addColumnsTx(ctx, tx, "nodes", nodesCreditExhaustionCols)
+	case 46:
+		return applyCreditClassMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

@@ -19,6 +19,7 @@ holder, membership ID, internal controller or executor ID, or reservation ID.
 | `executor_offer_declined` | Current enrollment or claim validation rejected the offer, or a higher-ranked offer won. The safe `reason` field distinguishes those cases. |
 | `executor_offer_awarded` | The offer won at the recorded priority target or at the deadline. |
 | `executor_offer_round_empty` | The deadline had no live eligible offer, so the existing coordinator fallback took ownership. |
+| `credits_unpriced_class` | A claim was refused because the node's cpu request is above the largest class the credit rate table prices. Carries `cores` and `max_cores`. |
 
 ## Failure reasons
 
@@ -35,6 +36,7 @@ the logs.
 | `agent_lost` | The agent or gateway stopped heartbeating. The source node is terminal; a fresh linked run may retry it within `.Retry(n)`. | Check the executor and `agent_loss_*` events. A post-start retry is at-least-once and spends each acknowledged invocation. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no runner claimed the node within the controller's queue deadline (default 15m). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
 | `credits_exhausted` | The controller's prepaid credit balance ran out and the node was cancelled after the grace period. Its claim is released and its offers are withdrawn. | Add credits, then re-run. A node cancelled this way held no slot afterwards, so nothing is left to reclaim. |
+| `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, and the runner that tried to take it reported nothing smaller, so no claim could be billed. | Add the class with `sparkwing cluster credits settings --rate-table`, or lower the node's cpu request, then re-run. The `credits_unpriced_class` event carries the request and the ceiling. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
 | `logs_auth` | The runner's log-append calls were rejected (401/403) by the controller, so the run's structured logs are unrecoverable. | Check the runner token's `logs.write` scope; the run fails loud rather than reporting success with no output. |

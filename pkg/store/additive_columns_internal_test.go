@@ -73,6 +73,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v45 adds one defaulted column, so an older binary keeps writing
 	// the migrated database and simply never stamps it.
 	45: {nodesCreditExhaustionCols},
+	// safety: v46 adds the cpu class and the rate each charge was billed at,
+	// and the class a node was claimed at, all defaulted, so an older binary
+	// keeps writing the migrated database.
+	46: {creditChargeClassCols, nodesCreditClassCols},
 }
 
 func columnSpecMaps() []map[string]string {

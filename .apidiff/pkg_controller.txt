@@ -271,10 +271,12 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
+const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)

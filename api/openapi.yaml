@@ -4632,6 +4632,13 @@ components:
       description: The guards to set, by name.
       properties:
         limits: {type: object, additionalProperties: {type: integer, format: int64}, description: Guard name to ceiling; zero removes it.}
+    CreditRate:
+      x-sparkwing-go-type: pkg/controller.creditRateJSON
+      type: object
+      description: The price of one cloud runner second at one cpu class.
+      properties:
+        cores: {type: integer, format: int64, description: Whole cores of the class.}
+        micro_per_second: {type: integer, format: int64, description: Micro-credits one second at this class costs.}
     CreditState:
       x-sparkwing-go-type: pkg/controller.creditStateJSON
       type: object
@@ -4641,6 +4648,14 @@ components:
         granted_micro: {type: integer, format: int64}
         reversed_micro: {type: integer, format: int64, description: "What reversals took back, reported positive."}
         charged_micro: {type: integer, format: int64}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one four-core cloud runner second.}
+        rate_table:
+          type: array
+          description: The price of a cloud runner second at every cpu class, smallest class first.
+          items: {$ref: "#/components/schemas/CreditRate"}
+        rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not bills the default ladder.}
+        billing_cpu_ceiling_cores: {type: integer, format: int64, description: Holds every node's billed class under this many cores; 0 bills by the node's own cpu request.}
+        grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a node runs past its claim reservation with the balance at zero.}
         max_charge_seconds: {type: integer, format: int64, description: "The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop."}
@@ -4652,8 +4667,16 @@ components:
     CreditSettings:
       x-sparkwing-go-type: pkg/controller.creditSettingsJSON
       type: object
-      description: The three values the ledger prices work with, and the credit units they are quoted in.
+      description: The values the ledger prices work with, and the credit units they are quoted in.
       properties:
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one four-core cloud runner second; the four-core entry of the rate table.}
+        rate_table:
+          type: array
+          description: The price of a cloud runner second at every cpu class, smallest class first.
+          items: {$ref: "#/components/schemas/CreditRate"}
+        rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not bills the default ladder.}
+        billing_cpu_ceiling_cores: {type: integer, format: int64, description: Holds every node's billed class under this many cores; 0 bills by the node's own cpu request.}
+        grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance; zero cancels it as soon as its reservation is consumed.}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a node runs past the reservation its claim paid for with the balance at zero; zero cancels it at the first heartbeat past that reservation.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
@@ -4664,6 +4687,17 @@ components:
       type: object
       description: The settings to change. An omitted field is left as it was.
       properties:
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one four-core cloud runner second; must be positive. Refused with 400 once a rate table exists or when named beside rate_table.}
+        billing_cpu_ceiling_cores: {type: integer, format: int64, description: Holds every node's billed class under this many cores; 0 bills by the node's own cpu request.}
+        rate_table:
+          description: The price of a cloud runner second at every cpu class, as a list of entries or as an object keyed by cores. Writing it also writes the four-core price to rate_micro_per_second.
+          oneOf:
+            - type: array
+              items: {$ref: "#/components/schemas/CreditRate"}
+            - type: object
+              additionalProperties: {type: integer, format: int64}
+        grace_seconds: {type: integer, format: int64, description: Seconds a running node survives an empty balance; zero or more.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; at least the heartbeat interval.}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second; 1 to 1000000000000.}
         grace_seconds: {type: integer, format: int64, description: Seconds a node runs past its claim reservation on an empty balance; zero or more.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; from one second past the longest node heartbeat cadence to one day.}
@@ -4691,6 +4725,8 @@ components:
         kind: {type: string, description: "reservation, usage, or refund; a refund carries negative seconds and amount."}
         seconds: {type: integer, format: int64}
         amount_micro: {type: integer, format: int64}
+        cpu_class_cores: {type: integer, format: int64, description: Whole cores of the cpu class billed; absent on a charge written before the rate table.}
+        rate_micro_per_second: {type: integer, format: int64, description: The price the charge was billed at; a later change to the rate table leaves it alone.}
         charged_at: {type: integer, format: int64, description: Unix seconds.}
     CreditHistory:
       x-sparkwing-go-type: pkg/controller.creditHistoryJSON

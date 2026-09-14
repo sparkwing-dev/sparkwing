@@ -210,7 +210,11 @@ type CreditCharge struct {
 	Kind        string
 	Seconds     int64
 	AmountMicro int64
-	ChargedAt   time.Time
+
+	CPUClassCores int64
+
+	RateMicroPerSecond int64
+	ChargedAt          time.Time
 }
 const CreditChargeRefund = "refund"
 const CreditChargeReservation = "reservation"
@@ -268,17 +272,31 @@ type CreditLedgerTotals struct {
 
 	SettledSeconds int64
 }
+type CreditRate struct {
+	Cores          int64
+	MicroPerSecond int64
+}
+const CreditRateBaseClassCores = 4
+type CreditRateTable []CreditRate
+func (t CreditRateTable) BaseRate() int64
+func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error)
+func (t CreditRateTable) RateFor(cores int64) int64
+func (t CreditRateTable) Sorted() CreditRateTable
+func (t CreditRateTable) Validate() error
 type CreditSettings struct {
 	RateMicroPerSecond int64
+
+	BillingCPUCeilingCores int64
 
 	GraceSeconds int64
 
 	MaxChargeSeconds int64
 }
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond *int64
-	GraceSeconds       *int64
-	MaxChargeSeconds   *int64
+	RateMicroPerSecond     *int64
+	BillingCPUCeilingCores *int64
+	GraceSeconds           *int64
+	MaxChargeSeconds       *int64
 }
 type CreditState struct {
 	GrantedMicro int64
@@ -287,11 +305,16 @@ type CreditState struct {
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
-	GraceSeconds       int64
-	MaxChargeSeconds   int64
-	BurnWindow         time.Duration
-	BurnMicro          int64
-	ExhaustedAt        *time.Time
+	RateTable          CreditRateTable
+
+	RateTableSet bool
+
+	BillingCPUCeilingCores int64
+	GraceSeconds           int64
+	MaxChargeSeconds       int64
+	BurnWindow             time.Duration
+	BurnMicro              int64
+	ExhaustedAt            *time.Time
 }
 const CreditsPerDollar = 100
 type CronDeclaration struct {
@@ -411,6 +434,7 @@ const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
+func DefaultCreditRateTable(rate int64) CreditRateTable
 const DefaultLeaseDuration = 3 * time.Minute
 func DetectDialect(dsn string) Dialect
 type Dialect int
@@ -451,6 +475,7 @@ var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownToken = errors.New("unknown token")
+var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 var ErrUserNotFound = errors.New("user not found")
 type Event struct {
 	RunID   string
@@ -463,6 +488,7 @@ type Event struct {
 const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
+const EventKindCreditsUnpriced = "credits_unpriced_class"
 type ExecutionAttempt struct {
 	RunID            string
 	NodeID           string
@@ -604,6 +630,7 @@ const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
+const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
 func FormatCredits(micro int64) string
 var FreeTierQuota = StorageQuota{
@@ -655,6 +682,7 @@ var Maintenance = storeMaintenanceFns{
 const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditMaxChargeSeconds = 86_400
 const MaxCreditRateMicro = 1_000_000_000_000
+const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
@@ -1114,6 +1142,7 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (s *Store) BillingCPUCeilingCores(ctx context.Context) (int64, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
@@ -1169,6 +1198,8 @@ func (s *Store) CreditGrantReferenceIndexPresent(ctx context.Context) (bool, err
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
+func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error)
+func (s *Store) CreditRateTableSet(ctx context.Context) (bool, error)
 func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
@@ -1187,6 +1218,9 @@ func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentit
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
+func (s *Store) FailNodeForUnpricedClass(
+	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
+) error
 func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID string) (ExecutorClaimRoundResult, error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
@@ -1328,10 +1362,12 @@ func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.D
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunnerCapFor(ctx context.Context, principal string, now time.Time) (RunnerCap, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SetBillingCPUCeilingCores(ctx context.Context, cores int64) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error
+func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (err error)
 func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
@@ -1461,6 +1497,14 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 func UnknownRequirements(listed []string) []string
+type UnpricedCPUClassError struct {
+	RunID    string
+	NodeID   string
+	Cores    int64
+	MaxCores int64
+}
+func (e *UnpricedCPUClassError) Error() string
+func (e *UnpricedCPUClassError) Unwrap() error
 type User struct {
 	Name        string
 	PWHash      string

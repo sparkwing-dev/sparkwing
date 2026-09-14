@@ -116,13 +116,14 @@ var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
+	res := r.resolveResources(ctx, req)
 	fence, claimed := r.claimNode(ctx, req, name)
 	if claimed {
 		// safety: the dispatcher reached here holding the run's trigger claim,
 		// and the controller refuses a request that carries both identities.
 		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
 	}
-	job := r.buildJob(name, req, r.resolveResources(ctx, req), fence)
+	job := r.buildJob(name, req, res, fence)
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})

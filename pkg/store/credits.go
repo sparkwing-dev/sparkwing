@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -113,6 +114,9 @@ const (
 	// EventKindCreditsExhausted records a node cancelled after the balance
 	// reached zero and the grace period elapsed.
 	EventKindCreditsExhausted = "credits_exhausted"
+	// EventKindCreditsUnpriced records a node failed because its cpu request
+	// is above the largest class the rate table prices.
+	EventKindCreditsUnpriced = "credits_unpriced_class"
 )
 
 // ErrInsufficientCredits is returned when a metered runner's controller has
@@ -147,6 +151,7 @@ const (
 	metaKeyCreditGraceSecs   = "credit_grace_seconds"
 	metaKeyCreditMaxCharge   = "credit_max_charge_seconds"
 	metaKeyCreditExhaustedAt = "credit_exhausted_at"
+	metaKeyBillingCPUCeiling = "billing_cpu_ceiling_cores"
 )
 
 // CreditHistoryMaxLimit is the most rows of each kind one history read
@@ -176,6 +181,10 @@ const creditChargesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_charges (
     kind         TEXT NOT NULL DEFAULT 'usage',
     seconds      INTEGER NOT NULL,
     amount_micro INTEGER NOT NULL,
+    -- cpu_class: whole cores of the class billed; 0 for a row written before
+    -- the rate table, which was billed at credit_rate_micro_per_second.
+    cpu_class    INTEGER NOT NULL DEFAULT 0,
+    rate_micro_per_second INTEGER NOT NULL DEFAULT 0,
     charged_at   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_credit_charges_charged ON credit_charges(charged_at);
@@ -214,6 +223,19 @@ var creditChargeKindCols = map[string]string{
 	"kind": "TEXT NOT NULL DEFAULT 'usage'",
 }
 
+// safety: a row billed before the rate table carries class 0, which reads as
+// the single rate it was charged at rather than a class the table prices.
+var creditChargeClassCols = map[string]string{
+	"cpu_class":             "INTEGER NOT NULL DEFAULT 0",
+	"rate_micro_per_second": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// safety: a node claimed before the rate table carries class 0 and keeps
+// billing at the single rate, so an upgrade does not reprice work in flight.
+var nodesCreditClassCols = map[string]string{
+	"credit_cpu_class": "INTEGER NOT NULL DEFAULT 0",
+}
+
 // safety: metering trusts this operator-set marker alone, never a runner's
 // self-asserted labels.
 var tokensMeteredCols = map[string]string{
@@ -247,6 +269,20 @@ func applyCreditsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 		return err
 	}
 	return ensureColumnsSQLite(ctx, tx, "credit_charges", creditChargeKindCols)
+}
+
+func applyCreditClassMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	if err := ensureColumnsSQLite(ctx, tx, "credit_charges", creditChargeClassCols); err != nil {
+		return err
+	}
+	return ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditClassCols)
+}
+
+func applyCreditClassMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	if err := addColumnsTx(ctx, tx, "credit_charges", creditChargeClassCols); err != nil {
+		return err
+	}
+	return addColumnsTx(ctx, tx, "nodes", nodesCreditClassCols)
 }
 
 func applyCreditsMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -352,7 +388,13 @@ type CreditCharge struct {
 	Kind        string
 	Seconds     int64
 	AmountMicro int64
-	ChargedAt   time.Time
+	// CPUClassCores is the cpu class the row was billed at, in whole cores,
+	// and zero for a row written before the rate table.
+	CPUClassCores int64
+	// RateMicroPerSecond is the price the row was billed at, which a later
+	// change to the rate table leaves alone.
+	RateMicroPerSecond int64
+	ChargedAt          time.Time
 }
 
 // CreditState is the ledger as an operator reads it: what was granted, what
@@ -366,11 +408,18 @@ type CreditState struct {
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
-	GraceSeconds       int64
-	MaxChargeSeconds   int64
-	BurnWindow         time.Duration
-	BurnMicro          int64
-	ExhaustedAt        *time.Time
+	RateTable          CreditRateTable
+	// RateTableSet reports whether an operator wrote the table. A state that
+	// reports false bills the default ladder.
+	RateTableSet bool
+	// BillingCPUCeilingCores holds every node's billed class under this many
+	// cores. Zero bills each node by its own cpu request.
+	BillingCPUCeilingCores int64
+	GraceSeconds           int64
+	MaxChargeSeconds       int64
+	BurnWindow             time.Duration
+	BurnMicro              int64
+	ExhaustedAt            *time.Time
 }
 
 // ValidCreditGrantKind reports whether kind is one this ledger stores.
@@ -633,6 +682,21 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 		return out, err
 	}
 	out.RateMicroPerSecond = rate
+	table, err := s.CreditRateTable(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.RateTable = table
+	tableSet, err := s.CreditRateTableSet(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.RateTableSet = tableSet
+	ceiling, err := s.BillingCPUCeilingCores(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.BillingCPUCeilingCores = ceiling
 	grace, err := s.CreditGraceSeconds(ctx)
 	if err != nil {
 		return out, err
@@ -753,6 +817,15 @@ func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) er
 	return s.setCreditSetting(ctx, metaKeyCreditRateMicro, micro)
 }
 
+// safety: the rate table writes its four-core entry here, so it passes through
+// the same bound the setting's own caller does.
+func setCreditRateMicroTx(ctx context.Context, tx *storeTx, micro int64) error {
+	if err := validCreditRate(micro); err != nil {
+		return err
+	}
+	return setCreditSettingTx(ctx, tx, metaKeyCreditRateMicro, formatCreditSetting(micro))
+}
+
 // CreditGraceSeconds returns how long a node keeps running once it has
 // consumed the reservation its claim paid for with the balance at zero.
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
@@ -789,6 +862,10 @@ func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
 type CreditSettings struct {
 	// RateMicroPerSecond is the price of one cloud runner second.
 	RateMicroPerSecond int64
+	// BillingCPUCeilingCores holds the class a node is billed at to a cpu
+	// figure the operator sets, whatever the node's own request asked for.
+	// Zero bills every node by its request.
+	BillingCPUCeilingCores int64
 	// GraceSeconds is how long a node that has consumed its claim reservation
 	// on an empty balance keeps running before the controller cancels it.
 	GraceSeconds int64
@@ -800,9 +877,10 @@ type CreditSettings struct {
 // setting as it stands, so a caller changing one value sends one field and a
 // field added later joins without disturbing these three.
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond *int64
-	GraceSeconds       *int64
-	MaxChargeSeconds   *int64
+	RateMicroPerSecond     *int64
+	BillingCPUCeilingCores *int64
+	GraceSeconds           *int64
+	MaxChargeSeconds       *int64
 }
 
 // CreditSettings reads all three settings together. A controller that set none
@@ -860,6 +938,9 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 	if u.RateMicroPerSecond != nil {
 		out[metaKeyCreditRateMicro] = *u.RateMicroPerSecond
 	}
+	if u.BillingCPUCeilingCores != nil {
+		out[metaKeyBillingCPUCeiling] = *u.BillingCPUCeilingCores
+	}
 	if u.GraceSeconds != nil {
 		out[metaKeyCreditGraceSecs] = *u.GraceSeconds
 	}
@@ -872,9 +953,16 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 // safety: every value is judged before any of them is written, so a body that
 // names one good setting and one bad one moves neither.
 func (u CreditSettingsUpdate) validate() error {
-	if u.RateMicroPerSecond == nil && u.GraceSeconds == nil && u.MaxChargeSeconds == nil {
-		return fmt.Errorf("%w: name at least one of the rate, the grace period, or the charge cap",
+	if u.RateMicroPerSecond == nil && u.BillingCPUCeilingCores == nil &&
+		u.GraceSeconds == nil && u.MaxChargeSeconds == nil {
+		return fmt.Errorf(
+			"%w: name at least one of the rate, the billing cpu ceiling, the grace period, or the charge cap",
 			ErrInvalidCreditSetting)
+	}
+	if u.BillingCPUCeilingCores != nil {
+		if err := validBillingCPUCeiling(*u.BillingCPUCeilingCores); err != nil {
+			return err
+		}
 	}
 	if u.RateMicroPerSecond != nil {
 		if err := validCreditRate(*u.RateMicroPerSecond); err != nil {
@@ -900,6 +988,31 @@ func validCreditRate(micro int64) error {
 			ErrInvalidCreditSetting, int64(MaxCreditRateMicro), micro)
 	}
 	return nil
+}
+
+// safety: the ceiling is a whole number of cores the table can price, so a
+// negative one is refused and zero means the node's own request decides.
+func validBillingCPUCeiling(cores int64) error {
+	if cores < 0 {
+		return fmt.Errorf("%w: the billing cpu ceiling must not be negative, got %d",
+			ErrInvalidCreditSetting, cores)
+	}
+	return nil
+}
+
+// BillingCPUCeilingCores returns the cpu figure the ledger holds a node's class
+// under. Zero bills every node by the cpu its own request resolved to.
+func (s *Store) BillingCPUCeilingCores(ctx context.Context) (int64, error) {
+	return s.creditSetting(ctx, metaKeyBillingCPUCeiling, 0)
+}
+
+// SetBillingCPUCeilingCores holds every node's billed class under cores. Zero
+// lifts the ceiling.
+func (s *Store) SetBillingCPUCeilingCores(ctx context.Context, cores int64) error {
+	if err := validBillingCPUCeiling(cores); err != nil {
+		return err
+	}
+	return s.setCreditSetting(ctx, metaKeyBillingCPUCeiling, cores)
 }
 
 func validCreditGrace(secs int64) error {
@@ -932,7 +1045,12 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	if err != nil {
 		return out, err
 	}
+	ceiling, err := creditSettingTx(ctx, tx, metaKeyBillingCPUCeiling, 0)
+	if err != nil {
+		return out, err
+	}
 	out.RateMicroPerSecond = rate
+	out.BillingCPUCeilingCores = ceiling
 	out.GraceSeconds = grace
 	out.MaxChargeSeconds = maxCharge
 	return out, nil
@@ -975,13 +1093,42 @@ func parseCreditSetting(raw string, fallback int64) int64 {
 }
 
 func (s *Store) setCreditSetting(ctx context.Context, key string, v int64) error {
-	_, err := s.exec(ctx, upsertCreditSettingSQL, key, strconv.FormatInt(v, 10), time.Now().UnixNano())
+	_, err := s.exec(ctx, upsertCreditSettingSQL, key, formatCreditSetting(v), time.Now().UnixNano())
+	return err
+}
+
+func setCreditSettingTx(ctx context.Context, tx *storeTx, key, value string) error {
+	_, err := tx.ExecContext(ctx, upsertCreditSettingSQL, key, value, time.Now().UnixNano())
 	return err
 }
 
 const upsertCreditSettingSQL = `
         INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+
+func formatCreditSetting(v int64) string { return strconv.FormatInt(v, 10) }
+
+// safety: a setting the store has never held reads as the empty string, which
+// is what lets a caller tell "never set" from a value it cannot parse.
+func (s *Store) creditSettingRaw(ctx context.Context, key string) (string, error) {
+	var raw string
+	err := s.queryRow(ctx, selectCreditSettingSQL, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return raw, err
+}
+
+func creditSettingRawTx(ctx context.Context, tx *storeTx, key string) (string, error) {
+	var raw string
+	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return raw, err
+}
+
+const selectCreditSettingSQL = `SELECT value FROM sparkwing_meta WHERE key = ?`
 
 func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
 	var raw string
@@ -1026,7 +1173,8 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGran
 // ListCreditCharges returns charges newest first, at most limit rows and
 // never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
-	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at
+	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, kind, seconds, amount_micro,
+	         cpu_class, rate_micro_per_second, charged_at
 	  FROM credit_charges ORDER BY charged_at DESC, id DESC LIMIT ?`, creditLimit(limit))
 	if err != nil {
 		return nil, err
@@ -1037,7 +1185,7 @@ func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCha
 		var c CreditCharge
 		var charged int64
 		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Kind,
-			&c.Seconds, &c.AmountMicro, &charged); err != nil {
+			&c.Seconds, &c.AmountMicro, &c.CPUClassCores, &c.RateMicroPerSecond, &charged); err != nil {
 			return nil, err
 		}
 		c.ChargedAt = time.Unix(0, charged).UTC()
@@ -1056,8 +1204,9 @@ func creditLimit(limit int) int {
 	return limit
 }
 
-// CreditClaimFloorMicro is what a metered claim reserves: one minute of
-// cloud runner time at the current rate.
+// CreditClaimFloorMicro is one minute of cloud runner time at the four-core
+// rate. A claim reserves this minute at the class of the node it takes, so a
+// claim on another class reserves the same minute at that class's price.
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
 	rate, err := s.CreditRateMicroPerSecond(ctx)
 	if err != nil {
@@ -1078,19 +1227,35 @@ func (s *Store) reserveNodeCreditsTx(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
-	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
+	table, err := creditRateTableTx(ctx, tx)
 	if err != nil {
 		return err
 	}
-	required := rate * CreditClaimFloorSeconds
 	balance, err := creditBalanceTx(ctx, tx)
 	if err != nil {
 		return err
+	}
+	ceiling, err := creditSettingTx(ctx, tx, metaKeyBillingCPUCeiling, 0)
+	if err != nil {
+		return err
+	}
+	class, classErr := nodeCreditClassTx(ctx, tx, table, runID, nodeID, ceiling)
+	var unpriced *UnpricedCPUClassError
+	if classErr != nil && !errors.As(classErr, &unpriced) {
+		return classErr
+	}
+	required := class.MicroPerSecond * CreditClaimFloorSeconds
+	if unpriced != nil {
+		required = table.BaseRate() * CreditClaimFloorSeconds
 	}
 	// safety: an empty balance is the refusal a runner already understands, so
 	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+	}
+	if unpriced != nil {
+		unpriced.RunID, unpriced.NodeID = runID, nodeID
+		return unpriced
 	}
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
@@ -1107,19 +1272,22 @@ func (s *Store) reserveNodeCreditsTx(
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
 		id, runID, nodeID, claimant.TokenPrefix, CreditChargeReservation,
-		int64(CreditClaimFloorSeconds), required, now.UnixNano()); err != nil {
+		int64(CreditClaimFloorSeconds), required, class.Cores, class.MicroPerSecond,
+		now.UnixNano()); err != nil {
 		return fmt.Errorf("credits: reserve: %w", err)
 	}
 	through := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
 	_, err = tx.ExecContext(ctx,
-		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-		through, runID, nodeID)
+		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?
+		  WHERE run_id = ? AND node_id = ?`,
+		through, class.Cores, runID, nodeID)
 	return err
 }
 
 const insertCreditChargeSQL = `
-        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro,
+                cpu_class, rate_micro_per_second, charged_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreditChargeResult is what one charge did to the ledger.
 type CreditChargeResult struct {
@@ -1169,7 +1337,7 @@ func (s *Store) chargeNode(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return out, err
 	}
-	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
+	table, err := creditRateTableTx(ctx, tx)
 	if err != nil {
 		return out, err
 	}
@@ -1182,10 +1350,11 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 
-	var anchor int64
+	var anchor, class int64
 	err = tx.QueryRowContext(ctx,
-		`SELECT credit_charged_through FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor)
+		`SELECT credit_charged_through, credit_cpu_class FROM nodes
+		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
+		runID, nodeID).Scan(&anchor, &class)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, notFound("node", runID+"/"+nodeID)
 	}
@@ -1194,10 +1363,16 @@ func (s *Store) chargeNode(
 	}
 
 	nowNS := now.UnixNano()
+	rate := chargeRate(table, class)
+	refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
+	if err != nil {
+		return out, err
+	}
 	charge, forgiven, through, err := settleChargeWindow(
 		ctx, tx, chargeWindow{
 			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix,
-			Anchor: anchor, NowNS: nowNS, Rate: rate, MaxCharge: maxCharge, Final: final,
+			Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
+			MaxCharge: maxCharge, Final: final,
 		})
 	if err != nil {
 		return out, err
@@ -1236,10 +1411,47 @@ func (s *Store) chargeNode(
 }
 
 type chargeWindow struct {
-	RunID, NodeID, TokenPrefix string
-	Anchor, NowNS              int64
-	Rate, MaxCharge            int64
-	Final                      bool
+	RunID, NodeID, TokenPrefix         string
+	Anchor, NowNS                      int64
+	Rate, RefundRate, Class, MaxCharge int64
+	Final                              bool
+}
+
+// safety: the tail of a reservation is returned at the price it was taken at,
+// because a table raised between the claim and the finish would otherwise
+// refund more than the reservation took out.
+func refundRateTx(
+	ctx context.Context, tx *storeTx, runID, nodeID string, fallback int64, refunding bool,
+) (int64, error) {
+	if !refunding {
+		return fallback, nil
+	}
+	var reserved int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT rate_micro_per_second FROM credit_charges
+		  WHERE run_id = ? AND node_id = ? AND kind = ?
+		  ORDER BY charged_at DESC, id DESC LIMIT 1`,
+		runID, nodeID, CreditChargeReservation).Scan(&reserved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fallback, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if reserved <= 0 {
+		return fallback, nil
+	}
+	return reserved, nil
+}
+
+// safety: a node claimed before the rate table carries no class, so it keeps
+// billing at the four-core price the single rate setting holds and an upgrade
+// leaves work in flight at the price it started on.
+func chargeRate(table CreditRateTable, class int64) int64 {
+	if class <= 0 {
+		return table.BaseRate()
+	}
+	return table.RateFor(class)
 }
 
 // safety: the returned instant is zero once a final settle has released the
@@ -1262,7 +1474,8 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 		if refund <= 0 {
 			return nil, 0, 0, nil
 		}
-		charge, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -refund, -w.Rate*refund)
+		charge, err := insertCreditChargeTx(ctx, tx, w.refunding(), CreditChargeRefund, -refund,
+			-w.RefundRate*refund)
 		return charge, 0, 0, err
 	}
 
@@ -1287,6 +1500,13 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 	return charge, forgiven, settled, err
 }
 
+// safety: the row records the price it moved credits at, which for a refund is
+// the reservation's price rather than the one in force now.
+func (w chargeWindow) refunding() chargeWindow {
+	w.Rate = w.RefundRate
+	return w
+}
+
 func insertCreditChargeTx(
 	ctx context.Context, tx *storeTx, w chargeWindow, kind string, seconds, amount int64,
 ) (*CreditCharge, error) {
@@ -1295,12 +1515,14 @@ func insertCreditChargeTx(
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
-		id, w.RunID, w.NodeID, w.TokenPrefix, kind, seconds, amount, w.NowNS); err != nil {
+		id, w.RunID, w.NodeID, w.TokenPrefix, kind, seconds, amount,
+		w.Class, w.Rate, w.NowNS); err != nil {
 		return nil, fmt.Errorf("credits: insert charge: %w", err)
 	}
 	return &CreditCharge{
 		ID: id, RunID: w.RunID, NodeID: w.NodeID, TokenPrefix: w.TokenPrefix,
 		Kind: kind, Seconds: seconds, AmountMicro: amount,
+		CPUClassCores: w.Class, RateMicroPerSecond: w.Rate,
 		ChargedAt: time.Unix(0, w.NowNS).UTC(),
 	}, nil
 }
@@ -1500,6 +1722,27 @@ func (s *Store) CancelNodeForExhaustedCredits(
 ) error {
 	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
 		FailureCreditsExhausted, "credit balance exhausted", now)
+}
+
+// FailNodeForUnpricedClass fails a node whose cpu request is above the largest
+// class the credit rate table prices, and records an event naming both sizes.
+// A claim the ledger cannot price would otherwise be retried by every poller
+// forever, so the run is told why instead of waiting on a node nobody may take.
+func (s *Store) FailNodeForUnpricedClass(
+	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
+) error {
+	payload, err := json.Marshal(map[string]int64{
+		"cores": refusal.Cores, "max_cores": refusal.MaxCores,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := s.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
+		EventKindCreditsUnpriced, payload); err != nil {
+		return err
+	}
+	return s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
+		FailureUnpricedCPUClass, refusal.Error(), now)
 }
 
 // CancelNodeForComputeLimit fails a running node a compute guard stopped,

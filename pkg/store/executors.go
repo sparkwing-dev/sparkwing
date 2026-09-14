@@ -1357,25 +1357,32 @@ func executorResourcesFit(e Executor, usedCores float64, usedMemory int64, charg
 }
 
 func (s *Store) executorNodeCharge(ctx context.Context, tx *storeTx, n *Node) (ExecutorResource, error) {
+	return nodeChargeTx(ctx, tx, n.RunID, n.NodeID)
+}
+
+// safety: the resolution order lives here rather than on the store so the
+// credit ledger can price a node by the same cpu figure the scheduler sizes it
+// by, inside the claim transaction that is already open.
+func nodeChargeTx(ctx context.Context, tx *storeTx, runID, nodeID string) (ExecutorResource, error) {
 	var pipeline string
 	var plan []byte
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline, plan_json FROM runs WHERE id = ?`, n.RunID).Scan(&pipeline, &plan); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT pipeline, plan_json FROM runs WHERE id = ?`, runID).Scan(&pipeline, &plan); err != nil {
 		return ExecutorResource{}, err
 	}
-	if pin := snapshotNodeResource(plan, n.NodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
+	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
 		return pin, nil
 	}
 	row := tx.QueryRowContext(ctx, `
 SELECT `+profileColumns+`
-  FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, n.NodeID)
-	profile, err := scanProfile(row, pipeline, n.NodeID)
+  FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, nodeID)
+	profile, err := scanProfile(row, pipeline, nodeID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ExecutorResource{}, err
 	}
 	if err == nil {
-		return executorNodeChargeFromSnapshot(plan, n.NodeID, profile), nil
+		return executorNodeChargeFromSnapshot(plan, nodeID, profile), nil
 	}
-	return executorNodeChargeFromSnapshot(plan, n.NodeID, nil), nil
+	return executorNodeChargeFromSnapshot(plan, nodeID, nil), nil
 }
 
 func executorNodeChargeFromSnapshot(plan []byte, nodeID string, profile *PipelineProfile) ExecutorResource {

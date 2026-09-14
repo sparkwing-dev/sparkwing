@@ -16,36 +16,97 @@ import (
 const creditsBurnWindow = 24 * time.Hour
 
 type creditStateJSON struct {
-	BalanceMicro       int64  `json:"balance_micro"`
-	GrantedMicro       int64  `json:"granted_micro"`
-	ReversedMicro      int64  `json:"reversed_micro"`
-	ChargedMicro       int64  `json:"charged_micro"`
-	RateMicroPerSecond int64  `json:"rate_micro_per_second"`
-	GraceSeconds       int64  `json:"grace_seconds"`
-	MaxChargeSeconds   int64  `json:"max_charge_seconds"`
-	BurnWindowSeconds  int64  `json:"burn_window_seconds"`
-	BurnMicro          int64  `json:"burn_micro"`
-	ExhaustedAt        *int64 `json:"exhausted_at,omitempty"`
-	MicroPerCredit     int64  `json:"micro_per_credit"`
-	CreditsPerDollar   int64  `json:"credits_per_dollar"`
+	BalanceMicro           int64            `json:"balance_micro"`
+	GrantedMicro           int64            `json:"granted_micro"`
+	ReversedMicro          int64            `json:"reversed_micro"`
+	ChargedMicro           int64            `json:"charged_micro"`
+	RateMicroPerSecond     int64            `json:"rate_micro_per_second"`
+	RateTable              []creditRateJSON `json:"rate_table"`
+	RateTableSet           bool             `json:"rate_table_set"`
+	BillingCPUCeilingCores int64            `json:"billing_cpu_ceiling_cores"`
+	GraceSeconds           int64            `json:"grace_seconds"`
+	MaxChargeSeconds       int64            `json:"max_charge_seconds"`
+	BurnWindowSeconds      int64            `json:"burn_window_seconds"`
+	BurnMicro              int64            `json:"burn_micro"`
+	ExhaustedAt            *int64           `json:"exhausted_at,omitempty"`
+	MicroPerCredit         int64            `json:"micro_per_credit"`
+	CreditsPerDollar       int64            `json:"credits_per_dollar"`
 }
 
 type creditSettingsJSON struct {
-	RateMicroPerSecond int64 `json:"rate_micro_per_second"`
-	GraceSeconds       int64 `json:"grace_seconds"`
-	MaxChargeSeconds   int64 `json:"max_charge_seconds"`
-	MicroPerCredit     int64 `json:"micro_per_credit"`
-	CreditsPerDollar   int64 `json:"credits_per_dollar"`
+	RateMicroPerSecond     int64            `json:"rate_micro_per_second"`
+	RateTable              []creditRateJSON `json:"rate_table"`
+	RateTableSet           bool             `json:"rate_table_set"`
+	BillingCPUCeilingCores int64            `json:"billing_cpu_ceiling_cores"`
+	GraceSeconds           int64            `json:"grace_seconds"`
+	MaxChargeSeconds       int64            `json:"max_charge_seconds"`
+	MicroPerCredit         int64            `json:"micro_per_credit"`
+	CreditsPerDollar       int64            `json:"credits_per_dollar"`
+}
+
+// safety: the wire shape is one entry per cpu class, so a caller reads the
+// ladder in the order the ledger prices it.
+type creditRateJSON struct {
+	Cores          int64 `json:"cores"`
+	MicroPerSecond int64 `json:"micro_per_second"`
 }
 
 // safety: a nil field leaves that setting where it stands, which is what lets a
-// later field such as a per-class rate table join this body without disturbing
-// the three scalars or the callers that send only one of them. The field order
-// matches store.CreditSettingsUpdate, which it converts to.
+// caller send only the settings it means to change. The rate table is written
+// through its own store call, so it rides beside the three scalars rather than
+// inside the update they become.
 type setCreditSettingsReq struct {
-	RateMicroPerSecond *int64 `json:"rate_micro_per_second,omitempty"`
-	GraceSeconds       *int64 `json:"grace_seconds,omitempty"`
-	MaxChargeSeconds   *int64 `json:"max_charge_seconds,omitempty"`
+	RateMicroPerSecond     *int64             `json:"rate_micro_per_second,omitempty"`
+	RateTable              *creditRateTableIn `json:"rate_table,omitempty"`
+	BillingCPUCeilingCores *int64             `json:"billing_cpu_ceiling_cores,omitempty"`
+	GraceSeconds           *int64             `json:"grace_seconds,omitempty"`
+	MaxChargeSeconds       *int64             `json:"max_charge_seconds,omitempty"`
+}
+
+func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
+	return store.CreditSettingsUpdate{
+		RateMicroPerSecond:     r.RateMicroPerSecond,
+		BillingCPUCeilingCores: r.BillingCPUCeilingCores,
+		GraceSeconds:           r.GraceSeconds,
+		MaxChargeSeconds:       r.MaxChargeSeconds,
+	}
+}
+
+func (r setCreditSettingsReq) namesAScalar() bool {
+	return r.RateMicroPerSecond != nil || r.BillingCPUCeilingCores != nil ||
+		r.GraceSeconds != nil || r.MaxChargeSeconds != nil
+}
+
+// safety: operators write the table both ways, so a body may name it as a list
+// of entries or as an object keyed by cores.
+type creditRateTableIn struct {
+	table store.CreditRateTable
+}
+
+func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error {
+	var list []creditRateJSON
+	if err := json.Unmarshal(raw, &list); err == nil {
+		t.table = make(store.CreditRateTable, 0, len(list))
+		for _, entry := range list {
+			t.table = append(t.table,
+				store.CreditRate{Cores: entry.Cores, MicroPerSecond: entry.MicroPerSecond})
+		}
+		return nil
+	}
+	var keyed map[string]int64
+	if err := json.Unmarshal(raw, &keyed); err != nil {
+		return errors.New(
+			"rate_table must be a list of {cores, micro_per_second} or an object keyed by cores")
+	}
+	t.table = make(store.CreditRateTable, 0, len(keyed))
+	for key, micro := range keyed {
+		cores, err := strconv.ParseInt(key, 10, 64)
+		if err != nil {
+			return fmt.Errorf("rate_table key %q is not a number of cores", key)
+		}
+		t.table = append(t.table, store.CreditRate{Cores: cores, MicroPerSecond: micro})
+	}
+	return nil
 }
 
 type creditGrantJSON struct {
@@ -59,14 +120,16 @@ type creditGrantJSON struct {
 }
 
 type creditChargeJSON struct {
-	ID          string `json:"id"`
-	RunID       string `json:"run_id"`
-	NodeID      string `json:"node_id"`
-	TokenPrefix string `json:"token_prefix"`
-	Kind        string `json:"kind"`
-	Seconds     int64  `json:"seconds"`
-	AmountMicro int64  `json:"amount_micro"`
-	ChargedAt   int64  `json:"charged_at"`
+	ID                 string `json:"id"`
+	RunID              string `json:"run_id"`
+	NodeID             string `json:"node_id"`
+	TokenPrefix        string `json:"token_prefix"`
+	Kind               string `json:"kind"`
+	Seconds            int64  `json:"seconds"`
+	AmountMicro        int64  `json:"amount_micro"`
+	CPUClassCores      int64  `json:"cpu_class_cores,omitempty"`
+	RateMicroPerSecond int64  `json:"rate_micro_per_second,omitempty"`
+	ChargedAt          int64  `json:"charged_at"`
 }
 
 type creditHistoryJSON struct {
@@ -88,17 +151,20 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := creditStateJSON{
-		BalanceMicro:       state.BalanceMicro,
-		GrantedMicro:       state.GrantedMicro,
-		ReversedMicro:      state.ReversedMicro,
-		ChargedMicro:       state.ChargedMicro,
-		RateMicroPerSecond: state.RateMicroPerSecond,
-		GraceSeconds:       state.GraceSeconds,
-		MaxChargeSeconds:   state.MaxChargeSeconds,
-		BurnWindowSeconds:  int64(creditsBurnWindow.Seconds()),
-		BurnMicro:          state.BurnMicro,
-		MicroPerCredit:     store.MicroCreditsPerCredit,
-		CreditsPerDollar:   store.CreditsPerDollar,
+		BalanceMicro:           state.BalanceMicro,
+		GrantedMicro:           state.GrantedMicro,
+		ReversedMicro:          state.ReversedMicro,
+		ChargedMicro:           state.ChargedMicro,
+		RateMicroPerSecond:     state.RateMicroPerSecond,
+		RateTable:              creditRateTableToJSON(state.RateTable),
+		RateTableSet:           state.RateTableSet,
+		BillingCPUCeilingCores: state.BillingCPUCeilingCores,
+		GraceSeconds:           state.GraceSeconds,
+		MaxChargeSeconds:       state.MaxChargeSeconds,
+		BurnWindowSeconds:      int64(creditsBurnWindow.Seconds()),
+		BurnMicro:              state.BurnMicro,
+		MicroPerCredit:         store.MicroCreditsPerCredit,
+		CreditsPerDollar:       store.CreditsPerDollar,
 	}
 	if state.ExhaustedAt != nil {
 		v := state.ExhaustedAt.Unix()
@@ -113,17 +179,25 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
+	out, err := s.creditSettingsJSON(r, settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request) {
-	var req setCreditSettingsReq
-	if err := decodeJSON(r, &req); err != nil {
+	var body setCreditSettingsReq
+	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	update := store.CreditSettingsUpdate(req)
-	settings, err := s.store.SetCreditSettings(r.Context(), update)
+	if err := s.refuseDerivedRateWrite(r, body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	settings, err := s.writeCreditSettings(r, body)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			writeError(w, http.StatusBadRequest, err)
@@ -136,17 +210,96 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		"rate_micro_per_second", settings.RateMicroPerSecond,
 		"grace_seconds", settings.GraceSeconds,
 		"max_charge_seconds", settings.MaxChargeSeconds)
-	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
+	out, err := s.creditSettingsJSON(r, settings)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// safety: the table carries its four-core entry into the single rate setting,
+// so it is written first and a body naming both ends on the scalar the caller
+// asked for.
+func (s *Server) writeCreditSettings(
+	r *http.Request, body setCreditSettingsReq,
+) (store.CreditSettings, error) {
+	ctx := r.Context()
+	if body.RateTable != nil {
+		if err := body.RateTable.table.Validate(); err != nil {
+			return store.CreditSettings{}, err
+		}
+		if err := s.store.SetCreditRateTable(ctx, body.RateTable.table); err != nil {
+			return store.CreditSettings{}, err
+		}
+		s.logger.Info("credit setting set",
+			"setting", "rate_table", "classes", len(body.RateTable.table))
+		if !body.namesAScalar() {
+			return s.store.CreditSettings(ctx)
+		}
+	}
+	return s.store.SetCreditSettings(ctx, body.update())
+}
+
+// safety: with a table stored the scalar is the four-core entry under another
+// name, so writing it alone would move one class without saying so; the caller
+// is told to write the table instead.
+func (s *Server) refuseDerivedRateWrite(r *http.Request, body setCreditSettingsReq) error {
+	if body.RateMicroPerSecond == nil {
+		return nil
+	}
+	if body.RateTable != nil {
+		return fmt.Errorf(
+			"%w: rate_micro_per_second is the four-core entry of the rate table; name one or the other",
+			store.ErrInvalidCreditSetting)
+	}
+	set, err := s.store.CreditRateTableSet(r.Context())
+	if err != nil {
+		return err
+	}
+	if !set {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
+		store.ErrInvalidCreditSetting)
 }
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
 	return creditSettingsJSON{
-		RateMicroPerSecond: settings.RateMicroPerSecond,
-		GraceSeconds:       settings.GraceSeconds,
-		MaxChargeSeconds:   settings.MaxChargeSeconds,
-		MicroPerCredit:     store.MicroCreditsPerCredit,
-		CreditsPerDollar:   store.CreditsPerDollar,
+		RateMicroPerSecond:     settings.RateMicroPerSecond,
+		BillingCPUCeilingCores: settings.BillingCPUCeilingCores,
+		GraceSeconds:           settings.GraceSeconds,
+		MaxChargeSeconds:       settings.MaxChargeSeconds,
+		MicroPerCredit:         store.MicroCreditsPerCredit,
+		CreditsPerDollar:       store.CreditsPerDollar,
 	}
+}
+
+func (s *Server) creditSettingsJSON(
+	r *http.Request, settings store.CreditSettings,
+) (creditSettingsJSON, error) {
+	ctx := r.Context()
+	out := creditSettingsToJSON(settings)
+	table, err := s.store.CreditRateTable(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.RateTable = creditRateTableToJSON(table)
+	set, err := s.store.CreditRateTableSet(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.RateTableSet = set
+	return out, nil
+}
+
+func creditRateTableToJSON(table store.CreditRateTable) []creditRateJSON {
+	out := make([]creditRateJSON, 0, len(table))
+	for _, entry := range table {
+		out = append(out, creditRateJSON{Cores: entry.Cores, MicroPerSecond: entry.MicroPerSecond})
+	}
+	return out
 }
 
 func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +394,9 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 	for _, c := range charges {
 		out.Charges = append(out.Charges, creditChargeJSON{
 			ID: c.ID, RunID: c.RunID, NodeID: c.NodeID, TokenPrefix: c.TokenPrefix,
-			Kind: c.Kind, Seconds: c.Seconds, AmountMicro: c.AmountMicro, ChargedAt: c.ChargedAt.Unix(),
+			Kind: c.Kind, Seconds: c.Seconds, AmountMicro: c.AmountMicro,
+			CPUClassCores: c.CPUClassCores, RateMicroPerSecond: c.RateMicroPerSecond,
+			ChargedAt: c.ChargedAt.Unix(),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -285,6 +440,45 @@ func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err
 	}
 	s.noteCreditsBlocked(r, refusal.BalanceMicro, refusal.RequiredMicro)
 	writeJSON(w, http.StatusPaymentRequired, refusal)
+	return true
+}
+
+// UnpricedCPUClassCode is the machine-readable code on the refusal of a claim
+// for a node asking for more cores than the credit rate table prices.
+const UnpricedCPUClassCode = "unpriced_cpu_class"
+
+// safety: a runner tells a priced-out node apart from a transport failure and
+// stops asking for it until the operator adds the class.
+type unpricedClassRefusalJSON struct {
+	Error    string `json:"error"`
+	Code     string `json:"code"`
+	Cores    int64  `json:"cores"`
+	MaxCores int64  `json:"max_cores"`
+}
+
+// safety: the ledger cannot price the node, so the claim is refused rather
+// than billed at a class the operator never set.
+func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
+	var unpriced *store.UnpricedCPUClassError
+	if !errors.As(err, &unpriced) {
+		return false
+	}
+	s.logger.Warn("claim refused: the credit rate table prices no class this large",
+		"run_id", unpriced.RunID, "node_id", unpriced.NodeID,
+		"cores", unpriced.Cores, "max_cores", unpriced.MaxCores)
+	if unpriced.RunID != "" {
+		// safety: every poller would otherwise retry this node forever, so the
+		// run is failed with the reason rather than left waiting on a claim the
+		// ledger cannot price.
+		if failErr := s.store.FailNodeForUnpricedClass(r.Context(), unpriced, time.Now()); failErr != nil {
+			s.logger.Warn("failing a node the rate table cannot price",
+				"run_id", unpriced.RunID, "node_id", unpriced.NodeID, "err", failErr)
+		}
+	}
+	writeJSON(w, http.StatusConflict, unpricedClassRefusalJSON{
+		Error: unpriced.Error(), Code: UnpricedCPUClassCode,
+		Cores: unpriced.Cores, MaxCores: unpriced.MaxCores,
+	})
 	return true
 }
 
