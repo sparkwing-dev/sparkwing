@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -467,5 +468,45 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 	}
 	if len(triggers) != 0 {
 		t.Fatalf("the refused run-now left %d triggers behind", len(triggers))
+	}
+}
+
+func TestComputeLimits_ShowsTheDerivedRunnerCap(t *testing.T) {
+	f := newCreditsFixture(t, true)
+
+	_, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	if bytes.Contains(body, []byte("derived_runner_cap")) {
+		t.Fatalf("a controller with no per-principal guard reports a derived cap: %s", body)
+	}
+
+	setComputeLimit(t, f, store.ComputeLimitConcurrentRunners, 100)
+	setComputeLimit(t, f, store.ComputeLimitRunnerScaleStepCredits, 5000)
+	if _, err := f.store.GrantCredits(context.Background(), store.CreditGrantPaid,
+		15000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	if status != http.StatusOK {
+		t.Fatalf("show: status = %d: %s", status, body)
+	}
+	var view struct {
+		Usage struct {
+			DerivedRunnerCap   int64 `json:"derived_runner_cap"`
+			RecentPaidMicro    int64 `json:"recent_paid_micro"`
+			ScaleWindowSeconds int64 `json:"scale_window_seconds"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if view.Usage.DerivedRunnerCap != 400 {
+		t.Fatalf("derived cap = %d, want 400: %s", view.Usage.DerivedRunnerCap, body)
+	}
+	if view.Usage.RecentPaidMicro != 15000*store.MicroCreditsPerCredit {
+		t.Fatalf("recent paid = %d, want the whole payment", view.Usage.RecentPaidMicro)
+	}
+	if view.Usage.ScaleWindowSeconds != int64(store.RunnerScaleWindow.Seconds()) {
+		t.Fatalf("window = %ds, want %v", view.Usage.ScaleWindowSeconds, store.RunnerScaleWindow)
 	}
 }

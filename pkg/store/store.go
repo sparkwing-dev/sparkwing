@@ -107,6 +107,9 @@ type Store struct {
 	csrfKey         []byte
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
+	runnerCapMu     sync.Mutex
+	runnerCaps      map[string]runnerCapEntry
+	runnerCapEpoch  uint64
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -1056,7 +1059,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 41
+const expectedSchemaVersion = 43
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1937,6 +1940,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 41:
 		_, err := tx.ExecContext(ctx, egressUsageTableSQLite)
 		return err
+	case 42:
+		return applyCreditReferenceMigrationSQLite(ctx, tx)
+	case 43:
+		return applyRunnerCapIndexMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2262,6 +2269,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 41:
 		_, err := tx.ExecContext(ctx, egressUsageTablePostgres)
 		return err
+	case 42:
+		return applyCreditReferenceMigrationPostgres(ctx, tx)
+	case 43:
+		return applyRunnerCapIndexMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -5297,7 +5308,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
