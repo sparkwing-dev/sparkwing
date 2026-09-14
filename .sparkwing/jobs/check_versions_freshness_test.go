@@ -131,7 +131,12 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(kubernetesE2EPipelineModuleRel)), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.MkdirAll(filepath.Join(dir, "pkg", "docs"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		for path, content := range map[string]string{
+			"CHANGELOG.md": fixtureChangelog,
+			filepath.Join("pkg", "docs", "changelog.md"):                   fixtureChangelog,
 			filepath.Join("pkg", "scaffold", "version.go"):                 "v0.19.0",
 			filepath.Join(".sparkwing", "go.mod"):                          "module test",
 			filepath.Join(".sparkwing", "go.sum"):                          "",
@@ -462,6 +467,21 @@ require github.com/sparkwing-dev/sparkwing v0.1.0
 replace github.com/sparkwing-dev/sparkwing => ../../../..
 `
 
+const fixtureSyncDocs = `#!/bin/sh
+set -eu
+mkdir -p pkg/docs
+cp CHANGELOG.md pkg/docs/changelog.md
+`
+
+const fixtureChangelog = `# Changelog
+
+## [Unreleased]
+
+### Changed
+
+- **cache:** an entry the fixture already carried.
+`
+
 const fixtureRegenAPISnapshot = `#!/bin/sh
 set -eu
 version=$(sed -n 's/.*FallbackSDKVersion = "\(v[^"]*\)".*/\1/p' pkg/scaffold/version.go)
@@ -523,6 +543,12 @@ func seedReleaseRepo(t *testing.T) string {
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)), "package scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldAPISnapshotRel)), "# pkg/scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
 	writeFile(t, filepath.Join(repo, "bin", "regen-api-snapshot.sh"), fixtureRegenAPISnapshot)
+	writeFile(t, filepath.Join(repo, "bin", "sync-docs.sh"), fixtureSyncDocs)
+	writeFile(t, filepath.Join(repo, "CHANGELOG.md"), fixtureChangelog)
+	if err := os.MkdirAll(filepath.Join(repo, "pkg", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "pkg", "docs", "changelog.md"), fixtureChangelog)
 
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.email", "test@example.invalid")

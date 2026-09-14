@@ -26,6 +26,8 @@ const kubernetesE2EPipelineModuleRel = "testdata/k8s-e2e/repo/.sparkwing"
 var scaffoldFallbackVersionRe = regexp.MustCompile(`FallbackSDKVersion = "(v[^"]*)"`)
 
 var sparkwingPinArtifacts = []string{
+	"CHANGELOG.md",
+	"pkg/docs/changelog.md",
 	scaffoldFallbackRel,
 	".sparkwing/go.mod",
 	".sparkwing/go.sum",
@@ -451,6 +453,12 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if err := regenerateScaffoldAPISnapshot(ctx, repoRoot); err != nil {
 		return "", err
 	}
+	if err := recordPinBumpInChangelog(repoRoot, latest); err != nil {
+		return "", fmt.Errorf("record the pin bump in CHANGELOG.md: %w", err)
+	}
+	if err := syncDocsMirror(ctx, repoRoot); err != nil {
+		return "", err
+	}
 	if err := commitSparkwingPinBump(ctx, repoRoot, latest); err != nil {
 		return "", fmt.Errorf("commit sparkwing pin bump: %w", err)
 	}
@@ -585,6 +593,58 @@ func readScaffoldVersionArtifact(repoRoot, rel string) (string, error) {
 		return "", fmt.Errorf("FallbackSDKVersion pattern not found in %s", path)
 	}
 	return string(match[1]), nil
+}
+
+// safety: the bump rewrites the scaffold's pinned version, a surface the
+// changelog gate covers, so a bump that writes no entry reds the trunk for every
+// contributor until one is written by hand.
+func recordPinBumpInChangelog(repoRoot, version string) error {
+	path := filepath.Join(repoRoot, "CHANGELOG.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	body := string(data)
+	entry := "- **scaffold:** `const FallbackSDKVersion` pins " + version +
+		", so a fresh scaffold compiles against that release.\n"
+	updated, err := insertUnreleasedChange(body, entry)
+	if err != nil {
+		return err
+	}
+	if updated == body {
+		return nil
+	}
+	// #nosec G703 -- a pipeline job writing under the repository it runs in
+	return os.WriteFile(path, []byte(updated), 0o644)
+}
+
+func insertUnreleasedChange(body, entry string) (string, error) {
+	const unreleased = "## [Unreleased]"
+	at := strings.Index(body, unreleased)
+	if at < 0 {
+		return "", fmt.Errorf("CHANGELOG.md carries no %s section", unreleased)
+	}
+	if strings.Contains(body, strings.TrimSuffix(entry, "\n")) {
+		return body, nil
+	}
+	rest := body[at+len(unreleased):]
+	const changed = "\n### Changed\n"
+	nextHeading := strings.Index(rest, "\n## ")
+	if head := strings.Index(rest, changed); head >= 0 && (nextHeading < 0 || head < nextHeading) {
+		cut := at + len(unreleased) + head + len(changed)
+		return body[:cut] + "\n" + entry + body[cut:], nil
+	}
+	cut := at + len(unreleased)
+	return body[:cut] + "\n" + changed + "\n" + entry + body[cut:], nil
+}
+
+func syncDocsMirror(ctx context.Context, repoRoot string) error {
+	cmd := exec.CommandContext(ctx, "bash", filepath.Join(repoRoot, "bin", "sync-docs.sh"))
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sync docs mirror: %w\n%s", err, bytes.TrimSpace(out))
+	}
+	return nil
 }
 
 func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error {
