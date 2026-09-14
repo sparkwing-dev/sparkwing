@@ -339,13 +339,12 @@ runs logs --follow` read that ring while the node runs. The durable
 copy still goes to the bucket, and a read after the node finishes comes
 from there.
 
-The ring is memory, so it is bounded three ways: 512 KiB per node,
-64 MiB across every node together, and 1024 nodes holding a ring at
-once. Past the byte bounds the oldest bytes of the widest ring go first;
+The ring is memory, so it is bounded per node at 512 KiB, across every
+node together at 64 MiB, and at 1024 nodes holding a ring at once. Past the byte bounds the oldest bytes of the widest ring go first;
 past the node bound the ring of the node that wrote least recently is
 released. A node's ring is released shortly after the node finishes, or
 after ten minutes of silence from a node that never reported finishing.
-`sparkwing-controller` takes all four bounds as `--live-log-node-kb`,
+`sparkwing-controller` takes each bound as `--live-log-node-kb`,
 `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`, and
 refuses a non-positive value.
 
