@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -91,14 +90,11 @@ func TestForegroundFleetAuthorityRequiresBodyAttestationThenFallsBackToCoordinat
 		t.Fatal(err)
 	}
 	defer st.Close()
-	raw, _, err := st.ProvisionExecutor(ctx, "fleet-executor:helper", store.Executor{
+	raw := enrollFleetHelper(t, st, store.Executor{
 		Name: "helper", Kind: "agent", Location: "local", Capabilities: []string{"helper-cap"},
 		BasePriority: 100, PriorityCeiling: 100, MaxConcurrent: 1,
 		Budget: store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30},
-	}, []string{controller.ScopeNodesClaim, controller.ScopeRunsState}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	address := reserveFleetTestAddress(t)
 	configPath := filepath.Join(root, "config", fleet.Filename)

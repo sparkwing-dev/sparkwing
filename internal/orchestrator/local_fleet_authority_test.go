@@ -163,13 +163,10 @@ func TestLocalFleetAuthorityStopClaimsRejectsNewPrepareAndOfferOverAuthenticated
 		t.Fatal(err)
 	}
 	defer st.Close()
-	raw, _, err := st.ProvisionExecutor(context.Background(), "fleet-executor:helper", store.Executor{
+	raw := enrollFleetHelper(t, st, store.Executor{
 		Name: "helper", Kind: "agent", Location: "local", Capabilities: []string{"helper-cap"},
 		BasePriority: 50, PriorityCeiling: 100, MaxConcurrent: 1,
-	}, []string{controller.ScopeNodesClaim, controller.ScopeRunsState}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
 	fixture := newFleetSourceFixture(t)
 	authority, err := startLocalFleetAuthority(st, "run-stop", fleet.Config{
 		Listen: address, PublicURL: "http://" + address,
@@ -226,4 +223,21 @@ func TestCoordinatorProcessLossIsCancellation(t *testing.T) {
 	if got := statusForRunError(fleet.ErrCoordinatorProcessGone); got != "cancelled" {
 		t.Fatalf("coordinator-process loss status = %q", got)
 	}
+}
+
+// safety: the supported path is a minted runner credential bound by an
+// enrollment, which is what `sparkwing cluster agents enroll --token-prefix`
+// does against this state database.
+func enrollFleetHelper(t *testing.T, st *store.Store, executor store.Executor) string {
+	t.Helper()
+	raw, tok, err := st.CreateToken("fleet-executor:"+executor.Name, store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor.Principal = tok.Principal
+	if err := st.EnrollExecutor(context.Background(), tok.Prefix, executor); err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
