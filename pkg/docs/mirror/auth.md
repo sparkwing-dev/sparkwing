@@ -62,15 +62,25 @@ dollar top-up is a thousand credits. At the default rate a cloud runner second
 costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
 hour, so ten dollars buys just under fourteen hours.
 
+A second is priced by the node's cpu class. The rate table prices one class per
+whole-core size, a node is billed at the smallest class that covers its
+resolved cpu request, and a request above the largest class is refused at the
+claim with the class to add. An installation that never set a table pays the
+single rate at every class, and `credit_rate_micro_per_second` is the four-core
+entry under another name, so setting one moves the other.
+`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
+the ladder and needs `admin`.
+
 The balance is the sum of grants less the sum of charges, computed in SQL over
 the `credit_grants` and `credit_charges` tables. A grant is `free` or `paid`
 and records who added it and the payment it came from. A charge is a
 `reservation` a claim took, the `usage` an interval billed, or the `refund` of
 a reservation a node did not use; each names the run, node, token prefix, and
-seconds it covered.
+seconds it covered, and the class and rate it was billed at, so a later change
+to the table never reprices a charge already written.
 
-`sparkwing cluster credits show` prints the balance, the rate, the charge cap
-and the last day's burn. `sparkwing cluster credits grant --kind free|paid
+`sparkwing cluster credits show` prints the balance, the rate table, the charge
+cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
 --amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
 lists every movement newest first.
 

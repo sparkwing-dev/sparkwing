@@ -42,6 +42,19 @@ unlock.
   the three values and sets the ones its `--rate-micro`, `--grace-seconds` and
   `--max-charge-seconds` flags name. The defaults are unchanged: a self-hosted
   controller still gives a node 60 seconds of grace.
+- **controller + CLI:** Metered runner seconds are priced by the node's cpu
+  class. A `rate_table` beside the three settings prices one class per
+  whole-core size, a node is billed at the smallest class covering its resolved
+  cpu request, and a request above the largest class is refused at the claim
+  with `409` and code `unpriced_cpu_class` naming the class to add. Charge rows
+  record the class and the rate they were billed at, so a later change to the
+  table never reprices a charge already written, and `credits show` and
+  `credits history` print both. `sparkwing cluster credits settings
+  --rate-table 2=10000,4=20000,8=36667` writes the ladder, and the route also
+  takes it as a list of `{cores, micro_per_second}` or an object keyed by
+  cores. An installation that never sets a table pays its single
+  `rate_micro_per_second` at every class, which is what it billed before, and
+  that setting is the four-core entry of the table under another name.
 
 ### Changed
 
