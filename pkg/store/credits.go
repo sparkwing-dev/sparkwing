@@ -217,10 +217,9 @@ func applyCreditReferenceMigrationPostgres(ctx context.Context, tx *storeTx) err
 }
 
 // safety: grants written before the reference became a key may already repeat
-// one, and refusing to open a ledger over an operator note nobody can delete
-// costs more than the index buys; the grant path enforces the same rule inside
-// the ledger lock either way. The attempt repeats on every open, so deleting
-// the duplicate rows and restarting is all it takes to enforce the key.
+// one, and refusing to open a ledger over an operator note costs more than the
+// index buys; the grant path enforces the rule inside the ledger lock anyway.
+// The attempt repeats on every open, so deleting the duplicates enforces the key.
 func (s *Store) ensureCreditGrantReferenceIndex(ctx context.Context) error {
 	present, err := s.CreditGrantReferenceIndexPresent(ctx)
 	if err != nil || present {
