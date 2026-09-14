@@ -110,8 +110,18 @@ CREATE INDEX IF NOT EXISTS idx_nodes_credit_principal ON nodes(claim_principal, 
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_principal_created ON runs(created_principal, created_at);`
 
+// safety: the early-version column sweep stops running long before this step, so a
+// database that passed those versions before claim_principal joined the sweep reaches
+// this index without the column. This step carries it rather than assuming the sweep did.
+var nodesClaimPrincipalCols = map[string]string{
+	"claim_principal": "TEXT NOT NULL DEFAULT ''",
+}
+
 func applyComputeGuardsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := ensureColumnsSQLite(ctx, tx, "runs", runsPrincipalCols); err != nil {
+		return err
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesClaimPrincipalCols); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, computeGuardIndexes)
@@ -120,6 +130,9 @@ func applyComputeGuardsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 
 func applyComputeGuardsMigrationPostgres(ctx context.Context, tx *storeTx) error {
 	if err := addColumnsTx(ctx, tx, "runs", runsPrincipalCols); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "nodes", nodesClaimPrincipalCols); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, computeGuardIndexes)
