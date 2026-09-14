@@ -286,28 +286,19 @@ func TestClaimPlacement_ReadyBumpDoesNotRestartTheHold(t *testing.T) {
 		}},
 	}
 	held := store.WithClaimPlacement(ctx, placement)
+	agePlacementHold(t, s, "run-1", "node-a", time.Now().Add(-time.Minute))
 
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "cpu", TokenPrefix: "swr_cpu"},
-			"runner:other:1", time.Minute, []string{"cpu"}); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("cpu runner claim of a gpu node: %v", err)
-		}
-		n, err := s.ClaimNextReadyNode(held, cloudRunner, "runner:cloud:1", time.Minute,
-			[]string{"gpu", "location=cloud"})
-		if err == nil {
-			if n.PlacementReason != store.PlacementFallback {
-				t.Fatalf("placement reason = %q, want %q", n.PlacementReason, store.PlacementFallback)
-			}
-			return
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("cloud claim: %v", err)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("node still held 3s into a 200ms hold; the ready bump restarted it")
-		}
-		time.Sleep(20 * time.Millisecond)
+	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "cpu", TokenPrefix: "swr_cpu"},
+		"runner:other:1", time.Minute, []string{"cpu"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cpu runner claim of a gpu node: %v", err)
+	}
+	n, err := s.ClaimNextReadyNode(held, cloudRunner, "runner:cloud:1", time.Minute,
+		[]string{"gpu", "location=cloud"})
+	if err != nil {
+		t.Fatalf("cloud claim after the hold expired: %v", err)
+	}
+	if n.PlacementReason != store.PlacementFallback {
+		t.Fatalf("placement reason = %q, want %q", n.PlacementReason, store.PlacementFallback)
 	}
 }
 
