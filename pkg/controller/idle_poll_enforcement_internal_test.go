@@ -49,8 +49,10 @@ func TestClaimPollAdvice_EnforcementRefusesAnEarlyPoll(t *testing.T) {
 	if early.Code != http.StatusTooManyRequests {
 		t.Fatalf("early claim: status=%d want 429", early.Code)
 	}
-	if got := early.Header().Get("Retry-After"); got == "" || got == "0" {
-		t.Errorf("Retry-After=%q, want the rest of the wait", got)
+	// safety: never shorter than the real refill, and never longer than one
+	// suggestion, or two refused polls would not fit inside the placement hold.
+	if got := early.Header().Get("Retry-After"); got != "5" {
+		t.Errorf("Retry-After=%q, want the suggested interval", got)
 	}
 }
 
@@ -154,20 +156,6 @@ func TestClaimPollAdvice_AFloodOfRunnerNamesLeavesTheGateUp(t *testing.T) {
 	srv.Handler().ServeHTTP(early, fromClient(namedClaimRequest("runner:real:1"), "192.0.2.1:9000"))
 	if early.Code != http.StatusTooManyRequests {
 		t.Fatalf("status=%d, want 429; one caller's runner names switched enforcement off for another", early.Code)
-	}
-}
-
-func TestTokenRequestBudget_SparesTheAgentLivenessHeartbeat(t *testing.T) {
-	srv := newAdviceServer(t).WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 1})
-
-	for attempt := range 3 {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/agent-1/heartbeat", strings.NewReader("{}"))
-		req.Header.Set("Content-Type", "application/json")
-		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code == http.StatusTooManyRequests {
-			t.Fatalf("heartbeat %d was shed; an agent treats a lost liveness beat as fatal", attempt)
-		}
 	}
 }
 

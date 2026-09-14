@@ -79,13 +79,16 @@ func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
 				"requests_per_minute", t.policy.AlarmPerMinute,
 				"reason", "one controller is serving more requests a minute than it was sized for")
 		}
-		if t.requests == nil || agentLivenessHeartbeat(r) {
+		if t.requests == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
 		key := s.floodKey(r, "")
 		allowed, wait := t.requests.AllowWithRetry(key, now)
-		if !allowed {
+		// safety: the budget is spent before the exemption is weighed, so an
+		// agent's own beats still count as the load they are; what the
+		// exemption buys is that a beat is never the request that is shed.
+		if !allowed && !s.ownAgentLivenessHeartbeat(r) {
 			observePrincipalThrottled(budgetClassToken)
 			s.logger.Warn("request shed",
 				"principal", key, "route_class", budgetClassToken, "retry_after", wait,
@@ -98,12 +101,44 @@ func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
 }
 
 // safety: an agent treats a lost liveness heartbeat as fatal and takes every
-// node it runs down with it, so the one route a shed answer would kill is
-// spared, exactly as the per-runner budgets spare it by leaving it unwrapped.
-func agentLivenessHeartbeat(r *http.Request) bool {
-	return r.Method == http.MethodPost &&
-		strings.HasPrefix(r.URL.Path, "/api/v1/agents/") &&
-		strings.HasSuffix(r.URL.Path, "/heartbeat")
+// node it runs down with it, so a token's beat for the agent it enrolled is
+// spared. A beat naming any other agent is somebody else's and is budgeted
+// like any other request, or the route would be an unbudgeted lane.
+func (s *Server) ownAgentLivenessHeartbeat(r *http.Request) bool {
+	name, ok := agentLivenessHeartbeatName(r)
+	if !ok || s.store == nil {
+		return false
+	}
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok || p == nil || p.TokenPrefix == "" {
+		return false
+	}
+	// safety: this is the ownership the heartbeat handler itself enforces
+	// through the store, asked one read earlier and only of a request the
+	// budget has already refused.
+	enrolled, err := s.store.ExecutorNameForTokenPrefix(r.Context(), p.TokenPrefix)
+	if err != nil {
+		return false
+	}
+	return enrolled == name
+}
+
+// safety: the budget runs ahead of the mux, which is what sets path values, so
+// the agent's name is read off the path here rather than through PathValue.
+func agentLivenessHeartbeatName(r *http.Request) (string, bool) {
+	const prefix, suffix = "/api/v1/agents/", "/heartbeat"
+	if r.Method != http.MethodPost {
+		return "", false
+	}
+	path := r.URL.Path
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return "", false
+	}
+	name := path[len(prefix) : len(path)-len(suffix)]
+	if name == "" || strings.Contains(name, "/") {
+		return "", false
+	}
+	return name, true
 }
 
 // safety: an alarm the operator hears once a minute is a notice; one raised per
