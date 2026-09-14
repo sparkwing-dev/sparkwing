@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.4] - 2026-09-14
 ### Added
 
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
