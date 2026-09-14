@@ -94,12 +94,12 @@ func readRepoFile(t *testing.T, dir, rel string) string {
 func TestReleaseCutRollsTheGuideForTwoBreakingEntries(t *testing.T) {
 	dir := migrationRepo(t, twoBreakingChangelog, twoBreakingGuide, migrationIndexFixture)
 
-	roll, alreadyRolled, err := planMigrationRollIn(dir, twoBreakingChangelog, "v0.9.0", "2026-03-04")
+	roll, err := planMigrationRollIn(dir, twoBreakingChangelog, "v0.9.0", "2026-03-04")
 	if err != nil {
 		t.Fatalf("planMigrationRollIn: %v", err)
 	}
-	if alreadyRolled {
-		t.Fatalf("a fixture with no v0.9.0.md reported the guide already rolled")
+	if roll.guideOnDisk {
+		t.Fatalf("a fixture with no v0.9.0.md reported the guide already written")
 	}
 	if !roll.needed || roll.breaking != 2 {
 		t.Fatalf("roll = %+v, want needed with 2 breaking entries", roll)
@@ -192,11 +192,11 @@ func TestReleaseCutRefusesABreakingEntryWithNoMigrationLink(t *testing.T) {
 `
 	dir := migrationRepo(t, changelog, freshUnreleasedGuide, migrationIndexFixture)
 
-	_, _, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
+	_, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
 	if err == nil {
 		t.Fatalf("the cut accepted a (Breaking) entry with no migration link")
 	}
-	for _, want := range []string{"CHANGELOG.md:7", "**cache (Breaking):**", "carries no docs/migrations/ link", "written by a person"} {
+	for _, want := range []string{"CHANGELOG.md:7", "missing-migration-link", "written by a person"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal does not name %q:\n%v", want, err)
 		}
@@ -216,12 +216,50 @@ func TestReleaseCutRefusesAnAnchorTheGuideDoesNotCarry(t *testing.T) {
 `
 	dir := migrationRepo(t, changelog, twoBreakingGuide, migrationIndexFixture)
 
-	_, _, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
+	_, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
 	if err == nil {
 		t.Fatalf("the cut accepted a link to an anchor the guide does not carry")
 	}
 	if !strings.Contains(err.Error(), "#no-such-section") || !strings.Contains(err.Error(), "#typed-dep-interface") {
 		t.Errorf("refusal names neither the dead anchor nor the ones the guide carries:\n%v", err)
+	}
+}
+
+func TestReleaseCutRefusesALinkToAnotherReleasesGuide(t *testing.T) {
+	changelog := `# Changelog
+
+## [v0.9.0] - 2026-03-04
+
+- **sdk (Breaking):** the shape changed. See [migration
+  guide](docs/migrations/v0.8.0.md#an-older-break).
+`
+	dir := migrationRepo(t, changelog, twoBreakingGuide, migrationIndexFixture)
+
+	_, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
+	if err == nil {
+		t.Fatalf("the cut accepted a link to a guide this release does not roll")
+	}
+	if !strings.Contains(err.Error(), "version-mismatch") || !strings.Contains(err.Error(), "docs/migrations/v0.9.0.md") {
+		t.Errorf("refusal does not name the guide the release rolls:\n%v", err)
+	}
+}
+
+func TestReleaseCutRefusesALinkWithNoAnchor(t *testing.T) {
+	changelog := `# Changelog
+
+## [v0.9.0] - 2026-03-04
+
+- **sdk (Breaking):** the shape changed. See [migration
+  guide](docs/migrations/_unreleased.md).
+`
+	dir := migrationRepo(t, changelog, twoBreakingGuide, migrationIndexFixture)
+
+	_, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
+	if err == nil {
+		t.Fatalf("the cut accepted a migration link with no anchor")
+	}
+	if !strings.Contains(err.Error(), "missing-migration-anchor") {
+		t.Errorf("refusal does not name the missing anchor:\n%v", err)
 	}
 }
 
@@ -234,36 +272,63 @@ func TestReleaseCutRollsNoGuideWithoutABreakingEntry(t *testing.T) {
 `
 	dir := migrationRepo(t, changelog, freshUnreleasedGuide, migrationIndexFixture)
 
-	roll, alreadyRolled, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
+	roll, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
 	if err != nil {
 		t.Fatalf("planMigrationRollIn: %v", err)
 	}
-	if alreadyRolled || roll.needed {
-		t.Fatalf("roll = %+v (alreadyRolled=%v), want no guide for a release with no breaking entry", roll, alreadyRolled)
+	if roll.needed {
+		t.Fatalf("roll = %+v, want no guide for a release with no breaking entry", roll)
 	}
 	if indexHasVersionRow(readRepoFile(t, dir, migrationsDirRel+"/"+migrationIndexName), "v0.9.0") {
 		t.Errorf("a release with no breaking entry took an index row")
 	}
 }
 
-func TestReleaseCutLeavesAGuideThatIsAlreadyOnDisk(t *testing.T) {
+func TestReleaseCutStillRepointsAndIndexesAPreRolledGuide(t *testing.T) {
 	dir := migrationRepo(t, twoBreakingChangelog, twoBreakingGuide, migrationIndexFixture)
-	rolled := "# Migrating to v0.9.0\n\n## Typed Dep interface\n\n## CacheOptions splits in two\n"
+	handRolled := strings.Replace(twoBreakingGuide, "# Migrating to the next release", "# Migrating to v0.9.0", 1)
 	for _, base := range []string{migrationsDirRel, mirrorMigrationsDirRel} {
-		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(base), "v0.9.0.md"), []byte(rolled), 0o644); err != nil {
-			t.Fatalf("seed rolled guide: %v", err)
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(base), "v0.9.0.md"), []byte(handRolled), 0o644); err != nil {
+			t.Fatalf("seed the hand-rolled guide: %v", err)
 		}
 	}
 
-	roll, alreadyRolled, err := planMigrationRollIn(dir, twoBreakingChangelog, "v0.9.0", "2026-03-04")
+	roll, err := planMigrationRollIn(dir, twoBreakingChangelog, "v0.9.0", "2026-03-04")
 	if err != nil {
 		t.Fatalf("planMigrationRollIn: %v", err)
 	}
-	if !alreadyRolled || roll.needed {
-		t.Fatalf("roll = %+v (alreadyRolled=%v), want the rerun to leave the guide alone", roll, alreadyRolled)
+	if !roll.guideOnDisk || !roll.needed {
+		t.Fatalf("roll = %+v, want the remaining work planned against the guide on disk", roll)
 	}
-	if got := readRepoFile(t, dir, migrationsDirRel+"/v0.9.0.md"); got != rolled {
-		t.Errorf("the rerun rewrote the guide:\n%s", got)
+	if roll.repointed != 2 {
+		t.Errorf("repointed %d links, want 2 even though the guide was already written", roll.repointed)
+	}
+	if _, err := writeMigrationRoll(dir, roll); err != nil {
+		t.Fatalf("writeMigrationRoll: %v", err)
+	}
+	if err := writeChangelogPair(dir, roll.changelogBody); err != nil {
+		t.Fatalf("writeChangelogPair: %v", err)
+	}
+
+	if got := readRepoFile(t, dir, migrationsDirRel+"/v0.9.0.md"); got != handRolled {
+		t.Errorf("the cut rewrote a guide a person had already written:\n%s", got)
+	}
+	changelog := readRepoFile(t, dir, "CHANGELOG.md")
+	if strings.Contains(changelog, "docs/migrations/_unreleased.md") {
+		t.Errorf("the released section still links the unreleased guide:\n%s", changelog)
+	}
+	index := readRepoFile(t, dir, migrationsDirRel+"/"+migrationIndexName)
+	if !indexHasVersionRow(index, "v0.9.0") {
+		t.Errorf("the pre-rolled release took no index row:\n%s", index)
+	}
+	if got := readRepoFile(t, dir, migrationsDirRel+"/"+unreleasedGuideName); got != freshUnreleasedGuide {
+		t.Errorf("_unreleased.md still holds the rolled sections: %q", got)
+	}
+	if err := CheckChangelogLint(context.Background(), dir); err != nil {
+		t.Fatalf("a pre-rolled cut leaves a tree that cannot be committed:\n%v", err)
+	}
+	if err := checkMigrationGuide(context.Background(), dir, "v0.9.0"); err != nil {
+		t.Fatalf("release-verify refuses the pre-rolled tree: %v", err)
 	}
 }
 
@@ -281,7 +346,7 @@ func TestReleaseVerifyRefusesATagStillLinkingTheUnreleasedGuide(t *testing.T) {
 
 func TestReleaseVerifyRefusesAGuideMissingFromTheIndex(t *testing.T) {
 	dir := migrationRepo(t, twoBreakingChangelog, twoBreakingGuide, migrationIndexFixture)
-	roll, _, err := planMigrationRollIn(dir, twoBreakingChangelog, "v0.9.0", "2026-03-04")
+	roll, err := planMigrationRollIn(dir, twoBreakingChangelog, "v0.9.0", "2026-03-04")
 	if err != nil {
 		t.Fatalf("planMigrationRollIn: %v", err)
 	}
@@ -327,6 +392,16 @@ func TestBreakingSummaryTakesOneSentencePerEntry(t *testing.T) {
 			name: "an abbreviation a lowercase word follows is not a sentence end",
 			body: "- **sdk (Breaking):** Keyed literals are required, e.g. the holder struct. Rewrite them.",
 			want: "Keyed literals are required, e.g. the holder struct.",
+		},
+		{
+			name: "a digit before the period still ends a sentence",
+			body: "- **store (Breaking):** Schema moves 13 -> 14. Upgrade every binary.",
+			want: "Schema moves 13 -> 14.",
+		},
+		{
+			name: "a version at the end of a sentence still ends it",
+			body: "- **release (Breaking):** Ryan cut v0.50.4. The fix landed later.",
+			want: "Ryan cut v0.50.4.",
 		},
 		{
 			name: "a wrapped entry with no period keeps its whole body",

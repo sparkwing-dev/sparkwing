@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"testing/fstest"
 	"unicode"
 )
 
@@ -22,6 +23,7 @@ const freshUnreleasedGuide = "# Migrating to the next release\n\nNo breaking cha
 
 type migrationRoll struct {
 	needed         bool
+	guideOnDisk    bool
 	guideName      string
 	guideBody      string
 	unreleasedBody string
@@ -68,16 +70,9 @@ func breakingEntries(s changelogSection) []changelogEntry {
 	return out
 }
 
-func entryScope(e changelogEntry) string {
-	if m := breakingScopeRe.FindStringSubmatch(e.body); m != nil {
-		return strings.TrimSpace(m[1])
-	}
-	return "(Breaking)"
-}
-
 // safety: a section with no (Breaking) entry owes no guide, so the roll reports
 // needed false rather than renaming the placeholder into a version nobody links.
-func planMigrationRoll(changelogBody, guideSource, indexBody, version, date string) (migrationRoll, error) {
+func planMigrationRoll(changelogBody, guideSource, indexBody, version, date string, guideOnDisk bool) (migrationRoll, error) {
 	sec, ok := releasedSection(changelogBody, version)
 	if !ok {
 		return migrationRoll{}, fmt.Errorf("CHANGELOG.md carries no [%s] section to roll the migration guide from", version)
@@ -87,11 +82,15 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 		return migrationRoll{}, nil
 	}
 	guideName := version + ".md"
-	headings := markdownHeadings(guideSource)
-	if err := refuseUnguidedBreaking(breaking, version, guideName, headings); err != nil {
+	guideBody := retitleGuide(guideSource, version)
+	rolledBody, repointed := repointMigrationLinks(changelogBody, sec.startLine, guideName)
+	rolledSec, ok := releasedSection(rolledBody, version)
+	if !ok {
+		return migrationRoll{}, fmt.Errorf("CHANGELOG.md lost its [%s] section while repointing its links", version)
+	}
+	if err := refuseUnrolledBreaking(rolledSec, guideName, guideBody); err != nil {
 		return migrationRoll{}, err
 	}
-	rolled, repointed := repointMigrationLinks(changelogBody, sec.startLine, guideName)
 	summary := breakingSummary(breaking)
 	index, err := insertMigrationIndexRow(indexBody, version, date, summary)
 	if err != nil {
@@ -99,60 +98,35 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 	}
 	return migrationRoll{
 		needed:         true,
+		guideOnDisk:    guideOnDisk,
 		guideName:      guideName,
-		guideBody:      retitleGuide(guideSource, version),
+		guideBody:      guideBody,
 		unreleasedBody: freshUnreleasedGuide,
 		indexBody:      index,
-		changelogBody:  rolled,
+		changelogBody:  rolledBody,
 		summary:        summary,
 		breaking:       len(breaking),
 		repointed:      repointed,
 	}, nil
 }
 
-// safety: the guide's prose is a person's work, so an entry with nothing to
-// point at stops the cut instead of tagging a release whose (Breaking) entry
-// resolves to nothing and whose merge back to main cannot be committed.
-func refuseUnguidedBreaking(breaking []changelogEntry, version, guideName string, headings []string) error {
-	var faults []string
-	for _, e := range breaking {
-		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
-		if len(links) == 0 {
-			if pinnedToOwnRelease(version, e.body) {
-				continue
-			}
-			faults = append(faults, fmt.Sprintf("CHANGELOG.md:%d: **%s (Breaking):** carries no docs/migrations/ link",
-				e.titleLine, entryScope(e)))
-			continue
-		}
-		for _, m := range links {
-			path, anchor, _ := strings.Cut(m[1], "#")
-			path = strings.TrimSpace(path)
-			anchor = strings.TrimSpace(anchor)
-			if path != unreleasedGuideName && path != guideName {
-				faults = append(faults, fmt.Sprintf("CHANGELOG.md:%d: **%s (Breaking):** links to docs/migrations/%s, which this release does not roll",
-					e.titleLine, entryScope(e), path))
-				continue
-			}
-			if anchor == "" {
-				faults = append(faults, fmt.Sprintf("CHANGELOG.md:%d: **%s (Breaking):** links to docs/migrations/%s with no #anchor; the guide carries %s",
-					e.titleLine, entryScope(e), path, formatAnchorList(headings)))
-				continue
-			}
-			if !anchorInHeadings(anchor, headings) {
-				faults = append(faults, fmt.Sprintf("CHANGELOG.md:%d: **%s (Breaking):** links to #%s, which matches no heading in docs/migrations/%s; it carries %s",
-					e.titleLine, entryScope(e), anchor, unreleasedGuideName, formatAnchorList(headings)))
-			}
-		}
-	}
-	if len(faults) == 0 {
+// safety: one judge for what a released section owes its guide. The pre-commit
+// tier refuses a commit on exactly these findings, so reading them from the same
+// lint stops the cut from tagging a tree nobody can commit afterwards.
+func refuseUnrolledBreaking(rolled changelogSection, guideName, guideBody string) error {
+	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}})
+	if len(issues) == 0 {
 		return nil
 	}
-	return fmt.Errorf("[%s] has %d (Breaking) entry link(s) the migration guide does not cover:\n%s\n"+
-		"Write a section for each in %s/%s and link the entry to %s/%s#<anchor>; "+
-		"the cut repoints those links to %s/%s. A guide section is written by a person, so the release stops here",
-		version, len(faults), strings.Join(faults, "\n"),
-		migrationsDirRel, unreleasedGuideName, migrationsDirRel, unreleasedGuideName, migrationsDirRel, guideName)
+	var b strings.Builder
+	for _, i := range issues {
+		b.WriteString("  " + i.Format() + "\n")
+	}
+	return fmt.Errorf("%s does not cover every (Breaking) entry in [%s]:\n%s"+
+		"Write a section for each in %s/%s and link the entry to its anchor; the cut repoints those links to %s/%s. "+
+		"A guide section is written by a person, so the release stops here",
+		migrationsDirRel+"/"+guideName, rolled.version, b.String(),
+		migrationsDirRel, unreleasedGuideName, migrationsDirRel, guideName)
 }
 
 // safety: scoped to the section being cut so an older released section, which
@@ -229,7 +203,7 @@ func flattenEntryBody(body string) string {
 	return strings.TrimSpace(entryPrefixRe.ReplaceAllString(flat, ""))
 }
 
-// safety: a changelog sentence carries version numbers, `.pem`-style code spans
+// safety: a changelog sentence carries `.pem`-style code spans, version numbers
 // and "e.g.", so the cut is taken only at a period that a new sentence follows.
 func firstSentence(s string) string {
 	runes := []rune(s)
@@ -240,9 +214,6 @@ func firstSentence(s string) string {
 			continue
 		}
 		if inCode || r != '.' {
-			continue
-		}
-		if i > 0 && unicode.IsDigit(runes[i-1]) {
 			continue
 		}
 		next := nextNonSpace(runes, i+1)
@@ -268,11 +239,6 @@ func nextNonSpace(runes []rune, from int) int {
 	return -1
 }
 
-func migrationGuideExists(repoDir, guideName string) bool {
-	_, err := os.Stat(filepath.Join(repoDir, filepath.FromSlash(migrationsDirRel), guideName))
-	return err == nil
-}
-
 func readMigrationFile(repoDir, name string) (string, error) {
 	body, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(migrationsDirRel), name))
 	if err != nil {
@@ -281,46 +247,52 @@ func readMigrationFile(repoDir, name string) (string, error) {
 	return string(body), nil
 }
 
-// safety: a guide already on disk is how a rerun after a failed push leaves the
-// tree, so the roll reports it rather than overwriting a rolled guide.
-func planMigrationRollIn(repoDir, changelogBody, version, date string) (roll migrationRoll, alreadyRolled bool, err error) {
-	if migrationGuideExists(repoDir, version+".md") {
-		return migrationRoll{}, true, nil
-	}
-	guide, err := readMigrationFile(repoDir, unreleasedGuideName)
+// safety: a guide already on disk is a hand-roll or a rerun after a failed push,
+// so its text becomes the authority and only its file write is skipped; the
+// refusal, the link repoint and the index row still run or the cut ships the
+// defect the guide was rolled to prevent.
+func planMigrationRollIn(repoDir, changelogBody, version, date string) (migrationRoll, error) {
+	guideSource, guideOnDisk, err := readGuideSource(repoDir, version+".md")
 	if err != nil {
-		return migrationRoll{}, false, err
+		return migrationRoll{}, err
 	}
 	index, err := readMigrationFile(repoDir, migrationIndexName)
 	if err != nil {
-		return migrationRoll{}, false, err
+		return migrationRoll{}, err
 	}
-	roll, err = planMigrationRoll(changelogBody, guide, index, version, date)
-	if err != nil {
-		return migrationRoll{}, false, err
+	return planMigrationRoll(changelogBody, guideSource, index, version, date, guideOnDisk)
+}
+
+func readGuideSource(repoDir, guideName string) (body string, onDisk bool, err error) {
+	if rolled, readErr := readMigrationFile(repoDir, guideName); readErr == nil {
+		return rolled, true, nil
 	}
-	return roll, false, nil
+	body, err = readMigrationFile(repoDir, unreleasedGuideName)
+	return body, false, err
 }
 
 func writeMigrationRoll(repoDir string, roll migrationRoll) ([]string, error) {
 	files := []struct {
 		name string
 		body string
+		keep bool
 	}{
-		{roll.guideName, roll.guideBody},
-		{unreleasedGuideName, roll.unreleasedBody},
-		{migrationIndexName, roll.indexBody},
+		{roll.guideName, roll.guideBody, roll.guideOnDisk},
+		{unreleasedGuideName, roll.unreleasedBody, false},
+		{migrationIndexName, roll.indexBody, false},
 	}
-	var written []string
+	var touched []string
 	for _, f := range files {
-		for _, path := range migrationFileTargets(repoDir, f.name) {
-			if err := os.WriteFile(path, []byte(f.body), 0o644); err != nil {
-				return nil, fmt.Errorf("write %s: %w", path, err)
+		if !f.keep {
+			for _, path := range migrationFileTargets(repoDir, f.name) {
+				if err := os.WriteFile(path, []byte(f.body), 0o644); err != nil {
+					return nil, fmt.Errorf("write %s: %w", path, err)
+				}
 			}
 		}
-		written = append(written, migrationFileRels(f.name)...)
+		touched = append(touched, migrationFileRels(f.name)...)
 	}
-	return written, nil
+	return touched, nil
 }
 
 // safety: the date the index row carries is the one the changelog heading was

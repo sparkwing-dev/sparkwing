@@ -298,14 +298,21 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	case rewriteApply:
 		sparkwing.Info(ctx, "renaming CHANGELOG.md [Unreleased] -> [%s] (%d entries)", version, action.unreleasedEntries)
 	}
-	roll, alreadyRolled, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
+	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
 	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
 	switch {
-	case alreadyRolled:
-		sparkwing.Info(ctx, "docs/migrations/%s.md is already on disk; leaving the guide as it stands", version)
+	case roll.needed && roll.guideOnDisk:
+		body = roll.changelogBody
+		written, err := writeMigrationRoll(j.RepoDir, roll)
+		if err != nil {
+			return fmt.Errorf("release: %w", err)
+		}
+		staged = append(staged, written...)
+		sparkwing.Info(ctx, "docs/migrations/%s was already written; repointed %d link(s), indexed it and reset _unreleased.md",
+			roll.guideName, roll.repointed)
 	case roll.needed:
 		body = roll.changelogBody
 		written, err := writeMigrationRoll(j.RepoDir, roll)
@@ -318,14 +325,19 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	default:
 		sparkwing.Info(ctx, "[%s] carries no (Breaking) entry, so %s ships without a migration guide", version, version)
 	}
-	if action.kind == rewriteNoop && !roll.needed {
-		return nil
-	}
 	if err := writeChangelogPair(j.RepoDir, body); err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
+	}
+	pending, err := runGitIn(ctx, j.RepoDir, "diff", "--cached", "--name-only")
+	if err != nil {
+		return fmt.Errorf("release: read the staged set: %w", err)
+	}
+	if strings.TrimSpace(pending) == "" {
+		sparkwing.Info(ctx, "the rename and the guide are already committed for %s; nothing to commit", version)
+		return nil
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", releaseCommitSubject(version, roll.needed)); err != nil {
 		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
@@ -377,13 +389,14 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 	case rewriteApply:
 		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and commit", version, action.unreleasedEntries)
 	}
-	roll, alreadyRolled, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
+	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
 	switch {
-	case alreadyRolled:
-		sparkwing.Info(ctx, "dry-run: docs/migrations/%s.md is already on disk; the guide would be left as it stands", version)
+	case roll.needed && roll.guideOnDisk:
+		sparkwing.Info(ctx, "dry-run: docs/migrations/%s is already written; would repoint %d link(s), reset _unreleased.md, and index it as %q",
+			roll.guideName, roll.repointed, roll.summary)
 	case roll.needed:
 		sparkwing.Info(ctx, "dry-run: would rename docs/migrations/_unreleased.md -> %s for %d breaking entries, repoint %d link(s), write a fresh _unreleased.md, and index it as %q",
 			roll.guideName, roll.breaking, roll.repointed, roll.summary)
