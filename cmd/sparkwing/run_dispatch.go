@@ -615,7 +615,7 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
 			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
 		if snapshot.Baseline.SHA != "" {
-			fmt.Fprintf(os.Stderr, "working tree: the runner resolves %s at %s\n",
+			fmt.Fprintf(os.Stderr, "working tree: sent baseline %s at %s with the trigger\n",
 				snapshot.Baseline.Ref, snapshot.Baseline.SHA)
 		}
 	} else if repoURL != "" {
