@@ -453,30 +453,42 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "README.md", "base\n", 0o644)
 	writeSnapshotFile(t, repo, ".gitignore", ".env.local\n", 0o644)
+	writeSnapshotFile(t, repo, "deploy/service.conf", "timeout=30s\n", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "base")
 
 	writeSnapshotFile(t, repo, ".env", "API_TOKEN=live-value\n", 0o644)
-	writeSnapshotFile(t, repo, "deploy/service.conf", "DATABASE_PASSWORD=hunter2\n", 0o644)
+	writeSnapshotFile(t, repo, "deploy/service.conf", "database_password = hunter2\n", 0o644)
 	writeSnapshotFile(t, repo, ".env.local", "API_TOKEN=ignored\n", 0o644)
+	writeSnapshotFile(t, repo, ".env.example", "API_TOKEN=replace-me\n", 0o644)
 
 	_, err := captureWorktreeSnapshot(context.Background(), repo, nil)
 	if err == nil {
 		t.Fatal("expected a refusal naming the secret-shaped files")
 	}
 	message := err.Error()
-	for _, want := range []string{".env (name)", "deploy/service.conf (content)", ".gitignore", "--allow-secret-file"} {
+	for _, want := range []string{
+		".env (name, untracked)", "deploy/service.conf (content, tracked)",
+		"git rm --cached", ".gitignore", "--allow-secret-file",
+	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("refusal = %q, want it to mention %q", message, want)
 		}
 	}
-	if strings.Contains(message, ".env.local") {
-		t.Fatalf("refusal = %q, want no gitignored path", message)
+	for _, unwanted := range []string{".env.local", ".env.example"} {
+		if strings.Contains(message, unwanted) {
+			t.Fatalf("refusal = %q, want no %s", message, unwanted)
+		}
 	}
 
 	if _, err := captureWorktreeSnapshot(context.Background(), repo, []string{".env"}); err == nil ||
-		!strings.Contains(err.Error(), "deploy/service.conf (content)") || strings.Contains(err.Error(), ".env (name)") {
+		!strings.Contains(err.Error(), "deploy/service.conf (content") || strings.Contains(err.Error(), ".env (name") {
 		t.Fatalf("naming one path = %v, want the other path still refused", err)
+	}
+
+	if _, err := captureWorktreeSnapshot(context.Background(), repo, []string{"nowhere/.env"}); err == nil ||
+		!strings.Contains(err.Error(), "which no file in the working-tree snapshot matches") {
+		t.Fatalf("naming an absent path = %v, want it reported", err)
 	}
 
 	snapshot, err := captureWorktreeSnapshot(context.Background(), repo, []string{"./.env", "deploy/service.conf"})
@@ -491,22 +503,25 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	}
 }
 
-func TestCaptureWorktreeSnapshotReadsNeitherBinaryNorOversizeFilesForCredentials(t *testing.T) {
+func TestCaptureWorktreeSnapshotJudgesAFilePrefixAndSkipsBinaryFiles(t *testing.T) {
 	repo := initSnapshotRepo(t)
 	writeSnapshotFile(t, repo, "README.md", "base\n", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "base")
 
-	writeSnapshotFile(t, repo, "fixtures/image.txt", "\x00\x01\x02API_TOKEN=live-value\n", 0o644)
-	writeSnapshotFile(t, repo, "fixtures/dump.txt", strings.Repeat("filler line\n", 8000)+"API_TOKEN=live-value\n", 0o644)
+	filler := strings.Repeat("filler = line\n", 8000)
+	writeSnapshotFile(t, repo, "fixtures/image.conf", "\x00\x01api_token = A1b2C3d4E5f6G7h8I9j0\n", 0o644)
+	writeSnapshotFile(t, repo, "fixtures/tail.conf", filler+"api_token = A1b2C3d4E5f6G7h8I9j0\n", 0o644)
 
 	snapshot, err := captureWorktreeSnapshot(context.Background(), repo, nil)
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot: %v", err)
 	}
 	defer func() { _ = snapshot.close() }()
-	checkout := importSnapshotBundle(t, snapshot)
-	if _, err := os.Stat(filepath.Join(checkout, "fixtures/dump.txt")); err != nil {
-		t.Fatalf("oversize file stat = %v, want it in the snapshot", err)
+
+	writeSnapshotFile(t, repo, "fixtures/head.conf", "api_token = A1b2C3d4E5f6G7h8I9j0\n"+filler, 0o644)
+	if _, err := captureWorktreeSnapshot(context.Background(), repo, nil); err == nil ||
+		!strings.Contains(err.Error(), "fixtures/head.conf (content, untracked)") {
+		t.Fatalf("large file with a credential in its prefix = %v, want a refusal", err)
 	}
 }

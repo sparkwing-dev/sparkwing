@@ -433,18 +433,31 @@ Before the upload, Sparkwing reads the snapshot manifest for secret-shaped
 files and refuses the trigger when it finds any, because the snapshot travels
 to a machine the file was never meant to reach. A file is secret-shaped by
 name when it is a dotenv (`.env`, `.env.production`, `staging.env`), a key,
-keystore or certificate file (`.pem`, `.key`, `.p12`, `.jks`, `id_rsa` and its
-siblings), or a configuration or data file whose name is credential-shaped
-(`credentials.json`, `token.yaml`); it is secret-shaped by content when a
-small text configuration file carries a private-key block, a bearer header,
-or a credential-named assignment. The same name and value vocabulary the
-detached-run environment filter uses decides both. The refusal lists every
-offending path; add each to `.gitignore`, or name it with
-`--allow-secret-file PATH` (`--sw-allow-secret-file PATH` for
-`sparkwing run --sw-fleet`) once per file. The override admits only the paths
-it names, so what travelled stays visible in the command that sent it.
-Gitignored files never enter the manifest and so are never named. A file
-larger than 64 KiB, or one whose bytes are binary, is not read for content.
+keystore or certificate file (`.pem`, `.key`, `.crt`, `.cer`, `.der`, `.p12`,
+`.pfx`, `.jks`, `id_rsa` and its siblings, `.netrc`, `.pgpass`), or a
+configuration file whose name ends in a credential word (`credentials.json`,
+`token.yaml`). A name ending in `.example`, `.sample`, `.template`, `.tmpl` or
+`.dist` is a committed template and is never secret-shaped.
+
+It is secret-shaped by content when its bytes carry a private key block, a
+bearer header, or a credential-named setting that holds a value. Only settings
+and manifest files are read (`.env`, `.ini`, `.conf`, `.cfg`, `.properties`,
+`.json`, `.yaml`, `.yml`, `.toml`); prose and source files are not, because an
+API dump or a Go file carries camel-case identifiers no value rule can tell
+from a token. Outside a settings file the value itself must look like a
+credential -- a key block, or a long unbroken mixed-case token -- so a
+Kubernetes manifest that names a secret it does not hold (`secretKey:
+api-token`) passes while one that embeds the secret does not. The same name
+and value vocabulary the detached-run environment filter uses decides both.
+
+The refusal lists every offending path and says whether it is tracked:
+`git rm --cached PATH` for a tracked file, `.gitignore` for an untracked one,
+or `--allow-secret-file PATH` (`--sw-allow-secret-file PATH` for `sparkwing
+run --sw-fleet`) once per file to send it anyway. The override admits only the
+paths it names and refuses a path that matches nothing in the snapshot, so
+what travelled stays visible in the command that sent it. Gitignored files
+never enter the manifest and so are never named. Sparkwing judges the first
+64 KiB of a file and never reads a file whose bytes are binary.
 
 `SPARKWING_FLEET_CONFIG` is the one supported environment override for this
 feature; it selects a `fleet.yaml` outside the default config directory. The

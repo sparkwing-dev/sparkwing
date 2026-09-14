@@ -262,17 +262,24 @@ unlock.
 - **cli:** A `--working-tree` trigger, and a `sparkwing run --sw-fleet`
   snapshot, now refuse to upload a manifest holding a secret-shaped file. A
   file is secret-shaped by name when it is a dotenv, a key, keystore or
-  certificate file (`.pem`, `.key`, `.p12`, `.jks`, `id_rsa` and its siblings),
-  or a configuration or data file whose name is credential-shaped, and by
-  content when a small text configuration file carries a private-key block, a
-  bearer header, or a credential-named assignment; the same vocabulary the
-  detached-run environment filter uses decides both. The refusal names every
-  offending path and the remedy. `--allow-secret-file PATH`
-  (`--sw-allow-secret-file PATH` on `sparkwing run`) sends one named file
-  anyway and is repeatable; it admits only the paths it names, so the record of
-  what left the machine is the command itself. Gitignored files never entered
-  the manifest and are unaffected, and a file over 64 KiB or one whose bytes
-  are binary is not read for content.
+  certificate file (`.pem`, `.key`, `.crt`, `.cer`, `.der`, `.p12`, `.jks`,
+  `id_rsa` and its siblings), or a configuration file whose name ends in a
+  credential word; a `.example`, `.sample`, `.template`, `.tmpl` or `.dist`
+  name is a committed template and never is. It is secret-shaped by content
+  when the first 64 KiB of a settings or manifest file (`.env`, `.ini`,
+  `.conf`, `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`) carries a
+  private-key block, a bearer header, or a credential-named setting holding a
+  value; outside a settings file that value must itself look like a
+  credential, so a Kubernetes manifest naming a secret it does not hold
+  passes. The same vocabulary the detached-run environment filter uses decides
+  both. The refusal names every offending path, says whether it is tracked,
+  and gives the remedy: `git rm --cached PATH` when tracked, `.gitignore` when
+  not. `--allow-secret-file PATH` (`--sw-allow-secret-file PATH` on `sparkwing
+  run`) sends one named file anyway and is repeatable; it admits only the
+  paths it names and refuses a path that matches no file in the snapshot, so
+  the record of what left the machine is the command itself. Gitignored files
+  never entered the manifest and are unaffected, and a file whose bytes are
+  binary is never read.
 
 ## [v0.50.3] - 2026-09-14
 ### Added

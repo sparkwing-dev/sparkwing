@@ -1335,9 +1335,10 @@ requires a complete SHA-1 repository; shallow and SHA-256 checkouts
 fail before upload.
 
 A snapshot carrying a secret-shaped file is refused before upload:
-a dotenv, a key or keystore file, or a small configuration file
-whose bytes read as a credential. The refusal names each path.
-Ignore the file, or send it anyway by naming it with
+a dotenv, a key, keystore or certificate file, or a settings or
+manifest file whose bytes read as a credential. The refusal names
+each path and whether it is tracked. Untrack it with
+'git rm --cached', ignore it, or send it anyway by naming it with
 --allow-secret-file PATH once per file; there is no blanket bypass.
 
 Requires a profile with controller: set. For local execution
