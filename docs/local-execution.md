@@ -585,6 +585,19 @@ agent-only because the fallback Job does not advertise labels. Saturated or
 offline agents therefore spill generic work to Kubernetes without weakening
 placement requirements.
 
+Before it creates the Job the dispatcher claims that one node for itself with
+its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands
+the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
+`SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`,
+`SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`.
+`run-node` sends that fence on every state write and log append, and the
+dispatcher and the pod both renew the lease while the node runs. The claim is
+what the controller's node-mutation fence admits, and on a metered token it is
+what reserves the minute the run bills. Nothing releases the claim: the pod
+stops renewing it when it exits and the lease lapses for the reaper. The plain
+`--trigger-runner k8s` path takes the same claim, because it builds the same
+Job.
+
 The full-chart path is
 `sparkwing-runner-bundle.runner.triggerRunner.kind: warm`, together with
 `sparkwing-runner-bundle.runner.automountServiceAccountToken: true`. The

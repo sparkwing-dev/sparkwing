@@ -5015,7 +5015,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 		if target == nil {
 			return nil, notFound("ready node", "")
 		}
-		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement)
+		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true)
 		if err != nil {
 			return nil, err
 		}
@@ -5188,8 +5188,12 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 // safety: returns nil when another runner took the node between the scan and
 // the award, which the caller answers by scanning again.
 func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, claimant ClaimIdentity,
-	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool,
 ) (*Node, error) {
+	readyClause := ""
+	if queued {
+		readyClause = ` AND ready_at IS NOT NULL`
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -5207,8 +5211,8 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
-		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
-		    AND ready_at IS NOT NULL AND `+nodeNotDone+`
+		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
+		    AND `+nodeNotDone+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
 		    AND `+nodeExecutionUnsealed,
 		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),

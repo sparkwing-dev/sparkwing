@@ -20,11 +20,31 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
+  `nodes.claim`) awards one named node to the caller, through the award and
+  credit reservation the queue claim uses, for a dispatcher that executes a
+  node itself. `store.ClaimNamedNode` and `client.ClaimNodeByID` are its store
+  and client surfaces.
+
 ### Fixed
 
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".
+- **controller + cluster:** A Kubernetes fallback Job now holds the claim on the
+  node it executes, so the node's state writes stop failing with
+  "controller 403: claim_required" and the run records a terminal outcome. The
+  dispatcher claims the one node through the new
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope `nodes.claim`), hands the
+  awarded fence to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
+  `SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`,
+  `SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`,
+  and both renew the lease while the node runs. `sparkwing-runner run-node`
+  sends that fence on every state write and log append. A metered token reserves
+  and settles its credits on this claim, so a cloud node run this way bills its
+  minute. Both `--trigger-runner warm` and `--trigger-runner k8s` take the claim.
 
 ## [v0.50.2] - 2026-09-14
 ### Added

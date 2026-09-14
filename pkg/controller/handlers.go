@@ -1530,6 +1530,42 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	writeClaimedNode(w, r, s, n)
 }
 
+type claimNamedNodeReq struct {
+	HolderID  string `json:"holder_id"`
+	LeaseSecs int    `json:"lease_secs"`
+}
+
+func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
+	var body claimNamedNodeReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.HolderID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return
+	}
+	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
+	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
+		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
+	if err != nil {
+		if s.writeCreditsRefusal(w, r, err) {
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeClaimedNode(w, r, s, n)
+}
+
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {

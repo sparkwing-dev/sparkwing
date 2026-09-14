@@ -48,6 +48,11 @@ func RunNodeOnce(
 		cfg.claimFence.HolderID = holderID
 		ctx = withNodeClaimHolder(ctx, holderID)
 		ctx = store.WithNodeClaimFence(ctx, cfg.claimFence)
+	} else if cfg.claimFence.HolderID != "" && cfg.claimFence.ClaimGeneration > 0 {
+		// safety: this process is already the isolated execution, so the claim
+		// fences its own writes rather than handing the node to a child.
+		ctx = withNodeClaimHolder(ctx, cfg.claimFence.HolderID)
+		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), cfg.claimFence)
 	}
 	if logger == nil {
 		logger = slog.Default()

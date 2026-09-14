@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,7 +112,13 @@ var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
-	job := r.buildJob(name, req, r.resolveResources(ctx, req))
+	fence, claimed := r.claimNode(ctx, req, name)
+	if claimed {
+		// safety: the dispatcher reached here holding the run's trigger claim,
+		// and the controller refuses a request that carries both identities.
+		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
+	}
+	job := r.buildJob(name, req, r.resolveResources(ctx, req), fence)
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -134,7 +141,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	hbCtx, stopHB := context.WithCancel(ctx)
 	defer stopHB()
-	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
+	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, fence.HolderID, r.logger)
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "job created")
 	var lastPhase string
@@ -187,21 +194,59 @@ func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 	return string(p.Status.Phase)
 }
 
-func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
-	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
-	t := time.NewTicker(5 * time.Second)
+func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID, holderID string, logger *slog.Logger) {
+	beat := func() {
+		if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
+			logger.Debug("k8s: heartbeat failed",
+				"run_id", runID, "node_id", nodeID, "err", err)
+		}
+		if holderID == "" {
+			return
+		}
+		// safety: the pod may spend minutes pulling its image before it starts
+		// renewing the lease itself, and a lapsed claim is a reaped node.
+		if err := ctrl.HeartbeatNodeClaim(ctx, runID, nodeID, holderID, ClaimLease, nil); err != nil {
+			logger.Debug("k8s: claim heartbeat failed",
+				"run_id", runID, "node_id", nodeID, "holder_id", holderID, "err", err)
+		}
+	}
+	beat()
+	t := time.NewTicker(ClaimHeartbeatInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
-				logger.Debug("k8s: heartbeat failed",
-					"run_id", runID, "node_id", nodeID, "err", err)
-			}
+			beat()
 		}
 	}
+}
+
+// ClaimLease is the lease the dispatcher takes on a node it executes through a
+// Job, and the lease the pod renews. It is the store's cap, because a pod can
+// spend minutes pulling an image before it writes anything.
+const ClaimLease = store.MaxLeaseDuration
+
+// ClaimHeartbeatInterval is how often the dispatcher and the pod renew the
+// claim.
+const ClaimHeartbeatInterval = 5 * time.Second
+
+// safety: a controller that does not carry the targeted-claim route, or a node
+// some other holder already took, leaves the Job running exactly as it did
+// before the fence existed rather than failing the node here.
+func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName string) (store.NodeClaimFence, bool) {
+	holderID := "k8s-job:" + jobName
+	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease)
+	if err != nil {
+		r.logger.Warn("k8s: claiming the node for its Job failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
+		return store.NodeClaimFence{}, false
+	}
+	return store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}, true
 }
 
 func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, jobName string) runner.Result {
@@ -368,7 +413,19 @@ func nodePin(node *sparkwing.JobNode) *capacity.Pin {
 // this one binary, so a Job that named any other would fail to start.
 const JobBinary = "sparkwing-runner"
 
-func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution) *batchv1.Job {
+// Claim fence environment. The pod reads these to rebuild the claim the
+// dispatcher took for it, which every node state write and log append is
+// checked against. They are the variable names an agent-claimed node already
+// travels under, so one reader in run-node serves both.
+const (
+	ClaimHolderEnv       = "SPARKWING_NODE_CLAIM_HOLDER"
+	ClaimGenerationEnv   = "SPARKWING_NODE_CLAIM_GENERATION"
+	ClaimMembershipEnv   = "SPARKWING_NODE_CLAIM_MEMBERSHIP"
+	ClaimReservationEnv  = "SPARKWING_NODE_CLAIM_RESERVATION"
+	ClaimLeaseSecondsEnv = "SPARKWING_NODE_CLAIM_LEASE_SECONDS"
+)
+
+func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution, fence store.NodeClaimFence) *batchv1.Job {
 	env := []corev1.EnvVar{
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
 		{Name: "SPARKWING_RUN_ID", Value: req.RunID},
@@ -396,6 +453,7 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_TOKEN", Value: tok})
 	}
 	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
+	env = append(env, claimFenceEnv(fence)...)
 
 	container := corev1.Container{
 		Name:            "runner",
@@ -465,6 +523,19 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 				Spec:       podSpec,
 			},
 		},
+	}
+}
+
+func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {
+	if fence.HolderID == "" || fence.ClaimGeneration < 1 {
+		return nil
+	}
+	return []corev1.EnvVar{
+		{Name: ClaimHolderEnv, Value: fence.HolderID},
+		{Name: ClaimGenerationEnv, Value: strconv.FormatInt(fence.ClaimGeneration, 10)},
+		{Name: ClaimMembershipEnv, Value: fence.MembershipID},
+		{Name: ClaimReservationEnv, Value: fence.ReservationID},
+		{Name: ClaimLeaseSecondsEnv, Value: strconv.Itoa(int(ClaimLease.Seconds()))},
 	}
 }
 

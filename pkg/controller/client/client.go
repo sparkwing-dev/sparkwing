@@ -1224,6 +1224,29 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 	}
 }
 
+// ClaimNodeByID claims the one node runID/nodeID for holderID, whatever its
+// place in the queue, and returns it with the claim fence the caller must send
+// on every later write: ClaimedBy, ClaimGeneration, ClaimMembershipID, and
+// ReservationID. A dispatcher that runs a node no agent claimed calls this so
+// its own writes carry a live claim.
+//
+// A node another claim holds, a finished node, or one the controller will not
+// award returns [store.ErrLockHeld]. A controller too old to carry the route
+// answers 404, which reaches the caller as an ordinary error.
+func (c *Client) ClaimNodeByID(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) (*store.Node, error) {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/claim",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	body := map[string]any{"holder_id": holderID}
+	if lease > 0 {
+		body["lease_secs"] = max(int(lease.Seconds()), 1)
+	}
+	var n store.Node
+	if err := c.post(ctx, path, body, http.StatusOK, &n); err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
 func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-start",
 		url.PathEscape(runID), url.PathEscape(nodeID))
