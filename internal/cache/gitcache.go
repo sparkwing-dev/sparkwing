@@ -2584,6 +2584,14 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unsupported service", http.StatusBadRequest)
 			return
 		}
+		// safety: a clone by branch is answered from the mirror's refs and
+		// reports no error, so a mirror nobody refreshed would hand the runner
+		// an old tip and the run would build code that is not the branch.
+		hash := strings.TrimSuffix(filepath.Base(bareRepo), ".git")
+		lock := repoLock(hash)
+		lock.Lock()
+		refreshMirrorBestEffort(hash, bareRepo)
+		lock.Unlock()
 		handleInfoRefs(w, r, bareRepo, service)
 
 	case rest == "git-upload-pack":

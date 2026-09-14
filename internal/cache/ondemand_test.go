@@ -269,3 +269,39 @@ func TestBackgroundFetchLoop_ZeroIntervalPollsNothing(t *testing.T) {
 		t.Errorf("origin fetches with the keep-warm pass off: got %d, want 0", got)
 	}
 }
+
+func TestInfoRefs_RefreshesAMirrorThatFellBehind(t *testing.T) {
+	repoURL, bareRepo, upstream := gitcacheFixture(t)
+	registerMirrorName(t, "widgets", repoURL)
+	setWindows(t, time.Minute, time.Hour)
+	fetches := countRealFetches(t)
+
+	sha := pushCommit(t, upstream)
+
+	advertise := func() string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/git/widgets/info/refs?service=git-upload-pack", nil)
+		w := httptest.NewRecorder()
+		handleGit(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("info/refs status: got %d, want 200; body=%q", w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+
+	if !strings.Contains(advertise(), sha) {
+		t.Errorf("info/refs advertised a tip older than the push; want %s", sha)
+	}
+	if !mirrorHasCommit(t, bareRepo, sha) {
+		t.Errorf("the mirror still lacks %s after a clone asked for its refs", sha)
+	}
+	if got := fetches.Load(); got != 1 {
+		t.Fatalf("origin fetches: got %d, want 1", got)
+	}
+
+	advertise()
+
+	if got := fetches.Load(); got != 1 {
+		t.Errorf("a second clone inside the freshness window fetched again: got %d, want 1", got)
+	}
+}

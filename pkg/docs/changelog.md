@@ -155,7 +155,10 @@ unlock.
   after a push builds that push instead of being told the ref is not ours; a
   commit origin does not have costs one fetch and then the same `not our ref`
   refusal as before. The fetch is deduplicated per repository, so a burst of
-  triggers on one push asks origin once. The background loop becomes a
+  triggers on one push asks origin once. A clone that names a branch refreshes
+  the mirror through `info/refs`, under the same `FETCH_FRESH_WINDOW` throttle
+  the other read handlers use, so no clone path depends on the poll any more.
+  The background loop becomes a
   keep-warm pass: it refreshes only mirrors a request touched in the last hour,
   which leaves a repository nobody is building untouched, and `FETCH_INTERVAL`
   (`--fetch-interval`) of `0` now turns the pass off entirely instead of

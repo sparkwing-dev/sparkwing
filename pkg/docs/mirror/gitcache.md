@@ -139,6 +139,11 @@ repository lock finds either the commit or a fetch that completed after
 it arrived. A commit origin does not have costs one fetch and then the
 same `not our ref` refusal git has always sent.
 
+A clone that names a branch rather than a commit is answered from the
+mirror's refs and reports no error, so `info/refs` refreshes the mirror
+first, under the same `FETCH_FRESH_WINDOW` throttle every other read
+handler uses.
+
 The log line `on-demand fetch: <hash> took <duration>` and the
 `sparkwing.gitcache.mirror_fetches` counter (labelled `reason` =
 `on_demand` or `keep_warm`, and `failed`) report these fetches;
