@@ -34,9 +34,9 @@ join a tailnet or configure host networking.
 does not, and what an operator does about the rest when a teammate's branch
 runs on an enrolled desktop.
 
-Native Windows helpers start the body suspended, assign it to a Job Object
-that kills all members on close and does not permit breakaway, and then resume
-it. The supervisor waits for the Job to report zero active processes after
+Native Windows helpers start the body suspended, assign it to a kill-on-close
+Job Object, and then resume it, so nothing the body spawns exists outside the
+job. The supervisor waits for the Job to report zero active processes after
 the body exits or is cancelled. Linux, macOS, and WSL helpers instead create a
 dedicated process session, send TERM and then KILL to its remaining members,
 and wait for that session to empty. Unix code can call `setsid` to leave that

@@ -43,8 +43,9 @@ a secret read only when the request names its own run. The controller then
 resolves the name against the repository of a run the caller holds a live claim
 in, plus the secrets an admin marked shared; a runner token names no
 repository of its own, and a principal holding no claim is refused with
-`claim_required`. See `readSecretForCaller` in `pkg/controller/secrets.go` and
-`GetSecretForRun` in `pkg/store`. Within the claim the grant is the repository,
+`claim_required`. An admin-scoped token is the exception: it names any
+repository it likes on the same route. See `readSecretForCaller` in
+`pkg/controller/secrets.go` and `GetSecretForRun` in `pkg/store`. Within the claim the grant is the repository,
 not the pipeline's declared inputs: code in that run reads any secret name that
 repository has.
 
@@ -59,10 +60,11 @@ when the allow-list names it. See `remoteExecutionChildEnvironment` in
 **The process tree dies with the node.** The child leads its own process
 session. When the node finishes or is cancelled, the supervisor sends TERM, then
 KILL, and waits for the session to empty, retrying rather than releasing the
-machine's slot while members are alive. Windows starts the body suspended inside
-a kill-on-close Job Object and resumes it there, so nothing it spawns exists
-outside the job. See `internal/procgroup` and
-`internal/orchestrator/run_node_child_process_unix.go`. A node killed without
+machine's slot while members are alive
+(`internal/orchestrator/run_node_child_process_unix.go`, `internal/procgroup`).
+Windows starts the body suspended inside a kill-on-close Job Object and resumes
+it there, so nothing it spawns exists outside the job
+(`internal/procgroup/job_windows.go`). A node killed without
 running any code leaves its step sessions to the ledger sweeps described in
 [local-execution.md](local-execution.md).
 
@@ -95,6 +97,14 @@ reports a digest, a file count, and byte totals rather than names
 other direction, the sender's working tree lands on your disk under the runner's
 account.
 
+**A trigger consumer's child.** A pool started with `--also-claim-triggers`
+compiles the triggering branch and runs its binary with the runner's
+`SPARKWING_AGENT_TOKEN` in the environment
+(`internal/cluster/trigger_loop.go`), which is the runner's own credential
+rather than a per-node capability, and none of the child-environment filtering
+above applies to it. `sparkwing cluster runners add` never sets that flag, so a
+desktop enrolled by the installer does not take that path.
+
 **The contribution cap.** A runner's `--contribution` value caps the headroom it
 advertises when it claims (`internal/cluster/headroom.go`), so it bounds how
 much work the box accepts, not what an admitted pipeline consumes. The one
@@ -105,11 +115,18 @@ that mechanism.
 
 **Labels.** Labels are placement, not admission control. A node that requires
 no labels matches any runner, and a runner advertises its own set on every
-claim (`pkg/store/node_placement.go`), so label terms cannot hold a box to one
-repository's work. No repository or pipeline allow-list exists on the claim
-path. The boundary is which controller you enroll with: one controller is one
-trust domain, so every repository on it reaches every runner whose labels
-satisfy a node.
+claim (`labelsSatisfied` and the claim scan in `pkg/store/store.go`), so label
+terms cannot hold a box to one repository's work. No repository or pipeline
+allow-list exists on the claim path. The boundary is which controller you
+enroll with: one controller is one trust domain, so every repository on it
+reaches every runner whose labels satisfy any unsealed node.
+
+A sealed node is the narrower case. The claim scan skips nodes that are sealed
+or pinned to a coordinator or executor location, and a fleet run's nodes are
+sealed: they reach one enrolled executor, and only when the claimant's token
+prefix and principal match the executor the run named
+(`PrepareExecutorClaimForRun` in `pkg/store/executor_claim_offer.go`). A pool
+runner never sees that work.
 
 ## What to do about it
 
