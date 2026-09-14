@@ -136,6 +136,16 @@ unlock.
 
 ### Changed
 
+- **checks:** The git pre-push hook runs the new `pre-push` pipeline instead of
+  `gate`. It judges the push with the checks that answer in seconds: gofmt and
+  the configured formatters over the changed Go files, the comment policy, the
+  embedded docs mirror, the CHANGELOG entry gate, the OpenAPI and public API
+  snapshot gates, home resolution, and `go build` over the packages the push
+  touches, up to eight of them. `gate` keeps every step it had, gains those
+  three contract gates, and no git hook fires it any more: `sparkwing run gate`
+  runs it on demand and hosted CI runs it on every pull request and every push
+  to main.
+
 - **controller (Breaking):** A metered runner second is priced by the node's cpu
   class from the default rate table, which carries GitHub Actions' Linux x64
   rates: 2-core 10,000 micro-credits a second, 4-core 20,000, 8-core 36,667,

@@ -1,17 +1,21 @@
 pipelines:
   # pre-commit is the source-policy tier and runs from the git pre-commit hook;
-  # gate is the broad tier and runs from the git pre-push hook; pre-release is
-  # the release-boundary tier, which the release pipeline and the hosted
-  # release lane run and no git hook fires.
+  # pre-push is the fast push-boundary tier and runs from the git pre-push hook;
+  # gate is the broad tier, which `sparkwing run gate` and hosted CI run and no
+  # git hook fires; pre-release is the release-boundary tier, which the release
+  # pipeline and the hosted release lane run.
   - name: pre-commit
     entrypoint: PreCommit
     on:
       pre_commit: {}
 
-  - name: gate
-    entrypoint: Gate
+  - name: pre-push
+    entrypoint: PrePush
     on:
       pre_push: {}
+
+  - name: gate
+    entrypoint: Gate
 
   - name: pre-release
     entrypoint: PreRelease
