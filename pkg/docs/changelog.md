@@ -77,8 +77,16 @@ unlock.
   risk-labeled step ran unauthorized. `sparkwing run` now builds that binary
   before admission, and the refusal names the step, its labels and
   `--sw-allow`. A source tree holding a file sparkwing cannot read is refused
-  rather than run, because its declarations cannot be weighed. A detached run
-  is still dispatched before admission.
+  rather than run, because its declarations cannot be weighed.
+
+- **cli:** A detached launch of a pipeline whose step declares a `Risk` is
+  refused rather than dispatched. `sparkwing run <pipeline> --sw-detached`
+  returned before admission and the trigger carries no allow, so the resident
+  consumer ran the risk-labeled step authorized by nothing. The launch now
+  weighs the declarations the way a foreground run does and refuses with the
+  same message, naming the step, its labels and `--sw-allow`, and saying that a
+  detached launch cannot carry an allow. A pipeline that declares no risk
+  launches detached as before.
 
 ## [v0.50.5] - 2026-09-14
 ### Changed

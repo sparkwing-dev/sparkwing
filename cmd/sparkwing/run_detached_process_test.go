@@ -262,6 +262,20 @@ func (e *submitTestEnv) env() []string {
 	return append(base, e.extraEnv...)
 }
 
+// TestRunDetached_AdmitsAPipelineThatDeclaresNoRisk holds the submission gate
+// to the pipelines that declare a risk: weighing the declarations must not cost
+// every other detached launch its dispatch.
+func TestRunDetached_AdmitsAPipelineThatDeclaresNoRisk(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	result := e.submit()
+	if result.RunID == "" {
+		t.Fatal("a detached launch of a pipeline that declares no risk returned no run handle")
+	}
+	waitUntil(t, "the submitted run to reach the pipeline", 90*time.Second, func() bool {
+		return len(e.markerLines()) == 1
+	})
+}
+
 func TestRunDetached_UsesEachSubmissionEnvironment(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	e.extraEnv = []string{"SPARKWING_SUBMIT_TEST_ENV=first"}

@@ -64,6 +64,9 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 	if err != nil {
 		return err
 	}
+	if err := refuseDeclaredRisks(repoDir, pipelineName, wf); err != nil {
+		return err
+	}
 
 	priority := ""
 	if strings.TrimSpace(wf.priority) != "" {
@@ -559,6 +562,26 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-fleet", wf.fleet, "enrolled helpers execute under the lifetime of the coordinating foreground process, " +
 			"which a detached run does not have; run it in the foreground with `sparkwing run --sw-fleet`"},
 	}
+}
+
+// safety: the consumer executes a detached run with no operator attached, and
+// the trigger carries no allow, so a declared risk has to refuse at submission
+// or it reaches the consumer authorized by nothing. Reading the declarations
+// costs a build of the pipeline the way the foreground gate does.
+func refuseDeclaredRisks(repoDir, pipelineName string, wf runFlags) error {
+	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
+	run := newPipelineRun(sparkwingDir, compileOptions{NoUpdate: os.Getenv("SPARKWING_NO_UPDATE") == "1"})
+	defer run.stop()
+	if err := run.materialize(os.Environ()); err != nil {
+		return run.finish(err)
+	}
+	findings := declaredRisks(run.ctx, sparkwingDir, pipelineName)
+	if err := enforceRiskGate(pipelineName, findings, wf); err != nil {
+		return run.finish(fmt.Errorf("%s: %w\n"+
+			"A detached launch cannot carry an allow, so run this pipeline in the foreground",
+			detachedPath, err))
+	}
+	return nil
 }
 
 func refuseForegroundOnlyFlags(wf runFlags) error {

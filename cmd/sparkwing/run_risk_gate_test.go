@@ -69,6 +69,50 @@ func TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk(t *testing.T) {
 	}
 }
 
+// TestRunDetached_RefusesADeclaredRisk requires the refusal at submission: a
+// detached launch reaches the consumer with no operator attached and no allow
+// on the trigger, so admitting one would run the risk-declaring step
+// authorized by nothing.
+func TestRunDetached_RefusesADeclaredRisk(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the risk gate compiles a fixture pipeline binary; run without -short")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	cli := buildSubmitCLI(t)
+
+	sparkwingHome := t.TempDir()
+	t.Setenv("SPARKWING_HOME", sparkwingHome)
+	offlineStopDaemon(t, sparkwingHome)
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	repoDir, sparkwingDir := riskWriteFixture(t)
+
+	env := append(os.Environ(),
+		"SPARKWING_HOME="+sparkwingHome,
+		"SPARKWING_LOG_FORMAT=quiet",
+		"GOWORK=off",
+		riskMarkerEnv+"="+marker,
+	)
+	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
+	}
+
+	refused, err := offlineRunCLI(cli, repoDir, env, "run", "risky", "--sw-detached")
+	if err == nil {
+		t.Fatalf("a detached launch with no --sw-allow was admitted:\n%s", refused)
+	}
+	for _, want := range []string{`step "push"`, "destructive", "prod", "--sw-allow", "detached"} {
+		if !strings.Contains(refused, want) {
+			t.Fatalf("the refusal does not name %q:\n%s", want, refused)
+		}
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the refused launch executed pipeline work: %v", statErr)
+	}
+}
+
 // TestRun_RefusesASourceTreeItCannotRead requires a refusal, never an
 // admission, when .sparkwing/ holds a file the dispatcher cannot read. The
 // unreadable file is one the Go toolchain ignores, so the pipeline would still
