@@ -297,6 +297,19 @@ func TestCredentialFileContent(t *testing.T) {
 		{"identifier dump is not a token", ".apidiff/sparkwing.txt", "\tKeys: runtimePlumbingKeys{\n", false},
 		{"key block in prose with CRLF", "notes.txt", "note\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3Blb\r\n", true},
 		{"key block in a file with no extension", "backup", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", true},
+		{
+			"assignment in a file with no extension", "deploy/credentials",
+			"[default]\napi_token = Hn4Td8Pw2Kc6Lm9Vb3Yx7Qs5\n", true,
+		},
+		{
+			"direnv export assignment", ".envrc",
+			"export API_TOKEN=Zt7Qm3Lp9Vd2Xb6Nh4Rk8Ws1\n", true,
+		},
+		{
+			"no-extension assignment without a credential value", "Makefile",
+			"REGISTRY = ghcr.io/sparkwing\nTOKEN = $(shell cat token)\n", false,
+		},
+		{"license prose is not a credential", "LICENSE", "Copyright 2026 Sparkwing\n", false},
 		{"certificate block in prose", "chain.md", "-----BEGIN CERTIFICATE-----\nMIIE\n", true},
 		{"key block in a Go fixture", "internal/envredact/envredact_test.go", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", false},
 		{"key block in a TypeScript fixture", "web/app/auth.ts", "-----BEGIN PRIVATE KEY-----\nMIIE\n", false},

@@ -270,7 +270,8 @@ unlock.
   block (a key pasted into source is not detected, because the markers there
   are test fixtures), or when the
   first 64 KiB of a settings or manifest file (`.env`, `.ini`, `.conf`,
-  `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`) carries a bearer
+  `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`, or a name with no
+  extension such as `credentials` or `.envrc`) carries a bearer
   header or a credential-named setting holding a value; outside a settings
   file that value must itself look like a
   credential, so a Kubernetes manifest naming a secret it does not hold

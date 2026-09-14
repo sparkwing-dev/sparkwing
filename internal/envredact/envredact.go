@@ -156,6 +156,7 @@ var templateExtensions = map[string]bool{
 }
 
 var contentScanExtensions = map[string]bool{
+	"":           true,
 	"env":        true,
 	"ini":        true,
 	"conf":       true,
@@ -777,17 +778,19 @@ func contentScannedExtension(path string) bool {
 	return contentScanExtensions[extension]
 }
 
+// safety: a dot-leading name such as .envrc is a hidden file with no
+// extension, so the text after that dot must not be read as one.
 func fileNameAndExtension(path string) (string, string) {
 	name := path
 	if cut := strings.LastIndexAny(name, "/\\"); cut >= 0 {
 		name = name[cut+1:]
 	}
 	lower := strings.ToLower(name)
-	extension := lower[strings.LastIndexByte(lower, '.')+1:]
-	if extension == lower {
-		extension = ""
+	dot := strings.LastIndexByte(lower, '.')
+	if dot <= 0 {
+		return name, ""
 	}
-	return name, extension
+	return name, lower[dot+1:]
 }
 
 func dotenvName(lower string) bool {
