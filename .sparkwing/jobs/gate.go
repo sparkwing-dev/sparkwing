@@ -26,7 +26,7 @@ func (Gate) ShortHelp() string {
 }
 
 func (Gate) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push."
 }
 
 func (Gate) Examples() []sparkwing.Example {
@@ -82,6 +82,7 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "changelog-links", checkChangelogLinks)
 	sparkwing.Step(w, "comments", checkComments)
+	sparkwing.Step(w, "test-sleeps", checkTestSleeps)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
 	sparkwing.Step(w, "api-spec", checkAPISpec)
@@ -148,34 +149,50 @@ func runFrontendBrowser(ctx context.Context) error {
 }
 
 func checkComments(ctx context.Context) error {
-	command, scope, err := commentCheckCommand(ctx)
+	return runScopedChecker(ctx, "comments", commentCheckCommand)
+}
+
+func checkTestSleeps(ctx context.Context) error {
+	return runScopedChecker(ctx, "test-sleeps", sleepCheckCommand)
+}
+
+func runScopedChecker(ctx context.Context, step string, plan func(context.Context) (string, string, error)) error {
+	command, scope, err := plan(ctx)
 	if err != nil {
 		return err
 	}
-	sparkwing.Info(ctx, "comments: %s", scope)
+	sparkwing.Info(ctx, "%s: %s", step, scope)
 	_, err = sparkwing.Bash(ctx, command).Run()
 	return err
 }
 
 func commentCheckCommand(ctx context.Context) (command, scope string, err error) {
+	return scopedCheckerCommand(ctx, "commentcheck", "Go file", existingGoFiles)
+}
+
+func sleepCheckCommand(ctx context.Context) (command, scope string, err error) {
+	return scopedCheckerCommand(ctx, "sleepcheck", "test file", existingGoTestFiles)
+}
+
+func scopedCheckerCommand(ctx context.Context, tool, noun string, keep func([]string) []string) (command, scope string, err error) {
 	// safety: -staged gates an empty diff on a branch whose work is already
 	// committed, so the step passes locally and the hosted gate, which stages
-	// the whole push, fails the same comments after the fast-forward.
+	// the whole push, fails the same findings after the fast-forward.
 	staged, err := stagedNames(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("list the staged change: %w", err)
 	}
 	if len(staged) > 0 {
-		return "go run ./internal/commentcheck -staged .",
-			fmt.Sprintf("%d staged Go file(s)", len(existingGoFiles(staged))), nil
+		return fmt.Sprintf("go run ./internal/%s -staged .", tool),
+			fmt.Sprintf("%d staged %s(s)", len(keep(staged)), noun), nil
 	}
 	base, err := resolveGateBase(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	return "go run ./internal/commentcheck -base " + base + " .",
-		fmt.Sprintf("nothing staged, so the change since %s (%s) and every untracked Go file",
-			gateBaselineRef, base), nil
+	return fmt.Sprintf("go run ./internal/%s -base %s .", tool, base),
+		fmt.Sprintf("nothing staged, so the change since %s (%s) and every untracked %s",
+			gateBaselineRef, base, noun), nil
 }
 
 var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
@@ -411,6 +428,16 @@ func existingGoFiles(all []string) []string {
 			continue
 		}
 		out = append(out, f)
+	}
+	return out
+}
+
+func existingGoTestFiles(all []string) []string {
+	out := make([]string, 0, len(all))
+	for _, f := range existingGoFiles(all) {
+		if strings.HasSuffix(f, "_test.go") {
+			out = append(out, f)
+		}
 	}
 	return out
 }

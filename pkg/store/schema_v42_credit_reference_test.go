@@ -132,12 +132,9 @@ func TestSchemaV42_OpensOverGrantsThatAlreadyRepeatAReference(t *testing.T) {
 	if v := readSchemaVersion(t, upgraded.DB()); v != store.ExpectedSchemaVersion() {
 		t.Fatalf("version after upgrade = %d, want %d", v, store.ExpectedSchemaVersion())
 	}
-	enforced, err := upgraded.CreditGrantReferenceIndexPresent(ctx)
-	if err != nil {
-		t.Fatalf("read whether the key is enforced: %v", err)
-	}
-	if enforced {
-		t.Error("the key was created over rows that repeat a reference")
+	if err := insertGrantTheOldWay(t, upgraded, "grant-dupe",
+		store.CreditGrantFree, "welcome", 7); err != nil {
+		t.Errorf("the migration created the key over rows that repeat a reference: %v", err)
 	}
 	first, err := upgraded.RecordCreditGrant(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCredit,
@@ -156,27 +153,45 @@ func TestSchemaV42_OpensOverGrantsThatAlreadyRepeatAReference(t *testing.T) {
 	if again.Created || again.Grant.ID != first.Grant.ID {
 		t.Fatalf("redelivery = %+v, want the first grant %q", again, first.Grant.ID)
 	}
+}
 
-	if _, err := upgraded.DB().ExecContext(ctx,
-		`DELETE FROM credit_grants WHERE id = 'grant-b'`); err != nil {
-		t.Fatalf("delete the duplicate row: %v", err)
+// A store already past the reference migration keeps the key exactly as it
+// stands: opening it neither drops the key nor creates one an operator removed.
+func TestSchemaV42_LeavesAStorePastTheMigrationAsItIs(t *testing.T) {
+	target := storetest.New(t)
+	ctx := context.Background()
+	opened, err := target.TryOpen()
+	if err != nil {
+		t.Fatalf("Open#1: %v", err)
 	}
-	_ = upgraded.Close()
+	if err := insertGrantTheOldWay(t, opened, "grant-a", store.CreditGrantPaid, "pi_1", 5); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	_ = opened.Close()
 
-	repaired, err := target.TryOpen()
+	reopened, err := target.TryOpen()
 	if err != nil {
-		t.Fatalf("Open#3 (after the duplicates went): %v", err)
+		t.Fatalf("Open#2: %v", err)
 	}
-	defer func() { _ = repaired.Close() }()
-	enforced, err = repaired.CreditGrantReferenceIndexPresent(ctx)
+	if v := readSchemaVersion(t, reopened.DB()); v != store.ExpectedSchemaVersion() {
+		t.Fatalf("version = %d, want %d", v, store.ExpectedSchemaVersion())
+	}
+	if err := insertGrantTheOldWay(t, reopened, "grant-b",
+		store.CreditGrantPaid, "pi_1", 5); err == nil {
+		t.Error("reopening dropped the grant key")
+	}
+	if _, err := reopened.DB().ExecContext(ctx, `DROP INDEX idx_credit_grants_reference`); err != nil {
+		t.Fatalf("drop the grant key: %v", err)
+	}
+	_ = reopened.Close()
+
+	without, err := target.TryOpen()
 	if err != nil {
-		t.Fatalf("read whether the key is enforced: %v", err)
+		t.Fatalf("Open#3: %v", err)
 	}
-	if !enforced {
-		t.Fatal("deleting the duplicates and reopening did not create the key")
-	}
-	if err := insertGrantTheOldWay(t, repaired, "grant-c",
-		store.CreditGrantPaid, "pi_after", 1); err == nil {
-		t.Error("the key let a second paid grant of one payment in")
+	defer func() { _ = without.Close() }()
+	if err := insertGrantTheOldWay(t, without, "grant-c",
+		store.CreditGrantPaid, "pi_1", 5); err != nil {
+		t.Errorf("opening a store past the migration recreated the key: %v", err)
 	}
 }

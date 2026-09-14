@@ -301,7 +301,8 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, floor, "", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := f.store.SetCreditGraceSeconds(ctx, 1); err != nil {
+	grace := int64(1)
+	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
 	c := client.NewWithToken(f.url, nil, f.runner)

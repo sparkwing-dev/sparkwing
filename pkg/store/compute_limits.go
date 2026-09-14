@@ -373,7 +373,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		}
 	}
 	if limits.ConcurrentRunners > 0 {
-		derived, err := s.runnerCap(ctx, tx, limits, claimant.Principal, now)
+		derived, err := s.runnerCap(ctx, tx, limits, now)
 		if err != nil {
 			return runnerCapReadRefusal(err, limits, claimant.Principal)
 		}

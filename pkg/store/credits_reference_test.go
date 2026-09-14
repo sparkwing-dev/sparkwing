@@ -2,13 +2,10 @@ package store_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"math"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -372,121 +369,5 @@ func TestGrantCreditsRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 	}
 	if n := grantCount(t, s); n != 3 {
 		t.Fatalf("grants = %d, want the two payments and the one reversal", n)
-	}
-}
-
-// Two controllers starting together both find the grant key missing once the
-// migration lock that held them releases, and Postgres answers the second
-// CREATE UNIQUE INDEX with a pg_class duplicate key rather than honoring IF
-// NOT EXISTS, so an open that races another must still return a store.
-func TestCreditGrantReferenceIndexSurvivesConcurrentPostgresOpens(t *testing.T) {
-	target := storetest.NewPostgres(t)
-	ctx := context.Background()
-
-	const openers = 8
-	opened := make([]*store.Store, openers)
-	failures := make([]error, openers)
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := range openers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			opened[i], failures[i] = store.OpenPostgres(ctx, target.DSN())
-		}()
-	}
-	close(start)
-	wg.Wait()
-	for i, err := range failures {
-		if err != nil {
-			t.Errorf("opener %d: %v", i, err)
-			continue
-		}
-		t.Cleanup(func() { _ = opened[i].Close() })
-	}
-
-	verify := target.Open(t)
-	present, err := verify.CreditGrantReferenceIndexPresent(ctx)
-	if err != nil {
-		t.Fatalf("read whether the key is enforced: %v", err)
-	}
-	if !present {
-		t.Fatal("the concurrent opens left the ledger without the grant key")
-	}
-}
-
-// A controller that finds the grant key half written by another controller
-// must still open: Postgres answers the loser of that race with a pg_class
-// duplicate key rather than honoring IF NOT EXISTS.
-func TestCreditGrantReferenceIndexYieldsToAnotherCreator(t *testing.T) {
-	target := storetest.NewPostgres(t)
-	ctx := context.Background()
-	seeded := target.Open(t)
-	if _, err := seeded.DB().ExecContext(ctx,
-		`DROP INDEX idx_credit_grants_reference`); err != nil {
-		t.Fatalf("drop the grant key: %v", err)
-	}
-
-	rival, err := sql.Open("pgx", target.DSN())
-	if err != nil {
-		t.Fatalf("open the rival session: %v", err)
-	}
-	defer func() { _ = rival.Close() }()
-	tx, err := rival.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin the rival transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX idx_credit_grants_reference
-	    ON credit_grants(kind, reference) WHERE reference != ''`); err != nil {
-		t.Fatalf("the rival create: %v", err)
-	}
-
-	opened := make(chan error, 1)
-	go func() {
-		st, err := store.OpenPostgres(ctx, target.DSN())
-		if st != nil {
-			_ = st.Close()
-		}
-		opened <- err
-	}()
-	waitForBlockedIndexCreate(t, seeded)
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit the rival create: %v", err)
-	}
-
-	if err := <-opened; err != nil {
-		t.Fatalf("an open that lost the race to the key was refused: %v", err)
-	}
-	present, err := seeded.CreditGrantReferenceIndexPresent(ctx)
-	if err != nil {
-		t.Fatalf("read whether the key is enforced: %v", err)
-	}
-	if !present {
-		t.Fatal("the race left the ledger without the grant key")
-	}
-}
-
-// safety: committing the rival before the opener reaches its own create would
-// leave the opener skipping the create, which is not the race under test.
-func waitForBlockedIndexCreate(t *testing.T, s *store.Store) {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		var running int
-		if err := s.DB().QueryRowContext(context.Background(),
-			`SELECT COUNT(*) FROM pg_stat_activity
-			 WHERE state = 'active' AND query LIKE 'CREATE UNIQUE INDEX IF NOT EXISTS%'`,
-		).Scan(&running); err != nil {
-			t.Fatalf("watch for the opener's create: %v", err)
-		}
-		if running > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the opener never reached the create")
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }

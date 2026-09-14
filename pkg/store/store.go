@@ -111,7 +111,7 @@ type Store struct {
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
 	runnerCapMu     sync.Mutex
-	runnerCaps      map[string]runnerCapEntry
+	runnerCapCache  runnerCapEntry
 	runnerCapEpoch  uint64
 }
 
@@ -1604,9 +1604,6 @@ func (s *Store) migrate() error {
 		})
 	}
 	if err != nil {
-		return err
-	}
-	if err := s.ensureCreditGrantReferenceIndex(ctx); err != nil {
 		return err
 	}
 	_, err = s.ensureControllerAuthority(ctx)
