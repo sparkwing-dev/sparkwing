@@ -824,10 +824,15 @@ func (s *Store) chargeNode(
 	}
 
 	nowNS := now.UnixNano()
+	rate := chargeRate(table, class)
+	refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
+	if err != nil {
+		return out, err
+	}
 	charge, forgiven, through, err := settleChargeWindow(
 		ctx, tx, chargeWindow{
 			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix,
-			Anchor: anchor, NowNS: nowNS, Rate: chargeRate(table, class), Class: class,
+			Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
 			MaxCharge: maxCharge, Final: final,
 		})
 	if err != nil {
@@ -864,10 +869,37 @@ func (s *Store) chargeNode(
 }
 
 type chargeWindow struct {
-	RunID, NodeID, TokenPrefix string
-	Anchor, NowNS              int64
-	Rate, Class, MaxCharge     int64
-	Final                      bool
+	RunID, NodeID, TokenPrefix         string
+	Anchor, NowNS                      int64
+	Rate, RefundRate, Class, MaxCharge int64
+	Final                              bool
+}
+
+// safety: the tail of a reservation is returned at the price it was taken at,
+// because a table raised between the claim and the finish would otherwise
+// refund more than the reservation took out.
+func refundRateTx(
+	ctx context.Context, tx *storeTx, runID, nodeID string, fallback int64, refunding bool,
+) (int64, error) {
+	if !refunding {
+		return fallback, nil
+	}
+	var reserved int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT rate_micro_per_second FROM credit_charges
+		  WHERE run_id = ? AND node_id = ? AND kind = ?
+		  ORDER BY charged_at DESC, id DESC LIMIT 1`,
+		runID, nodeID, CreditChargeReservation).Scan(&reserved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fallback, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if reserved <= 0 {
+		return fallback, nil
+	}
+	return reserved, nil
 }
 
 // safety: a node claimed before the rate table carries no class, so it keeps
@@ -900,7 +932,8 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 		if refund <= 0 {
 			return nil, 0, 0, nil
 		}
-		charge, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -refund, -w.Rate*refund)
+		charge, err := insertCreditChargeTx(ctx, tx, w.refunding(), CreditChargeRefund, -refund,
+			-w.RefundRate*refund)
 		return charge, 0, 0, err
 	}
 
@@ -923,6 +956,13 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 	}
 	charge, err := insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, seconds, w.Rate*seconds)
 	return charge, forgiven, settled, err
+}
+
+// safety: the row records the price it moved credits at, which for a refund is
+// the reservation's price rather than the one in force now.
+func (w chargeWindow) refunding() chargeWindow {
+	w.Rate = w.RefundRate
+	return w
 }
 
 func insertCreditChargeTx(

@@ -345,3 +345,43 @@ func lastChargeFor(t *testing.T, s *store.Store, runID string) store.CreditCharg
 	t.Fatalf("no charge for %s", runID)
 	return store.CreditCharge{}
 }
+
+// A reservation is returned at the price it was taken at, so a table raised
+// mid-run cannot refund more than the claim took out.
+func TestAnEarlyFinishRefundsAtTheRateTheClaimReserved(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 10_000)
+	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-early", "build", 8)
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-early", "build", "pod-1", time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	doubled := githubRateTable()
+	for i := range doubled {
+		doubled[i].MicroPerSecond *= 2
+	}
+	if err := s.SetCreditRateTable(ctx, doubled); err != nil {
+		t.Fatalf("reprice: %v", err)
+	}
+	res, err := s.FinalizeNodeCredits(ctx, "run-early", "build", claimant.TokenPrefix, time.Now())
+	if err != nil || res.Charge == nil {
+		t.Fatalf("finalize: %+v %v", res.Charge, err)
+	}
+	if res.Charge.Kind != store.CreditChargeRefund {
+		t.Fatalf("finalize wrote %s, want a refund", res.Charge.Kind)
+	}
+	if res.Charge.RateMicroPerSecond != 36_667 {
+		t.Fatalf("refund priced at %d, want the reserved 36667", res.Charge.RateMicroPerSecond)
+	}
+	if want := res.Charge.Seconds * 36_667; res.Charge.AmountMicro != want {
+		t.Fatalf("refund = %d, want %d", res.Charge.AmountMicro, want)
+	}
+	if res.BalanceMicro > 10_000*store.MicroCreditsPerCredit {
+		t.Fatalf("the refund lifted the balance above what was granted: %d", res.BalanceMicro)
+	}
+}
