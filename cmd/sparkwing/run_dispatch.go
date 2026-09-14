@@ -554,6 +554,11 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	if repositorySlug != "" {
 		environmentValues["GITHUB_REPOSITORY"] = repositorySlug
 	}
+	if snapshot != nil {
+		for key, value := range snapshot.Baseline.Env() {
+			environmentValues[key] = value
+		}
+	}
 	if flags.startAt != "" {
 		environmentValues["SPARKWING_START_AT"] = flags.startAt
 	}
@@ -609,6 +614,10 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		}
 		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
 			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
+		if snapshot.Baseline.SHA != "" {
+			fmt.Fprintf(os.Stderr, "working tree: the runner resolves %s at %s\n",
+				snapshot.Baseline.Ref, snapshot.Baseline.SHA)
+		}
 	} else if repoURL != "" {
 		discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
 		services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())

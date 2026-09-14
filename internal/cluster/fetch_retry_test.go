@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
 func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
@@ -164,5 +166,29 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("retry didn't honor context: elapsed=%v", elapsed)
+	}
+}
+
+func TestFetchPipelineWorkspaceSourceWithRetry_CarriesTheRecordedBaseline(t *testing.T) {
+	prevFn := fetchWorkspaceSourceFn
+	t.Cleanup(func() { fetchWorkspaceSourceFn = prevFn })
+
+	want := bincache.WorkspaceBaselineFromEnv(map[string]string{
+		bincache.WorkspaceBaseRefEnvKey: "origin/main",
+		bincache.WorkspaceBaseSHAEnvKey: strings.Repeat("c", 40),
+	})
+	var got bincache.WorkspaceBaseline
+	fetchWorkspaceSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string, baseline bincache.WorkspaceBaseline) (string, error) {
+		got = baseline
+		return "/tmp/extracted/.sparkwing", nil
+	}
+
+	if _, err := fetchPipelineWorkspaceSourceWithRetry(context.Background(),
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc123", "/tmp/work",
+		want, slog.Default(), "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("baseline reaching the fetch = %+v, want %+v", got, want)
 	}
 }

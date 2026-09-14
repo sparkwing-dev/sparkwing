@@ -79,12 +79,15 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
-	fetchSource := bincache.FetchPipelineSourceWithCredentials
+	var sparkwingDir string
+	var err error
 	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
-		fetchSource = bincache.FetchPipelineWorkspaceSourceWithCredentials
+		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheToken,
+			repoURL, branch, trigger.GitSHA, workDir, bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv))
+	} else {
+		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheToken,
+			repoURL, branch, trigger.GitSHA, workDir)
 	}
-	sparkwingDir, err := fetchSource(ctx, gcURL, controllerURL, token, cacheToken,
-		repoURL, branch, trigger.GitSHA, workDir)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
 	}

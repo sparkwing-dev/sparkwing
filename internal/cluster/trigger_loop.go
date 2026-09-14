@@ -225,11 +225,15 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
-	fetchSource := fetchPipelineSourceWithRetry
+	var sparkwingDir string
+	var fetchErr error
 	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
-		fetchSource = fetchPipelineWorkspaceSourceWithRetry
+		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token,
+			repoURL, branch, sha, workDir, bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv), logger, trigger.ID)
+	} else {
+		sparkwingDir, fetchErr = fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token,
+			repoURL, branch, sha, workDir, logger, trigger.ID)
 	}
-	sparkwingDir, fetchErr := fetchSource(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, repoURL, branch, sha, workDir, logger, trigger.ID)
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
@@ -354,21 +358,25 @@ var (
 const notOurRefSubstr = "not our ref"
 
 func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
-	return fetchPipelineSourceWithRetryFn(ctx, fetchSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
+		return fetchSourceFn(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+	}, sha, logger, runID)
 }
 
-func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
-	return fetchPipelineSourceWithRetryFn(ctx, fetchWorkspaceSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, baseline bincache.WorkspaceBaseline, logger *slog.Logger, runID string) (string, error) {
+	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
+		return fetchWorkspaceSourceFn(gcURL, controllerURL, token, repoURL, branch, sha, workDir, baseline)
+	}, sha, logger, runID)
 }
 
-func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func(string, string, string, string, string, string, string) (string, error), gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func() (string, error), sha string, logger *slog.Logger, runID string) (string, error) {
 	attempts := triggerFetchMaxAttempts
 	if attempts < 1 {
 		attempts = 1
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		sparkwingDir, err := fetch(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+		sparkwingDir, err := fetch()
 		if err == nil {
 			return sparkwingDir, nil
 		}

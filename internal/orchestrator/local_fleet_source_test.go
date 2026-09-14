@@ -29,7 +29,7 @@ func TestLocalFleetSourceServesOnlyExactAuthenticatedSnapshot(t *testing.T) {
 	defer proxy.Close()
 	dest := filepath.Join(fixture.root, "dest")
 	gitcacheURL := proxy.URL + "/api/v1/runs/exact-run/gitcache"
-	sparkwingDir, err := bincache.FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gitcacheURL, proxy.URL, "private-cache-hop", "", fixture.repoURL, "main", fixture.sha, dest)
+	sparkwingDir, err := bincache.FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gitcacheURL, proxy.URL, "private-cache-hop", "", fixture.repoURL, "main", fixture.sha, dest, bincache.WorkspaceBaseline{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestLocalFleetSourceServesOnlyExactAuthenticatedSnapshot(t *testing.T) {
 	if err != nil || string(body) != "exact bytes\n" {
 		t.Fatalf("materialized source = %q, %v", body, err)
 	}
-	_, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gitcacheURL, proxy.URL, "wrong", "", fixture.repoURL, "main", fixture.sha, filepath.Join(fixture.root, "denied"))
+	_, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gitcacheURL, proxy.URL, "wrong", "", fixture.repoURL, "main", fixture.sha, filepath.Join(fixture.root, "denied"), bincache.WorkspaceBaseline{})
 	if err == nil {
 		t.Fatal("wrong source credential fetched the snapshot")
 	}

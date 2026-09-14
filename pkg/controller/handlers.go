@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -658,19 +659,21 @@ type triggerResp struct {
 
 // safety: every other trigger_env key a run reads is controller-written, so an inbound copy forges it.
 var submittedTriggerEnvKeys = map[string]bool{
-	"GITHUB_REPOSITORY":          true,
-	sparkwing.EnvGitHubEventName: true,
-	sparkwing.EnvPRNumber:        true,
-	sparkwing.EnvPRAction:        true,
-	sparkwing.EnvPRBaseRef:       true,
-	sparkwing.EnvPRBaseSHA:       true,
-	sparkwing.EnvPRHeadRef:       true,
-	sparkwing.EnvPRHeadSHA:       true,
-	"SPARKWING_START_AT":         true,
-	"SPARKWING_STOP_AT":          true,
-	"SPARKWING_ONLY":             true,
-	"SPARKWING_DRY_RUN":          true,
-	"SPARKWING_NO_CACHE":         true,
+	"GITHUB_REPOSITORY":             true,
+	sparkwing.EnvGitHubEventName:    true,
+	sparkwing.EnvPRNumber:           true,
+	sparkwing.EnvPRAction:           true,
+	sparkwing.EnvPRBaseRef:          true,
+	sparkwing.EnvPRBaseSHA:          true,
+	sparkwing.EnvPRHeadRef:          true,
+	sparkwing.EnvPRHeadSHA:          true,
+	"SPARKWING_START_AT":            true,
+	"SPARKWING_STOP_AT":             true,
+	"SPARKWING_ONLY":                true,
+	"SPARKWING_DRY_RUN":             true,
+	"SPARKWING_NO_CACHE":            true,
+	bincache.WorkspaceBaseRefEnvKey: true,
+	bincache.WorkspaceBaseSHAEnvKey: true,
 }
 
 var githubProvenanceEnvKeys = map[string]bool{

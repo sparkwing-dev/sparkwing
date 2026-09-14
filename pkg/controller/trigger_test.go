@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/inprocdispatch"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
@@ -188,6 +190,8 @@ func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 				"NPM_TOKEN":                     "npm-bearer",
 				"SPARKWING_PG_URL":              "postgres://sparkwing:hunter2@db.example/sparkwing",
 				"GITHUB_REPOSITORY":             "sparkwing-dev/sparkwing",
+				bincache.WorkspaceBaseRefEnvKey: "origin/main",
+				bincache.WorkspaceBaseSHAEnvKey: strings.Repeat("a", 40),
 				retryprovenance.RepoDirKey:      "/src/sparkwing",
 				retryprovenance.RevisionKey:     "deadbeef",
 				retryprovenance.PlanHashKey:     "plan-1",
@@ -222,7 +226,9 @@ func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 		}
 	}
 	for key, want := range map[string]string{
-		"GITHUB_REPOSITORY": "sparkwing-dev/sparkwing",
+		"GITHUB_REPOSITORY":             "sparkwing-dev/sparkwing",
+		bincache.WorkspaceBaseRefEnvKey: "origin/main",
+		bincache.WorkspaceBaseSHAEnvKey: strings.Repeat("a", 40),
 	} {
 		if trigger.TriggerEnv[key] != want {
 			t.Fatalf("%s = %q, want %q", key, trigger.TriggerEnv[key], want)

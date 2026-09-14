@@ -410,3 +410,41 @@ func assertSnapshotFile(t *testing.T, root, name, want string) {
 		t.Fatalf("%s = %q, want %q", name, got, want)
 	}
 }
+
+func TestCaptureWorktreeSnapshotRecordsTheBaselineTheBranchForkedFrom(t *testing.T) {
+	repo := initSnapshotRepo(t)
+	writeSnapshotFile(t, repo, "tracked.txt", "base\n", 0o644)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-m", "base")
+	forkPoint := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+
+	snapshot, err := captureWorktreeSnapshot(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("captureWorktreeSnapshot: %v", err)
+	}
+	if snapshot.Baseline != (bincache.WorkspaceBaseline{}) {
+		t.Fatalf("a repository with no origin recorded baseline %+v", snapshot.Baseline)
+	}
+	if err := snapshot.close(); err != nil {
+		t.Fatal(err)
+	}
+
+	runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", forkPoint)
+	writeSnapshotFile(t, repo, "tracked.txt", "branch\n", 0o644)
+	runSnapshotGit(t, repo, "add", ".")
+	runSnapshotGit(t, repo, "commit", "-m", "branch")
+	writeSnapshotFile(t, repo, "uncommitted.txt", "edit\n", 0o644)
+
+	snapshot, err = captureWorktreeSnapshot(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("captureWorktreeSnapshot: %v", err)
+	}
+	defer func() { _ = snapshot.close() }()
+	want := bincache.WorkspaceBaseline{Ref: "origin/main", SHA: forkPoint}
+	if snapshot.Baseline != want {
+		t.Fatalf("baseline = %+v, want %+v", snapshot.Baseline, want)
+	}
+	if snapshot.Baseline.SHA == snapshot.BaseSHA {
+		t.Fatalf("baseline %s is the branch tip, not the fork point", snapshot.Baseline.SHA)
+	}
+}

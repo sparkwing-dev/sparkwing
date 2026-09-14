@@ -767,3 +767,101 @@ func TestTryBinary_SendsTokenAsBearer(t *testing.T) {
 		})
 	}
 }
+
+func workspaceSnapshotCommit(t *testing.T, bareRepo, baseSHA, addPath, addContent string) string {
+	t.Helper()
+	index := filepath.Join(t.TempDir(), "index")
+	run := func(env []string, args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", bareRepo}, args...)...)
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	indexEnv := []string{"GIT_INDEX_FILE=" + index}
+	run(indexEnv, "read-tree", baseSHA)
+	writeBlob := exec.Command("git", "-C", bareRepo, "hash-object", "-w", "--stdin")
+	writeBlob.Stdin = strings.NewReader(addContent)
+	blobOut, err := writeBlob.Output()
+	if err != nil {
+		t.Fatalf("hash-object: %v", err)
+	}
+	blob := strings.TrimSpace(string(blobOut))
+	run(indexEnv, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+addPath)
+	tree := run(indexEnv, "write-tree")
+
+	commit := exec.Command("git", "-C", bareRepo, "commit-tree", tree)
+	commit.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Sparkwing", "GIT_AUTHOR_EMAIL=workspace@sparkwing.dev", "GIT_AUTHOR_DATE=2000-01-01T00:00:00Z",
+		"GIT_COMMITTER_NAME=Sparkwing", "GIT_COMMITTER_EMAIL=workspace@sparkwing.dev", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
+	)
+	commit.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
+	out, err := commit.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit workspace tree: %v: %s", err, out)
+	}
+	sha := strings.TrimSpace(string(out))
+	run(nil, "update-ref", "refs/heads/workspace", sha)
+	return sha
+}
+
+func TestFetchPipelineWorkspaceSource_ResolvesTheBaselineAStepDiffsAgainst(t *testing.T) {
+	repoParent := t.TempDir()
+	name := sourceurl.ClaimedRepoNameFromURL(testRepoSSH)
+	baseSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, name, "main")
+	bareRepo := filepath.Join(repoParent, name+".git")
+	workspaceSHA := workspaceSnapshotCommit(t, bareRepo, tipSHA, "added.txt", "added\n")
+	srv := startGitcacheTestServer(t, repoParent)
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		name     string
+		baseline WorkspaceBaseline
+		want     []string
+	}{
+		{name: "with the recorded baseline", baseline: WorkspaceBaseline{Ref: "origin/main", SHA: baseSHA}, want: []string{".sparkwing/marker", "added.txt"}},
+		{name: "without one", baseline: WorkspaceBaseline{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
+				testRepoSSH, "main", workspaceSHA, t.TempDir(), tc.baseline)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := filepath.Dir(sparkwingDir)
+			base, mergeBaseErr := exec.Command("git", "-C", root, "merge-base", "origin/main", "HEAD").Output()
+			if tc.baseline.SHA == "" {
+				if mergeBaseErr == nil {
+					t.Fatalf("a checkout with no recorded baseline resolved origin/main at %s", strings.TrimSpace(string(base)))
+				}
+				return
+			}
+			if mergeBaseErr != nil {
+				t.Fatalf("merge-base origin/main HEAD: %v", mergeBaseErr)
+			}
+			if got := strings.TrimSpace(string(base)); got != baseSHA {
+				t.Fatalf("merge-base = %s, want the recorded baseline %s", got, baseSHA)
+			}
+			changed, err := exec.Command("git", "-C", root, "diff", "--name-only", "--diff-filter=ACMR", baseSHA).Output()
+			if err != nil {
+				t.Fatalf("diff against the baseline: %v", err)
+			}
+			got := strings.Fields(string(changed))
+			if len(got) != len(tc.want) {
+				t.Fatalf("changed files = %v, want %v", got, tc.want)
+			}
+			for i, want := range tc.want {
+				if got[i] != want {
+					t.Fatalf("changed files = %v, want %v", got, tc.want)
+				}
+			}
+			if head, headErr := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output(); headErr != nil {
+				t.Fatal(headErr)
+			} else if strings.TrimSpace(string(head)) != workspaceSHA {
+				t.Fatalf("HEAD = %s, want the snapshot commit %s", strings.TrimSpace(string(head)), workspaceSHA)
+			}
+		})
+	}
+}
