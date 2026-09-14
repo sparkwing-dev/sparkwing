@@ -519,7 +519,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 
 // safety: a fence header the caller merely shaped correctly proves nothing, so
 // the run's recorded status and error go only to a caller whose trigger claim
-// the store would honour on the write itself.
+// the store would honor on the write itself.
 func (s *Server) holdsLiveTriggerClaim(ctx context.Context, runID string) bool {
 	fence, fenced := store.TriggerClaimFenceFromContext(ctx)
 	if !fenced {
