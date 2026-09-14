@@ -24,7 +24,7 @@ func TestAdvisedPoll_OnlyWidensTheConfiguredCadence(t *testing.T) {
 	cases := []struct {
 		name       string
 		configured time.Duration
-		advisor    pollAdvisor
+		advisor    PollAdvisor
 		least      time.Duration
 		most       time.Duration
 	}{
@@ -36,7 +36,7 @@ func TestAdvisedPoll_OnlyWidensTheConfiguredCadence(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wait := advisedPoll(tc.configured, tc.advisor)
+			wait := AdvisedPoll(tc.configured, tc.advisor)
 			if wait < tc.least || wait > tc.most {
 				t.Fatalf("wait = %s, want between %s and %s", wait, tc.least, tc.most)
 			}

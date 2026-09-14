@@ -94,7 +94,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	sem := make(chan struct{}, opts.MaxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	shed := newShedLog(shedWarnInterval)
+	shed := NewShedLog(ShedWarnInterval)
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -114,10 +114,10 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
-			if wait, ok := unavailableBackoff(err, opts.Poll); ok {
+			if wait, ok := UnavailableBackoff(err, opts.Poll); ok {
 				logger.Debug("trigger loop: claim shed by the controller; backing off",
 					"err", err, "retry_after", wait)
-				if shed.due() {
+				if shed.Due() {
 					logger.Warn("trigger loop: controller is shedding claims; polling more slowly",
 						"err", err, "retry_after", wait)
 				}
@@ -130,7 +130,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		}
 		if trigger == nil {
 			<-sem
-			sleepOrCancel(ctx, advisedPoll(opts.Poll, cli))
+			sleepOrCancel(ctx, AdvisedPoll(opts.Poll, cli))
 			continue
 		}
 		logger.Info("trigger loop: claimed",
@@ -597,7 +597,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 	t := time.NewTicker(triggerHeartbeatInterval)
 	defer t.Stop()
 	lastOK := time.Now()
-	shed := newShedLog(shedWarnInterval)
+	shed := NewShedLog(ShedWarnInterval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -628,10 +628,10 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 				killChild()
 				return triggerClaimSilenced
 			}
-			if wait, ok := unavailableBackoff(err, minShedBackoff); ok {
+			if wait, ok := UnavailableBackoff(err, minShedBackoff); ok {
 				logger.Debug("trigger loop: heartbeat shed by the controller; backing off",
 					"trigger_id", triggerID, "retry_after", wait, "err", err)
-				if shed.due() {
+				if shed.Due() {
 					logger.Warn("trigger loop: controller is shedding heartbeats",
 						"trigger_id", triggerID, "retry_after", wait, "err", err,
 						"silence", silence.Round(time.Second))

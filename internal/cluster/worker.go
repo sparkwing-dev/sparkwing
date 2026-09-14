@@ -42,7 +42,8 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 	defer func() { _ = dummyStore.Close() }()
 	local := orchestrator.LocalBackends(paths, dummyStore, nil)
 
-	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token)
+	stateClient := client.NewWithToken(opts.ControllerURL, opts.HTTPClient, opts.Token).
+		WithRunnerIdentity(processRunnerIdentity("worker"))
 
 	logsBackend := local.Logs
 	switch {
@@ -68,6 +69,7 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 		"sources", opts.Sources,
 	)
 
+	shed := NewShedLog(ShedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			opts.Logger.Info("worker shutting down", "reason", err)
@@ -79,12 +81,22 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
+			if wait, ok := UnavailableBackoff(err, opts.PollInterval); ok {
+				opts.Logger.Debug("claim shed by the controller; backing off",
+					"err", err, "retry_after", wait)
+				if shed.Due() {
+					opts.Logger.Info("controller is shedding claims; polling more slowly",
+						"err", err, "retry_after", wait)
+				}
+				sleepOrCancel(ctx, wait)
+				continue
+			}
 			opts.Logger.Error("claim failed", "err", err)
 			sleepOrCancel(ctx, opts.PollInterval)
 			continue
 		}
 		if trigger == nil {
-			sleepOrCancel(ctx, opts.PollInterval)
+			sleepOrCancel(ctx, AdvisedPoll(opts.PollInterval, stateClient))
 			continue
 		}
 

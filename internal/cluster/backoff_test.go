@@ -34,7 +34,7 @@ func TestUnavailableBackoff_HonorsTheHeaderBetweenFloorAndCap(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wait, ok := unavailableBackoff(shedError(tc.after), tc.floor)
+			wait, ok := UnavailableBackoff(shedError(tc.after), tc.floor)
 			if !ok {
 				t.Fatalf("unavailableBackoff did not recognize a shed claim")
 			}
@@ -47,26 +47,26 @@ func TestUnavailableBackoff_HonorsTheHeaderBetweenFloorAndCap(t *testing.T) {
 
 func TestUnavailableBackoff_IgnoresOtherErrors(t *testing.T) {
 	for _, err := range []error{errors.New("connection refused"), store.ErrInsufficientCredits, nil} {
-		if _, ok := unavailableBackoff(err, time.Second); ok {
-			t.Fatalf("unavailableBackoff claimed %v as a shed poll", err)
+		if _, ok := UnavailableBackoff(err, time.Second); ok {
+			t.Fatalf("UnavailableBackoff claimed %v as a shed poll", err)
 		}
 	}
 }
 
 func TestShedLog_WarnsAtMostOncePerWindow(t *testing.T) {
 	clock := time.Now()
-	s := newShedLog(time.Minute)
+	s := NewShedLog(time.Minute)
 	s.now = func() time.Time { return clock }
 
-	if !s.due() {
+	if !s.Due() {
 		t.Fatal("the first shed poll stayed silent")
 	}
 	clock = clock.Add(59 * time.Second)
-	if s.due() {
+	if s.Due() {
 		t.Fatal("a second line inside the window")
 	}
 	clock = clock.Add(2 * time.Second)
-	if !s.due() {
+	if !s.Due() {
 		t.Fatal("no line after the window closed")
 	}
 }
