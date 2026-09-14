@@ -9,7 +9,7 @@ type storeMaintenanceFns struct {
 	ReapExpiredTriggers           func(s *Store, ctx context.Context) ([]string, error)
 	ReapStalePendingRuns          func(s *Store, ctx context.Context, grace time.Duration, reason string) ([]string, error)
 	ReapStaleRunningRuns          func(s *Store, ctx context.Context, grace time.Duration, reason string) ([]string, error)
-	ReapQueueExpiredRuns          func(s *Store, ctx context.Context, deadline time.Duration, reason string) ([]string, error)
+	ReapQueueExpiredRuns          func(s *Store, ctx context.Context, deadline, staleHeartbeat time.Duration, reason string) ([]string, error)
 	ReapTimedOutApprovals         func(s *Store, ctx context.Context) ([][2]string, error)
 	FailNodesInRun                func(s *Store, ctx context.Context, runID, errMsg, failureReason string) ([]string, error)
 	FailStaleQueuedNodes          func(s *Store, ctx context.Context, olderThan time.Duration) ([][2]string, error)

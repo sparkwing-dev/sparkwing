@@ -52,7 +52,9 @@ unlock.
   the first run submitted during a runner-pool rollout survives the rollout. The
   queue timeout (`Server.WithQueueTimeout`, 15 minutes by default) is the bound:
   a run whose trigger sits unclaimed past it fails with "no runner claimed this
-  run's trigger before the queue deadline".
+  run's trigger before the queue deadline" and its trigger is finished in the
+  same sweep, so no late runner executes a child for it. A run still stamping its
+  run-level heartbeat outlives that sweep.
 - **controller:** `POST /api/v1/runs/{id}/nodes` now answers `409` naming the
   run's recorded status and error when the run has already finished, and `409`
   when the claim that names the run no longer holds it. A child that reaches a

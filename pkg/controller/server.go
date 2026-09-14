@@ -1249,6 +1249,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.githubCommitStatuses.shutdown(ctx)
 }
 
+// safety: a run-level heartbeat this old means no orchestrator is driving the
+// run, which is the one piece of evidence both run sweeps act on.
+const runHeartbeatStaleAfter = 3 * time.Minute
+
 // safety: releasing a claim puts the trigger back in the queue, so a run nothing
 // has executed yet belongs to the next claimant rather than to this sweep; the
 // queue-deadline sweep is what ends it when no claimant comes.
@@ -1285,6 +1289,10 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 	)
 }
 
+// safety: this asks only whether the trigger is still live work, where
+// triggerRequeuedSQL asks the narrower question of whether it is back in the
+// queue after a claim. A runner that claimed the trigger between the reap and
+// this read owns the run too, and requiring the queued state would fail it.
 func (s *Server) triggerAwaitsClaimant(ctx context.Context, id string) bool {
 	trig, err := s.store.GetTrigger(ctx, id)
 	if err != nil {
@@ -1364,7 +1372,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			}
 
 			if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
-				3*time.Minute,
+				runHeartbeatStaleAfter,
 				"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
 				s.logger.Error("stale running sweep failed", "err", err)
 			} else {
@@ -1375,7 +1383,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			}
 
 			if ids, err := store.Maintenance.ReapQueueExpiredRuns(s.store, ctx,
-				s.queueTimeout,
+				s.queueTimeout, runHeartbeatStaleAfter,
 				"reaped: no runner claimed this run's trigger before the queue deadline"); err != nil {
 				s.logger.Error("queue-deadline sweep failed", "err", err)
 			} else {
