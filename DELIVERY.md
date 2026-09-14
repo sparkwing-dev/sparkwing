@@ -123,6 +123,21 @@ launcher when testing isolated tool state.
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
   not the caller's. Drop an error only through a helper that logs why.
+- **No sleeps or wall-clock waits in tests:** `internal/sleepcheck` fails any
+  `_test.go` that calls `time.Sleep`, `time.After`, `time.Tick`,
+  `time.NewTimer` or `time.NewTicker`, or that reads `time.Now` or `time.Since`
+  as a wait: an ordering comparison, a loop condition, or a
+  `context.WithTimeout` or `WithDeadline` argument. A `time.Now()` that only
+  stamps a fixture value is allowed. Write the test to wait on the channel,
+  condition, or state the code under test signals, to drive a clock the test
+  injects, or to run under `testing/synctest`, whose clock advances once every
+  goroutine is blocked. A file that dot-imports `time` cannot be judged and
+  fails for that reason. The `test-sleeps` step runs the checker in
+  `pre-commit` and `gate` over the staged change, or the change since
+  origin/main when nothing is staged, so a new offender fails from the first
+  run while the tests written before the rule keep passing until they are
+  edited. `GOWORK=off go run ./internal/sleepcheck .` judges every test file in
+  the tree, which is how to size the remaining purge.
 - **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when

@@ -90,7 +90,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"status": "ok", "auth": authState,
-		"object_store": objectStore, "database": s.storageHealth(r.Context()),
+		"object_store": objectStore, "database": s.storageHealth(),
 		"egress": egressState,
 	}
 	if len(problems) > 0 {

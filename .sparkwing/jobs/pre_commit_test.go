@@ -40,7 +40,7 @@ func nodeIDs(nodes []*sparkwing.JobNode) []string {
 func TestPreCommitRunsTheSourcePolicyStepsAndNothingElse(t *testing.T) {
 	want := []string{
 		"changelog-links", "comments", "docs-mirror", "em-dashes", "formatters",
-		"gofmt", "home-resolution", "tracked-binaries", "tracker-ids",
+		"gofmt", "home-resolution", "test-sleeps", "tracked-binaries", "tracker-ids",
 	}
 	if got := stepIDs(t, &PreCommit{}); !slices.Equal(got, want) {
 		t.Fatalf("pre-commit steps = %v, want %v", got, want)

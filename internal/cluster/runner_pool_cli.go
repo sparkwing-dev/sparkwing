@@ -480,7 +480,7 @@ func executePooledNode(
 	provider headroomProvider,
 ) {
 	if hbInterval <= 0 {
-		hbInterval = poolHeartbeatDefaultInterval
+		hbInterval = store.PoolHeartbeatInterval
 	}
 	if hbInterval < 200*time.Millisecond {
 		hbInterval = 200 * time.Millisecond
@@ -515,8 +515,6 @@ func executePooledNode(
 }
 
 var (
-	poolHeartbeatDefaultInterval = store.PoolHeartbeatInterval
-
 	poolHeartbeatTimeout = 2 * time.Second
 
 	poolHeartbeatMaxSilence = 3 * time.Minute

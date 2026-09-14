@@ -127,7 +127,8 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 		}
 	}
 
-	if err := s.SetCreditRateMicroPerSecond(ctx, 50_000); err != nil {
+	single := int64(50_000)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); err != nil {
 		t.Fatalf("set the single rate: %v", err)
 	}
 	table, err = s.CreditRateTable(ctx)
@@ -162,7 +163,8 @@ func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 		t.Fatalf("single rate = %d, want the four-core price 20000", rate)
 	}
 
-	if err := s.SetCreditRateMicroPerSecond(ctx, 21_000); err != nil {
+	single := int64(21_000)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); err != nil {
 		t.Fatalf("set the single rate: %v", err)
 	}
 	table, err := s.CreditRateTable(ctx)
@@ -403,7 +405,9 @@ func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
 		t.Fatalf("Validate refused the ceiling itself: %v", err)
 	}
 	s := storetest.Open(t)
-	if err := s.SetCreditRateMicroPerSecond(context.Background(), store.MaxCreditRateMicro+1); err == nil {
+	past := int64(store.MaxCreditRateMicro) + 1
+	if _, err := s.SetCreditSettings(context.Background(),
+		store.CreditSettingsUpdate{RateMicroPerSecond: &past}); err == nil {
 		t.Fatal("the single rate accepted a value above the ceiling")
 	}
 }
@@ -440,7 +444,8 @@ func TestTheBillingCPUCeilingHoldsEveryClassDown(t *testing.T) {
 	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	if err := s.SetBillingCPUCeilingCores(ctx, 1); err != nil {
+	ceiling := int64(1)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{BillingCPUCeilingCores: &ceiling}); err != nil {
 		t.Fatalf("set the ceiling: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-capped", "build", 64)
@@ -455,7 +460,8 @@ func TestTheBillingCPUCeilingHoldsEveryClassDown(t *testing.T) {
 		}
 	}
 
-	if err := s.SetBillingCPUCeilingCores(ctx, 0); err != nil {
+	lifted := int64(0)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{BillingCPUCeilingCores: &lifted}); err != nil {
 		t.Fatalf("lift the ceiling: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-uncapped", "build", 16)
@@ -465,7 +471,9 @@ func TestTheBillingCPUCeilingHoldsEveryClassDown(t *testing.T) {
 	if charge := lastChargeFor(t, s, "run-uncapped"); charge.CPUClassCores != 16 {
 		t.Fatalf("with no ceiling a 16-core node billed class %d", charge.CPUClassCores)
 	}
-	if err := s.SetBillingCPUCeilingCores(ctx, -1); err == nil {
+	negative := int64(-1)
+	if _, err := s.SetCreditSettings(ctx,
+		store.CreditSettingsUpdate{BillingCPUCeilingCores: &negative}); err == nil {
 		t.Fatal("a negative ceiling was accepted")
 	}
 }
