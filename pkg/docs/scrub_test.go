@@ -55,6 +55,9 @@ var scrubPatterns = []struct {
 var knownScrubHits = map[string][]string{}
 
 func TestEmbeddedDocsCarryNothingPrivate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	pages := docs.List()
 	if len(pages) == 0 {
 		t.Fatal("no docs embedded, so this check reads nothing")

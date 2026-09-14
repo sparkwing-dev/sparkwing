@@ -164,6 +164,9 @@ func TestCreateToken_BlankAndPaddedScopesTolerated(t *testing.T) {
 var scopeConstRE = regexp.MustCompile(`\bScope\w*\s*=\s*"([a-z][a-z.]*)"`)
 
 func TestCreateToken_AllowlistCoversEveryScopeConstant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 

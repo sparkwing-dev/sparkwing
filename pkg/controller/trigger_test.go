@@ -723,6 +723,9 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 }
 
 func TestListRoutes_ClampTheirLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)

@@ -256,6 +256,9 @@ func TestSecretArgs_ControllerGrandfathersOldRuns(t *testing.T) {
 }
 
 func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)

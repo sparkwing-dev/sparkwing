@@ -24,6 +24,9 @@ func TestListCallerMutationIsIsolated(t *testing.T) {
 }
 
 func TestCatalogConcurrentReaders(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	want := List()
 	hits := SearchSections("cache")
 	body, err := Read("pipelines")
