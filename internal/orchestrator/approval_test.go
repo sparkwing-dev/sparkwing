@@ -98,6 +98,9 @@ func joinApprovalWorker(t *testing.T, name string, done <-chan struct{}) {
 }
 
 func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
 	testCtx, cancel := context.WithCancel(context.Background())
@@ -174,6 +177,9 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 }
 
 func TestApproval_DeniedFlowsToFailed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
 	testCtx, cancel := context.WithCancel(context.Background())
@@ -226,6 +232,9 @@ func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 }
 
 func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	orchestrator.SetApprovalPollIntervalForTest(t, time.Hour)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

@@ -15,6 +15,9 @@ import (
 )
 
 func TestCacheResolutionFailureStopsDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	for _, failure := range []string{"empty", "panic", "error", "error-with-key"} {
 		t.Run(failure, func(t *testing.T) {
 			state := consumerTestStore(t, t.TempDir())

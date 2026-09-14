@@ -29,6 +29,9 @@ func init() {
 }
 
 func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	t.Cleanup(func() {
 		select {
 		case <-wedgeRelease:

@@ -17,6 +17,9 @@ import (
 )
 
 func TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 10.9s of real work; the fast class runs under -short")
+	}
 	mod, bin := buildProcPerNodeBinary(t)
 	cli := wingdHostBin(t)
 

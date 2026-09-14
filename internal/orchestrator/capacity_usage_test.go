@@ -39,6 +39,9 @@ type wantNode struct {
 }
 
 func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	cases := []struct {
 		name         string
 		hostCores    int

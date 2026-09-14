@@ -199,6 +199,9 @@ func runSharedS3Burst(t *testing.T, p orchestrator.Paths, st *store.Store, names
 }
 
 func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	resetSharedS3()
 	p := newPaths(t)
 	st, err := store.Open(p.StateDB())
@@ -252,6 +255,9 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 }
 
 func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	resetSharedS3()
 	p := newPaths(t)
 	st, err := store.Open(p.StateDB())

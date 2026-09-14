@@ -663,6 +663,9 @@ func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 }
 
 func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
 	p := newPaths(t)
@@ -1142,6 +1145,9 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 }
 
 func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
 	p := newPaths(t)
@@ -1297,14 +1303,23 @@ func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "plan-level-queued-await-parent", 100*time.Millisecond)
 }
 
 func TestConcurrency_RunAndAwaitExplicitTimeoutProtectsParentDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "explicit-timeout-await-parent", 100*time.Millisecond)
 }
 
 func TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "unbounded-await-parent", 750*time.Millisecond)
 }
 
@@ -1467,6 +1482,9 @@ func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.
 }
 
 func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
@@ -1709,6 +1727,9 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
@@ -1858,6 +1879,9 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
@@ -2020,6 +2044,9 @@ func waitForMissedPromotionChecks(t *testing.T, backend *missedPromotionBackend)
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
@@ -2156,6 +2183,9 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
@@ -2303,6 +2333,9 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	resetCacheCounter()
 	p := newPaths(t)
 	ctx := context.Background()
@@ -2403,6 +2436,9 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 }
 
 func TestConcurrency_ForcedReleaseStopsCancelOthersLeader(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	testCancelOthersStopsLeader(t, "cache-forced-release-leader", "cache-forced-release-follower")
 }
 

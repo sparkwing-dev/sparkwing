@@ -40,6 +40,9 @@ func (s reconcileSink) Push(ctx context.Context, sm nodemetrics.Sample) error {
 }
 
 func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	if !nodemetrics.CPUAccountingAvailable() {
 		t.Skip("no CPU accounting on this platform")
 	}

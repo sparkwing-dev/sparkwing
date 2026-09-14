@@ -11,6 +11,9 @@ import (
 )
 
 func TestChildRun_StartAndFinishEventsInParentStream(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	p := newPaths(t)
 	ctx := context.Background()
 
