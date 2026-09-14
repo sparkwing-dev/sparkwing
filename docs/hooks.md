@@ -107,7 +107,8 @@ a profile whose controller token carries the `admin` scope.
 
 ### Where the secret and the allow-list live
 
-The controller resolves each delivery against two sources:
+The controller resolves each delivery against the bindings it stores and
+the document in its environment:
 
 1. The bindings `sparkwing cluster webhooks connect` stores, one row per
    pipeline and repository.
