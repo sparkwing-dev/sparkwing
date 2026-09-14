@@ -23,12 +23,12 @@ unlock.
 ### Added
 
 - **CLI:** `SPARKWING_DEV_ENV_DISABLE`, holding any value, closes the
-  `$SPARKWING_HOME/dev.env` fallback behind `SPARKWING_CONTROLLER_URL` and
-  `SPARKWING_LOGS_URL`, so `sparkwing run-node` and `sparkwing handle-trigger`
-  resolve a service URL from their own environment and nowhere else. A test
-  suite running inside a sparkwing node is the case that needs it: it inherits
-  the operator's home, and an unset URL would otherwise resolve to whatever
-  development controller that dev.env names.
+  `$SPARKWING_HOME/dev.env` fallback for every key it answers, including
+  `SPARKWING_CONTROLLER_URL`, `SPARKWING_LOGS_URL` and the artifact backend's
+  `SPARKWING_CACHE_URL`, so a process resolves a service URL from its own
+  environment and nowhere else. A test suite running inside a sparkwing node is
+  the case that needs it: it inherits the operator's home, and an unset URL
+  would otherwise resolve to whatever development service that dev.env names.
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a
