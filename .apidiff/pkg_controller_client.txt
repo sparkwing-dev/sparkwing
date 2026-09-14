@@ -32,6 +32,7 @@ type AcquireSlotResponse struct {
 	QueueLength int
 	Holders     []WaiterHolder
 }
+func AdvisedPoll(configured time.Duration, advisor PollAdvisor) time.Duration
 type ClaimCapacity struct {
 	MaxConcurrent int
 	ActiveClaims  int
@@ -274,9 +275,11 @@ type LiveLogChunk struct {
 	Done bool
 }
 func LoadSignal(err error) (time.Duration, bool)
+const MaxClaimBackoff = 30 * time.Second
 const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
+func NewShedLog(every time.Duration) *ShedLog
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 type ObjectStoreBreaker struct {
 	Enabled bool
@@ -319,6 +322,9 @@ type ObjectStoreClassState struct {
 	TrippedAt     time.Time
 	TrippedWindow string
 }
+type PollAdvisor interface {
+	PollAdvice() time.Duration
+}
 type RateLimitedError struct {
 	RetryAfter time.Duration
 
@@ -345,6 +351,10 @@ type SecretRotationSkip struct {
 	Name string
 	Repo string
 }
+type ShedLog struct {
+}
+func (s *ShedLog) Due() bool
+const ShedWarnInterval = time.Minute
 type StateWaiter struct {
 	RunID         string
 	NodeID        string
@@ -379,6 +389,7 @@ type TriggerResponse struct {
 	RunID  string
 	Status string
 }
+func UnavailableBackoff(err error, floor time.Duration) (time.Duration, bool)
 type UnavailableError struct {
 	RetryAfter time.Duration
 

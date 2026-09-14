@@ -69,7 +69,7 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 		"sources", opts.Sources,
 	)
 
-	shed := NewShedLog(ShedWarnInterval)
+	shed := client.NewShedLog(client.ShedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			opts.Logger.Info("worker shutting down", "reason", err)
@@ -81,7 +81,7 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
-			if wait, ok := UnavailableBackoff(err, opts.PollInterval); ok {
+			if wait, ok := client.UnavailableBackoff(err, opts.PollInterval); ok {
 				opts.Logger.Debug("claim shed by the controller; backing off",
 					"err", err, "retry_after", wait)
 				if shed.Due() {
@@ -96,7 +96,7 @@ func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 			continue
 		}
 		if trigger == nil {
-			sleepOrCancel(ctx, AdvisedPoll(opts.PollInterval, stateClient))
+			sleepOrCancel(ctx, client.AdvisedPoll(opts.PollInterval, stateClient))
 			continue
 		}
 

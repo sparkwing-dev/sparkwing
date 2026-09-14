@@ -12,7 +12,6 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/cluster"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
@@ -49,7 +48,7 @@ func runWorker(args []string) error {
 
 	cli := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
 		WithRunnerIdentity(logs.ProcessIdentity("worker"))
-	shed := cluster.NewShedLog(cluster.ShedWarnInterval)
+	shed := client.NewShedLog(client.ShedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -59,7 +58,7 @@ func runWorker(args []string) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
-			if wait, ok := cluster.UnavailableBackoff(err, *poll); ok {
+			if wait, ok := client.UnavailableBackoff(err, *poll); ok {
 				if shed.Due() {
 					fmt.Fprintf(os.Stderr,
 						"worker: the controller is shedding claims; polling again in %s\n", wait)
@@ -72,7 +71,7 @@ func runWorker(args []string) error {
 			continue
 		}
 		if trigger == nil {
-			sleepOrCancel(ctx, cluster.AdvisedPoll(*poll, cli))
+			sleepOrCancel(ctx, client.AdvisedPoll(*poll, cli))
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)

@@ -16,34 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type fixedAdvisor time.Duration
-
-func (a fixedAdvisor) PollAdvice() time.Duration { return time.Duration(a) }
-
-func TestAdvisedPoll_OnlyWidensTheConfiguredCadence(t *testing.T) {
-	cases := []struct {
-		name       string
-		configured time.Duration
-		advisor    PollAdvisor
-		least      time.Duration
-		most       time.Duration
-	}{
-		{"no advisor", time.Second, nil, time.Second, time.Second},
-		{"no advice", time.Second, fixedAdvisor(0), time.Second, time.Second},
-		{"advice below the configured cadence", 5 * time.Second, fixedAdvisor(time.Second), 5 * time.Second, 5 * time.Second},
-		{"advice above the configured cadence", time.Second, fixedAdvisor(6 * time.Second), 6 * time.Second, 7500 * time.Millisecond},
-		{"advice above the cap", time.Second, fixedAdvisor(time.Hour), maxAdvisedPoll, maxAdvisedPoll + maxAdvisedPoll/4},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			wait := AdvisedPoll(tc.configured, tc.advisor)
-			if wait < tc.least || wait > tc.most {
-				t.Fatalf("wait = %s, want between %s and %s", wait, tc.least, tc.most)
-			}
-		})
-	}
-}
-
 type advisingClaimer struct {
 	advice time.Duration
 

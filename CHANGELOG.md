@@ -62,6 +62,14 @@ unlock.
   token prefix together with the runner.
   `sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
   refusals. Off unless a limits profile turns it on.
+- **SDK:** `client.UnavailableBackoff`, `client.AdvisedPoll`, `client.NewShedLog`
+  and `client.PollAdvisor` are how a claim or heartbeat loop reacts to a
+  controller's backpressure: wait out a `Retry-After` capped at
+  `client.MaxClaimBackoff` and spread, widen an idle poll only as far as the
+  controller suggested and `client.MaxPollAdvice` allows, and say so in the log
+  once every `client.ShedWarnInterval`. They were the warm-runner pool's own
+  copies; every loop that talks to a controller now shares one.
+
 - **controller + CLI:** `GET /api/v1/compute-limits` carries a `budgets` object
   with the per-runner and per-token request budgets, the request rate alarm,
   the idle-poll suggestion and whether it is enforced, and the egress stream
