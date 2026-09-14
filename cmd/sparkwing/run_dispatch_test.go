@@ -258,6 +258,9 @@ func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
 }
 
 func TestDispatchRun_ConsumesSeparatorBeforeExecutingPipeline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("SPARKWING_NO_BINCACHE", "1")

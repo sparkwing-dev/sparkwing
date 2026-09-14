@@ -13,6 +13,9 @@ import (
 )
 
 func TestOutputContractTerminal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
+	}
 	for _, tc := range []struct {
 		name, mode string
 		args       []string

@@ -16,6 +16,9 @@ import (
 )
 
 func TestServeNativeLifecyclePreservesRunningArtifactAndOptions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 19.7s of real work; the fast class runs under -short")
+	}
 	source := buildSubmitCLI(t)
 	root := t.TempDir()
 	binary := filepath.Join(root, "sparkwing")

@@ -32,6 +32,9 @@ func discoveryOutput(t *testing.T, args ...string) ([]map[string]any, map[string
 }
 
 func TestDiscoveryCommandsPaginationAndFullTreeCounts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	all, allPage, _ := discoveryOutput(t, "commands", "--limit", "0")
 	if len(all) < 80 || allPage["truncated"] != false {
 		t.Fatal("exhaustive index did not include the full tree")
@@ -83,6 +86,9 @@ func TestDiscoveryCommandsPaginationAndFullTreeCounts(t *testing.T) {
 }
 
 func TestDiscoveryDocsBudgetAndSelectedBody(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	rows, page, out := discoveryOutput(t, "docs", "search", "--query", "cache")
 	if len(rows) != 20 || page["truncated"] != true || len(out) > 15_000 {
 		t.Fatalf("search exceeded bounded snippet contract: %v, %d bytes", page, len(out))
@@ -117,6 +123,9 @@ func TestDiscoveryDocsBudgetAndSelectedBody(t *testing.T) {
 }
 
 func TestDiscoveryDocsRankedPaginationAndListFiltering(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	all, _, _ := discoveryOutput(t, "docs", "search", "--query", "Memoize key", "--limit", "0")
 	var got []map[string]any
 	cursor := ""
@@ -162,6 +171,9 @@ func TestDiscoveryDocsRankedPaginationAndListFiltering(t *testing.T) {
 }
 
 func TestDiscoveryRejectsInvalidSelectionAndKeepsExportsExhaustive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	for _, args := range [][]string{
 		{"commands", "--limit", "-1"},
 		{"commands", "--cursor", "missing"},

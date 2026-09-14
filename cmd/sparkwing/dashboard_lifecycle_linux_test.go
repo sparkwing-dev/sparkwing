@@ -43,6 +43,9 @@ func dashboardSleepingRecord(t *testing.T) (dashboardPaths, dashboardRecord, *ex
 }
 
 func TestServeStartPreservesEveryOwnedRunningInstance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s of real work; the fast class runs under -short")
+	}
 	for _, identity := range []string{"match", "different", "unknown"} {
 		t.Run(identity, func(t *testing.T) {
 			dp, record, child := dashboardSleepingRecord(t)
@@ -91,6 +94,9 @@ func TestServeStartPreservesEveryOwnedRunningInstance(t *testing.T) {
 }
 
 func TestServeRefusesReusedOrOpaquePID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s of real work; the fast class runs under -short")
+	}
 	for _, kind := range []string{"reused", "opaque"} {
 		t.Run(kind, func(t *testing.T) {
 			dp, record, child := dashboardSleepingRecord(t)
@@ -161,6 +167,9 @@ func TestServeHelpAndInvalidArgumentsLeaveFreshHomeUntouched(t *testing.T) {
 }
 
 func TestServeRefusesUnsafeStateInputsBeforeWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	for _, name := range []string{"dashboard-state.json", dashboardPIDFile} {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()

@@ -14,6 +14,9 @@ import (
 
 func TestRunDetached_PriorityRidesOnTheTriggerNotTheArgs(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	res := e.submit("--sw-priority", "front")
@@ -35,6 +38,9 @@ func TestRunDetached_PriorityRidesOnTheTriggerNotTheArgs(t *testing.T) {
 // hurry is that same intent, so the repeat must answer with the original run.
 func TestRunDetached_PriorityDoesNotDeduplicate(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	first := e.submit("--sw-idempotency-key", "priority-dedup", "--sw-priority", "3")

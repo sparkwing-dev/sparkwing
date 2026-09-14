@@ -10,6 +10,9 @@ import (
 )
 
 func TestProductionSourceUsesRunsCommandNames(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	subcommands := make([]string, len(cmdJobs.SubcommandOrder))
 	for i, subcommand := range cmdJobs.SubcommandOrder {
 		subcommands[i] = regexp.QuoteMeta(subcommand)

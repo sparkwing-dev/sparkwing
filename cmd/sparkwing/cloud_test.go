@@ -135,6 +135,9 @@ func TestCloudConnectDerivesTheProfileNameFromTheControllerHost(t *testing.T) {
 }
 
 func TestCloudConnectRefusesAnExistingProfileAndMintsNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newCloudFixture(t)
 	f.connect(t, "--name", "prod")
 	before := f.mintedToken(t, "prod")

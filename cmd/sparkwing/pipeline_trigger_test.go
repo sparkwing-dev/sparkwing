@@ -578,6 +578,9 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 }
 
 func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	spy := &triggerSpy{runStatus: "failed", runError: "node build failed"}
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
@@ -626,6 +629,9 @@ func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
 }
 
 func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	spy := &triggerSpy{runHTTPStatus: http.StatusServiceUnavailable}
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()

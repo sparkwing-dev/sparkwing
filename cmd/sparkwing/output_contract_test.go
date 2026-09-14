@@ -69,6 +69,9 @@ func decodeOutputRecords(t *testing.T, output []byte) []map[string]any {
 }
 
 func TestOutputContractPipeRoutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
+	}
 	for _, arguments := range [][]string{
 		{},
 		{"--output", "json"},
@@ -109,6 +112,9 @@ func TestOutputContractPipeRoutes(t *testing.T) {
 }
 
 func TestOutputContractOverridesAndErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
 	for _, flag := range [][]string{{"-o", "json"}, {"-o=json"}, {"--output", "json"}, {"--output=json"}} {
 		command := outputContractCommand(t, append([]string{"version", "--offline"}, flag...)...)
 		output, err := command.Output()
@@ -148,6 +154,9 @@ func TestOutputContractPlainCompletionAndEmptyList(t *testing.T) {
 }
 
 func TestOutputContractKeepsFlagValues(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, query := range []string{"-output", "help", "--help"} {
 		command := outputContractCommand(t, "docs", "search", "-q", query, "-o", "json")
 		output, err := command.Output()

@@ -126,6 +126,9 @@ var userNamedEnvReads = map[string]string{
 }
 
 func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	names, dynamic, err := envVarsRead("../..")
 	if err != nil {
 		t.Fatal(err)

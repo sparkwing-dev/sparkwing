@@ -327,6 +327,9 @@ func TestDiagnose_RecognizesSupportedWingdStateOnlyHome(t *testing.T) {
 }
 
 func TestDiagnose_RefusesKnownPathSymlinksWithoutTouchingTargets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, name := range []string{"runs", "box-slots", "state.db"} {
 		t.Run(name, func(t *testing.T) {
 			p := doctorHome(t)
