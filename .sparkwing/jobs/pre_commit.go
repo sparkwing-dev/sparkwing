@@ -7,9 +7,9 @@ import (
 )
 
 // PreCommit is the source-policy tier: everything a commit can be judged
-// against without compiling, linking, or asking the network. The broad tier
-// that vets, builds, tests and lints the whole tree is Gate, which the pre-push
-// hook runs.
+// against without compiling, linking, or asking the network. The fast tier the
+// pre-push hook runs is PrePush; the broad tier that vets, builds, tests and
+// lints the whole tree is Gate, which runs on demand and in hosted CI.
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
@@ -28,8 +28,9 @@ func (PreCommit) Help() string {
 		"live links in released changelog entries, and no product file that resolves the sparkwing home " +
 		"itself instead of through internal/paths.DefaultPaths. Every step reads files; none compiles, " +
 		"links, or reaches the network, which is what keeps the git pre-commit hook under ten seconds. " +
-		"go vet, go build, go test, golangci-lint, the race gate and the dashboard suites run in `gate` " +
-		"at the pre-push boundary. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes " +
+		"The push boundary adds the contract gates and a compile of the touched packages in `pre-push`; " +
+		"go vet, go build, go test, golangci-lint, the race gate and the dashboard suites run in `gate`, " +
+		"on demand and in hosted CI. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes " +
 		"and tracker IDs."
 }
 
@@ -39,16 +40,17 @@ func (PreCommit) Examples() []sparkwing.Example {
 	}
 }
 
-// perf: admits a commit ahead of the queued multi-minute gates sharing this
-// machine. A ten-second tier cannot keep its promise from behind one in FIFO.
-const preCommitPriority = 10
+// perf: admits the two hook tiers ahead of the queued multi-minute gates
+// sharing this machine. A tier a human waits on cannot keep its promise from
+// behind one in FIFO.
+const hookTierPriority = 10
 
 func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	// perf: measured on a 16-core Linux host at 0.6 cores sustained over the
 	// whole run; one core is the smallest pin that never throttles the two
 	// steps that fan out (gofmt and the tracked-binary sweep).
 	plan.Resources(sparkwing.Cores(1))
-	plan.Priority(preCommitPriority)
+	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
 }
@@ -79,7 +81,11 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 // subset of what the formatters step enforces and runs beside it because it
 // answers first and names the file without loading a package graph.
 func runGofmtOnTheChange(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
+	return gofmtOverScope(ctx, changeScope)
+}
+
+func gofmtOverScope(ctx context.Context, scopeOf scopeFunc) error {
+	files, scope, err := scopeOf(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
 		return err
 	}

@@ -149,6 +149,20 @@ unlock.
 
 ### Changed
 
+- **checks:** The git pre-push hook runs the new `pre-push` pipeline instead of
+  `gate`. It judges the push with the checks that answer in seconds: gofmt and
+  the configured formatters over the changed Go files, the comment policy, the
+  embedded docs mirror, the CHANGELOG entry gate, the OpenAPI and public API
+  snapshot gates, home resolution, and `go build` over the packages the push
+  touches, up to eight of them. `gate` keeps every step it had, gains those
+  three contract gates, and no git hook fires it any more: `sparkwing run gate`
+  runs it on demand and hosted CI runs it on every pull request and every push
+  to main. Every scoped step in the push tier reads the commits being pushed,
+  never the index, so a file left staged cannot narrow what a push is judged
+  against. An existing checkout keeps running the old hook until
+  `sparkwing pipeline hooks install` rewrites the scripts, because each script
+  names its pipeline.
+
 - **pkg/store + controller:** The credit surfaces added this cycle carry less
   machinery. The derived runner cap is cached once rather than once per
   principal, because the ledger records no principal and every principal

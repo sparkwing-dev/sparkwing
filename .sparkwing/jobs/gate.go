@@ -22,11 +22,11 @@ import (
 type Gate struct{ sparkwing.Base }
 
 func (Gate) ShortHelp() string {
-	return "Broad local verification at the push boundary: Go gates, frontend checks, source-policy sweeps, and docs sync"
+	return "Broad verification on demand and in hosted CI: Go gates, frontend checks, source-policy sweeps, contract gates, and docs sync"
 }
 
 func (Gate) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. The git pre-push hook runs this pipeline; the far cheaper source-policy subset runs at pre-commit."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD- uppercase, BW- in either case) over the staged files, or over the files changed since origin/main when nothing is staged, and no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags) in the staged change, or in the change since origin/main plus every untracked Go file when nothing is staged, and no test that sleeps or waits on the wall clock over that same scope, and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, comment, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. It also requires a CHANGELOG.md entry for every covered surface the change touches (bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), and the public API surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs. No git hook runs this pipeline: `sparkwing run gate` runs it on demand and hosted CI runs it on every pull request and every push to main. The two hook tiers are the far cheaper subsets pre-commit and pre-push."
 }
 
 func (Gate) Examples() []sparkwing.Example {
@@ -62,7 +62,10 @@ func goStepParallelism(cpuCount int) int {
 }
 
 func boundedGoCommand(cpuCount int, verb, args string) string {
-	parallelism := goStepParallelism(cpuCount)
+	return goCommandAt(goStepParallelism(cpuCount), verb, args)
+}
+
+func goCommandAt(parallelism int, verb, args string) string {
 	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", parallelism, verb, parallelism, args)
 }
 
@@ -84,6 +87,9 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "comments", checkComments)
 	sparkwing.Step(w, "test-sleeps", checkTestSleeps)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
+	sparkwing.Step(w, "changelog", checkChangelogRequired)
+	sparkwing.Step(w, "api-spec", checkAPISpec)
+	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
 	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit)
 	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
@@ -192,6 +198,39 @@ func scopedCheckerCommand(ctx context.Context, tool, noun string, keep func([]st
 			gateBaselineRef, base, noun), nil
 }
 
+type scopeFunc func(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error)
+
+// safety: git hands a pre-push hook no index of its own, so a file left
+// staged would narrow every step to that file and push the commits unjudged.
+// The push tier reads the range; changeScope, which reads the index, is what
+// a commit is judged by.
+func pushRangeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {
+	base, err := resolveGateBase(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	changed, err := listNames(ctx, "diff -z --name-only --diff-filter=ACMR "+base+" HEAD")
+	if err != nil {
+		return nil, "", fmt.Errorf("list the push range %s..HEAD: %w", base, err)
+	}
+	files := keep(changed)
+	return files, fmt.Sprintf("%d %s in the push range %s..HEAD (%s)",
+		len(files), noun, gateBaselineRef, base), nil
+}
+
+func pushRangeCheckerCommand(ctx context.Context, tool, noun string, keep func([]string) []string) (command, scope string, err error) {
+	_, scope, err = pushRangeScope(ctx, noun, keep)
+	if err != nil {
+		return "", "", err
+	}
+	base, err := resolveGateBase(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("go run ./internal/%s -base %s .", tool, base),
+		fmt.Sprintf("%s, plus every untracked %s", scope, noun), nil
+}
+
 var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
 
 var homeDirJoin = regexp.MustCompile(`filepath\.Join\([^,)]*[Hh]ome[^,)]*,\s*"\.sparkwing"`)
@@ -294,7 +333,11 @@ func runGofmt(ctx context.Context) error {
 }
 
 func runFormatters(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
+	return formattersOverScope(ctx, changeScope)
+}
+
+func formattersOverScope(ctx context.Context, scopeOf scopeFunc) error {
+	files, scope, err := scopeOf(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
 		return err
 	}

@@ -26,14 +26,14 @@ func TestRaceTargetsGroupChangedFilesByPackageAndModule(t *testing.T) {
 		".":          {"./", "./internal/orchestrator", "./pkg/store"},
 		".sparkwing": {"./", "./jobs"},
 	}
-	if got := raceTargets(files, modules); !reflect.DeepEqual(got, want) {
-		t.Fatalf("raceTargets = %v, want %v", got, want)
+	if got := touchedPackageTargets(files, modules); !reflect.DeepEqual(got, want) {
+		t.Fatalf("touchedPackageTargets = %v, want %v", got, want)
 	}
 }
 
 func TestRaceTargetsAreEmptyWhenNothingChanged(t *testing.T) {
-	if got := raceTargets(nil, []string{".", ".sparkwing"}); len(got) != 0 {
-		t.Fatalf("raceTargets(nil) = %v, want none", got)
+	if got := touchedPackageTargets(nil, []string{".", ".sparkwing"}); len(got) != 0 {
+		t.Fatalf("touchedPackageTargets(nil) = %v, want none", got)
 	}
 }
 

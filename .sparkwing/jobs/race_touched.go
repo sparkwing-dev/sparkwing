@@ -20,7 +20,7 @@ func runRaceTouched(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	targets := raceTargets(files, modules)
+	targets := touchedPackageTargets(files, modules)
 	sparkwing.Info(ctx, "race-touched: %s", scope)
 	if len(targets) == 0 {
 		sparkwing.Info(ctx, "race-touched: no package changed; nothing to race-test")
@@ -54,7 +54,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 		len(failures), strings.Join(failures, "\n  - "))
 }
 
-func raceTargets(files, modules []string) map[string][]string {
+func touchedPackageTargets(files, modules []string) map[string][]string {
 	seen := map[string]map[string]bool{}
 	for _, f := range files {
 		if isTestdataPath(f) {

@@ -93,11 +93,20 @@ func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
 	}
 }
 
-func TestGateStillRunsEveryStepThePreCommitTierAlsoRuns(t *testing.T) {
+func TestGateStillRunsEveryStepTheHookTiersAlsoRun(t *testing.T) {
 	gate := stepIDs(t, &Gate{})
-	for _, id := range stepIDs(t, &PreCommit{}) {
-		if !slices.Contains(gate, id) {
-			t.Errorf("gate dropped %q: the broad tier is the one hosted CI runs, so a policy step that lives only at pre-commit is unenforced on a pull request", id)
+	// safety: the gate's whole-module vet and build are what the push tier
+	// runs over the touched packages alone.
+	broader := map[string]string{"build-touched": "build", "vet-touched": "vet"}
+	for tier, ids := range map[string][]string{
+		"pre-commit": stepIDs(t, &PreCommit{}),
+		"pre-push":   stepIDs(t, &PrePush{}),
+	} {
+		for _, id := range ids {
+			if slices.Contains(gate, id) || slices.Contains(gate, broader[id]) {
+				continue
+			}
+			t.Errorf("gate dropped %q: the broad tier is the one hosted CI runs, so a step that lives only at %s is unenforced on a pull request", id, tier)
 		}
 	}
 }
@@ -134,7 +143,7 @@ func TestEachGitHookTierIsDeclaredExactlyOnce(t *testing.T) {
 			byTrigger[event] = append(byTrigger[event], p.Name)
 		}
 	}
-	for event, want := range map[string]string{"pre_commit": "pre-commit", "pre_push": "gate"} {
+	for event, want := range map[string]string{"pre_commit": "pre-commit", "pre_push": "pre-push"} {
 		got := byTrigger[event]
 		if len(got) != 1 || got[0] != want {
 			t.Errorf("%s is declared by %v, want exactly [%s]: a second pipeline on the same trigger doubles what the hook costs", event, got, want)
@@ -148,9 +157,9 @@ func TestEveryDeclaredPipelineResolvesToARegisteredName(t *testing.T) {
 			t.Errorf("%s is declared in sparkwing.yaml but no job registers it", p.Name)
 		}
 	}
-	for _, gone := range []string{"pre-push", "push-checks"} {
+	for _, gone := range []string{"push-checks"} {
 		if _, ok := sparkwing.Lookup(gone); ok {
-			t.Errorf("%q is still registered; the tiers are pre-commit, gate and pre-release, and a surviving alias keeps the old meaning alive", gone)
+			t.Errorf("%q is still registered; the tiers are pre-commit, pre-push, gate and pre-release, and a surviving alias keeps the old meaning alive", gone)
 		}
 	}
 }

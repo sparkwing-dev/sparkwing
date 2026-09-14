@@ -625,7 +625,7 @@ commit and waits for every security job before building release artifacts.
   lists every one for review. The comment gate keeps each annotation alone on
   one line, so no free prose rides behind a suppression.
 - **govulncheck** in source mode over `./...`, in addition to the
-  binary-mode scan the `pre-push` gate runs against every shipped
+  binary-mode scan the `pre-release` gate runs against every shipped
   executable.
 - **gitleaks** over the available git history. `.gitleaks.toml` allow-lists two
   exact documentation and test-fixture values, and `.gitleaksignore` names one
