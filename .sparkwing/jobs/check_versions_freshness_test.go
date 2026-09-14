@@ -411,6 +411,11 @@ func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
 	}
 	gitRun(t, repo, "config", "core.hooksPath", hooks)
 	gitRun(t, repo, "tag", "v0.99.0")
+	// safety: the pin catches up to a tag the trunk has moved past. A tag still
+	// pointing at HEAD is the release being verified, which nothing can pin.
+	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// past the tag\n")
+	gitRun(t, repo, "add", "doc.go")
+	gitRun(t, repo, "commit", "-m", "move past the tag")
 
 	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
 	if err != nil {

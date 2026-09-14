@@ -132,6 +132,31 @@ func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, e
 	return stable[len(stable)-1], nil
 }
 
+// safety: a release is verified at its own tag, where the pin still names the
+// release before it, because nothing can pin a tag that did not exist when the
+// commit was written. Reading that as staleness makes every release fail its own
+// verification, and the bump it attempts cannot commit on a runner anyway.
+func tagAtHead(ctx context.Context, repoRoot string) (string, error) {
+	out, err := captureGit(ctx, repoRoot, "tag", "--points-at", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	var newest string
+	for _, line := range strings.Split(out, "\n") {
+		v := strings.TrimSpace(line)
+		if !semver.IsValid(v) || semver.Prerelease(v) != "" {
+			continue
+		}
+		if newest == "" || semver.Compare(v, newest) > 0 {
+			newest = v
+		}
+	}
+	if newest == "" {
+		return "", fmt.Errorf("no release tag points at HEAD in %s", repoRoot)
+	}
+	return newest, nil
+}
+
 func scaffoldFallbackProblem(pinned, latest string) string {
 	if !semver.IsValid(pinned) {
 		return fmt.Sprintf(
@@ -424,6 +449,9 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 		return "", err
 	}
 	if aligned && semver.Compare(pinned, latest) >= 0 {
+		return "", nil
+	}
+	if headTag, tagErr := tagAtHead(ctx, repoRoot); tagErr == nil && headTag == latest {
 		return "", nil
 	}
 	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot); err != nil {
