@@ -25,14 +25,14 @@ func assertCreditClassSchema(t *testing.T, db *sql.DB) {
 
 // safety: dropping the columns is what makes reopening the database run the
 // migration against the shape the previous binary left behind.
-func downgradeCreditClassToV42(t *testing.T, db *sql.DB) {
+func downgradeCreditClassToV43(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	for _, q := range []string{
 		`ALTER TABLE credit_charges DROP COLUMN cpu_class`,
 		`ALTER TABLE credit_charges DROP COLUMN rate_micro_per_second`,
 		`ALTER TABLE nodes DROP COLUMN credit_cpu_class`,
-		`DELETE FROM sparkwing_schema_version WHERE version >= 43`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 44`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -40,7 +40,7 @@ func downgradeCreditClassToV42(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestSchemaV43FreshSQLiteCreditClassShape(t *testing.T) {
+func TestSchemaV44FreshSQLiteCreditClassShape(t *testing.T) {
 	st, err := storetest.NewSQLite(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -54,20 +54,20 @@ func TestSchemaV43FreshSQLiteCreditClassShape(t *testing.T) {
 
 // The columns carry defaults and the version declares no requirement, so the
 // binary that wrote the store before the migration keeps writing it after.
-func TestSchemaV43UpgradesRealV42SQLiteShapeAndStaysWritableByTheOlderBinary(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v42.db")
+func TestSchemaV44UpgradesRealV43SQLiteShapeAndStaysWritableByTheOlderBinary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v43.db")
 	st, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeCreditClassToV42(t, st.DB())
+	downgradeCreditClassToV43(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	up, err := store.Open(path)
 	if err != nil {
-		t.Fatalf("upgrade v42 to v43: %v", err)
+		t.Fatalf("upgrade v43 to v44: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	assertCreditClassSchema(t, up.DB())
@@ -98,21 +98,21 @@ func TestSchemaV43UpgradesRealV42SQLiteShapeAndStaysWritableByTheOlderBinary(t *
 	}
 }
 
-func TestSchemaV43UpgradesRealV42PostgresShape(t *testing.T) {
+func TestSchemaV44UpgradesRealV43PostgresShape(t *testing.T) {
 	dsn := pgTestSchemaDSN(t)
 	ctx := context.Background()
 	st, err := store.OpenPostgres(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeCreditClassToV42(t, st.DB())
+	downgradeCreditClassToV43(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	up, err := store.OpenPostgres(ctx, dsn)
 	if err != nil {
-		t.Fatalf("upgrade v42 to v43 on Postgres: %v", err)
+		t.Fatalf("upgrade v43 to v44 on Postgres: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	assertCreditClassSchema(t, up.DB())

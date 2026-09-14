@@ -61,10 +61,11 @@ var additiveColumnSources = map[int][]map[string]string{
 	// older binary keeps writing the migrated database.
 	41: nil,
 	42: nil,
-	// safety: v43 adds the cpu class and the rate each charge was billed at,
+	43: nil,
+	// safety: v44 adds the cpu class and the rate each charge was billed at,
 	// and the class a node was claimed at, all defaulted, so an older binary
 	// keeps writing the migrated database.
-	43: {creditChargeClassCols, nodesCreditClassCols},
+	44: {creditChargeClassCols, nodesCreditClassCols},
 }
 
 func columnSpecMaps() []map[string]string {
