@@ -578,11 +578,12 @@ With the Helm values `runner.triggerRunner.kind: warm` and
 to remote agents first. If no agent claims an unlabeled node within the
 internal window, the worker atomically removes the offer and creates a
 Kubernetes Job with the chart's existing image, namespace, service account,
-pull policy, and cache settings. A concurrent agent claim defeats revocation,
-so fallback cannot double-execute the node. Labeled nodes stay agent-only
-because the fallback Job does not advertise labels. Saturated or offline
-agents therefore spill generic work to Kubernetes without weakening placement
-requirements.
+pull policy, and cache settings. The Job runs `sparkwing-runner run-node`, the
+executable the runner image installs. A concurrent agent claim defeats
+revocation, so fallback cannot double-execute the node. Labeled nodes stay
+agent-only because the fallback Job does not advertise labels. Saturated or
+offline agents therefore spill generic work to Kubernetes without weakening
+placement requirements.
 
 The full-chart path is
 `sparkwing-runner-bundle.runner.triggerRunner.kind: warm`, together with

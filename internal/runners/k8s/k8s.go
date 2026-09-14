@@ -361,6 +361,10 @@ func nodePin(node *sparkwing.JobNode) *capacity.Pin {
 	return &capacity.Pin{Cores: h.Cores, MemoryBytes: h.MemoryBytes}
 }
 
+// JobBinary is the executable a fallback Job runs. The runner image installs
+// this one binary, so a Job that named any other would fail to start.
+const JobBinary = "sparkwing-runner"
+
 func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution) *batchv1.Job {
 	env := []corev1.EnvVar{
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
@@ -391,7 +395,7 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		Name:            "runner",
 		Image:           r.cfg.Image,
 		ImagePullPolicy: pullPolicyOrDefault(r.cfg.ImagePullPolicy),
-		Command:         []string{"sparkwing"},
+		Command:         []string{JobBinary},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
 		Resources:       podResources(res, r.cfg),
