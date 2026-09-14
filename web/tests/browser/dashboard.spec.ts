@@ -528,7 +528,9 @@ async function selectRunWhileOlderDetailIsPending(
 ): Promise<() => Promise<void>> {
   const olderStarted = deferred();
   const olderRelease = deferred();
+  const olderDelivered = deferred();
   const newerFinished = deferred();
+  let olderFailure: string | null = null;
   await installMockAPI(page, {
     runs: [
       finishedRun,
@@ -550,7 +552,12 @@ async function selectRunWhileOlderDetailIsPending(
       if (runID !== finishedRun.id) return false;
       olderStarted.resolve();
       await olderRelease.promise;
-      await route.fulfill({ json: finishedDetail });
+      try {
+        await route.fulfill({ json: finishedDetail });
+      } catch (error) {
+        olderFailure = String(error);
+      }
+      olderDelivered.resolve();
       return true;
     },
   });
@@ -561,11 +568,11 @@ async function selectRunWhileOlderDetailIsPending(
   if (!newerDetail) await newerFinished.promise;
 
   return async () => {
-    const olderResponse = page.waitForResponse((response) =>
-      new URL(response.url()).pathname.endsWith(`/runs/${finishedRun.id}`),
-    );
     olderRelease.resolve();
-    await olderResponse;
+    await olderDelivered.promise;
+    if (olderFailure) {
+      throw new Error(`older detail request was not delivered: ${olderFailure}`);
+    }
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>
