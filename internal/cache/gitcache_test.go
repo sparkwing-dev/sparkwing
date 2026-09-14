@@ -944,6 +944,17 @@ func TestNewRejectsEmptyAPIToken(t *testing.T) {
 
 func newTestServer(t *testing.T, token string) *httptest.Server {
 	t.Helper()
+	cfg := DefaultConfig()
+	cfg.APIToken = token
+	cfg.AllowUnauthenticated = token == ""
+	return newTestServerConfig(t, cfg)
+}
+
+// safety: New copies this config into the package globals, so a test that needs
+// a different window sets it here rather than writing those globals while the
+// server is answering requests.
+func newTestServerConfig(t *testing.T, cfg Config) *httptest.Server {
+	t.Helper()
 	saved := struct {
 		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir string
 		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken        string
@@ -957,12 +968,9 @@ func newTestServer(t *testing.T, token string) *httptest.Server {
 	})
 
 	root := t.TempDir()
-	cfg := DefaultConfig()
 	cfg.DataDir = root
 	cfg.ProxyDir = filepath.Join(root, "proxy")
 	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
-	cfg.APIToken = token
-	cfg.AllowUnauthenticated = token == ""
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1486,6 +1494,7 @@ func TestMetricsDoNotEnumerateMirrors(t *testing.T) {
 	repoNames["secret-service"] = repoURL
 	repoNamesMu.Unlock()
 	runGit(t, filepath.Join(repoDir, hash+".git"), "init", "--bare")
+	bgFetch.markRequested(stateKey(hash))
 
 	startBackgroundFetch(t, time.Millisecond)
 

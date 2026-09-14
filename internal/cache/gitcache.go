@@ -52,7 +52,7 @@ func initGitcacheMetrics() {
 		metric.WithUnit("{file}"))
 
 	gitcacheFetchDur, _ = meter.Float64Histogram("sparkwing.gitcache.fetch_duration",
-		metric.WithDescription("Background git fetch duration"),
+		metric.WithDescription("Mirror fetch duration, by what asked for the fetch"),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(0.1, 0.5, 1, 2, 5, 10, 30, 60))
 
@@ -67,6 +67,22 @@ func initGitcacheMetrics() {
 	gitcacheRecoveryRecl, _ = meter.Int64Counter("sparkwing.gitcache.recovery_reclones",
 		metric.WithDescription("Recovery reclones after a failed mirror fetch"),
 		metric.WithUnit("{reclone}"))
+}
+
+const (
+	fetchReasonOnDemand = "on_demand"
+	fetchReasonKeepWarm = "keep_warm"
+)
+
+// safety: /metrics is unauthenticated, so the reason may be labeled but the
+// repository may not: a per-repo label enumerates the mirror set.
+func recordMirrorFetch(ctx context.Context, reason string, took time.Duration, failed bool) {
+	if gitcacheFetchDur == nil {
+		return
+	}
+	gitcacheFetchDur.Record(ctx, took.Seconds(), metric.WithAttributes(
+		attribute.String("reason", reason),
+		attribute.Bool("failed", failed)))
 }
 
 var (
@@ -131,7 +147,7 @@ var (
 	sshKeyDir             = "/etc/ssh-key"
 	autoRegisterReposSpec string
 
-	fetchFreshWindow = 15 * time.Second
+	fetchFreshWindow = 10 * time.Second
 
 	recloneCooldown = 1 * time.Hour
 
@@ -249,6 +265,7 @@ type repoFetchState struct {
 	lastReclone time.Time
 	reclones    []time.Time
 	lastClone   time.Time
+	lastRequest time.Time
 }
 
 var bgFetch = &fetchState{repos: map[string]*repoFetchState{}}
@@ -274,6 +291,24 @@ func (fs *fetchState) markFetched(name string) {
 
 	rs.nextRetry = time.Time{}
 	rs.lastClone = time.Time{}
+}
+
+// perf: the keep-warm pass refreshes only mirrors a request touched recently,
+// so a repository nobody is building costs origin nothing.
+func (fs *fetchState) markRequested(name string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.entry(name).lastRequest = time.Now()
+}
+
+func (fs *fetchState) requestedSince(name string, window time.Duration) bool {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	rs := fs.repos[name]
+	if rs == nil || rs.lastRequest.IsZero() {
+		return false
+	}
+	return time.Since(rs.lastRequest) < window
 }
 
 func (fs *fetchState) fresh(name string) bool {
@@ -389,20 +424,23 @@ var recloneMirror = func(repoURL, bareRepo string) (string, error) {
 
 const mirrorFetchTimeout = 2 * time.Minute
 
-func fetchMirrorIfStale(hash, bareRepo string) (out string, skipped bool, err error) {
+func fetchMirrorIfStale(ctx context.Context, hash, bareRepo string) (out string, skipped bool, err error) {
 	name := stateKey(hash)
+	bgFetch.markRequested(name)
 	if bgFetch.fresh(name) {
 		return "", true, nil
 	}
+	start := time.Now()
 	out, err = mirrorFetch(mirrorFetchTimeout, bareRepo)
+	recordMirrorFetch(ctx, fetchReasonOnDemand, time.Since(start), err != nil)
 	if err == nil {
 		bgFetch.markFetched(name)
 	}
 	return out, false, err
 }
 
-func refreshMirrorBestEffort(hash, bareRepo string) {
-	if _, skipped, err := fetchMirrorIfStale(hash, bareRepo); err != nil {
+func refreshMirrorBestEffort(ctx context.Context, hash, bareRepo string) {
+	if _, skipped, err := fetchMirrorIfStale(ctx, hash, bareRepo); err != nil {
 		log.Printf("warning: mirror fetch for %s failed, serving cached refs: %v", hash, err)
 	} else if skipped {
 		log.Printf("mirror fetch for %s skipped (fetched within %s)", hash, fetchFreshWindow)
@@ -468,13 +506,17 @@ func friendlyFetchError(raw string) string {
 	}
 }
 
+const keepWarmWindow = time.Hour
+
+const maxFetchBackoff = 10 * time.Minute
+
 func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
-		interval = 30 * time.Second
+		log.Printf("background keep-warm: off; mirrors fetch when a request needs a commit they lack")
+		return
 	}
-	log.Printf("background fetch: every %s", interval)
+	log.Printf("background keep-warm: every %s, for mirrors a request touched in the last %s", interval, keepWarmWindow)
 
-	const maxBackoff = 10 * time.Minute
 	consecutiveAllFail := 0
 
 	for {
@@ -482,72 +524,15 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			return
 		}
 
-		entries, err := os.ReadDir(repoDir)
-		if err != nil {
-			continue
-		}
-
-		var fetched, failed int
-		for _, e := range entries {
-			if !e.IsDir() || !strings.HasSuffix(e.Name(), ".git") {
-				continue
-			}
-
-			bgFetch.mu.RLock()
-			rs := bgFetch.repos[e.Name()]
-			bgFetch.mu.RUnlock()
-			if rs != nil && time.Now().Before(rs.nextRetry) {
-				continue
-			}
-
-			bare := filepath.Join(repoDir, e.Name())
-			// safety: request handlers key this lock on the bare hash, and a second key is no lock at all.
-			mu := repoLock(strings.TrimSuffix(e.Name(), ".git"))
-			// safety: a handler holding this lock is already refreshing the mirror, and blocking
-			// here would stall every other repo behind it.
-			if !mu.TryLock() {
-				continue
-			}
-			fetchStart := time.Now()
-			out, err := mirrorFetch(1*time.Minute, bare)
-			mu.Unlock()
-			if gitcacheFetchDur != nil {
-				// safety: /metrics is unauthenticated, and a per-repo label enumerates the mirror set.
-				gitcacheFetchDur.Record(context.Background(), time.Since(fetchStart).Seconds())
-			}
-
-			fetched++
-			bgFetch.mu.Lock()
-			if err != nil {
-				failed++
-				errMsg := strings.TrimSpace(fmt.Sprintf("%v %s", err, out))
-				if rs == nil {
-					rs = &repoFetchState{backoff: interval}
-					bgFetch.repos[e.Name()] = rs
-				} else {
-					rs.backoff *= 2
-					rs.backoff = min(rs.backoff, maxBackoff)
-				}
-				rs.lastError = errMsg
-				rs.lastErrorAt = time.Now()
-				rs.nextRetry = time.Now().Add(rs.backoff)
-				bgFetch.mu.Unlock()
-				log.Printf("background fetch: %s failed (retry in %s): %s", e.Name(), rs.backoff, errMsg)
-			} else {
-
-				bgFetch.mu.Unlock()
-				bgFetch.markFetched(e.Name())
-				log.Printf("background fetch: %s ok", e.Name())
-			}
-		}
+		fetched, failed := keepWarmPass(ctx, interval)
 
 		if fetched > 0 && failed == fetched {
 			consecutiveAllFail++
 			bgFetch.mu.Lock()
 			bgFetch.allFailing = true
 			bgFetch.mu.Unlock()
-			pause := min(time.Duration(consecutiveAllFail)*interval, maxBackoff)
-			log.Printf("background fetch: all %d repos failed -- pausing %s", failed, pause)
+			pause := min(time.Duration(consecutiveAllFail)*interval, maxFetchBackoff)
+			log.Printf("background keep-warm: all %d repos failed -- pausing %s", failed, pause)
 			if !sleepCtx(ctx, pause) {
 				return
 			}
@@ -558,6 +543,69 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			bgFetch.mu.Unlock()
 		}
 	}
+}
+
+// perf: this refreshes only the mirrors a request touched inside the keep-warm
+// window. A hosted cache holds every customer's repository, and walking all of
+// them on a timer fetches code nobody is building.
+func keepWarmPass(ctx context.Context, interval time.Duration) (fetched, failed int) {
+	entries, err := os.ReadDir(repoDir)
+	if err != nil {
+		return 0, 0
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasSuffix(e.Name(), ".git") {
+			continue
+		}
+		if !bgFetch.requestedSince(e.Name(), keepWarmWindow) {
+			continue
+		}
+
+		bgFetch.mu.RLock()
+		rs := bgFetch.repos[e.Name()]
+		bgFetch.mu.RUnlock()
+		if rs != nil && time.Now().Before(rs.nextRetry) {
+			continue
+		}
+
+		bare := filepath.Join(repoDir, e.Name())
+		// safety: request handlers key this lock on the bare hash, and a second key is no lock at all.
+		mu := repoLock(strings.TrimSuffix(e.Name(), ".git"))
+		// safety: a handler holding this lock is already refreshing the mirror, and blocking
+		// here would stall every other repo behind it.
+		if !mu.TryLock() {
+			continue
+		}
+		fetchStart := time.Now()
+		out, err := mirrorFetch(1*time.Minute, bare)
+		mu.Unlock()
+		recordMirrorFetch(ctx, fetchReasonKeepWarm, time.Since(fetchStart), err != nil)
+
+		fetched++
+		bgFetch.mu.Lock()
+		if err != nil {
+			failed++
+			errMsg := strings.TrimSpace(fmt.Sprintf("%v %s", err, out))
+			rs = bgFetch.entry(e.Name())
+			if rs.backoff <= 0 {
+				rs.backoff = interval
+			} else {
+				rs.backoff = min(rs.backoff*2, maxFetchBackoff)
+			}
+			rs.lastError = errMsg
+			rs.lastErrorAt = time.Now()
+			rs.nextRetry = time.Now().Add(rs.backoff)
+			backoff := rs.backoff
+			bgFetch.mu.Unlock()
+			log.Printf("background keep-warm: %s failed (retry in %s): %s", e.Name(), backoff, errMsg)
+		} else {
+			bgFetch.mu.Unlock()
+			bgFetch.markFetched(e.Name())
+			log.Printf("background keep-warm: %s ok", e.Name())
+		}
+	}
+	return fetched, failed
 }
 
 func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
@@ -639,7 +687,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		bgFetch.markFetched(stateKey(hash))
 	} else {
 		enableSHAFetch(bareRepo)
-		out, skipped, err := fetchMirrorIfStale(hash, bareRepo)
+		out, skipped, err := fetchMirrorIfStale(r.Context(), hash, bareRepo)
 		switch {
 		case skipped:
 			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
@@ -948,7 +996,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 
 	out, err := gitOutput("-C", bareRepo, "show", "--end-of-options", branch+":"+filePath)
 	if errors.Is(err, errGitForkUnavailable) {
@@ -993,7 +1041,7 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 
 	ref := branch
 	if path != "" {
@@ -1043,7 +1091,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 
 	_, err := gitOutput("-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch)
 	if errors.Is(err, errGitForkUnavailable) {
@@ -1910,7 +1958,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 
 	lock := repoLock(hash)
 	lock.Lock()
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 	lock.Unlock()
 
 	ancestor, err := firstCachedObject(bareRepo, req.Commits)
@@ -2321,7 +2369,10 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 
 	enableSHAFetch(bareRepo)
 
+	bgFetch.markRequested(stateKey(hash))
+	start := time.Now()
 	out, err := mirrorFetch(45*time.Second, bareRepo)
+	recordMirrorFetch(r.Context(), fetchReasonOnDemand, time.Since(start), err != nil)
 	if err != nil {
 		log.Printf("eager refresh: %s failed: %v %s", hash, err, out)
 		http.Error(w, fmt.Sprintf("fetch failed: %s\n%s", err, sshHint(out)), http.StatusBadGateway)
@@ -2404,6 +2455,17 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 		if service != "git-upload-pack" && service != "git-receive-pack" {
 			http.Error(w, "unsupported service", http.StatusBadRequest)
 			return
+		}
+		// safety: a clone reads the mirror's refs and reports no error, so a
+		// mirror that fell behind hands the runner an old tip or no tip at all.
+		// receive-pack is refused anyway, and refreshing for it would let a
+		// rejected push spend an origin fetch.
+		if service == "git-upload-pack" {
+			hash := strings.TrimSuffix(filepath.Base(bareRepo), ".git")
+			lock := repoLock(hash)
+			lock.Lock()
+			refreshMirrorBestEffort(r.Context(), hash, bareRepo)
+			lock.Unlock()
 		}
 		handleInfoRefs(w, r, bareRepo, service)
 

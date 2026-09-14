@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/cache"
 )
 
 func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
@@ -231,5 +232,15 @@ func TestAdoptBaselineWithRetry_DoesNotRetryASourceThatServesOnlyTheSnapshot(t *
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("attempts = %d, want 1", got)
+	}
+}
+
+func TestTriggerFetchRetryDelayOutlastsTheCacheFreshnessWindow(t *testing.T) {
+	window := cache.DefaultConfig().FetchFreshWindow
+
+	if triggerFetchRetryDelay <= window {
+		t.Errorf("retry delay %s does not outlast the cache's %s freshness window, "+
+			"so a retry reads the same refs the first attempt did and the push race stays open",
+			triggerFetchRetryDelay, window)
 	}
 }

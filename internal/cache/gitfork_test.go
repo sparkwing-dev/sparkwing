@@ -326,6 +326,7 @@ func TestBackgroundFetchSkipsARepoALockedHandlerHolds(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(repoDir, name+".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		bgFetch.markRequested(name + ".git")
 	}
 
 	fetched := make(chan string, 8)

@@ -23,6 +23,7 @@ func startBackgroundFetch(t *testing.T, interval time.Duration) {
 
 func TestBackgroundFetchWaitsForTheHandlerLockOnTheSameRepo(t *testing.T) {
 	repoURL, _, _ := gitcacheFixture(t)
+	bgFetch.markRequested(stateKey(repoHash(repoURL)))
 
 	started := make(chan struct{}, 1)
 	old := mirrorFetch

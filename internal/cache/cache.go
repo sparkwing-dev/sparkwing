@@ -26,6 +26,9 @@ type Config struct {
 
 	ProxyDir string
 
+	// FetchInterval is how often the keep-warm pass refreshes mirrors a
+	// request touched in the last hour. Zero, the default, turns the pass off,
+	// and every mirror then refreshes when a clone reads its refs.
 	FetchInterval time.Duration
 
 	FetchFreshWindow time.Duration
@@ -78,8 +81,7 @@ func DefaultConfig() Config {
 		Addr:             ":8090",
 		DataDir:          "/data",
 		ProxyDir:         "/data/proxy",
-		FetchInterval:    30 * time.Second,
-		FetchFreshWindow: 15 * time.Second,
+		FetchFreshWindow: 10 * time.Second,
 		RecloneCooldown:  1 * time.Hour,
 		ProxyCacheTTL:    10 * time.Minute,
 		ProxyMaxAge:      7 * 24 * time.Hour,
@@ -127,12 +129,8 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ProxyDir == "" {
 		cfg.ProxyDir = filepath.Join(cfg.DataDir, "proxy")
 	}
-	if cfg.FetchInterval <= 0 {
-		cfg.FetchInterval = 30 * time.Second
-	}
-
 	if cfg.FetchFreshWindow == 0 {
-		cfg.FetchFreshWindow = 15 * time.Second
+		cfg.FetchFreshWindow = 10 * time.Second
 	}
 	if cfg.RecloneCooldown == 0 {
 		cfg.RecloneCooldown = 1 * time.Hour

@@ -20,6 +20,28 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cache (Breaking):** The gitcache refreshes a mirror when a clone reads its
+  refs, and no longer polls every mirror on a timer. A run triggered seconds
+  after a push now checks out that push instead of being told the ref is not
+  ours: `git fetch <sha>` reads `info/refs` first, so the commit is in the
+  mirror by the time `git upload-pack` answers. The refresh runs only for
+  `git-upload-pack` and only outside `FETCH_FRESH_WINDOW`, which bounds what
+  any caller can spend to one origin fetch per repository per window; that
+  default drops from `15s` to `10s`. `FETCH_INTERVAL` (`--fetch-interval`) now
+  defaults to `0`, which turns the background pass off; set it to opt in to a
+  keep-warm pass that refreshes only mirrors a request touched in the last
+  hour, and whose failures now back off from the interval and double to ten
+  minutes instead of retrying every cycle. `sparkwing.gitcache.fetch_duration`
+  gains `reason` (`on_demand`/`keep_warm`) and `failed` labels. A cache started
+  without `--fetch-interval` stops polling on upgrade; pass `--fetch-interval
+  30s` to keep the old cadence.
+
+- **runner:** The trigger loop waits 15 seconds between `not our ref` retries
+  instead of 10, so the second attempt falls outside the cache's freshness
+  window and reads refreshed refs rather than the ones the first attempt saw.
+
 ### Security
 
 - **cli:** A `--working-tree` trigger, and a `sparkwing run --sw-fleet`

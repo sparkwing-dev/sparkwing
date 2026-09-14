@@ -356,7 +356,10 @@ var (
 
 var (
 	triggerFetchMaxAttempts = 3
-	triggerFetchRetryDelay  = 10 * time.Second
+	// safety: the cache refreshes a mirror at most once per freshness window
+	// (cache.DefaultConfig().FetchFreshWindow, ten seconds), so a retry inside
+	// that window reads the same refs and the attempt is spent for nothing.
+	triggerFetchRetryDelay = 15 * time.Second
 )
 
 const notOurRefSubstr = "not our ref"

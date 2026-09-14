@@ -91,8 +91,9 @@ are in [api-reference.md](api-reference.md).
 ### Cache
 
 Git HTTP server, blob store, and package proxy. Mirrors bare repositories
-from GitHub with a background fetch loop (every 30 seconds). Serves git
-clones over HTTP so runners do not need SSH keys.
+from GitHub, refreshing a mirror when a clone reads its refs and at most
+once per freshness window. Serves git clones over HTTP so runners do not
+need SSH keys.
 
 Also stores:
 
