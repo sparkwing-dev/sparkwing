@@ -47,11 +47,11 @@ func TestExpiredNodeClaimCannotBeRevivedOrStarted(t *testing.T) {
 	s := storetest.Open(t)
 	createRunAndReadyNode(t, s, "run-expired", "build")
 	claimant := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
-	n, err := s.ClaimNextReadyNode(ctx, claimant, "agent:box-a:1", time.Millisecond, nil)
+	n, err := s.ClaimNextReadyNode(ctx, claimant, "agent:box-a:1", time.Minute, nil)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireNodeClaim(t, s, n.RunID, n.NodeID)
 	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
 		Claimant: claimant, HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,

@@ -17,8 +17,11 @@ import (
 
 func TestPoolBinding_ServesRequestsWhileTheBindingIsBuilt(t *testing.T) {
 	client := fake.NewSimpleClientset()
+	// safety: the config read parks here, so every request in the first round
+	// lands while the binding is genuinely half-built.
+	release := make(chan struct{})
 	client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
-		time.Sleep(50 * time.Millisecond)
+		<-release
 		return false, nil, nil
 	})
 
@@ -36,13 +39,34 @@ func TestPoolBinding_ServesRequestsWhileTheBindingIsBuilt(t *testing.T) {
 		s.pool.run(ctx, s.logger)
 	}()
 
+	hammerPoolList(t, s)
+	close(release)
+	hammerPoolList(t, s)
+
+	cancel()
+	stopped, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+	select {
+	case <-ran:
+	case <-stopped.Done():
+		t.Fatal("pool run did not return after cancellation")
+	}
+
+	rec := httptest.NewRecorder()
+	s.handlePoolList(rec, httptest.NewRequest(http.MethodGet, "/api/v1/pool", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pool list once the binding is built = %d, want 200", rec.Code)
+	}
+}
+
+func hammerPoolList(t *testing.T, s *Server) {
+	t.Helper()
 	var wg sync.WaitGroup
-	deadline := time.Now().Add(200 * time.Millisecond)
 	for range 20 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for time.Now().Before(deadline) {
+			for range 50 {
 				rec := httptest.NewRecorder()
 				s.handlePoolList(rec, httptest.NewRequest(http.MethodGet, "/api/v1/pool", nil))
 				if rec.Code != http.StatusOK && rec.Code != http.StatusServiceUnavailable {
@@ -53,11 +77,4 @@ func TestPoolBinding_ServesRequestsWhileTheBindingIsBuilt(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-
-	cancel()
-	select {
-	case <-ran:
-	case <-time.After(5 * time.Second):
-		t.Fatal("pool run did not return after cancellation")
-	}
 }

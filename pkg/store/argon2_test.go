@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -37,43 +38,56 @@ func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
 	})
 
+	const (
+		hashes = 16
+		want   = 2
+	)
 	var inFlight, peak atomic.Int64
-	argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
-		n := inFlight.Add(1)
-		for {
-			seen := peak.Load()
-			if n <= seen || peak.CompareAndSwap(seen, n) {
-				break
+	synctest.Test(t, func(t *testing.T) {
+		// safety: the bubble's Wait returns only once every hash is parked,
+		// either in the fake or on the semaphore, so the peak is read from a
+		// settled state rather than from whichever goroutines happened to be
+		// scheduled first.
+		release := make(chan struct{})
+		argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+			n := inFlight.Add(1)
+			for {
+				seen := peak.Load()
+				if n <= seen || peak.CompareAndSwap(seen, n) {
+					break
+				}
 			}
+			<-release
+			inFlight.Add(-1)
+			return make([]byte, keyLen)
 		}
-		time.Sleep(20 * time.Millisecond)
-		inFlight.Add(-1)
-		return make([]byte, keyLen)
-	}
 
-	const want = 2
-	if got := SetArgon2MemoryBudget(want * Argon2HashBytes); got != want {
-		t.Fatalf("SetArgon2MemoryBudget returned %d, want %d", got, want)
-	}
+		if got := SetArgon2MemoryBudget(want * Argon2HashBytes); got != want {
+			t.Fatalf("SetArgon2MemoryBudget returned %d, want %d", got, want)
+		}
 
-	var wg sync.WaitGroup
-	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := hashPassword("correct horse battery staple"); err != nil {
-				t.Errorf("hashPassword: %v", err)
-			}
-		}()
-	}
-	wg.Wait()
+		var wg sync.WaitGroup
+		for range hashes {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := hashPassword("correct horse battery staple"); err != nil {
+					t.Errorf("hashPassword: %v", err)
+				}
+			}()
+		}
+		synctest.Wait()
 
-	if got := peak.Load(); got > want {
-		t.Fatalf("peak concurrent hashes = %d, want at most %d", got, want)
-	}
-	if got := peak.Load(); got < want {
-		t.Fatalf("peak concurrent hashes = %d, want the full budget used", got)
-	}
+		if got := peak.Load(); got > want {
+			t.Errorf("peak concurrent hashes = %d, want at most %d", got, want)
+		}
+		if got := peak.Load(); got < want {
+			t.Errorf("peak concurrent hashes = %d, want the full budget used", got)
+		}
+
+		close(release)
+		wg.Wait()
+	})
 }
 
 func TestSetArgon2MemoryBudgetIgnoresNonPositive(t *testing.T) {

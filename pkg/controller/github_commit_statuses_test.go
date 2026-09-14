@@ -34,14 +34,39 @@ type recordedGitHubStatus struct {
 }
 
 type lockedBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
+	mu      sync.Mutex
+	b       bytes.Buffer
+	waiting map[string]chan struct{}
 }
 
 func (b *lockedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.b.Write(p)
+	n, err := b.b.Write(p)
+	for sub, ch := range b.waiting {
+		if strings.Contains(b.b.String(), sub) {
+			close(ch)
+			delete(b.waiting, sub)
+		}
+	}
+	return n, err
+}
+
+// safety: the writer of a log line is the goroutine under test, so a test that
+// needs the line waits on this channel rather than reading the buffer again.
+func (b *lockedBuffer) await(sub string) <-chan struct{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := make(chan struct{})
+	if strings.Contains(b.b.String(), sub) {
+		close(ch)
+		return ch
+	}
+	if b.waiting == nil {
+		b.waiting = map[string]chan struct{}{}
+	}
+	b.waiting[sub] = ch
+	return ch
 }
 
 func (b *lockedBuffer) String() string {
@@ -1008,16 +1033,17 @@ func TestGitHubCommitStatusFailureDoesNotRejectWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	failureLogged := logs.await("github commit status update failed")
 	select {
 	case <-requests:
 	case <-time.After(2 * time.Second):
 		t.Fatal("github status request did not arrive")
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for !strings.Contains(logs.String(), "github commit status update failed") && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if !strings.Contains(logs.String(), "github commit status update failed") {
+	logged, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+	select {
+	case <-failureLogged:
+	case <-logged.Done():
 		t.Fatalf("failure was not logged: %s", logs.String())
 	}
 

@@ -51,6 +51,22 @@ func executorOffer(t *testing.T, s *store.Store, identity store.ClaimIdentity, n
 	return result
 }
 
+func setOfferedAt(t *testing.T, s *store.Store, holderID string, at int64) {
+	t.Helper()
+	res, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE node_claim_offers SET offered_at = ? WHERE holder_id = ?`), at, holderID)
+	if err != nil {
+		t.Fatalf("set the offer time for %s: %v", holderID, err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("count the offers restamped for %s: %v", holderID, err)
+	}
+	if changed != 1 {
+		t.Fatalf("offers restamped for %s = %d, want 1", holderID, changed)
+	}
+}
+
 func TestExecutorSelectedEventUsesPublicAttribution(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -410,7 +426,6 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 	if got := executorOffer(t, s, first, "zeta", "holder-z", "reservation-z", "run", "work", 0); !got.Pending {
 		t.Fatalf("first offer = %+v", got)
 	}
-	time.Sleep(time.Millisecond)
 	if got := executorOffer(t, s, second, "alpha", "holder-a", "reservation-a", "run", "work", 0); !got.Pending {
 		t.Fatalf("second offer = %+v", got)
 	}
@@ -418,6 +433,8 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), stamp); err != nil {
 		t.Fatal(err)
 	}
+	setOfferedAt(t, s, "holder-z", stamp)
+	setOfferedAt(t, s, "holder-a", stamp+int64(time.Second))
 	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
 	if err != nil || result.Revoked || result.Pending {
 		t.Fatalf("finalize = %+v, %v", result, err)

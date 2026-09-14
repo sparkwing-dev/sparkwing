@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -442,7 +443,7 @@ func TestExpositionParsesAndNamesTheDocumentedSet(t *testing.T) {
 	}
 }
 
-func TestReaperAndCreditSamplerFillTheOperationalSeries(t *testing.T) {
+func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	restoreGlobals(t)
 
 	ctx := context.Background()
@@ -472,38 +473,70 @@ func TestReaperAndCreditSamplerFillTheOperationalSeries(t *testing.T) {
 	claimWithLabels(t, api.URL, "pool-a", []string{"zone=b"})
 
 	srv.sampleCreditLedger(ctx)
-	reaperCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		srv.runReaper(reaperCtx, 5*time.Millisecond)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+	srv.sampleOperationalSeries(ctx)
 
 	want := map[string]float64{
 		`sparkwing_queue_depth{state="waiting"}`:             1,
 		`sparkwing_credits_granted_micro_total{kind="free"}`: 4_000_000,
 		`sparkwing_runners_live{label_set="zone=b"}`:         1,
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		body := scrapeRegistry(t)
-		settled := true
-		for series, v := range want {
-			if got, ok := sampleValue(body, series); !ok || got != v {
-				settled = false
-			}
+	body := scrapeRegistry(t)
+	for _, series := range slices.Sorted(maps.Keys(want)) {
+		got, ok := sampleValue(body, series)
+		if !ok || got != want[series] {
+			t.Errorf("%s = %v (reported %v), want %v:\n%s", series, got, ok, want[series], body)
 		}
-		if settled {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the samplers never reported %v:\n%s", slices.Sorted(maps.Keys(want)), body)
-		}
-		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestReaperSamplesTheOperationalSeries(t *testing.T) {
+	restoreGlobals(t)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	setup := context.Background()
+	if err := st.CreateRun(setup, store.Run{
+		ID: "run-reaper-sweep", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := st.CreateNode(setup, store.Node{
+		RunID: "run-reaper-sweep", NodeID: "node-a", Status: "pending",
+	}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	srv := New(st, nil)
+	const interval = time.Second
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			srv.runReaper(ctx, interval)
+		}()
+
+		// safety: the bubble's clock only moves once every goroutine is
+		// parked, so this deadline carries the reaper past exactly one tick
+		// and the Wait that follows returns when that sweep has finished.
+		swept, done := context.WithTimeout(ctx, 2*interval)
+		defer done()
+		<-swept.Done()
+		synctest.Wait()
+
+		cancel()
+		<-stopped
+	})
+
+	body := scrapeRegistry(t)
+	const series = `sparkwing_queue_depth{state="waiting"}`
+	if got, ok := sampleValue(body, series); !ok || got != 1 {
+		t.Fatalf("%s = %v (reported %v) after a reaper sweep, want 1:\n%s", series, got, ok, body)
 	}
 }
 
