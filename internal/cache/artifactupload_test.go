@@ -389,6 +389,13 @@ func ceilingFixture(t *testing.T, cfg objectguard.CeilingConfig) {
 	cfg.Subject, cfg.Remedy = storeCeilingSubject, storeCeilingRemedy
 	storeCeiling = objectguard.NewCeiling(cfg)
 	t.Cleanup(func() {
+		// safety: a measurement the test started walks these package
+		// variables on its own goroutine, so they are restored only once it
+		// has finished.
+		deadline := time.Now().Add(10 * time.Second)
+		for measureOnce.Running() && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
 		storeCeiling = previous
 		artifactsDir, cacheDir, uploadsDir = oldArtifacts, oldCache, oldUploads
 	})
