@@ -268,6 +268,9 @@ func cleanReport() (string, error) {
 }
 
 func TestRunNpmAudit_RetriesATransientRegistryAndAcceptsALaterAnswer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 9.0s of real work; the fast class runs under -short")
+	}
 	calls := stubNpmAuditRunner(t, unreachableRegistry, unreachableRegistry, cleanReport)
 	verdict, err := runNpmAudit(t.Context())
 	if err != nil {
@@ -282,6 +285,9 @@ func TestRunNpmAudit_RetriesATransientRegistryAndAcceptsALaterAnswer(t *testing.
 }
 
 func TestRunNpmAudit_StopsAtTheAttemptCeilingAndReportsUnavailable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 9.0s of real work; the fast class runs under -short")
+	}
 	calls := stubNpmAuditRunner(t, unreachableRegistry)
 	_, err := runNpmAudit(t.Context())
 	if !errors.Is(err, errNpmRegistryUnavailable) {

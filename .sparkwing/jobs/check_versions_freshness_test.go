@@ -404,6 +404,9 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 }
 
 func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	repo := seedReleaseRepo(t)
 	hooks := filepath.Join(t.TempDir(), "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {

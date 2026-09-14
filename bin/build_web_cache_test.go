@@ -109,6 +109,9 @@ func (f webBuildFixture) builds(t *testing.T) int {
 }
 
 func TestWebBuildReuseSkipsUnchangedFrontendForGoEdits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newWebBuildFixture(t)
 	f.mustRun(t)
 	info, err := os.Stat(filepath.Join(f.root, "internal/web/next-out/index.html"))
@@ -131,6 +134,9 @@ func TestWebBuildReuseSkipsUnchangedFrontendForGoEdits(t *testing.T) {
 }
 
 func TestWebBuildReuseInvalidatesContentAndBuildInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 4.3s of real work; the fast class runs under -short")
+	}
 	cases := map[string]func(*testing.T, webBuildFixture) []string{
 		"source bytes with preserved mtime": func(t *testing.T, f webBuildFixture) []string {
 			p := filepath.Join(f.root, "web/src/page.tsx")
@@ -203,6 +209,9 @@ func TestWebBuildReuseInvalidatesContentAndBuildInputs(t *testing.T) {
 }
 
 func TestWebBuildReuseValidatesCompleteExport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s of real work; the fast class runs under -short")
+	}
 	for _, mode := range []string{"missing asset", "edited asset", "missing index", "extra asset"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newWebBuildFixture(t)
@@ -231,6 +240,9 @@ func TestWebBuildReuseValidatesCompleteExport(t *testing.T) {
 }
 
 func TestWebBuildFailuresCannotLeaveReusableProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
 	for _, mode := range []string{"failed build", "inputs changed during build"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newWebBuildFixture(t)
@@ -264,6 +276,9 @@ func TestWebBuildProofDoesNotStoreEnvironmentValues(t *testing.T) {
 }
 
 func TestWebBuildSerializesConcurrentReuse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
+	}
 	f := newWebBuildFixture(t)
 	log, err := os.CreateTemp(t.TempDir(), "first-build")
 	if err != nil {
@@ -313,6 +328,9 @@ func TestWebBuildSerializesConcurrentReuse(t *testing.T) {
 }
 
 func TestWebBuildNormalizesProductionAndRebuildsWithoutReuse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	f := newWebBuildFixture(t)
 	f.mustRun(t)
 	f.mustRun(t, "NODE_ENV=development")
@@ -330,6 +348,9 @@ func TestWebBuildNormalizesProductionAndRebuildsWithoutReuse(t *testing.T) {
 }
 
 func TestWebBuildCustomNodeConfigurationFallsBackToBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	for _, config := range []string{"NODE_OPTIONS=--max-old-space-size=256", `WEB_TEST_NPM_CONFIG={"node-options":"--max-old-space-size=256"}`, `WEB_TEST_NPM_CONFIG={"script-shell":"/bin/sh"}`} {
 		t.Run(config, func(t *testing.T) {
 			f := newWebBuildFixture(t)

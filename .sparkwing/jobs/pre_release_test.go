@@ -11,6 +11,9 @@ import (
 )
 
 func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.3s of real work; the fast class runs under -short")
+	}
 	const want = "npx --yes markdownlint-cli2@0.23.2"
 	if markdownlintCommand != want {
 		t.Fatalf("markdownlint command = %q, want exactly %q", markdownlintCommand, want)

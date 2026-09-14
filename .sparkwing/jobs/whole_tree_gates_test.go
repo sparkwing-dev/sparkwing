@@ -19,6 +19,9 @@ var wholeTreeGates = []struct {
 const wholeTreeGateBudget = 30 * time.Second
 
 func TestThisRepoSatisfiesItsOwnWholeTreeGates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	root := sourceTreeRoot()
 	if root == "" {
 		t.Fatal("could not locate the repository root from this file's compile-time path; " +

@@ -175,6 +175,9 @@ func measureGreen(t *testing.T, args ...string) (installToGreenResult, installTo
 }
 
 func TestInstallToGreenReportsEveryPhaseOfTheDemoPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	_, report := measureGreen(t)
 	if !report.Green {
 		t.Error("a successful run_finish record was not reported as green")
@@ -207,6 +210,9 @@ func TestInstallToGreenReportsEveryPhaseOfTheDemoPath(t *testing.T) {
 }
 
 func TestInstallToGreenRecordsTheContextTheNumberNeeds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	_, report := measureGreen(t)
 	if report.Cores <= 0 {
 		t.Errorf("report claims %d cores", report.Cores)
@@ -225,6 +231,9 @@ func TestInstallToGreenRecordsTheContextTheNumberNeeds(t *testing.T) {
 }
 
 func TestInstallToGreenPinsModuleResolutionAndNamesWhatItReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	_, reset := measureGreen(t)
 	if reset.GoProxy != "https://proxy.golang.org,direct" {
 		t.Errorf("a reset run resolved through %q, not the public default", reset.GoProxy)
@@ -254,6 +263,9 @@ func TestInstallToGreenPinsModuleResolutionAndNamesWhatItReset(t *testing.T) {
 }
 
 func TestInstallToGreenMeasuresAgainstACleanHomeAndAnEmptyModuleCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	result, _ := measureGreen(t)
 
 	callerHome := os.Getenv("HOME")
@@ -286,6 +298,9 @@ func TestInstallToGreenMeasuresAgainstACleanHomeAndAnEmptyModuleCache(t *testing
 }
 
 func TestInstallToGreenLeavesTheCallersGitBindingAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git is not on PATH: %v", err)
 	}
@@ -389,6 +404,9 @@ func gitBindingValue(name, repo string) string {
 }
 
 func TestInstallToGreenResetsEveryGitBindingVariable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
+	}
 	for _, name := range gitBindingNames(t) {
 		t.Run(name, func(t *testing.T) {
 			operatorRepo := operatorRepository(t)
@@ -410,6 +428,9 @@ func TestInstallToGreenResetsEveryGitBindingVariable(t *testing.T) {
 }
 
 func TestInstallToGreenRefusesToCallAnUnprovenRunGreen(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	for _, stubRun := range []string{"silent", "split"} {
 		result := runInstallToGreen(t, installToGreenOptions{stubRun: stubRun, args: []string{"--output", "json"}})
 		if result.err == nil {
@@ -469,6 +490,9 @@ func TestInstallToGreenSeparatesAnUnreachableProxyFromASlowDemoPath(t *testing.T
 }
 
 func TestInstallToGreenFailsAnExplicitTargetAndNamesTheDominantPhase(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	result := runInstallToGreen(t, installToGreenOptions{stubRun: "green", args: []string{"--output", "json", "--target-seconds", "0"}})
 	if result.err == nil {
 		t.Fatalf("harness met a zero-second target: %s", result.stdout)
@@ -506,6 +530,9 @@ func TestInstallToGreenPointsACandidateBuildAtTheWorktreeSDK(t *testing.T) {
 }
 
 func TestInstallToGreenRemovesItsScratchTree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	result, _ := measureGreen(t)
 	left, err := os.ReadDir(result.tmpDir)
 	if err != nil {
@@ -521,6 +548,9 @@ func TestInstallToGreenRemovesItsScratchTree(t *testing.T) {
 // pointing the module at the worktree. This fixture reproduces that failure
 // against the real toolchain rather than trusting the shape of the fix.
 func TestInstallToGreenTidiesSoACandidateDependencyResolves(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	goBinary, err := exec.LookPath("go")
 	if err != nil {
 		t.Skipf("go is not on PATH: %v", err)
