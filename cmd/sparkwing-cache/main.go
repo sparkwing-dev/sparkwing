@@ -102,7 +102,7 @@ func run(args []string) error {
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 
-	egressCfg, err := readEgress()
+	egressCfg, _, err := readEgress()
 	if err != nil {
 		return err
 	}

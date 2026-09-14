@@ -228,7 +228,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
 	}
-	egressCfg, err := readEgress()
+	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
 		return err
 	}
@@ -284,8 +284,8 @@ func run(args []string) error {
 		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
 		RequestsPerTokenMinute:    fs.Changed(flagRequestsPerTokenMinute),
 		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
-		MaxLogStreamsPerPrincipal: egressNamed(fs, egress.FlagMaxLogStreams, egressCfg.MaxStreamsPerPrincipal),
-		MaxDownloadsPerPrincipal:  egressNamed(fs, egress.FlagMaxDownloads, egressCfg.MaxDownloadsPerPrincipal),
+		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
+		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
 	})
 	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
@@ -438,8 +438,9 @@ func run(args []string) error {
 
 // safety: a runner honoring a suggestion longer than these windows stops
 // counting as live, and local-first placement silently stops preferring it.
-// The margin is a whole second poll, not a hair, because a runner that wakes
-// one request late must still land inside the window.
+// The margin is a whole second poll, because enforcement never names a wait
+// longer than one suggestion and a refused runner must still land inside the
+// window on its second try.
 const idleClaimPollMargin = 2
 
 // safety: one name per flag, because the profile has to ask the flag set
@@ -497,13 +498,6 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	}
 	set.EnforceIdleClaimPoll = profile.EnforceIdleClaimPoll
 	return set
-}
-
-// safety: the egress budgets fold their environment fallback into the flag's
-// default before it is parsed, so a value that arrived either way is what the
-// config already holds, and only the flag can spell an explicit zero.
-func egressNamed(fs *flag.FlagSet, flagName string, value int) bool {
-	return fs.Changed(strings.TrimPrefix(flagName, "--")) || value != 0
 }
 
 func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
