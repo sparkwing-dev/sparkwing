@@ -326,6 +326,12 @@ func (r *Runner) claimNode(
 ) (store.NodeClaimFence, store.CPUClass, bool) {
 	holderID := "k8s-job:" + jobName
 	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true)
+	// safety: only the operator's metered pool may claim it sizes a node to its
+	// cpu class, so an unmetered installation claims the node plainly and gets
+	// the pod shape it always had.
+	if errors.Is(err, store.ErrLockHeld) {
+		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false)
+	}
 	if errors.Is(err, client.ErrControllerLacksRoute) {
 		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
 			"run_id", req.RunID, "node_id", req.NodeID)

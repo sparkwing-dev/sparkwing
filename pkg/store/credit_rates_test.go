@@ -642,3 +642,49 @@ func TestAnUnmeteredClaimStillTakesALargeNode(t *testing.T) {
 		t.Fatalf("claimed %s, want the eight-core node", n.RunID)
 	}
 }
+
+// Only the operator's metered pool may claim it sizes a node to its class, so
+// a customer's local agent can never route a class node to itself.
+func TestANamedClaimSizingToClassNeedsAMeteredToken(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	fundLedger(t, s, 10_000)
+	_, tok, err := s.CreateTokenWith(ctx, "agent:laptop", store.TokenKindRunner,
+		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{})
+	if err != nil {
+		t.Fatalf("mint a token: %v", err)
+	}
+	local := store.ClaimIdentity{Principal: "agent:laptop", TokenPrefix: tok.Prefix}
+	readyNodeWithCores(t, s, "run-big", "build", 8)
+
+	_, err = s.ClaimNamedNode(ctx, local, "run-big", "build", "laptop-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true})
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("an unmetered claim sizing to the class = %v, want a refusal", err)
+	}
+	if _, err := s.ClaimNamedNode(ctx, local, "run-big", "build", "laptop-1", time.Minute,
+		store.NamedClaimOptions{}); err != nil {
+		t.Fatalf("an unmetered claim of the same node: %v", err)
+	}
+}
+
+// A small node behind a queue of large ones is still reachable: the classes a
+// warm runner may not take never enter the scan window.
+func TestAWarmClaimReachesASmallNodeBehindManyLargeOnes(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 100_000)
+	for i := range 600 {
+		readyNodeWithCores(t, s, fmt.Sprintf("run-big-%03d", i), "build", 8)
+	}
+	readyNodeWithCores(t, s, "run-small", "build", 2)
+
+	n, err := s.ClaimNextReadyNode(ctx, claimant, "pool-1", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("claim behind 600 large nodes: %v", err)
+	}
+	if n.RunID != "run-small" {
+		t.Fatalf("claimed %s, want the two-core node", n.RunID)
+	}
+}

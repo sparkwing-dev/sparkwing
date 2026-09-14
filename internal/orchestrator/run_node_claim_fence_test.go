@@ -151,7 +151,7 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 	defer srv.Close()
 
 	claimed, err := client.NewWithToken(srv.URL, nil, token).
-		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-1", time.Minute, true)
+		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("dispatcher claim: %v", err)
 	}

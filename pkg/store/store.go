@@ -4945,14 +4945,19 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	if now.IsZero() {
 		now = time.Now()
 	}
+	class, err := readyCPUClassTx(ctx, tx, summary.Resources)
+	if err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(
 		ctx,
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
 		                  placement_hold_from = COALESCE(placement_hold_from, ?),
 		                  offer_started_at = COALESCE(offer_started_at, ?),
+		                  credit_cpu_class = ?,
 		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
 		  WHERE run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), now.UnixNano(), target, runID, nodeID,
+		now.UnixNano(), now.UnixNano(), now.UnixNano(), class, target, runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -5167,6 +5172,25 @@ type claimCandidate struct {
 	decision placementDecision
 }
 
+// safety: the class a node becomes ready at is stamped on its row so the queue
+// read can leave the classes a warm runner may not have out of the scan window
+// entirely. A class no table prices stamps zero, which keeps the node scannable
+// so the claim that prices it fails it with the class to add.
+func readyCPUClassTx(ctx context.Context, tx *storeTx, charge ExecutorResource) (int64, error) {
+	table, err := creditRateTableTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	class, err := table.ClassForResource(charge)
+	if err != nil {
+		if errors.Is(err, ErrUnpricedCPUClass) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return class.Cores, nil
+}
+
 // safety: an unmetered claimant, which is every local claim-mode agent, gets a
 // zero filter and the whole queue.
 func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (warmClassFilter, error) {
@@ -5182,7 +5206,7 @@ func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (wa
 	if err != nil {
 		return warmClassFilter{}, err
 	}
-	return warmClassFilter{table: table, warmCores: cores, active: true}, nil
+	return warmClassFilter{table: table, warmCores: cores, metered: true}, nil
 }
 
 // safety: a warm runner shares one machine with its neighbors, so a node whose
@@ -5192,11 +5216,13 @@ func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (wa
 type warmClassFilter struct {
 	table     CreditRateTable
 	warmCores int64
-	active    bool
+	// safety: the operator's own pool token is the only one the ladder governs
+	// and the only one that may claim it sizes an executor to a class.
+	metered bool
 }
 
 func (f warmClassFilter) refuses(ctx context.Context, q rowQuerier, runID, nodeID string) (bool, error) {
-	if !f.active {
+	if !f.metered {
 		return false, nil
 	}
 	charge, err := nodeChargeTx(ctx, q, runID, nodeID)
@@ -5210,7 +5236,7 @@ func (f warmClassFilter) refuses(ctx context.Context, q rowQuerier, runID, nodeI
 // prices it fails the node with the class to add and a filter that hid the node
 // would leave it queued forever.
 func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
-	if !f.active {
+	if !f.metered {
 		return false
 	}
 	class, err := f.table.ClassForResource(charge)
@@ -5226,7 +5252,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 	var mismatched []nodeKey
 	var cursor *claimCandidate
 	for range claimScanRounds {
-		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor)
+		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -5261,8 +5287,17 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 	return nil, mismatched, nil
 }
 
-func (s *Store) readClaimCandidates(ctx context.Context, coordinatorID string, after *claimCandidate) ([]claimCandidate, error) {
+func (s *Store) readClaimCandidates(
+	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter,
+) ([]claimCandidate, error) {
 	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
+	// safety: the stamped class keeps a queue of large nodes out of the scan
+	// window, so a small node behind thousands of them is still reachable.
+	classClause := ""
+	if warm.metered {
+		classClause = ` AND credit_cpu_class <= ?`
+		args = append(args, warm.warmCores)
+	}
 	keyset := ""
 	if after != nil {
 		keyset = ` AND (ready_at > ? OR (ready_at = ? AND (run_id > ? OR (run_id = ? AND node_id > ?))))`
@@ -5275,7 +5310,7 @@ func (s *Store) readClaimCandidates(ctx context.Context, coordinatorID string, a
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+keyset+`
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+classClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {

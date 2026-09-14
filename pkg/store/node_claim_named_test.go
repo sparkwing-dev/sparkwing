@@ -15,7 +15,7 @@ func TestClaimNamedNodeAwardsAnUnqueuedNode(t *testing.T) {
 	ctx := context.Background()
 	seedClaimedNode(t, s, "run-named", "build")
 
-	n, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-named", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	n, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-named", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{})
 	if err != nil {
 		t.Fatalf("ClaimNamedNode: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestClaimNamedNodeRefusesANodeAnotherHolderHas(t *testing.T) {
 		t.Fatalf("agent claim: %v", err)
 	}
 
-	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-taken", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-taken", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{})
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("ClaimNamedNode on a held node = %v, want ErrLockHeld", err)
 	}
@@ -73,7 +73,7 @@ func TestClaimNamedNodeRefusesAFinishedNode(t *testing.T) {
 		t.Fatalf("FinishNode: %v", err)
 	}
 
-	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-done", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-done", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{})
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("ClaimNamedNode on a finished node = %v, want ErrLockHeld", err)
 	}
@@ -82,7 +82,7 @@ func TestClaimNamedNodeRefusesAFinishedNode(t *testing.T) {
 func TestClaimNamedNodeReportsANodeThatDoesNotExist(t *testing.T) {
 	s := storetest.Open(t)
 	_, err := s.ClaimNamedNode(context.Background(), store.ClaimIdentity{},
-		"run-missing", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+		"run-missing", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{})
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("ClaimNamedNode on an absent node = %v, want ErrNotFound", err)
 	}
@@ -97,7 +97,7 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-billed", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-billed", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{}); err != nil {
 		t.Fatalf("ClaimNamedNode: %v", err)
 	}
 	charges, err := s.ListCreditCharges(ctx, 10)
@@ -127,7 +127,7 @@ func TestClaimNamedNodeIsRefusedWhenTheBalanceCannotCoverTheReservation(t *testi
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	seedClaimedNode(t, s, "run-broke-named", "build")
 
-	_, err := s.ClaimNamedNode(ctx, claimant, "run-broke-named", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimNamedNode(ctx, claimant, "run-broke-named", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{})
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("named claim on an empty ledger = %v, want ErrInsufficientCredits", err)
 	}
@@ -148,7 +148,7 @@ func TestClaimNamedNodeRefusesANodeOfAFinishedRun(t *testing.T) {
 		t.Fatalf("FinishRun: %v", err)
 	}
 
-	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-over", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-over", "build", "k8s-job:sw-1", time.Minute, store.NamedClaimOptions{})
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("ClaimNamedNode on a node of a finished run = %v, want ErrLockHeld", err)
 	}

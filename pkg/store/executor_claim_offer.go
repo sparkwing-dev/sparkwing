@@ -218,7 +218,7 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 			return nil, err
 		}
 		charge := executorNodeChargeFromSnapshot(plan.raw, item.nodeID, profiles[executorPrepareProfileKey(plan.pipeline, item.nodeID)])
-		if warm.active && warm.refusesCharge(charge) {
+		if warm.metered && warm.refusesCharge(charge) {
 			continue
 		}
 		summary := ExecutorSchedulingSummary{

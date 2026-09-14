@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -41,25 +42,14 @@ type NamedClaimOptions struct {
 // opts says what the caller will give the node. A metered caller that does not
 // size its executor to the node's cpu class is refused a class larger than the
 // warm pool serves, exactly as the queue claim passes over one, so naming a
-// node is not a way around the ladder.
+// node is not a way around the ladder. Only a metered token may claim that it
+// sizes to the class, because the metered token is the operator's own pool and
+// a customer's local agent must never route a class node to itself.
 func (s *Store) ClaimNamedNode(
 	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
 	lease time.Duration, opts NamedClaimOptions,
 ) (*Node, error) {
 	lease = clampNodeLease(lease)
-	if !opts.SizesToClass {
-		warm, err := s.warmClassFilter(ctx, claimant)
-		if err != nil {
-			return nil, err
-		}
-		refused, err := warm.refuses(ctx, storeRowQuerier{s}, runID, nodeID)
-		if err != nil {
-			return nil, err
-		}
-		if refused {
-			return nil, ErrLockHeld
-		}
-	}
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
 		return nil, err
@@ -79,6 +69,24 @@ func (s *Store) ClaimNamedNode(
 	}
 	if status == nodeStatusDone || claimedBy.Valid || isTerminalRunStatus(runStatus) {
 		return nil, ErrLockHeld
+	}
+	warm, err := s.warmClassFilter(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
+	if opts.SizesToClass {
+		if !warm.metered {
+			return nil, fmt.Errorf(
+				"%w: sizing a node to its cpu class is the operator's metered pool's claim", ErrLockHeld)
+		}
+	} else {
+		refused, err := warm.refuses(ctx, storeRowQuerier{s}, runID, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if refused {
+			return nil, ErrLockHeld
+		}
 	}
 	candidate := claimCandidate{runID: runID, nodeID: nodeID}
 	decodeCandidateLabels(runID, nodeID, needsJSON, &candidate.needs)
