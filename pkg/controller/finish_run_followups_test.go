@@ -145,19 +145,26 @@ func TestDrainGitHubCommitStatuses_DoesNotInheritASpentBudget(t *testing.T) {
 			finishRunFollowUpTimeout, controllerShutdownBudget)
 	}
 
+	// safety: the spent server posts to a github of its own, so the gate below
+	// can only be opened by the live server's own request.
+	spentGitHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer spentGitHub.Close()
+
 	posted := make(chan struct{}, 4)
 	arrived := make(chan struct{}, 4)
 	release := make(chan struct{})
-	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	liveGitHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		arrived <- struct{}{}
 		<-release
 		posted <- struct{}{}
 		w.WriteHeader(http.StatusCreated)
 	}))
-	defer github.Close()
+	defer liveGitHub.Close()
 
 	spentLogs := &lockedBuffer{}
-	spent := queuedCommitStatusServer(t, github.URL, github.Client(), spentLogs)
+	spent := queuedCommitStatusServer(t, spentGitHub.URL, spentGitHub.Client(), spentLogs)
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := spent.Shutdown(expired); err == nil {
@@ -165,7 +172,7 @@ func TestDrainGitHubCommitStatuses_DoesNotInheritASpentBudget(t *testing.T) {
 	}
 
 	liveLogs := &lockedBuffer{}
-	live := queuedCommitStatusServer(t, github.URL, github.Client(), liveLogs)
+	live := queuedCommitStatusServer(t, liveGitHub.URL, liveGitHub.Client(), liveLogs)
 	// safety: the post is in flight when the gate opens, so the drain has to
 	// wait for it rather than finding the queue already empty.
 	go func() {
