@@ -144,26 +144,31 @@ func run(args []string) error {
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
 			"minute, keyed on the token prefix together with the runner the "+
 			"request names. Past it a claim is answered 429 with a Retry-After "+
-			"naming the refill delay. Zero is unlimited. Work it from the cadence "+
-			"the loop keeps rather than a round number: it polls once every %s "+
-			"while the queue is empty, which is %d requests a minute, and claims "+
-			"once more for each node it starts, so %d covers a runner starting "+
-			"three nodes a poll and %d one that also restarts mid-minute.",
+			"naming the refill delay. Zero is unlimited. A claim that comes back "+
+			"with a node spends nothing: an award is work this controller handed "+
+			"out and the loop re-claims at once, so the budget bounds empty "+
+			"polling, which a runner can do without limit. Work it from that "+
+			"cadence rather than a round number: the loop polls once every %s "+
+			"while the queue is empty, which is %d requests a minute, so %d "+
+			"allows four times that and %d eight.",
 			controller.ClaimPollInterval,
 			controller.CompliantClaimPollsPerMinute(),
 			controller.CompliantClaimPollsPerMinute()*4,
 			controller.CompliantClaimPollsPerMinute()*8))
 	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
-			"rolling minute. The agent liveness heartbeat is never budgeted. "+
-			"Zero is unlimited; %d suits the cadence the shipped runners "+
-			"heartbeat at.", controller.RecommendedHeartbeatsPerMinute))
+			"rolling minute, charged whatever the answer. The agent liveness "+
+			"heartbeat is never budgeted. Zero is unlimited; %d suits the "+
+			"cadence the shipped runners heartbeat at.",
+			controller.RecommendedHeartbeatsPerMinute))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
 		"request budget on every route one token can reach, per rolling minute, "+
 			"keyed on the token prefix. It bounds a caller that varies the runner "+
-			"it says it is, which the per-runner budgets above cannot. The agent "+
-			"liveness heartbeat is never budgeted. Past it a request is answered "+
-			"429 with a Retry-After naming the refill delay. Zero is unlimited.")
+			"it says it is, which the per-runner budgets above cannot. A liveness "+
+			"heartbeat for the agent this token enrolled is never the request "+
+			"that is shed; one naming any other agent is budgeted like the rest. "+
+			"Past the budget a request is answered 429 with a Retry-After naming "+
+			"the refill delay. Zero is unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
 		"request rate, across every caller, past which this controller logs at "+
 			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+
