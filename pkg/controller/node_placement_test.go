@@ -105,10 +105,14 @@ func TestPlacement_CloudRunnerTakesTheNodeAfterTheHold(t *testing.T) {
 	seedReadyNode(t, st, "run-1", "node-a", []string{"location=local"})
 	// safety: the hold runs from the node's hold-from stamp, so moving the
 	// stamp back is the whole hold elapsing without the test waiting for it.
-	if _, err := st.DB().ExecContext(ctx,
+	res, err := st.DB().ExecContext(ctx,
 		`UPDATE nodes SET placement_hold_from = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().Add(-2*time.Minute).UnixNano(), "run-1", "node-a"); err != nil {
+		time.Now().Add(-2*time.Minute).UnixNano(), "run-1", "node-a")
+	if err != nil {
 		t.Fatalf("age the placement hold: %v", err)
+	}
+	if aged, aerr := res.RowsAffected(); aerr != nil || aged != 1 {
+		t.Fatalf("aged rows = %d (err %v), want 1", aged, aerr)
 	}
 
 	claimed, err := c.ClaimNode(ctx, "runner:cloudpod:1", []string{"location=cloud"}, time.Minute, nil)
