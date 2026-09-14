@@ -121,6 +121,9 @@ func TestGitFetchBySHA_FindsACommitPushedAfterTheMirrorWasCloned(t *testing.T) {
 }
 
 func TestGitFetchBySHA_BurstOnOnePushCostsOneOriginFetch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	srv, _, upstream, fetches := gitcacheServerFixture(t)
 
 	sha := pushCommit(t, upstream)

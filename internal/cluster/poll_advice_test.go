@@ -73,6 +73,9 @@ func (a *advisingClaimer) gaps() []time.Duration {
 }
 
 func TestRunPoolLoop_HonoursTheSuggestedPollInterval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	const advice = 80 * time.Millisecond
 	claimer := &advisingClaimer{advice: advice}
 
@@ -144,6 +147,9 @@ func (c *rateLimitedClaimer) gaps() []time.Duration {
 }
 
 func TestRunPoolLoop_BacksOffOnARateLimitedClaim(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	const retryAfter = 60 * time.Millisecond
 	claimer := &rateLimitedClaimer{retryAfter: retryAfter, shed: 3}
 
@@ -175,6 +181,9 @@ func TestRunPoolLoop_BacksOffOnARateLimitedClaim(t *testing.T) {
 }
 
 func TestRunPoolLoop_AStableIdentityLetsTheBudgetBite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)

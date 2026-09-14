@@ -808,6 +808,9 @@ func workspaceSnapshotCommit(t *testing.T, bareRepo, baseSHA, addPath, addConten
 }
 
 func TestAdoptWorkspaceBaseline_ResolvesTheBaselineAStepDiffsAgainst(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	repoParent := t.TempDir()
 	name := sourceurl.ClaimedRepoNameFromURL(testRepoSSH)
 	baseSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, name, "main")

@@ -130,6 +130,9 @@ func TestEnsureToolchainBinaryRefetchesOnDigestMismatch(t *testing.T) {
 }
 
 func TestEnsureToolchainBinaryRefusesAnUnsignedManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 30.0s of real work; the fast class runs under -short")
+	}
 	_, binPath, _ := seedToolchainStore(t, "v9.9.9", releaseFixture("v9.9.9"))
 	sig := filepath.Join(filepath.Dir(binPath), "SHA256SUMS.sig")
 	if err := os.WriteFile(sig, []byte("not a signature"), 0o600); err != nil {
@@ -145,6 +148,9 @@ func TestEnsureToolchainBinaryRefusesAnUnsignedManifest(t *testing.T) {
 // A digest sidecar with no signed manifest is what a local writer can forge; it
 // must not be enough to make the store trust a binary.
 func TestEnsureToolchainBinaryRefusesALocalDigestSidecar(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 30.0s of real work; the fast class runs under -short")
+	}
 	_, binPath, _ := seedToolchainStore(t, "v9.9.9", releaseFixture("v9.9.9"))
 	dir := filepath.Dir(binPath)
 	digest, err := sha256OfFile(binPath)
@@ -277,6 +283,9 @@ func TestEnsureToolchainBinaryAnnouncesARejectedStoreBeforeRefetching(t *testing
 }
 
 func TestToolchainFetchErrorCarriesTheRejectedStoresReason(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 30.0s of real work; the fast class runs under -short")
+	}
 	_, binPath, _ := seedToolchainStore(t, "v9.9.9", releaseFixture("v9.9.9"))
 	if err := os.WriteFile(binPath, []byte("TAMPERED"), 0o700); err != nil {
 		t.Fatal(err)

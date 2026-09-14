@@ -10,6 +10,9 @@ import (
 )
 
 func TestRetiredDashboardNounCannotPerformServiceActions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s of real work; the fast class runs under -short")
+	}
 	for _, args := range [][]string{{"dashboard"}, {"dashboard", "start", "--addr", "127.0.0.1:0"}, {"dashboard", "status"}, {"dashboard", "kill"}, {"dashboard", "stop"}, {"dashboard", "--help"}, {"-o", "json", "dashboard", "start"}, {"--output=plain", "dashboard", "status"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cmd := outputContractCommand(t, args...)
@@ -79,6 +82,9 @@ func assertNoServiceState(t *testing.T, home string) {
 }
 
 func TestServeHelpAndCommandIndexReplaceDashboard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	for _, args := range [][]string{{"serve", "--help", "-o", "json"}, {"serve", "start", "--help", "-o", "json"}, {"-o", "json", "help", "serve", "status"}} {
 		cmd := outputContractCommand(t, args...)
 		out, err := cmd.Output()

@@ -215,6 +215,9 @@ func TestSwitchToolchainIgnoresAHandSetGuardOnASourceBuild(t *testing.T) {
 }
 
 func TestToolchainFetchErrorNamesVersionURLAndRemedy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 30.0s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	withTestUpdateKey(t)
 	prev := updateBaseURL

@@ -11,6 +11,9 @@ import (
 )
 
 func TestXrepoListDescribesEachRepositoryOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)

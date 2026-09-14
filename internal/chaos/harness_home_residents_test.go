@@ -16,6 +16,9 @@ import (
 )
 
 func TestHomeResidentsSeesADetachedProcessOwnedGroupsMiss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
+	}
 	if runtime.GOOS != "linux" {
 		t.Skipf("reading a process environment is unsupported on %s", runtime.GOOS)
 	}

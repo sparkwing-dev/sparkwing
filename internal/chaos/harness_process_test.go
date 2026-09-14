@@ -182,6 +182,9 @@ func TestWatchActorReapsExitedProcessAndRecordsFinalOutput(t *testing.T) {
 }
 
 func TestWatchActorBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	requireProcessGroups(t)
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
@@ -406,6 +409,9 @@ func TestDaemonCleanupFailureRetainsLedgerForRetry(t *testing.T) {
 }
 
 func TestActorCleanupSeparatesOutputDrainFromProcessGroupFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	requireProcessGroups(t)
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
@@ -439,6 +445,9 @@ func TestActorCleanupSeparatesOutputDrainFromProcessGroupFailure(t *testing.T) {
 }
 
 func TestProcessGuardAcceptsSoakScaleLeaderAnchors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.5s of real work; the fast class runs under -short")
+	}
 	requireProcessGroups(t)
 	h, journal := soakScaleHarness(t)
 	defer journal.Close()
@@ -512,6 +521,9 @@ func TestProcessGuardFailsWhenADescendantZombieNeverDrains(t *testing.T) {
 }
 
 func TestProcessGuardFailsWhenALeaderAnchorNeverDrains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	requireProcessGroups(t)
 	h, journal := soakScaleHarness(t)
 	defer journal.Close()
@@ -533,6 +545,9 @@ func TestProcessGuardFailsWhenALeaderAnchorNeverDrains(t *testing.T) {
 }
 
 func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	requireProcessGroups(t)
 	h, journal := soakScaleHarness(t)
 	defer journal.Close()
