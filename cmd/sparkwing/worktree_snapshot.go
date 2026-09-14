@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceidentity"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -86,11 +87,11 @@ func (s *worktreeSnapshot) materialize(ctx context.Context) (string, string, err
 	return checkout, repoURL, nil
 }
 
-func captureWorktreeSnapshot(ctx context.Context, start string) (*worktreeSnapshot, error) {
-	return captureWorktreeSnapshotWithLimits(ctx, start, defaultWorktreeSnapshotLimits)
+func captureWorktreeSnapshot(ctx context.Context, start string, allowedSecretFiles []string) (*worktreeSnapshot, error) {
+	return captureWorktreeSnapshotWithLimits(ctx, start, defaultWorktreeSnapshotLimits, allowedSecretFiles)
 }
 
-func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits) (*worktreeSnapshot, error) {
+func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string) (*worktreeSnapshot, error) {
 	repoRoot, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
@@ -190,6 +191,9 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 		return fail(err)
 	}
 	if err := rejectUnsafeSymlinks(ctx, gitDir, tree); err != nil {
+		return fail(err)
+	}
+	if err := rejectSecretShapedFiles(ctx, gitDir, tree, allowedSecretFiles); err != nil {
 		return fail(err)
 	}
 	fileCount, sourceBytes, err := measureSnapshotTree(ctx, gitDir, tree, limits)
@@ -493,6 +497,71 @@ func splitSnapshotPath(value string) []string {
 		return nil
 	}
 	return strings.Split(value, "/")
+}
+
+const secretShapedFileReport = 10
+
+// safety: the manifest travels to another machine, so a credential in it leaks
+// to whoever runs the job; the named override keeps the decision per file.
+func rejectSecretShapedFiles(ctx context.Context, gitDir, tree string, allowed []string) error {
+	permitted := map[string]bool{}
+	for _, path := range allowed {
+		if normalized := normalizeSnapshotPath(path); normalized != "" {
+			permitted[normalized] = true
+		}
+	}
+	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rlz", "--full-tree", tree)
+	if err != nil {
+		return fmt.Errorf("inspect snapshot manifest: %w", err)
+	}
+	var offenders []string
+	for _, record := range strings.Split(out, "\x00") {
+		meta, path, ok := strings.Cut(record, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) != 4 || fields[1] != "blob" || permitted[path] {
+			continue
+		}
+		if envredact.CredentialFileName(path) {
+			offenders = append(offenders, path+" (name)")
+			continue
+		}
+		size, sizeErr := strconv.ParseInt(fields[3], 10, 64)
+		if sizeErr != nil || !envredact.CredentialFileScannable(path, size) {
+			continue
+		}
+		content, readErr := gitDirOutput(ctx, gitDir, "cat-file", "blob", fields[2])
+		if readErr != nil {
+			return fmt.Errorf("read snapshot file: %w", snapshotGitError(readErr))
+		}
+		if envredact.CredentialFileContent(path, []byte(content)) {
+			offenders = append(offenders, path+" (content)")
+		}
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	listed := offenders
+	if len(listed) > secretShapedFileReport {
+		listed = listed[:secretShapedFileReport]
+	}
+	more := ""
+	if len(offenders) > len(listed) {
+		more = fmt.Sprintf("\n  and %d more", len(offenders)-len(listed))
+	}
+	return fmt.Errorf("working-tree snapshot refuses secret-shaped files:\n  %s%s\n"+
+		"add each to .gitignore, or name it with --allow-secret-file to send it anyway",
+		strings.Join(listed, "\n  "), more)
+}
+
+func normalizeSnapshotPath(path string) string {
+	cleaned := strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
+	for strings.HasPrefix(cleaned, "./") {
+		cleaned = cleaned[2:]
+	}
+	return strings.TrimPrefix(cleaned, "/")
 }
 
 func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {

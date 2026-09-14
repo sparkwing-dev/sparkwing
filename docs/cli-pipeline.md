@@ -587,6 +587,7 @@ separator passes through unchanged.
 | `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
+| `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
@@ -972,6 +973,12 @@ and runs that exact snapshot without pushing to the origin. It
 requires a complete SHA-1 repository; shallow and SHA-256 checkouts
 fail before upload.
 
+A snapshot carrying a secret-shaped file is refused before upload:
+a dotenv, a key or keystore file, or a small configuration file
+whose bytes read as a credential. The refusal names each path.
+Ignore the file, or send it anyway by naming it with
+--allow-secret-file PATH once per file; there is no blanket bypass.
+
 Requires a profile with controller: set. For local execution
 against a profile's storage, use 'sparkwing run --profile X'.
 
@@ -986,6 +993,7 @@ against a profile's storage, use 'sparkwing run --profile X'.
 | `--profile NAME` | Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline (required) |
 | `--detach` | Return once the trigger is registered (print the run id); don't follow |
 | `--working-tree` | Run tracked changes and untracked non-ignored files from an immutable remote snapshot |
+| `--allow-secret-file PATH` | Send this secret-shaped working-tree file anyway; PATH is repository-relative (repeatable) |
 
 ### Examples
 
@@ -998,4 +1006,7 @@ sparkwing pipeline trigger fictional-release --profile prod --detach
 
 # Run the current dirty tree remotely
 sparkwing pipeline trigger test --profile gaming --working-tree
+
+# Send a secret-shaped file the snapshot refuses
+sparkwing pipeline trigger test --profile gaming --working-tree --allow-secret-file config/local.env
 ```

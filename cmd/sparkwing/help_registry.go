@@ -1334,6 +1334,12 @@ and runs that exact snapshot without pushing to the origin. It
 requires a complete SHA-1 repository; shallow and SHA-256 checkouts
 fail before upload.
 
+A snapshot carrying a secret-shaped file is refused before upload:
+a dotenv, a key or keystore file, or a small configuration file
+whose bytes read as a credential. The refusal names each path.
+Ignore the file, or send it anyway by naming it with
+--allow-secret-file PATH once per file; there is no blanket bypass.
+
 Requires a profile with controller: set. For local execution
 against a profile's storage, use 'sparkwing run --profile X'.`,
 	PosArgs: []PosArg{
@@ -1343,6 +1349,7 @@ against a profile's storage, use 'sparkwing run --profile X'.`,
 		{Name: "profile", Argument: "NAME", Desc: "Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline", Group: "System", Required: true},
 		{Name: "detach", Desc: "Return once the trigger is registered (print the run id); don't follow", Group: "System"},
 		{Name: "working-tree", Desc: "Run tracked changes and untracked non-ignored files from an immutable remote snapshot", Group: "Source"},
+		{Name: "allow-secret-file", Argument: "PATH", Desc: "Send this secret-shaped working-tree file anyway; PATH is repository-relative (repeatable)", Group: "Source"},
 	},
 	GroupOrder:  []string{"Source", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
@@ -1350,6 +1357,7 @@ against a profile's storage, use 'sparkwing run --profile X'.`,
 		{"Submit and follow", "sparkwing pipeline trigger fictional-release --profile prod --version v1.2.3"},
 		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger fictional-release --profile prod --detach"},
 		{"Run the current dirty tree remotely", "sparkwing pipeline trigger test --profile gaming --working-tree"},
+		{"Send a secret-shaped file the snapshot refuses", "sparkwing pipeline trigger test --profile gaming --working-tree --allow-secret-file config/local.env"},
 	},
 }
 

@@ -509,6 +509,13 @@ controller or runner pool outside the cluster reaches the cache through
 `networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
 an `ipBlock` for the caller's source range.
 
+`pipeline trigger --working-tree` refuses to upload a snapshot whose manifest
+holds a secret-shaped file, by name or by the bytes of a small text
+configuration file, using the credential vocabulary the detached-run
+environment filter uses. An operator sends such a file only by naming its path
+with `--allow-secret-file`, so the audit of what left the laptop is the command
+itself.
+
 `pipeline trigger --working-tree` may seed uncommitted source; the cache
 retains up to 128 workspace refs per repository and expires them after
 `WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into

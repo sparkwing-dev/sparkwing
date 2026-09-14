@@ -257,6 +257,23 @@ unlock.
   `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
   add` and the service installer write.
 
+### Security
+
+- **cli:** A `--working-tree` trigger, and a `sparkwing run --sw-fleet`
+  snapshot, now refuse to upload a manifest holding a secret-shaped file. A
+  file is secret-shaped by name when it is a dotenv, a key, keystore or
+  certificate file (`.pem`, `.key`, `.p12`, `.jks`, `id_rsa` and its siblings),
+  or a configuration or data file whose name is credential-shaped, and by
+  content when a small text configuration file carries a private-key block, a
+  bearer header, or a credential-named assignment; the same vocabulary the
+  detached-run environment filter uses decides both. The refusal names every
+  offending path and the remedy. `--allow-secret-file PATH`
+  (`--sw-allow-secret-file PATH` on `sparkwing run`) sends one named file
+  anyway and is repeatable; it admits only the paths it names, so the record of
+  what left the machine is the command itself. Gitignored files never entered
+  the manifest and are unaffected, and a file over 64 KiB or one whose bytes
+  are binary is not read for content.
+
 ## [v0.50.3] - 2026-09-14
 ### Added
 

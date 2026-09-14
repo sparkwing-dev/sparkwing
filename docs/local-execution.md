@@ -429,6 +429,23 @@ Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories
 fail before upload. Workspace seed refs are capped at 128 distinct snapshots
 per repository; a full cache rejects a new snapshot before trigger admission.
 
+Before the upload, Sparkwing reads the snapshot manifest for secret-shaped
+files and refuses the trigger when it finds any, because the snapshot travels
+to a machine the file was never meant to reach. A file is secret-shaped by
+name when it is a dotenv (`.env`, `.env.production`, `staging.env`), a key,
+keystore or certificate file (`.pem`, `.key`, `.p12`, `.jks`, `id_rsa` and its
+siblings), or a configuration or data file whose name is credential-shaped
+(`credentials.json`, `token.yaml`); it is secret-shaped by content when a
+small text configuration file carries a private-key block, a bearer header,
+or a credential-named assignment. The same name and value vocabulary the
+detached-run environment filter uses decides both. The refusal lists every
+offending path; add each to `.gitignore`, or name it with
+`--allow-secret-file PATH` (`--sw-allow-secret-file PATH` for
+`sparkwing run --sw-fleet`) once per file. The override admits only the paths
+it names, so what travelled stays visible in the command that sent it.
+Gitignored files never enter the manifest and so are never named. A file
+larger than 64 KiB, or one whose bytes are binary, is not read for content.
+
 `SPARKWING_FLEET_CONFIG` is the one supported environment override for this
 feature; it selects a `fleet.yaml` outside the default config directory. The
 remaining `SPARKWING_FLEET*` names are private parent-to-pipeline handoff, not

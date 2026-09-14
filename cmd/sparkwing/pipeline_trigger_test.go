@@ -166,17 +166,18 @@ func TestPipelineTrigger_MissingProfile(t *testing.T) {
 }
 
 func TestPipelineTrigger_DelimiterProtectsWorkingTreePipelineArgument(t *testing.T) {
-	pipeline, profileName, detach, workingTree, help, passthrough, err := parseTriggerFlags([]string{
+	flags, err := parseTriggerFlags([]string{
 		"release", "--profile", "prod", "--", "--working-tree", "--detach",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pipeline != "release" || profileName != "prod" || detach || workingTree || help {
-		t.Fatalf("parsed controls = %q %q detach=%t workingTree=%t help=%t", pipeline, profileName, detach, workingTree, help)
+	if flags.pipeline != "release" || flags.profile != "prod" || flags.detach || flags.workingTree || flags.wantHelp {
+		t.Fatalf("parsed controls = %q %q detach=%t workingTree=%t help=%t",
+			flags.pipeline, flags.profile, flags.detach, flags.workingTree, flags.wantHelp)
 	}
-	if !slices.Equal(passthrough, []string{"--working-tree", "--detach"}) {
-		t.Fatalf("passthrough = %v", passthrough)
+	if !slices.Equal(flags.passthrough, []string{"--working-tree", "--detach"}) {
+		t.Fatalf("passthrough = %v", flags.passthrough)
 	}
 }
 

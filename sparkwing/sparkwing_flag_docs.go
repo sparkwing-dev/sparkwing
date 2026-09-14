@@ -58,6 +58,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-fleet", Desc: "Let explicitly enrolled helpers execute nodes under this foreground process's authority", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
+	{Name: "sw-allow-secret-file", Argument: "PATH", Desc: "Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable)", Group: "System"},
 	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
 	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
 	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop)", Group: "System", Hot: true},
