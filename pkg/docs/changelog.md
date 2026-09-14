@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.3] - 2026-09-14
 ### Added
 
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
