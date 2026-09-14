@@ -22,15 +22,66 @@ unlock.
 
 ### Added
 
-- **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
-  `nodes.claim`) awards one named node to the caller, through the award and
-  credit reservation the queue claim uses, for a dispatcher that executes a
-  node itself. It awards an unlabelled node the queue has opened to any
-  `nodes.claim` token; a node the queue has not opened and a node that declares
-  `.Requires()` labels go only to a caller holding the run's live trigger claim,
-  so a pipeline pod's token cannot take work whose dependencies have not run or
-  work its box cannot do. `store.ClaimNamedNode` and `client.ClaimNodeByID` are
-  its store and client surfaces.
+- **controller:** `max_concurrent_runners` scales with recent paid credit
+  A metered principal's cap is now the base plus one more base for every
+  `runner_scale_step_credits` of `paid` credit granted in the last 30 days,
+  less the `reversal` grants that take those payments back, held under
+  `runner_scale_ceiling`. A reversal is matched to the payment its `reverses`
+  names rather than to its own date, so a late refund still takes back the cap
+  its payment bought and refunding an aged-out payment leaves a fresh one
+  alone. The base is the new `runner_scale_base`, or `max_concurrent_runners`
+  when that is zero; the ceiling falls back to `max_global_runners`, and
+  scaling only ever raises the static guard. All three guards are zero by
+  default, so an install keeps the static cap, and the rule applies only while
+  `max_concurrent_runners` is set. `runner_scale_base` and
+  `runner_scale_ceiling` are capped at a million runners and
+  `runner_scale_step_credits` at a billion credits. A claim past the derived
+  cap answers the existing `429 compute_limit`, and so does a ledger the
+  derivation cannot read, which holds the principal to the static cap.
+  `GET /api/v1/compute-limits` reports the result as
+  `usage.derived_runner_cap` with the `usage.recent_paid_micro` behind it, and
+  `sparkwing cluster limits show` prints a `DERIVED RUNNER CAP` line. The
+  derivation is cached for a minute per principal so a claim costs no ledger
+  query, and a grant or reversal retires the cache at once.
+  `store.RunnerCapFor` is its store surface.
+
+- **controller + cli:** A credit grant carrying a non-empty `reference` is now
+  idempotent, and a refunded payment can be taken back out. `POST
+  /api/v1/credits/grants` returns the grant already written for a `kind` and
+  `reference` pair with 200 instead of adding the credits a second time, so a
+  payment webhook may redeliver; a new grant still answers 201, and an empty
+  reference writes a new row as before. The new `reversal` kind carries a
+  negative `amount_micro`, its own `reference` (the refund id, so partial
+  refunds each land) and `reverses` naming the paid grant's reference, and the
+  balance, `sparkwing cluster credits show` (a `REVERSED` line and
+  `reversed_micro`), `credits history` and
+  `sparkwing_credits_granted_micro_total{kind="reversal"}` account for it.
+  `sparkwing cluster credits grant --kind reversal --amount -1000 --reference
+  re_9 --reverses pay_1` is the operator path. A reversal whose `reverses`
+  matches no paid grant is refused; one that takes the balance below zero is
+  allowed, and the claim path then stops new metered work. Schema v42 adds the
+  `reverses` column and a unique index over non-empty `(kind, reference)`
+  grants, both additive, so the previous release still opens the database.
+
+- **CLI:** `SPARKWING_DEV_ENV_DISABLE`, holding any value, closes the
+  `$SPARKWING_HOME/dev.env` fallback for every key it answers, including
+  `SPARKWING_CONTROLLER_URL`, `SPARKWING_LOGS_URL` and the artifact backend's
+  `SPARKWING_CACHE_URL`, so a process resolves a service URL from its own
+  environment and nowhere else. A test suite running inside a sparkwing node is
+  the case that needs it: it inherits the operator's home, and an unset URL
+  would otherwise resolve to whatever development service that dev.env names.
+  allowed, and the claim path then stops new metered work. A replay must carry
+  the terms it carried the first time: a `kind` and `reference` pair another
+  grant holds under a different `amount_micro` or `reverses` answers 409. One
+  grant may not exceed 10^15 micro-credits, a billion credits, which keeps a
+  posted amount from turning a later balance read into an overflow. A refund
+  reports on the new `sparkwing_credits_reversed_micro_total` rather than on
+  the granted series, so summing that series over `kind` stays the money paid
+  in. Schema v42 adds the `reverses` column and a unique index over non-empty
+  `(kind, reference)` grants, both additive, so the previous release still
+  opens the database; the index is retried on every open and skipped while
+  older grants repeat a reference, which `GET /api/v1/health` reports as
+  `database.credit_grant_key` and the controller logs at every start.
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a running node gets on an empty balance, and the cap
@@ -56,6 +107,60 @@ unlock.
   `rate_micro_per_second` at every class, which is what it billed before, and
   that setting is the four-core entry of the table under another name.
 
+### Fixed
+
+- **api:** `api/openapi.yaml` no longer loses the tail of a description
+  An unquoted comma and colon inside a flow-mapping description split the prose
+  and turned its tail into a sibling field nobody wrote, which silently
+  truncated eleven schema descriptions. `bin/check-api-spec.sh` now refuses any
+  mapping key holding a space, which is what such a split produces.
+
+- **controller:** A run whose trigger went back into the claim queue now waits
+  for the next claimant instead of failing three minutes after the claim that
+  held it died. Releasing an expired claim leaves a run nothing has executed yet
+  pending, and the stale-running sweep skips a run whose trigger is queued, so
+  the first run submitted during a runner-pool rollout survives the rollout. The
+  queue timeout (`Server.WithQueueTimeout`, 15 minutes by default) is the bound:
+  a run whose trigger sits unclaimed past it fails with "no runner claimed this
+  run's trigger before the queue deadline" and its trigger is finished in the
+  same sweep, so no late runner executes a child for it. A run still stamping its
+  run-level heartbeat outlives that sweep.
+
+- **controller:** `POST /api/v1/runs/{id}/nodes` now answers `409` naming the
+  run's recorded status and error when the run has already finished, and `409`
+  when the claim that names the run no longer holds it. A child that reaches a
+  reaped run reports why its node was refused instead of a `500`.
+
+### Removed
+
+- **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
+  and the fleet CLI
+
+  `name` and `coordinators` selected a path the controller refuses on both the
+  claim route and the offer route, so the loop they started claimed nothing. A
+  file that still sets either key fails to load with a message naming the
+  removed mode. `sparkwing-runner agent --allow-enrolled-preview` and
+  `sparkwing fleet agents enroll`, whose one-time output was a `coordinators`
+  block, go with them. See the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-is-removed).
+  Claim mode is unchanged and keeps `controller`, `logs`, `token`, `labels`,
+  `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
+  `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
+  add` and the service installer write.
+
+## [v0.50.3] - 2026-09-14
+### Added
+
+- **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
+  `nodes.claim`) awards one named node to the caller, through the award and
+  credit reservation the queue claim uses, for a dispatcher that executes a
+  node itself. It awards an unlabelled node the queue has opened to any
+  `nodes.claim` token; a node the queue has not opened and a node that declares
+  `.Requires()` labels go only to a caller holding the run's live trigger claim,
+  so a pipeline pod's token cannot take work whose dependencies have not run or
+  work its box cannot do. `store.ClaimNamedNode` and `client.ClaimNodeByID` are
+  its store and client surfaces.
+
 ### Changed
 
 - **cluster:** A Kubernetes runner Job now carries an `activeDeadlineSeconds`:
@@ -69,6 +174,14 @@ unlock.
 
 ### Fixed
 
+- **cli + cluster:** A `--working-tree` trigger now records the commit its
+  checkout shares with the origin default branch, and the runner fetches that
+  commit through the same Git cache and names it with the remote-tracking ref
+  the laptop had. A step that scopes itself with `git merge-base origin/main
+  HEAD` -- comment policy, new-code lint, changelog checks -- reads the same
+  range on a remote runner that it reads locally, instead of failing with "this
+  checkout cannot resolve it". A checkout with no origin remote records no
+  baseline and behaves as it did.
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".

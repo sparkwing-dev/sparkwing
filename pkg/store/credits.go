@@ -37,6 +37,12 @@ const (
 	// bounds how far concurrent runners can drive the balance below zero.
 	CreditClaimFloorSeconds = 60
 
+	// MaxCreditGrantMicro caps the size of one grant at a billion credits,
+	// ten million dollars. A ledger sums grants in SQL, so an amount near the
+	// integer limit turns a later balance read into an overflow rather than a
+	// number, and no real payment reaches this ceiling.
+	MaxCreditGrantMicro = 1_000_000_000_000_000
+
 	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
 	// Heartbeats arrive every three seconds by default, so the cap engages
 	// only when the controller was unreachable or the heartbeat loop stalled,
@@ -50,10 +56,13 @@ const (
 	MinCreditMaxChargeSeconds = 3
 )
 
-// Credit grant kinds.
+// Credit grant kinds. A reversal carries a negative amount and names the
+// paid grant it takes back, which is how a refunded card payment leaves the
+// ledger.
 const (
-	CreditGrantFree = "free"
-	CreditGrantPaid = "paid"
+	CreditGrantFree     = "free"
+	CreditGrantPaid     = "paid"
+	CreditGrantReversal = "reversal"
 )
 
 // Credit charge kinds. A reservation is taken at claim time, usage rows bill
@@ -79,6 +88,11 @@ const (
 // no balance left to pay for the work it asked for. The claim path returns
 // an [InsufficientCreditsError], which wraps it and names the shortfall.
 var ErrInsufficientCredits = errors.New("insufficient credits")
+
+// ErrCreditGrantConflict is returned when a grant names a kind and reference
+// another grant already carries but asks for different terms. A replay of the
+// identical request returns the stored grant instead.
+var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 
 // InsufficientCreditsError refuses a claim the balance cannot pay for and
 // names both sides of the comparison, so the refusal a runner receives says
@@ -112,7 +126,7 @@ const creditHistoryDefaultLimit = 200
 
 const creditGrantsTableSQLite = `CREATE TABLE IF NOT EXISTS credit_grants (
     id           TEXT PRIMARY KEY,
-    -- free | paid
+    -- free | paid | reversal; a reversal carries a negative amount
     kind         TEXT NOT NULL,
     amount_micro INTEGER NOT NULL,
     -- payment id or operator note; empty for an unreferenced grant
@@ -139,6 +153,28 @@ const creditChargesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_charges (
 );
 CREATE INDEX IF NOT EXISTS idx_credit_charges_charged ON credit_charges(charged_at);
 CREATE INDEX IF NOT EXISTS idx_credit_charges_node ON credit_charges(run_id, node_id);`
+
+// safety: a payment webhook redelivers until it sees a 2xx, so the reference a
+// grant carries is the key that keeps the retry from granting twice. An empty
+// reference is an operator note rather than a payment, so it repeats freely.
+const creditGrantReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_reference
+    ON credit_grants(kind, reference) WHERE reference != ''`
+
+// safety: the runner cap sums one kind of grant over a date range on every
+// cache miss, so that pair is an index rather than a scan of the ledger.
+const creditGrantKindCreatedIndex = `CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_created
+    ON credit_grants(kind, created_at)`
+
+func applyRunnerCapIndexMigration(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx, creditGrantKindCreatedIndex)
+	return err
+}
+
+// safety: a reversal names the paid grant's reference here, and its own
+// reference is the refund id, so partial refunds of one payment each land.
+var creditGrantReversesCols = map[string]string{
+	"reverses": "TEXT NOT NULL DEFAULT ''",
+}
 
 var creditsTablesPostgres = func() string {
 	r := strings.NewReplacer("INTEGER", "BIGINT")
@@ -219,14 +255,83 @@ func applyCreditsMigrationPostgres(ctx context.Context, tx *storeTx) error {
 	return addColumnsTx(ctx, tx, "credit_charges", creditChargeKindCols)
 }
 
+func applyCreditReferenceMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	return ensureColumnsSQLite(ctx, tx, "credit_grants", creditGrantReversesCols)
+}
+
+func applyCreditReferenceMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	return addColumnsTx(ctx, tx, "credit_grants", creditGrantReversesCols)
+}
+
+// safety: grants written before the reference became a key may already repeat
+// one, and refusing to open a ledger over an operator note costs more than the
+// index buys; the grant path enforces the rule inside the ledger lock anyway.
+// The attempt repeats on every open, so deleting the duplicates enforces the key.
+func (s *Store) ensureCreditGrantReferenceIndex(ctx context.Context) error {
+	present, err := s.CreditGrantReferenceIndexPresent(ctx)
+	if err != nil || present {
+		return err
+	}
+	dupes, err := duplicateGrantReferences(ctx, storeExecer{s: s})
+	if err != nil {
+		return err
+	}
+	if len(dupes) > 0 {
+		slog.Warn("credits: grants repeat a reference, so the database does not enforce the grant key; "+
+			"delete the duplicate rows and restart to enforce it",
+			"references", strings.Join(dupes, ", "))
+		return nil
+	}
+	_, err = s.exec(ctx, creditGrantReferenceIndex)
+	return err
+}
+
+// CreditGrantReferenceIndexPresent reports whether the database enforces one
+// grant per kind and non-empty reference. It is false only while grants
+// written before the key existed still repeat a reference.
+func (s *Store) CreditGrantReferenceIndexPresent(ctx context.Context) (bool, error) {
+	q := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_credit_grants_reference'`
+	if s.dialect == DialectPostgres {
+		q = `SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		     WHERE c.relname = 'idx_credit_grants_reference' AND c.relkind = 'i'
+		       AND n.nspname = ANY (current_schemas(true))`
+	}
+	var count int
+	if err := s.queryRow(ctx, q).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func duplicateGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
+	rows, err := q.QueryContext(ctx, `SELECT kind, reference FROM credit_grants
+	  WHERE reference != '' GROUP BY kind, reference HAVING COUNT(*) > 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []string
+	for rows.Next() {
+		var kind, reference string
+		if err := rows.Scan(&kind, &reference); err != nil {
+			return nil, err
+		}
+		out = append(out, kind+"/"+reference)
+	}
+	return out, rows.Err()
+}
+
 // CreditGrant is one row of credit_grants: credits the operator added.
 type CreditGrant struct {
 	ID          string
 	Kind        string
 	AmountMicro int64
 	Reference   string
-	CreatedBy   string
-	CreatedAt   time.Time
+	// Reverses names the reference of the paid grant a reversal takes back,
+	// and is empty on every other kind.
+	Reverses  string
+	CreatedBy string
+	CreatedAt time.Time
 }
 
 // CreditCharge is one row of credit_charges: a claim's reservation, one
@@ -253,7 +358,10 @@ type CreditCharge struct {
 // was spent, what is left, the price of a cloud runner second, and the burn
 // over a recent window.
 type CreditState struct {
-	GrantedMicro       int64
+	GrantedMicro int64
+	// ReversedMicro is what reversals took back, reported as a positive
+	// amount and already subtracted from the balance.
+	ReversedMicro      int64
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
@@ -267,58 +375,194 @@ type CreditState struct {
 
 // ValidCreditGrantKind reports whether kind is one this ledger stores.
 func ValidCreditGrantKind(kind string) bool {
-	return kind == CreditGrantFree || kind == CreditGrantPaid
+	return kind == CreditGrantFree || kind == CreditGrantPaid || kind == CreditGrantReversal
 }
 
-// GrantCredits adds credits to the ledger and returns the row it wrote.
-// A grant that lifts the balance above zero clears the exhaustion stamp, so
-// a node cancelled for an empty balance is the last one cancelled.
+// CreditGrantRequest is one movement of the grant side of the ledger: credits
+// added, or, for [CreditGrantReversal], credits taken back.
+//
+// Reference is the payment id the grant came from, or an operator note. A
+// non-empty one makes the grant idempotent: a second request naming the same
+// kind and reference returns the row already written, which is what lets a
+// payment webhook retry. An empty reference writes a new row every time.
+//
+// A reversal carries a negative AmountMicro, its own Reference (the refund id,
+// so partial refunds of one payment each land), and Reverses naming the
+// reference of the paid grant it takes back.
+type CreditGrantRequest struct {
+	Kind        string
+	AmountMicro int64
+	Reference   string
+	Reverses    string
+	CreatedBy   string
+}
+
+// CreditGrantResult is the row the ledger holds for a request together with
+// whether this call wrote it. Created is false when a non-empty reference
+// matched a grant already recorded, in which case Grant is that earlier row.
+type CreditGrantResult struct {
+	Grant   CreditGrant
+	Created bool
+}
+
+func (req CreditGrantRequest) validate() error {
+	if !ValidCreditGrantKind(req.Kind) {
+		return fmt.Errorf("credits: unknown grant kind %q", req.Kind)
+	}
+	if req.Kind != CreditGrantReversal {
+		if req.AmountMicro <= 0 {
+			return errors.New("credits: grant amount must be positive")
+		}
+		if req.AmountMicro > MaxCreditGrantMicro {
+			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
+		}
+		if req.Reverses != "" {
+			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
+		}
+		return nil
+	}
+	if req.AmountMicro >= 0 {
+		return errors.New("credits: a reversal amount must be negative")
+	}
+	if req.AmountMicro < -MaxCreditGrantMicro {
+		return fmt.Errorf("credits: a reversal may not exceed %d micro-credits", MaxCreditGrantMicro)
+	}
+	if req.Reference == "" {
+		return errors.New("credits: a reversal needs its own reference, the refund id")
+	}
+	if req.Reverses == "" {
+		return fmt.Errorf("credits: a reversal must name the %s grant's reference it reverses",
+			CreditGrantPaid)
+	}
+	return nil
+}
+
+// GrantCredits adds credits to the ledger and returns the row it holds for
+// them. A grant that lifts the balance above zero clears the exhaustion stamp,
+// so a node cancelled for an empty balance is the last one cancelled. A
+// non-empty reference is idempotent: the row already written under that kind
+// and reference is returned instead of a second one.
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (_ *CreditGrant, err error) {
-	if !ValidCreditGrantKind(kind) {
-		return nil, fmt.Errorf("credits: unknown grant kind %q", kind)
+) (*CreditGrant, error) {
+	res, err := s.RecordCreditGrant(ctx, CreditGrantRequest{
+		Kind: kind, AmountMicro: amountMicro, Reference: reference, CreatedBy: createdBy,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if amountMicro <= 0 {
-		return nil, errors.New("credits: grant amount must be positive")
+	grant := res.Grant
+	return &grant, nil
+}
+
+// RecordCreditGrant writes req and reports whether it wrote a new row. It
+// refuses a reversal whose Reverses names no paid grant, so a refund can only
+// take back a payment the ledger recorded. A reversal may take the balance
+// below zero; the claim path then refuses new metered work.
+func (s *Store) RecordCreditGrant(
+	ctx context.Context, req CreditGrantRequest,
+) (_ CreditGrantResult, err error) {
+	if err := req.validate(); err != nil {
+		return CreditGrantResult{}, err
 	}
 	id, err := newCreditID("grant")
 	if err != nil {
-		return nil, err
+		return CreditGrantResult{}, err
 	}
 	now := time.Now().UTC()
-	grant := &CreditGrant{
-		ID: id, Kind: kind, AmountMicro: amountMicro,
-		Reference: reference, CreatedBy: createdBy, CreatedAt: now,
+	grant := CreditGrant{
+		ID: id, Kind: req.Kind, AmountMicro: req.AmountMicro,
+		Reference: req.Reference, Reverses: req.Reverses,
+		CreatedBy: req.CreatedBy, CreatedAt: now,
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return nil, err
+		return CreditGrantResult{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	// safety: the lock is what makes the reference check and the insert one
+	// step, so two deliveries of the same payment cannot both find nothing.
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return nil, err
+		return CreditGrantResult{}, err
+	}
+	if req.Reference != "" {
+		existing, found, err := creditGrantByReferenceTx(ctx, tx, req.Kind, req.Reference)
+		if err != nil {
+			return CreditGrantResult{}, err
+		}
+		if found {
+			if err := sameGrantTerms(existing, req); err != nil {
+				return CreditGrantResult{}, err
+			}
+			return CreditGrantResult{Grant: existing}, tx.Commit()
+		}
+	}
+	if req.Kind == CreditGrantReversal {
+		_, found, err := creditGrantByReferenceTx(ctx, tx, CreditGrantPaid, req.Reverses)
+		if err != nil {
+			return CreditGrantResult{}, err
+		}
+		if !found {
+			return CreditGrantResult{}, fmt.Errorf(
+				"credits: no %s grant carries the reference %q", CreditGrantPaid, req.Reverses)
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_grants (id, kind, amount_micro, reference, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)`,
-		id, kind, amountMicro, reference, createdBy, now.UnixNano()); err != nil {
-		return nil, fmt.Errorf("credits: insert grant: %w", err)
+        INSERT INTO credit_grants (id, kind, amount_micro, reference, reverses, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, req.Kind, req.AmountMicro, req.Reference, req.Reverses,
+		req.CreatedBy, now.UnixNano()); err != nil {
+		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
 	balance, err := creditBalanceTx(ctx, tx)
 	if err != nil {
-		return nil, err
+		return CreditGrantResult{}, err
 	}
 	if balance > 0 {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
-			return nil, err
+			return CreditGrantResult{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return CreditGrantResult{}, err
 	}
-	return grant, nil
+	s.invalidateRunnerCaps()
+	return CreditGrantResult{Grant: grant, Created: true}, nil
+}
+
+// safety: a webhook replay carries the terms it carried the first time, so
+// different terms under one reference are a caller mistake rather than a
+// retry, and answering with the stored row would swallow the difference.
+func sameGrantTerms(stored CreditGrant, req CreditGrantRequest) error {
+	if stored.AmountMicro != req.AmountMicro {
+		return fmt.Errorf("%w: %q holds %d micro-credits, not %d",
+			ErrCreditGrantConflict, req.Reference, stored.AmountMicro, req.AmountMicro)
+	}
+	if stored.Reverses != req.Reverses {
+		return fmt.Errorf("%w: %q reverses %q, not %q",
+			ErrCreditGrantConflict, req.Reference, stored.Reverses, req.Reverses)
+	}
+	return nil
+}
+
+func creditGrantByReferenceTx(
+	ctx context.Context, tx *storeTx, kind, reference string,
+) (CreditGrant, bool, error) {
+	var g CreditGrant
+	var created int64
+	err := tx.QueryRowContext(ctx, `SELECT id, kind, amount_micro, reference, reverses, created_by, created_at
+	  FROM credit_grants WHERE kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, kind, reference).
+		Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreditGrant{}, false, nil
+	}
+	if err != nil {
+		return CreditGrant{}, false, err
+	}
+	g.CreatedAt = time.Unix(0, created).UTC()
+	return g, true, nil
 }
 
 // CreditBalanceMicro returns grants minus charges, in micro-credits. A
@@ -332,6 +576,13 @@ func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error) {
 }
 
 const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants),
+        (SELECT SUM(amount_micro) FROM credit_charges)`
+
+// safety: a reversal is a grant row with a negative amount, so a reader that
+// wants the two apart asks for them apart; the balance is the same either way.
+const creditGrantSplitSQL = `SELECT
+        (SELECT SUM(amount_micro) FROM credit_grants WHERE kind != ?),
+        (SELECT -SUM(amount_micro) FROM credit_grants WHERE kind = ?),
         (SELECT SUM(amount_micro) FROM credit_charges)`
 
 func creditBalanceTx(ctx context.Context, tx *storeTx) (int64, error) {
@@ -357,13 +608,15 @@ func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
 // and the credits burned over window.
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
 	out := CreditState{BurnWindow: window}
-	var granted, charged sql.NullInt64
-	if err := s.queryRow(ctx, creditBalanceSQL).Scan(&granted, &charged); err != nil {
+	var granted, reversed, charged sql.NullInt64
+	if err := s.queryRow(ctx, creditGrantSplitSQL,
+		CreditGrantReversal, CreditGrantReversal).Scan(&granted, &reversed, &charged); err != nil {
 		return out, err
 	}
 	out.GrantedMicro = granted.Int64
+	out.ReversedMicro = reversed.Int64
 	out.ChargedMicro = charged.Int64
-	out.BalanceMicro = granted.Int64 - charged.Int64
+	out.BalanceMicro = granted.Int64 - reversed.Int64 - charged.Int64
 
 	if window > 0 {
 		var burn sql.NullInt64
@@ -413,6 +666,9 @@ type CreditLedgerTotals struct {
 	// GrantedFreeMicro and GrantedPaidMicro sum the grants of each kind.
 	GrantedFreeMicro int64
 	GrantedPaidMicro int64
+	// ReversedMicro is what refunds took back out of the paid grants,
+	// reported as a positive amount.
+	ReversedMicro int64
 	// ReservedMicro is the runway claims took up front, refunds included, so
 	// it is the gross reservation rather than the part never returned.
 	ReservedMicro int64
@@ -446,10 +702,11 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
+                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        -COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
                    FROM credit_grants`,
-		CreditGrantFree, CreditGrantPaid,
-	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro); err != nil {
+		CreditGrantFree, CreditGrantPaid, CreditGrantReversal,
+	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro, &out.ReversedMicro); err != nil {
 		return out, err
 	}
 	var settled, charged int64
@@ -481,7 +738,7 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	}
 	out.SettledSeconds = charged - refundable
 
-	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - settled
+	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - out.ReversedMicro - settled
 	return out, tx.Commit()
 }
 
@@ -624,7 +881,7 @@ func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
 // ListCreditGrants returns grants newest first, at most limit rows and never
 // more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
-	rows, err := s.query(ctx, `SELECT id, kind, amount_micro, reference, created_by, created_at
+	rows, err := s.query(ctx, `SELECT id, kind, amount_micro, reference, reverses, created_by, created_at
 	  FROM credit_grants ORDER BY created_at DESC, id DESC LIMIT ?`, creditLimit(limit))
 	if err != nil {
 		return nil, err
@@ -634,7 +891,8 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGran
 	for rows.Next() {
 		var g CreditGrant
 		var created int64
-		if err := rows.Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.CreatedBy, &created); err != nil {
+		if err := rows.Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses,
+			&g.CreatedBy, &created); err != nil {
 			return nil, err
 		}
 		g.CreatedAt = time.Unix(0, created).UTC()
@@ -690,7 +948,7 @@ func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
 
 // safety: reserving inside the claim's own transaction is what keeps concurrent
 // runners from each reading the same balance and claiming against it.
-func reserveNodeCreditsTx(
+func (s *Store) reserveNodeCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
 ) error {
 	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
@@ -723,7 +981,7 @@ func reserveNodeCreditsTx(
 		return err
 	}
 	if limits.Any() {
-		if err := enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+		if err := s.enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
 			return err
 		}
 	}

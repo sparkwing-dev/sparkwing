@@ -116,7 +116,7 @@ func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
-	if err == nil || !strings.Contains(err.Error(), "sparkwing fleet agents enroll") {
+	if err == nil || !strings.Contains(err.Error(), "no enrolled helpers") {
 		t.Fatalf("empty config error = %v", err)
 	}
 }

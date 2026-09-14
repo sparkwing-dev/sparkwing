@@ -114,17 +114,23 @@ func ComputeLimitNames() []string
 const ComputeLimitNodesPerRun = "max_nodes_per_run"
 const ComputeLimitRunSeconds = "max_run_seconds"
 const ComputeLimitRunnerAlarm = "runner_alarm"
+const ComputeLimitRunnerScaleBase = "runner_scale_base"
+const ComputeLimitRunnerScaleCeiling = "runner_scale_ceiling"
+const ComputeLimitRunnerScaleStepCredits = "runner_scale_step_credits"
 const ComputeLimitRunsPerHour = "max_runs_per_hour"
 type ComputeLimits struct {
-	ConcurrentRunners int64
-	GlobalRunners     int64
-	RunnerAlarm       int64
-	RunSeconds        int64
-	NodesPerRun       int64
-	RunsPerHour       int64
-	GlobalNodesPerRun int64
-	GlobalRunsPerHour int64
-	CronSeconds       int64
+	ConcurrentRunners      int64
+	GlobalRunners          int64
+	RunnerAlarm            int64
+	RunSeconds             int64
+	NodesPerRun            int64
+	RunsPerHour            int64
+	GlobalNodesPerRun      int64
+	GlobalRunsPerHour      int64
+	CronSeconds            int64
+	RunnerScaleBase        int64
+	RunnerScaleStepCredits int64
+	RunnerScaleCeiling     int64
 }
 func (l ComputeLimits) Any() bool
 func (l ComputeLimits) Value(name string) (int64, bool)
@@ -230,17 +236,33 @@ type CreditGrant struct {
 	Kind        string
 	AmountMicro int64
 	Reference   string
-	CreatedBy   string
-	CreatedAt   time.Time
+
+	Reverses  string
+	CreatedBy string
+	CreatedAt time.Time
 }
 const CreditGrantFree = "free"
 const CreditGrantPaid = "paid"
+type CreditGrantRequest struct {
+	Kind        string
+	AmountMicro int64
+	Reference   string
+	Reverses    string
+	CreatedBy   string
+}
+type CreditGrantResult struct {
+	Grant   CreditGrant
+	Created bool
+}
+const CreditGrantReversal = "reversal"
 const CreditHistoryMaxLimit = 1000
 type CreditLedgerTotals struct {
 	BalanceMicro int64
 
 	GrantedFreeMicro int64
 	GrantedPaidMicro int64
+
+	ReversedMicro int64
 
 	ReservedMicro int64
 
@@ -262,7 +284,9 @@ func (t CreditRateTable) RateFor(cores int64) int64
 func (t CreditRateTable) Sorted() CreditRateTable
 func (t CreditRateTable) Validate() error
 type CreditState struct {
-	GrantedMicro       int64
+	GrantedMicro int64
+
+	ReversedMicro      int64
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
@@ -410,6 +434,7 @@ const EgressUsageRetentionMonths = 13
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
@@ -617,6 +642,7 @@ var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
 	ReapStalePendingRuns:          (*Store).reapStalePendingRuns,
 	ReapStaleRunningRuns:          (*Store).reapStaleRunningRuns,
+	ReapQueueExpiredRuns:          (*Store).reapQueueExpiredRuns,
 	ReapTimedOutApprovals:         (*Store).reapTimedOutApprovals,
 	FailNodesInRun:                (*Store).failNodesInRun,
 	FailStaleQueuedNodes:          (*Store).failStaleQueuedNodes,
@@ -630,6 +656,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
@@ -962,6 +989,11 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+type RunnerCap struct {
+	Cap int64
+
+	RecentPaidMicro int64
+}
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
 type RunnerPresence struct {
 	Name string
@@ -970,6 +1002,9 @@ type RunnerPresence struct {
 
 	FreeSlots int
 }
+const RunnerScaleMaxRunners = 1_000_000
+const RunnerScaleMaxStepCredits = 1_000_000_000
+const RunnerScaleWindow = 30 * 24 * time.Hour
 type SchemaRequirement struct {
 	Name    string
 	AddedBy string
@@ -1131,6 +1166,7 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
+func (s *Store) CreditGrantReferenceIndexPresent(ctx context.Context) (bool, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
@@ -1187,7 +1223,7 @@ func (s *Store) GetSecretRow(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (_ *CreditGrant, err error)
+) (*CreditGrant, error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
@@ -1249,13 +1285,15 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
-func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
+func (s *Store) RecordCreditGrant(
+	ctx context.Context, req CreditGrantRequest,
+) (_ CreditGrantResult, err error)
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
@@ -1284,12 +1322,12 @@ func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIde
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
-func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
+func (s *Store) RunnerCapFor(ctx context.Context, principal string, now time.Time) (RunnerCap, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
@@ -1476,6 +1514,7 @@ func WithoutClaimFences(ctx context.Context) context.Context
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 func (t *storeTx) Commit() error
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

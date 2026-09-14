@@ -52,7 +52,48 @@ const (
 	// ComputeLimitCronSeconds is the shortest interval a cloud schedule may
 	// declare, in seconds.
 	ComputeLimitCronSeconds = "min_cron_interval_seconds"
+	// ComputeLimitRunnerScaleBase is the runner allowance one step of recent
+	// paid credit buys, and the cap a principal that loaded nothing gets.
+	// Zero uses max_concurrent_runners, so an install that sets no scaling
+	// keeps the static cap.
+	ComputeLimitRunnerScaleBase = "runner_scale_base"
+	// ComputeLimitRunnerScaleStepCredits is the paid credit a controller must
+	// have been granted over [RunnerScaleWindow] to earn one more base. Zero
+	// turns scaling off and leaves max_concurrent_runners alone.
+	ComputeLimitRunnerScaleStepCredits = "runner_scale_step_credits"
+	// ComputeLimitRunnerScaleCeiling is the most a scaled cap may reach. Zero
+	// uses max_global_runners, so the operator's own ceiling wins by default.
+	ComputeLimitRunnerScaleCeiling = "runner_scale_ceiling"
 )
+
+// RunnerScaleWindow is how far back the runner cap counts paid grants. A
+// payment older than this earns nothing.
+const RunnerScaleWindow = 30 * 24 * time.Hour
+
+// Bounds on the scaling guards. They keep an operator's typo out of the
+// arithmetic that derives a cap, where a step of a few quintillion credits
+// would earn nobody anything and a base of the same would mean no ceiling at
+// all.
+const (
+	// RunnerScaleMaxStepCredits is the largest step runner_scale_step_credits
+	// may declare, ten million dollars of credit.
+	RunnerScaleMaxStepCredits = 1_000_000_000
+	// RunnerScaleMaxRunners is the largest runner count runner_scale_base and
+	// runner_scale_ceiling may declare.
+	RunnerScaleMaxRunners = 1_000_000
+)
+
+// safety: a guard outside these bounds is a typo rather than an intention, and
+// the arithmetic that derives a cap reads better when the inputs are sane.
+var computeLimitCeilings = map[string]int64{
+	ComputeLimitRunnerScaleBase:        RunnerScaleMaxRunners,
+	ComputeLimitRunnerScaleCeiling:     RunnerScaleMaxRunners,
+	ComputeLimitRunnerScaleStepCredits: RunnerScaleMaxStepCredits,
+}
+
+// safety: a claim must not pay for a ledger query, so the derivation is held
+// for this long and a grant clears it early.
+const runnerCapTTL = time.Minute
 
 // safety: the per-principal guards measure the principal that created a run,
 // and nothing else on the row records it.
@@ -130,15 +171,18 @@ func (e *ComputeLimitError) Unwrap() error { return ErrComputeLimit }
 // ComputeLimits is every compute guard the controller enforces. A zero field
 // is an unlimited guard.
 type ComputeLimits struct {
-	ConcurrentRunners int64
-	GlobalRunners     int64
-	RunnerAlarm       int64
-	RunSeconds        int64
-	NodesPerRun       int64
-	RunsPerHour       int64
-	GlobalNodesPerRun int64
-	GlobalRunsPerHour int64
-	CronSeconds       int64
+	ConcurrentRunners      int64
+	GlobalRunners          int64
+	RunnerAlarm            int64
+	RunSeconds             int64
+	NodesPerRun            int64
+	RunsPerHour            int64
+	GlobalNodesPerRun      int64
+	GlobalRunsPerHour      int64
+	CronSeconds            int64
+	RunnerScaleBase        int64
+	RunnerScaleStepCredits int64
+	RunnerScaleCeiling     int64
 }
 
 // Any reports whether any guard is set, which is what lets a caller skip the
@@ -163,6 +207,12 @@ var computeLimitFields = map[string]func(*ComputeLimits) *int64{
 	ComputeLimitGlobalNodesPerRun: func(l *ComputeLimits) *int64 { return &l.GlobalNodesPerRun },
 	ComputeLimitGlobalRunsPerHour: func(l *ComputeLimits) *int64 { return &l.GlobalRunsPerHour },
 	ComputeLimitCronSeconds:       func(l *ComputeLimits) *int64 { return &l.CronSeconds },
+
+	ComputeLimitRunnerScaleBase: func(l *ComputeLimits) *int64 { return &l.RunnerScaleBase },
+	ComputeLimitRunnerScaleStepCredits: func(l *ComputeLimits) *int64 {
+		return &l.RunnerScaleStepCredits
+	},
+	ComputeLimitRunnerScaleCeiling: func(l *ComputeLimits) *int64 { return &l.RunnerScaleCeiling },
 }
 
 // ComputeLimitNames returns every guard name, sorted, which is the set
@@ -243,6 +293,9 @@ func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) e
 	if value < 0 {
 		return errors.New("compute limits: a guard must not be negative")
 	}
+	if most, bounded := computeLimitCeilings[name]; bounded && value > most {
+		return fmt.Errorf("compute limits: %s must not exceed %d", name, most)
+	}
 	return s.setCreditSetting(ctx, computeLimitKey(name), value)
 }
 
@@ -303,7 +356,7 @@ func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, er
 // safety: the guards run inside the claim's own transaction, under the ledger
 // lock the reservation already holds, so two runners polling at once cannot
 // both read a count below the cap and both claim against it.
-func enforceClaimComputeLimitsTx(
+func (s *Store) enforceClaimComputeLimitsTx(
 	ctx context.Context, tx *storeTx, limits ComputeLimits, claimant ClaimIdentity, runID string, now time.Time,
 ) error {
 	if limits.GlobalRunners > 0 {
@@ -320,15 +373,19 @@ func enforceClaimComputeLimitsTx(
 		}
 	}
 	if limits.ConcurrentRunners > 0 {
+		derived, err := s.runnerCap(ctx, tx, limits, claimant.Principal, now)
+		if err != nil {
+			return runnerCapReadRefusal(err, limits, claimant.Principal)
+		}
 		var held int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0 AND claim_principal = ?`,
 			claimant.Principal).Scan(&held); err != nil {
 			return err
 		}
-		if held >= limits.ConcurrentRunners {
+		if held >= derived.Cap {
 			return &ComputeLimitError{
-				Limit: ComputeLimitConcurrentRunners, Cap: limits.ConcurrentRunners,
+				Limit: ComputeLimitConcurrentRunners, Cap: derived.Cap,
 				Observed: held, Scope: "principal " + claimant.Principal, Principal: claimant.Principal,
 			}
 		}

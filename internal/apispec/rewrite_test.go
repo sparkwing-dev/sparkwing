@@ -235,3 +235,27 @@ func TestRewriteIgnoresScopeProseInASchema(t *testing.T) {
 		t.Fatalf("rewrite rejected a schema member's own documentation: %v", err)
 	}
 }
+
+func TestRewriteRejectsAKeyAnUnquotedDescriptionInvented(t *testing.T) {
+	spec := strings.Replace(minimalSpec, "components: {}\n",
+		"components:\n  schemas:\n    Ledger:\n      type: object\n      properties:\n"+
+			"        granted_micro: {type: integer, description: Grants, in micro-credits, it holds.}\n", 1)
+	routes := []apiroutes.Route{{Method: "GET", Path: "/api/v1/runs", Scope: "runs.read"}}
+	_, err := rewrite(spec, routes, nil)
+	if err == nil {
+		t.Fatal("rewrite accepted a description an unquoted comma split into a key")
+	}
+	if !strings.Contains(err.Error(), "mapping key holding a space") {
+		t.Errorf("error does not name the cause: %v", err)
+	}
+}
+
+func TestRewriteAllowsAQuotedDescriptionCarryingCommas(t *testing.T) {
+	spec := strings.Replace(minimalSpec, "components: {}\n",
+		"components:\n  schemas:\n    Ledger:\n      type: object\n      properties:\n"+
+			"        granted_micro: {type: integer, description: \"Grants, in micro-credits, it holds.\"}\n", 1)
+	routes := []apiroutes.Route{{Method: "GET", Path: "/api/v1/runs", Scope: "runs.read"}}
+	if _, err := rewrite(spec, routes, nil); err != nil {
+		t.Fatalf("rewrite rejected a quoted description: %v", err)
+	}
+}

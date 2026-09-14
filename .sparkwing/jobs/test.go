@@ -27,11 +27,13 @@ func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 }
 
 func (p *Test) run(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, testGoCommand(runtime.NumCPU())).Run(); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "go test: all packages passed")
-	return nil
+	return withProductTestHome(func(home string) error {
+		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(runtime.NumCPU()), home)).Run(); err != nil {
+			return err
+		}
+		sparkwing.Info(ctx, "go test: all packages passed")
+		return nil
+	})
 }
 
 func testGoCommand(cpuCount int) string {

@@ -208,6 +208,66 @@ func TestCreditsCLIWireMatchesTheController(t *testing.T) {
 	}
 }
 
+func TestCreditGrantAmountRule(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		kind     string
+		amount   int64
+		reverses string
+		ok       bool
+	}{
+		"a paid grant":                     {store.CreditGrantPaid, 1000, "", true},
+		"a paid grant of nothing":          {store.CreditGrantPaid, 0, "", false},
+		"a paid grant that reverses":       {store.CreditGrantPaid, 1000, "pay_1", false},
+		"a reversal":                       {store.CreditGrantReversal, -1000, "pay_1", true},
+		"a reversal that adds credits":     {store.CreditGrantReversal, 1000, "pay_1", false},
+		"a reversal that names no payment": {store.CreditGrantReversal, -1000, "", false},
+	} {
+		err := creditGrantAmountRule(tc.kind, tc.amount, tc.reverses)
+		if tc.ok && err != nil {
+			t.Errorf("%s was refused: %v", name, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+func TestCreditHistoryRowNamesTheReversedPayment(t *testing.T) {
+	t.Parallel()
+	rows := creditHistoryRows(creditHistoryResp{
+		Grants: []creditGrantResp{{
+			ID: "grant-r", Kind: store.CreditGrantReversal, AmountMicro: -5 * store.MicroCreditsPerCredit,
+			Reference: "re_1", Reverses: "pay_1", CreatedBy: "billing", CreatedAt: 100,
+		}},
+	})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want the reversal", rows)
+	}
+	detail := creditRowDetail(rows[0])
+	for _, want := range []string{"reversal", "ref=re_1", "reverses=pay_1"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail %q is missing %q", detail, want)
+		}
+	}
+}
+
+func TestRenderCreditStateShowsReversals(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := renderCreditState(&buf, creditStateResp{
+		BalanceMicro:   600_000_000,
+		GrantedMicro:   1_000_000_000,
+		ReversedMicro:  400_000_000,
+		MicroPerCredit: store.MicroCreditsPerCredit,
+	}); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(buf.String(), "REVERSED") || !strings.Contains(buf.String(), "400.00 credits") {
+		t.Errorf("credit state output does not report the reversal:\n%s", buf.String())
+	}
+}
+
 func TestRenderCreditSettings(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

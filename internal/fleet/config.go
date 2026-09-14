@@ -1,7 +1,6 @@
 package fleet
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -122,94 +121,6 @@ func decode(r io.Reader, path string, tailscaleIPs TailscaleIPs) (Config, error)
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
-}
-
-// AppendExecutor serializes Sparkwing enrollment writes and refuses a config
-// edit observed while the new enrollment is prepared.
-func AppendExecutor(path string, executor Executor, tailscaleIPs TailscaleIPs) (Config, error) {
-	return AppendExecutorPrepared(path, executor, tailscaleIPs, nil)
-}
-
-// ExecutorPreparation performs private side effects after policy validation.
-// Its rollback runs when preparation or the following config commit fails.
-type ExecutorPreparation func(Config) (rollback func() error, err error)
-
-// AppendExecutorPrepared serializes policy validation, credential preparation,
-// and the config commit so concurrent enrollments cannot rotate each other.
-func AppendExecutorPrepared(path string, executor Executor, tailscaleIPs TailscaleIPs, prepare ExecutorPreparation) (result Config, retErr error) {
-	unlock, err := lockConfig(path)
-	if err != nil {
-		return Config{}, err
-	}
-	defer unlock()
-	f, err := openPrivate(path)
-	if err != nil {
-		return Config{}, err
-	}
-	original, err := io.ReadAll(f)
-	closeErr := f.Close()
-	if err != nil {
-		return Config{}, err
-	}
-	if closeErr != nil {
-		return Config{}, closeErr
-	}
-	cfg, err := decode(bytes.NewReader(original), path, tailscaleIPs)
-	if err != nil {
-		return Config{}, err
-	}
-	for _, existing := range cfg.Executors {
-		if existing.Name == executor.Name {
-			return Config{}, fmt.Errorf("executor %q is already enrolled", executor.Name)
-		}
-	}
-	cfg.Executors = append(cfg.Executors, executor)
-	if err := cfg.validate(tailscaleIPs); err != nil {
-		return Config{}, err
-	}
-	var rollback func() error
-	if prepare != nil {
-		rollback, err = prepare(cfg)
-		if err != nil {
-			if rollback != nil {
-				if rollbackErr := rollback(); rollbackErr != nil {
-					err = errors.Join(err, fmt.Errorf("rollback executor preparation: %w", rollbackErr))
-				}
-			}
-			return Config{}, err
-		}
-		defer func() {
-			if retErr != nil && rollback != nil {
-				if rollbackErr := rollback(); rollbackErr != nil {
-					retErr = errors.Join(retErr, fmt.Errorf("rollback executor preparation: %w", rollbackErr))
-				}
-			}
-		}()
-	}
-	body, err := yaml.Marshal(cfg)
-	if err != nil {
-		return Config{}, err
-	}
-	current, err := readPrivate(path)
-	if err != nil {
-		return Config{}, err
-	}
-	if !bytes.Equal(current, original) {
-		return Config{}, errors.New("fleet config changed while enrollment was prepared")
-	}
-	if err := replacePrivate(path, body); err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
-}
-
-func readPrivate(path string) ([]byte, error) {
-	f, err := openPrivate(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	return io.ReadAll(f)
 }
 
 func lockConfig(path string) (func(), error) {

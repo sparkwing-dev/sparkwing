@@ -1251,6 +1251,58 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.githubCommitStatuses.shutdown(ctx)
 }
 
+// safety: a run-level heartbeat this old means no orchestrator is driving the
+// run, which is the one piece of evidence both run sweeps act on.
+const runHeartbeatStaleAfter = 3 * time.Minute
+
+// safety: releasing a claim puts the trigger back in the queue, so a run nothing
+// has executed yet belongs to the next claimant rather than to this sweep; the
+// queue-deadline sweep is what ends it when no claimant comes.
+func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
+	run, err := s.store.GetRun(ctx, id)
+	switch {
+	case err != nil:
+	case run.FinishedAt != nil:
+	case run.Status == "pending" && s.triggerAwaitsClaimant(ctx, id):
+		s.logger.Warn("released stale claim; run waits for the next claimant",
+			"trigger_id", id)
+	default:
+		if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
+			s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
+		} else {
+			s.reportGitHubCommitStatus(ctx, id, "failed")
+		}
+		if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
+			"runner lease expired before node reported completion",
+			store.FailureRunnerLeaseExpired); nerr != nil {
+			s.logger.Error("cascade-fail nodes failed",
+				"run_id", id, "err", nerr)
+		} else {
+			for _, nid := range nids {
+				s.logger.Warn("cascade-failed orphan node",
+					"run_id", id, "node_id", nid)
+			}
+		}
+	}
+	s.logger.Warn(
+		"reaped stale claim",
+		"trigger_id", id,
+		"had_run", err == nil,
+	)
+}
+
+// safety: this asks only whether the trigger is still live work, where
+// triggerRequeuedSQL asks the narrower question of whether it is back in the
+// queue after a claim. A runner that claimed the trigger between the reap and
+// this read owns the run too, and requiring the queued state would fail it.
+func (s *Server) triggerAwaitsClaimant(ctx context.Context, id string) bool {
+	trig, err := s.store.GetTrigger(ctx, id)
+	if err != nil {
+		return false
+	}
+	return !trig.IsFinished()
+}
+
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1308,30 +1360,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				continue
 			}
 			for _, id := range ids {
-				run, err := s.store.GetRun(ctx, id)
-				if err == nil && run.FinishedAt == nil {
-					if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
-						s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
-					} else {
-						s.reportGitHubCommitStatus(ctx, id, "failed")
-					}
-					if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
-						"runner lease expired before node reported completion",
-						store.FailureRunnerLeaseExpired); nerr != nil {
-						s.logger.Error("cascade-fail nodes failed",
-							"run_id", id, "err", nerr)
-					} else {
-						for _, nid := range nids {
-							s.logger.Warn("cascade-failed orphan node",
-								"run_id", id, "node_id", nid)
-						}
-					}
-				}
-				s.logger.Warn(
-					"reaped stale claim",
-					"trigger_id", id,
-					"had_run", err == nil,
-				)
+				s.settleExpiredTriggerClaim(ctx, id)
 			}
 			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
 				5*store.DefaultLeaseDuration,
@@ -1345,12 +1374,24 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			}
 
 			if ids, err := store.Maintenance.ReapStaleRunningRuns(s.store, ctx,
-				3*time.Minute,
+				runHeartbeatStaleAfter,
 				"reaped: no run-level heartbeat for >3m; orchestrator is no longer running"); err != nil {
 				s.logger.Error("stale running sweep failed", "err", err)
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale running run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
+				}
+			}
+
+			if ids, err := store.Maintenance.ReapQueueExpiredRuns(s.store, ctx,
+				s.queueTimeout, runHeartbeatStaleAfter,
+				"reaped: no runner claimed this run's trigger before the queue deadline"); err != nil {
+				s.logger.Error("queue-deadline sweep failed", "err", err)
+			} else {
+				for _, id := range ids {
+					s.logger.Warn("reaped run whose trigger outlived the queue deadline",
+						"run_id", id, "queue_timeout", s.queueTimeout)
 					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}

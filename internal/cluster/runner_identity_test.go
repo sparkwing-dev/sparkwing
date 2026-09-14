@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -109,73 +108,5 @@ func TestRunTriggerLoop_NamesItsRunnerOnEveryClaim(t *testing.T) {
 	}
 	if !capture.stable("/api/v1/triggers/claim") {
 		t.Error("the identity changed between polls; each poll would buy a fresh budget")
-	}
-}
-
-func TestAgentMembershipClient_NamesTheAgentOnEveryClaim(t *testing.T) {
-	capture, ts := newIdentityCapture()
-	defer ts.Close()
-
-	cfg := agentconfig.Config{Name: "fleet-agent", Controller: ts.URL}
-	member := agentconfig.Coordinator{Name: "coordinator-a", Controller: ts.URL}
-	ctrl := agentMembershipClient(cfg, member)
-
-	for range 2 {
-		if _, err := ctrl.PrepareExecutorClaim(context.Background(), member.Name); err != nil {
-			t.Fatalf("PrepareExecutorClaim: %v", err)
-		}
-	}
-
-	got, ok := capture.first("/api/v1/nodes/claim/prepare")
-	if !ok {
-		t.Fatal("the membership client never prepared a claim")
-	}
-	if got != member.Name {
-		t.Errorf("preparation sent %s=%q, want the coordinator name %q",
-			store.RunnerIdentityHeader, got, member.Name)
-	}
-	if !capture.stable("/api/v1/nodes/claim/prepare") {
-		t.Error("the identity changed between polls; each poll would buy a fresh budget")
-	}
-}
-
-func TestAgentRunnerIdentity_PrefersTheNamesAnAgentAlreadyHas(t *testing.T) {
-	cases := []struct {
-		name   string
-		cfg    agentconfig.Config
-		member agentconfig.Coordinator
-		want   string
-	}{
-		{
-			name:   "the coordinator's own name",
-			cfg:    agentconfig.Config{Name: "fleet-agent"},
-			member: agentconfig.Coordinator{Name: "coordinator-a"},
-			want:   "coordinator-a",
-		},
-		{
-			name: "the agent's name",
-			cfg:  agentconfig.Config{Name: "fleet-agent"},
-			want: "fleet-agent",
-		},
-		{
-			name: "the holder prefix",
-			cfg:  agentconfig.Config{HolderPrefix: "runner:host"},
-			want: "runner:host",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := agentRunnerIdentity(tc.cfg, tc.member); got != tc.want {
-				t.Errorf("agentRunnerIdentity = %q, want %q", got, tc.want)
-			}
-		})
-	}
-
-	nameless := agentRunnerIdentity(agentconfig.Config{}, agentconfig.Coordinator{})
-	if !strings.HasPrefix(nameless, "agent:") {
-		t.Errorf("a nameless agent identified itself as %q, want one naming this process", nameless)
-	}
-	if nameless != agentRunnerIdentity(agentconfig.Config{}, agentconfig.Coordinator{}) {
-		t.Error("the fallback identity changed between calls")
 	}
 }

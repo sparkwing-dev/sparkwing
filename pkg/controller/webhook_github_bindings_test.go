@@ -18,7 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const bindingSecret = "3b9d0a1f4c7e2b5a8d6f0c3e9b2a5d8f"
+const bindingSecret = "fixture-webhook-secret-not-a-real-key"
 
 type bindingFixture struct {
 	server *httptest.Server

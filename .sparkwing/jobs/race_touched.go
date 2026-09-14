@@ -27,25 +27,31 @@ func runRaceTouched(ctx context.Context) error {
 		return nil
 	}
 	return withGoTestScratch(func(testRoot string) error {
-		var failures []string
-		for _, module := range mapKeys(targets) {
-			pkgs := targets[module]
-			sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
-			// safety: go test's default 10-minute budget is per package binary and
-			// pkg/store under the race detector outlives it on a one-core hosted
-			// runner; the pipeline's own timeout still bounds the step.
-			cmd := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
-			script := withoutInherited(fmt.Sprintf("cd %q && %s", module, cmd), productTestUnset)
-			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
-			}
-		}
-		if len(failures) == 0 {
-			return nil
-		}
-		return fmt.Errorf("go test -race failed in %d module(s):\n  - %s",
-			len(failures), strings.Join(failures, "\n  - "))
+		return withProductTestHome(func(home string) error {
+			return raceModules(ctx, targets, testRoot, home)
+		})
 	})
+}
+
+func raceModules(ctx context.Context, targets map[string][]string, testRoot, home string) error {
+	var failures []string
+	for _, module := range mapKeys(targets) {
+		pkgs := targets[module]
+		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
+		// safety: go test's default 10-minute budget is per package binary and
+		// pkg/store under the race detector outlives it on a one-core hosted
+		// runner; the pipeline's own timeout still bounds the step.
+		cmd := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
+		script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
+		if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("go test -race failed in %d module(s):\n  - %s",
+		len(failures), strings.Join(failures, "\n  - "))
 }
 
 func raceTargets(files, modules []string) map[string][]string {

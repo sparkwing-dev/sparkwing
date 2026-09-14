@@ -46,10 +46,6 @@ type PoolLoopConfig struct {
 	Contribution           string
 	MembershipContribution string
 
-	// ExecutorName marks an enrolled membership, which must use the separate
-	// reservation-backed offer path instead of this legacy FIFO poller.
-	ExecutorName string
-
 	Home string
 
 	Version string
@@ -58,10 +54,6 @@ type PoolLoopConfig struct {
 type nodeClaimer interface {
 	ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration,
 		headroom *client.Headroom, capacity *client.ClaimCapacity) (*store.Node, error)
-}
-
-type executorNodeClaimer interface {
-	ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 }
 
 type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
@@ -190,16 +182,6 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 
 		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
 		report := currentCapacity(ctx, provider)
-		if cfg.ExecutorName != "" {
-			<-sem
-			if sharedSlots != nil {
-				<-sharedSlots
-			}
-			observeClaimOutcome("assisted-offer-required")
-			logger.Error("claim withheld; enrolled executors require the assisted offer protocol", "source", cfg.SourceName)
-			sleepOrCancel(ctx, cfg.PollInterval)
-			continue
-		}
 		// safety: the loop holds one slot for the claim it is about to make, so
 		// the nodes already executing are the rest of what it holds.
 		capacity := &client.ClaimCapacity{MaxConcurrent: cfg.MaxConcurrent, ActiveClaims: max(len(sem)-1, 0)}

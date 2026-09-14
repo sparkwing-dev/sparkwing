@@ -256,7 +256,7 @@ func dispatchRun(args []string) error {
 			return fmt.Errorf("--sw-fleet config %s: %w", configPath, err)
 		}
 		if len(fleetConfig.Executors) == 0 {
-			return errors.New("--sw-fleet has no enrolled helpers; add one with `sparkwing fleet agents enroll --name ... --location ...`")
+			return fmt.Errorf("--sw-fleet has no enrolled helpers; %s lists no executors", configPath)
 		}
 		env = setEnv(env, "SPARKWING_FLEET_CONFIG", configPath)
 		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {

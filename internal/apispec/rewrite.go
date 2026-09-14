@@ -71,6 +71,9 @@ func rewrite(spec string, routes []apiroutes.Route, scopes []string) (string, er
 		return "", err
 	}
 	seedMissing(paths, routes, documented)
+	if err := checkKeysAreIdentifiers(root, ""); err != nil {
+		return "", err
+	}
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -383,4 +386,34 @@ func topLevelKey(line string) bool {
 
 func pathKey(line string) bool {
 	return strings.HasPrefix(line, "  /") && strings.HasSuffix(line, ":")
+}
+
+// safety: every key this spec declares is a field name, a path, a media type,
+// a status code or an extension, so none holds a space. An unquoted comma and
+// colon inside a description makes one: the flow mapping splits the prose and
+// the tail becomes a sibling field nobody wrote.
+func checkKeysAreIdentifiers(node *yaml.Node, path string) error {
+	switch node.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key, value := node.Content[i], node.Content[i+1]
+			if strings.Contains(key.Value, " ") {
+				return fmt.Errorf(
+					"%s: line %d: %q is a mapping key holding a space, "+
+						"which is an unquoted comma and colon inside the value above it; "+
+						"quote that value",
+					path, key.Line, key.Value)
+			}
+			if err := checkKeysAreIdentifiers(value, path+"/"+key.Value); err != nil {
+				return err
+			}
+		}
+	case yaml.SequenceNode:
+		for i, child := range node.Content {
+			if err := checkKeysAreIdentifiers(child, fmt.Sprintf("%s/%d", path, i)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

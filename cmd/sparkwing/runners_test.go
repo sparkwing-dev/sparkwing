@@ -135,9 +135,6 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the written config does not load: %v", err)
 	}
-	if raw.Name != "" || len(raw.Coordinators) != 0 {
-		t.Errorf("config selects enrolled mode: name=%q coordinators=%d", raw.Name, len(raw.Coordinators))
-	}
 	if raw.HolderPrefix != "dev-laptop" || raw.MaxConcurrent != 3 || raw.Contribution != "4,8gb" {
 		t.Errorf("config = %+v", raw)
 	}
@@ -150,12 +147,8 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if !strings.HasPrefix(raw.Token, minted.Prefix) {
 		t.Error("the config does not carry the minted token")
 	}
-	cfg, err := agentconfig.Validate(*raw)
-	if err != nil {
+	if _, err := agentconfig.Validate(*raw); err != nil {
 		t.Fatalf("the written config does not validate: %v", err)
-	}
-	if err := agentconfig.CheckEnrolledExecutionAvailable(cfg, false); err != nil {
-		t.Fatalf("the written config would be refused at startup: %v", err)
 	}
 
 	wantCalls := []string{

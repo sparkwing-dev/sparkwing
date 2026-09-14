@@ -31,7 +31,7 @@ func MainWithVersion(version string) {
 	case "runner":
 		err = runRunnerCLI(os.Args[2:], version)
 	case "agent":
-		err = runAgentCLI(os.Args[2:], buildinfo.Read("sparkwing-runner", version))
+		err = runAgentCLI(os.Args[2:])
 	case "run-node":
 		err = orchestrator.RunNodeCommand(os.Args[2:])
 	case "wingd":

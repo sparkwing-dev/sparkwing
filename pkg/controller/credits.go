@@ -18,6 +18,7 @@ const creditsBurnWindow = 24 * time.Hour
 type creditStateJSON struct {
 	BalanceMicro       int64            `json:"balance_micro"`
 	GrantedMicro       int64            `json:"granted_micro"`
+	ReversedMicro      int64            `json:"reversed_micro"`
 	ChargedMicro       int64            `json:"charged_micro"`
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateJSON `json:"rate_table"`
@@ -92,6 +93,7 @@ type creditGrantJSON struct {
 	Kind        string `json:"kind"`
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
+	Reverses    string `json:"reverses,omitempty"`
 	CreatedBy   string `json:"created_by,omitempty"`
 	CreatedAt   int64  `json:"created_at"`
 }
@@ -118,6 +120,7 @@ type createGrantReq struct {
 	Kind        string `json:"kind"`
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
+	Reverses    string `json:"reverses,omitempty"`
 }
 
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +132,7 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 	out := creditStateJSON{
 		BalanceMicro:       state.BalanceMicro,
 		GrantedMicro:       state.GrantedMicro,
+		ReversedMicro:      state.ReversedMicro,
 		ChargedMicro:       state.ChargedMicro,
 		RateMicroPerSecond: state.RateMicroPerSecond,
 		RateTable:          creditRateTableToJSON(state.RateTable),
@@ -281,26 +285,54 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !store.ValidCreditGrantKind(req.Kind) {
-		writeError(w, http.StatusBadRequest, errors.New("kind must be free or paid"))
+		writeError(w, http.StatusBadRequest, errors.New("kind must be free, paid or reversal"))
 		return
 	}
-	if req.AmountMicro <= 0 {
-		writeError(w, http.StatusBadRequest, errors.New("amount_micro must be positive"))
+	if err := grantAmountRule(req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	who := authwire.AnonymousPrincipal
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		who = p.Name
 	}
-	grant, err := s.store.GrantCredits(r.Context(), req.Kind, req.AmountMicro, req.Reference, who)
+	res, err := s.store.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
+		Kind: req.Kind, AmountMicro: req.AmountMicro,
+		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who,
+	})
+	if errors.Is(err, store.ErrCreditGrantConflict) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if !res.Created {
+		// safety: a payment webhook redelivers until it sees a 2xx, so the
+		// reference it already granted answers with the row it wrote.
+		s.logger.Info("credits already granted for this reference",
+			"kind", res.Grant.Kind, "reference", res.Grant.Reference, "grant_id", res.Grant.ID)
+		writeJSON(w, http.StatusOK, creditGrantToJSON(res.Grant))
+		return
+	}
 	s.logger.Info("credits granted",
-		"kind", grant.Kind, "amount_micro", grant.AmountMicro,
-		"reference", grant.Reference, "by", who)
-	writeJSON(w, http.StatusCreated, creditGrantToJSON(*grant))
+		"kind", res.Grant.Kind, "amount_micro", res.Grant.AmountMicro,
+		"reference", res.Grant.Reference, "reverses", res.Grant.Reverses, "by", who)
+	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
+}
+
+func grantAmountRule(req createGrantReq) error {
+	if req.Kind == store.CreditGrantReversal {
+		if req.AmountMicro >= 0 {
+			return errors.New("amount_micro must be negative for a reversal")
+		}
+		return nil
+	}
+	if req.AmountMicro <= 0 {
+		return errors.New("amount_micro must be positive")
+	}
+	return nil
 }
 
 func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
@@ -349,7 +381,8 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 func creditGrantToJSON(g store.CreditGrant) creditGrantJSON {
 	return creditGrantJSON{
 		ID: g.ID, Kind: g.Kind, AmountMicro: g.AmountMicro,
-		Reference: g.Reference, CreatedBy: g.CreatedBy, CreatedAt: g.CreatedAt.Unix(),
+		Reference: g.Reference, Reverses: g.Reverses,
+		CreatedBy: g.CreatedBy, CreatedAt: g.CreatedAt.Unix(),
 	}
 }
 

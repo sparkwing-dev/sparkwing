@@ -45,6 +45,7 @@ func runCredits(args []string) error {
 type creditStateResp struct {
 	BalanceMicro       int64            `json:"balance_micro"`
 	GrantedMicro       int64            `json:"granted_micro"`
+	ReversedMicro      int64            `json:"reversed_micro"`
 	ChargedMicro       int64            `json:"charged_micro"`
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateResp `json:"rate_table"`
@@ -93,6 +94,9 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "BALANCE\t%s credits\n", store.FormatCredits(state.BalanceMicro))
 	fmt.Fprintf(tw, "GRANTED\t%s credits\n", store.FormatCredits(state.GrantedMicro))
+	if state.ReversedMicro != 0 {
+		fmt.Fprintf(tw, "REVERSED\t%s credits\n", store.FormatCredits(state.ReversedMicro))
+	}
 	fmt.Fprintf(tw, "CHARGED\t%s credits\n", store.FormatCredits(state.ChargedMicro))
 	fmt.Fprintf(tw, "RATE\t%s credits per cloud runner second\n",
 		creditsPerUnit(state.RateMicroPerSecond, state.MicroPerCredit))
@@ -293,6 +297,7 @@ type creditGrantResp struct {
 	Kind        string `json:"kind"`
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
+	Reverses    string `json:"reverses,omitempty"`
 	CreatedBy   string `json:"created_by,omitempty"`
 	CreatedAt   int64  `json:"created_at"`
 }
@@ -300,9 +305,10 @@ type creditGrantResp struct {
 func runCreditsGrant(args []string) error {
 	fs := flag.NewFlagSet(cmdCreditsGrant.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	kind := fs.String("kind", "", "grant kind: free|paid")
-	amount := fs.Int64("amount", 0, "credits to add (100 credits = one dollar)")
+	kind := fs.String("kind", "", "grant kind: free|paid|reversal")
+	amount := fs.Int64("amount", 0, "credits to add, or to take back as a negative number on a reversal (100 credits = one dollar)")
 	reference := fs.String("reference", "", "payment id or operator note recorded with the grant")
+	reverses := fs.String("reverses", "", "reference of the paid grant a reversal takes back")
 	if err := parseAndCheck(cmdCreditsGrant, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -310,10 +316,10 @@ func runCreditsGrant(args []string) error {
 		return err
 	}
 	if !store.ValidCreditGrantKind(*kind) {
-		return fmt.Errorf("credits grant: --kind must be free or paid")
+		return fmt.Errorf("credits grant: --kind must be free, paid or reversal")
 	}
-	if *amount <= 0 {
-		return fmt.Errorf("credits grant: --amount must be a positive number of credits")
+	if err := creditGrantAmountRule(*kind, *amount, *reverses); err != nil {
+		return err
 	}
 	prof, err := resolveProfile(*on)
 	if err != nil {
@@ -329,6 +335,9 @@ func runCreditsGrant(args []string) error {
 	if *reference != "" {
 		body["reference"] = *reference
 	}
+	if *reverses != "" {
+		body["reverses"] = *reverses
+	}
 	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/credits/grants", body)
 	if err != nil {
 		return err
@@ -337,8 +346,32 @@ func runCreditsGrant(args []string) error {
 	if err := json.Unmarshal(resp, &grant); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
+	if grant.Kind == store.CreditGrantReversal {
+		fmt.Printf("reversed %s credits of %s as %s\n",
+			store.FormatCredits(-grant.AmountMicro), grant.Reverses, grant.ID)
+		return nil
+	}
 	fmt.Printf("granted %s credits (%s) as %s\n",
 		store.FormatCredits(grant.AmountMicro), grant.Kind, grant.ID)
+	return nil
+}
+
+func creditGrantAmountRule(kind string, amount int64, reverses string) error {
+	if kind != store.CreditGrantReversal {
+		if amount <= 0 {
+			return fmt.Errorf("credits grant: --amount must be a positive number of credits")
+		}
+		if reverses != "" {
+			return fmt.Errorf("credits grant: --reverses belongs to a reversal")
+		}
+		return nil
+	}
+	if amount >= 0 {
+		return fmt.Errorf("credits grant: a reversal takes a negative --amount")
+	}
+	if reverses == "" {
+		return fmt.Errorf("credits grant: a reversal needs --reverses, the reference of the paid grant it takes back")
+	}
 	return nil
 }
 
@@ -369,6 +402,7 @@ type creditHistoryRow struct {
 	AmountMicro int64  `json:"amount_micro"`
 	Kind        string `json:"kind,omitempty"`
 	Reference   string `json:"reference,omitempty"`
+	Reverses    string `json:"reverses,omitempty"`
 	CreatedBy   string `json:"created_by,omitempty"`
 	RunID       string `json:"run_id,omitempty"`
 	NodeID      string `json:"node_id,omitempty"`
@@ -427,7 +461,7 @@ func creditHistoryRows(history creditHistoryResp) []creditHistoryRow {
 	for _, g := range history.Grants {
 		rows = append(rows, creditHistoryRow{
 			Type: creditGrantRowType, ID: g.ID, At: g.CreatedAt, AmountMicro: g.AmountMicro,
-			Kind: g.Kind, Reference: g.Reference, CreatedBy: g.CreatedBy,
+			Kind: g.Kind, Reference: g.Reference, Reverses: g.Reverses, CreatedBy: g.CreatedBy,
 		})
 	}
 	for _, c := range history.Charges {
@@ -469,6 +503,9 @@ func creditRowDetail(row creditHistoryRow) string {
 		detail := row.Kind
 		if row.Reference != "" {
 			detail += " ref=" + row.Reference
+		}
+		if row.Reverses != "" {
+			detail += " reverses=" + row.Reverses
 		}
 		if row.CreatedBy != "" {
 			detail += " by=" + row.CreatedBy
