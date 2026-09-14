@@ -187,9 +187,9 @@ func TestHighestReleaseTag(t *testing.T) {
 			want: "v0.11.0",
 		},
 		{
-			name: "ignores pre-release and build metadata",
+			name: "counts a pre-release and ignores build metadata",
 			tags: []string{"v0.11.0", "v0.12.0-rc1", "v0.12.0+build"},
-			want: "v0.11.0",
+			want: "v0.12.0-rc1",
 		},
 		{
 			name: "ignores non-semver refs",

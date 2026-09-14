@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -530,26 +530,29 @@ func currentBranch(ctx context.Context, repoDir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// safety: the one release-tag grammar. bin/check-release-tag-order.sh and the
+// safety: workflow's own shape check carry the same expression, and a test
+// safety: pins all three, so no stage accepts a tag another stage refuses.
+var releaseTagGrammar = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$`)
+
+func isReleaseTagShape(v string) bool {
+	return releaseTagGrammar.MatchString(v)
+}
+
 func validateReleaseVersion(v string) error {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return errors.New("release: --version is required (e.g. --version v0.6.1)")
 	}
-	if !strings.HasPrefix(v, "v") {
-		return fmt.Errorf("release: version %q must begin with 'v' (e.g. v0.6.1)", v)
+	if !isReleaseTagShape(v) {
+		return fmt.Errorf("release: version %q is not a vMAJOR.MINOR.PATCH release tag "+
+			"(an optional -prerelease suffix is allowed; leading zeros and +build metadata are not)", v)
 	}
-	if !semver.IsValid(v) {
-		return fmt.Errorf("release: version %q is not valid semver (expected vX.Y.Z)", v)
-	}
-	if semver.Prerelease(v) != "" || semver.Build(v) != "" {
-		return fmt.Errorf("release: version %q includes pre-release / build metadata; release pipeline only cuts stable tags", v)
-	}
-	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("release: version %q must be vX.Y.Z", v)
+	if semver.Prerelease(v) != "" {
+		return fmt.Errorf("release: version %q is a pre-release; the pipeline only cuts stable tags", v)
 	}
 	// safety: module is locked to v0.x; remove this check to allow v1+ tags.
-	if semver.Major(v) != "v0" {
+	if !onReleaseLine(v) {
 		return fmt.Errorf("release: version %q is v1.0.0+ but sparkwing is locked to v0.x. "+
 			"Bumping to v1+ commits the public API surface (see VERSIONING.md); "+
 			"if that's intentional, remove the pre-1.0 lock in .sparkwing/jobs/release.go and resubmit", v)
@@ -577,35 +580,20 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 	return res.Stdout, nil
 }
 
-func runGitRawIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			msg := strings.TrimSpace(string(exitErr.Stderr))
-			if msg != "" {
-				return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
-			}
-		}
-		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
-	}
-	return out, nil
-}
+// safety: v1.0.0 through v1.6.1 are retracted tombstone tags the module proxy
+// safety: keeps forever (see the retract block in go.mod), so the release line
+// safety: stops below them. Pre-releases do count: dropping one here would let
+// safety: the workflow refuse a version this pipeline just cut.
+const releaseLineCeiling = "v1.0.0"
 
-const releaseTagCeiling = "v1.0.0"
+func onReleaseLine(tag string) bool {
+	return isReleaseTagShape(tag) && semver.Compare(tag, releaseLineCeiling) < 0
+}
 
 func highestReleaseTag(tags []string) string {
 	var best string
 	for _, t := range tags {
-		if !semver.IsValid(t) {
-			continue
-		}
-		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
-			continue
-		}
-		if semver.Compare(t, releaseTagCeiling) >= 0 {
+		if !onReleaseLine(t) {
 			continue
 		}
 		if best == "" || semver.Compare(t, best) > 0 {
@@ -615,10 +603,29 @@ func highestReleaseTag(tags []string) string {
 	return best
 }
 
-func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
-	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
+// safety: the workflow runs these gates after the tag exists, so the release
+// safety: being cut is in its own tag list and must not be its own predecessor.
+func previousReleaseTag(ctx context.Context, repoDir, version string) (string, error) {
+	tags, err := remoteReleaseTags(ctx, repoDir)
 	if err != nil {
 		return "", err
+	}
+	tags = slices.DeleteFunc(tags, func(t string) bool { return t == version })
+	return highestReleaseTag(tags), nil
+}
+
+func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
+	tags, err := remoteReleaseTags(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
+	return highestReleaseTag(tags), nil
+}
+
+func remoteReleaseTags(ctx context.Context, repoDir string) ([]string, error) {
+	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
+	if err != nil {
+		return nil, err
 	}
 	var tags []string
 	for _, line := range strings.Split(out, "\n") {
@@ -633,7 +640,7 @@ func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 		}
 		tags = append(tags, strings.TrimSuffix(strings.TrimPrefix(ref, prefix), "^{}"))
 	}
-	return highestReleaseTag(tags), nil
+	return tags, nil
 }
 
 func bumpVersion(v, kind string) (string, error) {
@@ -761,8 +768,11 @@ func (j *checkSchemaBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 }
 
 func (j *checkSchemaBreakJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+	return checkSchemaBreak(ctx, j.RepoDir, j.Version.Get(ctx))
+}
+
+func checkSchemaBreak(ctx context.Context, repoDir, version string) error {
+	prevTag, err := previousReleaseTag(ctx, repoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: resolve previous tag for schema gate: %w", err)
 	}
@@ -770,7 +780,7 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "no previous release tag; skipping schema-break changelog gate")
 		return nil
 	}
-	curSrc, err := os.ReadFile(filepath.Join(j.RepoDir, filepath.FromSlash(storeSchemaSourcePath)))
+	curSrc, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(storeSchemaSourcePath)))
 	if err != nil {
 		return fmt.Errorf("release: read %s: %w", storeSchemaSourcePath, err)
 	}
@@ -778,7 +788,7 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: current schema: %w", err)
 	}
-	prevSrc, err := runGitIn(ctx, j.RepoDir, "show", prevTag+":"+storeSchemaSourcePath)
+	prevSrc, err := runGitIn(ctx, repoDir, "show", prevTag+":"+storeSchemaSourcePath)
 	if err != nil {
 		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, prevTag, err)
 	}
@@ -798,7 +808,7 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d) and no requirement added; gate passes", prevTag, curSchema)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
@@ -846,8 +856,11 @@ func (j *checkWireBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error)
 }
 
 func (j *checkWireBreakJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+	return checkWireBreak(ctx, j.RepoDir, j.Version.Get(ctx))
+}
+
+func checkWireBreak(ctx context.Context, repoDir, version string) error {
+	prevTag, err := previousReleaseTag(ctx, repoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: resolve previous tag for wire gate: %w", err)
 	}
@@ -855,7 +868,7 @@ func (j *checkWireBreakJob) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "no previous release tag; skipping wire-surface changelog gate")
 		return nil
 	}
-	cuts, err := wireCutsSince(ctx, j.RepoDir, prevTag)
+	cuts, err := wireCutsSince(ctx, repoDir, prevTag)
 	if err != nil {
 		return fmt.Errorf("release: diff the wire surface against %s: %w", prevTag, err)
 	}
@@ -863,11 +876,11 @@ func (j *checkWireBreakJob) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "wire surface added to or unchanged since %s; gate passes", prevTag)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	body, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
-	issues := LintWireBreak(string(body), version, cuts, migrationsFS(j.RepoDir))
+	issues := LintWireBreak(string(body), version, cuts, migrationsFS(repoDir))
 	if len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {

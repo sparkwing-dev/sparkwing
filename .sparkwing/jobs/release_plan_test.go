@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -137,5 +138,71 @@ func TestRequireAheadOfNewestTag(t *testing.T) {
 				t.Fatalf("requireAheadOfNewestTag(%q, %q) = %v, wantErr %v", c.version, c.newest, err, c.wantErr)
 			}
 		})
+	}
+}
+
+func TestReleaseTagGrammarIsTheOneGrammar(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(filepath.Join(root, "bin", "check-release-tag-order.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expression := strings.TrimPrefix(strings.TrimSuffix(releaseTagGrammar.String(), "$"), "^")
+	if !strings.Contains(string(script), expression) {
+		t.Errorf("bin/check-release-tag-order.sh does not carry the grammar %s", expression)
+	}
+	if !strings.Contains(string(workflow), expression) {
+		t.Errorf(".github/workflows/release.yaml does not carry the grammar %s", expression)
+	}
+}
+
+func TestReleaseTagGrammarAndThePreV1Lock(t *testing.T) {
+	cases := []struct {
+		name      string
+		version   string
+		wantShape bool
+		wantLine  bool
+		wantCut   bool
+	}{
+		{name: "stable", version: "v0.50.4", wantShape: true, wantLine: true, wantCut: true},
+		{name: "prerelease", version: "v0.50.4-rc.1", wantShape: true, wantLine: true},
+		{name: "build metadata", version: "v0.50.4+deadbeef"},
+		{name: "leading zeros", version: "v0.50.04"},
+		{name: "two fields", version: "v0.50"},
+		{name: "no v prefix", version: "0.50.4"},
+		{name: "retracted v1 tombstone", version: "v1.6.1", wantShape: true},
+		{name: "v1 and above", version: "v1.0.0", wantShape: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isReleaseTagShape(c.version); got != c.wantShape {
+				t.Errorf("isReleaseTagShape(%q) = %v, want %v", c.version, got, c.wantShape)
+			}
+			if got := validateReleaseVersion(c.version) == nil; got != c.wantCut {
+				t.Errorf("validateReleaseVersion(%q) accepted = %v, want %v", c.version, got, c.wantCut)
+			}
+			inHighest := highestReleaseTag([]string{c.version}) == c.version
+			if inHighest != c.wantLine {
+				t.Errorf("highestReleaseTag counts %q = %v, want %v; the newest tag must be what the workflow calls the newest tag", c.version, inHighest, c.wantLine)
+			}
+		})
+	}
+}
+
+func TestPreviousReleaseTagIsNotTheReleaseBeingCut(t *testing.T) {
+	tags := []string{"v0.50.2", "v0.50.3", "v0.50.4"}
+	if got := highestReleaseTag(tags); got != "v0.50.4" {
+		t.Fatalf("highestReleaseTag = %q, want v0.50.4", got)
+	}
+	trimmed := slices.DeleteFunc(slices.Clone(tags), func(t string) bool { return t == "v0.50.4" })
+	if got := highestReleaseTag(trimmed); got != "v0.50.3" {
+		t.Fatalf("previous tag = %q, want v0.50.3; the schema and wire gates would diff a release against itself", got)
 	}
 }
