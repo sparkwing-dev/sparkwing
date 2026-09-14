@@ -7046,11 +7046,10 @@ SELECT id FROM runs
 	return ids, nil
 }
 
-// safety: this is the deadline the requeued-trigger exclusions answer to. A run
-// whose trigger went back in the queue survives the orphan sweeps, so without a
-// bound a queue no runner serves would hold it open for good. A run that is
-// executing answers only to the heartbeat the stale-running sweep reads, because
-// the claimant that spawned it can die while the work it started runs on.
+// safety: this is the deadline the requeued-trigger exclusions answer to, or a
+// queue no runner serves would hold a run open for good. An executing run
+// answers only to the heartbeat the stale-running sweep reads, because the
+// claimant that spawned the work can die while the work runs on.
 func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline, staleHeartbeat time.Duration, reason string) ([]string, error) {
 	now := time.Now()
 	cutoff := now.Add(-deadline).UnixNano()
