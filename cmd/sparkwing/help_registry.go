@@ -2331,8 +2331,8 @@ max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
 max_global_runs_per_hour, min_cron_interval_seconds, runner_scale_base,
 runner_scale_step_credits and runner_scale_ceiling. The per-principal
-guards bind a principal holding a metered token; the max_global_ pair binds
-every run. The runner_scale_ trio raises max_concurrent_runners by one
+guards bind a principal holding a metered token; the two max_global settings bind
+every run. The three runner_scale settings raise max_concurrent_runners by one
 runner_scale_base for every runner_scale_step_credits of paid credit granted in
 the last 30 days, held under runner_scale_ceiling. Work past a guard answers
 429 with a Retry-After and the run records a compute_limit_blocked event.
