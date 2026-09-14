@@ -86,6 +86,11 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
+	// safety: naming a node the queue has not opened needs the run's dispatch
+	// claim, which this fixture stands in for by opening the queue instead.
+	if err := st.MarkNodeReady(ctx, runID, nodeID); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
 	token, _, err := st.CreateToken("pool", store.TokenKindRunner, []string{
 		controller.ScopeNodesClaim, controller.ScopeRunsRead,
 		controller.ScopeRunsState, controller.ScopeRunsWrite,

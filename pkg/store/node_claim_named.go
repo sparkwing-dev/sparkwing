@@ -15,10 +15,14 @@ import (
 //
 // Unlike the queue claim it passes over no candidate and reads no label: the
 // caller already decided this node is its work. It still refuses a node
-// another claim holds, a node that finished, one pinned to a different
-// coordinator or executor location, and one whose execution policy is sealed.
-// A node that exists but cannot be awarded returns [ErrLockHeld]; a node that
-// does not exist returns [ErrNotFound].
+// another claim holds, a node that finished, a node of a run that finished,
+// one pinned to a coordinator or executor location, and one whose execution
+// policy is sealed. A node that exists but cannot be awarded returns
+// [ErrLockHeld]; a node that does not exist returns [ErrNotFound].
+//
+// It reads no readiness flag, because the coordinator fallback it serves takes
+// the node in the same breath as the controller withdraws it from the queue.
+// Deciding who may name a node is the caller's gate, not this one.
 //
 // claimant is the authenticated token the claim answers to, exactly as for
 // [Store.ClaimNextReadyNode]: a metered token reserves credits here, and
@@ -30,19 +34,20 @@ func (s *Store) ClaimNamedNode(ctx context.Context, claimant ClaimIdentity, runI
 	if err != nil {
 		return nil, err
 	}
-	var status string
+	var status, runStatus string
 	var claimedBy sql.NullString
 	var needsJSON, prefersJSON []byte
-	err = s.queryRow(ctx, `SELECT status, claimed_by, needs_labels, prefers_labels
- FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID).Scan(
-		&status, &claimedBy, &needsJSON, &prefersJSON)
+	err = s.queryRow(ctx, `SELECT n.status, n.claimed_by, n.needs_labels, n.prefers_labels, r.status
+ FROM nodes n JOIN runs r ON r.id = n.run_id
+	WHERE n.run_id = ? AND n.node_id = ?`, runID, nodeID).Scan(
+		&status, &claimedBy, &needsJSON, &prefersJSON, &runStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("node", runID+"/"+nodeID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if status == nodeStatusDone || claimedBy.Valid {
+	if status == nodeStatusDone || claimedBy.Valid || isTerminalRunStatus(runStatus) {
 		return nil, ErrLockHeld
 	}
 	candidate := claimCandidate{runID: runID, nodeID: nodeID}

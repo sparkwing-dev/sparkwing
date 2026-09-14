@@ -76,6 +76,10 @@ type Config struct {
 	TTLSecondsAfterFinished int32
 
 	MissingJobGracePeriod time.Duration
+
+	// JobActiveDeadline bounds a fallback Job whose node declared no timeout.
+	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it.
+	JobActiveDeadline time.Duration
 }
 
 type Runner struct {
@@ -141,7 +145,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	hbCtx, stopHB := context.WithCancel(ctx)
 	defer stopHB()
-	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, fence.HolderID, r.logger)
+	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "job created")
 	var lastPhase string
@@ -194,43 +198,36 @@ func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 	return string(p.Status.Phase)
 }
 
-func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID, holderID string, logger *slog.Logger) {
-	beat := func() {
-		if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
-			logger.Debug("k8s: heartbeat failed",
-				"run_id", runID, "node_id", nodeID, "err", err)
-		}
-		if holderID == "" {
-			return
-		}
-		// safety: the pod may spend minutes pulling its image before it starts
-		// renewing the lease itself, and a lapsed claim is a reaped node.
-		if err := ctrl.HeartbeatNodeClaim(ctx, runID, nodeID, holderID, ClaimLease, nil); err != nil {
-			logger.Debug("k8s: claim heartbeat failed",
-				"run_id", runID, "node_id", nodeID, "holder_id", holderID, "err", err)
-		}
-	}
-	beat()
-	t := time.NewTicker(ClaimHeartbeatInterval)
+func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
+	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
+	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			beat()
+			if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
+				logger.Debug("k8s: heartbeat failed",
+					"run_id", runID, "node_id", nodeID, "err", err)
+			}
 		}
 	}
 }
 
 // ClaimLease is the lease the dispatcher takes on a node it executes through a
-// Job, and the lease the pod renews. It is the store's cap, because a pod can
-// spend minutes pulling an image before it writes anything.
+// Job, and the lease the pod renews once it starts. The dispatcher never
+// renews it: a pod that never runs must let its claim lapse rather than hold a
+// billed claim for as long as the dispatcher watches an ImagePullBackOff.
 const ClaimLease = store.MaxLeaseDuration
 
-// ClaimHeartbeatInterval is how often the dispatcher and the pod renew the
-// claim.
-const ClaimHeartbeatInterval = 5 * time.Second
+// DefaultJobActiveDeadline bounds a fallback Job whose node declared no
+// timeout, so a pod that wedges cannot outlive the run that wanted it.
+const DefaultJobActiveDeadline = 6 * time.Hour
+
+// safety: the node's own timeout must fire first, so it records an outcome
+// rather than vanishing with the pod Kubernetes deleted.
+const jobDeadlineSlack = 10 * time.Minute
 
 // safety: a controller that does not carry the targeted-claim route, or a node
 // some other holder already took, leaves the Job running exactly as it did
@@ -238,6 +235,11 @@ const ClaimHeartbeatInterval = 5 * time.Second
 func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName string) (store.NodeClaimFence, bool) {
 	holderID := "k8s-job:" + jobName
 	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease)
+	if errors.Is(err, client.ErrControllerLacksRoute) {
+		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
+			"run_id", req.RunID, "node_id", req.NodeID)
+		return store.NodeClaimFence{}, false
+	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed",
 			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
@@ -247,6 +249,23 @@ func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName stri
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	}, true
+}
+
+func (r *Runner) jobActiveDeadline(req runner.Request) *int64 {
+	deadline := r.cfg.JobActiveDeadline
+	if deadline <= 0 {
+		deadline = DefaultJobActiveDeadline
+	}
+	if req.Node != nil {
+		if declared := req.Node.TimeoutDuration(); declared > 0 {
+			deadline = declared + jobDeadlineSlack
+		}
+	}
+	secs := int64(deadline.Seconds())
+	if secs < 1 {
+		secs = 1
+	}
+	return &secs
 }
 
 func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, jobName string) runner.Result {
@@ -518,6 +537,7 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
+			ActiveDeadlineSeconds:   r.jobActiveDeadline(req),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec:       podSpec,

@@ -139,3 +139,37 @@ func TestClaimNamedNodeIsRefusedWhenTheBalanceCannotCoverTheReservation(t *testi
 		t.Fatal("a refused claim left the node claimed")
 	}
 }
+
+func TestClaimNamedNodeRefusesANodeOfAFinishedRun(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedClaimedNode(t, s, "run-over", "build")
+	if err := s.FinishRun(ctx, "run-over", "success", ""); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+
+	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-over", "build", "k8s-job:sw-1", time.Minute)
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("ClaimNamedNode on a node of a finished run = %v, want ErrLockHeld", err)
+	}
+}
+
+// The named claim and the queue claim share one award, and only the named one
+// may take a node the queue has not opened.
+func TestClaimNextReadyNodeStillRefusesANodeTheQueueHasNotOpened(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedClaimedNode(t, s, "run-unready", "build")
+
+	_, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{}, "agent:box-a", time.Minute, nil)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ClaimNextReadyNode saw an unready node = %v, want ErrNotFound", err)
+	}
+	n, err := s.GetNode(ctx, "run-unready", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.Claimed {
+		t.Fatalf("the queue claim took an unready node for %q", n.ClaimedBy)
+	}
+}

@@ -945,3 +945,34 @@ func TestRunNode_ClaimsTheNodeBeforeItCreatesTheJob(t *testing.T) {
 		t.Fatalf("%s = %q, want generation %d", ClaimGenerationEnv, env[ClaimGenerationEnv], n.ClaimGeneration)
 	}
 }
+
+func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{}, store.NodeClaimFence{})
+	if job.Spec.ActiveDeadlineSeconds == nil {
+		t.Fatal("the Job carries no ActiveDeadlineSeconds, so a wedged pod outlives its run")
+	}
+	if want := int64(DefaultJobActiveDeadline.Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want %d", *job.Spec.ActiveDeadlineSeconds, want)
+	}
+
+	tuned := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 90 * time.Minute}}
+	job = tuned.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{}, store.NodeClaimFence{})
+	if want := int64((90 * time.Minute).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("configured ActiveDeadlineSeconds = %d, want %d", *job.Spec.ActiveDeadlineSeconds, want)
+	}
+}
+
+func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "slow", func(context.Context) error { return nil }).Timeout(time.Hour)
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "slow", Node: node},
+		capacity.Resolution{}, store.NodeClaimFence{})
+	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
+			*job.Spec.ActiveDeadlineSeconds, want)
+	}
+}

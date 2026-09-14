@@ -42,20 +42,28 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	now := time.Now().UTC()
-	// safety: the dispatcher's readiness routes bind to the run's trigger claim,
-	// which a foreground test run has no trigger to hold.
-	dispatcherToken, _, err := st.CreateToken("dispatcher", store.TokenKindRunner,
-		[]string{controller.ScopeAdmin}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken dispatcher: %v", err)
-	}
-	poolToken, _, err := st.CreateToken("pool", store.TokenKindRunner, []string{
+	// safety: production runs the dispatcher and its Kubernetes fallback on one
+	// worker token, and the readiness routes bind to the run's trigger claim, so
+	// the fixture gives that token a live claim on the trigger rather than admin.
+	poolToken, record, err := st.CreateToken("pool", store.TokenKindRunner, []string{
 		controller.ScopeNodesClaim, controller.ScopeRunsRead, controller.ScopeRunsState,
-	}, 0, now)
+	}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken pool: %v", err)
 	}
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "run-1", Pipeline: "demo", Status: "pending", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	claimant := store.ClaimIdentity{Principal: "pool", TokenPrefix: record.Prefix}
+	trigger, err := st.ClaimNextTriggerFor(ctx, claimant, time.Minute, nil, nil)
+	if err != nil {
+		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	}
+	dispatchCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{
+		Claimant: claimant, ClaimGeneration: trigger.ClaimSeq,
+	})
 
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().Handler())
@@ -77,11 +85,11 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
 		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
 	}, quiet)
-	warm := warmpool.New(client.NewWithToken(srv.URL, nil, dispatcherToken), fallback, warmpool.Config{
+	warm := warmpool.New(client.NewWithToken(srv.URL, nil, poolToken), fallback, warmpool.Config{
 		PollInterval: time.Millisecond, ClaimWaitTimeout: 10 * time.Millisecond,
 	}, quiet)
 
-	warm.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	warm.RunNode(dispatchCtx, runner.Request{RunID: "run-1", NodeID: "build"})
 
 	n, err := st.GetNode(ctx, "run-1", "build")
 	if err != nil {

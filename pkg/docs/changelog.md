@@ -25,8 +25,18 @@ unlock.
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a
-  node itself. `store.ClaimNamedNode` and `client.ClaimNodeByID` are its store
-  and client surfaces.
+  node itself. It awards a node the queue has opened to any `nodes.claim`
+  token and an unopened one only to a caller holding the run's live trigger
+  claim, so a pipeline pod's token cannot take work whose dependencies have not
+  run. `store.ClaimNamedNode` and `client.ClaimNodeByID` are its store and
+  client surfaces.
+
+### Changed
+
+- **cluster:** A Kubernetes runner Job now carries an `activeDeadlineSeconds`:
+  ten minutes past the node's own `.Timeout()` where it declared one, and six
+  hours otherwise. `k8s.Config.JobActiveDeadline` sets the default. A wedged
+  pod that used to run until an operator noticed is now bounded.
 
 ### Fixed
 
@@ -42,9 +52,11 @@ unlock.
   `SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`,
   `SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`,
   and both renew the lease while the node runs. `sparkwing-runner run-node`
-  sends that fence on every state write and log append. A metered token reserves
-  and settles its credits on this claim, so a cloud node run this way bills its
-  minute. Both `--trigger-runner warm` and `--trigger-runner k8s` take the claim.
+  sends that fence on every state write and log append and is the only renewer,
+  so a pod that never starts releases the node when its ten-minute lease lapses.
+  A metered token reserves and settles its credits on this claim, so a cloud
+  node run this way bills its minute. Both `--trigger-runner warm` and
+  `--trigger-runner k8s` take the claim.
 
 ## [v0.50.2] - 2026-09-14
 ### Added

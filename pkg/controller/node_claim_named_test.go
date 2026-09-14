@@ -14,9 +14,34 @@ import (
 )
 
 type namedClaimFixture struct {
-	url   string
-	token string
-	store *store.Store
+	url    string
+	token  string
+	prefix string
+	store  *store.Store
+}
+
+func (f namedClaimFixture) readyNode(t *testing.T, runID, nodeID string) {
+	t.Helper()
+	seedRunNode(t, f.store, runID, nodeID)
+	if err := f.store.MarkNodeReady(context.Background(), runID, nodeID); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+}
+
+// safety: the dispatcher's standing is its live claim on the run's trigger,
+// which is what lets it name a node the queue has not opened.
+func (f namedClaimFixture) claimTrigger(t *testing.T, runID, pipeline string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := f.store.CreateTrigger(ctx, store.Trigger{
+		ID: runID, Pipeline: pipeline, Status: "pending", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if _, err := f.store.ClaimNextTriggerFor(ctx,
+		store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix}, time.Minute, nil, nil); err != nil {
+		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	}
 }
 
 func newNamedClaimFixture(t *testing.T, opts store.TokenOptions) namedClaimFixture {
@@ -26,7 +51,7 @@ func newNamedClaimFixture(t *testing.T, opts store.TokenOptions) namedClaimFixtu
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	token, _, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
+	token, record, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
 		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
 		0, time.Now().UTC(), opts)
 	if err != nil {
@@ -34,12 +59,12 @@ func newNamedClaimFixture(t *testing.T, opts store.TokenOptions) namedClaimFixtu
 	}
 	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
-	return namedClaimFixture{url: srv.URL, token: token, store: st}
+	return namedClaimFixture{url: srv.URL, token: token, prefix: record.Prefix, store: st}
 }
 
 func TestClaimNodeByID_AwardsTheNamedNodeWithItsFence(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{})
-	seedRunNode(t, f.store, "run-1", "build")
+	f.readyNode(t, "run-1", "build")
 	c := client.NewWithToken(f.url, nil, f.token)
 	ctx := context.Background()
 
@@ -69,7 +94,7 @@ func TestClaimNodeByID_AwardsTheNamedNodeWithItsFence(t *testing.T) {
 
 func TestClaimNodeByID_RefusesANodeAnotherHolderHas(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{})
-	seedRunNode(t, f.store, "run-1", "build")
+	f.readyNode(t, "run-1", "build")
 	ctx := context.Background()
 	if _, err := f.store.ClaimNamedNode(ctx, store.ClaimIdentity{},
 		"run-1", "build", "agent:box-a", time.Minute); err != nil {
@@ -94,7 +119,7 @@ func TestClaimNodeByID_ReportsANodeThatDoesNotExist(t *testing.T) {
 
 func TestClaimNodeByID_NeedsTheClaimScope(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{})
-	seedRunNode(t, f.store, "run-1", "build")
+	f.readyNode(t, "run-1", "build")
 	reader, _, err := f.store.CreateToken("reader", store.TokenKindRunner,
 		[]string{controller.ScopeRunsRead}, 0, time.Now().UTC())
 	if err != nil {
@@ -112,7 +137,7 @@ func TestClaimNodeByID_NeedsTheClaimScope(t *testing.T) {
 // the finish.
 func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{Metered: true})
-	seedRunNode(t, f.store, "run-1", "build")
+	f.readyNode(t, "run-1", "build")
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
 		100*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
@@ -155,5 +180,55 @@ func rewindNamedChargeWindow(t *testing.T, st *store.Store, runID, nodeID string
 		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
 		at.UnixNano(), runID, nodeID); err != nil {
 		t.Fatalf("rewind the charge window: %v", err)
+	}
+}
+
+// Every pipeline pod carries a nodes.claim token, so the scope alone must not
+// let one take a node whose dependencies have not run.
+func TestClaimNodeByID_RefusesAnUnreadyNodeWithoutTheRunsDispatchClaim(t *testing.T) {
+	f := newNamedClaimFixture(t, store.TokenOptions{})
+	seedRunNode(t, f.store, "run-1", "build")
+
+	_, err := client.NewWithToken(f.url, nil, f.token).
+		ClaimNodeByID(context.Background(), "run-1", "build", "rogue:pod", time.Minute)
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("claiming an unready node = %v, want a refusal", err)
+	}
+	n, err := f.store.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.Claimed {
+		t.Fatalf("the refused claim still took the node for %q", n.ClaimedBy)
+	}
+}
+
+func TestClaimNodeByID_AwardsAnUnreadyNodeToTheRunsDispatcher(t *testing.T) {
+	f := newNamedClaimFixture(t, store.TokenOptions{})
+	seedRunNode(t, f.store, "run-1", "build")
+	f.claimTrigger(t, "run-1", "demo")
+
+	n, err := client.NewWithToken(f.url, nil, f.token).
+		ClaimNodeByID(context.Background(), "run-1", "build", "k8s-job:sw-1", time.Minute)
+	if err != nil {
+		t.Fatalf("the run's dispatcher was refused its own node: %v", err)
+	}
+	if n.ClaimedBy != "k8s-job:sw-1" {
+		t.Fatalf("claimed_by = %q, want the dispatcher's holder", n.ClaimedBy)
+	}
+}
+
+func TestClaimNodeByID_RefusesANodeOfAFinishedRun(t *testing.T) {
+	f := newNamedClaimFixture(t, store.TokenOptions{})
+	f.readyNode(t, "run-1", "build")
+	ctx := context.Background()
+	if err := f.store.FinishRun(ctx, "run-1", "success", ""); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+
+	_, err := client.NewWithToken(f.url, nil, f.token).
+		ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute)
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("claiming a node of a finished run = %v, want ErrLockHeld", err)
 	}
 }

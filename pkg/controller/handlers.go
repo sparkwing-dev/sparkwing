@@ -1546,6 +1546,9 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
+	if !s.mayClaimNamedNode(w, r, runID, nodeID) {
+		return
+	}
 	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
 		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
 	if err != nil {
@@ -1564,6 +1567,42 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeClaimedNode(w, r, s, n)
+}
+
+// safety: naming a node skips the queue, and every pipeline pod carries a
+// nodes.claim token, so the scope alone would let a node body take work whose
+// dependencies have not run. A node the queue already opened is fair game; an
+// unopened one belongs to whoever holds the run's dispatch claim.
+func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok || p.HasScope(ScopeAdmin) {
+		return true
+	}
+	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if n.ReadyAt != nil {
+		return true
+	}
+	held, err := s.store.PrincipalHoldsTriggerClaim(r.Context(), runID, claimIdentity(r), time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if held {
+		return true
+	}
+	writeAuthError(w, http.StatusForbidden, authErrorBody{
+		Code: "claim_required", Principal: p.label(),
+		Message: "node " + runID + "/" + nodeID + " has not been made ready, so naming it requires the run's live trigger claim",
+	})
+	return false
 }
 
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {

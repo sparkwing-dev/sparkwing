@@ -590,13 +590,26 @@ its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands
 the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
 `SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`,
 `SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`.
-`run-node` sends that fence on every state write and log append, and the
-dispatcher and the pod both renew the lease while the node runs. The claim is
+`run-node` sends that fence on every state write and log append. The claim is
 what the controller's node-mutation fence admits, and on a metered token it is
-what reserves the minute the run bills. Nothing releases the claim: the pod
-stops renewing it when it exits and the lease lapses for the reaper. The plain
-`--trigger-runner k8s` path takes the same claim, because it builds the same
-Job.
+what reserves the minute the run bills. The plain `--trigger-runner k8s` path
+takes the same claim, because it builds the same Job.
+
+The route awards a node the queue has already opened to any `nodes.claim`
+token, and an unopened one only to a caller holding the run's live trigger
+claim, which is the dispatcher. A node body's token therefore cannot take work
+whose dependencies have not run. The route refuses a node another claim holds
+and a node of a run that has finished.
+
+The pod is the only renewer: it extends the lease every five seconds from the
+moment its process starts, and the dispatcher renews nothing, so a pod that
+never runs releases the node when the ten-minute lease lapses rather than
+holding a billed claim for as long as the dispatcher watches an
+`ImagePullBackOff`. The same ten minutes is the cost of a dispatcher that dies
+mid-node: nothing releases a claim, so the node waits out the lease before the
+reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten
+minutes past the node's own `.Timeout()` where it declared one and six hours
+otherwise, so a wedged pod cannot outlive the run that wanted it.
 
 The full-chart path is
 `sparkwing-runner-bundle.runner.triggerRunner.kind: warm`, together with

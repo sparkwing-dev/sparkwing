@@ -573,6 +573,9 @@ func runNodeCLI(args []string) error {
 		}
 		runOpts = append(runOpts, brokeredExecutionChild(os.Getenv(remoteBrokeredArtifactEnv) == "1"))
 	}
+	// safety: RunNodeCommand reads the same claim variables for a Job's pod,
+	// where the process already is the isolated execution; here it supervises
+	// one, so a claim means handing the node to a child through the broker.
 	if os.Getenv(remoteBrokeredClaimEnv) == "1" {
 		holderID = "brokered-execution"
 		runOpts = append(runOpts, func(c *runNodeConfig) {

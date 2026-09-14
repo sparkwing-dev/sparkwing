@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -75,6 +74,11 @@ func RunNodeCommand(args []string) error {
 	if fence.HolderID != "" {
 		holderID = fence.HolderID
 		runOpts = append(runOpts, ClaimedNodeFence(fence))
+		// safety: the renewal has to reach the controller the node's writes
+		// reach, which over the daemon's unix socket is neither the URL nor the
+		// bearer token this process was given.
+		transports := nodeTransportsFor(runNodeConfig{apiSocket: apiSocket}, *controllerURL, token)
+		defer transports.close()
 		var wg sync.WaitGroup
 		hbCtx, stopHeartbeat := context.WithCancel(ctx)
 		// safety: nothing releases the claim, so the pod stops renewing it and
@@ -83,12 +87,12 @@ func RunNodeCommand(args []string) error {
 			stopHeartbeat()
 			wg.Wait()
 		}()
-		if *controllerURL != "" {
+		if transports.stateURL != "" {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				heartbeatDispatchedClaim(hbCtx,
-					client.NewWithToken(*controllerURL, &http.Client{Timeout: 30 * time.Second}, token),
+					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken),
 					runID, nodeID, fence, lease, slog.Default())
 			}()
 		}
@@ -106,11 +110,14 @@ func RunNodeCommand(args []string) error {
 }
 
 // DispatchedClaimHeartbeatInterval is how often a dispatched node renews the
-// claim its dispatcher took for it.
+// claim its dispatcher took for it. The dispatcher renews nothing, so this is
+// the only signal that the pod is alive.
 const DispatchedClaimHeartbeatInterval = 5 * time.Second
 
-// safety: a lease the dispatcher did not name still has to be long enough to
-// outlive one missed renewal, so it falls back to the store's cap.
+// safety: runNodeCLI reads the same variables and supervises an isolated child
+// under them; here the process already is that child, so the fence guards its
+// own writes. A lease the dispatcher did not name falls back to the store's cap
+// so one missed renewal does not lose the claim.
 func dispatchedNodeClaim() (store.NodeClaimFence, time.Duration, error) {
 	holder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER")
 	if holder == "" {
