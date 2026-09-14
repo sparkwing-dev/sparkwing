@@ -62,8 +62,10 @@ labels you authorize are forwarded to the run as `SPARKWING_ALLOW`
 that variable by hand authorizes nothing, because the gate has already run by
 then.
 
-A detached run is not gated yet: `--sw-detached` dispatches before admission
-and refuses `--sw-allow`, so run a risk-labeled pipeline in the foreground.
+A detached launch of a pipeline that declares a risk is refused: the trigger
+carries no allow, so `--sw-detached` weighs the declarations at submission and
+tells you to run that pipeline in the foreground, where `--sw-allow`
+authorizes it.
 
 `--profile NAME` selects the storage and dispatch addressing
 (state/cache/logs, and any controller auth). Execution still happens

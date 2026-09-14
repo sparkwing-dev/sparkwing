@@ -185,6 +185,10 @@ refused with the reason rather than silently ignored: `--sw-index`
 `sparkwing run`. Everything else after the pipeline name is passed to the
 pipeline as its own arguments.
 
+Because the trigger carries no allow, a detached launch of a pipeline whose
+step declares a risk is refused at submission, naming the step and its labels.
+Run that pipeline in the foreground with `--sw-allow`.
+
 `--sw-ref` and `--sw-priority` are the exceptions, because both ride on
 the trigger. A detached launch resolves the ref to a commit, builds the
 worktree, and records it as the run's checkout, so the run executes that
