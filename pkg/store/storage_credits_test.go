@@ -317,6 +317,53 @@ func TestASpentBalanceDrainsToTheFreeAllowanceOutsideTheRetentionWindow(t *testi
 	}
 }
 
+func TestASpentBalanceWithNoFreeAllowanceDrainsEverythingPastTheWindow(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	if err := st.SetStorageSettings(ctx, store.StorageSettings{EventRetentionDays: 30}); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "acme", "expired", gib, now.Add(-40*24*time.Hour))
+	seedRetainedRun(t, st, "acme", "inside", gib, now.Add(-2*24*time.Hour))
+
+	swept, err := st.SweepStorageAllowance(ctx, now)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.Runs != 1 || swept.Bytes != gib {
+		t.Fatalf("swept %+v, want the run past the window alone", swept)
+	}
+	retained, err := st.StorageRetainedBytes(ctx, "acme")
+	if err != nil {
+		t.Fatalf("retained: %v", err)
+	}
+	if retained != gib {
+		t.Fatalf("retained = %d, want only what the window still covers", retained)
+	}
+}
+
+func TestSweepKeepsEverythingForATeamThatNamedNoAllowance(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{
+		Principal: "acme", MaxBytesPerRun: 1 << 40,
+	}); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	seedRetainedRun(t, st, "acme", "ancient", 3*gib, now.Add(-365*24*time.Hour))
+
+	swept, err := st.SweepStorageAllowance(ctx, now)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.Runs != 0 {
+		t.Fatalf("swept %+v, want nothing on an install that priced no storage", swept)
+	}
+}
+
 func TestAPaidBalanceDrainsNothingBelowTheAllowance(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

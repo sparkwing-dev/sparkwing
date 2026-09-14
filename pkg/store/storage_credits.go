@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 )
@@ -345,7 +346,8 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 //
 // A spent balance lowers the ceiling to the free allowance, and that drain
 // takes only runs whose retention window has already elapsed, so non-payment
-// never removes anything the window still covers.
+// never removes anything the window still covers. An installation with no
+// retention window releases nothing, so nothing drains there.
 func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error) {
 	var out StorageAllowanceSweep
 	quotas, err := s.ListStorageQuotas(ctx)
@@ -360,8 +362,10 @@ func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (Stora
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		if err := s.expireAboveCeiling(ctx, quota.Principal, quota.AllowanceBytes, time.Time{}, &out); err != nil {
-			return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", quota.Principal, err)
+		if quota.AllowanceBytes > 0 {
+			if err := s.expireAboveCeiling(ctx, quota.Principal, quota.AllowanceBytes, time.Time{}, &out); err != nil {
+				return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", quota.Principal, err)
+			}
 		}
 		if !drain {
 			continue
@@ -401,14 +405,12 @@ func (s *Store) storageDrainTarget(ctx context.Context, now time.Time) (bool, st
 	return true, storageDrain{free: free, before: retentionCutoff(now, settings.EventRetentionDays)}, nil
 }
 
-// safety: a ceiling of zero keeps everything, which is what a team that never
-// named an allowance asked for, so only a positive ceiling expires anything.
+// safety: the caller decides whether a ceiling binds at all, because zero means
+// opposite things on the two passes: a team named no allowance, or a spent
+// balance leaves nothing free.
 func (s *Store) expireAboveCeiling(
 	ctx context.Context, principal string, ceiling int64, before time.Time, out *StorageAllowanceSweep,
 ) error {
-	if ceiling <= 0 {
-		return nil
-	}
 	retained, err := s.StorageRetainedBytes(ctx, principal)
 	if err != nil || retained <= ceiling {
 		return err
@@ -450,7 +452,7 @@ SELECT u.run_id, u.bytes
  WHERE u.principal = ? AND r.` + runTerminalIn + ` AND r.created_at < ?
  ORDER BY r.created_at ASC, u.run_id ASC
  LIMIT ?`
-	bound := int64(1)<<62 - 1
+	bound := int64(math.MaxInt64)
 	if !before.IsZero() {
 		bound = before.UnixNano()
 	}

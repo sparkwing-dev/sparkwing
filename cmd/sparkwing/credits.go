@@ -119,7 +119,9 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
 	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", state.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", state.MaxChargeSeconds)
-	fmt.Fprintf(tw, "STORAGE CHARGED\t%s credits\n", store.FormatCredits(state.StorageChargedMicro))
+	if state.StorageChargedMicro != 0 {
+		fmt.Fprintf(tw, "STORAGE CHARGED\t%s credits\n", store.FormatCredits(state.StorageChargedMicro))
+	}
 	fmt.Fprint(tw, storageRateLine(state.StorageRateMicroPerGBDay,
 		state.StorageFreeAllowanceBytes, state.MicroPerCredit))
 	if state.ExhaustedAt != nil {
