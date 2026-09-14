@@ -23,7 +23,8 @@ func (PrePush) ShortHelp() string {
 func (PrePush) Help() string {
 	return "Judges the push against the checks that answer in seconds: gofmt and the configured formatters " +
 		"(gofumpt + goimports) over the changed Go files, no disallowed comments (only GoDoc on exported APIs " +
-		"and // hack:/safety:/bug:/perf: tags), an embedded pkg/docs/ mirror that matches docs/ and " +
+		"and // hack:/safety:/bug:/perf: tags), no test that sleeps or waits on the wall clock over that " +
+		"same scope, an embedded pkg/docs/ mirror that matches docs/ and " +
 		"CHANGELOG.md, a CHANGELOG.md entry for every covered surface the push changes " +
 		"(bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table " +
 		"(bin/check-api-spec.sh), the public API surface matching the .apidiff/ snapshot " +
@@ -61,6 +62,7 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "gofmt", runGofmtOnTheChange)
 	sparkwing.Step(w, "formatters", runFormatters)
 	sparkwing.Step(w, "comments", checkComments)
+	sparkwing.Step(w, "test-sleeps", checkTestSleeps)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
