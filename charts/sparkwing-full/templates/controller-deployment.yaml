@@ -119,6 +119,9 @@ spec:
             {{- with .Values.controller.idleClaimPoll }}
             - {{ printf "--idle-claim-poll=%s" . | quote }}
             {{- end }}
+            {{- with .Values.controller.limitsProfile }}
+            - {{ printf "--limits-profile=%s" . | quote }}
+            {{- end }}
             {{- $bucket := .Values.controller.bucketCeiling | default dict }}
             {{- range $limit := list
                   (dict "flag" "--max-bucket-bytes" "value" $bucket.maxBytes)

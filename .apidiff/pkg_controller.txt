@@ -113,6 +113,21 @@ type GitHubWebhookDisconnectResponse struct {
 	HookID      int64
 }
 const IdleClaimPollJitterFactor = 1.25
+func LimitsProfile(name string) (LimitsProfileValues, error)
+const LimitsProfileCloud = "cloud"
+const LimitsProfileCloudFree = "cloud-free"
+func LimitsProfileNames() []string
+type LimitsProfileValues struct {
+	ClaimsPerRunnerMinute int
+
+	HeartbeatsPerRunnerMinute int
+
+	MaxLogStreamsPerPrincipal int
+
+	MaxDownloadsPerPrincipal int
+
+	EnforceIdleClaimPoll bool
+}
 type LiveLogRead struct {
 	Start int64
 
@@ -240,6 +255,7 @@ func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
+func (s *Server) WithIdleClaimPollEnforced(on bool) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server

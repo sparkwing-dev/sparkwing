@@ -22,6 +22,30 @@ unlock.
 
 ### Added
 
+- **controller + chart:** `--limits-profile` (chart `controller.limitsProfile`,
+  env `SPARKWING_LIMITS_PROFILE`) names a set of abuse guards a hosted
+  controller runs with, so provisioning writes one setting rather than one per
+  guard. `cloud` sets the per-runner claim and heartbeat budgets to 9600 and
+  1200 a minute, the egress caps to 50 live log streams and 20 concurrent
+  downloads per principal, and turns idle-poll enforcement on; `cloud-free`
+  sets 2400, 600, 10 and 5 with the same enforcement. A profile fills a guard
+  only where the command line and the environment named none, so an explicit
+  value always wins. `controller.LimitsProfile` and
+  `controller.LimitsProfileNames` are the Go surface. Empty, the default,
+  supplies nothing: a self-hosted controller keeps every budget unlimited.
+- **controller:** `Server.WithIdleClaimPollEnforced` answers a claim that
+  arrives sooner than the idle interval the controller last suggested that
+  runner with `429` and a `Retry-After` naming the rest of the wait. The
+  interval compared against is the one that runner was sent, and the
+  enforcement lifts as soon as work is handed out, so a runner honoring the
+  suggestion is never refused and a fleet is never held off a queue that has
+  filled. `sparkwing_principal_throttled_total{route_class="idle_poll"}` counts
+  the refusals. Off unless a limits profile turns it on.
+- **controller + CLI:** `GET /api/v1/compute-limits` carries a `budgets` object
+  with the per-runner request budgets, the idle-poll suggestion and whether it
+  is enforced, and the egress stream and download caps in force, and
+  `sparkwing cluster limits show` prints them beside the stored compute guards.
+
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a node gets past its claim reservation, and the cap on

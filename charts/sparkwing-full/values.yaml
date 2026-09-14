@@ -138,6 +138,15 @@ controller:
   # default of 5s.
   idleClaimPoll: ""
 
+  # Named set of abuse guards the controller runs with: "cloud" for a paid
+  # hosted controller, "cloud-free" for a free-tier one. A profile supplies the
+  # per-runner request budgets, the egress stream and download caps, and
+  # idle-poll enforcement, and it fills a guard only where nothing above named
+  # one, so an explicit value always wins. Empty, the default, supplies none
+  # and leaves a self-hosted controller exactly as it was. See
+  # docs/security.md.
+  limitsProfile: ""
+
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""

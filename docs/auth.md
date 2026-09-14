@@ -650,7 +650,10 @@ placement. The header is advice a
 runner may only widen its own cadence to: it never polls faster than it
 was configured to, it spreads its return with jitter so a fleet advised
 together does not come back together, and a runner that ignores the
-header polls exactly as often as it always did. A host's own admission
+header polls exactly as often as it always did. A controller running a
+limits profile enforces the suggestion instead, answering an early claim
+`429` with the rest of the wait; see
+[security.md](security.md#idle-poll-enforcement). A host's own admission
 daemon and the loopback controller suggest nothing: they serve one
 machine's runs, where a widened idle poll costs pickup latency and
 protects no fleet.

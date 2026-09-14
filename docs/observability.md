@@ -706,6 +706,10 @@ unlimited until an operator sets one.
 | `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
 
+The controller's two concurrency caps are also supplied as a set by
+`--limits-profile`, which a hosted controller runs with instead of naming
+each guard; see [security.md](security.md#limits-profiles).
+
 Each service reads its own environment variables:
 `SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES`,
 `SPARKWING_LOGS_EGRESS_MONTHLY_BYTES`,

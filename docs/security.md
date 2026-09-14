@@ -282,6 +282,10 @@ budgeted as one caller there. Size the budgets per runner and the older
 half of the fleet still clears them, or leave the budgets at zero until
 the rollout finishes.
 
+`--limits-profile` turns the budgets on as a set, so a hosted controller
+carries one setting rather than one per guard. It is described under
+[Limits profiles](#limits-profiles) below.
+
 The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
 never budgeted. An agent that loses it tears down its membership and
 every node under it, which is a far worse outcome than the load one
@@ -293,6 +297,55 @@ counts it. A runner reads a `429` the way it reads a `503`: it waits the
 header out, capped at 30 seconds, and keeps its claim and its node. A
 host's own admission daemon and the loopback controller budget nothing,
 because their callers are unauthenticated and would share one bucket.
+
+## Idle-poll enforcement
+
+A controller told to enforce its idle-poll suggestion answers a claim
+that arrives sooner than the interval it last suggested that runner with
+`429` and a `Retry-After` naming the rest of the wait, instead of a
+claim. The interval compared against is the one that runner was last
+sent, not the one the controller would send now, and the enforcement
+lifts the moment work is handed out, so a fleet is never held off a queue
+that has since filled. A runner that honors the suggestion waits at least
+that long by construction and is never refused; a runner that ignores the
+header pays the wait it was told about. A controller that suggests
+nothing, which is any controller with `--idle-claim-poll=0` and every
+host's own admission daemon, enforces nothing.
+
+Enforcement is off unless a limits profile turns it on;
+`sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
+refusals.
+
+## Limits profiles
+
+`--limits-profile` (chart `controller.limitsProfile`, env
+`SPARKWING_LIMITS_PROFILE`) names a set of abuse guards a hosted
+controller runs with, so provisioning writes one setting rather than one
+per guard. Empty, the default, supplies none: a self-hosted controller
+keeps every budget unlimited and enforces no idle poll, which is what it
+served before profiles existed.
+
+| Guard | `cloud` | `cloud-free` |
+| --- | --- | --- |
+| `--claims-per-runner-minute` | 9600 | 2400 |
+| `--heartbeats-per-runner-minute` | 1200 | 600 |
+| `--egress-max-log-streams` | 50 | 10 |
+| `--egress-max-downloads` | 20 | 5 |
+| Idle-poll enforcement | on | on |
+
+The claim budgets are `1200 x max_concurrent`, the recommendation above,
+at the concurrency each tier's agents are sized for: eight offer slots on
+`cloud` and the two the runner chart ships with on `cloud-free`. The
+heartbeat budgets carry the shipped cadence with the same headroom, and
+the free tier halves the paid figure. The egress caps are the concurrency
+one team is expected to read logs and artifacts at.
+
+A profile fills a guard only where the command line and the environment
+named none. Every guard it supplies is unlimited at zero, so a value an
+operator set is already non-zero and wins; raising one guard on a hosted
+controller is one flag beside the profile rather than a fork of it.
+`sparkwing cluster limits show` prints the budgets in force beside the
+stored compute guards.
 
 ## Webhooks
 
