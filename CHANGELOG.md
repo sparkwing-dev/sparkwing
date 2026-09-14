@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.5] - 2026-09-14
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.0, so a fresh scaffold compiles against that release.
@@ -42,7 +43,7 @@ unlock.
   gains `reason` (`on_demand`/`keep_warm`) and `failed` labels. A cache started
   without `--fetch-interval` stops polling on upgrade; pass `--fetch-interval
   30s` to keep the old cadence. See [migration
-  guide](docs/migrations/_unreleased.md#the-gitcache-refreshes-on-demand-and-stops-polling-by-default).
+  guide](docs/migrations/v0.50.5.md#the-gitcache-refreshes-on-demand-and-stops-polling-by-default).
 
 - **release:** `sparkwing run release` rolls the migration guide with the
   changelog section it renames: `docs/migrations/_unreleased.md` becomes
@@ -66,7 +67,7 @@ unlock.
   it does not know. `warm_cpu_class_cores` takes its place on all three
   schemas: it caps the class the warm pool serves rather than the class a node
   is billed at, and a node is now billed at the class it pinned. See [migration
-  guide](docs/migrations/_unreleased.md#the-credit-settings-api-drops-billing_cpu_ceiling_cores).
+  guide](docs/migrations/v0.50.5.md#the-credit-settings-api-drops-billing_cpu_ceiling_cores).
 
 - **runner:** The trigger loop waits 15 seconds between `not our ref` retries
   instead of 10, so the second attempt falls outside the cache's freshness
