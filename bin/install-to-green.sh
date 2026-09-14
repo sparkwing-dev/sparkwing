@@ -245,12 +245,16 @@ else
     chmod 0755 "$STAGE/$asset"
   fi
 
-  openssl genpkey -algorithm ed25519 -out "$WORK/signing.pem" 2>/dev/null ||
+  # The caller nominates an openssl for the installer, and staging needs the
+  # same one: a system openssl that cannot mint an ed25519 key stops the run
+  # here, before the nominated binary is ever consulted.
+  ssl="${SPARKWING_OPENSSL:-openssl}"
+  "$ssl" genpkey -algorithm ed25519 -out "$WORK/signing.pem" 2>/dev/null ||
     fail "this openssl cannot generate ed25519 keys, so no release can be staged"
-  signing_key="$(openssl pkey -in "$WORK/signing.pem" -pubout -outform DER | tail -c 32 | openssl base64 -A)"
-  (cd "$STAGE" && openssl dgst -sha256 -r "$asset" >SHA256SUMS)
-  openssl pkeyutl -sign -inkey "$WORK/signing.pem" -rawin -in "$STAGE/SHA256SUMS" -out "$STAGE/SHA256SUMS.sig"
-  openssl pkeyutl -sign -inkey "$WORK/signing.pem" -rawin -in "$STAGE/$asset" -out "$STAGE/$asset.sig"
+  signing_key="$("$ssl" pkey -in "$WORK/signing.pem" -pubout -outform DER | tail -c 32 | "$ssl" base64 -A)"
+  (cd "$STAGE" && "$ssl" dgst -sha256 -r "$asset" >SHA256SUMS)
+  "$ssl" pkeyutl -sign -inkey "$WORK/signing.pem" -rawin -in "$STAGE/SHA256SUMS" -out "$STAGE/SHA256SUMS.sig"
+  "$ssl" pkeyutl -sign -inkey "$WORK/signing.pem" -rawin -in "$STAGE/$asset" -out "$STAGE/$asset.sig"
 
   # The installer trusts the release key and takes no override, so the staged
   # copy swaps the trust root for the key minted above and nothing else.
@@ -296,7 +300,10 @@ export "${demo_env[@]}"
 # builds, which is not what an adopter's first compile resolves.
 export GOWORK=off
 unset GOBIN
-export PATH="$PREFIX:$GO_BIN_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+# The pinned path carries the system administration directories too: this
+# script reads the machine's load through a tool that lives in one of them,
+# and a path without them records no load for the half of the run after it.
+export PATH="$PREFIX:$GO_BIN_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 for required in git curl; do
   command -v "$required" >/dev/null 2>&1 ||
     fail "$required is required and does not resolve on the harness PATH ($PATH)"
