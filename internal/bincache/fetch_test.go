@@ -807,7 +807,7 @@ func workspaceSnapshotCommit(t *testing.T, bareRepo, baseSHA, addPath, addConten
 	return sha
 }
 
-func TestFetchPipelineWorkspaceSource_ResolvesTheBaselineAStepDiffsAgainst(t *testing.T) {
+func TestAdoptWorkspaceBaseline_ResolvesTheBaselineAStepDiffsAgainst(t *testing.T) {
 	repoParent := t.TempDir()
 	name := sourceurl.ClaimedRepoNameFromURL(testRepoSSH)
 	baseSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, name, "main")
@@ -817,24 +817,30 @@ func TestFetchPipelineWorkspaceSource_ResolvesTheBaselineAStepDiffsAgainst(t *te
 	defer srv.Close()
 
 	for _, tc := range []struct {
-		name     string
-		baseline WorkspaceBaseline
-		want     []string
+		name  string
+		adopt bool
+		want  []string
 	}{
-		{name: "with the recorded baseline", baseline: WorkspaceBaseline{Ref: "origin/main", SHA: baseSHA}, want: []string{".sparkwing/marker", "added.txt"}},
-		{name: "without one", baseline: WorkspaceBaseline{}},
+		{name: "with the recorded baseline", adopt: true, want: []string{".sparkwing/marker", "added.txt"}},
+		{name: "without one"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
-				testRepoSSH, "main", workspaceSHA, t.TempDir(), tc.baseline)
+				testRepoSSH, "main", workspaceSHA, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
 			root := filepath.Dir(sparkwingDir)
+			if tc.adopt {
+				if err := AdoptWorkspaceBaseline(context.Background(), root, srv.URL, "",
+					workspaceSHA, WorkspaceBaseline{Ref: "origin/main", SHA: baseSHA}); err != nil {
+					t.Fatalf("AdoptWorkspaceBaseline: %v", err)
+				}
+			}
 			base, mergeBaseErr := exec.Command("git", "-C", root, "merge-base", "origin/main", "HEAD").Output()
-			if tc.baseline.SHA == "" {
+			if !tc.adopt {
 				if mergeBaseErr == nil {
-					t.Fatalf("a checkout with no recorded baseline resolved origin/main at %s", strings.TrimSpace(string(base)))
+					t.Fatalf("a checkout with no adopted baseline resolved origin/main at %s", strings.TrimSpace(string(base)))
 				}
 				return
 			}
@@ -864,4 +870,53 @@ func TestFetchPipelineWorkspaceSource_ResolvesTheBaselineAStepDiffsAgainst(t *te
 			}
 		})
 	}
+}
+
+func TestAdoptWorkspaceBaseline_SkipsASourceThatServesOnlyTheSnapshot(t *testing.T) {
+	repoParent := t.TempDir()
+	name := sourceurl.ClaimedRepoNameFromURL(testRepoSSH)
+	baseSHA, tipSHA := makeBareRepoWithSparkwing(t, repoParent, name, "main")
+	bareRepo := filepath.Join(repoParent, name+".git")
+	workspaceSHA := workspaceSnapshotCommit(t, bareRepo, tipSHA, "added.txt", "added\n")
+	srv := startGitcacheTestServer(t, repoParent)
+	defer srv.Close()
+
+	sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
+		testRepoSSH, "main", workspaceSHA, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Dir(sparkwingDir)
+
+	// safety: a local fleet run serves its own bundle this way, with the snapshot ref and nothing else.
+	snapshotOnly := filepath.Join(t.TempDir(), "snapshot-only")
+	mustGit(t, "", "clone", "--bare", "--quiet", bareRepo, snapshotOnly)
+	mustGit(t, snapshotOnly, "update-ref", SeedRef(workspaceSHA), workspaceSHA)
+	refs := strings.Fields(mustGit(t, snapshotOnly, "for-each-ref", "--format=%(refname)"))
+	for _, ref := range refs {
+		if ref != SeedRef(workspaceSHA) {
+			mustGit(t, snapshotOnly, "update-ref", "-d", ref)
+		}
+	}
+	mustGit(t, root, "remote", "set-url", "origin", snapshotOnly)
+
+	err = AdoptWorkspaceBaseline(context.Background(), root, srv.URL, "",
+		workspaceSHA, WorkspaceBaseline{Ref: "origin/main", SHA: baseSHA})
+	if !errors.Is(err, ErrBaselineUnservable) {
+		t.Fatalf("AdoptWorkspaceBaseline = %v, want ErrBaselineUnservable", err)
+	}
+	if out, refErr := exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Output(); refErr == nil {
+		t.Fatalf("a source that serves only the snapshot still named origin/main at %s", strings.TrimSpace(string(out)))
+	}
+}
+
+func mustGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
 }

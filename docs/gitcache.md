@@ -287,7 +287,11 @@ remote-tracking ref it had locally, and grafts the parentless snapshot commit
 onto it with a `refs/replace/` entry, so a step scoped by `git merge-base
 origin/main HEAD` reads the range the laptop would. `git rev-parse HEAD` still
 answers with the snapshot SHA. A checkout with no origin remote records no
-baseline, and a step that needs one reports the ref it cannot resolve.
+baseline, and a step that needs one reports the ref it cannot resolve. A source
+that advertises only the snapshot, which is what a local fleet run serves, has
+no baseline to give and the runner skips the fetch. A mirror that has not caught
+up yet is retried, and a baseline that stays unreachable is named in the run's
+log so the widened scope has a stated cause.
 The cache moves each accepted snapshot from the transient seed namespace into
 `refs/sparkwing-workspace/*` and retains at most 128 distinct workspace refs per
 repository. Re-seeding the same snapshot refreshes one ref. A new snapshot is

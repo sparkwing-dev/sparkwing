@@ -79,17 +79,22 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
+	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
 	var sparkwingDir string
 	var err error
-	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
+	if workspaceSource {
 		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheToken,
-			repoURL, branch, trigger.GitSHA, workDir, bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv))
+			repoURL, branch, trigger.GitSHA, workDir)
 	} else {
 		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheToken,
 			repoURL, branch, trigger.GitSHA, workDir)
 	}
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
+	}
+	if workspaceSource {
+		adoptNodeBaseline(ctx, trigger, filepath.Dir(sparkwingDir),
+			gcURL, bincache.GitcacheBearer(gcURL, controllerURL, token, cacheToken), runID, nodeID, logger)
 	}
 
 	binaryCacheURL := gcURL
@@ -107,6 +112,26 @@ func runNodeRemote(
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.path)
 	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, runID, nodeID, logger)
+}
+
+func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, gcURL, token, runID, nodeID string, logger *slog.Logger) {
+	baseline := bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv)
+	if baseline == (bincache.WorkspaceBaseline{}) {
+		return
+	}
+	err := bincache.AdoptWorkspaceBaseline(ctx, checkoutDir, gcURL, token, trigger.GitSHA, baseline)
+	switch {
+	case err == nil:
+		logger.Info("runNodeRemote: baseline ready",
+			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA)
+	case errors.Is(err, bincache.ErrBaselineUnservable):
+		logger.Debug("runNodeRemote: source serves only the snapshot, so it carries no baseline",
+			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref)
+	default:
+		// safety: the checkout runs without the baseline, and a step that needs it says so itself.
+		logger.Warn("runNodeRemote: baseline unavailable; a step that diffs against it judges this checkout against nothing",
+			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA, "err", err)
+	}
 }
 
 func runNodeIsolated(

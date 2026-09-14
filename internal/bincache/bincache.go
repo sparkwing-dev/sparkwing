@@ -196,7 +196,7 @@ func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
 }
 
 func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "", WorkspaceBaseline{})
+	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "")
 }
 
 // FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
@@ -204,10 +204,9 @@ func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, 
 	return FetchPipelineSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
 }
 
-// FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout
-// transformations, and gives the checkout the baseline ref the snapshot was captured against.
-func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string, baseline WorkspaceBaseline) (sparkwingDir string, err error) {
-	return FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir, baseline)
+// FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
+func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	return FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
 }
 
 // FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
@@ -215,26 +214,29 @@ func FetchPipelineSourceWithCredentials(
 	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
-	if bearer == "" {
-		bearer = cacheToken
-	}
-	return fetchPipelineSource(ctx, gcURL, bearer, repoSSH, branch, sha, parentDir, false,
-		controllerClaimedRepoName(gcURL, controllerURL, repoSSH), WorkspaceBaseline{})
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
 // FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
 func FetchPipelineWorkspaceSourceWithCredentials(
 	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
-	baseline WorkspaceBaseline,
 ) (sparkwingDir string, err error) {
-	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
-	if bearer == "" {
-		bearer = cacheToken
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+}
+
+// GitcacheBearer resolves the credential a cache read may carry: the controller bearer only for
+// the controller's own proxy origin, otherwise the caller's direct cache token or the environment's.
+func GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken string) string {
+	if bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken); bearer != "" {
+		return bearer
 	}
-	return fetchPipelineSource(ctx, gcURL, bearer, repoSSH, branch, sha, parentDir, true,
-		controllerClaimedRepoName(gcURL, controllerURL, repoSSH), baseline)
+	if cacheToken != "" {
+		return cacheToken
+	}
+	return CacheToken()
 }
 
 // ControllerRunGitcacheURL turns the admin cache proxy into the claim-bound route used by node executors.
@@ -311,7 +313,7 @@ func controllerClaimedRepoName(gcURL, controllerURL, repoURL string) string {
 	return sourceurl.ClaimedRepoNameFromURL(repoURL)
 }
 
-func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string, baseline WorkspaceBaseline) (sparkwingDir string, err error) {
+func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
@@ -355,9 +357,6 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 			if err := restoreRawCheckout(ctx, workTree, sha); err != nil {
 				return "", err
 			}
-		}
-		if workspaceCommit && baseline != (WorkspaceBaseline{}) {
-			warnBaselineUnavailable(baseline, adoptWorkspaceBaseline(ctx, workTree, gcURL, token, sha, baseline))
 		}
 	} else {
 		if err := shallowCloneBranch(ctx, gcURL, cloneURL, token, branch, workTree); err != nil {

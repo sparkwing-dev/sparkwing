@@ -2,8 +2,8 @@ package bincache
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,7 +88,16 @@ func validateRemoteTrackingRef(ref string) error {
 	return nil
 }
 
-func adoptWorkspaceBaseline(ctx context.Context, repoDir, gcURL, token, snapshotSHA string, baseline WorkspaceBaseline) error {
+// ErrBaselineUnservable reports a source that carries only the working-tree snapshot, such as the
+// single-ref server a local fleet run serves its own bundle from. It has no baseline commit to give.
+var ErrBaselineUnservable = errors.New("working-tree baseline: the source serves only the snapshot")
+
+// AdoptWorkspaceBaseline gives a snapshot checkout the remote-tracking ref its capture was measured
+// against: it fetches the baseline commit from the checkout's origin, names it, and grafts the
+// parentless snapshot commit onto it, so `git merge-base <ref> HEAD` answers what it answers on the
+// machine that captured the snapshot. It returns ErrBaselineUnservable when the origin carries only
+// the snapshot, and reports the git failure otherwise; the checkout stays usable either way.
+func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snapshotSHA string, baseline WorkspaceBaseline) error {
 	resolved, err := baseline.Resolve()
 	if err != nil {
 		return err
@@ -96,13 +105,27 @@ func adoptWorkspaceBaseline(ctx context.Context, repoDir, gcURL, token, snapshot
 	if resolved.SHA == snapshotSHA {
 		return fmt.Errorf("working-tree baseline: %s is the snapshot commit itself", resolved.SHA)
 	}
+	snapshot, err := isWorkspaceSnapshotCommit(ctx, checkoutDir, snapshotSHA)
+	if err != nil {
+		return err
+	}
+	if !snapshot {
+		return fmt.Errorf("working-tree baseline: %s is not a working-tree snapshot commit", snapshotSHA)
+	}
 	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoDir}, args...)...)
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", checkoutDir}, args...)...)
 		cmd.Env = gitHTTPEnv(gcURL, token)
 		if out, runErr := cmd.CombinedOutput(); runErr != nil {
 			return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), runErr, strings.TrimSpace(string(out)))
 		}
 		return nil
+	}
+	servable, err := originServesMoreThanTheSnapshot(ctx, checkoutDir, gcURL, token, snapshotSHA)
+	if err != nil {
+		return err
+	}
+	if !servable {
+		return ErrBaselineUnservable
 	}
 	if err := run("fetch", "--depth", "1", "--end-of-options", "origin", resolved.SHA); err != nil {
 		return err
@@ -118,7 +141,26 @@ func adoptWorkspaceBaseline(ctx context.Context, repoDir, gcURL, token, snapshot
 	if err := run("config", "core.useReplaceRefs", "true"); err != nil {
 		return err
 	}
-	return completeShallowCommit(ctx, repoDir, snapshotSHA)
+	return completeShallowCommit(ctx, checkoutDir, snapshotSHA)
+}
+
+func originServesMoreThanTheSnapshot(ctx context.Context, checkoutDir, gcURL, token, snapshotSHA string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", checkoutDir, "ls-remote", "--refs", "origin")
+	cmd.Env = gitHTTPEnv(gcURL, token)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("list the source refs: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		_, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
+		if ref != SeedRef(snapshotSHA) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // hack: git stops a traversal at a shallow boundary even where a replacement supplies the
@@ -130,11 +172,15 @@ func completeShallowCommit(ctx context.Context, repoDir, sha string) error {
 		return fmt.Errorf("resolve git directory: %w", err)
 	}
 	path := filepath.Join(strings.TrimSpace(string(out)), "shallow")
-	data, err := os.ReadFile(path) // #nosec G304 -- a path under the checkout this call just made
+	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
+		return fmt.Errorf("read shallow boundary: %w", err)
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- a path under the checkout this call just made
+	if err != nil {
 		return fmt.Errorf("read shallow boundary: %w", err)
 	}
 	kept := make([]string, 0, 4)
@@ -149,18 +195,26 @@ func completeShallowCommit(ctx context.Context, repoDir, sha string) error {
 		}
 		return nil
 	}
-	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
-		return fmt.Errorf("rewrite shallow boundary: %w", err)
-	}
-	return nil
+	return replaceFileAtomically(path, []byte(strings.Join(kept, "\n")+"\n"), info.Mode().Perm())
 }
 
-func warnBaselineUnavailable(baseline WorkspaceBaseline, err error) {
-	if err == nil {
-		return
+// safety: git reads the boundary at any moment, so it never sees a half-written file.
+func replaceFileAtomically(path string, data []byte, mode os.FileMode) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".shallow-*")
+	if err != nil {
+		return fmt.Errorf("stage shallow boundary: %w", err)
 	}
-	// safety: the checkout is complete without the baseline, so only the steps that scope
-	// themselves to it are affected, and they report the missing ref themselves.
-	slog.Default().Warn("working-tree baseline unavailable; a step that diffs against it cannot resolve it",
-		"ref", baseline.Ref, "sha", baseline.SHA, "err", err)
+	name := temp.Name()
+	_, writeErr := temp.Write(data)
+	closeErr := temp.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return errors.Join(fmt.Errorf("write shallow boundary: %w", err), os.Remove(name))
+	}
+	if err := os.Chmod(name, mode); err != nil {
+		return errors.Join(fmt.Errorf("set shallow boundary mode: %w", err), os.Remove(name))
+	}
+	if err := os.Rename(name, path); err != nil {
+		return errors.Join(fmt.Errorf("replace shallow boundary: %w", err), os.Remove(name))
+	}
+	return nil
 }

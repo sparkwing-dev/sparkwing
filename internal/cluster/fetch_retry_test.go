@@ -169,26 +169,67 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 	}
 }
 
-func TestFetchPipelineWorkspaceSourceWithRetry_CarriesTheRecordedBaseline(t *testing.T) {
-	prevFn := fetchWorkspaceSourceFn
-	t.Cleanup(func() { fetchWorkspaceSourceFn = prevFn })
-
-	want := bincache.WorkspaceBaselineFromEnv(map[string]string{
-		bincache.WorkspaceBaseRefEnvKey: "origin/main",
-		bincache.WorkspaceBaseSHAEnvKey: strings.Repeat("c", 40),
+func TestAdoptBaselineWithRetry_RecoversFromALaggingMirrorThenGivesUp(t *testing.T) {
+	prevFn := adoptBaselineFn
+	prevDelay := triggerFetchRetryDelay
+	prevAttempts := triggerFetchMaxAttempts
+	t.Cleanup(func() {
+		adoptBaselineFn = prevFn
+		triggerFetchRetryDelay = prevDelay
+		triggerFetchMaxAttempts = prevAttempts
 	})
-	var got bincache.WorkspaceBaseline
-	fetchWorkspaceSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string, baseline bincache.WorkspaceBaseline) (string, error) {
-		got = baseline
-		return "/tmp/extracted/.sparkwing", nil
+	triggerFetchRetryDelay = time.Millisecond
+	triggerFetchMaxAttempts = 3
+	lag := errors.New("git fetch --depth 1 origin abc: exit status 128: fatal: remote error: upload-pack: not our ref abc")
+	baseline := bincache.WorkspaceBaseline{Ref: "origin/main", SHA: strings.Repeat("c", 40)}
+
+	var calls int32
+	adoptBaselineFn = func(_ context.Context, checkoutDir, gcURL, token, sha string, got bincache.WorkspaceBaseline) error {
+		if got != baseline {
+			t.Errorf("baseline reaching the adopt = %+v, want %+v", got, baseline)
+		}
+		if atomic.AddInt32(&calls, 1) < 3 {
+			return lag
+		}
+		return nil
+	}
+	if err := adoptBaselineWithRetry(context.Background(), "/tmp/checkout", "http://cache", "token", "abc",
+		baseline, slog.Default(), "run-1"); err != nil {
+		t.Fatalf("expected the retry to recover, got %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
 	}
 
-	if _, err := fetchPipelineWorkspaceSourceWithRetry(context.Background(),
-		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc123", "/tmp/work",
-		want, slog.Default(), "run-1"); err != nil {
-		t.Fatal(err)
+	atomic.StoreInt32(&calls, 0)
+	adoptBaselineFn = func(_ context.Context, _, _, _, _ string, _ bincache.WorkspaceBaseline) error {
+		atomic.AddInt32(&calls, 1)
+		return lag
 	}
-	if got != want {
-		t.Fatalf("baseline reaching the fetch = %+v, want %+v", got, want)
+	err := adoptBaselineWithRetry(context.Background(), "/tmp/checkout", "http://cache", "token", "abc",
+		baseline, slog.Default(), "run-1")
+	if err == nil || !strings.Contains(err.Error(), notOurRefSubstr) {
+		t.Fatalf("exhausted retries returned %v, want the lag error", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+func TestAdoptBaselineWithRetry_DoesNotRetryASourceThatServesOnlyTheSnapshot(t *testing.T) {
+	prevFn := adoptBaselineFn
+	t.Cleanup(func() { adoptBaselineFn = prevFn })
+	var calls int32
+	adoptBaselineFn = func(_ context.Context, _, _, _, _ string, _ bincache.WorkspaceBaseline) error {
+		atomic.AddInt32(&calls, 1)
+		return bincache.ErrBaselineUnservable
+	}
+	err := adoptBaselineWithRetry(context.Background(), "/tmp/checkout", "http://cache", "token", "abc",
+		bincache.WorkspaceBaseline{Ref: "origin/main", SHA: strings.Repeat("d", 40)}, slog.Default(), "run-1")
+	if !errors.Is(err, bincache.ErrBaselineUnservable) {
+		t.Fatalf("err = %v, want ErrBaselineUnservable", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
 	}
 }
