@@ -13,6 +13,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -64,6 +65,12 @@ type Config struct {
 	WarnStoreObjects int64
 
 	StoreReconcile time.Duration
+	// EgressDailyAlarmBytes raises the egress alarm, which health
+	// reports, once this pod has sent this many bytes in a UTC day. It
+	// refuses nothing, because this service authenticates one shared
+	// token and so cannot tell one caller's spend from another's. Zero
+	// is off.
+	EgressDailyAlarmBytes int64
 }
 
 func DefaultConfig() Config {
@@ -209,6 +216,10 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
+	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
+	setEgressMeter(egressCfg)
+	logEgressBudgets(egressCfg)
+
 	loadRepoNames()
 	initProxy()
 
@@ -226,25 +237,25 @@ func New(cfg Config) (*Server, error) {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)
 
-	s.mux.HandleFunc("/archive", requireToken(handleArchive))
+	s.mux.HandleFunc("/archive", requireToken(metered(egress.ClassArtifact, handleArchive)))
 	s.mux.HandleFunc("/repos", requireToken(handleRepos))
-	s.mux.HandleFunc("/artifacts/", requireToken(handleArtifacts))
-	s.mux.HandleFunc("/file", requireToken(handleFile))
+	s.mux.HandleFunc("/artifacts/", requireToken(metered(egress.ClassArtifact, handleArtifacts)))
+	s.mux.HandleFunc("/file", requireToken(metered(egress.ClassArtifact, handleFile)))
 	s.mux.HandleFunc("/tree-hash", requireToken(handleTreeHash))
 	s.mux.HandleFunc("/branch-contains", requireToken(handleBranchContains))
-	s.mux.HandleFunc("/bin/", requireToken(handleBin))
-	s.mux.HandleFunc("/cache/", requireToken(handleCache))
+	s.mux.HandleFunc("/bin/", requireToken(metered(egress.ClassArtifact, handleBin)))
+	s.mux.HandleFunc("/cache/", requireToken(metered(egress.ClassArtifact, handleCache)))
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
-	s.mux.HandleFunc("/uploads/", requireToken(handleUploadDownload))
+	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
 	s.mux.HandleFunc("/git/register", requireToken(handleGitRegister))
 	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
-	s.mux.HandleFunc("/git/", requireToken(handleGit))
+	s.mux.HandleFunc("/git/", requireToken(metered(egress.ClassGit, handleGit)))
 
-	s.mux.HandleFunc("/proxy/", handleProxy)
+	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
 	s.mux.Handle("/metrics", s.tel.PromHandler)

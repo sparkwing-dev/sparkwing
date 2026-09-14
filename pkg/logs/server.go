@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -52,6 +53,8 @@ type Server struct {
 	runTotals runTotals
 	freeSpace freeSpaceProbe
 	diskSpace func(path string) (free, total uint64, ok bool)
+
+	egress *egress.Meter
 
 	controllerURL string
 	authCache     sync.Map
@@ -172,12 +175,12 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleAppend)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleRead)))
-	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleReadRun)))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))
+	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))
 	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleDeleteRun)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleStream)))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))
 
-	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, http.HandlerFunc(s.handleSearch)))
+	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))
 
 	authed := s.authMiddleware(mux)
 
@@ -419,6 +422,9 @@ type ServeOptions struct {
 	// StoreCeiling bounds the whole log store. Its zero value leaves
 	// the store unlimited.
 	StoreCeiling objectguard.CeilingConfig
+	// Egress bounds the bytes reads and streams send to clients. Nil
+	// leaves every read unmetered.
+	Egress *egress.Meter
 }
 
 // ServeWith starts the HTTP listener described by opts and blocks
@@ -441,6 +447,9 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	s.WithStoreCeiling(opts.StoreCeiling)
 	if opts.ControllerURL != "" {
 		s.WithControllerAuth(opts.ControllerURL, 60*time.Second)
+	}
+	if opts.Egress != nil {
+		s.WithEgressMeter(opts.Egress)
 	}
 	s.StartSweeper(ctx)
 	root, addr, controllerURL := opts.Root, opts.Addr, opts.ControllerURL
@@ -515,8 +524,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 	ceiling, ceilingProblems := s.storeCeilingHealth()
 	problems = append(problems, ceilingProblems...)
+	egressState, egressProblems := s.egressHealth()
+	problems = append(problems, egressProblems...)
 
-	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling}
+	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling, "egress": egressState}
 	if len(problems) > 0 {
 		body["status"] = "degraded"
 		body["problems"] = problems
@@ -525,13 +536,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	if err != nil {
 		s.logger.Error("logs store", "op", "health", "err", err)
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"status":"degraded","auth":%q}`, authState)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, `{"status":"degraded","auth":%q,"problems":["health: response could not be built"]}`, authState)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(buf)
+	fmt.Fprint(w, string(buf))
 }
 
 func formatBytes(n uint64) string {

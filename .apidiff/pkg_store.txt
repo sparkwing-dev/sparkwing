@@ -382,6 +382,14 @@ func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
 func DisplayProfileKey(key string) string
+type EgressUsage struct {
+	Principal string
+
+	Month     string
+	Bytes     int64
+	UpdatedAt time.Time
+}
+const EgressUsageRetentionMonths = 13
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
@@ -1170,6 +1178,7 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGran
 func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error)
 func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
+func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUsage, err error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
@@ -1219,12 +1228,14 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
+func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
+func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)

@@ -63,6 +63,9 @@ const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+const EgressBudgetCode = "egress_budget_exceeded"
+const EgressDownloadLimitCode = "egress_download_limit"
+const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
@@ -213,6 +216,7 @@ type Server struct {
 func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
+func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
@@ -229,6 +233,7 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
+func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server

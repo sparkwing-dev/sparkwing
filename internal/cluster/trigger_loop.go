@@ -331,7 +331,8 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	if !errors.As(buildErr, &ce) || len(ce.Output) == 0 {
 		return
 	}
-	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token)
+	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token).
+		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := cli.Append(postCtx, runID, CompileLogNode, ce.Output); err != nil {

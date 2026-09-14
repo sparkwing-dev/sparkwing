@@ -12,6 +12,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 func main() {
@@ -98,7 +99,14 @@ func run(args []string) error {
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
+	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
+
+	egressCfg, err := readEgress()
+	if err != nil {
+		return err
+	}
+	cfg.EgressDailyAlarmBytes = egressCfg.GlobalDailyAlarmBytes
 
 	srv, err := cache.New(cfg)
 	if err != nil {

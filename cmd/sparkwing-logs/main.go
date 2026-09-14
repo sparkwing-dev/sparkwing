@@ -14,6 +14,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -39,6 +40,8 @@ func run(args []string) error {
 			"guarding against accidentally deploying a logs service that serves, forges, and "+
 			"deletes every run's logs for anyone who can reach it. Leave unset "+
 			"for laptop-local use.")
+
+	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceLogs, egress.LogsSurfaces)
 
 	defaults, err := limitsFromEnv(logs.DefaultLimits())
 	if err != nil {
@@ -149,6 +152,11 @@ func run(args []string) error {
 		BinaryRatio:      *binaryRatio,
 	}
 
+	egressCfg, err := readEgress()
+	if err != nil {
+		return err
+	}
+
 	if *requireAuth {
 		if err := checkControllerURL(*controllerURL); err != nil {
 			return err
@@ -178,6 +186,7 @@ func run(args []string) error {
 		Private:       privateRoot,
 		Limits:        &limits,
 		StoreCeiling:  ceiling,
+		Egress:        egress.New(egressCfg),
 	})
 }
 

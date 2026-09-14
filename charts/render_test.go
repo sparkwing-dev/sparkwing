@@ -796,6 +796,26 @@ func TestRunnerGoCacheTakesAnExistingClaim(t *testing.T) {
 	}
 }
 
+// safety: the docs tell an operator to size an egress budget for one
+// process because the deployment runs one controller; a chart that
+// rendered two would make that sentence false without saying so.
+func TestControllerAboveOneReplicaFailsToRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.replicas=2")
+	for _, want := range []string{"controller.replicas above 1", "egress meter counts per process"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render error = %q, want it to name %q", out, want)
+		}
+	}
+}
+
+func TestControllerAtOneReplicaRenders(t *testing.T) {
+	out := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing",
+		"controller.replicas=1")
+	if !strings.Contains(out, "replicas: 1") {
+		t.Fatalf("controller deployment = %q, want one replica", out)
+	}
+}
+
 func TestRunnerGoCacheAboveOneReplicaRequiresReadWriteMany(t *testing.T) {
 	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
 		"runner.goCache.persistence.enabled=true",

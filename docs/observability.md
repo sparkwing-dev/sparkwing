@@ -677,3 +677,144 @@ and the refusal points at the measure route. Deleting a run on the logs
 service triggers the same off-request walk. Neither service drops a
 request that arrives while a walk is running: it re-runs once when that
 walk finishes, so a delete the walk had already passed still lands.
+A reset clears every tripped class and both window counters; lifetime
+request and trip totals survive so the metrics keep their history. A
+budget that keeps tripping wants a larger limit or a caller that stops
+retrying, not a repeated reset.
+
+## Egress budgets
+
+Egress is the bytes a Sparkwing service sends to clients: artifact and
+cache-archive downloads, log reads, the live log stream, and git proxy
+fetches. Object-store egress is about nine cents per gigabyte, so a
+terabyte a month is ninety dollars nobody authorised, and a user can
+spend it without writing a single pipeline.
+
+The controller, the logs service, and the cache each count the response
+bodies of those routes twice: once against the principal that asked for
+them, and once against the process total. Every budget below is
+unlimited until an operator sets one.
+
+| Flag | Controller | Logs | Cache | What it does |
+|------|-----------|------|-------|--------------|
+| `--egress-monthly-bytes` | yes | yes | no | Bytes one principal may download in a UTC month. Past it, its downloads answer `429` with a `Retry-After` naming the wait until the month rolls. |
+| `--egress-max-downloads` | yes | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
+| `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
+| `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
+
+Each service reads its own environment variables:
+`SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES`,
+`SPARKWING_LOGS_EGRESS_MONTHLY_BYTES`,
+`SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
+`SPARKWING_<SERVICE>_EGRESS_<BUDGET>`. They are separate on purpose: one
+variable on a shared ConfigMap read by three processes is one cap applied
+three times, which admits three times the bytes the operator wrote down.
+**The per-team monthly cap is the controller's**, and the other services'
+budgets bound their own traffic.
+
+### Refusing needs a principal the service can tell apart
+
+The controller resolves a bearer to a named principal on every download
+route, and the logs service resolves one through the controller's
+whoami, so their monthly and concurrency caps fall on the caller that
+spent the bytes.
+
+The cache authenticates one shared token, so every credentialed caller
+resolves to the same name. It therefore **meters and alarms and never
+refuses**: a cap it could enforce would answer `429` to the bearer every
+runner in the fleet shares, stopping every checkout and cache read at
+once, for up to a month, with no recovery but a pod restart. Its health
+reports `egress.enforced: false` to say so. The cap that protects the
+bill belongs to the controller, which knows who each bearer is.
+
+A service running with auth off resolves every request to `anonymous`,
+which is one shared budget for the same reason; that is the laptop-local
+shape, where no budget is set anyway.
+
+### A bearer can be a pool
+
+A runner pool shares one token, so twenty pods are one principal. The
+byte budget is keyed on the principal deliberately: the bill is the
+team's, however many pods spent it. The **concurrency caps are not**.
+They are keyed on the pod behind the request, taken from the
+`X-Sparkwing-Runner` identity the shipped runners already set for the
+controller's claim budgets, then from the claim-holder header, falling
+back to the principal only when nothing names a pod. A cap of eight keyed
+on the principal would refuse twelve of a twenty-pod pool while the byte
+budget sat untouched.
+
+That identity is cooperative: a caller that invents a pod name gets its
+own slots. The concurrency caps therefore bound an honest pool's burst
+and the blast radius of a stuck client; the monthly byte budget, which
+keys on the principal and cannot be moved by a header, is what bounds a
+caller that is trying to get around it.
+
+For the same reason the gitcache proxy routes take no slot at all. They
+are the checkout path every node walks, so a cap there refuses the clone
+rather than the download it was meant to bound. Those routes are still
+byte-metered, and still refused when the monthly byte budget is spent.
+
+### The alarm
+
+The monthly budget refuses; the daily threshold only alarms. The
+distinction is deliberate: one principal's spend is that principal's
+problem to answer for, and a process's daily total is the operator's.
+The alarm appears as `egress.alarm` on each service's `/api/v1/health`
+(the cache serves it on `/health`), as a line in `problems`, and as a
+`warn`-level log line carrying `day_bytes` and `threshold_bytes`, which
+is what a deployment's alerting keys on. Point CloudWatch alarms on the
+bucket's `BytesDownloaded` metric and the instance's `NetworkOut` at the
+same page, so the bill has a second witness that does not depend on a
+Sparkwing process being up.
+
+### What is and is not charged
+
+A byte counts when it is written to a `2xx` response to a request whose
+method carries a body. A `HEAD` charges nothing, because net/http
+discards what the handler writes to one, and an error body charges
+nothing, because it is not the download the budget is for.
+
+A budget is checked before a response starts, not during it, so a
+principal at zero can still finish whatever it already has in flight.
+The concurrency caps bound that overshoot only as far as they reach. The
+most a team can take past its monthly budget is
+
+    (--egress-max-downloads + --egress-max-log-streams)
+      x  the largest object those slotted routes serve
+      x  the number of pods behind the bearer
+
+because each pod holds its own slots, plus whatever the gitcache proxy
+routes serve, which hold no slot at all. A caller that invents pod names
+multiplies the pod count itself, so treat the formula as the bound on an
+honest fleet and the byte budget as the bound on the rest. Leave the caps
+unlimited and the overshoot is unbounded.
+
+### Persistence and history
+
+Counting is in memory, and only the controller persists it. It writes
+each principal's month total to its store on the maintenance sweep and
+reloads it at startup, so a restart resumes the month rather than handing
+everyone a fresh budget, and no response costs a store write; that sweep
+also prunes totals older than thirteen months, once a month rather than
+on every tick. The logs service and the cache count in memory alone: they
+park nothing for a flush that will never come, and their counters start
+over on a restart.
+
+Read the controller's meter, including the principals that have
+downloaded the most this month, with `GET /api/v1/egress` on an `admin`
+token.
+
+### One meter per process
+
+Like the object-store budget, an egress meter belongs to a process. Two
+controller replicas each count their own bytes, so a per-principal
+budget sized for one replica admits twice that across two.
+
+The persisted number is the high-water mark of any one writer, not the
+sum of them. Within a writer the total only rises, which is what makes a
+restart safe; across writers the row reflects the busier replica and the
+quieter one's bytes are not added to it. Size the budget for one
+process, and run one controller. The chart enforces that:
+`controller.replicas` above 1 fails to render, because the same second
+replica that would corrupt the local state DB would also double a
+per-principal budget and split the daily alarm below its threshold.

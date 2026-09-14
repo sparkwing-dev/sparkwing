@@ -577,6 +577,9 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 
 	problems = append(problems, storeCeilingProblems()...)
 	resp["store_ceiling"] = storeCeilingState()
+	egressState, egressProblems := egressHealth()
+	problems = append(problems, egressProblems...)
+	resp["egress"] = egressState
 
 	if len(problems) > 0 {
 		resp["status"] = "degraded"

@@ -84,9 +84,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	objectStore, objectStoreProblems := objectStoreHealth()
 	problems = append(problems, objectStoreProblems...)
 
+	egressState, egressProblems := s.egressHealth()
+	problems = append(problems, egressProblems...)
+
 	resp := map[string]any{
 		"status": "ok", "auth": authState,
 		"object_store": objectStore, "database": s.storageHealth(),
+		"egress": egressState,
 	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"

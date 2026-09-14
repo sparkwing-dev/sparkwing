@@ -106,6 +106,38 @@ unlock.
   A host's own admission daemon and the loopback controller suggest nothing and
   budget nothing, because a widened idle poll there costs pickup latency and
   their unauthenticated callers would share one bucket.
+- **controller + logs + cache:** Egress budgets bound the bytes each
+  service sends to clients: artifact and cache-archive downloads, log
+  reads, the live log stream, and git proxy fetches. On the controller and
+  the logs service, `--egress-monthly-bytes` refuses one principal's
+  downloads past a UTC-month byte total with `429`, a `Retry-After` naming
+  the wait until the month rolls, and a body whose `error` member says who
+  spent what against which limit; `--egress-max-downloads` and
+  `--egress-max-log-streams` cap what one caller holds open at once, which
+  is what bounds how far a burst carries it past the byte budget; those
+  caps key on the pod behind the request, because a runner pool shares one
+  token and a cap keyed on the principal would refuse most of the pool, and
+  the gitcache proxy routes take no slot at all since they are the checkout
+  path.
+  `--egress-daily-alarm-bytes` refuses nothing on any service and raises an
+  alarm reported as `egress.alarm` on the health route, as a line in
+  `problems`, and as a `warn` log line carrying `day_bytes` and
+  `threshold_bytes`. The cache meters and alarms but never refuses, because
+  it authenticates one shared token and a refusal there would fall on every
+  runner at once; its health says so with `egress.enforced: false`. Each
+  service reads its own `SPARKWING_<SERVICE>_EGRESS_<BUDGET>` variables, so
+  one value on a shared ConfigMap cannot apply the same cap three times. A
+  `HEAD` and an error body are charged nothing. Every budget defaults to
+  unlimited, so a deployment that sets none serves what it served before.
+  Counting is in memory; the controller writes each principal's month total
+  to schema v41's `egress_usage` table on its maintenance sweep, reloads it
+  at startup, and prunes past thirteen months, so no response costs a store
+  write and a restart resumes the month. `GET /api/v1/egress` (scope
+  `admin`) reports the budgets, the day and month totals, the alarm, and the
+  principals that have downloaded the most. `controller.replicas` above 1
+  now fails to render, because a second replica both corrupts the local
+  state DB and doubles a per-principal budget. Documented under [Egress
+  budgets](docs/observability.md#egress-budgets).
 - **controller + cli:** Compute guards bound what a controller starts before
   the credit ledger bills it. `max_concurrent_runners` caps the cloud runners
   one principal holds, `max_global_runners` caps the whole controller with

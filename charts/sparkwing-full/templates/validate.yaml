@@ -1,3 +1,6 @@
+{{- if gt (int .Values.controller.replicas) 1 -}}
+{{- fail "sparkwing-full: controller.replicas above 1 corrupts the controller's local SQLite state DB, and its egress meter counts per process, so a second replica both doubles a per-principal monthly budget and splits the daily alarm below its threshold. Keep controller.replicas at 1; HA controller is a paid feature" -}}
+{{- end -}}
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
 {{- if and (index $bundle "enabled") (or .Values.nameOverride .Values.fullnameOverride) (not (index $bundle "controller" "url")) -}}
 {{- fail "sparkwing-full: nameOverride/fullnameOverride changes the controller Service name; set sparkwing-runner-bundle.controller.url explicitly" -}}

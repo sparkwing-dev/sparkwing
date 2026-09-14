@@ -3824,6 +3824,28 @@ paths:
               schema: {$ref: "#/components/schemas/StorageSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
+  /api/v1/egress:
+    get:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Read the controller's egress budgets and top consumers.
+      description: |
+        Reports the per-principal monthly download budget, the global daily
+        alarm threshold, what the process has sent today and this month,
+        whether the alarm is up, and the principals that have downloaded the
+        most this month. Changes nothing.
+      responses:
+        "200":
+          description: The egress meter as it stands.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: "none"
+                properties:
+                  enabled: {type: boolean}
+                  egress: {type: object}
+
   /api/v1/compute-limits:
     get:
       x-sparkwing-scope: runs.read
