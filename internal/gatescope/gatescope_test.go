@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 )
 
 func TestWalk_SkipsTheDirectoriesNoGateJudges(t *testing.T) {
@@ -126,4 +128,41 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+func TestAddedLines_SeesAStagedPathHoldingASpace(t *testing.T) {
+	repo := newRepo(t)
+	name := "with space.go"
+	write(t, filepath.Join(repo, name), "package p\n\nfunc spaced() {}\n")
+	runGit(t, repo, "add", name)
+	unsetForTest(t, "GIT_INDEX_FILE")
+	unsetForTest(t, gitenv.GateIndexVar)
+
+	added, err := AddedLines(repo, true, "", "*.go")
+	if err != nil {
+		t.Fatalf("AddedLines: %v", err)
+	}
+	if !added[name][3] {
+		t.Fatalf("added = %v; git ends that header with a tab, so the file drops out of the scope unjudged", added)
+	}
+}
+
+func unsetForTest(t *testing.T, name string) {
+	t.Helper()
+	// safety: t.Setenv cannot clear a variable, and git reads an empty
+	// GIT_INDEX_FILE as a path of its own, which answers as an empty index
+	// rather than as the repository's. This drops t.Setenv's parallel-test
+	// guard with it; no test in this package runs in parallel.
+	prev, had := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if !had {
+			return
+		}
+		if err := os.Setenv(name, prev); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

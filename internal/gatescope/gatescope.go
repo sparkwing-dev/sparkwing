@@ -66,6 +66,8 @@ func Walk(root, suffix string, visit func(path, rel string)) error {
 func AddedLines(root string, staged bool, base, pathspec string) (map[string]map[int]bool, error) {
 	// safety: git quotes a path holding a non-ASCII byte unless core.quotePath
 	// is off, and a quoted +++ header drops that file from the scope unjudged.
+	// It does not cover a path holding a space, which the header terminates
+	// with a tab instead; headerPath strips that.
 	args := []string{"-c", "core.quotePath=false", "diff", "--unified=0", "--no-color"}
 	var index string
 	if staged {
@@ -171,7 +173,7 @@ func parseAddedLines(diff string) map[string]map[int]bool {
 	for line := range strings.SplitSeq(diff, "\n") {
 		switch {
 		case strings.HasPrefix(line, "+++ b/"):
-			cur = strings.TrimPrefix(line, "+++ b/")
+			cur = headerPath(strings.TrimPrefix(line, "+++ b/"))
 		case strings.HasPrefix(line, "+++ "):
 			cur = ""
 		case strings.HasPrefix(line, "@@") && cur != "":
@@ -202,6 +204,13 @@ func parseAddedLines(diff string) map[string]map[int]bool {
 		}
 	}
 	return added
+}
+
+// safety: git terminates the +++ header with a tab when the path holds a
+// space, and a name carrying that tab matches no file on disk, so the change
+// would leave the scope unjudged.
+func headerPath(name string) string {
+	return strings.TrimSuffix(name, "\t")
 }
 
 func git(root, index string, args ...string) (string, error) {
