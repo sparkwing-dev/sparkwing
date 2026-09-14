@@ -19,13 +19,23 @@ stability promise -- minors can break things, patches can introduce
 new APIs. We are using v0's flexibility to iterate the contract.
 
 The `retract` block in `go.mod` is the authoritative list of versions
-this project does not stand behind: the whole v1.x.y line on the Go
-proxy, and v0.52.0, a tag cut from a fixture commit on no branch and
-recalled within the hour. Do not pin to any of them. A retracted
-snapshot stays resolvable, because proxy snapshots are immutable, but
-carries no support and is never re-cut on another commit. Go reads
-retractions from the highest published version's `go.mod`, so an entry
-reaches consumers with the next release that outranks it.
+this project does not stand behind: the whole v1.x.y line, and v0.52.0,
+a tag cut from a fixture commit on no branch and recalled within the
+hour. Do not pin to any of them.
+
+The proxy keeps serving a version it has fetched at least once. v0.52.0
+was fetched, so it still resolves and version tooling still offers it.
+The v1.x tombstones were never fetched through the proxy, and their
+`.info` and `.mod` endpoints answer 404 today. A version the proxy holds
+is never re-cut on another commit: a second tag under that version would
+mismatch the `go.sum` every consumer has already cached.
+
+Go reads retractions from the highest published version's `go.mod`.
+v1.6.1 heads the proxy's version list, so nothing on the v0 line
+outranks it and only a new v1.6.x tombstone can carry the block, and
+v1.6.1's own `go.mod` is unfetchable. No retraction in this module
+reaches a consumer today; the block is the project's record of what not
+to pin.
 
 ## Versioning per repo
 
