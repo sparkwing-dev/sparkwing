@@ -54,11 +54,16 @@ The runner also consumes `--profile`, `-C`, `-v`, and the explicit
 `--dry-run=true` and `--dry-run=false` forms before the separator.
 `--target` passes to the pipeline.
 
-`--sw-allow` is enforced by the CLI before it dispatches anything. The
+`--sw-allow` is enforced by the CLI before it dispatches a foreground run. A
+step declares its labels in Go, so the CLI builds the `.sparkwing/` binary
+first and weighs the declarations that build emits, on every invocation. The
 labels you authorize are forwarded to the run as `SPARKWING_ALLOW`
-(comma-separated) so the run's own record shows what was
-authorized -- setting that variable by hand authorizes nothing, because
-the gate has already run by then.
+(comma-separated) so the run's own record shows what was authorized -- setting
+that variable by hand authorizes nothing, because the gate has already run by
+then.
+
+A detached run is not gated yet: `--sw-detached` dispatches before admission
+and refuses `--sw-allow`, so run a risk-labeled pipeline in the foreground.
 
 `--profile NAME` selects the storage and dispatch addressing
 (state/cache/logs, and any controller auth). Execution still happens

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -312,7 +313,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	}
 	describeByName := map[string]sparkwing.DescribePipeline{}
 	if sparkwingDir, ok := walkUpForSparkwing(cwd); ok {
-		if schema, serr := readDescribeCache(sparkwingDir); serr == nil {
+		if schema, serr := readDescribeCache(context.Background(), sparkwingDir); serr == nil {
 			for _, dp := range schema {
 				describeByName[dp.Name] = dp
 			}

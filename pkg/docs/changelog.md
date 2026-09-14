@@ -70,6 +70,16 @@ unlock.
   `go run ./internal/sleepcheck .` now counts 28 waits under `pkg/store` (was
   34) and 47 under `pkg/controller` (was 56).
 
+- **cli:** A step's `Risk` labels refuse a run on the first invocation in a
+  machine's `SPARKWING_HOME`, not only on later ones. The labels are declared
+  in Go and reach the CLI through the compiled `.sparkwing/` binary, so a home
+  that had never built the pipeline held no declaration to weigh and every
+  risk-labeled step ran unauthorized. `sparkwing run` now builds that binary
+  before admission, and the refusal names the step, its labels and
+  `--sw-allow`. A source tree holding a file sparkwing cannot read is refused
+  rather than run, because its declarations cannot be weighed. A detached run
+  is still dispatched before admission.
+
 ## [v0.50.5] - 2026-09-14
 ### Changed
 
