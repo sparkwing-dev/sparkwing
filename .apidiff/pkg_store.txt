@@ -628,6 +628,7 @@ type MetricSample struct {
 }
 func (m MetricSample) OneShot() bool
 const MicroCreditsPerCredit = 1_000_000
+const MinCreditMaxChargeSeconds = 3
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 func NearestRankIndex(xs []float64, q float64) int

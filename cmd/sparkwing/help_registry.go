@@ -2163,7 +2163,7 @@ time before it is granted, heartbeats charge the seconds they
 cover, and the finish refunds whatever of the reservation the
 node did not use. Runners the operator did not mark metered are
 never charged.`,
-	SubcommandOrder: []string{"show", "grant", "history"},
+	SubcommandOrder: []string{"show", "grant", "history", "settings"},
 	Examples: []Example{
 		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
 		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
@@ -2228,6 +2228,35 @@ per line.`,
 	Examples: []Example{
 		{"Read the ledger", "sparkwing cluster credits history --profile prod"},
 		{"Sum today's charges", "sparkwing cluster credits history --profile prod -o json | jq 'select(.type==\"charge\") | .amount_micro'"},
+	},
+}
+
+var cmdCreditsSettings = Command{
+	Path:     "sparkwing cluster credits settings",
+	Synopsis: "Read or set the credit rate, the grace period, and the charge cap",
+	Description: `Prints the three runtime settings the ledger prices work with,
+and sets the ones named by a flag. The rate is what one cloud
+runner second costs in micro-credits, the grace period is how
+long a running node survives an empty balance before the
+controller cancels it, and the charge cap is the most seconds
+any one charge may bill, which forgives a controller outage or
+a stalled heartbeat loop rather than billing the gap. A flag
+left off leaves that setting alone. Grace zero cancels a
+metered node as soon as its reservation is consumed on an empty
+balance, which bounds the unpaid overrun to one heartbeat
+interval per node. Reading needs the runs.read scope and
+setting needs admin.`,
+	Flags: []FlagSpec{
+		{Name: "rate-micro", Argument: "N", Desc: "Micro-credits one cloud runner second costs; a million is one credit", Group: "Input"},
+		{Name: "grace-seconds", Argument: "N", Desc: "Seconds a running node survives an empty balance; 0 cancels at once", Group: "Input"},
+		{Name: "max-charge-seconds", Argument: "N", Desc: "The most seconds any one charge may bill; at least 3", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the settings", "sparkwing cluster credits settings --profile prod"},
+		{"Cut a node off the moment its reservation runs out", "sparkwing cluster credits settings --grace-seconds 0 --profile prod"},
+		{"Reprice a cloud runner second at 0.03 credits", "sparkwing cluster credits settings --rate-micro 30000 --profile prod"},
 	},
 }
 

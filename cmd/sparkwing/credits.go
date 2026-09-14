@@ -15,6 +15,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -24,7 +25,7 @@ func runCredits(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdCredits, os.Stderr)
-		return fmt.Errorf("credits: subcommand required (show|grant|history)")
+		return fmt.Errorf("credits: subcommand required (show|grant|history|settings)")
 	}
 	switch args[0] {
 	case "show":
@@ -33,6 +34,8 @@ func runCredits(args []string) error {
 		return runCreditsGrant(args[1:])
 	case "history":
 		return runCreditsHistory(args[1:])
+	case "settings":
+		return runCreditsSettings(args[1:])
 	default:
 		PrintHelp(cmdCredits, os.Stderr)
 		return fmt.Errorf("credits: unknown subcommand %q", args[0])
@@ -123,6 +126,109 @@ func creditsPerUnit(micro, perCredit int64) string {
 		frac = -frac
 	}
 	return fmt.Sprintf("%d.%06d", whole, frac)
+}
+
+type creditSettingsResp struct {
+	RateMicroPerSecond int64 `json:"rate_micro_per_second"`
+	GraceSeconds       int64 `json:"grace_seconds"`
+	MaxChargeSeconds   int64 `json:"max_charge_seconds"`
+	MicroPerCredit     int64 `json:"micro_per_credit"`
+	CreditsPerDollar   int64 `json:"credits_per_dollar"`
+}
+
+func runCreditsSettings(args []string) error {
+	fs := flag.NewFlagSet(cmdCreditsSettings.Path, flag.ContinueOnError)
+	on := addProfileFlag(fs)
+	rate := fs.Int64("rate-micro", 0, "micro-credits one cloud runner second costs")
+	grace := fs.Int64("grace-seconds", 0, "seconds a running node survives an empty balance")
+	maxCharge := fs.Int64("max-charge-seconds", 0, "the most seconds any one charge may bill")
+	outputFormat := fs.StringP("output", "o", "",
+		"output format: pretty|json|plain (default: pretty on TTY, json when piped)")
+	if err := parseAndCheck(cmdCreditsSettings, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	format, err := resolveTTYAwareOutput(*outputFormat, cmdCreditsSettings.Path)
+	if err != nil {
+		return err
+	}
+	body, err := creditSettingsBody(fs, *rate, *grace, *maxCharge)
+	if err != nil {
+		return err
+	}
+	prof, err := resolveProfile(*on)
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "cluster credits settings"); err != nil {
+		return err
+	}
+	resp, err := creditSettingsExchange(prof, body)
+	if err != nil {
+		return err
+	}
+	if format == "json" {
+		_, err := os.Stdout.Write(append(resp, '\n'))
+		return err
+	}
+	var view creditSettingsResp
+	if err := json.Unmarshal(resp, &view); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	if format == "plain" {
+		return writeCreditSettingsPlain(os.Stdout, view)
+	}
+	return renderCreditSettings(os.Stdout, view)
+}
+
+// safety: an unset flag is left out of the body so the controller keeps that
+// setting, which is what makes changing one value a one-flag call.
+func creditSettingsBody(fs *flag.FlagSet, rate, grace, maxCharge int64) (map[string]any, error) {
+	body := map[string]any{}
+	if fs.Changed("rate-micro") {
+		if rate <= 0 {
+			return nil, errors.New("credits settings: --rate-micro must be positive")
+		}
+		body["rate_micro_per_second"] = rate
+	}
+	if fs.Changed("grace-seconds") {
+		if grace < 0 {
+			return nil, errors.New("credits settings: --grace-seconds must not be negative")
+		}
+		body["grace_seconds"] = grace
+	}
+	if fs.Changed("max-charge-seconds") {
+		if maxCharge < store.MinCreditMaxChargeSeconds {
+			return nil, fmt.Errorf("credits settings: --max-charge-seconds must be at least %d",
+				store.MinCreditMaxChargeSeconds)
+		}
+		body["max_charge_seconds"] = maxCharge
+	}
+	return body, nil
+}
+
+func creditSettingsExchange(prof *profile.Profile, body map[string]any) ([]byte, error) {
+	if len(body) == 0 {
+		return tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/credits/settings")
+	}
+	return tokensPut(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/credits/settings", body)
+}
+
+func renderCreditSettings(w io.Writer, view creditSettingsResp) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "RATE\t%s credits per cloud runner second (%d micro)\n",
+		creditsPerUnit(view.RateMicroPerSecond, view.MicroPerCredit), view.RateMicroPerSecond)
+	fmt.Fprintf(tw, "GRACE\t%ds after the balance reaches zero\n", view.GraceSeconds)
+	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", view.MaxChargeSeconds)
+	return tw.Flush()
+}
+
+func writeCreditSettingsPlain(w io.Writer, view creditSettingsResp) error {
+	_, err := fmt.Fprintf(w, "rate_micro_per_second\t%d\ngrace_seconds\t%d\nmax_charge_seconds\t%d\n",
+		view.RateMicroPerSecond, view.GraceSeconds, view.MaxChargeSeconds)
+	return err
 }
 
 type creditGrantResp struct {

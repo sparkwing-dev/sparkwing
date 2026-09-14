@@ -31,6 +31,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/credits` | `runs.read` |
 | `POST` | `/api/v1/credits/grants` | `admin` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
+| `GET` | `/api/v1/credits/settings` | `runs.read` |
+| `PUT` | `/api/v1/credits/settings` | `admin` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.write` |
 | `PUT` | `/api/v1/crons/repos` | `runs.write` |

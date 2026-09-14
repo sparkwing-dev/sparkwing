@@ -42,6 +42,12 @@ const (
 	// only when the controller was unreachable or the heartbeat loop stalled,
 	// and the customer is not billed for the gap.
 	DefaultCreditMaxChargeSeconds = 30
+
+	// MinCreditMaxChargeSeconds is the lowest charge cap an operator may set.
+	// Heartbeats arrive every three seconds, so a cap under that forgives part
+	// of every ordinary interval and the ledger undercharges steady work
+	// instead of only a stall.
+	MinCreditMaxChargeSeconds = 3
 )
 
 // Credit grant kinds.

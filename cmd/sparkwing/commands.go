@@ -34,7 +34,7 @@ var allCommands = []*Command{
 	&cmdProfilesSet, &cmdProfilesTest,
 	&cmdTokens, &cmdTokensCreate, &cmdTokensList, &cmdTokensRevoke,
 	&cmdTokensLookup, &cmdTokensRotate, &cmdTokensSetMetered,
-	&cmdCredits, &cmdCreditsShow, &cmdCreditsGrant, &cmdCreditsHistory,
+	&cmdCredits, &cmdCreditsShow, &cmdCreditsGrant, &cmdCreditsHistory, &cmdCreditsSettings,
 	&cmdLimits, &cmdLimitsShow, &cmdLimitsSet,
 	&cmdUsers, &cmdUsersAdd, &cmdUsersList, &cmdUsersDelete,
 	&cmdJobs, &cmdJobsList, &cmdJobsStatus, &cmdJobsLogs, &cmdJobsErrors,

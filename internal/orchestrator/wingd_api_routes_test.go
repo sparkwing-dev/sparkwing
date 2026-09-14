@@ -117,6 +117,8 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/credits",
 	"GET /api/v1/credits/history",
 	"POST /api/v1/credits/grants",
+	"GET /api/v1/credits/settings",
+	"PUT /api/v1/credits/settings",
 	"GET /api/v1/compute-limits",
 	"PUT /api/v1/compute-limits",
 	"GET /api/v1/trends",

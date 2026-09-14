@@ -3644,6 +3644,52 @@ paths:
               schema: {$ref: "#/components/schemas/CreditHistory"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
+  /api/v1/credits/settings:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: Read the rate, the grace period, and the charge cap.
+      description: |
+        The three values the ledger prices work with.
+        `rate_micro_per_second` is what one cloud runner second costs,
+        `grace_seconds` is how long a running node survives an empty balance
+        before the controller cancels it, and `max_charge_seconds` is the most
+        seconds any one charge may bill, which forgives a controller outage or
+        a stalled heartbeat loop rather than billing the gap. A controller that
+        set none of them reads the defaults.
+      responses:
+        "200":
+          description: The settings in force.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditSettings"}
+    put:
+      x-sparkwing-scope: admin
+      tags: [credits]
+      summary: Set the rate, the grace period, or the charge cap.
+      description: |
+        Sets each setting the body names and answers the full set as `GET`
+        does. An omitted field leaves that setting as it was, so changing one
+        value is a one-field body. A rate at or below zero, a negative grace
+        period, and a charge cap under the heartbeat interval are each refused
+        with `400`, and a body that names nothing is refused the same way; a
+        refused body writes none of its fields. `grace_seconds` at zero cancels
+        a metered node as soon as its reservation is consumed on an empty
+        balance, which bounds the unpaid overrun to one heartbeat interval per
+        node. Charges already written keep the rate they were charged at.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetCreditSettings"}
+      responses:
+        "200":
+          description: The settings after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditSettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
   /api/v1/tokens/{prefix}/metered:
     parameters:
       - in: path
@@ -4562,6 +4608,24 @@ components:
         exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
         micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
         credits_per_dollar: {type: integer, format: int64}
+    CreditSettings:
+      x-sparkwing-go-type: pkg/controller.creditSettingsJSON
+      type: object
+      description: The three values the ledger prices work with, and the credit units they are quoted in.
+      properties:
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
+        grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance; zero cancels it as soon as its reservation is consumed.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
+        micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
+        credits_per_dollar: {type: integer, format: int64}
+    SetCreditSettings:
+      x-sparkwing-go-type: pkg/controller.setCreditSettingsReq
+      type: object
+      description: The settings to change. An omitted field is left as it was.
+      properties:
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second; must be positive.}
+        grace_seconds: {type: integer, format: int64, description: Seconds a running node survives an empty balance; zero or more.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; at least the heartbeat interval.}
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object

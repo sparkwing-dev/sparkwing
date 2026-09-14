@@ -183,6 +183,7 @@ never charged.
 - `show` -- Print the balance, the rate, and the recent burn
 - `grant` -- Add free or paid credits to the ledger
 - `history` -- List grants and charges, newest first
+- `settings` -- Read or set the credit rate, the grace period, and the charge cap
 
 ### Examples
 
@@ -251,6 +252,46 @@ sparkwing cluster credits history --profile prod
 
 # Sum today's charges
 sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
+```
+
+## `sparkwing cluster credits settings`
+
+Read or set the credit rate, the grace period, and the charge cap
+
+Prints the three runtime settings the ledger prices work with,
+and sets the ones named by a flag. The rate is what one cloud
+runner second costs in micro-credits, the grace period is how
+long a running node survives an empty balance before the
+controller cancels it, and the charge cap is the most seconds
+any one charge may bill, which forgives a controller outage or
+a stalled heartbeat loop rather than billing the gap. A flag
+left off leaves that setting alone. Grace zero cancels a
+metered node as soon as its reservation is consumed on an empty
+balance, which bounds the unpaid overrun to one heartbeat
+interval per node. Reading needs the runs.read scope and
+setting needs admin.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--rate-micro N` | Micro-credits one cloud runner second costs; a million is one credit |
+| `--grace-seconds N` | Seconds a running node survives an empty balance; 0 cancels at once |
+| `--max-charge-seconds N` | The most seconds any one charge may bill; at least 3 |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read the settings
+sparkwing cluster credits settings --profile prod
+
+# Cut a node off the moment its reservation runs out
+sparkwing cluster credits settings --grace-seconds 0 --profile prod
+
+# Reprice a cloud runner second at 0.03 credits
+sparkwing cluster credits settings --rate-micro 30000 --profile prod
 ```
 
 ## `sparkwing cluster credits show`

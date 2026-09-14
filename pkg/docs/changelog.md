@@ -31,6 +31,17 @@ unlock.
   so a pipeline pod's token cannot take work whose dependencies have not run or
   work its box cannot do. `store.ClaimNamedNode` and `client.ClaimNodeByID` are
   its store and client surfaces.
+- **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
+  `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
+  rate, the grace period a running node gets on an empty balance, and the cap
+  on what any one charge may bill, which until now moved only through a code
+  change. An omitted field keeps its setting, so changing one value is a
+  one-field body; a rate at or below zero, a negative grace period, and a
+  charge cap under `store.MinCreditMaxChargeSeconds` are refused, and a refused
+  body writes none of its fields. `sparkwing cluster credits settings` prints
+  the three values and sets the ones its `--rate-micro`, `--grace-seconds` and
+  `--max-charge-seconds` flags name. The defaults are unchanged: a self-hosted
+  controller still gives a node 60 seconds of grace.
 
 ### Changed
 
