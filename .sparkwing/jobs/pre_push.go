@@ -3,7 +3,6 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -29,9 +28,10 @@ func (PrePush) Help() string {
 		"(bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table " +
 		"(bin/check-api-spec.sh), the public API surface matching the .apidiff/ snapshot " +
 		"(bin/check-api-snapshot.sh), no product file that resolves the sparkwing home itself instead of " +
-		"through internal/paths.DefaultPaths, and `go build` over the packages holding the changed Go " +
-		"files. Each scoped step reads the staged change, or the change since origin/main when nothing is " +
-		"staged, and names the mode it ran in. go vet, the full test suite, golangci-lint, the race gate, " +
+		"through internal/paths.DefaultPaths, and `go build` and `go vet` over the packages holding the " +
+		"changed Go files. Every scoped step reads the commits being pushed, the range " +
+		"origin/main..HEAD, and never the index, so whatever is staged cannot narrow what the push is " +
+		"judged against. go vet, the full test suite, golangci-lint, the race gate, " +
 		"the Postgres suite and the dashboard suites run in `gate`, which hosted CI runs on every pull " +
 		"request and every push to main."
 }
@@ -43,10 +43,7 @@ func (PrePush) Examples() []sparkwing.Example {
 }
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// perf: the compile of the touched packages is the one step that fans out;
-	// it measured 3.3 cores over a second on a 16-core Linux host, and two is
-	// the largest pin that still fits beside a running gate.
-	plan.Resources(sparkwing.Cores(2))
+	plan.Resources(sparkwing.Cores(prePushCores))
 	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
@@ -59,17 +56,42 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 // only make the verdict later. FailFast still stops the first failure.
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
-	sparkwing.Step(w, "gofmt", runGofmtOnTheChange)
-	sparkwing.Step(w, "formatters", runFormatters)
-	sparkwing.Step(w, "comments", checkComments)
-	sparkwing.Step(w, "test-sleeps", checkTestSleeps)
+	sparkwing.Step(w, "gofmt", runGofmtOverThePush)
+	sparkwing.Step(w, "formatters", runFormattersOverThePush)
+	sparkwing.Step(w, "comments", checkCommentsOverThePush)
+	sparkwing.Step(w, "test-sleeps", checkTestSleepsOverThePush)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
 	sparkwing.Step(w, "changelog", checkChangelogRequired)
 	sparkwing.Step(w, "api-spec", checkAPISpec)
 	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
 	sparkwing.Step(w, "build-touched", runBuildTouched)
+	sparkwing.Step(w, "vet-touched", runVetTouched)
 	return nil, nil
+}
+
+func runGofmtOverThePush(ctx context.Context) error {
+	return gofmtOverScope(ctx, pushRangeScope)
+}
+
+func runFormattersOverThePush(ctx context.Context) error {
+	return formattersOverScope(ctx, pushRangeScope)
+}
+
+func checkCommentsOverThePush(ctx context.Context) error {
+	return runScopedChecker(ctx, "comments", pushRangeCommentCommand)
+}
+
+func checkTestSleepsOverThePush(ctx context.Context) error {
+	return runScopedChecker(ctx, "test-sleeps", pushRangeSleepCommand)
+}
+
+func pushRangeCommentCommand(ctx context.Context) (command, scope string, err error) {
+	return pushRangeCheckerCommand(ctx, "commentcheck", "Go file", existingGoFiles)
+}
+
+func pushRangeSleepCommand(ctx context.Context) (command, scope string, err error) {
+	return pushRangeCheckerCommand(ctx, "sleepcheck", "test file", existingGoTestFiles)
 }
 
 func checkChangelogRequired(ctx context.Context) error {
@@ -93,13 +115,25 @@ func checkAPISnapshot(ctx context.Context) error {
 	return nil
 }
 
-// perf: eight packages compiled in about a second on a 16-core Linux host,
-// which is the share of the push budget this step gets. A wider change
-// compiles in `gate` and in hosted CI, both of which build every module.
-const touchedBuildPackageCap = 8
+// perf: the compiles are the one part of this tier that fans out, so they are
+// bounded to what the tier reserves. A burst past the reservation is load the
+// admission daemon cannot schedule against, and it measured an order of
+// magnitude over the pin when the bound was the whole machine.
+const prePushCores = 3
 
 func runBuildTouched(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "buildable Go file(s)", buildableGoFiles)
+	return goOverTouchedPackages(ctx, "build", "buildable Go file(s)", buildableGoFiles)
+}
+
+// safety: go vet type-checks the test files go build never reads, so a test
+// that does not compile fails here rather than in the first suite that runs.
+func runVetTouched(ctx context.Context) error {
+	return goOverTouchedPackages(ctx, "vet", "Go file(s)", existingGoFiles)
+}
+
+func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]string) []string) error {
+	step := verb + "-touched"
+	files, scope, err := pushRangeScope(ctx, noun, keep)
 	if err != nil {
 		return err
 	}
@@ -108,27 +142,17 @@ func runBuildTouched(ctx context.Context) error {
 		return err
 	}
 	targets := touchedPackageTargets(files, modules)
-	sparkwing.Info(ctx, "build-touched: %s", scope)
-
-	count := 0
-	for _, pkgs := range targets {
-		count += len(pkgs)
-	}
-	switch {
-	case count == 0:
-		sparkwing.Info(ctx, "build-touched: no Go package changed; nothing to compile")
-		return nil
-	case count > touchedBuildPackageCap:
-		sparkwing.Info(ctx, "build-touched: %d packages changed, above the %d this tier compiles; `sparkwing run gate` and hosted CI build every module",
-			count, touchedBuildPackageCap)
+	sparkwing.Info(ctx, "%s: %s", step, scope)
+	if len(targets) == 0 {
+		sparkwing.Info(ctx, "%s: no Go package changed; nothing to compile", step)
 		return nil
 	}
 
 	var failures []string
 	for _, module := range mapKeys(targets) {
 		pkgs := targets[module]
-		sparkwing.Info(ctx, "build-touched: %s: %s", module, strings.Join(pkgs, " "))
-		cmd := boundedGoCommand(runtime.NumCPU(), "build", strings.Join(pkgs, " "))
+		sparkwing.Info(ctx, "%s: %s: %s", step, module, strings.Join(pkgs, " "))
+		cmd := goCommandAt(prePushCores, verb, strings.Join(pkgs, " "))
 		if _, runErr := sparkwing.Bash(ctx, cmd).Dir(module).Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 		}
@@ -136,8 +160,8 @@ func runBuildTouched(ctx context.Context) error {
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("go build failed in %d module(s):\n  - %s",
-		len(failures), strings.Join(failures, "\n  - "))
+	return fmt.Errorf("go %s failed in %d module(s):\n  - %s",
+		verb, len(failures), strings.Join(failures, "\n  - "))
 }
 
 // safety: go build reads no test file, and a directory holding only tests has

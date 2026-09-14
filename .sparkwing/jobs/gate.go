@@ -62,7 +62,10 @@ func goStepParallelism(cpuCount int) int {
 }
 
 func boundedGoCommand(cpuCount int, verb, args string) string {
-	parallelism := goStepParallelism(cpuCount)
+	return goCommandAt(goStepParallelism(cpuCount), verb, args)
+}
+
+func goCommandAt(parallelism int, verb, args string) string {
 	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", parallelism, verb, parallelism, args)
 }
 
@@ -195,6 +198,39 @@ func scopedCheckerCommand(ctx context.Context, tool, noun string, keep func([]st
 			gateBaselineRef, base, noun), nil
 }
 
+type scopeFunc func(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error)
+
+// safety: git hands a pre-push hook no index of its own, so a file left
+// staged would narrow every step to that file and push the commits unjudged.
+// The push tier reads the range; changeScope, which reads the index, is what
+// a commit is judged by.
+func pushRangeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {
+	base, err := resolveGateBase(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	changed, err := listNames(ctx, "diff -z --name-only --diff-filter=ACMR "+base+" HEAD")
+	if err != nil {
+		return nil, "", fmt.Errorf("list the push range %s..HEAD: %w", base, err)
+	}
+	files := keep(changed)
+	return files, fmt.Sprintf("%d %s in the push range %s..HEAD (%s)",
+		len(files), noun, gateBaselineRef, base), nil
+}
+
+func pushRangeCheckerCommand(ctx context.Context, tool, noun string, keep func([]string) []string) (command, scope string, err error) {
+	_, scope, err = pushRangeScope(ctx, noun, keep)
+	if err != nil {
+		return "", "", err
+	}
+	base, err := resolveGateBase(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("go run ./internal/%s -base %s .", tool, base),
+		fmt.Sprintf("%s, plus every untracked %s", scope, noun), nil
+}
+
 var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
 
 var homeDirJoin = regexp.MustCompile(`filepath\.Join\([^,)]*[Hh]ome[^,)]*,\s*"\.sparkwing"`)
@@ -297,7 +333,11 @@ func runGofmt(ctx context.Context) error {
 }
 
 func runFormatters(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
+	return formattersOverScope(ctx, changeScope)
+}
+
+func formattersOverScope(ctx context.Context, scopeOf scopeFunc) error {
+	files, scope, err := scopeOf(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
 		return err
 	}

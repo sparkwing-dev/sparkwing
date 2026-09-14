@@ -2,8 +2,8 @@ package jobs
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +15,7 @@ func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
 	want := []string{
 		"api-snapshot", "api-spec", "build-touched", "changelog", "comments",
 		"docs-mirror", "formatters", "gofmt", "home-resolution", "test-sleeps",
+		"vet-touched",
 	}
 	if got := stepIDs(t, &PrePush{}); !slices.Equal(got, want) {
 		t.Fatalf("pre-push steps = %v, want %v", got, want)
@@ -62,17 +63,25 @@ func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
 			prepush.PriorityValue(), gate.PriorityValue())
 	}
 	hints := prepush.ResourceHints()
-	if hints == nil || hints.Cores <= 0 || hints.Cores > 2 {
-		t.Fatalf("pre-push reserved cores = %#v, want a pin of at most two so it fits beside a running gate", hints)
+	if hints == nil || hints.Cores != prePushCores {
+		t.Fatalf("pre-push reserved cores = %#v, want the %v its compiles are bounded to", hints, float64(prePushCores))
+	}
+	if hints.Cores > gateCoreReservation(runtime.NumCPU()) {
+		t.Errorf("pre-push reserves %v, more than the gate's %v, so the fast tier no longer fits beside a running gate",
+			hints.Cores, gateCoreReservation(runtime.NumCPU()))
+	}
+	if got := goCommandAt(prePushCores, "build", "./x"); !strings.Contains(got, "GOMAXPROCS=3") {
+		t.Errorf("the touched compile is not bounded to the reservation: %q", got)
 	}
 }
 
 func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
 	writeGoFile(t, filepath.Join(root, "internal", "broken.go"), "package internal\n\nfunc Broken() int { return \"not an int\" }\n")
-	gitAddAll(t, root)
+	gitCommitAll(t, root, "a package that does not compile")
 
 	err := runBuildTouched(context.Background())
 	if err == nil {
@@ -85,32 +94,92 @@ func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 
 func TestBuildTouchedIgnoresChangesGoBuildNeverReads(t *testing.T) {
 	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
 	writeGoFile(t, filepath.Join(root, "vendor", "example.com", "dep", "dep.go"),
 		"package dep\n\nfunc Dep() int { return \"not an int\" }\n")
 	writeGoFile(t, filepath.Join(root, "internal", "sound_test.go"),
 		"package internal\n\nfunc alsoNotAnInt() int { return \"not an int\" }\n")
 	writeGoFile(t, filepath.Join(root, "README.md"), "# fixture\n")
-	gitAddAll(t, root)
+	gitCommitAll(t, root, "a vendored, test-only and non-Go change")
 
 	if err := runBuildTouched(context.Background()); err != nil {
 		t.Fatalf("build-touched judged a vendored, test-only, or non-Go change: %v", err)
 	}
 }
 
-func TestBuildTouchedLeavesAWideChangeToTheBroadGate(t *testing.T) {
+func TestThePushTierJudgesThePushedCommitsWhateverIsStaged(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
-	writeGoFile(t, filepath.Join(root, "wide", "broken", "broken.go"),
-		"package broken\n\nfunc Broken() int { return \"not an int\" }\n")
-	for i := range touchedBuildPackageCap {
-		dir := fmt.Sprintf("p%d", i)
-		writeGoFile(t, filepath.Join(root, "wide", dir, dir+".go"),
-			fmt.Sprintf("package %s\n\nfunc Sound() int { return %d }\n", dir, i))
-	}
+	writeGoFile(t, filepath.Join(root, "internal", "broken.go"),
+		"package internal\n\nfunc Broken() int { return \"not an int\" }\n")
+	gitCommitAll(t, root, "the commit being pushed")
+
+	writeGoFile(t, filepath.Join(root, "internal", "unrelated.go"),
+		"package internal\n\nfunc Unrelated() int { return 7 }\n")
 	gitAddAll(t, root)
 
-	if err := runBuildTouched(context.Background()); err != nil {
-		t.Fatalf("build-touched compiled a change above its %d-package cap: %v", touchedBuildPackageCap, err)
+	if err := runBuildTouched(context.Background()); err == nil {
+		t.Fatal("a staged unrelated file narrowed the push tier, so the pushed commit went unjudged")
 	}
+	if err := runVetTouched(context.Background()); err == nil {
+		t.Error("vet-touched read the index instead of the push range")
+	}
+}
+
+func TestVetTouchedJudgesTheTestFilesBuildNeverReads(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	writeGoFile(t, filepath.Join(root, "internal", "broken_test.go"),
+		"package internal\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) { var n int = \"not an int\"; _ = n }\n")
+	gitCommitAll(t, root, "a test that does not compile")
+
+	if err := runBuildTouched(context.Background()); err != nil {
+		t.Fatalf("build-touched judged a test file: %v", err)
+	}
+	if err := runVetTouched(context.Background()); err == nil {
+		t.Error("vet-touched passed a test file that does not compile")
+	}
+}
+
+func TestTheHookTiersAndTheGateRunTheSameCheckers(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		checker string
+		hook    func(context.Context) (string, string, error)
+		gate    func(context.Context) (string, string, error)
+	}{
+		{"comments", pushRangeCommentCommand, commentCheckCommand},
+		{"test-sleeps", pushRangeSleepCommand, sleepCheckCommand},
+	} {
+		hookCmd, _, err := tc.hook(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gateCmd, _, err := tc.gate(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tool(hookCmd) != tool(gateCmd) {
+			t.Errorf("%s runs %q at the push and %q in the gate: a shared step name that runs a different check is how a tier stops judging what it claims to",
+				tc.checker, tool(hookCmd), tool(gateCmd))
+		}
+	}
+}
+
+func tool(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) < 3 {
+		return command
+	}
+	return strings.Join(fields[:3], " ")
 }

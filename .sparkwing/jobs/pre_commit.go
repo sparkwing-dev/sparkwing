@@ -81,7 +81,11 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 // subset of what the formatters step enforces and runs beside it because it
 // answers first and names the file without loading a package graph.
 func runGofmtOnTheChange(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
+	return gofmtOverScope(ctx, changeScope)
+}
+
+func gofmtOverScope(ctx context.Context, scopeOf scopeFunc) error {
+	files, scope, err := scopeOf(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
 		return err
 	}

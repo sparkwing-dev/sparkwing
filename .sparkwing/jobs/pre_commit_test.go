@@ -95,9 +95,9 @@ func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
 
 func TestGateStillRunsEveryStepTheHookTiersAlsoRun(t *testing.T) {
 	gate := stepIDs(t, &Gate{})
-	// safety: the gate compiles every package in every module, which is what
-	// the push tier's compile of the touched packages is a subset of.
-	broader := map[string]string{"build-touched": "build"}
+	// safety: the gate's whole-module vet and build are what the push tier
+	// runs over the touched packages alone.
+	broader := map[string]string{"build-touched": "build", "vet-touched": "vet"}
 	for tier, ids := range map[string][]string{
 		"pre-commit": stepIDs(t, &PreCommit{}),
 		"pre-push":   stepIDs(t, &PrePush{}),
