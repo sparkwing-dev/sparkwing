@@ -53,7 +53,7 @@ func gitcacheServerFixture(t *testing.T) (srv *httptest.Server, bareRepo, upstre
 
 	tmp := t.TempDir()
 	upstream = filepath.Join(tmp, "upstream.git")
-	mustGit(t, "", "init", "--bare", upstream)
+	mustGit(t, "", "init", "--bare", "-b", "main", upstream)
 	work := filepath.Join(tmp, "work")
 	mustGit(t, "", "clone", "--quiet", upstream, work)
 	mustGit(t, work, "config", "user.email", "t@t")

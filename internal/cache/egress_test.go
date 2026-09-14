@@ -34,7 +34,7 @@ func gitcacheFixture(t *testing.T) (repoURL, bareRepo, upstream string) {
 	})
 
 	upstream = filepath.Join(tmp, "upstream.git")
-	mustGit(t, "", "init", "--bare", upstream)
+	mustGit(t, "", "init", "--bare", "-b", "main", upstream)
 	work := filepath.Join(tmp, "work")
 	mustGit(t, "", "clone", upstream, work)
 	mustGit(t, work, "config", "user.email", "t@t")
