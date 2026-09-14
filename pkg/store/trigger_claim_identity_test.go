@@ -19,10 +19,10 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
 	seedPending(t, s, "t1")
-	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, 10*time.Millisecond, nil, nil); err != nil {
+	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Minute, nil, nil); err != nil {
 		t.Fatalf("ClaimNextTriggerFor: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	expireTriggerClaim(t, s, "t1")
 
 	ids, err := store.Maintenance.ReapExpiredTriggers(s, ctx)
 	if err != nil {
