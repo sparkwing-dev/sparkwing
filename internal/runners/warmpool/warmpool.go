@@ -30,6 +30,9 @@ type Runner struct {
 
 type coordinator interface {
 	MarkNodeReady(context.Context, string, string) error
+	AppendEvent(context.Context, string, string, string, []byte) error
+	FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string,
+		output []byte, reason string, exitCode *int) error
 	UpdateNodeActivity(context.Context, string, string, string) error
 	TouchNodeHeartbeat(context.Context, string, string) error
 	GetNode(context.Context, string, string) (*store.Node, error)
@@ -77,6 +80,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	waitDeadline := time.Now().Add(r.cfg.ClaimWaitTimeout)
 	const unmatchableLogEvery = time.Minute
 	var lastUnmatchableLog time.Time
+	unmatchableSince := time.Now()
 
 	for {
 		select {
@@ -103,14 +107,17 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			// safety: a labeled node may fall back only when the fallback explicitly
 			// advertises every label. Most callers configure none.
 			if !sparkwingruntime.MatchLabels(n.NeedsLabels, r.cfg.FallbackLabels) {
+				if time.Since(unmatchableSince) >= UnmatchableGracePeriod {
+					return r.failUnmatchable(ctx, req, n)
+				}
 				if time.Since(lastUnmatchableLog) >= unmatchableLogEvery {
 					r.logger.Warn("warmpool: labeled node unclaimed",
 						"run_id", req.RunID, "node_id", req.NodeID,
 						"needs_labels", n.NeedsLabels,
 						"fallback_labels", r.cfg.FallbackLabels,
+						"cpu_class_cores", n.CreditCPUClassCores,
 						"hint", "this dispatcher's fallback advertises none of these labels, so it waits "+
-							"for a runner that does; a node above the warm cpu class needs that runner "+
-							"to be one sized to its class")
+							"for a runner that does")
 					lastUnmatchableLog = time.Now()
 				}
 				continue
@@ -144,6 +151,35 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 		}
 	}
+}
+
+// UnmatchableGracePeriod is how long a node whose labels this dispatcher's
+// fallback cannot advertise waits for a runner that can before it fails. It
+// bounds the wait for a labeled runner that has yet to start, and is the only
+// end a node above the warm cpu class has when nothing on the fleet serves it.
+const UnmatchableGracePeriod = 5 * time.Minute
+
+// safety: a node no runner advertises and no fallback may take would otherwise
+// sit until the run's own deadline with nothing saying why, so the labels and
+// the class it was billed at are what it fails with.
+func (r *Runner) failUnmatchable(ctx context.Context, req runner.Request, n *store.Node) runner.Result {
+	msg := fmt.Sprintf(
+		"no runner advertises the labels %v within %s, and this dispatcher's fallback advertises %v",
+		n.NeedsLabels, UnmatchableGracePeriod, r.cfg.FallbackLabels)
+	if n.CreditCPUClassCores > 0 {
+		msg += fmt.Sprintf("; the node is billed at the %d-core class, which the warm pool does not serve",
+			n.CreditCPUClassCores)
+	}
+	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "node_unmatchable", []byte(msg)); err != nil {
+		r.logger.Warn("warmpool: recording the refusal failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	}
+	if err := r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
+		string(sparkwing.Failed), msg, nil, store.FailureQueueTimeout, nil); err != nil {
+		r.logger.Warn("warmpool: failing the unmatchable node failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	}
+	return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 }
 
 func (r *Runner) revokeAndReportCancelled(ctx context.Context, req runner.Request) runner.Result {

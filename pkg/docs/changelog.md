@@ -38,10 +38,14 @@ unlock.
   Kubernetes Job is sized from those, so the pod shape and the bill agree
   whichever ladder an operator priced. A named claim carries `sizes_to_class`
   to say it creates the node's executor at that class; a metered claim without
-  it is held to the warm class, so naming a node is not a way around the
-  ladder. A runner cpu or memory ceiling below the billed class fails the node
-  rather than running it smaller for the same price, and a pod no node accepts
-  within five minutes fails with the scheduler's own message.
+  it is held to the warm class and an unmetered token may not set it at all, so
+  naming a node is not a way around the ladder. A runner cpu or memory ceiling
+  below the billed class fails the node rather than running it smaller for the
+  same price; a pod no node accepts within five minutes fails with the
+  scheduler's own message; and a node whose labels no runner advertises and no
+  fallback may take fails after five minutes naming the labels and the class.
+  The class is stamped on the node when it becomes ready, so the queue read
+  skips the classes a warm runner may not take rather than scanning past them.
   `store.CPUClass`, `store.CreditRateTable.ClassForResource`,
   `store.CPUClassMemoryBytes`, `store.NamedClaimOptions` and
   `store.DefaultWarmCPUClassCores` are the store surface;
