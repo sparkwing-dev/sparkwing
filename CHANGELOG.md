@@ -230,6 +230,17 @@ unlock.
 
 ### Fixed
 
+- **tests:** Thirteen sleeps and wall-clock poll loops left `pkg/store` and
+  `pkg/controller`
+  Each site now waits on what the code already signals: a claim expired through
+  the store's own expiry helper, an offer time or a placement hold stamped into
+  the fixture, a gate channel a fake holds until the test has seen the
+  concurrency it is about to measure, or the log line the reporter writes. The
+  reaper's metric samples moved into a method of their own so a test can take
+  one sample instead of running the loop and polling the registry.
+  `go run ./internal/sleepcheck .` now counts 28 waits under `pkg/store` (was
+  34) and 49 under `pkg/controller` (was 56).
+
 - **api:** `api/openapi.yaml` no longer loses the tail of a description
   An unquoted comma and colon inside a flow-mapping description split the prose
   and turned its tail into a sibling field nobody wrote, which silently
