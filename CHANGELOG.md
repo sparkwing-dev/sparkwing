@@ -22,6 +22,21 @@ unlock.
 
 ### Added
 
+- **controller:** `max_concurrent_runners` scales with recent paid credit
+  A metered principal's cap is now the base plus one more base for every
+  `runner_scale_step_credits` of `paid` credit granted in the last 30 days,
+  held under `runner_scale_ceiling`. The base is the new `runner_scale_base`,
+  or `max_concurrent_runners` when that is zero; the ceiling falls back to
+  `max_global_runners`. All three guards are zero by default, so an install
+  keeps the static cap, and the rule applies only while
+  `max_concurrent_runners` is set. A claim past the derived cap answers the
+  existing `429 compute_limit`. `GET /api/v1/compute-limits` reports it as
+  `usage.derived_runner_cap` with the `usage.recent_paid_micro` behind it, and
+  `sparkwing cluster limits show` prints a `DERIVED RUNNER CAP` line. The
+  derivation is cached for a minute per principal so a claim costs no ledger
+  query, and a grant retires the cache at once. `store.RunnerCapFor` is its
+  store surface.
+
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a

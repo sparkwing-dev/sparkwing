@@ -274,6 +274,7 @@ func (s *Store) GrantCredits(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	s.invalidateRunnerCaps()
 	return grant, nil
 }
 
@@ -609,7 +610,7 @@ func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
 
 // safety: reserving inside the claim's own transaction is what keeps concurrent
 // runners from each reading the same balance and claiming against it.
-func reserveNodeCreditsTx(
+func (s *Store) reserveNodeCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
 ) error {
 	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
@@ -638,7 +639,7 @@ func reserveNodeCreditsTx(
 		return err
 	}
 	if limits.Any() {
-		if err := enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+		if err := s.enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
 			return err
 		}
 	}

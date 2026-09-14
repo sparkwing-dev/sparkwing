@@ -22,9 +22,12 @@ type computeLimitsJSON struct {
 }
 
 type computeUsageJSON struct {
-	Runners      int64            `json:"runners"`
-	ByPrincipal  map[string]int64 `json:"by_principal,omitempty"`
-	AlarmReached bool             `json:"alarm_reached"`
+	Runners            int64            `json:"runners"`
+	ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
+	AlarmReached       bool             `json:"alarm_reached"`
+	DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
+	RecentPaidMicro    int64            `json:"recent_paid_micro,omitempty"`
+	ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
 }
 
 type setComputeLimitsReq struct {
@@ -96,7 +99,27 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 		v, _ := limits.Value(name)
 		out.Limits[name] = v
 	}
+	if limits.ConcurrentRunners > 0 {
+		derived, err := s.store.RunnerCapFor(r.Context(), requestPrincipalName(r), time.Now())
+		if err != nil {
+			return computeLimitsJSON{}, err
+		}
+		out.Usage.DerivedRunnerCap = derived.Cap
+		out.Usage.RecentPaidMicro = derived.RecentPaidMicro
+		if limits.RunnerScaleStepCredits > 0 {
+			out.Usage.ScaleWindowSeconds = int64(store.RunnerScaleWindow.Seconds())
+		}
+	}
 	return out, nil
+}
+
+// safety: the cap is derived per principal, so an unauthenticated read is
+// measured against no principal rather than against the last caller's.
+func requestPrincipalName(r *http.Request) string {
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		return p.Name
+	}
+	return ""
 }
 
 // safety: a runner tells this apart from a transport failure and keeps polling

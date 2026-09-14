@@ -107,6 +107,9 @@ type Store struct {
 	csrfKey         []byte
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
+	runnerCapMu     sync.Mutex
+	runnerCaps      map[string]runnerCapEntry
+	runnerCapEpoch  uint64
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -5297,7 +5300,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never

@@ -61,3 +61,30 @@ func TestRenderComputeLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderComputeLimitsShowsTheDerivedCap(t *testing.T) {
+	t.Parallel()
+	var view computeLimitsResp
+	view.Limits = map[string]int64{store.ComputeLimitConcurrentRunners: 100}
+	view.Usage.DerivedRunnerCap = 400
+	view.Usage.RecentPaidMicro = 15000 * store.MicroCreditsPerCredit
+	view.Usage.ScaleWindowSeconds = int64(store.RunnerScaleWindow.Seconds())
+
+	var pretty bytes.Buffer
+	if err := renderComputeLimits(&pretty, view); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{"DERIVED RUNNER CAP", "400", "15000.00", "30 days"} {
+		if !strings.Contains(pretty.String(), want) {
+			t.Errorf("pretty output is missing %q:\n%s", want, pretty.String())
+		}
+	}
+
+	var plain bytes.Buffer
+	if err := writeComputeLimitsPlain(&plain, view); err != nil {
+		t.Fatalf("render plain: %v", err)
+	}
+	if !strings.Contains(plain.String(), "derived_runner_cap\t400\n") {
+		t.Errorf("plain output is missing the derived cap:\n%s", plain.String())
+	}
+}

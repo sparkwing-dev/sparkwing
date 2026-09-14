@@ -3859,6 +3859,9 @@ paths:
         runs, and their `max_global_*` counterparts count every run on the
         controller. `usage` reports the cloud runners claimed right now, in
         total and per principal, and whether the count reached `runner_alarm`.
+        It also reports `derived_runner_cap`, the per-principal runner ceiling
+        after `runner_scale_step_credits` of recent paid credit has raised
+        `max_concurrent_runners`, together with the credit it was read from.
       responses:
         "200":
           description: Guards and current usage.
@@ -4540,6 +4543,9 @@ components:
         runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller.}
         by_principal: {type: object, additionalProperties: {type: integer, format: int64}, description: The same count per principal.}
         alarm_reached: {type: boolean, description: Whether the count reached runner_alarm.}
+        derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal is held to once recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
+        recent_paid_micro: {type: integer, format: int64, description: Paid credit granted over the scaling window, in micro-credits: '', which is what the derived cap was read from.: ''}
+        scale_window_seconds: {type: integer, format: int64, description: How far back paid credit counts toward the derived cap.}
     SetComputeLimits:
       x-sparkwing-go-type: pkg/controller.setComputeLimitsReq
       type: object

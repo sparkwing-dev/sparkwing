@@ -425,10 +425,14 @@ Set one compute guard
 Sets one guard to a ceiling, or to zero to remove it. The guards are
 max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
-max_global_runs_per_hour and min_cron_interval_seconds. The per-principal
+max_global_runs_per_hour, min_cron_interval_seconds, runner_scale_base,
+runner_scale_step_credits and runner_scale_ceiling. The per-principal
 guards bind a principal holding a metered token; the max_global_ pair binds
-every run. Work past a guard answers 429 with a Retry-After and the run records
-a compute_limit_blocked event. Requires the admin scope.
+every run. The runner_scale_ trio raises max_concurrent_runners by one
+runner_scale_base for every runner_scale_step_credits of paid credit granted in
+the last 30 days, held under runner_scale_ceiling. Work past a guard answers
+429 with a Retry-After and the run records a compute_limit_blocked event.
+Requires the admin scope.
 
 ### Flags
 
@@ -449,6 +453,9 @@ sparkwing cluster limits set --name runner_alarm --value 40 --profile prod
 
 # Remove the per-run node cap
 sparkwing cluster limits set --name max_nodes_per_run --value 0 --profile prod
+
+# Add a hundred runners per 5000 credits loaded
+sparkwing cluster limits set --name runner_scale_step_credits --value 5000 --profile prod
 ```
 
 ## `sparkwing cluster limits show`
