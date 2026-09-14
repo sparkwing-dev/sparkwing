@@ -97,18 +97,35 @@ semver_cmp() {
   printf '0'
 }
 
+# v1.0.0 through v1.6.1 are retracted tombstone tags the module proxy keeps
+# forever (see the retract block in go.mod), so the release line stops below
+# them. .sparkwing/jobs/release.go carries the same ceiling.
+line_ceiling="v1.0.0"
+
+on_release_line() {
+  [[ "$1" =~ $semver_re ]] && [ "$(semver_cmp "$1" "$line_ceiling")" = "-1" ]
+}
+
 if ! [[ "$candidate" =~ $semver_re ]]; then
   echo "check-release-tag-order: $candidate is not a vMAJOR.MINOR.PATCH release tag (an optional -prerelease suffix is allowed)" >&2
   exit 1
 fi
 
+if ! on_release_line "$candidate"; then
+  echo "check-release-tag-order: $candidate is $line_ceiling or above, but sparkwing is locked to v0.x and retracts v1.0.0 through v1.6.1. Cut a v0.x version." >&2
+  exit 1
+fi
+
+# The workflow runs after the tag exists, so the candidate is in its own tag
+# list. It is compared against the versions published before it, never itself.
 newest=""
 while IFS= read -r line || [ -n "$line" ]; do
   tag="${line##*refs/tags/}"
   tag="${tag%^\{\}}"
   tag="${tag%%[[:space:]]*}"
   [ -n "$tag" ] || continue
-  [[ "$tag" =~ $semver_re ]] || continue
+  [ "$tag" != "$candidate" ] || continue
+  on_release_line "$tag" || continue
   if [ -z "$newest" ] || [ "$(semver_cmp "$tag" "$newest")" = "1" ]; then
     newest="$tag"
   fi
