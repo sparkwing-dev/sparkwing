@@ -225,7 +225,7 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 	write(".sparkwing/go.mod", module("v0.38.2"))
 	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.1"))
 
-	aligned, err := releaseVersionArtifactsAligned(dir, "v0.38.2")
+	_, aligned, err := coherentReleaseVersionArtifacts(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,12 +233,15 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 		t.Fatal("fixture-only drift reported aligned")
 	}
 	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.2"))
-	aligned, err = releaseVersionArtifactsAligned(dir, "v0.38.2")
+	pinned, aligned, err := coherentReleaseVersionArtifacts(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !aligned {
 		t.Fatal("coherent release artifacts reported drift")
+	}
+	if pinned != "v0.38.2" {
+		t.Fatalf("coherent pin = %q, want v0.38.2", pinned)
 	}
 }
 

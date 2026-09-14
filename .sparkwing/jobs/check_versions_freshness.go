@@ -515,14 +515,6 @@ func readPipelineModulePin(repoRoot, moduleDir string) (string, error) {
 	return "", fmt.Errorf("%s has no %s requirement", path, sdkModulePath)
 }
 
-func releaseVersionArtifactsAligned(repoRoot, version string) (bool, error) {
-	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
-	if err != nil {
-		return false, err
-	}
-	return aligned && pinned == version, nil
-}
-
 func coherentReleaseVersionArtifacts(repoRoot string) (string, bool, error) {
 	fallback, err := readFallbackSDKVersionFile(repoRoot)
 	if err != nil {
