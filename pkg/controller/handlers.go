@@ -1532,6 +1532,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			if s.writeCreditsRefusal(w, r, err) {
 				return
 			}
+			if s.writeUnpricedClassRefusal(w, err) {
+				return
+			}
 			if s.writeComputeLimitRefusal(w, r, body.RunID, body.NodeID, err) {
 				return
 			}
@@ -1590,6 +1593,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		if s.writeCreditsRefusal(w, r, err) {
 			return
 		}
+		if s.writeUnpricedClassRefusal(w, err) {
+			return
+		}
 		if s.writeClaimComputeLimitRefusal(w, r, err) {
 			return
 		}
@@ -1624,6 +1630,9 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
 	if err != nil {
 		if s.writeCreditsRefusal(w, r, err) {
+			return
+		}
+		if s.writeUnpricedClassRefusal(w, err) {
 			return
 		}
 		if errors.Is(err, store.ErrNotFound) {

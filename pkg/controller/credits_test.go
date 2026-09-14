@@ -533,11 +533,26 @@ func creditSettings(t *testing.T, f creditsFixture, method string, body any) (in
 }
 
 type creditSettingsView struct {
-	RateMicroPerSecond int64 `json:"rate_micro_per_second"`
-	GraceSeconds       int64 `json:"grace_seconds"`
-	MaxChargeSeconds   int64 `json:"max_charge_seconds"`
-	MicroPerCredit     int64 `json:"micro_per_credit"`
-	CreditsPerDollar   int64 `json:"credits_per_dollar"`
+	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
+	RateTable          []creditRateView `json:"rate_table"`
+	GraceSeconds       int64            `json:"grace_seconds"`
+	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
+	MicroPerCredit     int64            `json:"micro_per_credit"`
+	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+}
+
+type creditRateView struct {
+	Cores          int64 `json:"cores"`
+	MicroPerSecond int64 `json:"micro_per_second"`
+}
+
+func (v creditSettingsView) rateFor(cores int64) int64 {
+	for _, entry := range v.RateTable {
+		if entry.Cores == cores {
+			return entry.MicroPerSecond
+		}
+	}
+	return 0
 }
 
 func TestCreditSettings_ReadsTheDefaultsAndSetsEachValue(t *testing.T) {
@@ -650,5 +665,88 @@ func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
 		map[string]any{"grace_seconds": 0})
 	if status != http.StatusForbidden {
 		t.Fatalf("write without admin = %d, want 403", status)
+	}
+}
+
+// An installation that never set a table reads one price for every class, so
+// its bill is what the single rate charged on its own.
+func TestCreditSettings_ReadsAFlatDefaultRateTable(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, view := creditSettings(t, f, http.MethodGet, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET settings = %d", status)
+	}
+	if len(view.RateTable) == 0 {
+		t.Fatal("the settings route named no cpu class")
+	}
+	for _, entry := range view.RateTable {
+		if entry.MicroPerSecond != store.DefaultCreditRateMicro {
+			t.Fatalf("the %d-core class costs %d, want the default %d",
+				entry.Cores, entry.MicroPerSecond, store.DefaultCreditRateMicro)
+		}
+	}
+}
+
+func TestCreditSettings_TakesTheRateTableAsAListOrAsAnObject(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, view := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": []map[string]any{
+			{"cores": 2, "micro_per_second": 10_000},
+			{"cores": 8, "micro_per_second": 36_667},
+			{"cores": 4, "micro_per_second": 20_000},
+		},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("PUT a list = %d", status)
+	}
+	if len(view.RateTable) != 3 || view.RateTable[0].Cores != 2 || view.RateTable[2].Cores != 8 {
+		t.Fatalf("rate table = %+v, want three classes smallest first", view.RateTable)
+	}
+	if view.RateMicroPerSecond != 20_000 {
+		t.Fatalf("single rate = %d, want the four-core price 20000", view.RateMicroPerSecond)
+	}
+
+	status, view = creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": map[string]int64{"2": 11_000, "4": 22_000},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("PUT an object = %d", status)
+	}
+	if view.rateFor(2) != 11_000 || view.rateFor(4) != 22_000 || len(view.RateTable) != 2 {
+		t.Fatalf("rate table after the object write = %+v", view.RateTable)
+	}
+	if view.GraceSeconds != store.DefaultCreditGraceSeconds {
+		t.Fatalf("writing the table moved the grace period to %d", view.GraceSeconds)
+	}
+}
+
+func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	for name, body := range map[string]map[string]any{
+		"no class":   {"rate_table": []map[string]any{}},
+		"zero cores": {"rate_table": []map[string]any{{"cores": 0, "micro_per_second": 1}}},
+		"zero rate":  {"rate_table": []map[string]any{{"cores": 2, "micro_per_second": 0}}},
+		"a class twice": {"rate_table": []map[string]any{
+			{"cores": 2, "micro_per_second": 1}, {"cores": 2, "micro_per_second": 2},
+		}},
+		"a key that is not a core count": {"rate_table": map[string]int64{"large": 1}},
+		"neither a list nor an object":   {"rate_table": "2=10000"},
+	} {
+		if status, _ := creditSettings(t, f, http.MethodPut, body); status != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", name, status)
+		}
+	}
+
+	status, view := creditSettings(t, f, http.MethodGet, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET settings = %d", status)
+	}
+	for _, entry := range view.RateTable {
+		if entry.MicroPerSecond != store.DefaultCreditRateMicro {
+			t.Fatalf("a refused write priced the %d-core class at %d", entry.Cores, entry.MicroPerSecond)
+		}
 	}
 }
