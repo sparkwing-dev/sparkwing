@@ -64,7 +64,7 @@ func startLocalFleetAuthority(st *store.Store, runID string, cfg fleet.Config, o
 			}
 		}
 		if tokenPrefix == "" {
-			return fail(a, fmt.Errorf("fleet executor %q has no local credential enrollment; run `sparkwing fleet agents enroll`", enrolled.Name))
+			return fail(a, fmt.Errorf("fleet executor %q has no local credential enrollment", enrolled.Name))
 		}
 		tok, err := st.LookupTokenByPrefix(tokenPrefix)
 		if err != nil || !tok.IsValid(time.Now().UTC()) || tok.Kind != store.TokenKindRunner ||

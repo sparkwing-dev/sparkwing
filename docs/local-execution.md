@@ -505,11 +505,10 @@ retry. Capabilities, priority range, concurrency ceiling, and
 resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
 
-`sparkwing fleet agents enroll` mints one helper credential and records its
-trusted envelope in `fleet.yaml`. The one-time output is a membership record
-for the coordinator; enroll a machine that must execute work with `sparkwing
-cluster runners add`. Every membership carries a distinct revocable token and
-its enrolled name; network discovery never grants trust.
+A foreground coordinator reads its trusted helpers from `fleet.yaml`. Every
+membership carries a distinct revocable token and its enrolled name; network
+discovery never grants trust. Add a machine that executes work with `sparkwing
+cluster runners add`.
 
 An enrolled executor reports liveness to its coordinator, and a controller that
 hears nothing shows it offline. Idle enrollments remain visible. A compatible

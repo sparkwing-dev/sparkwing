@@ -65,11 +65,14 @@ unlock.
 
 ### Removed
 
-- **runner (Breaking):** `agent.yaml` drops `name` and `coordinators`, and
-  `sparkwing-runner agent` drops `--allow-enrolled-preview`. Those keys selected
-  enrolled mode, which the controller refuses on both the claim route and the
-  offer route, so the loop they started claimed nothing. A file that still sets
-  either key fails to load with a message naming the removed mode; see the
+- **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
+  and the fleet CLI
+  `name` and `coordinators` selected a path the controller refuses on both the
+  claim route and the offer route, so the loop they started claimed nothing. A
+  file that still sets either key fails to load with a message naming the
+  removed mode. `sparkwing-runner agent --allow-enrolled-preview` and
+  `sparkwing fleet agents enroll`, whose one-time output was a `coordinators`
+  block, go with them. See the
   [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-is-removed).
   Claim mode is unchanged and keeps `controller`, `logs`, `token`, `labels`,
   `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
