@@ -108,7 +108,11 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 }
 
 func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, error) {
-	out, err := captureGit(ctx, repoRoot, "tag", "--list", "v*")
+	// safety: a release line is what its own history carries. A tag cut on a
+	// branch that never landed outranks this line by version while being
+	// unreachable from it, and reading it as the latest release blocks every
+	// release the line can make.
+	out, err := captureGit(ctx, repoRoot, "tag", "--merged", "HEAD", "--list", "v*")
 	if err != nil {
 		return "", fmt.Errorf("git tag: %w", err)
 	}
