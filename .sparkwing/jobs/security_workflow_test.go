@@ -322,6 +322,13 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"bbd6e83949b551d822df445e15ddc2ae649f3b0d:cmd/sparkwing/agents_test.go:generic-api-key:15",
 		"01fe110594cc9d898a26d12f510397f4b2cd53dc:install/install.sh:generic-api-key:27",
 		"26f34bc5c311eba8dad006f49f84c82ef8c115cc:pkg/controller/webhook_github_bindings_test.go:generic-api-key:21",
+		"307a77eba29cf80aeb16b78190aed22bbf2787d0:internal/envredact/envredact_test.go:generic-api-key:280",
+		"31bd09fb7a6bcb79dd4533c3a44a702e775c5ba9:internal/envredact/envredact_test.go:generic-api-key:302",
+		"31bd09fb7a6bcb79dd4533c3a44a702e775c5ba9:internal/envredact/envredact_test.go:generic-api-key:306",
+		"397721c9535aa4ad4cc64a068076e9e0ffc9afc8:internal/envredact/envredact_test.go:private-key:298",
+		"7c75d7dbedc7b46c71c149db7996f6c9beabfc23:cmd/sparkwing/worktree_snapshot_test.go:generic-api-key:513",
+		"7c75d7dbedc7b46c71c149db7996f6c9beabfc23:cmd/sparkwing/worktree_snapshot_test.go:generic-api-key:514",
+		"7c75d7dbedc7b46c71c149db7996f6c9beabfc23:cmd/sparkwing/worktree_snapshot_test.go:generic-api-key:522",
 	}, "\n")
 	if ignore != want {
 		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)
