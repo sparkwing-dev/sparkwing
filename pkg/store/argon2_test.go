@@ -37,6 +37,11 @@ func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
 	})
 
+	const hashes = 16
+	// safety: every hash parks in the fake until the test has seen the budget
+	// filled, so the peak is read from hashes that were truly concurrent.
+	entered := make(chan struct{}, hashes)
+	release := make(chan struct{})
 	var inFlight, peak atomic.Int64
 	argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
 		n := inFlight.Add(1)
@@ -46,7 +51,8 @@ func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		entered <- struct{}{}
+		<-release
 		inFlight.Add(-1)
 		return make([]byte, keyLen)
 	}
@@ -57,7 +63,7 @@ func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for range 16 {
+	for range hashes {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -66,6 +72,10 @@ func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 			}
 		}()
 	}
+	for range want {
+		<-entered
+	}
+	close(release)
 	wg.Wait()
 
 	if got := peak.Load(); got > want {

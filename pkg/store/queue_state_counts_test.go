@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -166,6 +167,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 
 	churn, stop := context.WithCancel(ctx)
 	defer stop()
+	var landed atomic.Int64
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -185,13 +187,13 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 			if _, err := s.FinalizeNodeCredits(churn, "run-conc", node, claimant.TokenPrefix, time.Now()); err != nil {
 				return
 			}
+			landed.Add(1)
 		}
 	}()
 
+	const samples = 200
 	high := int64(-1)
-	deadline := time.Now().Add(2 * time.Second)
-	samples := 0
-	for time.Now().Before(deadline) {
+	for range samples {
 		totals, err := s.CreditLedgerTotals(ctx)
 		if err != nil {
 			t.Fatalf("CreditLedgerTotals: %v", err)
@@ -203,13 +205,12 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 		if totals.SettledSeconds > high {
 			high = totals.SettledSeconds
 		}
-		samples++
 	}
 	stop()
 	<-done
 
-	if samples < 10 {
-		t.Errorf("took %d samples in two seconds, too few to catch a torn read", samples)
+	if landed.Load() == 0 {
+		t.Error("no claim finished while the ledger was sampled, so no sample raced a write")
 	}
 }
 
