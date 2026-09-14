@@ -190,6 +190,13 @@ var nodesCreditCols = map[string]string{
 	"credit_charged_through": "INTEGER NOT NULL DEFAULT 0",
 }
 
+// safety: a node's grace clock starts where its paid runway ended, which is a
+// per-node instant; a ledger-wide stamp records only when some charge first
+// noticed the balance was empty, which lags by a heartbeat or by an idle hour.
+var nodesCreditExhaustionCols = map[string]string{
+	"credit_exhausted_anchor": "INTEGER NOT NULL DEFAULT 0",
+}
+
 func applyCreditsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := ensureColumnsSQLite(ctx, tx, "tokens", tokensMeteredCols); err != nil {
 		return err
@@ -955,12 +962,10 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 	out.BalanceMicro = balance
-	// safety: the claim reservation is runway already paid for, so a node
-	// inside it is never cancelled and the grace period starts where it ends.
-	// The anchor is the instant the node is paid through, so nowNS past it is
-	// the node having run longer than it reserved.
-	exhaustedFor, cancel, err := settleCreditExhaustionTx(
-		ctx, tx, balance, nowNS, grace, nowNS > anchor)
+	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
+		Balance: balance, NowNS: nowNS, Grace: grace,
+		RunID: runID, NodeID: nodeID, Anchor: anchor,
+	})
 	if err != nil {
 		return out, err
 	}
@@ -1042,12 +1047,26 @@ func insertCreditChargeTx(
 	}, nil
 }
 
+// safety: Anchor is the instant the node is paid through, read before this
+// charge advanced it. Zero means no charge has anchored the node yet, which is
+// a node still inside the claim that will set one.
+type creditExhaustion struct {
+	Balance, NowNS, Grace int64
+	RunID, NodeID         string
+	Anchor                int64
+}
+
 func settleCreditExhaustionTx(
-	ctx context.Context, tx *storeTx, balance, nowNS, grace int64, pastReservation bool,
+	ctx context.Context, tx *storeTx, e creditExhaustion,
 ) (time.Duration, bool, error) {
-	if balance > 0 {
+	if e.Balance > 0 {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
+			return 0, false, err
+		}
+		// safety: credit bought the node fresh runway, so the clock it was
+		// running down is gone rather than paused.
+		if err := stampCreditExhaustionAnchorTx(ctx, tx, e, 0); err != nil {
 			return 0, false, err
 		}
 		return 0, false, nil
@@ -1055,7 +1074,7 @@ func settleCreditExhaustionTx(
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (key) DO NOTHING`,
-		metaKeyCreditExhaustedAt, strconv.FormatInt(nowNS, 10), nowNS); err != nil {
+		metaKeyCreditExhaustedAt, strconv.FormatInt(e.NowNS, 10), e.NowNS); err != nil {
 		return 0, false, err
 	}
 	var raw string
@@ -1063,12 +1082,48 @@ func settleCreditExhaustionTx(
 		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt).Scan(&raw); err != nil {
 		return 0, false, err
 	}
-	stamped := parseCreditSetting(raw, nowNS)
-	exhaustedFor := time.Duration(nowNS - stamped)
+	stamped := parseCreditSetting(raw, e.NowNS)
+	exhaustedFor := time.Duration(e.NowNS - stamped)
 	if exhaustedFor < 0 {
 		exhaustedFor = 0
 	}
-	return exhaustedFor, pastReservation && exhaustedFor >= time.Duration(grace)*time.Second, nil
+	// safety: a node with no anchor has never been charged, so it is still
+	// inside the claim that will set one and cannot have outrun its runway.
+	if e.Anchor == 0 {
+		return exhaustedFor, false, nil
+	}
+	from, err := creditExhaustionAnchorTx(ctx, tx, e)
+	if err != nil {
+		return exhaustedFor, false, err
+	}
+	deadline := from + e.Grace*int64(time.Second)
+	return exhaustedFor, e.NowNS > e.Anchor && e.NowNS > deadline, nil
+}
+
+// safety: the grace clock is per node and starts where that node's paid runway
+// ended, which is the instant it was charged through when the balance first
+// read empty. Recording it once is what keeps the deadline still while later
+// heartbeats push the charge anchor forward.
+func creditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExhaustion) (int64, error) {
+	var stamped int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT credit_exhausted_anchor FROM nodes WHERE run_id = ? AND node_id = ?`,
+		e.RunID, e.NodeID).Scan(&stamped); err != nil {
+		return 0, err
+	}
+	if stamped != 0 {
+		return stamped, nil
+	}
+	return e.Anchor, stampCreditExhaustionAnchorTx(ctx, tx, e, e.Anchor)
+}
+
+func stampCreditExhaustionAnchorTx(
+	ctx context.Context, tx *storeTx, e creditExhaustion, at int64,
+) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
+		at, e.RunID, e.NodeID)
+	return err
 }
 
 // TokenMetered reports whether the operator marked this token's holder as a

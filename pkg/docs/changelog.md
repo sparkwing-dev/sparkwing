@@ -62,12 +62,15 @@ unlock.
   positive value). A cap at or under the cadence truncated and forgave part of
   every late tick. Refusals are `ErrInvalidCreditSetting`.
 - **controller:** A metered node inside the reservation its claim paid for is
-  no longer cancelled for exhausted credits, and the grace period is counted
-  from the end of that reservation rather than from the moment the balance
-  emptied. A claim reserves and charges for a minute of runway up front, so
+  no longer cancelled for exhausted credits, and each node now runs its own
+  grace clock from the instant it was charged through when the balance first
+  read empty. A claim reserves and charges for a minute of runway up front, so
   cancelling inside it billed for time the node never got to use; with a grace
-  period of zero the node lost the whole paid minute. A node past its
-  reservation behaves as before.
+  period of zero the node lost the whole paid minute. The clock used to run
+  from a ledger-wide stamp, so every node shared one deadline and the grace
+  period barely moved it. Schema v42 adds the `nodes.credit_exhausted_anchor`
+  column that holds each node's own start; it is defaulted, so a v41 binary
+  keeps writing the migrated database.
 - **cluster:** A Kubernetes runner Job now carries an `activeDeadlineSeconds`:
   ten minutes past the node's own `.Timeout()` where it declared one, and six
   hours otherwise. `--k8s-job-deadline` (env `SPARKWING_K8S_JOB_DEADLINE`, a Go

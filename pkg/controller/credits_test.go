@@ -133,6 +133,17 @@ func ageExhaustionStamp(t *testing.T, st *store.Store, at time.Time) {
 	}
 }
 
+// safety: the grace clock a cancellation runs on is the node's own, so a test
+// reaches the deadline by moving that instant rather than the ledger stamp.
+func ageNodeExhaustionAnchor(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
+	t.Helper()
+	if _, err := st.DB().Exec(
+		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), runID, nodeID); err != nil {
+		t.Fatalf("age the node's exhaustion anchor: %v", err)
+	}
+}
+
 func TestCredits_UnmeteredTokenClaimsAndIsNeverCharged(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	ctx := context.Background()
@@ -300,11 +311,20 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	})
 
-	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-30*time.Second))
+	// safety: the node is inside the minute its claim reserved and paid for, so
+	// the spent balance alone must not stop it.
 	if err := c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil); err != nil {
 		t.Fatalf("first heartbeat: %v", err)
 	}
+	node, err := f.store.GetNode(ctx, "run-run-dry", "build")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Status == "done" {
+		t.Fatal("the node was cancelled inside the reservation its claim paid for")
+	}
 	ageExhaustionStamp(t, f.store, time.Now().Add(-time.Minute))
+	ageNodeExhaustionAnchor(t, f.store, "run-run-dry", "build", time.Now().Add(-time.Minute))
 	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-2*time.Second))
 
 	err = c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil)
@@ -312,7 +332,7 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 		t.Fatalf("heartbeat after the grace period = %v, want ErrLockHeld", err)
 	}
 
-	node, err := f.store.GetNode(ctx, "run-run-dry", "build")
+	node, err = f.store.GetNode(ctx, "run-run-dry", "build")
 	if err != nil {
 		t.Fatalf("get node: %v", err)
 	}

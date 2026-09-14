@@ -926,6 +926,125 @@ func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
 	}
 }
 
+// safety: the claim consumes the whole balance, so every later heartbeat reads
+// a spent ledger and only the grace period decides when the node stops.
+func exhaustedReservedNode(t *testing.T, s *store.Store, runID string, grace int64) (
+	store.ClaimIdentity, time.Time,
+) {
+	t.Helper()
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:"+runID)
+	readyNode(t, s, runID, "build")
+	floor, err := s.CreditClaimFloorMicro(ctx)
+	if err != nil {
+		t.Fatalf("floor: %v", err)
+	}
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, floor, "", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
+		t.Fatalf("set grace: %v", err)
+	}
+	start := time.Now()
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	return claimant, start
+}
+
+func chargeAt(
+	t *testing.T, s *store.Store, runID string, claimant store.ClaimIdentity, at time.Time,
+) store.CreditChargeResult {
+	t.Helper()
+	res, err := s.ChargeNodeCredits(context.Background(), runID, "build", claimant.TokenPrefix, at)
+	if err != nil {
+		t.Fatalf("charge at %s: %v", at, err)
+	}
+	return res
+}
+
+func TestChargeNodeCreditsCountsGraceFromTheReservationEnd(t *testing.T) {
+	reserved := time.Duration(store.CreditClaimFloorSeconds) * time.Second
+	for _, tc := range []struct {
+		name              string
+		grace             int64
+		survives, cancels time.Duration
+	}{
+		{
+			"grace zero stops at the first heartbeat past the reservation",
+			0, reserved, reserved + 5*time.Second,
+		},
+		{
+			"grace sixty stops a minute past the reservation",
+			60, reserved + 55*time.Second, reserved + 65*time.Second,
+		},
+		{
+			"grace one twenty stops two minutes past the reservation",
+			120, reserved + 115*time.Second, reserved + 125*time.Second,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := storetest.Open(t)
+			runID := fmt.Sprintf("run-grace-%d", tc.grace)
+			claimant, start := exhaustedReservedNode(t, s, runID, tc.grace)
+
+			res := chargeAt(t, s, runID, claimant, start.Add(tc.survives))
+			if res.BalanceMicro > 0 {
+				t.Fatalf("balance at %s = %d, want it spent", tc.survives, res.BalanceMicro)
+			}
+			if res.Cancel {
+				t.Fatalf("cancelled at %s, inside the %ds grace period past the reservation",
+					tc.survives, tc.grace)
+			}
+
+			rewindChargeWindow(t, s, runID, "build", start.Add(tc.survives))
+			if res := chargeAt(t, s, runID, claimant, start.Add(tc.cancels)); !res.Cancel {
+				t.Fatalf("still running at %s, past the reservation and a %ds grace period",
+					tc.cancels, tc.grace)
+			}
+		})
+	}
+}
+
+func TestChargeNodeCreditsGivesEachNodeItsOwnGraceClock(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	reserved := time.Duration(store.CreditClaimFloorSeconds) * time.Second
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	floor, err := s.CreditClaimFloorMicro(ctx)
+	if err != nil {
+		t.Fatalf("floor: %v", err)
+	}
+	// safety: two reservations' worth, so both nodes claim before the ledger
+	// empties and each carries a reservation of its own.
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	grace := int64(0)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
+		t.Fatalf("set grace: %v", err)
+	}
+
+	start := time.Now()
+	for _, runID := range []string{"run-early", "run-late"} {
+		readyNode(t, s, runID, "build")
+		if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-"+runID, time.Minute, nil); err != nil {
+			t.Fatalf("claim %s: %v", runID, err)
+		}
+	}
+	// safety: the early node is paid through an instant already past, so its
+	// runway is spent while the late node sits inside its own.
+	rewindChargeWindow(t, s, "run-early", "build", start.Add(-30*time.Second))
+
+	at := start.Add(reserved / 2)
+	if res := chargeAt(t, s, "run-early", claimant, at); !res.Cancel {
+		t.Fatal("the early node outran the runway it was paid for and was not cancelled")
+	}
+	if res := chargeAt(t, s, "run-late", claimant, at); res.Cancel {
+		t.Fatal("the late node was cancelled inside its own reservation, on the early node's clock")
+	}
+}
+
 func TestChargeNodeCreditsNeverCancelsInsideTheClaimReservation(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
