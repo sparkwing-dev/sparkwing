@@ -274,8 +274,11 @@ smaller of the class its cpu request falls in and the class the
 runner executing it reports for itself; a request above the
 largest class that no runner report brings inside it fails the
 node. The rate is what a four-core second costs, which is the
-four-core entry of the table under another name, so once a
-table exists it is set by writing the table. The grace period
+four-core entry of the table under another name, so a body may
+name one or the other, never both. The billing cpu ceiling
+holds every node's class under a cpu figure the operator sets,
+which is how a cluster that hands out smaller pods than its
+plans ask for bills what it gives; zero bills by the request. The grace period
 is how long a node keeps running after it has consumed the
 reservation its claim paid for with the balance at zero: a node
 inside that reservation is never cancelled, because the ledger
@@ -294,6 +297,7 @@ runs.read scope and setting needs admin.
 | Flag | Description |
 |---|---|
 | `--rate-table PAIRS` | Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667 |
+| `--billing-cpu-ceiling-cores N` | Hold every node's billed class under N cores; 0 bills by the node's own request |
 | `--rate-micro N` | Micro-credits one four-core cloud runner second costs, 1 to 1000000000000; refused once a rate table exists |
 | `--grace-seconds N` | Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat |
 | `--max-charge-seconds N` | The most seconds any one charge may bill, 6 to 86400 |

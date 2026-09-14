@@ -272,36 +272,20 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	return tx.Commit()
 }
 
-// safety: the class is resolved from the same cpu figure the scheduler sizes
-// the node by, and never exceeds the cpu the runner executing it reports, so a
-// ceiling that clamped the pod clamps the bill with it.
+// safety: the class is resolved from the cpu figure the scheduler sizes the
+// node by, held under the operator's billing ceiling. Nothing a claimant says
+// about itself reaches this, because a runner that priced its own work could
+// bill a 64-core node at the smallest class.
 func nodeCreditClassTx(
-	ctx context.Context, tx *storeTx, table CreditRateTable, runID, nodeID string,
+	ctx context.Context, tx *storeTx, table CreditRateTable, runID, nodeID string, ceiling int64,
 ) (CreditRate, error) {
 	charge, err := nodeChargeTx(ctx, tx, runID, nodeID)
 	if err != nil {
 		return CreditRate{}, err
 	}
 	cores := charge.Cores
-	if reported, ok := ClaimRunnerCoresFromContext(ctx); ok && reported > 0 && reported < cores {
-		cores = reported
+	if ceiling > 0 && float64(ceiling) < cores {
+		cores = float64(ceiling)
 	}
 	return table.ClassFor(cores)
-}
-
-type claimRunnerCoresKey struct{}
-
-// WithClaimRunnerCores records the cpu the runner taking this claim reports for
-// itself, which is the pod the customer actually gets. The ledger bills the
-// smaller of that class and the class the node's own cpu request resolves to,
-// so a ceiling that clamped the pod clamps the bill. A claim that reports
-// nothing is priced by the node's request alone.
-func WithClaimRunnerCores(ctx context.Context, cores float64) context.Context {
-	return context.WithValue(ctx, claimRunnerCoresKey{}, cores)
-}
-
-// ClaimRunnerCoresFromContext returns the cpu a claim reported for its runner.
-func ClaimRunnerCoresFromContext(ctx context.Context) (float64, bool) {
-	cores, ok := ctx.Value(claimRunnerCoresKey{}).(float64)
-	return cores, ok
 }

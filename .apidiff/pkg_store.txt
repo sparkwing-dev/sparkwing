@@ -92,7 +92,6 @@ type ClaimPlacement struct {
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
-func ClaimRunnerCoresFromContext(ctx context.Context) (float64, bool)
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -287,14 +286,17 @@ func (t CreditRateTable) Validate() error
 type CreditSettings struct {
 	RateMicroPerSecond int64
 
+	BillingCPUCeilingCores int64
+
 	GraceSeconds int64
 
 	MaxChargeSeconds int64
 }
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond *int64
-	GraceSeconds       *int64
-	MaxChargeSeconds   *int64
+	RateMicroPerSecond     *int64
+	BillingCPUCeilingCores *int64
+	GraceSeconds           *int64
+	MaxChargeSeconds       *int64
 }
 type CreditState struct {
 	GrantedMicro int64
@@ -305,12 +307,14 @@ type CreditState struct {
 	RateMicroPerSecond int64
 	RateTable          CreditRateTable
 
-	RateTableSet     bool
-	GraceSeconds     int64
-	MaxChargeSeconds int64
-	BurnWindow       time.Duration
-	BurnMicro        int64
-	ExhaustedAt      *time.Time
+	RateTableSet bool
+
+	BillingCPUCeilingCores int64
+	GraceSeconds           int64
+	MaxChargeSeconds       int64
+	BurnWindow             time.Duration
+	BurnMicro              int64
+	ExhaustedAt            *time.Time
 }
 const CreditsPerDollar = 100
 type CronDeclaration struct {
@@ -1138,6 +1142,7 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (s *Store) BillingCPUCeilingCores(ctx context.Context) (int64, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
@@ -1357,6 +1362,7 @@ func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.D
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunnerCapFor(ctx context.Context, principal string, now time.Time) (RunnerCap, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SetBillingCPUCeilingCores(ctx context.Context, cores int64) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
@@ -1536,7 +1542,6 @@ type WaiterResolution struct {
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
-func WithClaimRunnerCores(ctx context.Context, cores float64) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context

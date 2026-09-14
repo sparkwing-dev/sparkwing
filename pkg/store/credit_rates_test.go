@@ -408,9 +408,9 @@ func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
 	}
 }
 
-// The billed class never exceeds the pod the runner reports, so a ceiling that
-// clamped the pod clamps the bill with it.
-func TestClaimBillsTheSmallerOfTheRequestAndTheRunnersOwnCPU(t *testing.T) {
+// Nothing a claimant says about itself reaches the bill: a claim that asserts a
+// tiny runner still pays for the node its plan asked for.
+func TestAClaimantsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
@@ -418,29 +418,21 @@ func TestClaimBillsTheSmallerOfTheRequestAndTheRunnersOwnCPU(t *testing.T) {
 	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	readyNodeWithCores(t, s, "run-clamped", "build", 16)
-	readyNodeWithCores(t, s, "run-roomy", "build", 2)
+	readyNodeWithCores(t, s, "run-big", "build", 64)
 
-	clamped := store.WithClaimRunnerCores(ctx, 2)
-	if _, err := s.ClaimNamedNode(clamped, claimant, "run-clamped", "build", "pod-1", time.Minute); err != nil {
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-big", "build", "pod-1", time.Minute); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if charge := lastChargeFor(t, s, "run-clamped"); charge.CPUClassCores != 2 {
-		t.Fatalf("a 16-core node on a 2-core runner billed class %d, want 2", charge.CPUClassCores)
-	}
-
-	roomy := store.WithClaimRunnerCores(ctx, 64)
-	if _, err := s.ClaimNamedNode(roomy, claimant, "run-roomy", "build", "pod-2", time.Minute); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	if charge := lastChargeFor(t, s, "run-roomy"); charge.CPUClassCores != 2 {
-		t.Fatalf("a 2-core node on a 64-core runner billed class %d, want 2", charge.CPUClassCores)
+	charge := lastChargeFor(t, s, "run-big")
+	if charge.CPUClassCores != 64 || charge.RateMicroPerSecond != 270_000 {
+		t.Fatalf("a 64-core node billed class %d at %d, want the 64-core class",
+			charge.CPUClassCores, charge.RateMicroPerSecond)
 	}
 }
 
-// A request the table cannot price is still claimable when the runner reports
-// a smaller pod, because that pod is what the customer gets.
-func TestARunnerReportSmallerThanAnUnpricedRequestPricesTheClaim(t *testing.T) {
+// The operator's ceiling is the only thing that lowers a class, so a cluster
+// that gives every node one core bills every node at the smallest class.
+func TestTheBillingCPUCeilingHoldsEveryClassDown(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
@@ -448,14 +440,33 @@ func TestARunnerReportSmallerThanAnUnpricedRequestPricesTheClaim(t *testing.T) {
 	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	readyNodeWithCores(t, s, "run-clamped-huge", "build", 96)
+	if err := s.SetBillingCPUCeilingCores(ctx, 1); err != nil {
+		t.Fatalf("set the ceiling: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-capped", "build", 64)
+	readyNodeWithCores(t, s, "run-huge", "build", 96)
 
-	clamped := store.WithClaimRunnerCores(ctx, 8)
-	if _, err := s.ClaimNamedNode(clamped, claimant, "run-clamped-huge", "build", "pod-1", time.Minute); err != nil {
+	for _, runID := range []string{"run-capped", "run-huge"} {
+		if _, err := s.ClaimNamedNode(ctx, claimant, runID, "build", "pod-"+runID, time.Minute); err != nil {
+			t.Fatalf("claim %s: %v", runID, err)
+		}
+		if charge := lastChargeFor(t, s, runID); charge.CPUClassCores != 2 {
+			t.Fatalf("%s billed class %d under a one-core ceiling, want 2", runID, charge.CPUClassCores)
+		}
+	}
+
+	if err := s.SetBillingCPUCeilingCores(ctx, 0); err != nil {
+		t.Fatalf("lift the ceiling: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-uncapped", "build", 16)
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-uncapped", "build", "pod-2", time.Minute); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if charge := lastChargeFor(t, s, "run-clamped-huge"); charge.CPUClassCores != 8 {
-		t.Fatalf("billed class %d, want the 8-core pod the runner reported", charge.CPUClassCores)
+	if charge := lastChargeFor(t, s, "run-uncapped"); charge.CPUClassCores != 16 {
+		t.Fatalf("with no ceiling a 16-core node billed class %d", charge.CPUClassCores)
+	}
+	if err := s.SetBillingCPUCeilingCores(ctx, -1); err == nil {
+		t.Fatal("a negative ceiling was accepted")
 	}
 }
 

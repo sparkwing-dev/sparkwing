@@ -1033,12 +1033,6 @@ type Headroom struct {
 type ClaimCapacity struct {
 	MaxConcurrent int `json:"max_concurrent"`
 	ActiveClaims  int `json:"active_claims"`
-	// Cores is the cpu this runner is working with, which is the pod a cloud
-	// customer actually gets. The ledger prices a metered node at the smaller
-	// of this class and the class the node's own cpu request resolves to, so a
-	// ceiling that clamped the pod clamps the bill. Zero reports nothing and
-	// prices the node by its request alone.
-	Cores float64 `json:"cores,omitempty"`
 }
 
 // ExecutorClaim describes an attested local reservation. Prepare does not
@@ -1253,23 +1247,11 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 // [ErrControllerLacksRoute], which a dispatcher answers by running the node the
 // way it did before the fence existed.
 func (c *Client) ClaimNodeByID(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) (*store.Node, error) {
-	return c.ClaimNodeByIDWithCapacity(ctx, runID, nodeID, holderID, lease, nil)
-}
-
-// ClaimNodeByIDWithCapacity claims as [Client.ClaimNodeByID] does and tells the
-// controller what the executing runner is working with, so a metered node is
-// billed at the pod it actually gets rather than at the cpu its plan asked for.
-func (c *Client) ClaimNodeByIDWithCapacity(
-	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, capacity *ClaimCapacity,
-) (*store.Node, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/claim",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		body["lease_secs"] = max(int(lease.Seconds()), 1)
-	}
-	if capacity != nil {
-		body["capacity"] = capacity
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {

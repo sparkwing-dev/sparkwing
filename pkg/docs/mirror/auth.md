@@ -63,22 +63,21 @@ costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
 hour, so ten dollars buys just under fourteen hours.
 
 A second is priced by the node's cpu class. The rate table prices one class per
-whole-core size, and a node is billed at the smaller of two classes: the one
-its resolved cpu request falls in, and the one the cpu the executing runner
-reports for itself falls in, so a ceiling that clamped the pod clamps the bill.
-A Kubernetes fallback Job reports the cpu its pod was given and a pooled runner
-reports the cpu limit the kernel caps it at; a runner that reports nothing is
-priced by the request alone. A request above the largest class that no runner
-report brings inside it fails the node with `unpriced_cpu_class` and a
-`credits_unpriced_class` event naming both sizes, rather than leaving a node no
-claim can pay for.
+whole-core size, and a node is billed at the class its resolved cpu request
+falls in, held under `billing_cpu_ceiling_cores` when the operator set one: a
+cluster that hands out smaller pods than its plans ask for sets the ceiling and
+bills what it gives. Nothing a claimant says about itself reaches the price,
+because a runner that priced its own work would bill a 64-core node at the
+smallest class. A request above the largest class the table prices fails the
+node with `unpriced_cpu_class` and a `credits_unpriced_class` event naming both
+sizes, rather than leaving a node no claim can pay for.
 
 An installation that never set a table bills the default ladder, which carries
 GitHub Actions' Linux x64 rates to the second: 2-core 10,000 micro-credits,
 4-core 20,000, 8-core 36,667, 16-core 70,000, 32-core 136,667, 64-core 270,000.
 `credit_rate_micro_per_second` is the four-core entry of that ladder under
 another name. Once a table exists that setting is derived: a `PUT` that names
-it alone answers `400` and says to write `rate_table` instead.
+it, alone or beside `rate_table`, answers `400` and says to write the table.
 `sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
 the ladder and needs `admin`. A stored table this build cannot read is an error
 on every credit read rather than a silent return to the flat rate.

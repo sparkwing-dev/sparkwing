@@ -560,13 +560,14 @@ func creditSettings(t *testing.T, f creditsFixture, method string, body any) (in
 }
 
 type creditSettingsView struct {
-	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
-	RateTable          []creditRateView `json:"rate_table"`
-	RateTableSet       bool             `json:"rate_table_set"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+	RateMicroPerSecond     int64            `json:"rate_micro_per_second"`
+	RateTable              []creditRateView `json:"rate_table"`
+	RateTableSet           bool             `json:"rate_table_set"`
+	BillingCPUCeilingCores int64            `json:"billing_cpu_ceiling_cores"`
+	GraceSeconds           int64            `json:"grace_seconds"`
+	MaxChargeSeconds       int64            `json:"max_charge_seconds"`
+	MicroPerCredit         int64            `json:"micro_per_credit"`
+	CreditsPerDollar       int64            `json:"credits_per_dollar"`
 }
 
 type creditRateView struct {
@@ -883,12 +884,13 @@ func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
 		t.Fatalf("the refused write moved the settings: %+v", view)
 	}
 
-	// safety: a body that rewrites the whole table may carry the scalar with it.
+	// safety: naming both would let the scalar override the table's own
+	// four-core entry, so the caller is told to name one.
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
 		"rate_micro_per_second": 21_000,
 		"rate_table":            map[string]int64{"2": 10_000, "4": 20_000},
-	}); status != http.StatusOK {
-		t.Fatalf("PUT both = %d, want 200", status)
+	}); status != http.StatusBadRequest {
+		t.Fatalf("PUT both = %d, want 400", status)
 	}
 }
 
@@ -936,9 +938,9 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	}
 }
 
-// The ledger prices a node at the pod the runner reports when that is smaller
-// than the node's own request.
-func TestCredits_ClaimReportsTheRunnersCPUAndIsBilledForIt(t *testing.T) {
+// A claim that asserts its own cpu changes nothing: only the operator's ceiling
+// lowers a class.
+func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -963,11 +965,19 @@ func TestCredits_ClaimReportsTheRunnersCPUAndIsBilledForIt(t *testing.T) {
 		t.Fatalf("mark ready: %v", err)
 	}
 
-	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+	// safety: the claim surface carries no cpu figure at all, so a body that
+	// asserts one is refused rather than quietly ignored.
+	status, _ := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
 		map[string]any{
 			"holder_id": "pod-1", "lease_secs": 60,
-			"capacity": map[string]any{"max_concurrent": 1, "active_claims": 0, "cores": 2},
+			"capacity": map[string]any{"max_concurrent": 1, "active_claims": 0, "cores": 0.01},
 		})
+	if status != http.StatusBadRequest {
+		t.Fatalf("a claim asserting its own cpu = %d, want 400", status)
+	}
+
+	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
 	if status != http.StatusOK {
 		t.Fatalf("claim = %d: %s", status, body)
 	}
@@ -975,7 +985,7 @@ func TestCredits_ClaimReportsTheRunnersCPUAndIsBilledForIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list charges: %v", err)
 	}
-	if len(charges) != 1 || charges[0].CPUClassCores != 2 || charges[0].RateMicroPerSecond != 10_000 {
-		t.Fatalf("reservation = %+v, want the 2-core class the runner reported", charges)
+	if len(charges) != 1 || charges[0].CPUClassCores != 16 || charges[0].RateMicroPerSecond != 70_000 {
+		t.Fatalf("reservation = %+v, want the 16-core class the plan asked for", charges)
 	}
 }

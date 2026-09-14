@@ -120,18 +120,18 @@ unlock.
   `credits history` print both. `sparkwing cluster credits settings
   --rate-table 2=10000,4=20000,8=36667` writes the ladder, and the route also
   takes it as a list of `{cores, micro_per_second}` or an object keyed by
-  cores. A node is billed at the smaller of the class its cpu request falls in
-  and the class the runner executing it reports through the claim's new
-  `capacity.cores`, so a `--k8s-cpu-ceiling` that clamped the pod clamps the
-  bill; the Kubernetes fallback reports the clamped figure and a pooled runner
-  reports the cpu limit its cgroup caps it at. A request no runner report
-  brings inside the table fails the node with `unpriced_cpu_class` and a
-  `credits_unpriced_class` event rather than leaving it claimable forever. A
+  cores. A node is billed at the class its cpu request falls in, held under the
+  new `billing_cpu_ceiling_cores` setting (`--billing-cpu-ceiling-cores`, zero
+  by default) so a cluster handing out smaller pods than its plans ask for
+  bills what it gives; nothing a claimant reports about itself changes a class.
+  A request above the largest class fails the node with `unpriced_cpu_class`
+  and a `credits_unpriced_class` event rather than leaving it claimable
+  forever. A
   rate above a million credits a second is refused, because it overflows the
   reservation a claim multiplies out. An installation that never sets a table
   bills the default ladder, and that setting is the four-core entry of it under
-  another name: once a table exists, a `PUT` naming the scalar alone answers
-  `400` and says to write `rate_table`. A stored table this build cannot read
+  another name: once a table exists, a `PUT` naming the scalar, alone or beside
+  `rate_table`, answers `400` and says to write the table. A stored table this build cannot read
   is an error rather than a silent fallback.
 
 ### Changed

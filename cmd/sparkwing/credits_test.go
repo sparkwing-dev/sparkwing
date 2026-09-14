@@ -236,6 +236,7 @@ func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
 	fs.Int64("grace-seconds", 0, "")
 	fs.Int64("max-charge-seconds", 0, "")
 	fs.String("rate-table", "", "")
+	fs.Int64("billing-cpu-ceiling-cores", 0, "")
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("parse %v: %v", args, err)
 	}
@@ -245,7 +246,7 @@ func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
 func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 	t.Parallel()
 	fs := creditSettingsFlagSet(t, []string{"--grace-seconds", "0"})
-	body, err := creditSettingsBody(fs, 0, 0, 0, "")
+	body, err := creditSettingsBody(fs, 0, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("body: %v", err)
 	}
@@ -257,7 +258,7 @@ func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 	}
 
 	fs = creditSettingsFlagSet(t, []string{"--rate-micro", "30000", "--max-charge-seconds", "45"})
-	body, err = creditSettingsBody(fs, 30_000, 0, 45, "")
+	body, err = creditSettingsBody(fs, 30_000, 0, 45, "", 0)
 	if err != nil {
 		t.Fatalf("body: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 	}
 
 	fs = creditSettingsFlagSet(t, nil)
-	body, err = creditSettingsBody(fs, 0, 0, 0, "")
+	body, err = creditSettingsBody(fs, 0, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("empty body: %v", err)
 	}
@@ -424,7 +425,7 @@ func TestCreditSettingsBodyCarriesTheRateTableAsPairs(t *testing.T) {
 	t.Parallel()
 	fs := creditSettingsFlagSet(t, []string{"--rate-table", "2=10000, 8=36667"})
 	table, _ := fs.GetString("rate-table")
-	body, err := creditSettingsBody(fs, 0, 0, 0, table)
+	body, err := creditSettingsBody(fs, 0, 0, 0, table, 0)
 	if err != nil {
 		t.Fatalf("body: %v", err)
 	}
@@ -500,7 +501,7 @@ func TestCreditSettingsBodyRefusesARateTableThatPricesAClassTwice(t *testing.T) 
 	t.Parallel()
 	fs := creditSettingsFlagSet(t, []string{"--rate-table", "2=10000,2=20000"})
 	table, _ := fs.GetString("rate-table")
-	if _, err := creditSettingsBody(fs, 0, 0, 0, table); err == nil {
+	if _, err := creditSettingsBody(fs, 0, 0, 0, table, 0); err == nil {
 		t.Fatal("--rate-table accepted the same class twice")
 	}
 }

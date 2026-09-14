@@ -43,20 +43,21 @@ func runCredits(args []string) error {
 }
 
 type creditStateResp struct {
-	BalanceMicro       int64            `json:"balance_micro"`
-	GrantedMicro       int64            `json:"granted_micro"`
-	ReversedMicro      int64            `json:"reversed_micro"`
-	ChargedMicro       int64            `json:"charged_micro"`
-	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
-	RateTable          []creditRateResp `json:"rate_table"`
-	RateTableSet       bool             `json:"rate_table_set"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	BurnWindowSeconds  int64            `json:"burn_window_seconds"`
-	BurnMicro          int64            `json:"burn_micro"`
-	ExhaustedAt        *int64           `json:"exhausted_at,omitempty"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+	BalanceMicro           int64            `json:"balance_micro"`
+	GrantedMicro           int64            `json:"granted_micro"`
+	ReversedMicro          int64            `json:"reversed_micro"`
+	ChargedMicro           int64            `json:"charged_micro"`
+	RateMicroPerSecond     int64            `json:"rate_micro_per_second"`
+	RateTable              []creditRateResp `json:"rate_table"`
+	RateTableSet           bool             `json:"rate_table_set"`
+	BillingCPUCeilingCores int64            `json:"billing_cpu_ceiling_cores"`
+	GraceSeconds           int64            `json:"grace_seconds"`
+	MaxChargeSeconds       int64            `json:"max_charge_seconds"`
+	BurnWindowSeconds      int64            `json:"burn_window_seconds"`
+	BurnMicro              int64            `json:"burn_micro"`
+	ExhaustedAt            *int64           `json:"exhausted_at,omitempty"`
+	MicroPerCredit         int64            `json:"micro_per_credit"`
+	CreditsPerDollar       int64            `json:"credits_per_dollar"`
 }
 
 func runCreditsShow(args []string) error {
@@ -106,6 +107,7 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 			entry.Cores, creditsPerUnit(entry.MicroPerSecond, state.MicroPerCredit), entry.MicroPerSecond)
 	}
 	fmt.Fprint(tw, rateTableOrigin(state.RateTableSet))
+	fmt.Fprint(tw, billingCeilingLine(state.BillingCPUCeilingCores))
 	fmt.Fprintf(tw, "BURN (%s)\t%s credits\n",
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
 	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", state.GraceSeconds)
@@ -124,6 +126,15 @@ func burnWindowLabel(seconds int64) string {
 	label := time.Duration(seconds * int64(time.Second)).String()
 	label = strings.TrimSuffix(label, "0s")
 	return strings.TrimSuffix(label, "0m")
+}
+
+// safety: a ceiling silently repricing every node is worth a line of its own,
+// because the table above it would otherwise look like the whole answer.
+func billingCeilingLine(cores int64) string {
+	if cores <= 0 {
+		return "CPU CEILING\tnone; each node bills by its own cpu request\n"
+	}
+	return fmt.Sprintf("CPU CEILING\t%d cores; no node bills above that class\n", cores)
 }
 
 // safety: the flat ladder an unset table prints reads like a priced one, so
@@ -149,13 +160,14 @@ func creditsPerUnit(micro, perCredit int64) string {
 }
 
 type creditSettingsResp struct {
-	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
-	RateTable          []creditRateResp `json:"rate_table"`
-	RateTableSet       bool             `json:"rate_table_set"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+	RateMicroPerSecond     int64            `json:"rate_micro_per_second"`
+	RateTable              []creditRateResp `json:"rate_table"`
+	RateTableSet           bool             `json:"rate_table_set"`
+	BillingCPUCeilingCores int64            `json:"billing_cpu_ceiling_cores"`
+	GraceSeconds           int64            `json:"grace_seconds"`
+	MaxChargeSeconds       int64            `json:"max_charge_seconds"`
+	MicroPerCredit         int64            `json:"micro_per_credit"`
+	CreditsPerDollar       int64            `json:"credits_per_dollar"`
 }
 
 type creditRateResp struct {
@@ -171,6 +183,8 @@ func runCreditsSettings(args []string) error {
 	maxCharge := fs.Int64("max-charge-seconds", 0, "the most seconds any one charge may bill")
 	rateTable := fs.String("rate-table", "",
 		"price every cpu class, as CORES=MICRO pairs, for example 2=10000,4=20000,8=36667")
+	cpuCeiling := fs.Int64("billing-cpu-ceiling-cores", 0,
+		"hold every node's billed class under this many cores; 0 bills by the node's own request")
 	outputFormat := fs.StringP("output", "o", "",
 		"output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	if err := parseAndCheck(cmdCreditsSettings, fs, args); err != nil {
@@ -183,7 +197,7 @@ func runCreditsSettings(args []string) error {
 	if err != nil {
 		return err
 	}
-	body, err := creditSettingsBody(fs, *rate, *grace, *maxCharge, *rateTable)
+	body, err := creditSettingsBody(fs, *rate, *grace, *maxCharge, *rateTable, *cpuCeiling)
 	if err != nil {
 		return err
 	}
@@ -217,7 +231,7 @@ func runCreditsSettings(args []string) error {
 // given and reports the refusal; only the ladder's own spelling is judged here,
 // because the wire carries it as a map.
 func creditSettingsBody(
-	fs *flag.FlagSet, rate, grace, maxCharge int64, rateTable string,
+	fs *flag.FlagSet, rate, grace, maxCharge int64, rateTable string, cpuCeiling int64,
 ) (map[string]any, error) {
 	body := map[string]any{}
 	if fs.Changed("rate-table") {
@@ -229,6 +243,9 @@ func creditSettingsBody(
 	}
 	if fs.Changed("rate-micro") {
 		body["rate_micro_per_second"] = rate
+	}
+	if fs.Changed("billing-cpu-ceiling-cores") {
+		body["billing_cpu_ceiling_cores"] = cpuCeiling
 	}
 	if fs.Changed("grace-seconds") {
 		body["grace_seconds"] = grace
@@ -284,6 +301,7 @@ func renderCreditSettings(w io.Writer, view creditSettingsResp) error {
 			entry.Cores, creditsPerUnit(entry.MicroPerSecond, view.MicroPerCredit), entry.MicroPerSecond)
 	}
 	fmt.Fprint(tw, rateTableOrigin(view.RateTableSet))
+	fmt.Fprint(tw, billingCeilingLine(view.BillingCPUCeilingCores))
 	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", view.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", view.MaxChargeSeconds)
 	return tw.Flush()
@@ -300,7 +318,8 @@ func writeCreditSettingsPlain(w io.Writer, view creditSettingsResp) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(w, "rate_table_set\t%t\n", view.RateTableSet)
+	_, err := fmt.Fprintf(w, "rate_table_set\t%t\nbilling_cpu_ceiling_cores\t%d\n",
+		view.RateTableSet, view.BillingCPUCeilingCores)
 	return err
 }
 

@@ -2251,8 +2251,11 @@ smaller of the class its cpu request falls in and the class the
 runner executing it reports for itself; a request above the
 largest class that no runner report brings inside it fails the
 node. The rate is what a four-core second costs, which is the
-four-core entry of the table under another name, so once a
-table exists it is set by writing the table. The grace period
+four-core entry of the table under another name, so a body may
+name one or the other, never both. The billing cpu ceiling
+holds every node's class under a cpu figure the operator sets,
+which is how a cluster that hands out smaller pods than its
+plans ask for bills what it gives; zero bills by the request. The grace period
 is how long a node keeps running after it has consumed the
 reservation its claim paid for with the balance at zero: a node
 inside that reservation is never cancelled, because the ledger
@@ -2267,6 +2270,7 @@ set a table bills the default ladder. Reading needs the
 runs.read scope and setting needs admin.`,
 	Flags: []FlagSpec{
 		{Name: "rate-table", Argument: "PAIRS", Desc: "Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667", Group: "Input"},
+		{Name: "billing-cpu-ceiling-cores", Argument: "N", Desc: "Hold every node's billed class under N cores; 0 bills by the node's own request", Group: "Input"},
 		{Name: "rate-micro", Argument: "N", Desc: fmt.Sprintf(
 			"Micro-credits one four-core cloud runner second costs, 1 to %d; refused once a rate table exists",
 			int64(store.MaxCreditRateMicro)), Group: "Input"},

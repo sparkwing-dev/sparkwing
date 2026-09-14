@@ -117,7 +117,7 @@ var _ runner.Runner = (*Runner)(nil)
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	res := r.resolveResources(ctx, req)
-	fence, claimed := r.claimNode(ctx, req, name, res)
+	fence, claimed := r.claimNode(ctx, req, name)
 	if claimed {
 		// safety: the dispatcher reached here holding the run's trigger claim,
 		// and the controller refuses a request that carries both identities.
@@ -233,14 +233,9 @@ const jobDeadlineSlack = 10 * time.Minute
 // safety: a controller that does not carry the targeted-claim route, or a node
 // some other holder already took, leaves the Job running exactly as it did
 // before the fence existed rather than failing the node here.
-func (r *Runner) claimNode(
-	ctx context.Context, req runner.Request, jobName string, res capacity.Resolution,
-) (store.NodeClaimFence, bool) {
+func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName string) (store.NodeClaimFence, bool) {
 	holderID := "k8s-job:" + jobName
-	// safety: the ceiling clamps the pod this Job starts, so the claim reports
-	// the clamped figure and a metered node is billed at the pod it gets.
-	n, err := r.ctrl.ClaimNodeByIDWithCapacity(ctx, req.RunID, req.NodeID, holderID, ClaimLease,
-		&client.ClaimCapacity{Cores: clampedCores(res, r.cfg.CPUCeiling)})
+	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease)
 	if errors.Is(err, client.ErrControllerLacksRoute) {
 		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
 			"run_id", req.RunID, "node_id", req.NodeID)
@@ -457,15 +452,6 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 		_ = r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "resource_clamped", []byte(w))
 	}
 	return res
-}
-
-// safety: the ceiling is what the pod is actually given, so a request above it
-// is reported at the ceiling rather than at the figure the plan asked for.
-func clampedCores(res capacity.Resolution, ceiling float64) float64 {
-	if ceiling > 0 && res.Cores > ceiling {
-		return ceiling
-	}
-	return res.Cores
 }
 
 func nodePin(node *sparkwing.JobNode) *capacity.Pin {
