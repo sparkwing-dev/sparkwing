@@ -282,11 +282,12 @@ repository is not mutated.
 The runner sees a clean detached checkout at the synthetic SHA rather than the
 laptop's staged-versus-unstaged split.
 Capture also records the commit HEAD shares with the origin default branch. The
-runner fetches that commit through the same cache and names it with the
-remote-tracking ref it had locally, so a step scoped by `git merge-base
-origin/main HEAD` reads the range the laptop would. A checkout with no origin
-remote records no baseline, and a step that needs one reports the ref it cannot
-resolve.
+runner fetches that commit through the same cache, names it with the
+remote-tracking ref it had locally, and grafts the parentless snapshot commit
+onto it with a `refs/replace/` entry, so a step scoped by `git merge-base
+origin/main HEAD` reads the range the laptop would. `git rev-parse HEAD` still
+answers with the snapshot SHA. A checkout with no origin remote records no
+baseline, and a step that needs one reports the ref it cannot resolve.
 The cache moves each accepted snapshot from the transient seed namespace into
 `refs/sparkwing-workspace/*` and retains at most 128 distinct workspace refs per
 repository. Re-seeding the same snapshot refreshes one ref. A new snapshot is
