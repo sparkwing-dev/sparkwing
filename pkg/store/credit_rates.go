@@ -263,7 +263,7 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	}
 	// safety: the scalar is the four-core price, so a table that prices no
 	// four-core class leaves it where it stands rather than restating a
-	// neighbouring class under a name that does not mean that class.
+	// neighboring class under a name that does not mean that class.
 	if base, ok := sorted.baseClassRate(); ok {
 		if err := setCreditRateMicroTx(ctx, tx, base); err != nil {
 			return err
@@ -282,19 +282,11 @@ func nodeCreditClassTx(
 	if err != nil {
 		return CreditRate{}, err
 	}
-	class, classErr := table.ClassFor(charge.Cores)
-	reported, ok := ClaimRunnerCoresFromContext(ctx)
-	if !ok || reported <= 0 {
-		return class, classErr
+	cores := charge.Cores
+	if reported, ok := ClaimRunnerCoresFromContext(ctx); ok && reported > 0 && reported < cores {
+		cores = reported
 	}
-	runnerClass, runnerErr := table.ClassFor(reported)
-	if runnerErr != nil {
-		return class, classErr
-	}
-	if classErr != nil || runnerClass.Cores < class.Cores {
-		return runnerClass, nil
-	}
-	return class, classErr
+	return table.ClassFor(cores)
 }
 
 type claimRunnerCoresKey struct{}
