@@ -112,6 +112,13 @@ func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snap
 	if !snapshot {
 		return fmt.Errorf("working-tree baseline: %s is not a working-tree snapshot commit", snapshotSHA)
 	}
+	servable, err := originServesMoreThanTheSnapshot(ctx, checkoutDir, gcURL, token, snapshotSHA)
+	if err != nil {
+		return err
+	}
+	if !servable {
+		return ErrBaselineUnservable
+	}
 	run := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", checkoutDir}, args...)...)
 		cmd.Env = gitHTTPEnv(gcURL, token)
@@ -119,13 +126,6 @@ func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snap
 			return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), runErr, strings.TrimSpace(string(out)))
 		}
 		return nil
-	}
-	servable, err := originServesMoreThanTheSnapshot(ctx, checkoutDir, gcURL, token, snapshotSHA)
-	if err != nil {
-		return err
-	}
-	if !servable {
-		return ErrBaselineUnservable
 	}
 	if err := run("fetch", "--depth", "1", "--end-of-options", "origin", resolved.SHA); err != nil {
 		return err
