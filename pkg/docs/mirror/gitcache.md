@@ -128,39 +128,46 @@ supported through `agent.yaml` `gitcache` and `cache_token`.
 
 ## On-Demand Fetch
 
-A clone that asks for a commit the mirror does not have makes the cache
-fetch origin before `git upload-pack` answers, and only then refuses. A
-trigger fires seconds after a push, so this is what lets the run build
-the commit that triggered it instead of being told the ref is not ours.
+Every clone refreshes the mirror before the cache advertises its refs,
+so a run triggered seconds after a push checks out that push instead of
+being told the ref is not ours. This is the only path that reaches
+origin for a clone: `git fetch <sha>` reads `info/refs` first, and by
+the time `git upload-pack` answers, the commit is there.
 
-The fetch is deduplicated per repository: a burst of triggers on one
-push costs origin one fetch, because every request that waited for the
-repository lock finds either the commit or a fetch that completed after
-it arrived. A commit origin does not have costs one fetch and then the
-same `not our ref` refusal git has always sent.
+The refresh runs only for `git-upload-pack`, and only when the mirror's
+last successful fetch is older than `FETCH_FRESH_WINDOW` (default 10
+seconds). That window is the bound on what a caller can spend: **any
+token that can reach these routes can force at most one origin fetch per
+repository per ten seconds**, however many clones it starts. A push
+advertisement (`git-receive-pack`) refreshes nothing, because the cache
+refuses the push anyway.
 
-A clone that names a branch rather than a commit is answered from the
-mirror's refs and reports no error, so `info/refs` refreshes the mirror
-first, under the same `FETCH_FRESH_WINDOW` throttle every other read
-handler uses.
+A commit origin does not have on any branch costs one fetch and then the
+same `not our ref` refusal git has always sent. Known limit: a want for a
+fork or pull-request head that origin keeps on a non-head ref is in that
+class, since the mirror fetches `refs/heads/*` only. Such a checkout
+pays a fetch and is still refused; seed it with `POST /sync/seed`.
 
-The log line `on-demand fetch: <hash> took <duration>` and the
-`sparkwing.gitcache.mirror_fetches` counter (labelled `reason` =
-`on_demand` or `keep_warm`, and `failed`) report these fetches;
-`sparkwing.gitcache.fetch_duration` carries the same labels.
+A failed fetch is not fatal to a clone: the cache logs it and serves the
+refs it has, so a broken SSH key degrades freshness rather than stopping
+every build.
+
+`sparkwing.gitcache.fetch_duration` counts and times every mirror fetch,
+labeled `reason` (`on_demand` or `keep_warm`) and `failed`.
 
 ## Keep-Warm Pass
 
-Every `FETCH_INTERVAL` the cache refreshes the mirrors a request touched
-in the last hour, and leaves every other mirror alone. A repository
-nobody is building costs origin nothing, which matters on a hosted cache
-holding many customers' repositories; an active one stays warm, so its
-next clone skips the fetch and ancestor negotiation for incremental
-uploads keeps succeeding.
+`FETCH_INTERVAL` is off by default (`0`). Set it, and the cache refreshes
+the mirrors a request touched in the last hour on that cadence, leaving
+every other mirror alone: a repository nobody is building costs origin
+nothing, which is what matters on a hosted cache holding many customers'
+repositories. It buys an active repository a warm mirror, so a clone
+skips its own fetch and ancestor negotiation for incremental uploads
+succeeds more often.
 
-Setting `FETCH_INTERVAL` to `0` turns the pass off entirely. Correctness
-does not depend on it: every mirror fetches when a request needs a
-commit it lacks.
+Correctness never depends on it. A fetch that fails backs off from the
+interval and doubles to ten minutes, so a repository whose credentials
+broke does not re-dial origin every cycle.
 
 ## Egress Guards
 
@@ -175,12 +182,12 @@ avoided egress cost.
 so a webhook burst multiplied GitHub traffic without making anything
 fresher.
 
-Now a successful fetch (from the keep-warm pass, from a request, or from
-`/git/refresh`) marks the repo fresh for `FETCH_FRESH_WINDOW`
-(default 15s), and requests inside that window serve straight from the
-mirror. The throttle does not apply to a clone that names a commit the
-mirror lacks: that fetch answers a question the window cannot, so it runs
-whatever the window says.
+Now a successful fetch (from the keep-warm pass, from a request, from a
+clone reading `info/refs`, or from `/git/refresh`) marks the repo fresh
+for `FETCH_FRESH_WINDOW` (default 10s), and requests inside that window
+serve straight from the mirror. The same window bounds the clone path, so
+ten seconds is also the worst-case staleness a checkout can see and the
+most origin traffic one repository can be made to spend.
 
 `POST /git/refresh` **is not throttled**. It exists to close the
 `git push && sparkwing pipeline trigger` race, so it always performs a
@@ -218,7 +225,7 @@ Health problems to expect from `GET /health`:
 | Problem text | What it means |
 |--------------|---------------|
 | `repo <hash>: recovery reclone ran N times in 24h -- persistent fetch failure; ...` | The mirror keeps failing to fetch and reclones are papering over it. Read the `recovery reclone:` log line for the git error, fix the cause (often a conflicting ref -- `git remote prune origin`, or delete the conflicting ref inside `/data/repos/<hash>.git`), then let the background loop resume. |
-| `repo <hash>: <friendly fetch error>` | The most recent mirror fetch failed (SSH, DNS, timeout, fork exhaustion). |
+| `repo <hash>: <friendly fetch error>` | The last fetch of this mirror failed (SSH, DNS, timeout, fork exhaustion), so clones are being served older refs. |
 | `repo <hash>: clone failed: ...` / `auto-clone failed: ...` | A mirror that was missing could not be cloned. The repo is on the clone cooldown until it expires or the repo is re-registered; seeding via `POST /sync/seed` also works when upstream is unreachable. |
 
 An operator who wants the old per-request behavior back can set
@@ -506,8 +513,8 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `SPARKWING_API_TOKEN` | Bearer token for every route outside `/health`, `/metrics`, `/stats`, and `/proxy/`. Required unless auth is disabled |
 | `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | Start without a token, leaving those routes open |
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
-| `FETCH_INTERVAL` | How often the keep-warm pass refreshes mirrors a request touched in the last hour (default: `30s`; `0` turns the pass off) |
-| `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |
+| `FETCH_INTERVAL` | Cadence of the keep-warm pass over mirrors a request touched in the last hour (default: `0`, the pass is off) |
+| `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
 | `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
 | `DATA_DIR` | Override data root (default: `/data`) |
