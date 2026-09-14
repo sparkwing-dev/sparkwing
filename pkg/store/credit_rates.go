@@ -81,7 +81,7 @@ func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 // returns an [UnpricedCPUClassError] when the request is above every class.
 func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error) {
 	if len(t) == 0 {
-		return CreditRate{}, errors.New("credits: the rate table prices no cpu class")
+		return CreditRate{}, fmt.Errorf("%w: the rate table prices no cpu class", ErrInvalidCreditSetting)
 	}
 	want := int64(1)
 	if cores > 1 {
@@ -130,28 +130,27 @@ func (t CreditRateTable) baseClassRate() (int64, bool) {
 }
 
 // Validate reports whether every entry prices a whole number of cores above
-// zero at a positive rate and no class appears twice.
+// zero, at a rate inside the bound the single rate setting is held to, with no
+// class priced twice.
 func (t CreditRateTable) Validate() error {
 	if len(t) == 0 {
-		return errors.New("credits: the rate table must price at least one cpu class")
+		return fmt.Errorf("%w: the rate table must price at least one cpu class", ErrInvalidCreditSetting)
 	}
 	if len(t) > MaxCreditRateTableEntries {
-		return fmt.Errorf("credits: the rate table prices at most %d cpu classes", MaxCreditRateTableEntries)
+		return fmt.Errorf("%w: the rate table prices at most %d cpu classes",
+			ErrInvalidCreditSetting, MaxCreditRateTableEntries)
 	}
 	seen := make(map[int64]bool, len(t))
 	for _, entry := range t {
 		if entry.Cores <= 0 {
-			return fmt.Errorf("credits: cpu class %d must be a positive number of cores", entry.Cores)
+			return fmt.Errorf("%w: cpu class %d must be a positive number of cores",
+				ErrInvalidCreditSetting, entry.Cores)
 		}
-		if entry.MicroPerSecond <= 0 {
-			return fmt.Errorf("credits: the rate for the %d-core class must be positive", entry.Cores)
-		}
-		if entry.MicroPerSecond > MaxCreditRateMicro {
-			return fmt.Errorf("credits: the rate for the %d-core class may not exceed %d micro-credits a second",
-				entry.Cores, MaxCreditRateMicro)
+		if err := validCreditRate(entry.MicroPerSecond); err != nil {
+			return fmt.Errorf("the %d-core class: %w", entry.Cores, err)
 		}
 		if seen[entry.Cores] {
-			return fmt.Errorf("credits: the %d-core class is priced twice", entry.Cores)
+			return fmt.Errorf("%w: the %d-core class is priced twice", ErrInvalidCreditSetting, entry.Cores)
 		}
 		seen[entry.Cores] = true
 	}

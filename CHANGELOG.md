@@ -22,6 +22,23 @@ unlock.
 
 ### Added
 
+- **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
+  `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
+  rate, the grace period a node gets past its claim reservation, and the cap on
+  what any one charge may bill, which until now moved only through a code
+  change. An omitted field keeps its setting, so changing one value is a
+  one-field body, and the three land in one transaction, so a refused body
+  writes none of its fields. `store.CreditSettings` and
+  `store.SetCreditSettings` are the store surface, `store.CreditSettingsUpdate`
+  the change it takes, and every refusal is a `store.ErrInvalidCreditSetting`.
+  `sparkwing cluster credits settings` prints the three values and sets the
+  ones its `--rate-micro`, `--grace-seconds` and `--max-charge-seconds` flags
+  name. The defaults are unchanged: a self-hosted controller still gives a node
+  60 seconds of grace.
+- **pkg/store:** `PoolHeartbeatInterval`, `DispatchedHeartbeatInterval` and
+  `MaxNodeHeartbeatInterval` name the node heartbeat cadences in one place, and
+  the pooled, dispatched and warm-pool runners read their defaults from them
+  instead of each carrying a literal. No cadence changed.
 - **controller:** `max_concurrent_runners` scales with recent paid credit
   A metered principal's cap is now the base plus one more base for every
   `runner_scale_step_credits` of `paid` credit granted in the last 30 days,
@@ -129,6 +146,26 @@ unlock.
   name, so a controller that repriced it keeps its own four-core price.
   `sparkwing cluster credits settings --rate-table` sets a ladder of your own,
   and charges already written keep the class and rate they were billed at.
+- **pkg/store:** The credit setters now bound what they accept, because a rate
+  near the int64 maximum overflowed the reservation a claim takes and let a
+  claim the ledger had to refuse succeed, then billed the next heartbeat
+  9.2e18 micro-credits. `SetCreditRateMicroPerSecond` takes 1 to
+  `MaxCreditRateMicro` (a million credits a second, where it previously took
+  zero and any positive value), and `SetCreditMaxChargeSeconds` takes
+  `MinCreditMaxChargeSeconds` to `MaxCreditMaxChargeSeconds` (one second past
+  the longest heartbeat cadence, to one day, where it previously took any
+  positive value). A cap at or under the cadence truncated and forgave part of
+  every late tick. Refusals are `ErrInvalidCreditSetting`.
+- **controller:** A metered node inside the reservation its claim paid for is
+  no longer cancelled for exhausted credits, and each node now runs its own
+  grace clock from the instant it was charged through when the balance first
+  read empty. A claim reserves and charges for a minute of runway up front, so
+  cancelling inside it billed for time the node never got to use; with a grace
+  period of zero the node lost the whole paid minute. The clock used to run
+  from a ledger-wide stamp, so every node shared one deadline and the grace
+  period barely moved it. Schema v45 adds the `nodes.credit_exhausted_anchor`
+  column that holds each node's own start; it is defaulted, so an older binary
+  keeps writing the migrated database.
 
 ### Fixed
 
@@ -153,6 +190,15 @@ unlock.
   run's recorded status and error when the run has already finished, and `409`
   when the claim that names the run no longer holds it. A child that reaches a
   reaped run reports why its node was refused instead of a `500`.
+
+- **cli + cluster:** A `--working-tree` trigger now records the commit its
+  checkout shares with the origin default branch, and the runner fetches that
+  commit through the same Git cache and names it with the remote-tracking ref
+  the laptop had. A step that scopes itself with `git merge-base origin/main
+  HEAD` -- comment policy, new-code lint, changelog checks -- reads the same
+  range on a remote runner that it reads locally, instead of failing with "this
+  checkout cannot resolve it". A checkout with no origin remote records no
+  baseline and behaves as it did.
 
 ### Removed
 
@@ -197,14 +243,6 @@ unlock.
 
 ### Fixed
 
-- **cli + cluster:** A `--working-tree` trigger now records the commit its
-  checkout shares with the origin default branch, and the runner fetches that
-  commit through the same Git cache and names it with the remote-tracking ref
-  the laptop had. A step that scopes itself with `git merge-base origin/main
-  HEAD` -- comment policy, new-code lint, changelog checks -- reads the same
-  range on a remote runner that it reads locally, instead of failing with "this
-  checkout cannot resolve it". A checkout with no origin remote records no
-  baseline and behaves as it did.
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".

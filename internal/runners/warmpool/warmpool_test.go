@@ -450,3 +450,11 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
 	}
 }
+
+func TestNewDefaultsTheHeartbeatToTheStoreCadence(t *testing.T) {
+	r := New(nil, nil, Config{}, nil)
+	if r.cfg.HeartbeatInterval != store.DispatchedHeartbeatInterval {
+		t.Fatalf("default heartbeat = %s, want the store's %s cadence the charge cap is judged against",
+			r.cfg.HeartbeatInterval, store.DispatchedHeartbeatInterval)
+	}
+}

@@ -3588,8 +3588,8 @@ paths:
         of them is one credit, and a hundred credits is one dollar, so a
         ten dollar top-up is a thousand credits. The balance is the sum of
         grants less the sum of charges, computed in SQL. `rate_micro_per_second`
-        prices one cloud runner second, `grace_seconds` is how long a running
-        node survives an empty balance, and `burn_micro` is what the last
+        prices one cloud runner second, `grace_seconds` is how long a node runs
+        past its claim reservation on an empty balance, and `burn_micro` is what the last
         `burn_window_seconds` cost. A controller that was never granted
         anything reads zero and charges nothing.
       responses:
@@ -3678,11 +3678,13 @@ paths:
       summary: Read the rate, the grace period, and the charge cap.
       description: |
         The three values the ledger prices work with.
-        `rate_micro_per_second` is what one cloud runner second costs,
-        `grace_seconds` is how long a running node survives an empty balance
-        before the controller cancels it, and `max_charge_seconds` is the most
-        seconds any one charge may bill, which forgives a controller outage or
-        a stalled heartbeat loop rather than billing the gap. A controller that
+        `rate_micro_per_second` is what one cloud runner second costs.
+        `grace_seconds` is how long a node keeps running once it has consumed
+        the reservation its claim paid for with the balance at zero; a node
+        still inside that reservation is never cancelled, because the ledger
+        already took payment for it. `max_charge_seconds` is the most seconds
+        any one charge may bill, which forgives a controller outage or a
+        stalled heartbeat loop rather than billing the gap. A controller that
         set none of them reads the defaults.
       responses:
         "200":
@@ -3695,15 +3697,20 @@ paths:
       tags: [credits]
       summary: Set the rate, the grace period, or the charge cap.
       description: |
-        Sets each setting the body names and answers the full set as `GET`
-        does. An omitted field leaves that setting as it was, so changing one
-        value is a one-field body. A rate at or below zero, a negative grace
-        period, and a charge cap under the heartbeat interval are each refused
-        with `400`, and a body that names nothing is refused the same way; a
-        refused body writes none of its fields. `grace_seconds` at zero cancels
-        a metered node as soon as its reservation is consumed on an empty
-        balance, which bounds the unpaid overrun to one heartbeat interval per
-        node. Charges already written keep the rate they were charged at.
+        Sets each setting the body names, in one transaction, and answers the
+        full set as `GET` does. An omitted field leaves that setting as it was,
+        so changing one value is a one-field body. A body that names nothing is
+        refused with `400`, as is a rate outside one micro-credit to a million
+        credits per second, a negative grace period, and a charge cap outside
+        the band whose floor is one second past the longest node heartbeat
+        cadence and whose ceiling is one day. The bounds keep the reservation a
+        claim takes and a capped charge inside a signed 64-bit integer, and the
+        floor keeps a cap from truncating every tick that arrives a little
+        late. A refused body writes none of its fields. `grace_seconds` at zero
+        cancels a metered node at the first heartbeat past the reservation its
+        claim paid for, which bounds the unpaid overrun to one heartbeat
+        interval per node. Charges already written keep the rate they were
+        charged at.
       requestBody:
         required: true
         content:
@@ -4649,6 +4656,8 @@ components:
           items: {$ref: "#/components/schemas/CreditRate"}
         rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not prices every class at rate_micro_per_second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
+        grace_seconds: {type: integer, format: int64, description: How long a node runs past its claim reservation with the balance at zero.}
         max_charge_seconds: {type: integer, format: int64, description: "The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop."}
         burn_window_seconds: {type: integer, format: int64}
         burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
@@ -4667,6 +4676,8 @@ components:
           items: {$ref: "#/components/schemas/CreditRate"}
         rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not prices every class at rate_micro_per_second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance; zero cancels it as soon as its reservation is consumed.}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
+        grace_seconds: {type: integer, format: int64, description: How long a node runs past the reservation its claim paid for with the balance at zero; zero cancels it at the first heartbeat past that reservation.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
         micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
         credits_per_dollar: {type: integer, format: int64}
@@ -4685,6 +4696,9 @@ components:
               additionalProperties: {type: integer, format: int64}
         grace_seconds: {type: integer, format: int64, description: Seconds a running node survives an empty balance; zero or more.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; at least the heartbeat interval.}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second; 1 to 1000000000000.}
+        grace_seconds: {type: integer, format: int64, description: Seconds a node runs past its claim reservation on an empty balance; zero or more.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; from one second past the longest node heartbeat cadence to one day.}
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object

@@ -108,7 +108,7 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 	fmt.Fprint(tw, rateTableOrigin(state.RateTableSet))
 	fmt.Fprintf(tw, "BURN (%s)\t%s credits\n",
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
-	fmt.Fprintf(tw, "GRACE\t%ds after the balance reaches zero\n", state.GraceSeconds)
+	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", state.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", state.MaxChargeSeconds)
 	if state.ExhaustedAt != nil {
 		fmt.Fprintf(tw, "EXHAUSTED\t%s\n",
@@ -213,8 +213,12 @@ func runCreditsSettings(args []string) error {
 }
 
 // safety: an unset flag is left out of the body so the controller keeps that
-// setting, which is what makes changing one value a one-flag call.
-func creditSettingsBody(fs *flag.FlagSet, rate, grace, maxCharge int64, rateTable string) (map[string]any, error) {
+// setting. The store owns what each value may be, so the CLI sends what it was
+// given and reports the refusal; only the ladder's own spelling is judged here,
+// because the wire carries it as a map.
+func creditSettingsBody(
+	fs *flag.FlagSet, rate, grace, maxCharge int64, rateTable string,
+) (map[string]any, error) {
 	body := map[string]any{}
 	if fs.Changed("rate-table") {
 		table, err := parseCreditRateTable(rateTable)
@@ -224,22 +228,12 @@ func creditSettingsBody(fs *flag.FlagSet, rate, grace, maxCharge int64, rateTabl
 		body["rate_table"] = table
 	}
 	if fs.Changed("rate-micro") {
-		if rate <= 0 {
-			return nil, errors.New("credits settings: --rate-micro must be positive")
-		}
 		body["rate_micro_per_second"] = rate
 	}
 	if fs.Changed("grace-seconds") {
-		if grace < 0 {
-			return nil, errors.New("credits settings: --grace-seconds must not be negative")
-		}
 		body["grace_seconds"] = grace
 	}
 	if fs.Changed("max-charge-seconds") {
-		if maxCharge < store.MinCreditMaxChargeSeconds {
-			return nil, fmt.Errorf("credits settings: --max-charge-seconds must be at least %d",
-				store.MinCreditMaxChargeSeconds)
-		}
 		body["max_charge_seconds"] = maxCharge
 	}
 	return body, nil
@@ -290,7 +284,7 @@ func renderCreditSettings(w io.Writer, view creditSettingsResp) error {
 			entry.Cores, creditsPerUnit(entry.MicroPerSecond, view.MicroPerCredit), entry.MicroPerSecond)
 	}
 	fmt.Fprint(tw, rateTableOrigin(view.RateTableSet))
-	fmt.Fprintf(tw, "GRACE\t%ds after the balance reaches zero\n", view.GraceSeconds)
+	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", view.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", view.MaxChargeSeconds)
 	return tw.Flush()
 }

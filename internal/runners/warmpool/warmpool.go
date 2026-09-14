@@ -45,7 +45,7 @@ func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logg
 		cfg.ClaimWaitTimeout = 5 * time.Second
 	}
 	if cfg.HeartbeatInterval <= 0 {
-		cfg.HeartbeatInterval = 5 * time.Second
+		cfg.HeartbeatInterval = store.DispatchedHeartbeatInterval
 	}
 	if logger == nil {
 		logger = slog.Default()

@@ -275,26 +275,28 @@ runner executing it reports for itself; a request above the
 largest class that no runner report brings inside it fails the
 node. The rate is what a four-core second costs, which is the
 four-core entry of the table under another name, so once a
-table exists it is set by writing the table. The grace period is how long a
-running node survives an empty balance before the controller
-cancels it, and the charge cap is the most seconds any one
-charge may bill, which forgives a controller outage or a
+table exists it is set by writing the table. The grace period
+is how long a node keeps running after it has consumed the
+reservation its claim paid for with the balance at zero: a node
+inside that reservation is never cancelled, because the ledger
+already took payment for it. The charge cap is the most seconds
+any one charge may bill, which forgives a controller outage or a
 stalled heartbeat loop rather than billing the gap. A flag left
-off leaves that setting alone. Grace zero cancels a metered
-node as soon as its reservation is consumed on an empty
-balance, which bounds the unpaid overrun to one heartbeat
-interval per node. An installation that never set a table pays
-the single rate at every class. Reading needs the runs.read
-scope and setting needs admin.
+off leaves that setting alone, and a refused value moves
+nothing. Grace zero cancels a metered node at the first
+heartbeat past its reservation, which bounds the unpaid overrun
+to one heartbeat interval per node. An installation that never
+set a table bills the default ladder. Reading needs the
+runs.read scope and setting needs admin.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--rate-table PAIRS` | Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667 |
-| `--rate-micro N` | Micro-credits one four-core cloud runner second costs; refused once a rate table exists |
-| `--grace-seconds N` | Seconds a running node survives an empty balance; 0 cancels at once |
-| `--max-charge-seconds N` | The most seconds any one charge may bill; at least 3 |
+| `--rate-micro N` | Micro-credits one four-core cloud runner second costs, 1 to 1000000000000; refused once a rate table exists |
+| `--grace-seconds N` | Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat |
+| `--max-charge-seconds N` | The most seconds any one charge may bill, 6 to 86400 |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--profile NAME` | Profile name (required) |
 
@@ -304,7 +306,7 @@ scope and setting needs admin.
 # Read the settings
 sparkwing cluster credits settings --profile prod
 
-# Cut a node off the moment its reservation runs out
+# Cut a node off at the first heartbeat past its reservation
 sparkwing cluster credits settings --grace-seconds 0 --profile prod
 
 # Reprice a cloud runner second at 0.03 credits
@@ -320,8 +322,8 @@ Print the balance, the rate table, and the recent burn
 
 Prints the balance in credits, what was granted and charged, the
 price of a cloud runner second at every cpu class, the credits
-burned over the last day, the grace period a running node gets
-after the balance reaches zero, and the cap on what any one
+burned over the last day, the grace period a node gets past the
+reservation its claim paid for, and the cap on what any one
 charge may bill. A
 controller that was never granted anything reads a zero balance
 and charges nothing, because nothing is metered until an

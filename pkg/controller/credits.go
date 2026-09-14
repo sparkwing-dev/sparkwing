@@ -49,13 +49,27 @@ type creditRateJSON struct {
 	MicroPerSecond int64 `json:"micro_per_second"`
 }
 
-// safety: a nil field leaves that setting where it stands, so a caller names
-// only what it means to change and a new field disturbs no existing caller.
+// safety: a nil field leaves that setting where it stands, which is what lets a
+// caller send only the settings it means to change. The rate table is written
+// through its own store call, so it rides beside the three scalars rather than
+// inside the update they become.
 type setCreditSettingsReq struct {
 	RateMicroPerSecond *int64             `json:"rate_micro_per_second,omitempty"`
 	RateTable          *creditRateTableIn `json:"rate_table,omitempty"`
 	GraceSeconds       *int64             `json:"grace_seconds,omitempty"`
 	MaxChargeSeconds   *int64             `json:"max_charge_seconds,omitempty"`
+}
+
+func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
+	return store.CreditSettingsUpdate{
+		RateMicroPerSecond: r.RateMicroPerSecond,
+		GraceSeconds:       r.GraceSeconds,
+		MaxChargeSeconds:   r.MaxChargeSeconds,
+	}
+}
+
+func (r setCreditSettingsReq) namesAScalar() bool {
+	return r.RateMicroPerSecond != nil || r.GraceSeconds != nil || r.MaxChargeSeconds != nil
 }
 
 // safety: operators write the table both ways, so a body may name it as a list
@@ -154,7 +168,12 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request) {
-	out, err := s.creditSettingsView(r)
+	settings, err := s.store.CreditSettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, err := s.creditSettingsJSON(r, settings)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -163,24 +182,29 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request) {
-	var req setCreditSettingsReq
-	if err := decodeJSON(r, &req); err != nil {
+	var body setCreditSettingsReq
+	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := req.validate(); err != nil {
+	if err := s.refuseDerivedRateWrite(r, body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.refuseDerivedRateWrite(r, req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	settings, err := s.writeCreditSettings(r, body)
+	if err != nil {
+		if errors.Is(err, store.ErrInvalidCreditSetting) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if err := s.applyCreditSettings(r, req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	out, err := s.creditSettingsView(r)
+	s.logger.Info("credit settings set",
+		"rate_micro_per_second", settings.RateMicroPerSecond,
+		"grace_seconds", settings.GraceSeconds,
+		"max_charge_seconds", settings.MaxChargeSeconds)
+	out, err := s.creditSettingsJSON(r, settings)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -188,37 +212,34 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, out)
 }
 
-// safety: every field is checked before any of them is written, so a body that
-// names one good setting and one bad one leaves the ledger as it was.
-func (r setCreditSettingsReq) validate() error {
-	if r.RateMicroPerSecond == nil && r.RateTable == nil &&
-		r.GraceSeconds == nil && r.MaxChargeSeconds == nil {
-		return errors.New(
-			"name at least one of rate_micro_per_second, rate_table, grace_seconds, max_charge_seconds")
-	}
-	if r.RateMicroPerSecond != nil && *r.RateMicroPerSecond <= 0 {
-		return errors.New("rate_micro_per_second must be positive")
-	}
-	if r.RateTable != nil {
-		if err := r.RateTable.table.Validate(); err != nil {
-			return err
+// safety: the table carries its four-core entry into the single rate setting,
+// so it is written first and a body naming both ends on the scalar the caller
+// asked for.
+func (s *Server) writeCreditSettings(
+	r *http.Request, body setCreditSettingsReq,
+) (store.CreditSettings, error) {
+	ctx := r.Context()
+	if body.RateTable != nil {
+		if err := body.RateTable.table.Validate(); err != nil {
+			return store.CreditSettings{}, err
+		}
+		if err := s.store.SetCreditRateTable(ctx, body.RateTable.table); err != nil {
+			return store.CreditSettings{}, err
+		}
+		s.logger.Info("credit setting set",
+			"setting", "rate_table", "classes", len(body.RateTable.table))
+		if !body.namesAScalar() {
+			return s.store.CreditSettings(ctx)
 		}
 	}
-	if r.GraceSeconds != nil && *r.GraceSeconds < 0 {
-		return errors.New("grace_seconds must not be negative")
-	}
-	if r.MaxChargeSeconds != nil && *r.MaxChargeSeconds < store.MinCreditMaxChargeSeconds {
-		return fmt.Errorf("max_charge_seconds must be at least %d, the heartbeat interval",
-			store.MinCreditMaxChargeSeconds)
-	}
-	return nil
+	return s.store.SetCreditSettings(ctx, body.update())
 }
 
 // safety: with a table stored the scalar is the four-core entry under another
 // name, so writing it alone would move one class without saying so; the caller
 // is told to write the table instead.
-func (s *Server) refuseDerivedRateWrite(r *http.Request, req setCreditSettingsReq) error {
-	if req.RateMicroPerSecond == nil || req.RateTable != nil {
+func (s *Server) refuseDerivedRateWrite(r *http.Request, body setCreditSettingsReq) error {
+	if body.RateMicroPerSecond == nil || body.RateTable != nil {
 		return nil
 	}
 	set, err := s.store.CreditRateTableSet(r.Context())
@@ -228,75 +249,36 @@ func (s *Server) refuseDerivedRateWrite(r *http.Request, req setCreditSettingsRe
 	if !set {
 		return nil
 	}
-	return errors.New(
-		"rate_micro_per_second is the four-core entry of the rate table; write rate_table instead")
+	return fmt.Errorf(
+		"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
+		store.ErrInvalidCreditSetting)
 }
 
-// safety: the table carries the four-core price into the single rate setting,
-// so it is written first and a body naming both ends on the scalar the caller
-// asked for.
-func (s *Server) applyCreditSettings(r *http.Request, req setCreditSettingsReq) error {
-	ctx := r.Context()
-	if req.RateTable != nil {
-		if err := s.store.SetCreditRateTable(ctx, req.RateTable.table); err != nil {
-			return err
-		}
-		s.logger.Info("credit setting set",
-			"setting", "rate_table", "classes", len(req.RateTable.table))
+func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
+	return creditSettingsJSON{
+		RateMicroPerSecond: settings.RateMicroPerSecond,
+		GraceSeconds:       settings.GraceSeconds,
+		MaxChargeSeconds:   settings.MaxChargeSeconds,
+		MicroPerCredit:     store.MicroCreditsPerCredit,
+		CreditsPerDollar:   store.CreditsPerDollar,
 	}
-	if req.RateMicroPerSecond != nil {
-		if err := s.store.SetCreditRateMicroPerSecond(ctx, *req.RateMicroPerSecond); err != nil {
-			return err
-		}
-		s.logger.Info("credit setting set",
-			"setting", "rate_micro_per_second", "value", *req.RateMicroPerSecond)
-	}
-	if req.GraceSeconds != nil {
-		if err := s.store.SetCreditGraceSeconds(ctx, *req.GraceSeconds); err != nil {
-			return err
-		}
-		s.logger.Info("credit setting set", "setting", "grace_seconds", "value", *req.GraceSeconds)
-	}
-	if req.MaxChargeSeconds != nil {
-		if err := s.store.SetCreditMaxChargeSeconds(ctx, *req.MaxChargeSeconds); err != nil {
-			return err
-		}
-		s.logger.Info("credit setting set",
-			"setting", "max_charge_seconds", "value", *req.MaxChargeSeconds)
-	}
-	return nil
 }
 
-func (s *Server) creditSettingsView(r *http.Request) (creditSettingsJSON, error) {
+func (s *Server) creditSettingsJSON(
+	r *http.Request, settings store.CreditSettings,
+) (creditSettingsJSON, error) {
 	ctx := r.Context()
-	var out creditSettingsJSON
-	rate, err := s.store.CreditRateMicroPerSecond(ctx)
-	if err != nil {
-		return out, err
-	}
-	grace, err := s.store.CreditGraceSeconds(ctx)
-	if err != nil {
-		return out, err
-	}
-	maxCharge, err := s.store.CreditMaxChargeSeconds(ctx)
-	if err != nil {
-		return out, err
-	}
+	out := creditSettingsToJSON(settings)
 	table, err := s.store.CreditRateTable(ctx)
 	if err != nil {
 		return out, err
 	}
-	out.RateMicroPerSecond = rate
 	out.RateTable = creditRateTableToJSON(table)
-	tableSet, err := s.store.CreditRateTableSet(ctx)
+	set, err := s.store.CreditRateTableSet(ctx)
 	if err != nil {
 		return out, err
 	}
-	out.RateTableSet = tableSet
-	out.GraceSeconds = grace
-	out.MaxChargeSeconds = maxCharge
-	out.MicroPerCredit = store.MicroCreditsPerCredit
-	out.CreditsPerDollar = store.CreditsPerDollar
+	out.RateTableSet = set
 	return out, nil
 }
 
