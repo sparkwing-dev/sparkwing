@@ -51,6 +51,13 @@ unlock.
   is never budgeted. `controller.TokenRequestBudget` and
   `Server.WithTokenRequestBudget` are the Go surface; both are unlimited unless
   an operator or a profile names a number.
+- **controller:** A claim that comes back with a node no longer spends the
+  per-runner claim budget. An award is work the controller chose to hand out,
+  and the loop that gets one re-claims at once rather than waiting its poll
+  interval, so charging it bounded how fast a runner could execute rather than
+  how fast it could ask: eight slots running 250ms nodes shed most of their
+  claims at any budget worked from a poll cadence. The budget now bounds empty
+  polling, which is what a runner can do without limit.
 - **controller:** `Server.WithIdleClaimPollEnforced` answers a claim poll that
   arrives sooner than the widest idle interval the controller suggests with
   `429` and a `Retry-After` naming the rest of the wait. Enforcement starts
@@ -326,6 +333,15 @@ unlock.
 
 ### Removed
 
+- **pkg/controller (Breaking):** `RecommendedClaimsPerMinute` and
+  `RecommendedClaimsPerMinuteForSlots` are gone. They sized a claim budget as
+  `1200 x max_concurrent` from a model where every offer slot spends a
+  preparation plus an offer per round, which no shipped runner does: a pool
+  runner claims one node at a time whatever its concurrency. Work a claim
+  budget from `controller.CompliantClaimPollsPerMinute` instead, which reports
+  what an empty-queue poll cadence costs, and remember that an awarded claim
+  spends no budget. See
+  [the migration guide](docs/migrations/_unreleased.md#the-claim-budget-recommendation-helpers-are-removed).
 - **release pipeline:** The `check-branch-published` and
   `gate-release-lineage` nodes, and the tip check inside `push-tag`, are gone.
   The pipeline no longer refuses a checkout that origin has moved ahead of, or

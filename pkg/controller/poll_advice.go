@@ -124,10 +124,14 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request) bool
 		return true
 	}
 	key := s.runnerBudgetKey(r)
-	allowed, wait := s.idlePolls.AllowWithRetry(key, now)
-	if allowed {
+	if s.idlePolls.Allow(key, now) {
 		return true
 	}
+	// safety: a refused poll is not charged again, so the bucket never owes
+	// more than the interval and the wait named here is never shorter than the
+	// real refill nor longer than one suggestion. Two of them, spread, are what
+	// the startup check fits inside the placement hold.
+	wait := s.idleClaimPoll
 	observePrincipalThrottled(budgetClassIdlePoll)
 	s.logger.Warn("claim shed",
 		"runner", key, "route_class", budgetClassIdlePoll, "retry_after", wait,

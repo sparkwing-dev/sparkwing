@@ -251,15 +251,16 @@ failing authentication. `--claims-per-runner-minute` and
 `controller.claimsPerRunnerMinute`,
 `controller.heartbeatsPerRunnerMinute`) bound what one runner spends per
 rolling minute. Both default to zero, which is unlimited: an operator
-opts in. 1200 of each suits the cadence the shipped runners use -- a pool
-runner claims every 500ms, or 120 a minute, and a node heartbeat runs
-every 3s. An enrolled agent's offer slots all poll under the agent's one
-name, and each slot spends a preparation plus an offer per round, so its
-claim budget is 1200 x `max_concurrent`: 1200 for one slot, 9600 for
-eight. `controller.RecommendedClaimsPerMinuteForSlots` computes it. A
-pool runner claims one node at a time whatever its concurrency, so the
-hosted profiles below size its budget from the poll cadence alone and an
-operator running an enrolled agent raises the guard with the flag.
+opts in.
+
+A claim that comes back with a node spends no claim budget. An award is
+work the controller chose to hand out, and the loop that gets one
+re-claims at once rather than waiting its poll interval, so charging it
+would bound how fast a runner may execute rather than how fast it may
+ask. What the budget bounds is empty polling, which a runner can do
+without limit: a pool runner polls every 500ms, or 120 a minute, so 480
+allows four times that cadence. Heartbeats carry no such exemption; 1200
+suits the 3s cadence the shipped runners keep.
 
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
@@ -267,17 +268,17 @@ path names -- and falls back to the `X-Sparkwing-Runner` header only on
 `POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
 `POST /api/v1/triggers/claim`, which name nothing. A runner sends one
 identity for the life of its process (a pool runner its holder prefix and
-process id, an enrolled agent its name), not one per poll: a value that changed per
-request would buy a fresh budget on every claim and grow the controller's
-bucket table at the fleet's poll rate.
+process id, an enrolled agent its name), not one per poll: a value that
+changed per request would buy a fresh budget on every claim and grow the
+controller's bucket table at the fleet's poll rate.
 
 **What this bounds is a cooperating runner.** On those three claim routes
 the identity is the runner's own word, so a holder of a valid token that
 varies it gets a fresh budget each time. The budget stops a runaway loop
 and keeps one misbehaving runner in a shared-token fleet from spending
 its peers' claim budget; it is not a defence against an authenticated
-caller who means harm. The token itself is the control that bounds that
-caller -- revoke it.
+caller who means harm. The per-token budget below is what bounds that
+caller, and the token itself is the control that ends it -- revoke it.
 
 A runner too old to send an identity shares one bucket with its peers on
 those routes, so during a rolling upgrade a shared-token fleet is
@@ -328,8 +329,9 @@ interval it was not yet told about, and it lifts the moment work is
 handed out, so a fleet is never held off a queue that has since filled. A
 runner that honors the suggestion waits at least that long by
 construction and is never refused; a runner that ignores the header pays
-the wait it was told about, and one that keeps knocking while refused is
-told to wait longer each time, up to twice the interval. A controller that suggests nothing, which is
+the wait it was told about, which is never longer than one suggestion, so
+two refused polls and a runner's own spread still fit inside the
+placement hold. A controller that suggests nothing, which is
 any controller with `--idle-claim-poll=0` and every host's own admission
 daemon, enforces nothing.
 
@@ -341,6 +343,14 @@ keyed the way the per-runner budgets are, on the token prefix together
 with the runner, and the runner a pool names itself carries its process
 id, so two runner processes on one host are two runners rather than one
 polling twice.
+
+Before turning enforcement on, check what the fleet is running. A caller
+older than v0.50.1 sends no `X-Sparkwing-Runner`, so every such caller on
+one token shares a single gate slot and all but the first are refused
+every round. They hold their claims and their nodes, because a `429` is
+backpressure they already honor, but they pick work up no faster than
+one runner would. Roll the fleet forward first, or leave
+`--idle-claim-poll` at zero until it is.
 
 Enforcement is off unless a limits profile turns it on;
 `sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
