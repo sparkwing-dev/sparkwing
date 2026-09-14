@@ -67,8 +67,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v43 adds one index and no column, so an older binary keeps
 	// writing the migrated database.
 	43: nil,
-	// safety: v44 is held open for the per-cpu-class rate table and adds
-	// nothing here until that branch lands.
+	// safety: v44 is permanently spent and adds no column, so an older binary
+	// keeps writing the migrated database.
 	44: nil,
 	// safety: v45 adds one defaulted column, so an older binary keeps writing
 	// the migrated database and simply never stamps it.

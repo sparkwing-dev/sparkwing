@@ -1323,8 +1323,9 @@ func settleCreditExhaustionTx(
 			return 0, false, err
 		}
 		// safety: credit bought the node fresh runway, so the clock it was
-		// running down is gone rather than paused.
-		if err := stampCreditExhaustionAnchorTx(ctx, tx, e, 0); err != nil {
+		// running down is gone rather than paused. The predicate keeps a
+		// healthy balance from writing the row on every heartbeat.
+		if err := clearCreditExhaustionAnchorTx(ctx, tx, e); err != nil {
 			return 0, false, err
 		}
 		return 0, false, nil
@@ -1381,6 +1382,14 @@ func stampCreditExhaustionAnchorTx(
 	_, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
 		at, e.RunID, e.NodeID)
+	return err
+}
+
+func clearCreditExhaustionAnchorTx(ctx context.Context, tx *storeTx, e creditExhaustion) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE nodes SET credit_exhausted_anchor = 0
+		  WHERE run_id = ? AND node_id = ? AND credit_exhausted_anchor != 0`,
+		e.RunID, e.NodeID)
 	return err
 }
 

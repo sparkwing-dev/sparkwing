@@ -1947,9 +1947,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyCreditReferenceMigrationSQLite(ctx, tx)
 	case 43:
 		return applyRunnerCapIndexMigration(ctx, tx)
-	// safety: v44 is the per-cpu-class rate table, which lands on its own
-	// branch; the ladder refuses a gap, so the version is held open here and
-	// that branch replaces this with its migration.
+	// safety: v44 is permanently spent. The ladder refuses a gap, so this
+	// build records v44 as applied on every store it opens, and nothing can
+	// tell that from a real v44 having run. The per-cpu-class rate table
+	// therefore takes v46.
 	case 44:
 		return nil
 	case 45:
@@ -2283,8 +2284,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyCreditReferenceMigrationPostgres(ctx, tx)
 	case 43:
 		return applyRunnerCapIndexMigration(ctx, tx)
-	// safety: v44 is the per-cpu-class rate table, held open the same way as in
-	// the SQLite ladder so both dialects agree on what each version is.
+	// safety: v44 is permanently spent, the same as in the SQLite ladder, so
+	// both dialects agree on what each version is.
 	case 44:
 		return nil
 	case 45:
