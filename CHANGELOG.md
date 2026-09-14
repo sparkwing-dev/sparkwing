@@ -22,6 +22,9 @@ unlock.
 
 ### Changed
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.50.4, so a fresh scaffold
+  compiles against that release.
+
 - **cache (Breaking):** The gitcache refreshes a mirror when a clone reads its
   refs, and no longer polls every mirror on a timer. A run triggered seconds
   after a push now checks out that push instead of being told the ref is not
