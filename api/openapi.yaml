@@ -3602,18 +3602,35 @@ paths:
     post:
       x-sparkwing-scope: admin
       tags: [credits]
-      summary: Add free or paid credits to the ledger.
+      summary: Add free or paid credits to the ledger, or reverse a paid grant.
       description: |
         Records who granted the credits, which kind they are, and the
         payment `reference` they came from. A grant that lifts the balance
         above zero lets metered runners claim again and stops the
         cancellation of nodes running on an empty balance.
+
+        A non-empty `reference` is idempotent: a second request naming the
+        same `kind` and `reference` returns the grant already written with
+        200, so a payment webhook may redeliver. An empty reference writes
+        a new grant every time.
+
+        A `reversal` takes a refunded payment back out. It carries a
+        negative `amount_micro`, its own `reference` (the refund id, so
+        partial refunds each land), and `reverses` naming the paid grant's
+        reference. A reversal whose `reverses` matches no paid grant is
+        refused, and one that takes the balance below zero stops new
+        metered claims.
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: "#/components/schemas/CreateGrantRequest"}
       responses:
+        "200":
+          description: The grant this reference already wrote.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditGrant"}
         "201":
           description: The grant written.
           content:
@@ -4557,8 +4574,9 @@ components:
       type: object
       description: The prepaid ledger as an operator reads it. Amounts are micro-credits.
       properties:
-        balance_micro: {type: integer, format: int64, description: Grants less charges.}
+        balance_micro: {type: integer, format: int64, description: Grants less reversals less charges.}
         granted_micro: {type: integer, format: int64}
+        reversed_micro: {type: integer, format: int64, description: What reversals took back, reported positive.: ''}
         charged_micro: {type: integer, format: int64}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
@@ -4571,12 +4589,13 @@ components:
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object
-      description: One addition to the ledger.
+      description: One movement of the grant side of the ledger.
       properties:
         id: {type: string}
-        kind: {type: string, description: free or paid.}
-        amount_micro: {type: integer, format: int64}
-        reference: {type: string, description: Payment id or operator note.}
+        kind: {type: string, description: free, paid or reversal.: ''}
+        amount_micro: {type: integer, format: int64, description: Negative on a reversal.}
+        reference: {type: string, description: Payment id, refund id: '', or operator note.: ''}
+        reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
     CreditCharge:
@@ -4641,9 +4660,10 @@ components:
       type: object
       required: [kind, amount_micro]
       properties:
-        kind: {type: string, description: free or paid.}
-        amount_micro: {type: integer, format: int64, description: Micro-credits to add; a million is one credit.}
-        reference: {type: string, description: Payment id or operator note.}
+        kind: {type: string, description: free, paid or reversal.: ''}
+        amount_micro: {type: integer, format: int64, description: Micro-credits to add, negative on a reversal; a million is one credit.: ''}
+        reference: {type: string, description: Payment id, refund id: '', or operator note. A non-empty one is idempotent.: ''}
+        reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object

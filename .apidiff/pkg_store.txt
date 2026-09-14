@@ -232,17 +232,33 @@ type CreditGrant struct {
 	Kind        string
 	AmountMicro int64
 	Reference   string
-	CreatedBy   string
-	CreatedAt   time.Time
+
+	Reverses  string
+	CreatedBy string
+	CreatedAt time.Time
 }
 const CreditGrantFree = "free"
 const CreditGrantPaid = "paid"
+type CreditGrantRequest struct {
+	Kind        string
+	AmountMicro int64
+	Reference   string
+	Reverses    string
+	CreatedBy   string
+}
+type CreditGrantResult struct {
+	Grant   CreditGrant
+	Created bool
+}
+const CreditGrantReversal = "reversal"
 const CreditHistoryMaxLimit = 1000
 type CreditLedgerTotals struct {
 	BalanceMicro int64
 
 	GrantedFreeMicro int64
 	GrantedPaidMicro int64
+
+	ReversedMicro int64
 
 	ReservedMicro int64
 
@@ -253,7 +269,9 @@ type CreditLedgerTotals struct {
 	SettledSeconds int64
 }
 type CreditState struct {
-	GrantedMicro       int64
+	GrantedMicro int64
+
+	ReversedMicro      int64
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
@@ -1178,7 +1196,7 @@ func (s *Store) GetSecretRow(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (_ *CreditGrant, err error)
+) (*CreditGrant, error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
@@ -1247,6 +1265,9 @@ func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
+func (s *Store) RecordCreditGrant(
+	ctx context.Context, req CreditGrantRequest,
+) (_ CreditGrantResult, err error)
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
