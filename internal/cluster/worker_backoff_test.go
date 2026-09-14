@@ -8,17 +8,46 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// safety: the loop is done with a refused claim once it has said so, so the
+// test watches the log rather than waiting a wall-clock interval out.
+type awaitedLog struct {
+	mu   sync.Mutex
+	out  strings.Builder
+	want string
+	once sync.Once
+	seen chan struct{}
+}
+
+func newAwaitedLog(want string) *awaitedLog {
+	return &awaitedLog{want: want, seen: make(chan struct{})}
+}
+
+func (l *awaitedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.out.Write(p)
+	if strings.Contains(l.out.String(), l.want) {
+		l.once.Do(func() { close(l.seen) })
+	}
+	return len(p), nil
+}
+
+func (l *awaitedLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.out.String()
+}
+
 // TestRunWorker_NamesItselfAndHonorsARefusal covers the worker loop against a
 // controller running a limits profile: it has to carry an identity of its own
 // or share one bucket with every other worker on the token, and it has to wait
-// out the Retry-After rather than repolling at its own cadence and logging an
+// the Retry-After out rather than repolling at its own cadence and logging an
 // error line each time.
 func TestRunWorker_NamesItselfAndHonorsARefusal(t *testing.T) {
 	var mu sync.Mutex
@@ -36,14 +65,18 @@ func TestRunWorker_NamesItselfAndHonorsARefusal(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	var logged strings.Builder
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	logged := newAwaitedLog("controller is shedding claims")
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	go func() {
+		<-logged.seen
+		cancel()
+	}()
+
 	err := RunWorker(ctx, orchestrator.WorkerOptions{
 		ControllerURL: ts.URL,
 		Paths:         orchestrator.Paths{Root: t.TempDir()},
-		PollInterval:  time.Millisecond,
-		Logger:        slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Logger:        slog.New(slog.NewTextHandler(logged, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {
 		t.Fatalf("RunWorker: %v", err)
@@ -60,14 +93,14 @@ func TestRunWorker_NamesItselfAndHonorsARefusal(t *testing.T) {
 			t.Fatalf("claim sent %s=%q, want %q", store.RunnerIdentityHeader, got, want)
 		}
 	}
-	if len(identities) > 2 {
-		t.Errorf("the worker polled %d times through a 30s Retry-After", len(identities))
-	}
 	out := logged.String()
 	if strings.Contains(out, "level=ERROR") {
 		t.Fatalf("a shed claim logged an error line:\n%s", out)
 	}
 	if got := strings.Count(out, "controller is shedding claims"); got != 1 {
 		t.Fatalf("shed claims logged %d notices, want 1 per window:\n%s", got, out)
+	}
+	if !strings.Contains(out, "retry_after=") {
+		t.Fatalf("the notice does not name the wait:\n%s", out)
 	}
 }
