@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -222,7 +222,7 @@ func TestRenderCreditSettings(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"0.020000 credits", "20000 micro", "GRACE", "0s after", "CHARGE CAP", "30s"} {
+	for _, want := range []string{"0.020000 credits", "20000 micro", "GRACE", "0s past", "CHARGE CAP", "30s"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("credit settings output is missing %q:\n%s", want, out)
 		}
@@ -244,10 +244,7 @@ func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
 func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 	t.Parallel()
 	fs := creditSettingsFlagSet(t, []string{"--grace-seconds", "0"})
-	body, err := creditSettingsBody(fs, 0, 0, 0)
-	if err != nil {
-		t.Fatalf("body: %v", err)
-	}
+	body := creditSettingsBody(fs, 0, 0, 0)
 	if len(body) != 1 {
 		t.Fatalf("body = %v, want grace alone", body)
 	}
@@ -255,32 +252,50 @@ func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
 		t.Fatalf("grace_seconds = %v", body["grace_seconds"])
 	}
 
-	fs = creditSettingsFlagSet(t, nil)
-	body, err = creditSettingsBody(fs, 0, 0, 0)
-	if err != nil {
-		t.Fatalf("empty body: %v", err)
+	fs = creditSettingsFlagSet(t, []string{"--rate-micro", "30000", "--max-charge-seconds", "45"})
+	body = creditSettingsBody(fs, 30_000, 0, 45)
+	if len(body) != 2 || body["rate_micro_per_second"] != int64(30_000) ||
+		body["max_charge_seconds"] != int64(45) {
+		t.Fatalf("body = %v, want the rate and the cap", body)
 	}
-	if len(body) != 0 {
+
+	fs = creditSettingsFlagSet(t, nil)
+	if body = creditSettingsBody(fs, 0, 0, 0); len(body) != 0 {
 		t.Fatalf("a flagless call built %v, so it would write instead of read", body)
 	}
 }
 
-func TestCreditSettingsBodyRefusesValuesTheLedgerCannotPrice(t *testing.T) {
-	t.Parallel()
-	for name, args := range map[string][]string{
-		"rate at zero":   {"--rate-micro", "0"},
-		"negative grace": {"--grace-seconds", "-1"},
-		"cap under the heartbeat interval": {
-			"--max-charge-seconds", strconv.FormatInt(store.MinCreditMaxChargeSeconds-1, 10),
-		},
+func TestCreditSettingsCLIReportsAValueTheStoreRefuses(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	admin, _, err := st.CreateToken("root", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("admin token: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	for name, body := range map[string]map[string]any{
+		"rate past the ceiling": {"rate_micro_per_second": int64(store.MaxCreditRateMicro) + 1},
+		"rate at zero":          {"rate_micro_per_second": 0},
+		"negative grace":        {"grace_seconds": -1},
+		"cap under the floor":   {"max_charge_seconds": store.MinCreditMaxChargeSeconds - 1},
+		"nothing named":         {},
 	} {
-		fs := creditSettingsFlagSet(t, args)
-		rate, _ := fs.GetInt64("rate-micro")
-		grace, _ := fs.GetInt64("grace-seconds")
-		maxCharge, _ := fs.GetInt64("max-charge-seconds")
-		if _, err := creditSettingsBody(fs, rate, grace, maxCharge); err == nil {
+		if _, err := tokensPut(srv.URL, admin, "/api/v1/credits/settings", body); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+	rate, err := st.CreditRateMicroPerSecond(context.Background())
+	if err != nil {
+		t.Fatalf("read rate: %v", err)
+	}
+	if rate != store.DefaultCreditRateMicro {
+		t.Fatalf("rate = %d; a refused write moved it", rate)
 	}
 }
 

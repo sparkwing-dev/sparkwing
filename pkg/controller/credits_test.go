@@ -602,8 +602,14 @@ func TestCreditSettings_RefusesValuesTheLedgerCannotPrice(t *testing.T) {
 		"rate at zero":   {"rate_micro_per_second": 0},
 		"negative rate":  {"rate_micro_per_second": -1},
 		"negative grace": {"grace_seconds": -1},
-		"cap under the heartbeat interval": {
+		"cap under the heartbeat cadence": {
 			"max_charge_seconds": store.MinCreditMaxChargeSeconds - 1,
+		},
+		"cap past the ceiling": {
+			"max_charge_seconds": int64(store.MaxCreditMaxChargeSeconds) + 1,
+		},
+		"rate past the ceiling": {
+			"rate_micro_per_second": int64(store.MaxCreditRateMicro) + 1,
 		},
 	} {
 		if status, _ := creditSettings(t, f, http.MethodPut, body); status != http.StatusBadRequest {

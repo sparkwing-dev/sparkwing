@@ -33,18 +33,41 @@ unlock.
   its store and client surfaces.
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
-  rate, the grace period a running node gets on an empty balance, and the cap
-  on what any one charge may bill, which until now moved only through a code
+  rate, the grace period a node gets past its claim reservation, and the cap on
+  what any one charge may bill, which until now moved only through a code
   change. An omitted field keeps its setting, so changing one value is a
-  one-field body; a rate at or below zero, a negative grace period, and a
-  charge cap under `store.MinCreditMaxChargeSeconds` are refused, and a refused
-  body writes none of its fields. `sparkwing cluster credits settings` prints
-  the three values and sets the ones its `--rate-micro`, `--grace-seconds` and
-  `--max-charge-seconds` flags name. The defaults are unchanged: a self-hosted
-  controller still gives a node 60 seconds of grace.
+  one-field body, and the three land in one transaction, so a refused body
+  writes none of its fields. `store.CreditSettings` and
+  `store.SetCreditSettings` are the store surface, `store.CreditSettingsUpdate`
+  the change it takes, and every refusal is a `store.ErrInvalidCreditSetting`.
+  `sparkwing cluster credits settings` prints the three values and sets the
+  ones its `--rate-micro`, `--grace-seconds` and `--max-charge-seconds` flags
+  name. The defaults are unchanged: a self-hosted controller still gives a node
+  60 seconds of grace.
+- **pkg/store:** `PoolHeartbeatInterval`, `DispatchedHeartbeatInterval` and
+  `MaxNodeHeartbeatInterval` name the node heartbeat cadences in one place, and
+  the pooled, dispatched and warm-pool runners read their defaults from them
+  instead of each carrying a literal. No cadence changed.
 
 ### Changed
 
+- **pkg/store:** The credit setters now bound what they accept, because a rate
+  near the int64 maximum overflowed the reservation a claim takes and let a
+  claim the ledger had to refuse succeed, then billed the next heartbeat
+  9.2e18 micro-credits. `SetCreditRateMicroPerSecond` takes 1 to
+  `MaxCreditRateMicro` (a million credits a second, where it previously took
+  zero and any positive value), and `SetCreditMaxChargeSeconds` takes
+  `MinCreditMaxChargeSeconds` to `MaxCreditMaxChargeSeconds` (one second past
+  the longest heartbeat cadence, to one day, where it previously took any
+  positive value). A cap at or under the cadence truncated and forgave part of
+  every late tick. Refusals are `ErrInvalidCreditSetting`.
+- **controller:** A metered node inside the reservation its claim paid for is
+  no longer cancelled for exhausted credits, and the grace period is counted
+  from the end of that reservation rather than from the moment the balance
+  emptied. A claim reserves and charges for a minute of runway up front, so
+  cancelling inside it billed for time the node never got to use; with a grace
+  period of zero the node lost the whole paid minute. A node past its
+  reservation behaves as before.
 - **cluster:** A Kubernetes runner Job now carries an `activeDeadlineSeconds`:
   ten minutes past the node's own `.Timeout()` where it declared one, and six
   hours otherwise. `--k8s-job-deadline` (env `SPARKWING_K8S_JOB_DEADLINE`, a Go
