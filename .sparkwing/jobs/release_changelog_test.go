@@ -1,10 +1,7 @@
 package jobs
 
 import (
-	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -219,204 +216,6 @@ func TestHighestReleaseTag(t *testing.T) {
 	}
 }
 
-func TestEnsureBranchContainsRemote(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	remote := filepath.Join(root, "remote.git")
-	work := filepath.Join(root, "work")
-	clone := filepath.Join(root, "clone")
-
-	runTestGit(t, root, "init", "--bare", remote)
-	runTestGit(t, root, "clone", remote, work)
-	runTestGit(t, work, "config", "user.name", "Test User")
-	runTestGit(t, work, "config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(work, "README.md"), []byte("one\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runTestGit(t, work, "add", "README.md")
-	runTestGit(t, work, "commit", "-m", "initial")
-	runTestGit(t, work, "branch", "-M", "release-test")
-	runTestGit(t, work, "push", "-u", "origin", "release-test")
-
-	if err := ensureBranchContainsRemote(ctx, work, "release-test"); err != nil {
-		t.Fatalf("fresh release branch rejected: %v", err)
-	}
-
-	runTestGit(t, root, "clone", remote, clone)
-	runTestGit(t, clone, "checkout", "release-test")
-	runTestGit(t, clone, "config", "user.name", "Test User")
-	runTestGit(t, clone, "config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte("two\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runTestGit(t, clone, "add", "README.md")
-	runTestGit(t, clone, "commit", "-m", "advance remote")
-	runTestGit(t, clone, "push", "origin", "HEAD:release-test")
-
-	if err := ensureBranchContainsRemote(ctx, work, "release-test"); err == nil {
-		t.Fatalf("stale release branch passed freshness fence")
-	}
-
-	runTestGit(t, work, "checkout", "-b", "never-pushed")
-	err := ensureBranchContainsRemote(ctx, work, "never-pushed")
-	if err == nil {
-		t.Fatal("a branch origin has never seen passed the preflight")
-	}
-	if !strings.Contains(err.Error(), "never-pushed") {
-		t.Errorf("error = %q, want it to name the unpublished branch", err)
-	}
-
-	if err := ensureBranchContainsRemote(ctx, work, "HEAD"); err == nil {
-		t.Fatal("a detached HEAD passed the preflight")
-	}
-}
-
-func TestWriteSelfModuleSums(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
-	writeSelfModuleSumsFixture(t, repo)
-
-	const version = "v0.1.0"
-	zipHash, goModHash, err := selfModuleSums(context.Background(), repo, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums: %v", err)
-	}
-	assertWriteSelfModuleSums(t, repo, version, zipHash, goModHash)
-}
-
-func TestWriteSelfModuleSumsInGitWorktree(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	writeSelfModuleSumsFixture(t, repo)
-	runTestGit(t, repo, "branch", "release-line")
-
-	worktree := filepath.Join(tmp, "release-worktree")
-	runTestGit(t, repo, "worktree", "add", worktree, "release-line")
-
-	const version = "v0.1.0"
-	zipHash, goModHash, err := selfModuleSums(context.Background(), worktree, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums: %v", err)
-	}
-	assertWriteSelfModuleSums(t, worktree, version, zipHash, goModHash)
-}
-
-func TestSelfModuleSumsIgnoreNestedPipelineModule(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
-	writeSelfModuleSumsFixture(t, repo)
-
-	const version = "v0.1.0"
-	before, _, err := selfModuleSums(context.Background(), repo, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums before nested change: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "go.sum"), []byte("nested module changed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runTestGit(t, repo, "add", ".sparkwing/go.sum")
-	runTestGit(t, repo, "commit", "-m", "change nested module")
-
-	after, _, err := selfModuleSums(context.Background(), repo, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums after nested change: %v", err)
-	}
-	if after != before {
-		t.Fatalf("root module zip hash changed after nested module edit:\nbefore: %s\nafter:  %s", before, after)
-	}
-}
-
-func TestSelfModuleSumsIgnoreUntrackedFiles(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
-	writeSelfModuleSumsFixture(t, repo)
-
-	const version = "v0.1.0"
-	before, _, err := selfModuleSums(context.Background(), repo, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums before untracked file: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "local-output.bin"), []byte(strings.Repeat("x", 1024)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	after, _, err := selfModuleSums(context.Background(), repo, version)
-	if err != nil {
-		t.Fatalf("selfModuleSums after untracked file: %v", err)
-	}
-	if after != before {
-		t.Fatalf("root module zip hash changed after untracked file:\nbefore: %s\nafter:  %s", before, after)
-	}
-}
-
-func writeSelfModuleSumsFixture(t *testing.T, repo string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{
-		"go.mod":              "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.0\n",
-		"main.go":             "package sparkwing\n",
-		".sparkwing/go.sum":   "github.com/sparkwing-dev/sparkwing v0.1.0 h1:stale\n",
-		".sparkwing/go.mod":   "module sparkwing-pipelines\n\ngo 1.26.0\n",
-		".gitignore":          "",
-		"docs/placeholder.md": "# Placeholder\n",
-	}
-	for name, body := range files {
-		path := filepath.Join(repo, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	runTestGit(t, repo, "init")
-	runTestGit(t, repo, "config", "user.name", "Test User")
-	runTestGit(t, repo, "config", "user.email", "test@example.com")
-	runTestGit(t, repo, "add", ".")
-	runTestGit(t, repo, "commit", "-m", "initial")
-}
-
-func assertWriteSelfModuleSums(t *testing.T, repo, version, zipHash, goModHash string) {
-	t.Helper()
-	if err := writeSelfModuleSums(context.Background(), repo, version); err != nil {
-		t.Fatalf("writeSelfModuleSums: %v", err)
-	}
-	first, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		sparkwingModulePath + " " + version + " " + zipHash,
-		sparkwingModulePath + " " + version + "/go.mod " + goModHash,
-	} {
-		if !strings.Contains(string(first), want) {
-			t.Fatalf(".sparkwing/go.sum missing %q:\n%s", want, first)
-		}
-	}
-	if strings.Contains(string(first), "h1:stale") {
-		t.Fatalf(".sparkwing/go.sum kept stale self-module sum:\n%s", first)
-	}
-
-	if err := writeSelfModuleSums(context.Background(), repo, version); err != nil {
-		t.Fatalf("repeat writeSelfModuleSums: %v", err)
-	}
-	second, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(first) != string(second) {
-		t.Fatalf("second write changed go.sum:\nfirst:\n%s\nsecond:\n%s", first, second)
-	}
-}
-
-func runTestGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
-}
-
 func TestPlanChangelogRewrite(t *testing.T) {
 	const date = "2026-05-20"
 	cases := []struct {
@@ -476,5 +275,14 @@ func TestPlanChangelogRewrite(t *testing.T) {
 			}
 			_ = date
 		})
+	}
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

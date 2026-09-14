@@ -5,30 +5,23 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
+	"sort"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
-	if templateVerifyReleaseTimeout < time.Hour {
-		t.Fatalf("template verification timeout = %s, want at least 1h", templateVerifyReleaseTimeout)
-	}
-}
-
-var releaseGateNodes = []string{
-	"validate-version",
-	"check-branch-published",
+// safety: the whole local release. Every suite that once gated the tag runs in
+// safety: hosted CI against the tagged source, so a node outside this list is
+// safety: work the release does not need.
+var releaseRecipe = []string{
 	"check-clean-tree",
-	"gate-contracts",
-	"gate-broad",
-	"gate-pre-release",
-	"gate-template-verify",
-	"gate-release-lineage",
+	"discover-version",
 	"gate-schema-changelog",
 	"gate-wire-changelog",
+	"prepare-changelog",
+	"push-tag",
+	"validate-version",
 }
 
 func releasePlan(t *testing.T) *sparkwing.Plan {
@@ -57,13 +50,6 @@ func mustNode(t *testing.T, plan *sparkwing.Plan, id string) *sparkwing.JobNode 
 	return n
 }
 
-func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
-	examples := (Release{}).Examples()
-	if got := examples[len(examples)-1].Command; got != `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run` {
-		t.Fatalf("preview command = %q", got)
-	}
-}
-
 func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
 	t.Helper()
 	seen := map[string]bool{}
@@ -81,189 +67,75 @@ func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
 	return seen
 }
 
-func TestReleasePlanPinsSelfReplaceAfterTagPush(t *testing.T) {
-	plan := releasePlan(t)
-
-	if !ancestors(t, plan, "bump-self-replace")["push-tag"] {
-		t.Error("bump-self-replace must depend on push-tag: the pin it writes names a version whose tag does not exist until push-tag creates it")
-	}
-	if ancestors(t, plan, "push-tag")["bump-self-replace"] {
-		t.Error("push-tag must not depend on bump-self-replace, directly or transitively: that cycle of intent is what made the release unsatisfiable")
+func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
+	examples := (Release{}).Examples()
+	if got := examples[len(examples)-1].Command; got != `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run` {
+		t.Fatalf("preview command = %q", got)
 	}
 }
 
-func TestReleasePlanRestoresSelfReplaceWhenBumpFails(t *testing.T) {
+func TestReleasePlanIsTheTagRecipeAndNothingElse(t *testing.T) {
 	plan := releasePlan(t)
 
-	bump := mustNode(t, plan, "bump-self-replace")
-	if !bump.IsContinueOnError() {
-		t.Error("bump-self-replace must be ContinueOnError so the restore still runs after a failed pin commit")
+	var got []string
+	for _, n := range plan.Nodes() {
+		got = append(got, n.ID())
 	}
-	if bump.IsOptional() {
-		t.Error("bump-self-replace must not be Optional: a failed pin has to fail the run")
-	}
-	if !ancestors(t, plan, "restore-self-replace")["bump-self-replace"] {
-		t.Error("restore-self-replace must depend on bump-self-replace so it runs on the bump's failure path")
+	sort.Strings(got)
+	if !slices.Equal(got, releaseRecipe) {
+		t.Fatalf("release plan nodes = %v, want %v; a release is a tag push, and every check of substance runs in hosted CI on the tagged source", got, releaseRecipe)
 	}
 }
 
-func TestReleasePlanGatesBlockTagPush(t *testing.T) {
+func TestReleasePlanTagsOnlyAfterTheChangelogCommit(t *testing.T) {
 	plan := releasePlan(t)
 
 	deps := ancestors(t, plan, "push-tag")
-	for _, gate := range releaseGateNodes {
-		if !deps[gate] {
-			t.Errorf("push-tag must depend on %s; a release that skips a gate to reach the tag is unsafe", gate)
+	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog"} {
+		if !deps[need] {
+			t.Errorf("push-tag must depend on %s; the tag has to land on the tree that already carries the release notes", need)
 		}
-		n := mustNode(t, plan, gate)
+		n := mustNode(t, plan, need)
 		if n.IsContinueOnError() || n.IsOptional() {
-			t.Errorf("%s must block push-tag on failure, but is marked ContinueOnError/Optional", gate)
+			t.Errorf("%s must block push-tag on failure, but is marked ContinueOnError/Optional", need)
 		}
 	}
 }
 
-func TestReleasePlanDoesNotCommitChangelogBeforeIndependentGatesPass(t *testing.T) {
-	deps := ancestors(t, releasePlan(t), "prepare-changelog")
-	for _, gate := range []string{"gate-template-verify", "gate-release-lineage"} {
-		if !deps[gate] {
-			t.Errorf("prepare-changelog must depend on %s so a failed gate leaves HEAD unchanged", gate)
+func TestReleasePlanValidatesTheVersionBeforeTouchingTheTree(t *testing.T) {
+	plan := releasePlan(t)
+
+	deps := ancestors(t, plan, "prepare-changelog")
+	for _, need := range []string{"validate-version", "check-clean-tree"} {
+		if !deps[need] {
+			t.Errorf("prepare-changelog must depend on %s so a refused version leaves HEAD unchanged", need)
 		}
 	}
-}
-
-func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) {
-	plan := releasePlan(t)
-	deps := ancestors(t, plan, "gate-template-verify")
-	for _, gate := range []string{"gate-broad", "gate-pre-release"} {
-		if !deps[gate] {
-			t.Errorf("gate-template-verify must depend on %s", gate)
-		}
-	}
-	hints := mustNode(t, plan, "gate-template-verify").ResourceHints()
-	if hints == nil || hints.Cores != 0.5 {
-		t.Fatalf("gate-template-verify resources = %+v, want 0.5 coordinator cores", hints)
+	if ancestors(t, plan, "validate-version")["prepare-changelog"] {
+		t.Error("validate-version must not wait for the commit it exists to precede")
 	}
 }
 
-func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
-	plan := releasePlan(t)
-
-	if !ancestors(t, plan, "gate-broad")["gate-contracts"] {
-		t.Error("gate-broad must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
+func TestRequireAheadOfNewestTag(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		newest  string
+		wantErr bool
+	}{
+		{name: "first release", version: "v0.1.0", newest: ""},
+		{name: "patch ahead", version: "v0.50.4", newest: "v0.50.3"},
+		{name: "minor ahead", version: "v0.51.0", newest: "v0.50.3"},
+		{name: "equal", version: "v0.50.3", newest: "v0.50.3", wantErr: true},
+		{name: "behind", version: "v0.50.2", newest: "v0.50.3", wantErr: true},
+		{name: "behind by minor", version: "v0.49.9", newest: "v0.50.0", wantErr: true},
 	}
-	if ancestors(t, plan, "gate-contracts")["gate-broad"] {
-		t.Error("gate-contracts must not depend on gate-broad, directly or transitively: that puts it back behind the suite it exists to precede")
-	}
-	if ancestors(t, plan, "gate-contracts")["gate-pre-release"] || ancestors(t, plan, "gate-contracts")["gate-template-verify"] {
-		t.Error("gate-contracts must not depend on the expensive gates")
-	}
-}
-
-func TestReleasePlanRejectsInvalidPreflightsBeforeExpensiveChecks(t *testing.T) {
-	plan := releasePlan(t)
-	preflights := []string{"check-clean-tree", "validate-version", "gate-release-lineage"}
-	for _, check := range []string{"gate-contracts", "gate-broad", "gate-pre-release", "gate-template-verify"} {
-		deps := ancestors(t, plan, check)
-		for _, preflight := range preflights {
-			if !deps[preflight] {
-				t.Errorf("%s can run after %s fails", check, preflight)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := requireAheadOfNewestTag(c.version, c.newest)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("requireAheadOfNewestTag(%q, %q) = %v, wantErr %v", c.version, c.newest, err, c.wantErr)
 			}
-			if ancestors(t, plan, preflight)[check] {
-				t.Errorf("%s waits for expensive check %s", preflight, check)
-			}
-		}
-	}
-}
-
-func TestReleaseContractPreflightRequiresEveryNamedCheckToPass(t *testing.T) {
-	check := contractCheck{
-		Label:   "contracts",
-		Command: "go test -v ./cmd/sparkwing -run " + contractTestPattern([]string{"TestAlpha", "TestBeta"}),
-		Tests:   []string{"TestAlpha", "TestBeta"},
-	}
-
-	full := "--- PASS: TestAlpha (0.01s)\n--- PASS: TestBeta (0.00s)\nok  cmd/sparkwing 0.3s\n"
-	if err := requireContractTestsPassed(check, full); err != nil {
-		t.Fatalf("a run that passed every named check was rejected: %v", err)
-	}
-
-	err := requireContractTestsPassed(check, "--- PASS: TestAlpha (0.01s)\nok  cmd/sparkwing 0.3s\n")
-	if err == nil || !strings.Contains(err.Error(), "TestBeta") || strings.Contains(err.Error(), "TestAlpha\n") {
-		t.Fatalf("a vanished check = %v, want a refusal naming only TestBeta", err)
-	}
-
-	if err := requireContractTestsPassed(check, "ok  cmd/sparkwing 0.3s [no tests to run]\n"); err == nil {
-		t.Fatal("a run that matched nothing passed the preflight")
-	}
-
-	if err := requireContractTestsPassed(check, "--- PASS: TestAlphaExtended (0.01s)\n--- PASS: TestBeta (0.0s)\n"); err == nil {
-		t.Fatal("a check whose name is only a prefix of another satisfied the preflight")
-	}
-}
-
-func TestReleaseContractPreflightNamesTheContractsItClaims(t *testing.T) {
-	checks := releaseContractChecks()
-	if len(checks) != 2 {
-		t.Fatalf("preflight has %d checks, want the docs mirror and the contract set", len(checks))
-	}
-	named := checks[1]
-	for _, want := range releaseContractTests {
-		if !strings.Contains(named.Command, want) {
-			t.Errorf("the -run pattern does not name %s", want)
-		}
-		if !slices.Contains(named.Tests, want) {
-			t.Errorf("the required-pass list does not name %s", want)
-		}
-	}
-	for _, want := range []string{"EnvironmentVariable", "Registry", "Help", "Docs"} {
-		if !strings.Contains(strings.Join(releaseContractTests, " "), want) {
-			t.Errorf("the contract set covers no %s check, but the label claims one", want)
-		}
-	}
-}
-
-func TestReleaseAlwaysRequestsAnExhaustiveTemplateProof(t *testing.T) {
-	if !releaseTemplateVerifyArgs.Exhaustive {
-		t.Error("the release gate must request an exhaustive template proof; a recorded proof shortens local iteration, never the tag boundary")
-	}
-}
-
-func TestReleasePlanSerializesPreReleaseAfterTheBroadGate(t *testing.T) {
-	deps := ancestors(t, releasePlan(t), "gate-pre-release")
-	if !deps["gate-broad"] {
-		t.Error("gate-pre-release must depend on gate-broad")
-	}
-}
-
-func TestReleasePlanRestoreDoesNotGateTagPush(t *testing.T) {
-	plan := releasePlan(t)
-
-	if ancestors(t, plan, "push-tag")["restore-self-replace"] {
-		t.Error("push-tag must not depend on restore-self-replace: cleanup runs after the tag, never as a precondition for it")
-	}
-}
-
-func TestReleaseRefusesAnUnpublishedBranchBeforeTheExpensiveGates(t *testing.T) {
-	plan := releasePlan(t)
-
-	for _, gate := range []string{"gate-broad", "gate-pre-release", "gate-template-verify"} {
-		if !ancestors(t, plan, gate)["check-branch-published"] {
-			t.Errorf("%s must depend on check-branch-published: the tag push refuses an unpublished branch anyway, so running the gate first buys nothing", gate)
-		}
-	}
-
-	deps := ancestors(t, plan, "check-branch-published")
-	for _, gate := range []string{"gate-contracts", "gate-broad", "gate-pre-release", "gate-template-verify"} {
-		if deps[gate] {
-			t.Errorf("check-branch-published must not depend on %s, directly or transitively: that puts it back behind the gates it exists to precede", gate)
-		}
-	}
-}
-
-func TestReleasePlan_BuildsTheEmbeddedDashboardBeforeTheBroadSuite(t *testing.T) {
-	plan := releasePlan(t)
-
-	if !ancestors(t, plan, "gate-broad")["build-web-bundle"] {
-		t.Error("gate-broad must depend on build-web-bundle: the broad suite compiles the embedded dashboard, which lives in a gitignored directory, so a clean checkout fails inside a test that names neither the bundle nor the remedy")
+		})
 	}
 }
