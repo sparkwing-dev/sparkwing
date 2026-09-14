@@ -656,6 +656,15 @@ func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequiremen
 	lim := corev1.ResourceList{}
 	measured := res.Source != store.CostSourceDefault
 
+	if class, ok := podCPUClass(res); measured && ok {
+		req[corev1.ResourceCPU] = milliCores(float64(class.Cores))
+		lim[corev1.ResourceCPU] = milliCores(float64(class.Cores))
+		memory := *resource.NewQuantity(store.CPUClassMemoryBytes(class.Cores), resource.BinarySI)
+		req[corev1.ResourceMemory] = memory
+		lim[corev1.ResourceMemory] = memory
+		return corev1.ResourceRequirements{Requests: req, Limits: lim}
+	}
+
 	if measured && res.Cores > 0 {
 		// safety: a sub-milli pin otherwise renders cpu: 0, which no quota counts
 		cores := cappedCores(math.Max(res.Cores, capacity.MeasuredCoreFloor), cfg.CPUCeiling)
@@ -684,6 +693,19 @@ func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequiremen
 		}
 	}
 	return corev1.ResourceRequirements{Requests: req, Limits: lim}
+}
+
+// safety: a node above the warm class runs on a machine of its own and is
+// billed for that whole class, so its pod asks for the class with no burst
+// above it. A node the warm pool serves keeps the shape it had, and so does one
+// nothing has measured yet.
+func podCPUClass(res capacity.Resolution) (store.CreditRate, bool) {
+	ladder := store.DefaultCreditRateTable(store.DefaultCreditRateMicro)
+	class, err := ladder.ClassForResource(store.ExecutorResource{Cores: res.Cores, MemoryBytes: res.MemoryBytes})
+	if err != nil || class.Cores <= store.DefaultWarmCPUClassCores {
+		return store.CreditRate{}, false
+	}
+	return class, true
 }
 
 func milliCores(cores float64) resource.Quantity {

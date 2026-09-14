@@ -480,17 +480,55 @@ func bytesOf(q resource.Quantity) int64 {
 	return v
 }
 
-func TestPodResources_PinDrivesRequestAndPolicyLimit(t *testing.T) {
-	res := capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
+func TestPodResources_PinAboveTheWarmClassAsksForItsWholeClass(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		res       capacity.Resolution
+		wantCPU   int64
+		wantBytes int64
+	}{
+		{
+			name:      "an eight-core pin",
+			res:       capacity.Resolution{Cores: 8, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
+			wantCPU:   8000,
+			wantBytes: 32 << 30,
+		},
+		{
+			name:      "memory the four-core class cannot hold",
+			res:       capacity.Resolution{Cores: 3, MemoryBytes: 20 << 30, Source: store.CostSourcePin},
+			wantCPU:   8000,
+			wantBytes: 32 << 30,
+		},
+		{
+			name:      "cpu alone above the warm class",
+			res:       capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
+			wantCPU:   4000,
+			wantBytes: 16 << 30,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := podResources(tc.res, defaultsCfg)
+			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPU {
+				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPU)
+			}
+			if got := milli(rr.Limits[corev1.ResourceCPU]); got != tc.wantCPU {
+				t.Errorf("cpu limit = %dm, want the request %dm", got, tc.wantCPU)
+			}
+			if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != tc.wantBytes {
+				t.Errorf("mem request = %d, want %d", got, tc.wantBytes)
+			}
+			if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != tc.wantBytes {
+				t.Errorf("mem limit = %d, want the request %d", got, tc.wantBytes)
+			}
+		})
+	}
+}
+
+func TestPodResources_WarmClassPinKeepsItsBurstLimit(t *testing.T) {
+	res := capacity.Resolution{Cores: 2, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
 	rr := podResources(res, defaultsCfg)
-	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 4000 {
-		t.Errorf("cpu request = %dm, want 4000m", got)
-	}
-	if got := milli(rr.Limits[corev1.ResourceCPU]); got != 8000 {
-		t.Errorf("cpu limit = %dm, want 8000m (2x request)", got)
-	}
-	if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != 8<<30 {
-		t.Errorf("mem request = %d, want %d", got, int64(8<<30))
+	if got := milli(rr.Limits[corev1.ResourceCPU]); got != 4000 {
+		t.Errorf("cpu limit = %dm, want 4000m (2x request)", got)
 	}
 	if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != int64(float64(8<<30)*podMemoryLimitFactor) {
 		t.Errorf("mem limit = %d, want %d (1.25x request)", got, int64(float64(8<<30)*podMemoryLimitFactor))
@@ -558,13 +596,13 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 			wantMemLim: 1 << 30,
 		},
 		{
-			name:       "no configured ceiling leaves the pin alone",
+			name:       "no configured ceiling leaves the pin its whole class",
 			res:        capacity.Resolution{Cores: 64, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
 			cfg:        defaultsCfg,
 			wantCPUReq: 64000,
-			wantCPULim: int64(64000 * podCPULimitFactor),
-			wantMemReq: 128 << 30,
-			wantMemLim: int64(float64(128<<30) * podMemoryLimitFactor),
+			wantCPULim: 64000,
+			wantMemReq: 256 << 30,
+			wantMemLim: 256 << 30,
 		},
 	}
 	for _, tc := range cases {
