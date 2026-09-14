@@ -17,8 +17,20 @@ import (
 const ComputeLimitRefusedCode = "compute_limit"
 
 type computeLimitsJSON struct {
-	Limits map[string]int64 `json:"limits"`
-	Usage  computeUsageJSON `json:"usage"`
+	Limits  map[string]int64   `json:"limits"`
+	Usage   computeUsageJSON   `json:"usage"`
+	Budgets requestBudgetsJSON `json:"budgets"`
+}
+
+// safety: the budgets are process configuration rather than stored guards, so
+// they are reported beside the guards and never set through this route.
+type requestBudgetsJSON struct {
+	ClaimsPerRunnerMinute     int64 `json:"claims_per_runner_minute"`
+	HeartbeatsPerRunnerMinute int64 `json:"heartbeats_per_runner_minute"`
+	IdleClaimPollSeconds      int64 `json:"idle_claim_poll_seconds"`
+	IdleClaimPollEnforced     bool  `json:"idle_claim_poll_enforced"`
+	MaxLogStreamsPerPrincipal int64 `json:"max_log_streams_per_principal"`
+	MaxDownloadsPerPrincipal  int64 `json:"max_downloads_per_principal"`
 }
 
 type computeUsageJSON struct {
@@ -94,6 +106,7 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 			ByPrincipal:  usage.ByPrincipal,
 			AlarmReached: usage.AlarmReached,
 		},
+		Budgets: s.requestBudgetsView(),
 	}
 	for _, name := range store.ComputeLimitNames() {
 		v, _ := limits.Value(name)
@@ -260,4 +273,16 @@ func (s *Server) cronIntervalRefusal(r *http.Request, expr string) error {
 		return err
 	}
 	return crons.RefuseBelowMinInterval(expr, limits.CronSeconds)
+}
+
+func (s *Server) requestBudgetsView() requestBudgetsJSON {
+	egressState := s.egress.State()
+	return requestBudgetsJSON{
+		ClaimsPerRunnerMinute:     int64(s.requestBudgetValues.ClaimsPerMinute),
+		HeartbeatsPerRunnerMinute: int64(s.requestBudgetValues.HeartbeatsPerMinute),
+		IdleClaimPollSeconds:      int64(s.idleClaimPoll / time.Second),
+		IdleClaimPollEnforced:     s.idlePolls != nil,
+		MaxLogStreamsPerPrincipal: int64(egressState.MaxStreamsPerPrincipal),
+		MaxDownloadsPerPrincipal:  int64(egressState.MaxDownloadsPerPrincipal),
+	}
 }

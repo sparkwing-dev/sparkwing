@@ -46,6 +46,34 @@ type computeLimitsResp struct {
 		RecentPaidMicro    int64            `json:"recent_paid_micro"`
 		ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
 	} `json:"usage"`
+	Budgets struct {
+		ClaimsPerRunnerMinute     int64 `json:"claims_per_runner_minute"`
+		HeartbeatsPerRunnerMinute int64 `json:"heartbeats_per_runner_minute"`
+		IdleClaimPollSeconds      int64 `json:"idle_claim_poll_seconds"`
+		IdleClaimPollEnforced     bool  `json:"idle_claim_poll_enforced"`
+		MaxLogStreamsPerPrincipal int64 `json:"max_log_streams_per_principal"`
+		MaxDownloadsPerPrincipal  int64 `json:"max_downloads_per_principal"`
+	} `json:"budgets"`
+}
+
+// safety: the budgets are process configuration the controller reports beside
+// the stored guards, so they are named here in the order an operator sizes
+// them rather than sorted with the guards `limits set` writes.
+func budgetRows(view computeLimitsResp) [][2]string {
+	idle := computeLimitLabel(view.Budgets.IdleClaimPollSeconds)
+	if view.Budgets.IdleClaimPollSeconds > 0 {
+		idle = strconv.FormatInt(view.Budgets.IdleClaimPollSeconds, 10) + "s"
+		if view.Budgets.IdleClaimPollEnforced {
+			idle += ", enforced"
+		}
+	}
+	return [][2]string{
+		{"claims_per_runner_minute", computeLimitLabel(view.Budgets.ClaimsPerRunnerMinute)},
+		{"heartbeats_per_runner_minute", computeLimitLabel(view.Budgets.HeartbeatsPerRunnerMinute)},
+		{"idle_claim_poll", idle},
+		{"max_log_streams_per_principal", computeLimitLabel(view.Budgets.MaxLogStreamsPerPrincipal)},
+		{"max_downloads_per_principal", computeLimitLabel(view.Budgets.MaxDownloadsPerPrincipal)},
+	}
 }
 
 func runComputeLimitsShow(args []string) error {
@@ -135,6 +163,9 @@ func renderComputeLimits(w io.Writer, view computeLimitsResp) error {
 		fmt.Fprintf(tw, "DERIVED RUNNER CAP\t%s\n", derivedRunnerCapLabel(view))
 	}
 	fmt.Fprintf(tw, "CLOUD RUNNERS\t%d claimed now\n", view.Usage.Runners)
+	for _, row := range budgetRows(view) {
+		fmt.Fprintf(tw, "%s\t%s\n", strings.ToUpper(row[0]), row[1])
+	}
 	if view.Usage.AlarmReached {
 		fmt.Fprintf(tw, "ALARM\treached\n")
 	}
@@ -152,6 +183,11 @@ func writeComputeLimitsPlain(w io.Writer, view computeLimitsResp) error {
 	}
 	if view.Usage.DerivedRunnerCap > 0 {
 		if _, err := fmt.Fprintf(w, "derived_runner_cap\t%d\n", view.Usage.DerivedRunnerCap); err != nil {
+			return err
+		}
+	}
+	for _, row := range budgetRows(view) {
+		if _, err := fmt.Fprintf(w, "%s\t%s\n", row[0], row[1]); err != nil {
 			return err
 		}
 	}
