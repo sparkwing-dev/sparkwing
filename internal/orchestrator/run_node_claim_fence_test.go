@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -58,12 +59,53 @@ func (f *fenceRecorder) record(r *http.Request) {
 	f.plain = append(f.plain, r.URL.Path)
 }
 
+// safety: an ambient SPARKWING_API_SOCKET routes the run lookup to the
+// machine's admission daemon rather than the fixture's controller, and a suite
+// running inside a sparkwing node inherits one, so every variable the
+// resolution reads is pinned.
+func pinRunNodeEnvironment(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		wingwire.APISocketEnv,
+		"SPARKWING_CONTROLLER_URL",
+		"SPARKWING_LOGS_URL",
+		"SPARKWING_RUN_ID",
+		"SPARKWING_NODE_ID",
+		"SPARKWING_AGENT_TOKEN",
+		"SPARKWING_CACHE_URL",
+		"SPARKWING_CACHE_TOKEN",
+		"SPARKWING_GITCACHE_URL",
+		"SPARKWING_LOCAL_ONLY",
+		"SPARKWING_DRY_RUN",
+		"SPARKWING_START_AT",
+		"SPARKWING_STOP_AT",
+		"SPARKWING_EXECUTION_CAPABILITY_STDIN",
+		"SPARKWING_BROKERED_NODE_CLAIM",
+		"SPARKWING_BROKERED_ARTIFACTS",
+		"SPARKWING_NODE_CLAIM_HOLDER",
+		"SPARKWING_NODE_CLAIM_GENERATION",
+		"SPARKWING_NODE_CLAIM_MEMBERSHIP",
+		"SPARKWING_NODE_CLAIM_RESERVATION",
+		"SPARKWING_NODE_CLAIM_LEASE_SECONDS",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+// safety: both URLs travel as flags because ResolveDevEnvURL falls back to a
+// dev.env it caches for the life of the process, which an empty variable loses
+// to.
+func runNodeArgs(controllerURL, runID, nodeID string) []string {
+	return []string{"--controller", controllerURL, "--logs", "", runID, nodeID}
+}
+
 // The warm fallback Job runs a node no agent claimed, so the pod is the only
 // holder of that claim and every state write it makes has to prove it.
 func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 	registerDispatchedClaimPipe()
 	isolateCheckout(t)
 	isolateProfiles(t)
+	pinRunNodeEnvironment(t)
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -120,7 +162,7 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 	t.Setenv("SPARKWING_NODE_CLAIM_RESERVATION", claimed.ReservationID)
 	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
 
-	if err := orchestrator.RunNodeCommand([]string{"--controller", srv.URL, runID, nodeID}); err != nil {
+	if err := orchestrator.RunNodeCommand(runNodeArgs(srv.URL, runID, nodeID)); err != nil {
 		t.Fatalf("RunNodeCommand: %v", err)
 	}
 
@@ -154,6 +196,7 @@ func TestRunNodeCommand_RunsUnfencedWithoutADispatchedClaim(t *testing.T) {
 	registerDispatchedClaimPipe()
 	isolateCheckout(t)
 	isolateProfiles(t)
+	pinRunNodeEnvironment(t)
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -180,7 +223,7 @@ func TestRunNodeCommand_RunsUnfencedWithoutADispatchedClaim(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, quiet).Handler())
 	defer srv.Close()
 
-	if err := orchestrator.RunNodeCommand([]string{"--controller", srv.URL, runID, nodeID}); err != nil {
+	if err := orchestrator.RunNodeCommand(runNodeArgs(srv.URL, runID, nodeID)); err != nil {
 		t.Fatalf("RunNodeCommand: %v", err)
 	}
 	n, err := st.GetNode(ctx, runID, nodeID)
