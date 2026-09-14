@@ -311,6 +311,8 @@ curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
 
 `GET /api/v1/storage` reports the allowance and `retained_bytes`, which is what
 the team still has stored and what the storage charge and the sweep both
-measure. What a team retains is charged against the credit ledger once an
-operator prices storage; [Credits](auth.md) describes the rate, the free
-allowance, and what a spent balance does.
+measure. The quota route does not take the allowance: rewriting a quota leaves
+it where it stands, so the two cannot overwrite each other. What a team retains
+is charged against the credit ledger once an operator prices storage;
+[Credits](auth.md) describes the rate, the free allowance, which bytes count,
+and what a spent balance does.

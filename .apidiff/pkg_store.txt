@@ -321,7 +321,8 @@ type CreditState struct {
 	GrantedMicro int64
 
 	ReversedMicro int64
-	ChargedMicro  int64
+
+	ChargedMicro int64
 
 	StorageChargedMicro int64
 	BalanceMicro        int64
@@ -1118,19 +1119,11 @@ type StorageAllowanceSweep struct {
 }
 const StorageBytesPerGB = 1 << 30
 const StorageChargeDaySeconds = 86_400
-const StorageChargeInterval = 24 * time.Hour
 type StorageChargeSweep struct {
 	Charges []CreditCharge
 
 	ChargedMicro int64
 }
-type StorageCreditsExhaustedError struct {
-	Principal      string
-	BalanceMicro   int64
-	RequestedBytes int64
-}
-func (e *StorageCreditsExhaustedError) Error() string
-func (e *StorageCreditsExhaustedError) Unwrap() error
 const StorageLimitBytesPerMonth = "bytes_per_month"
 const StorageLimitBytesPerRun = "bytes_per_run"
 const StorageLimitObjectsPerRun = "objects_per_run"
@@ -1261,7 +1254,6 @@ func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
-func (s *Store) DatabaseNow(ctx context.Context) (time.Time, error)
 func (s *Store) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)

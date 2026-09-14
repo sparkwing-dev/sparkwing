@@ -1113,6 +1113,18 @@ paths:
                 required: [seq]
                 properties:
                   seq: {type: integer, format: int64}
+        "402":
+          description: >-
+            Storage is priced and the credit balance is spent, so the payload would grow what the team retains with nothing to pay the rent on it. The event is not stored.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413":
+          description: >-
+            The payload would take the team past one of its storage limits. The reason names the limit, the team, what it has stored and what the write asked for.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /api/v1/triggers:
     post:
@@ -3855,7 +3867,9 @@ paths:
         Naming a `tier` and leaving every limit zero takes that tier's
         limits, so a team moves between tiers without restating three
         numbers. A limit of zero is unbounded, so a quota may cap bytes
-        without capping objects. The answer is the stored quota.
+        without capping objects. This route does not take the retained-storage
+        allowance and never changes it; its own route writes that. The answer
+        is the stored quota.
 
         Run events are charged their payload bytes and a published artifact
         manifest is charged one object, each inside the transaction that
@@ -3864,7 +3878,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/StorageQuota"}
+            schema: {$ref: "#/components/schemas/SetStorageQuota"}
       responses:
         "200":
           description: The stored quota.
@@ -4597,7 +4611,16 @@ components:
         max_bytes_per_run: {type: integer, format: int64}
         max_bytes_per_month: {type: integer, format: int64}
         max_objects_per_run: {type: integer, format: int64}
-        storage_allowance_bytes: {type: integer, format: int64, description: "Retained bytes the team asked to keep; the sweep expires its oldest finished runs above this, and 0 keeps everything."}
+        storage_allowance_bytes: {type: integer, format: int64, description: "Retained bytes the team asked to keep and the most it is billed for; the sweep expires its oldest finished runs above this, and 0 keeps everything. Written only by the allowance route."}
+    SetStorageQuota:
+      x-sparkwing-go-type: pkg/controller.setStorageQuotaJSON
+      type: object
+      description: "One team's storage limits. A zero limit is unbounded; the retained-storage allowance is not one of these and is left alone."
+      properties:
+        tier: {type: string, description: free or paid; supplies the limits when they are all zero.}
+        max_bytes_per_run: {type: integer, format: int64}
+        max_bytes_per_month: {type: integer, format: int64}
+        max_objects_per_run: {type: integer, format: int64}
     StorageAllowance:
       x-sparkwing-go-type: pkg/controller.storageAllowanceJSON
       type: object
