@@ -54,7 +54,11 @@ The runner also consumes `--profile`, `-C`, `-v`, and the explicit
 `--dry-run=true` and `--dry-run=false` forms before the separator.
 `--target` passes to the pipeline.
 
-`--sw-allow` is enforced by the CLI before it dispatches anything. The
+`--sw-allow` is enforced by the CLI before it dispatches anything. A step
+declares its labels in Go, so the CLI reads them from the compiled
+`.sparkwing/` binary and builds that binary first when this machine holds no
+build of it: the gate weighs the same declarations on the first run in a fresh
+`SPARKWING_HOME` as on every later one. The
 labels you authorize are forwarded to the run as `SPARKWING_ALLOW`
 (comma-separated) so the run's own record shows what was
 authorized -- setting that variable by hand authorizes nothing, because

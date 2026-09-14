@@ -70,6 +70,16 @@ unlock.
   instead of 10, so the second attempt falls outside the cache's freshness
   window and reads refreshed refs rather than the ones the first attempt saw.
 
+### Fixed
+
+- **cli:** A step's `Risk` labels refuse a run on the first invocation in a
+  machine's `SPARKWING_HOME`, not only on later ones. The labels are declared
+  in Go and reach the CLI through the compiled `.sparkwing/` binary, so a home
+  that had never built the pipeline held no declaration to weigh and every
+  risk-labeled step ran unauthorized. `sparkwing run` now builds that binary
+  before admission, and the refusal names the step, its labels and
+  `--sw-allow`.
+
 ### Security
 
 - **cli:** A `--working-tree` trigger, and a `sparkwing run --sw-fleet`
