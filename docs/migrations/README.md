@@ -12,6 +12,7 @@ Format conventions live in [../changelog-style.md](../changelog-style.md).
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.50.2](v0.50.2.md) | 2026-09-14 | `sparkwing-runner agent` refuses to start when `agent.yaml` sets `name` or `coordinators`, which selects enrolled mode. |
 | [v0.50.1](v0.50.1.md) | 2026-09-13 | `sparkwing pipeline sparks update --name NAME` is refused; the unfiltered `sparks update` re-resolves the whole manifest, which is what it always did. |
 | [v0.50.0](v0.50.0.md) | 2026-09-12 | `install/install.sh` becomes the public CLI installer and the runner installer moves to `install/service-install.sh`; and `ResourceState.ExternalSource` reports a third value, `unattributed`, for a real host reading that carries some of sparkwing's own runs' CPU. |
 | [v0.49.0](v0.49.0.md) | 2026-09-10 | `version update` becomes `update` for both the CLI and the SDK; the `dashboard` command group becomes `serve`, whose `start` no longer replaces a running service; `sparkwing queue exec` and the daemon's guarded-session wire messages are removed; `run --sw-isolated-home` is replaced by an admission refusal that names the upgrade; and the SDK drops `AcquireLintSlot`, `LintSlot` and `SPARKWING_LINT_SLOTS` in favour of `ToolCacheDir`. |
