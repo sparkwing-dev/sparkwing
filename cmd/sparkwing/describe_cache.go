@@ -31,7 +31,7 @@ func byRepoDescribePath(sparkwingDir string) string {
 		"cache", "describe", "by-repo", hex.EncodeToString(sum[:16])+".json")
 }
 
-func readDescribeCache(sparkwingDir string) ([]sparkwing.DescribePipeline, error) {
+func readDescribeCache(ctx context.Context, sparkwingDir string) ([]sparkwing.DescribePipeline, error) {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
@@ -41,10 +41,10 @@ func readDescribeCache(sparkwingDir string) ([]sparkwing.DescribePipeline, error
 	}
 	entry, entryErr := bincache.PipelineEntry(key)
 	if entryErr == nil {
-		lease, found, acquireErr := entry.Acquire(context.Background())
+		lease, found, acquireErr := entry.Acquire(ctx)
 		if acquireErr == nil && found {
 			defer func() { _ = lease.Release() }()
-			if out, err := refreshDescribeFromBinary(sparkwingDir, lease.Path(), key); err == nil && out != nil {
+			if out, err := refreshDescribeFromBinary(ctx, sparkwingDir, lease.Path(), key); err == nil && out != nil {
 				return out, nil
 			}
 		}
@@ -64,8 +64,8 @@ func readDescribeFile(path string) []sparkwing.DescribePipeline {
 	return out
 }
 
-func refreshDescribeFromBinary(sparkwingDir, binPath, key string) ([]sparkwing.DescribePipeline, error) {
-	raw, err := runDescribeBinary(sparkwingDir, binPath)
+func refreshDescribeFromBinary(ctx context.Context, sparkwingDir, binPath, key string) ([]sparkwing.DescribePipeline, error) {
+	raw, err := runDescribeBinary(ctx, sparkwingDir, binPath)
 	if err != nil {
 		return nil, fmt.Errorf("run %s --describe: %w", binPath, err)
 	}
@@ -85,13 +85,13 @@ func writeDescribeFile(path string, raw []byte) {
 	_ = fssecure.WriteFile(path, raw)
 }
 
-func writeDescribeCache(sparkwingDir, binPath string) error {
+func writeDescribeCache(ctx context.Context, sparkwingDir, binPath string) error {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		return fmt.Errorf("cache key: %w", err)
 	}
 
-	out, err := runDescribeBinary(sparkwingDir, binPath)
+	out, err := runDescribeBinary(ctx, sparkwingDir, binPath)
 	if err != nil {
 		return fmt.Errorf("run %s --describe: %w", binPath, err)
 	}
@@ -111,8 +111,8 @@ func writeDescribeCache(sparkwingDir, binPath string) error {
 	return nil
 }
 
-func pipelineFlagsFromCache(sparkwingDir, pipelineName string) ([]sparkwing.DescribeArg, error) {
-	schemas, err := readDescribeCache(sparkwingDir)
+func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName string) ([]sparkwing.DescribeArg, error) {
+	schemas, err := readDescribeCache(ctx, sparkwingDir)
 	if err != nil {
 		return nil, err
 	}
@@ -124,8 +124,8 @@ func pipelineFlagsFromCache(sparkwingDir, pipelineName string) ([]sparkwing.Desc
 	return nil, nil
 }
 
-func runDescribeBinary(sparkwingDir, binPath string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+func runDescribeBinary(ctx context.Context, sparkwingDir, binPath string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binPath, "--describe")
 	cmd.Dir = filepath.Dir(sparkwingDir)

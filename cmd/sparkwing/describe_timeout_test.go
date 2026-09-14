@@ -17,7 +17,7 @@ func TestDescribeCacheBoundsUnresponsiveBinary(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "describe")
 	writeExec(t, binary, "#!/bin/sh\nexec sleep 5\n")
 	started := time.Now()
-	_, err := refreshDescribeFromBinary(t.TempDir(), binary, "fixture")
+	_, err := refreshDescribeFromBinary(context.Background(), t.TempDir(), binary, "fixture")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error=%v, want timeout", err)
 	}

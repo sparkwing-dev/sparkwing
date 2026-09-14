@@ -176,12 +176,6 @@ func dispatchRun(args []string) error {
 	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
-	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
-		if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
-			return err
-		}
-	}
-
 	var afterChild func()
 	if flags.ref != "" {
 		_, pipelineDirectory, cleanup, err := setupRefWorktree(dir, flags.ref)
@@ -313,6 +307,22 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, orchestrator.PriorityEnv, priority)
 	}
 
+	run := newPipelineRun(dir, compileOptions{
+		NoUpdate:   flags.noUpdate || flags.fleet,
+		AfterChild: afterChild,
+	})
+	defer run.stop()
+	if err := run.materialize(env); err != nil {
+		return run.finish(err)
+	}
+	findings, err := declaredRisks(context.Background(), dir, pipelineName, env, run.opts)
+	if err != nil {
+		return run.finish(err)
+	}
+	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
+		return err
+	}
+
 	if runNeedsDaemon(flags, passthrough) {
 		ensureRunDaemonFn()
 	}
@@ -327,8 +337,7 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, "SPARKWING_FLEET_PARENT_TOKEN", fleetParentGuard.Token)
 	}
 	sweepStraySessionsBeforeRun()
-	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
-		compileOptions{NoUpdate: flags.noUpdate || flags.fleet, AfterChild: afterChild})
+	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
 }
 
 func removeEnv(env []string, key string) []string {

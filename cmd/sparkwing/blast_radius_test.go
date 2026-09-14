@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -164,7 +165,7 @@ func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 
 func TestLookupCachedRisks_DegradesGracefully(t *testing.T) {
 	tmp := t.TempDir()
-	if got := lookupCachedRisks(tmp, "any"); got != nil {
+	if got := lookupCachedRisks(context.Background(), tmp, "any"); got != nil {
 		t.Errorf("lookupCachedRisks on missing cache = %v, want nil", got)
 	}
 }

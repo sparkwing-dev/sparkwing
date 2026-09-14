@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -67,7 +68,7 @@ func runInternalCompletePipelines(_ []string) error {
 	shortByName := map[string]string{}
 	helpByName := map[string]string{}
 	if sparkwingDir, ok := walkUpForSparkwing(cwd); ok {
-		if schema, serr := readDescribeCache(sparkwingDir); serr == nil {
+		if schema, serr := readDescribeCache(context.Background(), sparkwingDir); serr == nil {
 			for _, dp := range schema {
 				if dp.Short != "" {
 					shortByName[dp.Name] = dp.Short
@@ -156,7 +157,7 @@ func runInternalCompletePipelineFlags(args []string) error {
 	if !ok {
 		return nil
 	}
-	schema, err := pipelineFlagsFromCache(sparkwingDir, pipelineName)
+	schema, err := pipelineFlagsFromCache(context.Background(), sparkwingDir, pipelineName)
 	if err == nil && len(schema) > 0 {
 		for _, a := range schema {
 			body := a.Desc

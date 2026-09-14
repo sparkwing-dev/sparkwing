@@ -17,47 +17,110 @@ import (
 )
 
 func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
+	run := newPipelineRun(sparkwingDir, opts)
+	defer run.stop()
+	if err := run.materialize(env); err != nil {
+		return run.finish(err)
+	}
+	return run.finish(run.exec(args, env))
+}
+
+// safety: the dispatcher has to weigh what a pipeline declares before it
+// starts, and only the compiled binary declares it, so building the binary and
+// exec'ing it are two steps a caller sequences within one interrupt lifetime.
+type pipelineRun struct {
+	ctx            context.Context
+	stopSignals    func()
+	raiseInterrupt func()
+	sparkwingDir   string
+	opts           compileOptions
+	lease          *bincache.Lease
+	source         string
+}
+
+func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
 	ctx, stopSignals, raiseInterrupt := interruptContext()
-	defer stopSignals()
-	err := prepareAndExec(ctx, stopSignals, sparkwingDir, args, env, opts)
-	if ctx.Err() != nil {
-		stopSignals()
+	return &pipelineRun{
+		ctx:            ctx,
+		stopSignals:    stopSignals,
+		raiseInterrupt: raiseInterrupt,
+		sparkwingDir:   sparkwingDir,
+		opts:           opts,
+	}
+}
+
+func (r *pipelineRun) materialize(env []string) error {
+	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
+		return err
+	}
+	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
+		return nil
+	}
+	// safety: a tree whose cache key cannot be computed runs through `go run .`,
+	// which publishes no binary, so there is nothing to materialize or describe.
+	if key, keyParts, keyErr := bincache.ExplainCacheKey(r.sparkwingDir); keyErr == nil {
+		lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, withWingdHost(env))
+		if err != nil {
+			return err
+		}
+		r.lease, r.source = lease, source
+	}
+	return nil
+}
+
+func (r *pipelineRun) exec(args, env []string) error {
+	env = withWingdHost(env)
+	if r.lease == nil {
+		r.stopSignals()
+		return runGo(r.sparkwingDir, append([]string{"run", "."}, args...), env, r.opts.AfterChild)
+	}
+	env = append(env, "SPARKWING_BINARY_SOURCE="+r.source)
+	if err := r.ctx.Err(); err != nil {
+		return err
+	}
+	// safety: the pipeline binary drives the terminal from here, so the CLI
+	// must stop catching signals it can no longer act on for that program.
+	r.stopSignals()
+	if fleetExecutionEnv(env) {
+		return runExec(r.lease.Path(), args, r.sparkwingDir, env, r.opts.AfterChild)
+	}
+	return r.lease.ExecReplace(args, r.sparkwingDir, env, r.opts.AfterChild)
+}
+
+func (r *pipelineRun) stop() {
+	r.stopSignals()
+	if r.lease == nil {
+		return
+	}
+	if err := r.lease.Release(); err != nil {
+		slog.Default().Debug("pipeline binary lease release failed", "err", err)
+	}
+}
+
+func (r *pipelineRun) finish(err error) error {
+	if r.ctx.Err() != nil {
+		r.stopSignals()
 		// safety: raiseInterrupt does not return on a platform that can
 		// re-raise, so teardown has to happen before it, not in a defer.
-		if opts.AfterChild != nil {
-			opts.AfterChild()
+		if r.opts.AfterChild != nil {
+			r.opts.AfterChild()
 		}
-		raiseInterrupt()
+		r.raiseInterrupt()
 	}
 	return err
 }
 
-func prepareAndExec(
+// safety: the returned lease pins the cache entry the binary lives in, so the
+// caller releases it once the binary has run or been read.
+func pipelineBinary(
 	ctx context.Context,
-	stopSignals func(),
-	sparkwingDir string,
-	args, env []string,
-	opts compileOptions,
-) error {
-	if err := resolveSparks(ctx, sparkwingDir, opts); err != nil {
-		return err
-	}
-
-	env = withWingdHost(env)
-
-	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
-		stopSignals()
-		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env, opts.AfterChild)
-	}
-
-	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
-	if err != nil {
-		stopSignals()
-		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env, opts.AfterChild)
-	}
+	sparkwingDir, key string,
+	keyParts []bincache.KeyPart,
+	env []string,
+) (*bincache.Lease, string, error) {
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	source := "cached"
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
@@ -98,9 +161,8 @@ func prepareAndExec(
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, "", err
 	}
-	defer func() { _ = lease.Release() }()
 	if published && source == "compiled" {
 		if gcURL := bincache.CacheURL(); gcURL != "" {
 			if err := bincache.UploadBinary(ctx, gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
@@ -109,25 +171,33 @@ func prepareAndExec(
 		}
 	}
 	lease.RecordUse(sparkwingDir, keyParts)
-	ensureDescribeCache(sparkwingDir, key, lease.Path())
-	env = append(env, "SPARKWING_BINARY_SOURCE="+source)
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	// safety: the pipeline binary drives the terminal from here, so the CLI
-	// must stop catching signals it can no longer act on for that program.
-	stopSignals()
-	if fleetExecutionEnv(env) {
-		return runExec(lease.Path(), args, sparkwingDir, env, opts.AfterChild)
-	}
-	return lease.ExecReplace(args, sparkwingDir, env, opts.AfterChild)
+	ensureDescribeCache(ctx, sparkwingDir, key, lease.Path())
+	return lease, source, nil
 }
 
-func ensureDescribeCache(sparkwingDir, key, binPath string) {
+// safety: what a pipeline declares lives in its compiled binary, so a home
+// that holds no build of it can answer for a declaration only after this.
+func ensurePipelineDeclarations(ctx context.Context, sparkwingDir string, env []string, opts compileOptions) error {
+	if err := resolveSparks(ctx, sparkwingDir, opts); err != nil {
+		return err
+	}
+	if key, keyParts, keyErr := bincache.ExplainCacheKey(sparkwingDir); keyErr == nil {
+		lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, env)
+		if err != nil {
+			return err
+		}
+		return lease.Release()
+	}
+	// safety: an unkeyable tree runs through `go run .`, which publishes no
+	// binary to read a declaration from; the caller proceeds without them.
+	return nil
+}
+
+func ensureDescribeCache(ctx context.Context, sparkwingDir, key, binPath string) {
 	if _, err := os.Stat(describeCachePath(key)); err == nil {
 		return
 	}
-	if err := writeDescribeCache(sparkwingDir, binPath); err != nil {
+	if err := writeDescribeCache(ctx, sparkwingDir, binPath); err != nil {
 		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
 	}
 }

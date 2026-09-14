@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"sort"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -12,8 +13,26 @@ type stepRiskFinding struct {
 	Labels []string
 }
 
-func lookupCachedRisks(sparkwingDir, pipelineName string) []stepRiskFinding {
-	schemas, err := readDescribeCache(sparkwingDir)
+// safety: a step declares its risk labels in Go, so they are legible only once
+// the .sparkwing/ binary exists; a tree this machine has never built is built
+// here, because the gate has to weigh the declaration before the run starts.
+func declaredRisks(
+	ctx context.Context,
+	sparkwingDir, pipelineName string,
+	env []string,
+	opts compileOptions,
+) ([]stepRiskFinding, error) {
+	if schemas, err := readDescribeCache(ctx, sparkwingDir); err == nil && len(schemas) > 0 {
+		return lookupCachedRisks(ctx, sparkwingDir, pipelineName), nil
+	}
+	if err := ensurePipelineDeclarations(ctx, sparkwingDir, env, opts); err != nil {
+		return nil, err
+	}
+	return lookupCachedRisks(ctx, sparkwingDir, pipelineName), nil
+}
+
+func lookupCachedRisks(ctx context.Context, sparkwingDir, pipelineName string) []stepRiskFinding {
+	schemas, err := readDescribeCache(ctx, sparkwingDir)
 	if err != nil || schemas == nil {
 		return nil
 	}
