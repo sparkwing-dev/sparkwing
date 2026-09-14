@@ -146,10 +146,11 @@ func withViewerIdentity(tabs *viewerTabs, next http.Handler) http.Handler {
 				" characters of letters, digits, dot, underscore or dash"))
 			return
 		}
-		r = r.Clone(r.Context())
+		ctx := r.Context()
+		r = r.Clone(ctx)
 		r.Header.Del(store.RunnerIdentityHeader)
 		if id := viewerIdentity(tabs, r, tab); id != "" {
-			r = r.WithContext(logs.WithReaderIdentity(r.Context(), id))
+			r = r.WithContext(logs.WithReaderIdentity(ctx, id))
 		}
 		next.ServeHTTP(w, r)
 	})
