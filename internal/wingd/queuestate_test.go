@@ -15,6 +15,9 @@ import (
 )
 
 func TestQueueState_HostPressureExplainsWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
@@ -134,6 +137,9 @@ func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T
 }
 
 func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
@@ -772,6 +778,9 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 }
 
 func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{7001: {Fraction: 0.9}}}
 	startDaemon(t, wingd.Config{
@@ -802,6 +811,9 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 }
 
 func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{8001: {HasDescendant: true}}}
 	startDaemon(t, wingd.Config{

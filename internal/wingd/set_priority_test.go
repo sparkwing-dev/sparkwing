@@ -51,6 +51,9 @@ func waitForParticipant(t *testing.T, home, participantID string) wingwire.Queue
 }
 
 func TestSetPriority_WaiterIsReRankedAndAdmitted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30), GraceWindow: -1})
 

@@ -136,6 +136,9 @@ func TestAPISocketSitsBesideAdmissionAtMode0600(t *testing.T) {
 }
 
 func TestAPISocketRefusesAPeerFromAnotherAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	restore := readPeerUID
 	foreign := os.Getuid() + 1
 	readPeerUID = func(net.Conn) (int, bool, error) { return foreign, true, nil }
@@ -253,6 +256,9 @@ func send(t *testing.T, nc net.Conn, msg wingwire.Message) {
 }
 
 func TestAnOpenAPIConnectionKeepsTheDaemonFromIdling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.9s of real work; the fast class runs under -short")
+	}
 	d, rec, errc := startAPIDaemon(t, Config{
 		IdleTimeout:      300 * time.Millisecond,
 		GraceWindow:      -1,

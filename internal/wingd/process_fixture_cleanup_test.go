@@ -12,6 +12,9 @@ import (
 const fixtureCleanupChildEnv = "SPARKWING_FIXTURE_CLEANUP_CHILD"
 
 func TestBuildFixtureProcessRemovesTemporaryDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	if marker := os.Getenv(fixtureCleanupChildEnv); marker != "" {
 		dir := filepath.Dir(buildFixture(t))
 		if err := os.WriteFile(marker, []byte(dir), 0o600); err != nil {

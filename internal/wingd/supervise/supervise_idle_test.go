@@ -20,6 +20,9 @@ func (c *daemonChild) Terminate() error   { c.stop(); return nil }
 func (c *daemonChild) Kill() error        { c.stop(); return nil }
 
 func TestLoopReapsDaemonThatIdlesOutUnderHealthProbes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
 	home, err := os.MkdirTemp("/tmp", "wsup")
 	if err != nil {
 		t.Fatalf("temp home: %v", err)

@@ -208,6 +208,9 @@ func TestUnknownFrameBeforeTheHandshakeIsAnsweredThenClosed(t *testing.T) {
 }
 
 func TestUnknownFramesDoNotHoldTheDaemonPastIdle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
 

@@ -13,6 +13,9 @@ import (
 )
 
 func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
 		Home:             home,

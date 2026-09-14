@@ -212,6 +212,9 @@ func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
 }
 
 func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	var calls atomic.Int32
 	spawnRequested := make(chan struct{})

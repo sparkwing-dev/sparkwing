@@ -42,6 +42,9 @@ func startProbeLoop(t *testing.T, interval time.Duration, probe func(context.Con
 
 func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
@@ -63,6 +66,9 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 
 func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
 
 	// safety: the guard below needs several probes inside this window, and the window
 	// holds only as many as the interval divides into it. A contended machine stretches
@@ -102,6 +108,9 @@ func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 
 func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
@@ -126,6 +135,9 @@ func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 
 func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
@@ -149,6 +161,9 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 
 func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	const idleTimeout = 250 * time.Millisecond
@@ -173,6 +188,9 @@ func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
 
 func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
