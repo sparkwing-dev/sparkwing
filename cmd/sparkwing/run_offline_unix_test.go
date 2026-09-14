@@ -264,10 +264,6 @@ func offlineConnectedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, mar
 // safety: the host module cache's download tree is laid out as a module proxy,
 // so seeding the fixture from it leaves this suite runnable on a host with no
 // network.
-// offlineConnectedProxy puts the host module cache, whose download tree is laid
-// out as a module proxy, ahead of the public one. Everything this fixture needs
-// is normally already on disk, so the run that populates the fixture cache costs
-// no fetch; the public proxy answers only for a module no build here has seen.
 func offlineConnectedProxy(t *testing.T) string {
 	t.Helper()
 	return "file://" + filepath.ToSlash(offlineHostModuleProxy(t)) + ",https://proxy.golang.org,direct"
