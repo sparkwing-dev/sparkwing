@@ -780,9 +780,11 @@ principal at zero can still finish whatever it already has in flight.
 The concurrency caps bound that overshoot only as far as they reach. The
 most a team can take past its monthly budget is
 
-    (--egress-max-downloads + --egress-max-log-streams)
-      x  the largest object those slotted routes serve
-      x  the number of pods behind the bearer
+```text
+(--egress-max-downloads + --egress-max-log-streams)
+  x  the largest object those slotted routes serve
+  x  the number of pods behind the bearer
+```
 
 because each pod holds its own slots, plus whatever the gitcache proxy
 routes serve, which hold no slot at all. A caller that invents pod names
