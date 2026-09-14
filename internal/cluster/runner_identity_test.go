@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -72,8 +74,11 @@ func TestRunPoolLoop_NamesItsRunnerOnEveryClaim(t *testing.T) {
 	if !ok {
 		t.Fatal("the pool loop never claimed")
 	}
-	if got != "runner:pool-host" {
-		t.Errorf("claim sent %s=%q, want the configured holder prefix", store.RunnerIdentityHeader, got)
+	want := "runner:pool-host:" + strconv.Itoa(os.Getpid())
+	if got != want {
+		t.Errorf("claim sent %s=%q, want %q: two runner processes on one host share a "+
+			"holder prefix and only the process id tells them apart",
+			store.RunnerIdentityHeader, got, want)
 	}
 	if !capture.stable("/api/v1/nodes/claim") {
 		t.Error("the identity changed between polls; each poll would buy a fresh budget")

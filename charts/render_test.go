@@ -1008,6 +1008,25 @@ func renderController(t *testing.T, sets ...string) renderedContainer {
 	return runnerContainer(t, rendered)
 }
 
+func TestControllerLimitsProfileAndRequestBudgetsReachTheArgs(t *testing.T) {
+	if args := renderController(t).Args; containsArg(args, "--limits-profile=cloud") {
+		t.Errorf("default controller args carry a limits profile: %v", args)
+	}
+	args := renderController(t,
+		"controller.limitsProfile=cloud",
+		"controller.requestsPerTokenMinute=2000",
+		"controller.requestsPerMinuteAlarm=5000").Args
+	for _, want := range []string{
+		"--limits-profile=cloud",
+		"--requests-per-token-minute=2000",
+		"--requests-per-minute-alarm=5000",
+	} {
+		if !containsArg(args, want) {
+			t.Errorf("controller args = %v, want %q", args, want)
+		}
+	}
+}
+
 func TestWebConfiguredControllerTokenIsRequired(t *testing.T) {
 	web := runnerContainer(t, helmTemplate(t, "sparkwing", "web.tokenSecret.name=sparkwing-token"))
 	for _, env := range web.Env {

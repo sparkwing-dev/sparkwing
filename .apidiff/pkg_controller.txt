@@ -50,6 +50,8 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const ClaimPollInterval = 500 * time.Millisecond
+func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
 const CreditsRefusedCode = "insufficient_credits"
@@ -113,6 +115,25 @@ type GitHubWebhookDisconnectResponse struct {
 	HookID      int64
 }
 const IdleClaimPollJitterFactor = 1.25
+func LimitsProfile(name string) (LimitsProfileValues, error)
+const LimitsProfileCloud = "cloud"
+const LimitsProfileCloudFree = "cloud-free"
+func LimitsProfileNames() []string
+type LimitsProfileValues struct {
+	ClaimsPerRunnerMinute int
+
+	HeartbeatsPerRunnerMinute int
+
+	RequestsPerTokenMinute int
+
+	RequestsPerMinuteAlarm int
+
+	MaxLogStreamsPerPrincipal int
+
+	MaxDownloadsPerPrincipal int
+
+	EnforceIdleClaimPoll bool
+}
 type LiveLogRead struct {
 	Start int64
 
@@ -182,8 +203,6 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
-const RecommendedClaimsPerMinute = 1200
-func RecommendedClaimsPerMinuteForSlots(slots int) int
 const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
@@ -240,6 +259,7 @@ func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
+func (s *Server) WithIdleClaimPollEnforced(on bool) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
@@ -252,6 +272,7 @@ func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
+func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	CachePod string
@@ -261,6 +282,11 @@ type ServicesResponse struct {
 	Dashboard string
 }
 const StorageMaintenanceInterval = time.Hour
+type TokenRequestBudget struct {
+	PerTokenMinute int
+
+	AlarmPerMinute int
+}
 type TrendPoint struct {
 	Bucket    string
 	Total     int

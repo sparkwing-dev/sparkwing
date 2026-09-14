@@ -179,11 +179,10 @@ func TestRequestBudget_LocalExecutionBudgetsNothing(t *testing.T) {
 // The recommendations must clear the cadence the shipped runners actually use:
 // a pool runner claims every 500ms and a node heartbeat runs every 3s.
 func TestRequestBudget_RecommendationsClearTheShippedCadence(t *testing.T) {
-	claimsAMinute := int(time.Minute / (500 * time.Millisecond))
 	beatsAMinute := int(time.Minute / (3 * time.Second))
-	if controller.RecommendedClaimsPerMinute < claimsAMinute*2 {
-		t.Errorf("RecommendedClaimsPerMinute=%d; a 500ms poller spends %d a minute",
-			controller.RecommendedClaimsPerMinute, claimsAMinute)
+	if controller.CompliantClaimPollsPerMinute() != int(time.Minute/controller.ClaimPollInterval) {
+		t.Errorf("CompliantClaimPollsPerMinute=%d; a %s poller spends a minute of them",
+			controller.CompliantClaimPollsPerMinute(), controller.ClaimPollInterval)
 	}
 	if controller.RecommendedHeartbeatsPerMinute < beatsAMinute*2 {
 		t.Errorf("RecommendedHeartbeatsPerMinute=%d; a 3s heartbeat spends %d a minute",
@@ -193,7 +192,7 @@ func TestRequestBudget_RecommendationsClearTheShippedCadence(t *testing.T) {
 
 func TestRequestBudget_SharedTokenFleetStaysAliveUnderTheRecommendedBudget(t *testing.T) {
 	base := newBudgetServer(t, controller.RequestBudget{
-		ClaimsPerMinute:     controller.RecommendedClaimsPerMinute,
+		ClaimsPerMinute:     controller.CompliantClaimPollsPerMinute() * 4,
 		HeartbeatsPerMinute: controller.RecommendedHeartbeatsPerMinute,
 	})
 

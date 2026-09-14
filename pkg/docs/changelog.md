@@ -20,6 +20,73 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **controller + chart:** `--limits-profile` (chart `controller.limitsProfile`)
+  names a set of abuse guards a hosted controller runs with, so provisioning
+  writes one setting rather than one per guard. `cloud` sets the per-runner
+  claim and heartbeat budgets to 480 and 1200 a minute, the per-token budget to
+  2000 a minute, the request rate alarm to 5000 a minute, the egress caps to 50
+  live log streams and 20 concurrent downloads per principal, and turns
+  idle-poll enforcement on; `cloud-free` sets 240, 600, 600, 5000, 10 and 5
+  with the same enforcement. The claim budgets are worked from the cadence the
+  shipped claim loop keeps, 120 polls a minute at its 500ms interval, so a
+  runner keeping its configured cadence is never refused and one in a tight
+  loop is held near the work it was asked to do. A profile fills a guard only
+  where the command line and the environment named none, so an explicit value
+  always wins, including an explicit zero that leaves a guard unlimited.
+  `controller.LimitsProfile`, `controller.LimitsProfileNames`,
+  `controller.ClaimPollInterval` and `controller.CompliantClaimPollsPerMinute`
+  are the Go surface. Empty, the default, supplies nothing: a self-hosted
+  controller keeps every budget unlimited.
+
+- **controller + chart:** `--requests-per-token-minute` (chart
+  `controller.requestsPerTokenMinute`) budgets every route one token can reach,
+  keyed on the token prefix alone, and answers `429` with a `Retry-After` past
+  it. It is what bounds a caller varying the runner it says it is, which the
+  per-runner budgets cannot: on the claim routes that name is the caller's own
+  word. `--requests-per-minute-alarm` (chart
+  `controller.requestsPerMinuteAlarm`) refuses nothing and logs at warn once a
+  minute when the controller serves more requests than it was sized for,
+  counted by `sparkwing_request_rate_alarm_total`. The agent liveness heartbeat
+  is never budgeted. `controller.TokenRequestBudget` and
+  `Server.WithTokenRequestBudget` are the Go surface; both are unlimited unless
+  an operator or a profile names a number.
+
+- **controller:** A claim that comes back with a node no longer spends the
+  per-runner claim budget. An award is work the controller chose to hand out,
+  and the loop that gets one re-claims at once rather than waiting its poll
+  interval, so charging it bounded how fast a runner could execute rather than
+  how fast it could ask: eight slots running 250ms nodes shed most of their
+  claims at any budget worked from a poll cadence. The budget now bounds empty
+  polling, which is what a runner can do without limit.
+
+- **controller:** `Server.WithIdleClaimPollEnforced` answers a claim poll that
+  arrives sooner than the widest idle interval the controller suggests with
+  `429` and a `Retry-After` naming the rest of the wait. Enforcement starts
+  only once that interval has been the standing suggestion for a whole
+  interval, and lifts as soon as work is handed out, so a runner honoring the
+  suggestion is never refused and a fleet is never held off a queue that has
+  filled. It guards the two routes that carry the suggestion, `POST
+  /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`, and is keyed on the
+  token prefix together with the runner.
+  `sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
+  refusals. Off unless a limits profile turns it on.
+
+- **SDK:** `client.UnavailableBackoff`, `client.AdvisedPoll`, `client.NewShedLog`
+  and `client.PollAdvisor` are how a claim or heartbeat loop reacts to a
+  controller's backpressure: wait out a `Retry-After` capped at
+  `client.MaxClaimBackoff` and spread, widen an idle poll only as far as the
+  controller suggested and `client.MaxPollAdvice` allows, and say so in the log
+  once every `client.ShedWarnInterval`. They were the warm-runner pool's own
+  copies; every loop that talks to a controller now shares one.
+
+- **controller + CLI:** `GET /api/v1/compute-limits` carries a `budgets` object
+  with the per-runner and per-token request budgets, the request rate alarm,
+  the idle-poll suggestion and whether it is enforced, and the egress stream
+  and download caps in force, and `sparkwing cluster limits show` prints them
+  beside the stored compute guards.
+
 ### Changed
 
 - **release:** The hosted release workflow runs no check on a tagged commit. It
@@ -34,6 +101,29 @@ unlock.
   changelog section. The checks are being reintroduced deliberately under the
   CI/CD group; `ci.yaml` still runs them on every pull request and every push to
   main.
+
+### Fixed
+
+- **CLI + cluster:** `sparkwing worker` and the in-process worker loop now name
+  themselves to the controller, honor `X-Sparkwing-Poll-After`, and back off on
+  a `Retry-After` instead of repolling at their own cadence. They had no runner
+  identity, so a fleet under a per-runner budget shared one bucket, and a shed
+  claim was logged at error on every poll; the refusal is now one line a minute
+  at info naming the wait. A pool runner's identity carries its process id too,
+  so two runner processes on one host are two runners rather than one polling
+  twice.
+
+### Removed
+
+- **pkg/controller (Breaking):** `RecommendedClaimsPerMinute` and
+  `RecommendedClaimsPerMinuteForSlots` are gone. They sized a claim budget as
+  `1200 x max_concurrent` from a model where every offer slot spends a
+  preparation plus an offer per round, which no shipped runner does: a pool
+  runner claims one node at a time whatever its concurrency. Work a claim
+  budget from `controller.CompliantClaimPollsPerMinute` instead, which reports
+  what an empty-queue poll cadence costs, and remember that an awarded claim
+  spends no budget. See
+  [the migration guide](docs/migrations/_unreleased.md#the-claim-budget-recommendation-helpers-are-removed).
 
 ## [v0.52.1] - 2026-09-14
 ### Fixed

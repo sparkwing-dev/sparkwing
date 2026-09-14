@@ -103,7 +103,18 @@ const (
 //
 // The reader reports a malformed environment fallback and a negative
 // flag value rather than serving a budget the operator did not mean.
-func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Surfaces) func() (Config, error) {
+// Named reports which budgets the operator set themselves, on the command line
+// or in the environment. A caller filling unset budgets from a profile needs it
+// to tell a budget nobody named from one deliberately set to zero, which is
+// unlimited and a value in its own right.
+type Named struct {
+	MonthlyBytes    bool
+	DailyAlarmBytes bool
+	MaxLogStreams   bool
+	MaxDownloads    bool
+}
+
+func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Surfaces) func() (Config, Named, error) {
 	names := FlagNames{
 		MonthlyBytes:    FlagMonthlyBytes,
 		DailyAlarmBytes: FlagDailyAlarmBytes,
@@ -111,8 +122,19 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		MaxDownloads:    FlagMaxDownloads,
 	}
 	var errs []error
+	var named Named
+	fromEnv := map[string]*bool{
+		EnvMonthlyBytes:    &named.MonthlyBytes,
+		EnvDailyAlarmBytes: &named.DailyAlarmBytes,
+		EnvMaxLogStreams:   &named.MaxLogStreams,
+		EnvMaxDownloads:    &named.MaxDownloads,
+	}
 	read := func(suffix string) *int64 {
-		v, err := int64Env(getenv, EnvName(svc, suffix))
+		name := EnvName(svc, suffix)
+		if strings.TrimSpace(getenv(name)) != "" {
+			*fromEnv[suffix] = true
+		}
+		v, err := int64Env(getenv, name)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -146,9 +168,15 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 				"with 429. 0, the default, is unlimited (env: "+EnvName(svc, EnvMaxLogStreams)+")")
 	}
 
-	return func() (Config, error) {
+	return func() (Config, Named, error) {
+		// safety: the flag wins over the environment either way, so a budget
+		// spelled on the command line is named however the environment reads.
+		named.MonthlyBytes = named.MonthlyBytes || fs.Changed(trimFlag(names.MonthlyBytes))
+		named.DailyAlarmBytes = named.DailyAlarmBytes || fs.Changed(trimFlag(names.DailyAlarmBytes))
+		named.MaxLogStreams = named.MaxLogStreams || fs.Changed(trimFlag(names.MaxLogStreams))
+		named.MaxDownloads = named.MaxDownloads || fs.Changed(trimFlag(names.MaxDownloads))
 		if len(errs) > 0 {
-			return Config{}, errs[0]
+			return Config{}, Named{}, errs[0]
 		}
 		cfg := Config{GlobalDailyAlarmBytes: *dailyFlag, Flags: names}
 		if monthlyFlag != nil {
@@ -160,8 +188,14 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		if streamsFlag != nil {
 			cfg.MaxStreamsPerPrincipal = int(*streamsFlag)
 		}
-		return cfg, cfg.Validate()
+		return cfg, named, cfg.Validate()
 	}
+}
+
+// safety: the flag names carry their leading dashes so a refusal can print
+// them, and a flag set is asked without.
+func trimFlag(name string) string {
+	return strings.TrimPrefix(name, "--")
 }
 
 // Validate reports a budget spelled with a negative number, which is

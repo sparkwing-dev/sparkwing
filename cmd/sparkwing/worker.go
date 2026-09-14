@@ -13,6 +13,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
 
 func runWorker(args []string) error {
@@ -45,7 +46,9 @@ func runWorker(args []string) error {
 	fmt.Fprintf(os.Stderr, "sparkwing worker: profile=%s controller=%s poll=%s\n",
 		prof.Name, prof.ControllerURL(), *poll)
 
-	cli := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
+	cli := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+		WithRunnerIdentity(logs.ProcessIdentity("worker"))
+	shed := client.NewShedLog(client.ShedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -55,12 +58,20 @@ func runWorker(args []string) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
+			if wait, ok := client.UnavailableBackoff(err, *poll); ok {
+				if shed.Due() {
+					fmt.Fprintf(os.Stderr,
+						"worker: the controller is shedding claims; polling again in %s\n", wait)
+				}
+				sleepOrCancel(ctx, wait)
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "worker: claim failed: %v (retrying)\n", err)
 			sleepOrCancel(ctx, *poll)
 			continue
 		}
 		if trigger == nil {
-			sleepOrCancel(ctx, *poll)
+			sleepOrCancel(ctx, client.AdvisedPoll(*poll, cli))
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)

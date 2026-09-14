@@ -69,7 +69,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token).
-		WithRunnerIdentity(cfg.HolderPrefix)
+		WithRunnerIdentity(holderRunnerIdentity(cfg.HolderPrefix))
 
 	var admission *orchestrator.LocalAdmission
 	var provider headroomProvider
@@ -139,8 +139,8 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		"auth", cfg.Token != "",
 	)
 
-	advisor, _ := claimer.(pollAdvisor)
-	idlePoll := func() time.Duration { return advisedPoll(cfg.PollInterval, advisor) }
+	advisor, _ := claimer.(client.PollAdvisor)
+	idlePoll := func() time.Duration { return client.AdvisedPoll(cfg.PollInterval, advisor) }
 
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	sharedSlots := cfg.SharedSlots
@@ -154,7 +154,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// safety: a compute guard holds for as long as the work above it runs, so
 	// the log says so once rather than on every poll.
 	limitLogged := false
-	shed := newShedLog(shedWarnInterval)
+	shed := client.NewShedLog(client.ShedWarnInterval)
 	for {
 		if err := ctx.Err(); err != nil {
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
@@ -214,11 +214,11 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 				sleepOrCancel(ctx, cfg.PollInterval)
 				continue
 			}
-			if wait, ok := unavailableBackoff(err, cfg.PollInterval); ok {
+			if wait, ok := client.UnavailableBackoff(err, cfg.PollInterval); ok {
 				observeClaimOutcome("unavailable")
 				logger.Debug("claim shed by the controller; backing off",
 					"err", err, "retry_after", wait, "source", cfg.SourceName)
-				if shed.due() {
+				if shed.Due() {
 					logger.Warn("controller is shedding claims; polling more slowly",
 						"err", err, "retry_after", wait, "source", cfg.SourceName)
 				}
@@ -533,7 +533,7 @@ func runPoolHeartbeat(
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	lastOK := time.Now()
-	shed := newShedLog(shedWarnInterval)
+	shed := client.NewShedLog(client.ShedWarnInterval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -565,11 +565,11 @@ func runPoolHeartbeat(
 				killNode()
 				return
 			}
-			if wait, ok := unavailableBackoff(err, minShedBackoff); ok {
+			if wait, ok := client.UnavailableBackoff(err, minShedBackoff); ok {
 				logger.Debug(source+" heartbeat shed by the controller; backing off",
 					"run_id", runID, "node_id", nodeID,
 					"retry_after", wait, "err", err)
-				if shed.due() {
+				if shed.Due() {
 					logger.Warn(source+" heartbeat: controller is shedding heartbeats",
 						"run_id", runID, "node_id", nodeID,
 						"retry_after", wait, "err", err,

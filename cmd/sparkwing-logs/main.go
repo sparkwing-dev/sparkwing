@@ -152,7 +152,7 @@ func run(args []string) error {
 		BinaryRatio:      *binaryRatio,
 	}
 
-	egressCfg, err := readEgress()
+	egressCfg, _, err := readEgress()
 	if err != nil {
 		return err
 	}

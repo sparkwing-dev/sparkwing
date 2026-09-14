@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,4 +87,11 @@ func splitCSV(s string) []string {
 // so a caller with no name of its own names this process instead.
 func processRunnerIdentity(role string) string {
 	return logs.ProcessIdentity(role)
+}
+
+// safety: two runner processes on one host are given the same holder prefix, so
+// the process id is what tells the controller's per-runner budgets and its idle
+// poll gate that they are two runners rather than one runner polling twice.
+func holderRunnerIdentity(prefix string) string {
+	return prefix + ":" + strconv.Itoa(os.Getpid())
 }

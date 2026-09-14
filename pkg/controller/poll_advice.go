@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -51,6 +52,7 @@ const idleClaimPollFraction = 4
 // suggests nothing.
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server {
 	s.idleClaimPoll = max
+	s.rebuildIdlePollGate()
 	return s
 }
 
@@ -77,6 +79,27 @@ func (s *Server) claimPollAdvice(now time.Time) time.Duration {
 	return min(advice.Truncate(time.Second), s.idleClaimPoll)
 }
 
+// WithIdleClaimPollEnforced answers a claim poll that arrives while this
+// controller is suggesting its widest idle interval, and sooner than that
+// interval, with 429 and a Retry-After naming the rest of the wait. A runner
+// that honors the suggestion is never refused, the refusal lifts the moment
+// work arrives, and a controller that suggests nothing enforces nothing.
+func (s *Server) WithIdleClaimPollEnforced(on bool) *Server {
+	s.idlePollsEnforced = on
+	s.rebuildIdlePollGate()
+	return s
+}
+
+// safety: the gate admits one poll per suggested interval, so it is rebuilt
+// whenever the suggestion changes rather than reading a window that has moved.
+func (s *Server) rebuildIdlePollGate() {
+	if !s.idlePollsEnforced || s.idleClaimPoll <= 0 {
+		s.idlePolls = nil
+		return
+	}
+	s.idlePolls = ratelimit.New(1, s.idleClaimPoll)
+}
+
 // safety: a header set after the status line is never sent, so this runs ahead of WriteHeader.
 func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
 	advice := s.claimPollAdvice(time.Now())
@@ -84,4 +107,35 @@ func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
 		return
 	}
 	w.Header().Set(store.ClaimPollAfterHeader, strconv.Itoa(int(advice.Seconds())))
+}
+
+// safety: a refusal is written here, so a caller that gets false must return
+// without writing its own answer.
+func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request) bool {
+	if s.idlePolls == nil {
+		return true
+	}
+	now := time.Now()
+	// safety: a runner honors the suggestion it was last sent, not the one the
+	// controller would send now, so the gate waits until the suggestion a whole
+	// interval ago was already the widest one. Until then, and whenever work
+	// arrives, this refuses nothing.
+	if s.claimPollAdvice(now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
+		return true
+	}
+	key := s.runnerBudgetKey(r)
+	if s.idlePolls.Allow(key, now) {
+		return true
+	}
+	// safety: a refused poll is not charged again, so the bucket never owes
+	// more than the interval and the wait named here is never shorter than the
+	// real refill nor longer than one suggestion. Two of them, spread, are what
+	// the startup check fits inside the placement hold.
+	wait := s.idleClaimPoll
+	observePrincipalThrottled(budgetClassIdlePoll)
+	s.logger.Warn("claim shed",
+		"runner", key, "route_class", budgetClassIdlePoll, "retry_after", wait,
+		"reason", "polled sooner than the suggested idle interval")
+	writeRetryAfter(w, wait, "poll again no sooner than the interval this controller suggested")
+	return false
 }

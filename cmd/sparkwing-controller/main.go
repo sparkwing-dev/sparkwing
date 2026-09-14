@@ -140,22 +140,49 @@ func run(args []string) error {
 			"first one started instead of starting a second. GitHub deliveries "+
 			"are deduped by delivery id and body digest regardless. Zero dedupes "+
 			"no API submission.")
-	claimsPerMinute := fs.Int("claims-per-runner-minute", 0,
+	claimsPerMinute := fs.Int(flagClaimsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
 			"minute, keyed on the token prefix together with the runner the "+
 			"request names. Past it a claim is answered 429 with a Retry-After "+
-			"naming the refill delay. Zero is unlimited. Size it as %d x the "+
-			"agent's max_concurrent: each offer slot polls under the agent's one "+
-			"name and spends a preparation plus an offer per round at the 500ms "+
-			"cadence, so a 1-slot agent wants %d and an 8-slot agent %d.",
-			controller.RecommendedClaimsPerMinute,
-			controller.RecommendedClaimsPerMinuteForSlots(1),
-			controller.RecommendedClaimsPerMinuteForSlots(8)))
-	heartbeatsPerMinute := fs.Int("heartbeats-per-runner-minute", 0,
+			"naming the refill delay. Zero is unlimited. A claim that comes back "+
+			"with a node spends nothing: an award is work this controller handed "+
+			"out and the loop re-claims at once, so the budget bounds empty "+
+			"polling, which a runner can do without limit. Work it from that "+
+			"cadence rather than a round number: the loop polls once every %s "+
+			"while the queue is empty, which is %d requests a minute, so %d "+
+			"allows four times that and %d eight.",
+			controller.ClaimPollInterval,
+			controller.CompliantClaimPollsPerMinute(),
+			controller.CompliantClaimPollsPerMinute()*4,
+			controller.CompliantClaimPollsPerMinute()*8))
+	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
-			"rolling minute. The agent liveness heartbeat is never budgeted. "+
-			"Zero is unlimited; %d suits the cadence the shipped runners "+
-			"heartbeat at.", controller.RecommendedHeartbeatsPerMinute))
+			"rolling minute, charged whatever the answer. The agent liveness "+
+			"heartbeat is never budgeted. Zero is unlimited; %d suits the "+
+			"cadence the shipped runners heartbeat at.",
+			controller.RecommendedHeartbeatsPerMinute))
+	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
+		"request budget on every route one token can reach, per rolling minute, "+
+			"keyed on the token prefix. It bounds a caller that varies the runner "+
+			"it says it is, which the per-runner budgets above cannot. A liveness "+
+			"heartbeat for the agent this token enrolled is never the request "+
+			"that is shed; one naming any other agent is budgeted like the rest. "+
+			"Past the budget a request is answered 429 with a Retry-After naming "+
+			"the refill delay. Zero is unlimited.")
+	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
+		"request rate, across every caller, past which this controller logs at "+
+			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+
+			"nothing; it is the notice that one pod is serving more than it was "+
+			"sized for. Zero raises no alarm.")
+	limitsProfile := fs.String("limits-profile", "",
+		fmt.Sprintf("named set of abuse guards this controller runs with: %s. A profile "+
+			"supplies the per-runner and per-token request budgets, the request rate "+
+			"alarm, the egress stream and download caps, and idle-poll enforcement, "+
+			"and it fills a guard only where the command line and the environment "+
+			"named none, so an explicit setting always wins, zero included. Empty, "+
+			"the default, supplies none and leaves a self-hosted controller exactly "+
+			"as it was.",
+			strings.Join(controller.LimitsProfileNames(), ", ")))
 	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
 		"widest poll interval this controller suggests to a claim loop while it "+
 			"has no work to hand out. The suggestion travels as a response header "+
@@ -206,7 +233,7 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
 	}
-	egressCfg, err := readEgress()
+	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
 		return err
 	}
@@ -237,12 +264,36 @@ func run(args []string) error {
 	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
 		return fmt.Errorf("--claims-per-runner-minute and --heartbeats-per-runner-minute cannot be negative")
 	}
+	if *requestsPerTokenMinute < 0 || *requestsPerMinuteAlarm < 0 {
+		return fmt.Errorf("--requests-per-token-minute and --requests-per-minute-alarm cannot be negative")
+	}
 	if *idleClaimPoll < 0 {
 		return fmt.Errorf("--idle-claim-poll cannot be negative")
 	}
 	if err := checkIdleClaimPoll(*idleClaimPoll, *placementHold, *placementLiveness); err != nil {
 		return err
 	}
+	profile, err := controller.LimitsProfile(*limitsProfile)
+	if err != nil {
+		return fmt.Errorf("--limits-profile: %w", err)
+	}
+	guards := applyLimitsProfile(profile, guardValues{
+		ClaimsPerRunnerMinute:     *claimsPerMinute,
+		HeartbeatsPerRunnerMinute: *heartbeatsPerMinute,
+		RequestsPerTokenMinute:    *requestsPerTokenMinute,
+		RequestsPerMinuteAlarm:    *requestsPerMinuteAlarm,
+		MaxLogStreamsPerPrincipal: egressCfg.MaxStreamsPerPrincipal,
+		MaxDownloadsPerPrincipal:  egressCfg.MaxDownloadsPerPrincipal,
+	}, guardsNamed{
+		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
+		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
+		RequestsPerTokenMinute:    fs.Changed(flagRequestsPerTokenMinute),
+		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
+		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
+		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
+	})
+	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
+	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
 			*liveLogNodeKB, *liveLogTotalMB)
@@ -341,10 +392,15 @@ func run(args []string) error {
 			DedupeWindow:         *triggerDedupeWindow,
 		}).
 		WithRequestBudget(controller.RequestBudget{
-			ClaimsPerMinute:     *claimsPerMinute,
-			HeartbeatsPerMinute: *heartbeatsPerMinute,
+			ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,
+			HeartbeatsPerMinute: guards.HeartbeatsPerRunnerMinute,
+		}).
+		WithTokenRequestBudget(controller.TokenRequestBudget{
+			PerTokenMinute: guards.RequestsPerTokenMinute,
+			AlarmPerMinute: guards.RequestsPerMinuteAlarm,
 		}).
 		WithIdleClaimPoll(*idleClaimPoll).
+		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 		WithEgressMeter(egress.New(egressCfg))
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
@@ -387,9 +443,67 @@ func run(args []string) error {
 
 // safety: a runner honoring a suggestion longer than these windows stops
 // counting as live, and local-first placement silently stops preferring it.
-// The margin is a whole second poll, not a hair, because a runner that wakes
-// one request late must still land inside the window.
+// The margin is a whole second poll, because enforcement never names a wait
+// longer than one suggestion and a refused runner must still land inside the
+// window on its second try.
 const idleClaimPollMargin = 2
+
+// safety: one name per flag, because the profile has to ask the flag set
+// whether the operator named a guard and a second spelling would answer for a
+// flag nobody set.
+const (
+	flagClaimsPerRunnerMinute     = "claims-per-runner-minute"
+	flagHeartbeatsPerRunnerMinute = "heartbeats-per-runner-minute"
+	flagRequestsPerTokenMinute    = "requests-per-token-minute"
+	flagRequestsPerMinuteAlarm    = "requests-per-minute-alarm"
+)
+
+type guardValues struct {
+	ClaimsPerRunnerMinute     int
+	HeartbeatsPerRunnerMinute int
+	RequestsPerTokenMinute    int
+	RequestsPerMinuteAlarm    int
+	MaxLogStreamsPerPrincipal int
+	MaxDownloadsPerPrincipal  int
+	EnforceIdleClaimPoll      bool
+}
+
+// safety: a guard the operator named wins whatever its value, so the profile
+// has to be told which ones were named rather than reading zero as unset.
+type guardsNamed struct {
+	ClaimsPerRunnerMinute     bool
+	HeartbeatsPerRunnerMinute bool
+	RequestsPerTokenMinute    bool
+	RequestsPerMinuteAlarm    bool
+	MaxLogStreamsPerPrincipal bool
+	MaxDownloadsPerPrincipal  bool
+}
+
+// safety: zero is a documented value on every guard here, unlimited, so what
+// the operator left alone is what the flag set reports rather than what the
+// value happens to be; an explicit zero keeps its guard off under a profile.
+func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues, named guardsNamed) guardValues {
+	if !named.ClaimsPerRunnerMinute {
+		set.ClaimsPerRunnerMinute = profile.ClaimsPerRunnerMinute
+	}
+	if !named.HeartbeatsPerRunnerMinute {
+		set.HeartbeatsPerRunnerMinute = profile.HeartbeatsPerRunnerMinute
+	}
+	if !named.RequestsPerTokenMinute {
+		set.RequestsPerTokenMinute = profile.RequestsPerTokenMinute
+	}
+	if !named.RequestsPerMinuteAlarm {
+		set.RequestsPerMinuteAlarm = profile.RequestsPerMinuteAlarm
+	}
+	if !named.MaxLogStreamsPerPrincipal {
+		set.MaxLogStreamsPerPrincipal = profile.MaxLogStreamsPerPrincipal
+	}
+	if !named.MaxDownloadsPerPrincipal {
+		set.MaxDownloadsPerPrincipal = profile.MaxDownloadsPerPrincipal
+	}
+	set.EnforceIdleClaimPoll = profile.EnforceIdleClaimPoll
+	return set
+}
 
 func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 	longest := controller.LongestHonoredIdlePoll(idle)
