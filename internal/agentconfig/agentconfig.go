@@ -90,14 +90,39 @@ func selectsEnrolledMode(data []byte) bool {
 	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
 		return false
 	}
-	root := doc.Content[0]
-	if root.Kind != yaml.MappingNode {
+	return carriesEnrolledKey(doc.Content[0], 0)
+}
+
+// safety: a merge key hides the removed keys behind an alias and YAML admits a
+// key in any case, so both reach the removal message instead of an
+// unknown-field error that names neither the mode nor the key that selected it.
+func carriesEnrolledKey(node *yaml.Node, depth int) bool {
+	const maxMergeDepth = 8
+	if node == nil || depth > maxMergeDepth {
 		return false
 	}
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		switch root.Content[i].Value {
+	switch node.Kind {
+	case yaml.AliasNode:
+		return carriesEnrolledKey(node.Alias, depth+1)
+	case yaml.SequenceNode:
+		for _, item := range node.Content {
+			if carriesEnrolledKey(item, depth+1) {
+				return true
+			}
+		}
+		return false
+	case yaml.MappingNode:
+	default:
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		switch strings.ToLower(strings.TrimSpace(node.Content[i].Value)) {
 		case "name", "coordinators":
 			return true
+		case "<<":
+			if carriesEnrolledKey(node.Content[i+1], depth+1) {
+				return true
+			}
 		}
 	}
 	return false

@@ -135,6 +135,8 @@ func TestLoad_RefusesTheRemovedEnrolledKeys(t *testing.T) {
 		{"name", "controller: http://localhost:4344\nname: desk\ntoken: tok\n"},
 		{"coordinators", "coordinators:\n  - controller: http://localhost:4344\n    token: tok\n"},
 		{"both", "name: desk\ncoordinators:\n  - controller: http://localhost:4344\n    token: tok\n"},
+		{"capitalized name", "controller: http://localhost:4344\nName: desk\ntoken: tok\n"},
+		{"merge key", "base: &b\n  name: desk\ncontroller: http://localhost:4344\ntoken: tok\n<<: *b\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writePrivateConfig(t, tc.body)
