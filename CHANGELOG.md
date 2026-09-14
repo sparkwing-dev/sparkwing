@@ -20,13 +20,8 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
-  `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
-  does not carry instead of exiting with "cannot fall back to remote compile".
-
 ## [v0.50.2] - 2026-09-14
+
 ### Added
 
 - **controller + store:** Retention, per-team storage quotas, and a
@@ -628,6 +623,9 @@ unlock.
 
 ### Fixed
 
+- **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
+  `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
+  does not carry instead of exiting with "cannot fall back to remote compile".
 - **cluster:** Warm-mode Kubernetes Job fallback starts `sparkwing-runner
   run-node` instead of `sparkwing run-node`. The runner image installs only
   `sparkwing-runner`, so every fallback pod failed to start with "executable
