@@ -657,8 +657,8 @@ func rewindGrant(t *testing.T, s *store.Store, id string, at time.Time) {
 	}
 }
 
-// safety: a payment reversal is a negative paid grant, and no store method
-// writes one yet, so the test writes the row the ledger would hold.
+// safety: a payment reversal is a negative paid grant, which the grant API
+// refuses to write, so the test writes the row the ledger would hold.
 func reversePayment(t *testing.T, s *store.Store, id string, credits int64, at time.Time) {
 	t.Helper()
 	if _, err := s.DB().Exec(fmt.Sprintf(
