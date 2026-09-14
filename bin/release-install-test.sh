@@ -20,21 +20,25 @@ case_failed() {
   failures=$((failures + 1))
 }
 
-if ! command -v openssl >/dev/null 2>&1; then
+# The fixtures this test signs need a working openssl, which is a separate
+# question from the openssl each case hands the installer under test. A caller
+# nominates the first with SPARKWING_OPENSSL; each case names the second.
+SSL="${SPARKWING_OPENSSL:-openssl}"
+if ! command -v "$SSL" >/dev/null 2>&1; then
   echo "release-install-test: openssl is required" >&2
   exit 1
 fi
-if ! openssl genpkey -algorithm ed25519 -out "$WORK/signing.pem" 2>/dev/null; then
+if ! "$SSL" genpkey -algorithm ed25519 -out "$WORK/signing.pem" 2>/dev/null; then
   echo "release-install-test: this openssl cannot generate ed25519 keys" >&2
   exit 1
 fi
-openssl genpkey -algorithm ed25519 -out "$WORK/other.pem" 2>/dev/null
+"$SSL" genpkey -algorithm ed25519 -out "$WORK/other.pem" 2>/dev/null
 raw_public_key() {
-  openssl pkey -in "$1" -pubout -outform DER | tail -c 32 | openssl base64 -A
+  "$SSL" pkey -in "$1" -pubout -outform DER | tail -c 32 | "$SSL" base64 -A
 }
 SIGNING_KEY_B64="$(raw_public_key "$WORK/signing.pem")"
 
-sign() { openssl pkeyutl -sign -inkey "$1" -rawin -in "$2" -out "$3"; }
+sign() { "$SSL" pkeyutl -sign -inkey "$1" -rawin -in "$2" -out "$3"; }
 
 GOOS="$(GOWORK=off go -C "$ROOT" env GOOS)"
 GOARCH="$(GOWORK=off go -C "$ROOT" env GOARCH)"
