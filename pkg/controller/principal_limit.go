@@ -60,7 +60,6 @@ type RequestBudget struct {
 // naming the real refill delay, and logged at warn with the runner and the
 // route class.
 func (s *Server) WithRequestBudget(b RequestBudget) *Server {
-	s.requestBudgetValues = b
 	s.requestBudget = newPrincipalBudget(b)
 	return s
 }
@@ -73,12 +72,13 @@ const (
 )
 
 type principalBudget struct {
+	policy     RequestBudget
 	claims     *ratelimit.Limiter
 	heartbeats *ratelimit.Limiter
 }
 
 func newPrincipalBudget(b RequestBudget) *principalBudget {
-	p := &principalBudget{}
+	p := &principalBudget{policy: b}
 	if b.ClaimsPerMinute > 0 {
 		p.claims = ratelimit.New(b.ClaimsPerMinute, budgetWindow)
 	}
@@ -86,6 +86,15 @@ func newPrincipalBudget(b RequestBudget) *principalBudget {
 		p.heartbeats = ratelimit.New(b.HeartbeatsPerMinute, budgetWindow)
 	}
 	return p
+}
+
+// safety: the view reports the budget the operator asked for, which a limiter
+// built from it no longer carries once it is spending tokens.
+func (p *principalBudget) values() RequestBudget {
+	if p == nil {
+		return RequestBudget{}
+	}
+	return p.policy
 }
 
 func (p *principalBudget) limiter(class string) *ratelimit.Limiter {
@@ -146,7 +155,15 @@ func runnerIdentity(r *http.Request) string {
 }
 
 func (s *Server) claimBudgeted(next http.Handler) http.Handler {
-	budgeted := s.budgeted(budgetClassClaim, next)
+	return s.budgeted(budgetClassClaim, next)
+}
+
+// safety: the gate holds a runner to the interval this controller suggested it,
+// so it guards only the two routes that carry the suggestion. A route naming
+// the trigger or node it wants is no idle poll, and the preparation half of an
+// offer round would otherwise charge one round twice.
+func (s *Server) idlePollBudgeted(next http.Handler) http.Handler {
+	budgeted := s.claimBudgeted(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.admitIdleClaimPoll(w, r) {
 			return

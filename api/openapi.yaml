@@ -4638,6 +4638,8 @@ components:
         idle_claim_poll_enforced: {type: boolean, description: "Whether a claim arriving sooner than the suggested interval is answered 429 rather than a claim."}
         max_log_streams_per_principal: {type: integer, format: int64, description: "Live log streams one principal may hold open at once; zero is unlimited."}
         max_downloads_per_principal: {type: integer, format: int64, description: "Metered downloads one principal may hold open at once; zero is unlimited."}
+        requests_per_token_minute: {type: integer, format: int64, description: "Requests one token may spend per rolling minute across every route; zero is unlimited."}
+        requests_per_minute_alarm: {type: integer, format: int64, description: "Request rate across every caller past which the controller raises an alarm; it refuses nothing and zero raises none."}
     SetComputeLimits:
       x-sparkwing-go-type: pkg/controller.setComputeLimitsReq
       type: object

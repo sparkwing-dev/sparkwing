@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -36,13 +37,14 @@ type Server struct {
 
 	loginLimit *loginLimiter
 
-	flood               *floodControl
-	requestBudget       *principalBudget
-	requestBudgetValues RequestBudget
+	flood         *floodControl
+	requestBudget *principalBudget
+	tokenBudget   *tokenBudget
 
-	idleClaimPoll  time.Duration
-	idlePolls      *idlePollGate
-	lastClaimAward atomic.Int64
+	idleClaimPoll     time.Duration
+	idlePolls         *ratelimit.Limiter
+	idlePollsEnforced bool
+	lastClaimAward    atomic.Int64
 
 	githubWebhookSecret  string
 	githubWebhook        GitHubWebhookConfig
@@ -128,7 +130,7 @@ func (s *Server) WithLocalExecution() *Server {
 	s.idleClaimPoll = 0
 	s.idlePolls = nil
 	s.requestBudget = newPrincipalBudget(RequestBudget{})
-	s.requestBudgetValues = RequestBudget{}
+	s.tokenBudget = nil
 	return s
 }
 
@@ -807,7 +809,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //     pass-through.
 func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(unsupportedRouteFallback(mux)))
+	router.Handle("/", s.authenticated(s.tokenBudgeted(unsupportedRouteFallback(mux))))
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 }
@@ -844,7 +846,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
-	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
+	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
 	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.heartbeatBudgeted(s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat)))))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
@@ -925,7 +927,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
 
-	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNode))))
+	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimNode))))
 	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handlePrepareNodeClaim))))
 	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
 	// to the live claim on the run's trigger rather than to the scope alone. A node claim

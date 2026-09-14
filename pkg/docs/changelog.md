@@ -22,29 +22,51 @@ unlock.
 
 ### Added
 
-- **controller + chart:** `--limits-profile` (chart `controller.limitsProfile`,
-  env `SPARKWING_LIMITS_PROFILE`) names a set of abuse guards a hosted
-  controller runs with, so provisioning writes one setting rather than one per
-  guard. `cloud` sets the per-runner claim and heartbeat budgets to 9600 and
-  1200 a minute, the egress caps to 50 live log streams and 20 concurrent
-  downloads per principal, and turns idle-poll enforcement on; `cloud-free`
-  sets 2400, 600, 10 and 5 with the same enforcement. A profile fills a guard
-  only where the command line and the environment named none, so an explicit
-  value always wins. `controller.LimitsProfile` and
-  `controller.LimitsProfileNames` are the Go surface. Empty, the default,
-  supplies nothing: a self-hosted controller keeps every budget unlimited.
-- **controller:** `Server.WithIdleClaimPollEnforced` answers a claim that
-  arrives sooner than the idle interval the controller last suggested that
-  runner with `429` and a `Retry-After` naming the rest of the wait. The
-  interval compared against is the one that runner was sent, and the
-  enforcement lifts as soon as work is handed out, so a runner honoring the
+- **controller + chart:** `--limits-profile` (chart `controller.limitsProfile`)
+  names a set of abuse guards a hosted controller runs with, so provisioning
+  writes one setting rather than one per guard. `cloud` sets the per-runner
+  claim and heartbeat budgets to 480 and 1200 a minute, the per-token budget to
+  2000 a minute, the request rate alarm to 5000 a minute, the egress caps to 50
+  live log streams and 20 concurrent downloads per principal, and turns
+  idle-poll enforcement on; `cloud-free` sets 240, 600, 600, 5000, 10 and 5
+  with the same enforcement. The claim budgets are worked from the cadence the
+  shipped claim loop keeps, 120 polls a minute at its 500ms interval, so a
+  runner keeping its configured cadence is never refused and one in a tight
+  loop is held near the work it was asked to do. A profile fills a guard only
+  where the command line and the environment named none, so an explicit value
+  always wins, including an explicit zero that leaves a guard unlimited.
+  `controller.LimitsProfile`, `controller.LimitsProfileNames`,
+  `controller.ClaimPollInterval` and `controller.CompliantClaimPollsPerMinute`
+  are the Go surface. Empty, the default, supplies nothing: a self-hosted
+  controller keeps every budget unlimited.
+- **controller + chart:** `--requests-per-token-minute` (chart
+  `controller.requestsPerTokenMinute`) budgets every route one token can reach,
+  keyed on the token prefix alone, and answers `429` with a `Retry-After` past
+  it. It is what bounds a caller varying the runner it says it is, which the
+  per-runner budgets cannot: on the claim routes that name is the caller's own
+  word. `--requests-per-minute-alarm` (chart
+  `controller.requestsPerMinuteAlarm`) refuses nothing and logs at warn once a
+  minute when the controller serves more requests than it was sized for,
+  counted by `sparkwing_request_rate_alarm_total`. The agent liveness heartbeat
+  is never budgeted. `controller.TokenRequestBudget` and
+  `Server.WithTokenRequestBudget` are the Go surface; both are unlimited unless
+  an operator or a profile names a number.
+- **controller:** `Server.WithIdleClaimPollEnforced` answers a claim poll that
+  arrives sooner than the widest idle interval the controller suggests with
+  `429` and a `Retry-After` naming the rest of the wait. Enforcement starts
+  only once that interval has been the standing suggestion for a whole
+  interval, and lifts as soon as work is handed out, so a runner honoring the
   suggestion is never refused and a fleet is never held off a queue that has
-  filled. `sparkwing_principal_throttled_total{route_class="idle_poll"}` counts
-  the refusals. Off unless a limits profile turns it on.
+  filled. It guards the two routes that carry the suggestion, `POST
+  /api/v1/nodes/claim` and `POST /api/v1/triggers/claim`, and is keyed on the
+  token prefix together with the runner.
+  `sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
+  refusals. Off unless a limits profile turns it on.
 - **controller + CLI:** `GET /api/v1/compute-limits` carries a `budgets` object
-  with the per-runner request budgets, the idle-poll suggestion and whether it
-  is enforced, and the egress stream and download caps in force, and
-  `sparkwing cluster limits show` prints them beside the stored compute guards.
+  with the per-runner and per-token request budgets, the request rate alarm,
+  the idle-poll suggestion and whether it is enforced, and the egress stream
+  and download caps in force, and `sparkwing cluster limits show` prints them
+  beside the stored compute guards.
 
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
@@ -253,6 +275,15 @@ unlock.
   keeps writing the migrated database.
 
 ### Fixed
+
+- **CLI + cluster:** `sparkwing worker` and the in-process worker loop now name
+  themselves to the controller, honor `X-Sparkwing-Poll-After`, and back off on
+  a `Retry-After` instead of repolling at their own cadence. They had no runner
+  identity, so a fleet under a per-runner budget shared one bucket, and a shed
+  claim was logged at error on every poll; the refusal is now one line a minute
+  at info naming the wait. A pool runner's identity carries its process id too,
+  so two runner processes on one host are two runners rather than one polling
+  twice.
 
 - **api:** `api/openapi.yaml` no longer loses the tail of a description
   An unquoted comma and colon inside a flow-mapping description split the prose

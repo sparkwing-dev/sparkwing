@@ -25,8 +25,10 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 		{
 			name: controller.LimitsProfileCloud,
 			want: controller.LimitsProfileValues{
-				ClaimsPerRunnerMinute:     9600,
+				ClaimsPerRunnerMinute:     480,
 				HeartbeatsPerRunnerMinute: 1200,
+				RequestsPerTokenMinute:    2000,
+				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 50,
 				MaxDownloadsPerPrincipal:  20,
 				EnforceIdleClaimPoll:      true,
@@ -35,8 +37,10 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 		{
 			name: controller.LimitsProfileCloudFree,
 			want: controller.LimitsProfileValues{
-				ClaimsPerRunnerMinute:     2400,
+				ClaimsPerRunnerMinute:     240,
 				HeartbeatsPerRunnerMinute: 600,
+				RequestsPerTokenMinute:    600,
+				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 10,
 				MaxDownloadsPerPrincipal:  5,
 				EnforceIdleClaimPoll:      true,
@@ -55,14 +59,83 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 	}
 }
 
-func TestLimitsProfile_ClaimBudgetsFollowTheRunnerCadence(t *testing.T) {
+// TestLimitsProfile_ClaimBudgetsClearTheCompliantCadence is the property the
+// numbers have to keep however they are retuned: a runner keeping the cadence
+// it was configured with is never refused, and the budget is a small multiple
+// of that cadence rather than a round number that bounds nothing.
+func TestLimitsProfile_ClaimBudgetsClearTheCompliantCadence(t *testing.T) {
+	compliant := controller.CompliantClaimPollsPerMinute()
+	for _, name := range controller.LimitsProfileNames() {
+		profile, err := controller.LimitsProfile(name)
+		if err != nil {
+			t.Fatalf("LimitsProfile(%q): %v", name, err)
+		}
+		if profile.ClaimsPerRunnerMinute <= compliant {
+			t.Errorf("%s claim budget = %d; a runner polling every %s spends %d a minute",
+				name, profile.ClaimsPerRunnerMinute, controller.ClaimPollInterval, compliant)
+		}
+		if profile.ClaimsPerRunnerMinute > compliant*8 {
+			t.Errorf("%s claim budget = %d; more than eight times the compliant %d bounds nothing",
+				name, profile.ClaimsPerRunnerMinute, compliant)
+		}
+	}
+}
+
+// TestLimitsProfile_HostedControllersCarryEveryGuard is the provisioning check:
+// a controller started under either hosted profile has every guard the hosted
+// tiers are sold with set, so none of them can be left off by an edit that
+// forgets one.
+func TestLimitsProfile_HostedControllersCarryEveryGuard(t *testing.T) {
+	for _, name := range []string{controller.LimitsProfileCloud, controller.LimitsProfileCloudFree} {
+		profile, err := controller.LimitsProfile(name)
+		if err != nil {
+			t.Fatalf("LimitsProfile(%q): %v", name, err)
+		}
+		for _, guard := range []struct {
+			name  string
+			value int
+		}{
+			{"claims per runner minute", profile.ClaimsPerRunnerMinute},
+			{"heartbeats per runner minute", profile.HeartbeatsPerRunnerMinute},
+			{"requests per token minute", profile.RequestsPerTokenMinute},
+			{"requests per minute alarm", profile.RequestsPerMinuteAlarm},
+			{"max log streams per principal", profile.MaxLogStreamsPerPrincipal},
+			{"max downloads per principal", profile.MaxDownloadsPerPrincipal},
+		} {
+			if guard.value <= 0 {
+				t.Errorf("%s leaves %s unlimited", name, guard.name)
+			}
+		}
+		if !profile.EnforceIdleClaimPoll {
+			t.Errorf("%s does not enforce the idle claim poll", name)
+		}
+	}
+}
+
+// TestLimitsProfile_TheFreeTierIsTighterThanThePaidOne pins the ordering the
+// tiers are priced on, so a retune cannot leave free the more generous.
+func TestLimitsProfile_TheFreeTierIsTighterThanThePaidOne(t *testing.T) {
 	paid, err := controller.LimitsProfile(controller.LimitsProfileCloud)
 	if err != nil {
 		t.Fatalf("LimitsProfile: %v", err)
 	}
-	if want := controller.RecommendedClaimsPerMinuteForSlots(8); paid.ClaimsPerRunnerMinute != want {
-		t.Errorf("cloud claim budget = %d; an eight-slot agent needs %d",
-			paid.ClaimsPerRunnerMinute, want)
+	free, err := controller.LimitsProfile(controller.LimitsProfileCloudFree)
+	if err != nil {
+		t.Fatalf("LimitsProfile: %v", err)
+	}
+	for _, tc := range []struct {
+		name       string
+		paid, free int
+	}{
+		{"claims per runner minute", paid.ClaimsPerRunnerMinute, free.ClaimsPerRunnerMinute},
+		{"heartbeats per runner minute", paid.HeartbeatsPerRunnerMinute, free.HeartbeatsPerRunnerMinute},
+		{"requests per token minute", paid.RequestsPerTokenMinute, free.RequestsPerTokenMinute},
+		{"max log streams per principal", paid.MaxLogStreamsPerPrincipal, free.MaxLogStreamsPerPrincipal},
+		{"max downloads per principal", paid.MaxDownloadsPerPrincipal, free.MaxDownloadsPerPrincipal},
+	} {
+		if tc.free >= tc.paid {
+			t.Errorf("%s: free %d is not below paid %d", tc.name, tc.free, tc.paid)
+		}
 	}
 }
 

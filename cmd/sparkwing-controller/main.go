@@ -140,29 +140,43 @@ func run(args []string) error {
 			"first one started instead of starting a second. GitHub deliveries "+
 			"are deduped by delivery id and body digest regardless. Zero dedupes "+
 			"no API submission.")
-	claimsPerMinute := fs.Int("claims-per-runner-minute", 0,
+	claimsPerMinute := fs.Int(flagClaimsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
 			"minute, keyed on the token prefix together with the runner the "+
 			"request names. Past it a claim is answered 429 with a Retry-After "+
-			"naming the refill delay. Zero is unlimited. Size it as %d x the "+
-			"agent's max_concurrent: each offer slot polls under the agent's one "+
-			"name and spends a preparation plus an offer per round at the 500ms "+
-			"cadence, so a 1-slot agent wants %d and an 8-slot agent %d.",
-			controller.RecommendedClaimsPerMinute,
-			controller.RecommendedClaimsPerMinuteForSlots(1),
-			controller.RecommendedClaimsPerMinuteForSlots(8)))
-	heartbeatsPerMinute := fs.Int("heartbeats-per-runner-minute", 0,
+			"naming the refill delay. Zero is unlimited. Work it from the cadence "+
+			"the loop keeps rather than a round number: it polls once every %s "+
+			"while the queue is empty, which is %d requests a minute, and claims "+
+			"once more for each node it starts, so %d covers a runner starting "+
+			"three nodes a poll and %d one that also restarts mid-minute.",
+			controller.ClaimPollInterval,
+			controller.CompliantClaimPollsPerMinute(),
+			controller.CompliantClaimPollsPerMinute()*4,
+			controller.CompliantClaimPollsPerMinute()*8))
+	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
 			"rolling minute. The agent liveness heartbeat is never budgeted. "+
 			"Zero is unlimited; %d suits the cadence the shipped runners "+
 			"heartbeat at.", controller.RecommendedHeartbeatsPerMinute))
-	limitsProfile := fs.String("limits-profile", os.Getenv("SPARKWING_LIMITS_PROFILE"),
+	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
+		"request budget on every route one token can reach, per rolling minute, "+
+			"keyed on the token prefix. It bounds a caller that varies the runner "+
+			"it says it is, which the per-runner budgets above cannot. The agent "+
+			"liveness heartbeat is never budgeted. Past it a request is answered "+
+			"429 with a Retry-After naming the refill delay. Zero is unlimited.")
+	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
+		"request rate, across every caller, past which this controller logs at "+
+			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+
+			"nothing; it is the notice that one pod is serving more than it was "+
+			"sized for. Zero raises no alarm.")
+	limitsProfile := fs.String("limits-profile", "",
 		fmt.Sprintf("named set of abuse guards this controller runs with: %s. A profile "+
-			"supplies the per-runner request budgets, the egress stream and download "+
-			"caps, and idle-poll enforcement, and it fills a guard only where the "+
-			"command line and the environment named none, so an explicit setting "+
-			"always wins. Empty, the default, supplies none and leaves a self-hosted "+
-			"controller exactly as it was (env: SPARKWING_LIMITS_PROFILE)",
+			"supplies the per-runner and per-token request budgets, the request rate "+
+			"alarm, the egress stream and download caps, and idle-poll enforcement, "+
+			"and it fills a guard only where the command line and the environment "+
+			"named none, so an explicit setting always wins, zero included. Empty, "+
+			"the default, supplies none and leaves a self-hosted controller exactly "+
+			"as it was.",
 			strings.Join(controller.LimitsProfileNames(), ", ")))
 	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
 		"widest poll interval this controller suggests to a claim loop while it "+
@@ -245,6 +259,9 @@ func run(args []string) error {
 	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
 		return fmt.Errorf("--claims-per-runner-minute and --heartbeats-per-runner-minute cannot be negative")
 	}
+	if *requestsPerTokenMinute < 0 || *requestsPerMinuteAlarm < 0 {
+		return fmt.Errorf("--requests-per-token-minute and --requests-per-minute-alarm cannot be negative")
+	}
 	if *idleClaimPoll < 0 {
 		return fmt.Errorf("--idle-claim-poll cannot be negative")
 	}
@@ -258,8 +275,17 @@ func run(args []string) error {
 	guards := applyLimitsProfile(profile, guardValues{
 		ClaimsPerRunnerMinute:     *claimsPerMinute,
 		HeartbeatsPerRunnerMinute: *heartbeatsPerMinute,
+		RequestsPerTokenMinute:    *requestsPerTokenMinute,
+		RequestsPerMinuteAlarm:    *requestsPerMinuteAlarm,
 		MaxLogStreamsPerPrincipal: egressCfg.MaxStreamsPerPrincipal,
 		MaxDownloadsPerPrincipal:  egressCfg.MaxDownloadsPerPrincipal,
+	}, guardsNamed{
+		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
+		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
+		RequestsPerTokenMinute:    fs.Changed(flagRequestsPerTokenMinute),
+		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
+		MaxLogStreamsPerPrincipal: egressNamed(fs, egress.FlagMaxLogStreams, egressCfg.MaxStreamsPerPrincipal),
+		MaxDownloadsPerPrincipal:  egressNamed(fs, egress.FlagMaxDownloads, egressCfg.MaxDownloadsPerPrincipal),
 	})
 	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
@@ -364,6 +390,10 @@ func run(args []string) error {
 			ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,
 			HeartbeatsPerMinute: guards.HeartbeatsPerRunnerMinute,
 		}).
+		WithTokenRequestBudget(controller.TokenRequestBudget{
+			PerTokenMinute: guards.RequestsPerTokenMinute,
+			AlarmPerMinute: guards.RequestsPerMinuteAlarm,
+		}).
 		WithIdleClaimPoll(*idleClaimPoll).
 		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 		WithEgressMeter(egress.New(egressCfg))
@@ -412,32 +442,68 @@ func run(args []string) error {
 // one request late must still land inside the window.
 const idleClaimPollMargin = 2
 
+// safety: one name per flag, because the profile has to ask the flag set
+// whether the operator named a guard and a second spelling would answer for a
+// flag nobody set.
+const (
+	flagClaimsPerRunnerMinute     = "claims-per-runner-minute"
+	flagHeartbeatsPerRunnerMinute = "heartbeats-per-runner-minute"
+	flagRequestsPerTokenMinute    = "requests-per-token-minute"
+	flagRequestsPerMinuteAlarm    = "requests-per-minute-alarm"
+)
+
 type guardValues struct {
 	ClaimsPerRunnerMinute     int
 	HeartbeatsPerRunnerMinute int
+	RequestsPerTokenMinute    int
+	RequestsPerMinuteAlarm    int
 	MaxLogStreamsPerPrincipal int
 	MaxDownloadsPerPrincipal  int
 	EnforceIdleClaimPoll      bool
 }
 
-// safety: zero is unlimited on every guard here, so a value the operator named
-// on the command line or in the environment is already non-zero and the
-// profile fills only what nobody set.
-func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues) guardValues {
-	if set.ClaimsPerRunnerMinute == 0 {
+// safety: a guard the operator named wins whatever its value, so the profile
+// has to be told which ones were named rather than reading zero as unset.
+type guardsNamed struct {
+	ClaimsPerRunnerMinute     bool
+	HeartbeatsPerRunnerMinute bool
+	RequestsPerTokenMinute    bool
+	RequestsPerMinuteAlarm    bool
+	MaxLogStreamsPerPrincipal bool
+	MaxDownloadsPerPrincipal  bool
+}
+
+// safety: zero is a documented value on every guard here, unlimited, so what
+// the operator left alone is what the flag set reports rather than what the
+// value happens to be; an explicit zero keeps its guard off under a profile.
+func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues, named guardsNamed) guardValues {
+	if !named.ClaimsPerRunnerMinute {
 		set.ClaimsPerRunnerMinute = profile.ClaimsPerRunnerMinute
 	}
-	if set.HeartbeatsPerRunnerMinute == 0 {
+	if !named.HeartbeatsPerRunnerMinute {
 		set.HeartbeatsPerRunnerMinute = profile.HeartbeatsPerRunnerMinute
 	}
-	if set.MaxLogStreamsPerPrincipal == 0 {
+	if !named.RequestsPerTokenMinute {
+		set.RequestsPerTokenMinute = profile.RequestsPerTokenMinute
+	}
+	if !named.RequestsPerMinuteAlarm {
+		set.RequestsPerMinuteAlarm = profile.RequestsPerMinuteAlarm
+	}
+	if !named.MaxLogStreamsPerPrincipal {
 		set.MaxLogStreamsPerPrincipal = profile.MaxLogStreamsPerPrincipal
 	}
-	if set.MaxDownloadsPerPrincipal == 0 {
+	if !named.MaxDownloadsPerPrincipal {
 		set.MaxDownloadsPerPrincipal = profile.MaxDownloadsPerPrincipal
 	}
 	set.EnforceIdleClaimPoll = profile.EnforceIdleClaimPoll
 	return set
+}
+
+// safety: the egress budgets fold their environment fallback into the flag's
+// default before it is parsed, so a value that arrived either way is what the
+// config already holds, and only the flag can spell an explicit zero.
+func egressNamed(fs *flag.FlagSet, flagName string, value int) bool {
+	return fs.Changed(strings.TrimPrefix(flagName, "--")) || value != 0
 }
 
 func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {

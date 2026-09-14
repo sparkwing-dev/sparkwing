@@ -53,6 +53,8 @@ type computeLimitsResp struct {
 		IdleClaimPollEnforced     bool  `json:"idle_claim_poll_enforced"`
 		MaxLogStreamsPerPrincipal int64 `json:"max_log_streams_per_principal"`
 		MaxDownloadsPerPrincipal  int64 `json:"max_downloads_per_principal"`
+		RequestsPerTokenMinute    int64 `json:"requests_per_token_minute"`
+		RequestsPerMinuteAlarm    int64 `json:"requests_per_minute_alarm"`
 	} `json:"budgets"`
 }
 
@@ -73,6 +75,8 @@ func budgetRows(view computeLimitsResp) [][2]string {
 		{"idle_claim_poll", idle},
 		{"max_log_streams_per_principal", computeLimitLabel(view.Budgets.MaxLogStreamsPerPrincipal)},
 		{"max_downloads_per_principal", computeLimitLabel(view.Budgets.MaxDownloadsPerPrincipal)},
+		{"requests_per_token_minute", computeLimitLabel(view.Budgets.RequestsPerTokenMinute)},
+		{"requests_per_minute_alarm", computeLimitLabel(view.Budgets.RequestsPerMinuteAlarm)},
 	}
 }
 

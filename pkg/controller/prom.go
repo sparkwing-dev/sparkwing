@@ -81,9 +81,16 @@ var (
 	principalThrottledTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_principal_throttled_total",
-			Help: "Requests refused by a per-principal request budget, by route class (claim, heartbeat).",
+			Help: "Requests refused by a per-principal request budget, by route class (claim, heartbeat, idle_poll, token).",
 		},
 		[]string{"route_class"},
+	)
+
+	requestRateAlarmTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "sparkwing_request_rate_alarm_total",
+			Help: "Minutes in which this controller served more requests than its configured alarm rate. It refuses nothing.",
+		},
 	)
 
 	authTokenCacheTotal = prometheus.NewCounterVec(
@@ -172,6 +179,10 @@ func observePrincipalThrottled(class string) {
 	principalThrottledTotal.WithLabelValues(class).Inc()
 }
 
+func observeRequestRateAlarm() {
+	requestRateAlarmTotal.Inc()
+}
+
 func observeAuthCache(result string) {
 	authTokenCacheTotal.WithLabelValues(result).Inc()
 }
@@ -188,6 +199,7 @@ var sparkwingCollectors = []prometheus.Collector{
 	httpRequestDurationSeconds,
 	authTokenCacheTotal,
 	principalThrottledTotal,
+	requestRateAlarmTotal,
 	queueDepthGauge,
 	claimWaitSeconds,
 	claimUnavailableTotal,

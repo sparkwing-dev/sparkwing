@@ -3,9 +3,9 @@ package controller
 import (
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -52,6 +52,7 @@ const idleClaimPollFraction = 4
 // suggests nothing.
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server {
 	s.idleClaimPoll = max
+	s.rebuildIdlePollGate()
 	return s
 }
 
@@ -78,92 +79,34 @@ func (s *Server) claimPollAdvice(now time.Time) time.Duration {
 	return min(advice.Truncate(time.Second), s.idleClaimPoll)
 }
 
-// WithIdleClaimPollEnforced answers a claim that arrives sooner than the idle
-// interval this controller last suggested that runner with 429 and a
-// Retry-After naming the rest of the wait, instead of a claim. A runner that
-// honors the suggestion is never refused, the refusal lifts the moment work
-// arrives, and a controller that suggests nothing enforces nothing.
+// WithIdleClaimPollEnforced answers a claim poll that arrives while this
+// controller is suggesting its widest idle interval, and sooner than that
+// interval, with 429 and a Retry-After naming the rest of the wait. A runner
+// that honors the suggestion is never refused, the refusal lifts the moment
+// work arrives, and a controller that suggests nothing enforces nothing.
 func (s *Server) WithIdleClaimPollEnforced(on bool) *Server {
-	if !on {
-		s.idlePolls = nil
-		return s
-	}
-	s.idlePolls = &idlePollGate{marks: make(map[string]idlePollMark)}
+	s.idlePollsEnforced = on
+	s.rebuildIdlePollGate()
 	return s
 }
 
+// safety: the gate admits one poll per suggested interval, so it is rebuilt
+// whenever the suggestion changes rather than reading a window that has moved.
+func (s *Server) rebuildIdlePollGate() {
+	if !s.idlePollsEnforced || s.idleClaimPoll <= 0 {
+		s.idlePolls = nil
+		return
+	}
+	s.idlePolls = ratelimit.New(1, s.idleClaimPoll)
+}
+
 // safety: a header set after the status line is never sent, so this runs ahead of WriteHeader.
-func (s *Server) writeClaimPollAdvice(w http.ResponseWriter, r *http.Request) {
-	now := time.Now()
-	advice := s.claimPollAdvice(now)
+func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
+	advice := s.claimPollAdvice(time.Now())
 	if advice <= 0 {
 		return
 	}
 	w.Header().Set(store.ClaimPollAfterHeader, strconv.Itoa(int(advice.Seconds())))
-	if s.idlePolls != nil {
-		s.idlePolls.record(s.runnerBudgetKey(r), advice, now)
-	}
-}
-
-// safety: a suggestion is worth remembering only while a runner could still
-// break it, and a runner accepts no suggestion wider than this.
-const maxIdlePollMarks = 20000
-
-type idlePollMark struct {
-	advised time.Duration
-	at      time.Time
-}
-
-// safety: the suggestion the controller sends grows with how long it has been
-// idle, so what a runner must honor is the one it was last sent rather than
-// the one the controller would send now.
-type idlePollGate struct {
-	mu    sync.Mutex
-	marks map[string]idlePollMark
-}
-
-func (g *idlePollGate) record(key string, advised time.Duration, now time.Time) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.evictLocked(now)
-	g.marks[key] = idlePollMark{advised: advised, at: now}
-}
-
-// safety: a mark expires in time but not under a flood of fresh runner
-// identities, so a full map drops what expired and then drops everything, and
-// the gate refuses less rather than growing without bound.
-func (g *idlePollGate) evictLocked(now time.Time) {
-	if len(g.marks) < maxIdlePollMarks {
-		return
-	}
-	for k, m := range g.marks {
-		if now.Sub(m.at) >= m.advised {
-			delete(g.marks, k)
-		}
-	}
-	if len(g.marks) >= maxIdlePollMarks {
-		clear(g.marks)
-	}
-}
-
-func (g *idlePollGate) check(key string, now, awarded time.Time) (time.Duration, bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	mark, ok := g.marks[key]
-	if !ok {
-		return 0, false
-	}
-	// safety: work handed out after the suggestion went out makes it stale, so
-	// a fleet is never held off a queue that has since filled.
-	if awarded.After(mark.at) {
-		delete(g.marks, key)
-		return 0, false
-	}
-	wait := mark.advised - now.Sub(mark.at)
-	if wait <= 0 {
-		return 0, false
-	}
-	return wait, true
 }
 
 // safety: a refusal is written here, so a caller that gets false must return
@@ -172,9 +115,17 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request) bool
 	if s.idlePolls == nil {
 		return true
 	}
+	now := time.Now()
+	// safety: a runner honors the suggestion it was last sent, not the one the
+	// controller would send now, so the gate waits until the suggestion a whole
+	// interval ago was already the widest one. Until then, and whenever work
+	// arrives, this refuses nothing.
+	if s.claimPollAdvice(now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
+		return true
+	}
 	key := s.runnerBudgetKey(r)
-	wait, refused := s.idlePolls.check(key, time.Now(), time.Unix(0, s.lastClaimAward.Load()))
-	if !refused {
+	allowed, wait := s.idlePolls.AllowWithRetry(key, now)
+	if allowed {
 		return true
 	}
 	observePrincipalThrottled(budgetClassIdlePoll)

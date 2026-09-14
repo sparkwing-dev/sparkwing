@@ -353,7 +353,8 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
 | `sparkwing_auth_token_cache_total` | Counter | `result` | Bearer verifications by how the verified-token cache answered them (`hit`, `miss`, `coalesced`) |
 | `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
-| `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a per-runner budget refused with `429` (`claim`, `heartbeat`) |
+| `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
+| `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
 | `sparkwing_queue_depth` | Gauge | `state` | Nodes short of a terminal outcome: `waiting`, `ready`, `claimed`, `running`, `approval_pending` |
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |

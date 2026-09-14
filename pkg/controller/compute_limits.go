@@ -31,6 +31,8 @@ type requestBudgetsJSON struct {
 	IdleClaimPollEnforced     bool  `json:"idle_claim_poll_enforced"`
 	MaxLogStreamsPerPrincipal int64 `json:"max_log_streams_per_principal"`
 	MaxDownloadsPerPrincipal  int64 `json:"max_downloads_per_principal"`
+	RequestsPerTokenMinute    int64 `json:"requests_per_token_minute"`
+	RequestsPerMinuteAlarm    int64 `json:"requests_per_minute_alarm"`
 }
 
 type computeUsageJSON struct {
@@ -278,11 +280,13 @@ func (s *Server) cronIntervalRefusal(r *http.Request, expr string) error {
 func (s *Server) requestBudgetsView() requestBudgetsJSON {
 	egressState := s.egress.State()
 	return requestBudgetsJSON{
-		ClaimsPerRunnerMinute:     int64(s.requestBudgetValues.ClaimsPerMinute),
-		HeartbeatsPerRunnerMinute: int64(s.requestBudgetValues.HeartbeatsPerMinute),
+		ClaimsPerRunnerMinute:     int64(s.requestBudget.values().ClaimsPerMinute),
+		HeartbeatsPerRunnerMinute: int64(s.requestBudget.values().HeartbeatsPerMinute),
 		IdleClaimPollSeconds:      int64(s.idleClaimPoll / time.Second),
 		IdleClaimPollEnforced:     s.idlePolls != nil,
 		MaxLogStreamsPerPrincipal: int64(egressState.MaxStreamsPerPrincipal),
 		MaxDownloadsPerPrincipal:  int64(egressState.MaxDownloadsPerPrincipal),
+		RequestsPerTokenMinute:    int64(s.tokenBudget.values().PerTokenMinute),
+		RequestsPerMinuteAlarm:    int64(s.tokenBudget.values().AlarmPerMinute),
 	}
 }

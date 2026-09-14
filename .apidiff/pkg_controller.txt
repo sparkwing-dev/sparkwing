@@ -50,6 +50,8 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const ClaimPollInterval = 500 * time.Millisecond
+func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
 const CreditsRefusedCode = "insufficient_credits"
@@ -121,6 +123,10 @@ type LimitsProfileValues struct {
 	ClaimsPerRunnerMinute int
 
 	HeartbeatsPerRunnerMinute int
+
+	RequestsPerTokenMinute int
+
+	RequestsPerMinuteAlarm int
 
 	MaxLogStreamsPerPrincipal int
 
@@ -268,6 +274,7 @@ func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
+func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	CachePod string
@@ -277,6 +284,11 @@ type ServicesResponse struct {
 	Dashboard string
 }
 const StorageMaintenanceInterval = time.Hour
+type TokenRequestBudget struct {
+	PerTokenMinute int
+
+	AlarmPerMinute int
+}
 type TrendPoint struct {
 	Bucket    string
 	Total     int

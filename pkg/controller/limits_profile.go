@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Limits profiles are the named sets of guard values a hosted controller runs
@@ -18,13 +19,16 @@ const (
 )
 
 // LimitsProfileValues are the guards one profile supplies. A profile fills a
-// guard only where the operator named none, so an explicit flag or environment
-// variable always wins.
+// guard only where the operator named none, so an explicit flag always wins.
 type LimitsProfileValues struct {
 	// ClaimsPerRunnerMinute is [RequestBudget.ClaimsPerMinute].
 	ClaimsPerRunnerMinute int
 	// HeartbeatsPerRunnerMinute is [RequestBudget.HeartbeatsPerMinute].
 	HeartbeatsPerRunnerMinute int
+	// RequestsPerTokenMinute is [TokenRequestBudget.PerTokenMinute].
+	RequestsPerTokenMinute int
+	// RequestsPerMinuteAlarm is [TokenRequestBudget.AlarmPerMinute].
+	RequestsPerMinuteAlarm int
 	// MaxLogStreamsPerPrincipal is the concurrent live log streams one
 	// principal may hold open.
 	MaxLogStreamsPerPrincipal int
@@ -37,30 +41,61 @@ type LimitsProfileValues struct {
 	EnforceIdleClaimPoll bool
 }
 
-// safety: the claim budget is spent per runner rather than per offer slot, so
-// the hosted profiles are sized for the concurrency an agent is configured
-// with: the shipped runner chart sets two, and eight is the headroom a team
-// can grow to without an operator raising the budget by hand.
+// ClaimPollInterval is the cadence the shipped claim loops keep while the
+// queue is empty. The hosted claim budgets are worked from it rather than from
+// a round number, so an operator can check the arithmetic against the runner
+// they actually run.
+const ClaimPollInterval = 500 * time.Millisecond
+
+// CompliantClaimPollsPerMinute reports the claim requests one runner makes in a
+// minute of an empty queue while honoring its configured cadence. A claim
+// budget below it refuses a runner that is doing exactly what it was asked to.
+func CompliantClaimPollsPerMinute() int {
+	return int(time.Minute / ClaimPollInterval)
+}
+
+// safety: past its empty-queue polling a loop spends one claim for each node it
+// starts, so the paid tier allows three times the polling cadence in awards and
+// the free tier one. A budget worked from a round number bounds nothing; one
+// worked from the cadence alone refuses a runner that restarted mid-minute.
 const (
-	cloudProfileSlots     = 8
-	cloudFreeProfileSlots = 2
+	cloudClaimHeadroom     = 4
+	cloudFreeClaimHeadroom = 2
 )
 
-// safety: the free tier halves the paid request budget and takes a fifth of
+// safety: a runner spends more than claims. A two-slot runner honoring its
+// cadences spends roughly 300 requests a minute: 120 empty-queue claim polls,
+// 40 node heartbeats at one every three seconds, and its state writes. The free
+// tier carries one such runner and the paid tier several under one token.
+const (
+	cloudRequestsPerTokenMinute     = 2000
+	cloudFreeRequestsPerTokenMinute = 600
+)
+
+// safety: the alarm is what one controller pod is sized to serve, so it sits
+// above any single tenant's budget and speaks when several tenants at once, or
+// a pod carrying more tenants than it was planned for, are driving it.
+const cloudRequestRateAlarm = 5000
+
+// safety: the free tier halves the paid heartbeat budget and takes a fifth of
 // its egress slots, which is the ratio the hosted tiers are priced on.
 const freeHeartbeatDivisor = 2
 
 var limitsProfiles = map[string]LimitsProfileValues{
 	LimitsProfileCloud: {
-		ClaimsPerRunnerMinute:     RecommendedClaimsPerMinuteForSlots(cloudProfileSlots),
+		ClaimsPerRunnerMinute:     CompliantClaimPollsPerMinute() * cloudClaimHeadroom,
 		HeartbeatsPerRunnerMinute: RecommendedHeartbeatsPerMinute,
+		RequestsPerTokenMinute:    cloudRequestsPerTokenMinute,
+		RequestsPerMinuteAlarm:    cloudRequestRateAlarm,
 		MaxLogStreamsPerPrincipal: 50,
 		MaxDownloadsPerPrincipal:  20,
 		EnforceIdleClaimPoll:      true,
 	},
 	LimitsProfileCloudFree: {
-		ClaimsPerRunnerMinute:     RecommendedClaimsPerMinuteForSlots(cloudFreeProfileSlots),
+		ClaimsPerRunnerMinute:     CompliantClaimPollsPerMinute() * cloudFreeClaimHeadroom,
 		HeartbeatsPerRunnerMinute: RecommendedHeartbeatsPerMinute / freeHeartbeatDivisor,
+		RequestsPerTokenMinute:    cloudFreeRequestsPerTokenMinute,
+		RequestsPerMinuteAlarm:    cloudRequestRateAlarm,
 		MaxLogStreamsPerPrincipal: 10,
 		MaxDownloadsPerPrincipal:  5,
 		EnforceIdleClaimPoll:      true,
