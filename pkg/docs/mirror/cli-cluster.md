@@ -270,15 +270,14 @@ Read or set the credit rate table, the grace period, and the charge cap
 Prints the runtime settings the ledger prices work with, and
 sets the ones named by a flag. The rate table prices one cloud
 runner second at every cpu class, and a node is billed at the
-smaller of the class its cpu request falls in and the class the
-runner executing it reports for itself; a request above the
-largest class that no runner report brings inside it fails the
-node. The rate is what a four-core second costs, which is the
-four-core entry of the table under another name, so a body may
-name one or the other, never both. The billing cpu ceiling
-holds every node's class under a cpu figure the operator sets,
-which is how a cluster that hands out smaller pods than its
-plans ask for bills what it gives; zero bills by the request. The grace period
+smallest class covering the cpu and memory it pinned; a request
+above the largest class fails the node. The rate is what a
+four-core second costs, which is the four-core entry of the
+table under another name, so a body may name one or the other,
+never both. The warm cpu class is the largest class the warm
+runner pool serves: a node above it starts a Kubernetes node
+sized to its class instead, and zero starts a node of its own
+for every class. The grace period
 is how long a node keeps running after it has consumed the
 reservation its claim paid for with the balance at zero: a node
 inside that reservation is never cancelled, because the ledger
@@ -297,7 +296,7 @@ runs.read scope and setting needs admin.
 | Flag | Description |
 |---|---|
 | `--rate-table PAIRS` | Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667 |
-| `--billing-cpu-ceiling-cores N` | Hold every node's billed class under N cores; 0 bills by the node's own request |
+| `--warm-cpu-class-cores N` | Largest cpu class the warm runner pool serves; a larger class starts a node of its own |
 | `--rate-micro N` | Micro-credits one four-core cloud runner second costs, 1 to 1000000000000; refused once a rate table exists |
 | `--grace-seconds N` | Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat |
 | `--max-charge-seconds N` | The most seconds any one charge may bill, 6 to 86400 |

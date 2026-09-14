@@ -166,6 +166,17 @@ func (c localStoreFleetCoordinator) FinalizeNodeReady(ctx context.Context, runID
 	return c.store.FinalizeExecutorClaimRound(ctx, runID, nodeID)
 }
 
+func (c localStoreFleetCoordinator) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
+	_, err := c.store.AppendEvent(ctx, runID, nodeID, kind, payload)
+	return err
+}
+
+func (c localStoreFleetCoordinator) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string,
+	output []byte, reason string, exitCode *int,
+) error {
+	return c.store.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
 var (
 	_ runner.Runner          = (*limitedFleetRunner)(nil)
 	_ runner.LabelAdvertiser = (*limitedFleetRunner)(nil)

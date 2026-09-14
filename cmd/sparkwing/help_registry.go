@@ -2247,15 +2247,14 @@ var cmdCreditsSettings = Command{
 	Description: `Prints the runtime settings the ledger prices work with, and
 sets the ones named by a flag. The rate table prices one cloud
 runner second at every cpu class, and a node is billed at the
-smaller of the class its cpu request falls in and the class the
-runner executing it reports for itself; a request above the
-largest class that no runner report brings inside it fails the
-node. The rate is what a four-core second costs, which is the
-four-core entry of the table under another name, so a body may
-name one or the other, never both. The billing cpu ceiling
-holds every node's class under a cpu figure the operator sets,
-which is how a cluster that hands out smaller pods than its
-plans ask for bills what it gives; zero bills by the request. The grace period
+smallest class covering the cpu and memory it pinned; a request
+above the largest class fails the node. The rate is what a
+four-core second costs, which is the four-core entry of the
+table under another name, so a body may name one or the other,
+never both. The warm cpu class is the largest class the warm
+runner pool serves: a node above it starts a Kubernetes node
+sized to its class instead, and zero starts a node of its own
+for every class. The grace period
 is how long a node keeps running after it has consumed the
 reservation its claim paid for with the balance at zero: a node
 inside that reservation is never cancelled, because the ledger
@@ -2270,7 +2269,7 @@ set a table bills the default ladder. Reading needs the
 runs.read scope and setting needs admin.`,
 	Flags: []FlagSpec{
 		{Name: "rate-table", Argument: "PAIRS", Desc: "Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667", Group: "Input"},
-		{Name: "billing-cpu-ceiling-cores", Argument: "N", Desc: "Hold every node's billed class under N cores; 0 bills by the node's own request", Group: "Input"},
+		{Name: "warm-cpu-class-cores", Argument: "N", Desc: "Largest cpu class the warm runner pool serves; a larger class starts a node of its own", Group: "Input"},
 		{Name: "rate-micro", Argument: "N", Desc: fmt.Sprintf(
 			"Micro-credits one four-core cloud runner second costs, 1 to %d; refused once a rate table exists",
 			int64(store.MaxCreditRateMicro)), Group: "Input"},

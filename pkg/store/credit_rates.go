@@ -23,7 +23,29 @@ const (
 	// MaxCreditRateTableEntries bounds the table an operator may store, which
 	// keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
+
+	// safety: the memory a cpu class carries for each of its cores, matching
+	// the hosted runners a customer compares against. A node asking for more
+	// takes the class whose memory covers it.
+	cpuClassMemoryBytesPerCore = 4 << 30
+
+	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no
+	// operator set one. A node above it is executed on a node of its own.
+	DefaultWarmCPUClassCores = 2
 )
+
+// CPUClass is one rung of the runner ladder: a whole number of cores and the
+// memory that comes with them. It is the shape a node's executor owes it, and
+// the shape its claim was billed at.
+type CPUClass struct {
+	Cores       int64 `json:"cores"`
+	MemoryBytes int64 `json:"memory_bytes"`
+}
+
+// CPUClassMemoryBytes returns the memory a class of this many cores carries.
+func CPUClassMemoryBytes(cores int64) int64 {
+	return cores * cpuClassMemoryBytesPerCore
+}
 
 // safety: these are GitHub Actions' Linux x64 rates carried to the second,
 // which is the comparison every customer makes. The four-core entry is the
@@ -64,9 +86,18 @@ type UnpricedCPUClassError struct {
 	NodeID   string
 	Cores    int64
 	MaxCores int64
+	// MemoryBytes is what the node asked for when memory, not cpu, is what no
+	// class covers. Zero when the cpu request alone is above every class.
+	MemoryBytes int64
 }
 
 func (e *UnpricedCPUClassError) Error() string {
+	if e.MemoryBytes > 0 {
+		return fmt.Sprintf(
+			"credits: this node asks for %d bytes of memory, which needs a %d-core class, "+
+				"and the largest priced class is %d; add a class for it to the credit rate table",
+			e.MemoryBytes, e.Cores, e.MaxCores)
+	}
 	return fmt.Sprintf(
 		"credits: this node asks for %d cpu cores and the largest priced class is %d; "+
 			"add a class for it to the credit rate table", e.Cores, e.MaxCores)
@@ -76,23 +107,43 @@ func (e *UnpricedCPUClassError) Error() string {
 // errors.Is without knowing this type.
 func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
-// ClassFor returns the class that prices a node asking for cores, which is the
-// smallest class whose cores cover the request rounded up to a whole core. It
-// returns an [UnpricedCPUClassError] when the request is above every class.
-func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error) {
+// ClassForResource returns the class that covers both halves of a node's
+// request: the smallest class whose cores cover the cpu rounded up to a whole
+// core and whose memory, four gibibytes for each core, covers the
+// memory asked for. It returns an [UnpricedCPUClassError] when no class is
+// large enough.
+func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {
 	if len(t) == 0 {
 		return CreditRate{}, fmt.Errorf("%w: the rate table prices no cpu class", ErrInvalidCreditSetting)
 	}
 	want := int64(1)
-	if cores > 1 {
-		want = int64(math.Ceil(cores))
+	if res.Cores > 1 {
+		want = int64(math.Ceil(res.Cores))
 	}
 	for _, entry := range t {
-		if entry.Cores >= want {
+		if entry.Cores >= want && CPUClassMemoryBytes(entry.Cores) >= res.MemoryBytes {
 			return entry, nil
 		}
 	}
-	return CreditRate{}, &UnpricedCPUClassError{Cores: want, MaxCores: t[len(t)-1].Cores}
+	largest := t[len(t)-1]
+	if CPUClassMemoryBytes(largest.Cores) < res.MemoryBytes {
+		return CreditRate{}, &UnpricedCPUClassError{
+			Cores: max(want, memoryClassCores(res.MemoryBytes)), MaxCores: largest.Cores,
+			MemoryBytes: res.MemoryBytes,
+		}
+	}
+	return CreditRate{}, &UnpricedCPUClassError{Cores: want, MaxCores: largest.Cores}
+}
+
+// safety: a memory request above every class is reported as the core count
+// that much memory would come with, so the operator adds a class that fits
+// rather than one that still refuses the node.
+func memoryClassCores(bytes int64) int64 {
+	cores := bytes / cpuClassMemoryBytesPerCore
+	if bytes%cpuClassMemoryBytesPerCore != 0 {
+		cores++
+	}
+	return cores
 }
 
 // RateFor returns the micro-credits a second costs at the recorded class,
@@ -272,20 +323,16 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	return tx.Commit()
 }
 
-// safety: the class is resolved from the cpu figure the scheduler sizes the
-// node by, held under the operator's billing ceiling. Nothing a claimant says
-// about itself reaches this, because a runner that priced its own work could
-// bill a 64-core node at the smallest class.
+// safety: the class is resolved from the cpu and memory the scheduler sizes the
+// node by, which is what the pod is given. Nothing a claimant says about itself
+// reaches this, because a runner that priced its own work could bill a 64-core
+// node at the smallest class.
 func nodeCreditClassTx(
-	ctx context.Context, tx *storeTx, table CreditRateTable, runID, nodeID string, ceiling int64,
+	ctx context.Context, q rowQuerier, table CreditRateTable, runID, nodeID string,
 ) (CreditRate, error) {
-	charge, err := nodeChargeTx(ctx, tx, runID, nodeID)
+	charge, err := nodeChargeTx(ctx, q, runID, nodeID)
 	if err != nil {
 		return CreditRate{}, err
 	}
-	cores := charge.Cores
-	if ceiling > 0 && float64(ceiling) < cores {
-		cores = float64(ceiling)
-	}
-	return table.ClassFor(cores)
+	return table.ClassForResource(charge)
 }

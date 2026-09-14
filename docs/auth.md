@@ -63,10 +63,8 @@ costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
 hour, so ten dollars buys just under fourteen hours.
 
 A second is priced by the node's cpu class. The rate table prices one class per
-whole-core size, and a node is billed at the class its resolved cpu request
-falls in, held under `billing_cpu_ceiling_cores` when the operator set one: a
-cluster that hands out smaller pods than its plans ask for sets the ceiling and
-bills what it gives. Nothing a claimant says about itself reaches the price,
+whole-core size, and a node is billed at the class it pinned, which is the class
+the pod is given. Nothing a claimant says about itself reaches the price,
 because a runner that priced its own work would bill a 64-core node at the
 smallest class. A request above the largest class the table prices fails the
 node with `unpriced_cpu_class` and a `credits_unpriced_class` event naming both
@@ -94,6 +92,48 @@ to the table never reprices a charge already written.
 cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
 --amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
 lists every movement newest first.
+
+## Runner classes
+
+A class is a whole number of cores with the memory that comes with it, and it
+is the unit a pipeline buys. The ladder is 2, 4, 8, 16, 32, and 64 cores, and
+each class carries 4 GiB of memory for each of its cores: 8 GiB at two cores,
+32 GiB at eight, 256 GiB at sixty-four. A node takes the smallest class that
+covers both halves of what it pinned, so a pin of three cores and 20 GB takes
+the 8-core class because the 4-core class carries only 16 GiB. The pod is
+created with cpu and memory requests and limits equal to its class, so a node
+never outgrows the class it is billed at.
+
+The 2-core class runs on the warm pool and starts in seconds. A larger class
+starts a Kubernetes node of its own, which takes one to two minutes during the
+preview, and the controller refuses every warm claim and offer for it so it
+cannot land on a machine it shares. `warm_cpu_class_cores` is the largest class
+the warm pool serves, 2 by default; zero starts a node of its own for every
+class. Local claim-mode agents are unmetered and claim by their labels as they
+always have.
+
+A claim answers with the class it billed, as `credit_cpu_class_cores` and
+`credit_cpu_class_memory_bytes`, and the Job is created from those two figures,
+so the pod shape and the bill agree whichever ladder the operator priced. A
+claim that names a node carries `sizes_to_class` to say it creates the node's
+executor at that class; a metered claim without it is held to the warm class,
+and an unmetered one may not set it at all, so a customer's local agent can
+never route a class node to itself. The metered token is the operator's own
+pool, and class routing trusts it: the warm loop and the Job dispatcher share
+one process and one token, so the controller takes the flag at its word until
+the Job builder moves server-side and the pod shape is the controller's own.
+A runner cpu or memory ceiling below the billed class fails the node naming
+both, because a customer must never be billed for a class the pod cannot get.
+A pod no node accepts within five minutes fails the node with the scheduler's
+own message, which is what a class larger than the cluster provisions looks
+like. A node whose `.Requires()` labels no runner advertises, and which no
+fallback may take, fails after five minutes with a `node_unmatchable` event
+naming the labels, the labels the fallback does advertise, and the class, so
+work the fleet cannot serve ends where an operator can see it.
+
+The class is stamped on the node when it becomes ready, so the queue read
+leaves the classes a warm runner may not take out of the scan entirely and a
+2-core node behind thousands of larger ones is still claimed at once.
 
 ## Compute guards
 

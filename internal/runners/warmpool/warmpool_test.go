@@ -2,12 +2,14 @@ package warmpool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -456,5 +458,144 @@ func TestNewDefaultsTheHeartbeatToTheStoreCadence(t *testing.T) {
 	if r.cfg.HeartbeatInterval != store.DispatchedHeartbeatInterval {
 		t.Fatalf("default heartbeat = %s, want the store's %s cadence the charge cap is judged against",
 			r.cfg.HeartbeatInterval, store.DispatchedHeartbeatInterval)
+	}
+}
+
+// The grace runs from the first sighting, and a wait exactly as long as it is
+// still inside it.
+func TestUnmatchableExpiredAtBothEdges(t *testing.T) {
+	t.Parallel()
+	since := time.Unix(0, 0)
+	grace := 10 * time.Millisecond
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		want bool
+	}{
+		{name: "the first sighting", now: since, want: false},
+		{name: "one nanosecond inside the grace", now: since.Add(grace - time.Nanosecond), want: false},
+		{name: "exactly the grace", now: since.Add(grace), want: false},
+		{name: "one nanosecond past the grace", now: since.Add(grace + time.Nanosecond), want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unmatchableExpired(since, tc.now, grace); got != tc.want {
+				t.Fatalf("unmatchableExpired = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewDefaultsTheUnmatchableGrace(t *testing.T) {
+	t.Parallel()
+	if got := New(nil, nil, Config{}, quietTestLogger()).cfg.UnmatchableGrace; got != DefaultUnmatchableGrace {
+		t.Fatalf("grace = %s, want %s", got, DefaultUnmatchableGrace)
+	}
+	if got := New(nil, nil, Config{UnmatchableGrace: time.Second}, quietTestLogger()).cfg.UnmatchableGrace; got != time.Second {
+		t.Fatalf("grace = %s, want the configured second", got)
+	}
+}
+
+// A node no runner advertises and no fallback may take fails once its grace
+// runs out, and says which labels and which class it failed on.
+func TestRunnerFailsAnUnmatchableNodeAfterItsGrace(t *testing.T) {
+	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"os=windows", "gpu"}, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     time.Millisecond,
+		ClaimWaitTimeout: 5 * time.Millisecond,
+		UnmatchableGrace: time.Millisecond,
+	}, quietTestLogger())
+
+	result := r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	if result.Outcome != sparkwing.Failed {
+		t.Fatalf("result = %+v, want failed", result)
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Outcome != string(sparkwing.Failed) || node.FailureReason != store.FailureQueueTimeout {
+		t.Fatalf("node = %s/%s, want a queue timeout", node.Outcome, node.FailureReason)
+	}
+
+	events, err := st.ListEventsAfter(context.Background(), "run-1", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *UnmatchableEvent
+	for _, e := range events {
+		if e.Kind != "node_unmatchable" {
+			continue
+		}
+		var payload UnmatchableEvent
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			t.Fatalf("decode the event: %v: %s", err, e.Payload)
+		}
+		found = &payload
+	}
+	if found == nil {
+		t.Fatal("no node_unmatchable event was recorded")
+	}
+	if !reflect.DeepEqual(found.NeedsLabels, []string{"os=windows", "gpu"}) {
+		t.Errorf("needs_labels = %v", found.NeedsLabels)
+	}
+	if len(found.FallbackLabels) != 0 {
+		t.Errorf("fallback_labels = %v, want none advertised", found.FallbackLabels)
+	}
+	if found.GraceSeconds != time.Millisecond.Seconds() {
+		t.Errorf("grace_seconds = %v, want %v", found.GraceSeconds, time.Millisecond.Seconds())
+	}
+	if !strings.Contains(found.Detail, "os=windows") {
+		t.Errorf("detail = %q, want it to name the labels", found.Detail)
+	}
+}
+
+// A grace that has not run out leaves the node queued for a runner that may
+// still appear.
+func TestRunnerKeepsAnUnmatchableNodeInsideItsGrace(t *testing.T) {
+	polled := make(chan struct{})
+	var polledOnce sync.Once
+	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"os=windows"}, func(next http.Handler, _ *store.Store) http.Handler {
+		var polls atomic.Int64
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req)
+			if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/nodes/build") &&
+				polls.Add(1) >= 5 {
+				polledOnce.Do(func() { close(polled) })
+			}
+		})
+	})
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     time.Millisecond,
+		ClaimWaitTimeout: 2 * time.Millisecond,
+		UnmatchableGrace: time.Hour,
+	}, quietTestLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan runner.Result, 1)
+	go func() { done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"}) }()
+	// safety: the package timeout is what bounds a runner that never polls, so
+	// the test waits on the signal itself rather than on the wall clock.
+	<-polled
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Outcome != "" {
+		t.Fatalf("node outcome = %q inside its grace, want it still queued", node.Outcome)
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+
+	cancel()
+	if result := <-done; result.Outcome != sparkwing.Cancelled {
+		t.Fatalf("result = %+v, want cancelled", result)
 	}
 }

@@ -117,13 +117,17 @@ var _ runner.Runner = (*Runner)(nil)
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	res := r.resolveResources(ctx, req)
-	fence, claimed := r.claimNode(ctx, req, name)
+	fence, class, claimed := r.claimNode(ctx, req, name)
 	if claimed {
 		// safety: the dispatcher reached here holding the run's trigger claim,
 		// and the controller refuses a request that carries both identities.
 		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
 	}
-	job := r.buildJob(name, req, res, fence)
+	if msg := r.ceilingUnderClass(class); msg != "" {
+		r.failNode(ctx, req, msg, store.FailureUnknown)
+		return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
+	}
+	job := r.buildJob(name, req, res, class, fence)
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -150,6 +154,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "job created")
 	var lastPhase string
+	var unschedulableSince time.Time
 
 	t := time.NewTicker(r.cfg.PollInterval)
 	defer t.Stop()
@@ -173,7 +178,90 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, phase)
 				lastPhase = phase
 			}
+			if detail := r.observeUnschedulable(ctx, name); detail == "" {
+				unschedulableSince = time.Time{}
+			} else {
+				now := time.Now()
+				if unschedulableSince.IsZero() {
+					unschedulableSince = now
+				}
+				if now.Sub(unschedulableSince) >= UnschedulableGracePeriod {
+					msg := fmt.Sprintf(
+						"K8sRunner: no node accepted this pod within %s: %s",
+						UnschedulableGracePeriod, detail)
+					r.failNode(ctx, req, msg, store.FailureUnknown)
+					return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
+				}
+			}
 		}
+	}
+}
+
+// UnschedulableGracePeriod is how long a pod may sit with no node willing to
+// take it before its node fails. A class larger than the cluster keeps warm
+// waits for a machine to boot, so the window covers that and stops well short
+// of the Job's wall-clock deadline.
+const UnschedulableGracePeriod = 5 * time.Minute
+
+// safety: an unschedulable pod would otherwise sit until the Job deadline hours
+// later with nothing saying why, so the scheduler's own message is what the
+// node fails with.
+func (r *Runner) observeUnschedulable(ctx context.Context, jobName string) string {
+	pods, err := r.client.CoreV1().Pods(r.cfg.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("batch.kubernetes.io/job-name=%s", jobName),
+	})
+	if err != nil || len(pods.Items) == 0 {
+		return ""
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodPending {
+			return ""
+		}
+	}
+	for _, p := range pods.Items {
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse &&
+				c.Reason == corev1.PodReasonUnschedulable {
+				if c.Message != "" {
+					return c.Message
+				}
+				return string(corev1.PodReasonUnschedulable)
+			}
+		}
+	}
+	return ""
+}
+
+// safety: a customer is billed for the class at the claim, so a pod that cannot
+// be given that class fails the node instead of running smaller for the same
+// price.
+func (r *Runner) ceilingUnderClass(class store.CPUClass) string {
+	if class.Cores <= 0 {
+		return ""
+	}
+	if r.cfg.CPUCeiling > 0 && r.cfg.CPUCeiling < float64(class.Cores) {
+		return fmt.Sprintf(
+			"K8sRunner: this node is billed at the %d-core class and the runner cpu ceiling is %g cores; "+
+				"raise the ceiling or lower the pin", class.Cores, r.cfg.CPUCeiling)
+	}
+	if r.cfg.MemoryCeiling > 0 && r.cfg.MemoryCeiling < class.MemoryBytes {
+		return fmt.Sprintf(
+			"K8sRunner: this node is billed at the %d-core class, which carries %s, and the runner memory "+
+				"ceiling is %s; raise the ceiling or lower the pin",
+			class.Cores, gib(class.MemoryBytes), gib(r.cfg.MemoryCeiling))
+	}
+	return ""
+}
+
+func (r *Runner) failNode(ctx context.Context, req runner.Request, msg, reason string) {
+	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "resource_class_refused", []byte(msg)); err != nil {
+		r.logger.Warn("k8s: recording the refusal failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	}
+	if err := r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
+		string(sparkwing.Failed), msg, nil, reason, nil); err != nil {
+		r.logger.Warn("k8s: failing the node failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
 	}
 }
 
@@ -233,23 +321,31 @@ const jobDeadlineSlack = 10 * time.Minute
 // safety: a controller that does not carry the targeted-claim route, or a node
 // some other holder already took, leaves the Job running exactly as it did
 // before the fence existed rather than failing the node here.
-func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName string) (store.NodeClaimFence, bool) {
+func (r *Runner) claimNode(
+	ctx context.Context, req runner.Request, jobName string,
+) (store.NodeClaimFence, store.CPUClass, bool) {
 	holderID := "k8s-job:" + jobName
-	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease)
+	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true)
+	// safety: only the operator's metered pool may claim it sizes a node to its
+	// cpu class, so an unmetered installation claims the node plainly and gets
+	// the pod shape it always had.
+	if errors.Is(err, store.ErrLockHeld) {
+		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false)
+	}
 	if errors.Is(err, client.ErrControllerLacksRoute) {
 		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
 			"run_id", req.RunID, "node_id", req.NodeID)
-		return store.NodeClaimFence{}, false
+		return store.NodeClaimFence{}, store.CPUClass{}, false
 	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed",
 			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
-		return store.NodeClaimFence{}, false
+		return store.NodeClaimFence{}, store.CPUClass{}, false
 	}
 	return store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	}, true
+	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, true
 }
 
 // safety: this is a wall-clock backstop for a pod Kubernetes would otherwise
@@ -481,7 +577,9 @@ const (
 	ClaimLeaseSecondsEnv = "SPARKWING_NODE_CLAIM_LEASE_SECONDS"
 )
 
-func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution, fence store.NodeClaimFence) *batchv1.Job {
+func (r *Runner) buildJob(
+	name string, req runner.Request, res capacity.Resolution, class store.CPUClass, fence store.NodeClaimFence,
+) *batchv1.Job {
 	env := []corev1.EnvVar{
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
 		{Name: "SPARKWING_RUN_ID", Value: req.RunID},
@@ -518,7 +616,7 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		Command:         []string{JobBinary},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
-		Resources:       podResources(res, r.cfg),
+		Resources:       podResources(res, class, r.cfg),
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			RunAsNonRoot:             boolPtr(true),
@@ -649,7 +747,18 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 
 // safety: cluster profiles use peak CPU because the resolved core value is a
 // hard CFS limit here; sustained local-host demand would throttle spiky pods.
-func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
+func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) corev1.ResourceRequirements {
+	// safety: the class the controller billed outranks the operator ceiling,
+	// which RunNode has already refused when it sits below the class, so a pod
+	// is never smaller than what the customer paid for.
+	if class.Cores > 0 {
+		cpu := milliCores(float64(class.Cores))
+		memory := *resource.NewQuantity(class.MemoryBytes, resource.BinarySI)
+		return corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: memory},
+			Limits:   corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: memory},
+		}
+	}
 	// safety: an operator ceiling outranks a pipeline pin, which is otherwise unbounded on this path
 	res = capacity.ApplyCeiling(res, cfg.CPUCeiling, cfg.MemoryCeiling)
 	req := corev1.ResourceList{}

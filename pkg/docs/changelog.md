@@ -23,6 +23,37 @@ unlock.
 ## [v0.50.4] - 2026-09-14
 ### Added
 
+- **controller + CLI + pkg/store:** Metered nodes are routed by cpu class. A
+  class is a whole number of cores carrying 4 GiB of memory for each of them,
+  and a node takes the smallest class covering both halves of what it pinned,
+  so a pin of three cores and 20 GB takes the 8-core class. A node above the
+  warm class is never offered to or claimed by a warm runner and runs on a
+  Kubernetes node sized to its class, with cpu and memory requests and limits
+  equal to the class so it never outgrows what it is billed at. The 2-core
+  class stays warm and starts in seconds; a larger class starts a node of its
+  own in one to two minutes. `warm_cpu_class_cores` on the credit settings
+  route (`sparkwing cluster credits settings --warm-cpu-class-cores N`, 2 by
+  default) is the largest class the warm pool serves, and zero starts a node of
+  its own for every class. A claimed node carries the class it was billed at as
+  `credit_cpu_class_cores` and `credit_cpu_class_memory_bytes`, and the
+  Kubernetes Job is sized from those, so the pod shape and the bill agree
+  whichever ladder an operator priced. A named claim carries `sizes_to_class`
+  to say it creates the node's executor at that class; a metered claim without
+  it is held to the warm class and an unmetered token may not set it at all, so
+  naming a node is not a way around the ladder. A runner cpu or memory ceiling
+  below the billed class fails the node rather than running it smaller for the
+  same price; a pod no node accepts within five minutes fails with the
+  scheduler's own message; and a node whose labels no runner advertises and no
+  fallback may take fails after five minutes with a `node_unmatchable` event
+  naming the labels and the class.
+  The class is stamped on the node when it becomes ready, so the queue read
+  skips the classes a warm runner may not take rather than scanning past them.
+  `store.CPUClass`, `store.CreditRateTable.ClassForResource`,
+  `store.CPUClassMemoryBytes`, `store.NamedClaimOptions` and
+  `store.DefaultWarmCPUClassCores` are the store surface;
+  `store.ClaimNamedNode` and `client.ClaimNodeByID` take the new option and
+  `CreditRateTable.ClassFor` is replaced by `ClassForResource`. Local
+  claim-mode agents are unmetered and claim by their labels as before.
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a node gets past its claim reservation, and the cap on
@@ -121,10 +152,8 @@ unlock.
   `credits history` print both. `sparkwing cluster credits settings
   --rate-table 2=10000,4=20000,8=36667` writes the ladder, and the route also
   takes it as a list of `{cores, micro_per_second}` or an object keyed by
-  cores. A node is billed at the class its cpu request falls in, held under the
-  new `billing_cpu_ceiling_cores` setting (`--billing-cpu-ceiling-cores`, zero
-  by default) so a cluster handing out smaller pods than its plans ask for
-  bills what it gives; nothing a claimant reports about itself changes a class.
+  cores. A node is billed at the class it pinned, which is the class its pod is
+  given; nothing a claimant reports about itself changes a class.
   A request above the largest class fails the node with `unpriced_cpu_class`
   and a `credits_unpriced_class` event rather than leaving it claimable
   forever. A rate above a million credits a second is refused, because it
@@ -195,7 +224,7 @@ unlock.
   key exactly as it stands, and `GET /api/v1/health` no longer reports
   `database.credit_grant_key`. `store.SetCreditSettings` is the only credit
   writer: `SetCreditRateMicroPerSecond`, `SetCreditGraceSeconds`,
-  `SetCreditMaxChargeSeconds` and `SetBillingCPUCeilingCores` are removed, as
+  `SetCreditMaxChargeSeconds` and the per-setting siblings are removed, as
   is `MaxNodeHeartbeatInterval`, which named the same cadence as
   `DispatchedHeartbeatInterval`. No cadence, default or cap arithmetic changed.
 - **controller (Breaking):** A metered runner second is priced by the node's cpu

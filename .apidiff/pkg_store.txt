@@ -75,6 +75,11 @@ const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+type CPUClass struct {
+	Cores       int64
+	MemoryBytes int64
+}
+func CPUClassMemoryBytes(cores int64) int64
 const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
 const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {
@@ -279,24 +284,24 @@ type CreditRate struct {
 const CreditRateBaseClassCores = 4
 type CreditRateTable []CreditRate
 func (t CreditRateTable) BaseRate() int64
-func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error)
+func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error)
 func (t CreditRateTable) RateFor(cores int64) int64
 func (t CreditRateTable) Sorted() CreditRateTable
 func (t CreditRateTable) Validate() error
 type CreditSettings struct {
 	RateMicroPerSecond int64
 
-	BillingCPUCeilingCores int64
+	WarmCPUClassCores int64
 
 	GraceSeconds int64
 
 	MaxChargeSeconds int64
 }
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond     *int64
-	BillingCPUCeilingCores *int64
-	GraceSeconds           *int64
-	MaxChargeSeconds       *int64
+	RateMicroPerSecond *int64
+	WarmCPUClassCores  *int64
+	GraceSeconds       *int64
+	MaxChargeSeconds   *int64
 }
 type CreditState struct {
 	GrantedMicro int64
@@ -309,12 +314,12 @@ type CreditState struct {
 
 	RateTableSet bool
 
-	BillingCPUCeilingCores int64
-	GraceSeconds           int64
-	MaxChargeSeconds       int64
-	BurnWindow             time.Duration
-	BurnMicro              int64
-	ExhaustedAt            *time.Time
+	WarmCPUClassCores int64
+	GraceSeconds      int64
+	MaxChargeSeconds  int64
+	BurnWindow        time.Duration
+	BurnMicro         int64
+	ExhaustedAt       *time.Time
 }
 const CreditsPerDollar = 100
 type CronDeclaration struct {
@@ -436,6 +441,7 @@ const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
 const DefaultLeaseDuration = 3 * time.Minute
+const DefaultWarmCPUClassCores = 2
 func DetectDialect(dsn string) Dialect
 type Dialect int
 func (d Dialect) String() string
@@ -702,6 +708,9 @@ const MicroCreditsPerCredit = 1_000_000
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
+type NamedClaimOptions struct {
+	SizesToClass bool
+}
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
@@ -748,6 +757,10 @@ type Node struct {
 	PlacementReason string
 
 	PlacementHoldFrom *time.Time
+
+	CreditCPUClassCores int64
+
+	CreditCPUClassMemoryBytes int64
 
 	NeedsLabels []string
 
@@ -1141,7 +1154,6 @@ func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string,
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
-func (s *Store) BillingCPUCeilingCores(ctx context.Context) (int64, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
@@ -1152,7 +1164,10 @@ func (s *Store) CancelNodeForExhaustedCredits(
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
-func (s *Store) ClaimNamedNode(ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string, lease time.Duration) (*Node, error)
+func (s *Store) ClaimNamedNode(
+	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
+	lease time.Duration, opts NamedClaimOptions,
+) (*Node, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string, executor ExecutorIdentity) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
@@ -1402,6 +1417,7 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) ValidateExecutorClaimReservation(ctx context.Context, claimant ClaimIdentity, runID, nodeID, executorName, reservationID string, slot int, resourceDigest string) error
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
+func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 type TableSize struct {
 	Name  string
@@ -1496,6 +1512,8 @@ type UnpricedCPUClassError struct {
 	NodeID   string
 	Cores    int64
 	MaxCores int64
+
+	MemoryBytes int64
 }
 func (e *UnpricedCPUClassError) Error() string
 func (e *UnpricedCPUClassError) Unwrap() error

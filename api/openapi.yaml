@@ -4013,6 +4013,7 @@ paths:
               properties:
                 holder_id: {type: string}
                 lease_secs: {type: integer}
+                sizes_to_class: {type: boolean, description: "The caller creates the node's executor at the cpu class the claim bills; without it a metered claim is held to the class the warm pool serves."}
       responses:
         "200":
           description: Claimed node.
@@ -4283,6 +4284,8 @@ components:
           nullable: true
           description: >-
             When the node became claimable, which the local-first hold runs from. Held apart from `ready_at`, which a label-mismatched claim moves to keep the queue in motion.
+        credit_cpu_class_cores: {type: integer, format: int64, description: "The cpu class the claim billed this node at, which is the shape its executor owes it. Absent on a node no metered claim priced."}
+        credit_cpu_class_memory_bytes: {type: integer, format: int64, description: "The memory that class carries, which its executor gives the node alongside the cores."}
         requested_cores: {type: number}
         requested_memory_bytes: {type: integer, format: int64}
         requested_slots: {type: integer}
@@ -4654,7 +4657,7 @@ components:
           description: The price of a cloud runner second at every cpu class, smallest class first.
           items: {$ref: "#/components/schemas/CreditRate"}
         rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not bills the default ladder.}
-        billing_cpu_ceiling_cores: {type: integer, format: int64, description: Holds every node's billed class under this many cores; 0 bills by the node's own cpu request.}
+        warm_cpu_class_cores: {type: integer, format: int64, description: "Largest cpu class the warm runner pool serves; a node above it starts a Kubernetes node sized to its class, and 0 starts one for every class."}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a node runs past its claim reservation with the balance at zero.}
@@ -4675,7 +4678,7 @@ components:
           description: The price of a cloud runner second at every cpu class, smallest class first.
           items: {$ref: "#/components/schemas/CreditRate"}
         rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not bills the default ladder.}
-        billing_cpu_ceiling_cores: {type: integer, format: int64, description: Holds every node's billed class under this many cores; 0 bills by the node's own cpu request.}
+        warm_cpu_class_cores: {type: integer, format: int64, description: "Largest cpu class the warm runner pool serves; a node above it starts a Kubernetes node sized to its class, and 0 starts one for every class."}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance; zero cancels it as soon as its reservation is consumed.}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a node runs past the reservation its claim paid for with the balance at zero; zero cancels it at the first heartbeat past that reservation.}
@@ -4688,7 +4691,7 @@ components:
       description: The settings to change. An omitted field is left as it was.
       properties:
         rate_micro_per_second: {type: integer, format: int64, description: Price of one four-core cloud runner second; must be positive. Refused with 400 once a rate table exists or when named beside rate_table.}
-        billing_cpu_ceiling_cores: {type: integer, format: int64, description: Holds every node's billed class under this many cores; 0 bills by the node's own cpu request.}
+        warm_cpu_class_cores: {type: integer, format: int64, description: "Largest cpu class the warm runner pool serves; a node above it starts a Kubernetes node sized to its class, and 0 starts one for every class."}
         rate_table:
           description: The price of a cloud runner second at every cpu class, as a list of entries or as an object keyed by cores. Writing it also writes the four-core price to rate_micro_per_second.
           oneOf:

@@ -86,7 +86,7 @@ func TestClaimNodeByID_AwardsTheNamedNodeWithItsFence(t *testing.T) {
 	c := client.NewWithToken(f.url, nil, f.token)
 	ctx := context.Background()
 
-	n, err := c.ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute)
+	n, err := c.ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("ClaimNodeByID: %v", err)
 	}
@@ -115,12 +115,12 @@ func TestClaimNodeByID_RefusesANodeAnotherHolderHas(t *testing.T) {
 	f.readyNode(t, "run-1", "build")
 	ctx := context.Background()
 	if _, err := f.store.ClaimNamedNode(ctx, store.ClaimIdentity{},
-		"run-1", "build", "agent:box-a", time.Minute); err != nil {
+		"run-1", "build", "agent:box-a", time.Minute, store.NamedClaimOptions{}); err != nil {
 		t.Fatalf("seed the agent's claim: %v", err)
 	}
 
 	_, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute)
+		ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute, false)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("claiming a held node = %v, want ErrLockHeld", err)
 	}
@@ -129,7 +129,7 @@ func TestClaimNodeByID_RefusesANodeAnotherHolderHas(t *testing.T) {
 func TestClaimNodeByID_ReportsANodeThatDoesNotExist(t *testing.T) {
 	f := newNamedClaimFixture(t, store.TokenOptions{})
 	_, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(context.Background(), "run-missing", "build", "k8s-job:sw-1", time.Minute)
+		ClaimNodeByID(context.Background(), "run-missing", "build", "k8s-job:sw-1", time.Minute, false)
 	if err == nil {
 		t.Fatal("claiming an absent node succeeded")
 	}
@@ -145,7 +145,7 @@ func TestClaimNodeByID_NeedsTheClaimScope(t *testing.T) {
 	}
 
 	if _, err := client.NewWithToken(f.url, nil, reader).
-		ClaimNodeByID(context.Background(), "run-1", "build", "k8s-job:sw-1", time.Minute); err == nil {
+		ClaimNodeByID(context.Background(), "run-1", "build", "k8s-job:sw-1", time.Minute, false); err == nil {
 		t.Fatal("a token without nodes.claim claimed a node")
 	}
 }
@@ -163,7 +163,7 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	}
 	c := client.NewWithToken(f.url, nil, f.token)
 
-	n, err := c.ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute)
+	n, err := c.ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("ClaimNodeByID: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestClaimNodeByID_RefusesAnUnreadyNodeWithoutTheRunsDispatchClaim(t *testin
 	seedRunNode(t, f.store, "run-1", "build")
 
 	_, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(context.Background(), "run-1", "build", "rogue:pod", time.Minute)
+		ClaimNodeByID(context.Background(), "run-1", "build", "rogue:pod", time.Minute, false)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("claiming an unready node = %v, want a refusal", err)
 	}
@@ -227,7 +227,7 @@ func TestClaimNodeByID_AwardsAnUnreadyNodeToTheRunsDispatcher(t *testing.T) {
 	f.claimTrigger(t, "run-1", "demo")
 
 	n, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(context.Background(), "run-1", "build", "k8s-job:sw-1", time.Minute)
+		ClaimNodeByID(context.Background(), "run-1", "build", "k8s-job:sw-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("the run's dispatcher was refused its own node: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestClaimNodeByID_RefusesANodeOfAFinishedRun(t *testing.T) {
 	}
 
 	_, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute)
+		ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute, false)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("claiming a node of a finished run = %v, want ErrLockHeld", err)
 	}
@@ -259,7 +259,7 @@ func TestClaimNodeByID_RefusesALabelledNodeWithoutTheRunsDispatchClaim(t *testin
 	f.labelledReadyNode(t, "run-1", "train", []string{"gpu"})
 
 	_, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(context.Background(), "run-1", "train", "unlabeled:pod", time.Minute)
+		ClaimNodeByID(context.Background(), "run-1", "train", "unlabeled:pod", time.Minute, false)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("claiming a gpu node from an unlabeled caller = %v, want a refusal", err)
 	}
@@ -282,7 +282,7 @@ func TestClaimNodeByID_AwardsALabelledNodeToTheRunsDispatcher(t *testing.T) {
 	f.claimTrigger(t, "run-1", "demo")
 
 	n, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(context.Background(), "run-1", "train", "k8s-job:sw-1", time.Minute)
+		ClaimNodeByID(context.Background(), "run-1", "train", "k8s-job:sw-1", time.Minute, false)
 	if err != nil {
 		t.Fatalf("the run's dispatcher was refused its own labeled node: %v", err)
 	}

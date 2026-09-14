@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"regexp"
@@ -1646,6 +1647,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 type claimNamedNodeReq struct {
 	HolderID  string `json:"holder_id"`
 	LeaseSecs int    `json:"lease_secs"`
+	// safety: without this the caller runs the node on an executor it already
+	// has, so a metered claim is held to the class the warm pool serves.
+	SizesToClass bool `json:"sizes_to_class,omitempty"`
 }
 
 func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
@@ -1663,7 +1667,15 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
-		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
+		body.HolderID, time.Duration(body.LeaseSecs)*time.Second,
+		store.NamedClaimOptions{SizesToClass: body.SizesToClass})
+	// safety: the flag is what admits a class the queue would refuse, and only
+	// the operator's own pool token may set it, so every use is on the record.
+	if body.SizesToClass && err == nil {
+		slog.InfoContext(r.Context(), "a named claim took a node at its cpu class",
+			"run_id", runID, "node_id", nodeID, "holder_id", body.HolderID,
+			"cpu_class_cores", n.CreditCPUClassCores)
+	}
 	if err != nil {
 		if s.writeCreditsRefusal(w, r, err) {
 			return

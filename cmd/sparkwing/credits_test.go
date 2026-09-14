@@ -236,7 +236,7 @@ func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
 	fs.Int64("grace-seconds", 0, "")
 	fs.Int64("max-charge-seconds", 0, "")
 	fs.String("rate-table", "", "")
-	fs.Int64("billing-cpu-ceiling-cores", 0, "")
+	fs.Int64("warm-cpu-class-cores", 0, "")
 	if err := fs.Parse(args); err != nil {
 		t.Fatalf("parse %v: %v", args, err)
 	}

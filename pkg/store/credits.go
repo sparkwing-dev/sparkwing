@@ -148,7 +148,7 @@ const (
 	metaKeyCreditGraceSecs   = "credit_grace_seconds"
 	metaKeyCreditMaxCharge   = "credit_max_charge_seconds"
 	metaKeyCreditExhaustedAt = "credit_exhausted_at"
-	metaKeyBillingCPUCeiling = "billing_cpu_ceiling_cores"
+	metaKeyWarmCPUClass      = "warm_cpu_class_cores"
 )
 
 // CreditHistoryMaxLimit is the most rows of each kind one history read
@@ -393,14 +393,13 @@ type CreditState struct {
 	// RateTableSet reports whether an operator wrote the table. A state that
 	// reports false bills the default ladder.
 	RateTableSet bool
-	// BillingCPUCeilingCores holds every node's billed class under this many
-	// cores. Zero bills each node by its own cpu request.
-	BillingCPUCeilingCores int64
-	GraceSeconds           int64
-	MaxChargeSeconds       int64
-	BurnWindow             time.Duration
-	BurnMicro              int64
-	ExhaustedAt            *time.Time
+	// WarmCPUClassCores is the largest class a warm runner pool serves.
+	WarmCPUClassCores int64
+	GraceSeconds      int64
+	MaxChargeSeconds  int64
+	BurnWindow        time.Duration
+	BurnMicro         int64
+	ExhaustedAt       *time.Time
 }
 
 // ValidCreditGrantKind reports whether kind is one this ledger stores.
@@ -673,11 +672,11 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 		return out, err
 	}
 	out.RateTableSet = tableSet
-	ceiling, err := s.BillingCPUCeilingCores(ctx)
+	warm, err := s.WarmCPUClassCores(ctx)
 	if err != nil {
 		return out, err
 	}
-	out.BillingCPUCeilingCores = ceiling
+	out.WarmCPUClassCores = warm
 	grace, err := s.CreditGraceSeconds(ctx)
 	if err != nil {
 		return out, err
@@ -814,10 +813,10 @@ func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
 type CreditSettings struct {
 	// RateMicroPerSecond is the price of one cloud runner second.
 	RateMicroPerSecond int64
-	// BillingCPUCeilingCores holds the class a node is billed at to a cpu
-	// figure the operator sets, whatever the node's own request asked for.
-	// Zero bills every node by its request.
-	BillingCPUCeilingCores int64
+	// WarmCPUClassCores is the largest cpu class a warm runner pool serves. A
+	// node above it is never offered to or claimed by a warm runner and is
+	// executed on a Kubernetes node sized to its class instead.
+	WarmCPUClassCores int64
 	// GraceSeconds is how long a node that has consumed its claim reservation
 	// on an empty balance keeps running before the controller cancels it.
 	GraceSeconds int64
@@ -829,10 +828,10 @@ type CreditSettings struct {
 // setting as it stands, so a caller changing one value sends one field and a
 // field added later joins without disturbing these three.
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond     *int64
-	BillingCPUCeilingCores *int64
-	GraceSeconds           *int64
-	MaxChargeSeconds       *int64
+	RateMicroPerSecond *int64
+	WarmCPUClassCores  *int64
+	GraceSeconds       *int64
+	MaxChargeSeconds   *int64
 }
 
 // CreditSettings reads all three settings together. A controller that set none
@@ -890,8 +889,8 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 	if u.RateMicroPerSecond != nil {
 		out[metaKeyCreditRateMicro] = *u.RateMicroPerSecond
 	}
-	if u.BillingCPUCeilingCores != nil {
-		out[metaKeyBillingCPUCeiling] = *u.BillingCPUCeilingCores
+	if u.WarmCPUClassCores != nil {
+		out[metaKeyWarmCPUClass] = *u.WarmCPUClassCores
 	}
 	if u.GraceSeconds != nil {
 		out[metaKeyCreditGraceSecs] = *u.GraceSeconds
@@ -905,14 +904,14 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 // safety: every value is judged before any of them is written, so a body that
 // names one good setting and one bad one moves neither.
 func (u CreditSettingsUpdate) validate() error {
-	if u.RateMicroPerSecond == nil && u.BillingCPUCeilingCores == nil &&
+	if u.RateMicroPerSecond == nil && u.WarmCPUClassCores == nil &&
 		u.GraceSeconds == nil && u.MaxChargeSeconds == nil {
 		return fmt.Errorf(
-			"%w: name at least one of the rate, the billing cpu ceiling, the grace period, or the charge cap",
+			"%w: name at least one of the rate, the warm cpu class, the grace period, or the charge cap",
 			ErrInvalidCreditSetting)
 	}
-	if u.BillingCPUCeilingCores != nil {
-		if err := validBillingCPUCeiling(*u.BillingCPUCeilingCores); err != nil {
+	if u.WarmCPUClassCores != nil {
+		if err := validWarmCPUClass(*u.WarmCPUClassCores); err != nil {
 			return err
 		}
 	}
@@ -942,20 +941,20 @@ func validCreditRate(micro int64) error {
 	return nil
 }
 
-// safety: the ceiling is a whole number of cores the table can price, so a
-// negative one is refused and zero means the node's own request decides.
-func validBillingCPUCeiling(cores int64) error {
+// safety: the warm class is a whole number of cores the ladder can name, and
+// zero is the cluster that runs nothing warm, so only a negative one is refused.
+func validWarmCPUClass(cores int64) error {
 	if cores < 0 {
-		return fmt.Errorf("%w: the billing cpu ceiling must not be negative, got %d",
+		return fmt.Errorf("%w: the warm cpu class must not be negative, got %d",
 			ErrInvalidCreditSetting, cores)
 	}
 	return nil
 }
 
-// BillingCPUCeilingCores returns the cpu figure the ledger holds a node's class
-// under. Zero bills every node by the cpu its own request resolved to.
-func (s *Store) BillingCPUCeilingCores(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyBillingCPUCeiling, 0)
+// WarmCPUClassCores returns the largest cpu class a warm runner pool serves. A
+// controller that set none serves [DefaultWarmCPUClassCores].
+func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error) {
+	return s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
 }
 
 func validCreditGrace(secs int64) error {
@@ -988,12 +987,12 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	if err != nil {
 		return out, err
 	}
-	ceiling, err := creditSettingTx(ctx, tx, metaKeyBillingCPUCeiling, 0)
+	warm, err := creditSettingTx(ctx, tx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
 	if err != nil {
 		return out, err
 	}
 	out.RateMicroPerSecond = rate
-	out.BillingCPUCeilingCores = ceiling
+	out.WarmCPUClassCores = warm
 	out.GraceSeconds = grace
 	out.MaxChargeSeconds = maxCharge
 	return out, nil
@@ -1178,11 +1177,7 @@ func (s *Store) reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
-	ceiling, err := creditSettingTx(ctx, tx, metaKeyBillingCPUCeiling, 0)
-	if err != nil {
-		return err
-	}
-	class, classErr := nodeCreditClassTx(ctx, tx, table, runID, nodeID, ceiling)
+	class, classErr := nodeCreditClassTx(ctx, tx, table, runID, nodeID)
 	var unpriced *UnpricedCPUClassError
 	if classErr != nil && !errors.As(classErr, &unpriced) {
 		return classErr

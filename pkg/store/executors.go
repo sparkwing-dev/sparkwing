@@ -1363,16 +1363,16 @@ func (s *Store) executorNodeCharge(ctx context.Context, tx *storeTx, n *Node) (E
 // safety: the resolution order lives here rather than on the store so the
 // credit ledger can price a node by the same cpu figure the scheduler sizes it
 // by, inside the claim transaction that is already open.
-func nodeChargeTx(ctx context.Context, tx *storeTx, runID, nodeID string) (ExecutorResource, error) {
+func nodeChargeTx(ctx context.Context, q rowQuerier, runID, nodeID string) (ExecutorResource, error) {
 	var pipeline string
 	var plan []byte
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline, plan_json FROM runs WHERE id = ?`, runID).Scan(&pipeline, &plan); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT pipeline, plan_json FROM runs WHERE id = ?`, runID).Scan(&pipeline, &plan); err != nil {
 		return ExecutorResource{}, err
 	}
 	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
 		return pin, nil
 	}
-	row := tx.QueryRowContext(ctx, `
+	row := q.QueryRowContext(ctx, `
 SELECT `+profileColumns+`
   FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, nodeID)
 	profile, err := scanProfile(row, pipeline, nodeID)
