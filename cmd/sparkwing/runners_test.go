@@ -159,7 +159,10 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if !slices.Equal(*f.calls, wantCalls) {
 		t.Errorf("service calls = %v, want %v", *f.calls, wantCalls)
 	}
-	for _, want := range []string{minted.Prefix, "wrote " + f.config, "runners remove --profile prod"} {
+	for _, want := range []string{
+		minted.Prefix, "wrote " + f.config, "runners remove --profile prod",
+		"docs read --topic threat-model",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

@@ -37,6 +37,7 @@
       "slugs": [
         "observability",
         "security",
+        "threat-model",
         "auth",
         "hooks",
         "crons",

@@ -288,6 +288,22 @@ unlock.
   `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
   add` and the service installer write.
 
+### Docs
+
+- **docs:** A threat model for running another person's branch on your machine
+
+  The new `threat-model` page states what an enrolled runner isolates when it
+  executes a teammate's branch: the per-node loopback capability the supervisor
+  mints and the routes it reaches, a secret read bounded to the repository of a
+  live claim, the child environment rebuilt rather than inherited, and the
+  process session the supervisor kills. It states what stays exposed with the
+  same precision: the OS user the pipeline runs as, code that leaves its session
+  with `setsid`, network egress, the files a working-tree snapshot carries, the
+  contribution cap as advertised headroom rather than an OS ceiling, and labels
+  as placement rather than admission control. Each claim names the package a
+  reader can check. `sparkwing cluster runners add` names the page in its
+  output, and `security.md` links it from the trust model.
+
 ## [v0.50.3] - 2026-09-14
 ### Added
 

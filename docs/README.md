@@ -59,6 +59,7 @@ docs/
   versioning.md          versioning policy, plugin compatibility, SDK extraction roadmap
   auth.md                principal + scope + argon2 token model
   security.md            transport, rate limiting, secret management
+  threat-model.md        running another person's branch on your machine
   observability.md       failure reasons, resource metrics, OTel
   mcp.md                 MCP server for AI agents
 ```
