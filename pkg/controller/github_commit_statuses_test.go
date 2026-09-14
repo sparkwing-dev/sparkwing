@@ -1039,7 +1039,13 @@ func TestGitHubCommitStatusFailureDoesNotRejectWebhook(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("github status request did not arrive")
 	}
-	<-failureLogged
+	logged, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+	select {
+	case <-failureLogged:
+	case <-logged.Done():
+		t.Fatalf("failure was not logged: %s", logs.String())
+	}
 
 	now := time.Now()
 	if err := st.CreateRun(context.Background(), store.Run{

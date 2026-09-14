@@ -262,7 +262,9 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 
 	// safety: the listener is bound before ServeWith runs, so this request
 	// waits in its backlog until the metrics server starts answering.
-	req, rerr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+metricsAddr+"/metrics", nil)
+	answered, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+	req, rerr := http.NewRequestWithContext(answered, http.MethodGet, "http://"+metricsAddr+"/metrics", nil)
 	if rerr != nil {
 		t.Fatal(rerr)
 	}

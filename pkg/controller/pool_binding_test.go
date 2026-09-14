@@ -44,7 +44,13 @@ func TestPoolBinding_ServesRequestsWhileTheBindingIsBuilt(t *testing.T) {
 	hammerPoolList(t, s)
 
 	cancel()
-	<-ran
+	stopped, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+	defer stopWaiting()
+	select {
+	case <-ran:
+	case <-stopped.Done():
+		t.Fatal("pool run did not return after cancellation")
+	}
 
 	rec := httptest.NewRecorder()
 	s.handlePoolList(rec, httptest.NewRequest(http.MethodGet, "/api/v1/pool", nil))
