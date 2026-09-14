@@ -37,7 +37,7 @@ func run(args []string) error {
 		"root of the package-registry proxy cache. Empty means $DATA_DIR/proxy. Falls back to $PROXY_CACHE_DIR.")
 	fs.DurationVar(&cfg.FetchInterval, "fetch-interval",
 		envDuration("FETCH_INTERVAL", cfg.FetchInterval),
-		"cadence of the background gitcache fetch loop. Falls back to $FETCH_INTERVAL.")
+		"cadence of the keep-warm pass, which refreshes only mirrors a request touched in the last hour. Zero turns the pass off, leaving every mirror to fetch when a request needs a commit it lacks. Falls back to $FETCH_INTERVAL.")
 	fs.DurationVar(&cfg.FetchFreshWindow, "fetch-fresh-window",
 		envDuration("FETCH_FRESH_WINDOW", cfg.FetchFreshWindow),
 		"how long a successful mirror fetch lets request handlers skip their own fetch. Negative disables the throttle. Falls back to $FETCH_FRESH_WINDOW.")

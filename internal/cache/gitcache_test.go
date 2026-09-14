@@ -1486,6 +1486,7 @@ func TestMetricsDoNotEnumerateMirrors(t *testing.T) {
 	repoNames["secret-service"] = repoURL
 	repoNamesMu.Unlock()
 	runGit(t, filepath.Join(repoDir, hash+".git"), "init", "--bare")
+	bgFetch.markRequested(stateKey(hash))
 
 	startBackgroundFetch(t, time.Millisecond)
 

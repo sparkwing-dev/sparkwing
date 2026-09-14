@@ -26,6 +26,9 @@ type Config struct {
 
 	ProxyDir string
 
+	// FetchInterval is how often the keep-warm pass refreshes mirrors a
+	// request touched in the last hour. Zero or less turns the pass off, and
+	// every mirror then fetches only when a request needs a commit it lacks.
 	FetchInterval time.Duration
 
 	FetchFreshWindow time.Duration
@@ -127,10 +130,6 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ProxyDir == "" {
 		cfg.ProxyDir = filepath.Join(cfg.DataDir, "proxy")
 	}
-	if cfg.FetchInterval <= 0 {
-		cfg.FetchInterval = 30 * time.Second
-	}
-
 	if cfg.FetchFreshWindow == 0 {
 		cfg.FetchFreshWindow = 15 * time.Second
 	}
