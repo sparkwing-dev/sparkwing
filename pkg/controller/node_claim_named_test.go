@@ -251,7 +251,7 @@ func TestClaimNodeByID_RefusesANodeOfAFinishedRun(t *testing.T) {
 	}
 }
 
-// The queue claim hands a labelled node only to a runner that advertises those
+// The queue claim hands a labeled node only to a runner that advertises those
 // labels. A named claim advertises none, so the label requirement has to fall
 // back to the run's dispatcher rather than being skipped.
 func TestClaimNodeByID_RefusesALabelledNodeWithoutTheRunsDispatchClaim(t *testing.T) {
@@ -259,19 +259,19 @@ func TestClaimNodeByID_RefusesALabelledNodeWithoutTheRunsDispatchClaim(t *testin
 	f.labelledReadyNode(t, "run-1", "train", []string{"gpu"})
 
 	_, err := client.NewWithToken(f.url, nil, f.token).
-		ClaimNodeByID(context.Background(), "run-1", "train", "unlabelled:pod", time.Minute)
+		ClaimNodeByID(context.Background(), "run-1", "train", "unlabeled:pod", time.Minute)
 	if !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("claiming a gpu node from an unlabelled caller = %v, want a refusal", err)
+		t.Fatalf("claiming a gpu node from an unlabeled caller = %v, want a refusal", err)
 	}
 	n, err := f.store.GetNode(context.Background(), "run-1", "train")
 	if err != nil {
 		t.Fatalf("GetNode: %v", err)
 	}
 	if n.Claimed {
-		t.Fatalf("the refused claim still took the labelled node for %q", n.ClaimedBy)
+		t.Fatalf("the refused claim still took the labeled node for %q", n.ClaimedBy)
 	}
 	if _, err := f.store.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{},
-		"unlabelled:agent", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
+		"unlabeled:agent", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the queue claim admitted the same node to the same labels = %v", err)
 	}
 }
@@ -284,7 +284,7 @@ func TestClaimNodeByID_AwardsALabelledNodeToTheRunsDispatcher(t *testing.T) {
 	n, err := client.NewWithToken(f.url, nil, f.token).
 		ClaimNodeByID(context.Background(), "run-1", "train", "k8s-job:sw-1", time.Minute)
 	if err != nil {
-		t.Fatalf("the run's dispatcher was refused its own labelled node: %v", err)
+		t.Fatalf("the run's dispatcher was refused its own labeled node: %v", err)
 	}
 	if n.ClaimedBy != "k8s-job:sw-1" {
 		t.Fatalf("claimed_by = %q, want the dispatcher's holder", n.ClaimedBy)

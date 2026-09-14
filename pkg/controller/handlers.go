@@ -1641,9 +1641,9 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: naming a node skips the queue, and every pipeline pod carries a
-// claim-scoped token, so an unlabelled node the queue already opened is fair
+// claim-scoped token, so an unlabeled node the queue already opened is fair
 // game and anything else needs the run's dispatch claim. A named claim
-// advertises no labels, so nothing else could honour a requirement.
+// advertises no labels, so nothing else could honor a requirement.
 func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.HasScope(ScopeAdmin) {
