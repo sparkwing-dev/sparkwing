@@ -195,6 +195,12 @@ func ensureToolchainBinary(w io.Writer, version string) (string, string, error) 
 	}
 	verified, err := fetchVerifiedRelease(version)
 	if err != nil {
+		// safety: only a missing asset means "not published yet". A signature
+		// safety: or digest failure is a release that is wrong, and serving an
+		// safety: older one in its place would hide it.
+		if !isAssetNotPublished(err) {
+			return "", "", toolchainFetchError(version, stale, err)
+		}
 		published, fallbackErr := newestPublishedRelease(version)
 		if fallbackErr != nil {
 			return "", "", toolchainFetchError(version, stale, err)

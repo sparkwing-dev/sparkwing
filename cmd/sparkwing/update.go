@@ -317,6 +317,17 @@ func cleanupStaleUpdate() {
 	_ = os.Remove(self + ".old")
 }
 
+// safety: the status is carried so a caller can tell an asset a release has
+// safety: not published yet from one it published wrong.
+type httpStatusError struct{ code int }
+
+func (e httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
+func isAssetNotPublished(err error) bool {
+	var status httpStatusError
+	return errors.As(err, &status) && status.code == http.StatusNotFound
+}
+
 func downloadFile(url, dst string, maxBytes int64) error {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(url)
@@ -325,7 +336,7 @@ func downloadFile(url, dst string, maxBytes int64) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return httpStatusError{code: resp.StatusCode}
 	}
 	f, err := os.Create(dst)
 	if err != nil {

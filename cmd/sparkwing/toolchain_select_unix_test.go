@@ -391,3 +391,23 @@ func TestRunToolchainStaysWhenTheFallbackIsAlreadyRunning(t *testing.T) {
 		t.Fatal("the fallback re-executed the release already running, which loops on every invocation")
 	}
 }
+
+func TestEnsureToolchainBinaryRefusesAPinWhoseAssetFailsVerification(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	priv := withTestUpdateKey(t)
+	wrongDigest := strings.Repeat("ab", 32)
+	newReleaseServer(t, "v9.9.9", releaseFixture("v9.9.9"), priv, releaseServerOpts{sumsDigest: wrongDigest})
+	withLatestPublishedRelease(t, "v9.9.8")
+
+	var out bytes.Buffer
+	_, _, err := ensureToolchainBinary(&out, "v9.9.9")
+	if err == nil {
+		t.Fatal("a release whose signed manifest does not match its bytes was accepted")
+	}
+	if strings.Contains(out.String(), "no published binaries yet") {
+		t.Fatalf("a corrupt release was announced as unpublished and downgraded:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "v9.9.9") {
+		t.Errorf("error %q does not name the pin", err)
+	}
+}
