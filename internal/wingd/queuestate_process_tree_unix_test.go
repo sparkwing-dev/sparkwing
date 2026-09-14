@@ -3,7 +3,6 @@
 package wingd_test
 
 import (
-	"context"
 	"os/exec"
 	"syscall"
 	"testing"
@@ -45,9 +44,7 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 	observation := time.NewTimer(500 * time.Millisecond)
 	defer observation.Stop()
 	for {
-		queryCtx, cancelQuery := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		qs, err := client.Query(queryCtx, client.Options{Home: home, Version: "v1.0.0"})
-		cancelQuery()
+		qs, err := client.Query(t.Context(), client.Options{Home: home, Version: "v1.0.0"})
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
 		}
