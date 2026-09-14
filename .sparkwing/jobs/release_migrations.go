@@ -248,9 +248,9 @@ func readMigrationFile(repoDir, name string) (string, error) {
 }
 
 // safety: a guide already on disk is a hand-roll or a rerun after a failed push,
-// so its text becomes the authority and only its file write is skipped; the
-// refusal, the link repoint and the index row still run or the cut ships the
-// defect the guide was rolled to prevent.
+// so its sections become the source the rest is judged and written from; only
+// the `#` title is normalised. The refusal, the link repoint and the index row
+// run either way, or the cut ships the defect the guide was rolled to prevent.
 func planMigrationRollIn(repoDir, changelogBody, version, date string) (migrationRoll, error) {
 	guideSource, guideOnDisk, err := readGuideSource(repoDir, version+".md")
 	if err != nil {
@@ -275,24 +275,21 @@ func writeMigrationRoll(repoDir string, roll migrationRoll) ([]string, error) {
 	files := []struct {
 		name string
 		body string
-		keep bool
 	}{
-		{roll.guideName, roll.guideBody, roll.guideOnDisk},
-		{unreleasedGuideName, roll.unreleasedBody, false},
-		{migrationIndexName, roll.indexBody, false},
+		{roll.guideName, roll.guideBody},
+		{unreleasedGuideName, roll.unreleasedBody},
+		{migrationIndexName, roll.indexBody},
 	}
-	var touched []string
+	var written []string
 	for _, f := range files {
-		if !f.keep {
-			for _, path := range migrationFileTargets(repoDir, f.name) {
-				if err := os.WriteFile(path, []byte(f.body), 0o644); err != nil {
-					return nil, fmt.Errorf("write %s: %w", path, err)
-				}
+		for _, path := range migrationFileTargets(repoDir, f.name) {
+			if err := os.WriteFile(path, []byte(f.body), 0o644); err != nil {
+				return nil, fmt.Errorf("write %s: %w", path, err)
 			}
 		}
-		touched = append(touched, migrationFileRels(f.name)...)
+		written = append(written, migrationFileRels(f.name)...)
 	}
-	return touched, nil
+	return written, nil
 }
 
 // safety: the date the index row carries is the one the changelog heading was

@@ -286,7 +286,7 @@ func TestReleaseCutRollsNoGuideWithoutABreakingEntry(t *testing.T) {
 
 func TestReleaseCutStillRepointsAndIndexesAPreRolledGuide(t *testing.T) {
 	dir := migrationRepo(t, twoBreakingChangelog, twoBreakingGuide, migrationIndexFixture)
-	handRolled := strings.Replace(twoBreakingGuide, "# Migrating to the next release", "# Migrating to v0.9.0", 1)
+	handRolled := twoBreakingGuide
 	for _, base := range []string{migrationsDirRel, mirrorMigrationsDirRel} {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(base), "v0.9.0.md"), []byte(handRolled), 0o644); err != nil {
 			t.Fatalf("seed the hand-rolled guide: %v", err)
@@ -310,8 +310,17 @@ func TestReleaseCutStillRepointsAndIndexesAPreRolledGuide(t *testing.T) {
 		t.Fatalf("writeChangelogPair: %v", err)
 	}
 
-	if got := readRepoFile(t, dir, migrationsDirRel+"/v0.9.0.md"); got != handRolled {
-		t.Errorf("the cut rewrote a guide a person had already written:\n%s", got)
+	guide := readRepoFile(t, dir, migrationsDirRel+"/v0.9.0.md")
+	if !strings.HasPrefix(guide, "# Migrating to v0.9.0\n") {
+		t.Errorf("the cut left the placeholder title on the rolled guide: %q", strings.SplitN(guide, "\n", 2)[0])
+	}
+	for _, heading := range []string{"## Typed Dep interface", "## CacheOptions splits in two"} {
+		if !strings.Contains(guide, heading) {
+			t.Errorf("the cut lost %q from a guide a person had written", heading)
+		}
+	}
+	if strings.Contains(guide, "Two breaking changes, both mechanical.") == false {
+		t.Errorf("the cut rewrote the prose a person had written:\n%s", guide)
 	}
 	changelog := readRepoFile(t, dir, "CHANGELOG.md")
 	if strings.Contains(changelog, "docs/migrations/_unreleased.md") {
