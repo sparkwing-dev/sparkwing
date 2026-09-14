@@ -41,6 +41,10 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 	if err != nil {
 		return fmt.Errorf("scan go.mod files: %w", err)
 	}
+	retracted, err := repoRetractedReleases(repoRoot)
+	if err != nil {
+		return err
+	}
 	var problems []string
 	for _, modPath := range mods {
 		bs, err := os.ReadFile(modPath)
@@ -58,7 +62,7 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 			}
 			if replace := findReplaceFor(f, req.Mod.Path); replace != nil {
 				if !isLocalReplace(replace) {
-					if msg := checkAgainstLatest(ctx, repoRoot, replace.New.Path, replace.New.Version, modPath); msg != "" {
+					if msg := checkAgainstLatest(ctx, retracted, replace.New.Path, replace.New.Version, modPath); msg != "" {
 						problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 					}
 					continue
@@ -80,7 +84,7 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 					))
 				}
 			} else {
-				if msg := checkAgainstLatest(ctx, repoRoot, req.Mod.Path, req.Mod.Version, modPath); msg != "" {
+				if msg := checkAgainstLatest(ctx, retracted, req.Mod.Path, req.Mod.Version, modPath); msg != "" {
 					problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 				}
 			}
@@ -353,7 +357,7 @@ func hasGitMetadata(dir string) (bool, error) {
 	}
 }
 
-func checkAgainstLatest(ctx context.Context, repoRoot, modulePath, pinned, fromModFile string) string {
+func checkAgainstLatest(ctx context.Context, retracted retractedReleases, modulePath, pinned, fromModFile string) string {
 	if pinned == "" {
 		return ""
 	}
@@ -367,7 +371,7 @@ func checkAgainstLatest(ctx context.Context, repoRoot, modulePath, pinned, fromM
 			)
 		}
 	}
-	latest, err := latestReleasedVersion(ctx, repoRoot, modulePath, fromModFile)
+	latest, err := latestReleasedVersion(ctx, retracted, modulePath, fromModFile)
 	if err != nil {
 		return fmt.Sprintf("%s: cannot resolve latest version (%v)", modulePath, err)
 	}
@@ -393,7 +397,7 @@ func semverMajor(v string) (int, bool) {
 	return n, true
 }
 
-func latestReleasedVersion(ctx context.Context, repoRoot, modulePath, fromModFile string) (string, error) {
+func latestReleasedVersion(ctx context.Context, retracted retractedReleases, modulePath, fromModFile string) (string, error) {
 	dir := filepath.Dir(fromModFile)
 	out, err := captureCmd(ctx, dir, "go", "list", "-m", "-versions", modulePath)
 	if err != nil {
@@ -402,10 +406,6 @@ func latestReleasedVersion(ctx context.Context, repoRoot, modulePath, fromModFil
 	parts := strings.Fields(strings.TrimSpace(out))
 	if len(parts) < 2 {
 		return "", fmt.Errorf("no versions reported for %s", modulePath)
-	}
-	retracted, err := repoRetractedReleases(repoRoot)
-	if err != nil {
-		return "", err
 	}
 	cap := majorCapFor(modulePath)
 	var stable []string
@@ -437,8 +437,8 @@ type retractedReleases struct {
 
 // safety: the proxy keeps serving a version forever once it has cached one, so a
 // tag cut by mistake and recalled stays on the list this check reads. The root
-// go.mod's retractions name those versions; go applies them only from a version
-// above them, which an unpublished retraction has none of.
+// go.mod's retractions name those versions, and go reads retractions from the
+// highest published version's go.mod, which carries none of them yet.
 func repoRetractedReleases(repoRoot string) (retractedReleases, error) {
 	path := filepath.Join(repoRoot, "go.mod")
 	body, err := os.ReadFile(path)
