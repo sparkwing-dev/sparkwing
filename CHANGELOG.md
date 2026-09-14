@@ -126,8 +126,8 @@ unlock.
   bills what it gives; nothing a claimant reports about itself changes a class.
   A request above the largest class fails the node with `unpriced_cpu_class`
   and a `credits_unpriced_class` event rather than leaving it claimable
-  forever. A
-  rate above a million credits a second is refused, because it overflows the
+  forever. A rate above a million credits a second is refused, because it
+  overflows the
   reservation a claim multiplies out. An installation that never sets a table
   bills the default ladder, and that setting is the four-core entry of it under
   another name: once a table exists, a `PUT` naming the scalar, alone or beside
