@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -485,6 +486,57 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 		if !ok || got != want[series] {
 			t.Errorf("%s = %v (reported %v), want %v:\n%s", series, got, ok, want[series], body)
 		}
+	}
+}
+
+func TestReaperSamplesTheOperationalSeries(t *testing.T) {
+	restoreGlobals(t)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	setup := context.Background()
+	if err := st.CreateRun(setup, store.Run{
+		ID: "run-reaper-sweep", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := st.CreateNode(setup, store.Node{
+		RunID: "run-reaper-sweep", NodeID: "node-a", Status: "pending",
+	}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	srv := New(st, nil)
+	const interval = time.Second
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			srv.runReaper(ctx, interval)
+		}()
+
+		// safety: the bubble's clock only moves once every goroutine is
+		// parked, so this deadline carries the reaper past exactly one tick
+		// and the Wait that follows returns when that sweep has finished.
+		swept, done := context.WithTimeout(ctx, 2*interval)
+		defer done()
+		<-swept.Done()
+		synctest.Wait()
+
+		cancel()
+		<-stopped
+	})
+
+	body := scrapeRegistry(t)
+	const series = `sparkwing_queue_depth{state="waiting"}`
+	if got, ok := sampleValue(body, series); !ok || got != 1 {
+		t.Fatalf("%s = %v (reported %v) after a reaper sweep, want 1:\n%s", series, got, ok, body)
 	}
 }
 
