@@ -152,7 +152,14 @@ func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]s
 	for _, module := range mapKeys(targets) {
 		pkgs := targets[module]
 		sparkwing.Info(ctx, "%s: %s: %s", step, module, strings.Join(pkgs, " "))
-		cmd := goCommandAt(prePushCores, verb, strings.Join(pkgs, " "))
+		args := strings.Join(pkgs, " ")
+		// safety: go build discards its output for several packages but writes
+		// a lone package's binary beside the module, where ./cmd/sparkwing
+		// collides with the sparkwing/ SDK directory and refuses to build.
+		if verb == "build" && len(pkgs) == 1 {
+			args = "-o /dev/null " + args
+		}
+		cmd := goCommandAt(prePushCores, verb, args)
 		if _, runErr := sparkwing.Bash(ctx, cmd).Dir(module).Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 		}
