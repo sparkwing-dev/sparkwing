@@ -132,6 +132,13 @@ func TestSchemaV42_OpensOverGrantsThatAlreadyRepeatAReference(t *testing.T) {
 	if v := readSchemaVersion(t, upgraded.DB()); v != store.ExpectedSchemaVersion() {
 		t.Fatalf("version after upgrade = %d, want %d", v, store.ExpectedSchemaVersion())
 	}
+	enforced, err := upgraded.CreditGrantReferenceIndexPresent(ctx)
+	if err != nil {
+		t.Fatalf("read whether the key is enforced: %v", err)
+	}
+	if enforced {
+		t.Error("the key was created over rows that repeat a reference")
+	}
 	first, err := upgraded.RecordCreditGrant(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCredit,
 		Reference: "pi_after", CreatedBy: "billing",
@@ -148,5 +155,28 @@ func TestSchemaV42_OpensOverGrantsThatAlreadyRepeatAReference(t *testing.T) {
 	}
 	if again.Created || again.Grant.ID != first.Grant.ID {
 		t.Fatalf("redelivery = %+v, want the first grant %q", again, first.Grant.ID)
+	}
+
+	if _, err := upgraded.DB().ExecContext(ctx,
+		`DELETE FROM credit_grants WHERE id = 'grant-b'`); err != nil {
+		t.Fatalf("delete the duplicate row: %v", err)
+	}
+	_ = upgraded.Close()
+
+	repaired, err := target.TryOpen()
+	if err != nil {
+		t.Fatalf("Open#3 (after the duplicates went): %v", err)
+	}
+	defer func() { _ = repaired.Close() }()
+	enforced, err = repaired.CreditGrantReferenceIndexPresent(ctx)
+	if err != nil {
+		t.Fatalf("read whether the key is enforced: %v", err)
+	}
+	if !enforced {
+		t.Fatal("deleting the duplicates and reopening did not create the key")
+	}
+	if err := insertGrantTheOldWay(t, repaired, "grant-c",
+		store.CreditGrantPaid, "pi_after", 1); err == nil {
+		t.Error("the key let a second paid grant of one payment in")
 	}
 }

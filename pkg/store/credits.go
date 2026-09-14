@@ -37,6 +37,12 @@ const (
 	// bounds how far concurrent runners can drive the balance below zero.
 	CreditClaimFloorSeconds = 60
 
+	// MaxCreditGrantMicro caps the size of one grant at a billion credits,
+	// ten million dollars. A ledger sums grants in SQL, so an amount near the
+	// integer limit turns a later balance read into an overflow rather than a
+	// number, and no real payment reaches this ceiling.
+	MaxCreditGrantMicro = 1_000_000_000_000_000
+
 	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
 	// Heartbeats arrive every three seconds by default, so the cap engages
 	// only when the controller was unreachable or the heartbeat loop stalled,
@@ -77,6 +83,11 @@ const (
 // an [InsufficientCreditsError], which wraps it and names the shortfall.
 var ErrInsufficientCredits = errors.New("insufficient credits")
 
+// ErrCreditGrantConflict is returned when a grant names a kind and reference
+// another grant already carries but asks for different terms. A replay of the
+// identical request returns the stored grant instead.
+var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
+
 // InsufficientCreditsError refuses a claim the balance cannot pay for and
 // names both sides of the comparison, so the refusal a runner receives says
 // how much is missing.
@@ -109,7 +120,7 @@ const creditHistoryDefaultLimit = 200
 
 const creditGrantsTableSQLite = `CREATE TABLE IF NOT EXISTS credit_grants (
     id           TEXT PRIMARY KEY,
-    -- free | paid
+    -- free | paid | reversal; a reversal carries a negative amount
     kind         TEXT NOT NULL,
     amount_micro INTEGER NOT NULL,
     -- payment id or operator note; empty for an unreferenced grant
@@ -198,40 +209,56 @@ func applyCreditsMigrationPostgres(ctx context.Context, tx *storeTx) error {
 }
 
 func applyCreditReferenceMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	if err := ensureColumnsSQLite(ctx, tx, "credit_grants", creditGrantReversesCols); err != nil {
-		return err
-	}
-	return createCreditGrantReferenceIndexTx(ctx, tx)
+	return ensureColumnsSQLite(ctx, tx, "credit_grants", creditGrantReversesCols)
 }
 
 func applyCreditReferenceMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	if err := addColumnsTx(ctx, tx, "credit_grants", creditGrantReversesCols); err != nil {
-		return err
-	}
-	return createCreditGrantReferenceIndexTx(ctx, tx)
+	return addColumnsTx(ctx, tx, "credit_grants", creditGrantReversesCols)
 }
 
 // safety: grants written before the reference became a key may already repeat
 // one, and refusing to open a ledger over an operator note nobody can delete
 // costs more than the index buys; the grant path enforces the same rule inside
-// the ledger lock either way.
-func createCreditGrantReferenceIndexTx(ctx context.Context, tx *storeTx) error {
-	dupes, err := duplicateGrantReferences(ctx, tx)
+// the ledger lock either way. The attempt repeats on every open, so deleting
+// the duplicate rows and restarting is all it takes to enforce the key.
+func (s *Store) ensureCreditGrantReferenceIndex(ctx context.Context) error {
+	present, err := s.CreditGrantReferenceIndexPresent(ctx)
+	if err != nil || present {
+		return err
+	}
+	dupes, err := duplicateGrantReferences(ctx, storeExecer{s: s})
 	if err != nil {
 		return err
 	}
 	if len(dupes) > 0 {
-		slog.Warn("credits: existing grants repeat a reference, so the unique index is not created; "+
-			"delete the duplicate rows and reindex to enforce it in the database",
+		slog.Warn("credits: grants repeat a reference, so the database does not enforce the grant key; "+
+			"delete the duplicate rows and restart to enforce it",
 			"references", strings.Join(dupes, ", "))
 		return nil
 	}
-	_, err = tx.ExecContext(ctx, creditGrantReferenceIndex)
+	_, err = s.exec(ctx, creditGrantReferenceIndex)
 	return err
 }
 
-func duplicateGrantReferences(ctx context.Context, tx *storeTx) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT kind, reference FROM credit_grants
+// CreditGrantReferenceIndexPresent reports whether the database enforces one
+// grant per kind and non-empty reference. It is false only while grants
+// written before the key existed still repeat a reference.
+func (s *Store) CreditGrantReferenceIndexPresent(ctx context.Context) (bool, error) {
+	q := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_credit_grants_reference'`
+	if s.dialect == DialectPostgres {
+		q = `SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		     WHERE c.relname = 'idx_credit_grants_reference' AND c.relkind = 'i'
+		       AND n.nspname = ANY (current_schemas(true))`
+	}
+	var count int
+	if err := s.queryRow(ctx, q).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func duplicateGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
+	rows, err := q.QueryContext(ctx, `SELECT kind, reference FROM credit_grants
 	  WHERE reference != '' GROUP BY kind, reference HAVING COUNT(*) > 1`)
 	if err != nil {
 		return nil, err
@@ -333,6 +360,9 @@ func (req CreditGrantRequest) validate() error {
 		if req.AmountMicro <= 0 {
 			return errors.New("credits: grant amount must be positive")
 		}
+		if req.AmountMicro > MaxCreditGrantMicro {
+			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
+		}
 		if req.Reverses != "" {
 			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
 		}
@@ -340,6 +370,9 @@ func (req CreditGrantRequest) validate() error {
 	}
 	if req.AmountMicro >= 0 {
 		return errors.New("credits: a reversal amount must be negative")
+	}
+	if req.AmountMicro < -MaxCreditGrantMicro {
+		return fmt.Errorf("credits: a reversal may not exceed %d micro-credits", MaxCreditGrantMicro)
 	}
 	if req.Reference == "" {
 		return errors.New("credits: a reversal needs its own reference, the refund id")
@@ -405,6 +438,9 @@ func (s *Store) RecordCreditGrant(
 			return CreditGrantResult{}, err
 		}
 		if found {
+			if err := sameGrantTerms(existing, req); err != nil {
+				return CreditGrantResult{}, err
+			}
 			return CreditGrantResult{Grant: existing}, tx.Commit()
 		}
 	}
@@ -439,6 +475,21 @@ func (s *Store) RecordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	return CreditGrantResult{Grant: grant, Created: true}, nil
+}
+
+// safety: a webhook replay carries the terms it carried the first time, so
+// different terms under one reference are a caller mistake rather than a
+// retry, and answering with the stored row would swallow the difference.
+func sameGrantTerms(stored CreditGrant, req CreditGrantRequest) error {
+	if stored.AmountMicro != req.AmountMicro {
+		return fmt.Errorf("%w: %q holds %d micro-credits, not %d",
+			ErrCreditGrantConflict, req.Reference, stored.AmountMicro, req.AmountMicro)
+	}
+	if stored.Reverses != req.Reverses {
+		return fmt.Errorf("%w: %q reverses %q, not %q",
+			ErrCreditGrantConflict, req.Reference, stored.Reverses, req.Reverses)
+	}
+	return nil
 }
 
 func creditGrantByReferenceTx(
@@ -477,7 +528,7 @@ const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants),
 // wants the two apart asks for them apart; the balance is the same either way.
 const creditGrantSplitSQL = `SELECT
         (SELECT SUM(amount_micro) FROM credit_grants WHERE kind != ?),
-        (SELECT SUM(-amount_micro) FROM credit_grants WHERE kind = ?),
+        (SELECT -SUM(amount_micro) FROM credit_grants WHERE kind = ?),
         (SELECT SUM(amount_micro) FROM credit_charges)`
 
 func creditBalanceTx(ctx context.Context, tx *storeTx) (int64, error) {
@@ -593,7 +644,7 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0)
+                        -COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
                    FROM credit_grants`,
 		CreditGrantFree, CreditGrantPaid, CreditGrantReversal,
 	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro, &out.ReversedMicro); err != nil {

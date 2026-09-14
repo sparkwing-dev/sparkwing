@@ -1600,6 +1600,9 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return err
 	}
+	if err := s.ensureCreditGrantReferenceIndex(ctx); err != nil {
+		return err
+	}
 	_, err = s.ensureControllerAuthority(ctx)
 	return err
 }
