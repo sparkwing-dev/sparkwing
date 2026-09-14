@@ -117,6 +117,9 @@ func TestEnqueueTriggerPropagatesRemintFailure(t *testing.T) {
 }
 
 func TestEnqueueTriggerCapsCollisionRemints(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
+	}
 	art := newTriggerCASArt()
 	art.rejectTriggerWrites = maxTriggerIDAttempts
 	b := New(art)

@@ -88,6 +88,9 @@ func warmReadyNode(t *testing.T, f *logClaimFixture, runID, nodeID string) {
 }
 
 func TestLogs_ClaimedRunnerAppendsItsClosingLinesAfterTheAttemptCloses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, _ := newLogClaimFixture(t, "runner")
 	ctx := context.Background()
 	warmReadyNode(t, f, "run-warm", "build")
@@ -185,6 +188,9 @@ func TestLogs_TriggerRunnerAppendsItsClosingLinesAfterTheAttemptCloses(t *testin
 }
 
 func TestLogs_AppendFromAPrincipalWithoutTheNodeClaimIsRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, _ := newLogClaimFixture(t, "runner")
 	ctx := context.Background()
 	warmReadyNode(t, f, "run-intruder", "build")

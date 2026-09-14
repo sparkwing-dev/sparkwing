@@ -14,6 +14,9 @@ import (
 )
 
 func TestStreamRestartsAfterFileShrinks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, "runs", "run")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

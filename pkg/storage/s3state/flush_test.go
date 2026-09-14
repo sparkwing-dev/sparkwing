@@ -88,6 +88,9 @@ func TestBackend_EnvelopeAppendedDuringAFlushIsStillWrittenOnClose(t *testing.T)
 }
 
 func TestBackend_FinishRunFailsWhileTheInFlightFlushCannotLand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	art := newGatedArt()
 	b := s3state.New(art, s3state.WithFlushInterval(5*time.Millisecond))
 	t.Cleanup(func() { _ = b.Close() })

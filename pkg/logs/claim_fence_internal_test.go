@@ -19,6 +19,9 @@ import (
 )
 
 func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

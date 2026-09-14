@@ -14,6 +14,9 @@ import (
 )
 
 func TestConformance_ArtifactStore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	conformance.TestArtifactStore(t, func() storage.ArtifactStore {
 		var mu sync.Mutex
 		blobs := map[string][]byte{}
