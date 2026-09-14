@@ -294,6 +294,11 @@ func TestCredentialFileContent(t *testing.T) {
 		{"dotenv template placeholder", ".env.example", "API_TOKEN=replace-me\n", false},
 		{"binary bytes", "fixtures/blob.conf", "\x00\x01API_TOKEN=live-value\n", false},
 		{"prose is never read", "notes.txt", "password = hunter2\n", false},
+		{"identifier dump is not a token", ".apidiff/sparkwing.txt", "\tKeys: runtimePlumbingKeys{\n", false},
+		{"key block in prose with CRLF", "notes.txt", "note\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3Blb\r\n", true},
+		{"key block in a file with no extension", "backup", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", true},
+		{"certificate block in prose", "chain.md", "-----BEGIN CERTIFICATE-----\nMIIE\n", true},
+		{"begin marker that is not a key", "notes.txt", "-----BEGIN PGP SIGNED MESSAGE-----\n", false},
 		{"empty file", ".env", "", false},
 	}
 	for _, tc := range cases {

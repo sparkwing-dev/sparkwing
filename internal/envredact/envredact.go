@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -179,6 +180,20 @@ var settingsExtensions = map[string]bool{
 const maxCredentialFileBytes = 64 << 10
 
 const minCredentialValueLength = 16
+
+var credentialBlockPatterns = []string{
+	"-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----",
+	"-----BEGIN CERTIFICATE-----",
+}
+
+var credentialBlock = regexp.MustCompile(strings.Join(credentialBlockPatterns, "|"))
+
+// CredentialBlockPatterns returns the extended regular expressions that
+// match a private key or certificate block, for a caller that searches
+// files it does not read itself.
+func CredentialBlockPatterns() []string {
+	return append([]string(nil), credentialBlockPatterns...)
+}
 
 const jsonScanDepth = 8
 
@@ -533,15 +548,15 @@ func CredentialFileScannable(path string) bool {
 	return contentScannedExtension(path)
 }
 
-// CredentialFileContent reports whether the bytes of a scannable file
-// carry a credential: a private-key block, a bearer header, or a
-// credential-named field holding a value. Binary content is never
-// judged, because the patterns read lines. In a structured document the
-// value must itself look like a credential outside a settings file,
-// because a field name alone is how a manifest describes a secret it
-// does not hold.
+// CredentialFileContent reports whether a file's bytes carry a
+// credential. A key or certificate block counts in any text file. A
+// bearer header or a credential-named field holding a value counts in a
+// settings or manifest file, and outside a settings file the value must
+// itself look like a credential, because a field name alone is how a
+// manifest describes a secret it does not hold. Binary content is never
+// judged, because the patterns read lines.
 func CredentialFileContent(path string, content []byte) bool {
-	if len(content) == 0 || !CredentialFileScannable(path) {
+	if len(content) == 0 {
 		return false
 	}
 	if len(content) > CredentialFilePrefixBytes {
@@ -552,8 +567,11 @@ func CredentialFileContent(path string, content []byte) bool {
 		return false
 	}
 	text := string(content)
-	if strings.Contains(text, "-----BEGIN ") {
+	if credentialBlock.MatchString(text) {
 		return true
+	}
+	if !CredentialFileScannable(path) {
+		return false
 	}
 	name, extension := fileNameAndExtension(path)
 	settings := settingsExtensions[extension] || dotenvName(strings.ToLower(name))

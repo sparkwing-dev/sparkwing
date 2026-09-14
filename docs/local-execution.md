@@ -439,12 +439,13 @@ configuration file whose name ends in a credential word (`credentials.json`,
 `token.yaml`). A name ending in `.example`, `.sample`, `.template`, `.tmpl` or
 `.dist` is a committed template and is never secret-shaped.
 
-It is secret-shaped by content when its bytes carry a private key block, a
-bearer header, or a credential-named setting that holds a value. Only settings
-and manifest files are read (`.env`, `.ini`, `.conf`, `.cfg`, `.properties`,
-`.json`, `.yaml`, `.yml`, `.toml`); prose and source files are not, because an
-API dump or a Go file carries camel-case identifiers no value rule can tell
-from a token. Outside a settings file the value itself must look like a
+It is secret-shaped by content when its bytes carry a private key or
+certificate block, a bearer header, or a credential-named setting that holds a
+value. A key block counts in any text file, whatever its name; the other two
+are looked for only in settings and manifest files (`.env`, `.ini`, `.conf`,
+`.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`), because an API dump
+or a source file carries camel-case identifiers no value rule can tell from a
+token. Outside a settings file the value itself must look like a
 credential -- a key block, or a long unbroken mixed-case token -- so a
 Kubernetes manifest that names a secret it does not hold (`secretKey:
 api-token`) passes while one that embeds the secret does not. The same name

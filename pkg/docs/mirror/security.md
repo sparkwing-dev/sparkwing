@@ -510,9 +510,9 @@ controller or runner pool outside the cluster reaches the cache through
 an `ipBlock` for the caller's source range.
 
 `pipeline trigger --working-tree` refuses to upload a snapshot whose manifest
-holds a secret-shaped file, by name or by the first 64 KiB of a settings or
-manifest file, using the credential vocabulary the detached-run environment
-filter uses. An operator sends such a file only by naming its path
+holds a secret-shaped file: by name, by a key or certificate block in any text
+file, or by the first 64 KiB of a settings or manifest file, using the
+credential vocabulary the detached-run environment filter uses. An operator sends such a file only by naming its path
 with `--allow-secret-file`, so the audit of what left the laptop is the command
 itself.
 

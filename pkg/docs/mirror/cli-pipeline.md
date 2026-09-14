@@ -974,8 +974,9 @@ requires a complete SHA-1 repository; shallow and SHA-256 checkouts
 fail before upload.
 
 A snapshot carrying a secret-shaped file is refused before upload:
-a dotenv, a key, keystore or certificate file, or a settings or
-manifest file whose bytes read as a credential. The refusal names
+a dotenv, a key, keystore or certificate file, any text file
+holding a key block, or a settings or manifest file whose bytes
+read as a credential. The refusal names
 each path and whether it is tracked. Untrack it with
 'git rm --cached', ignore it, or send it anyway by naming it with
 --allow-secret-file PATH once per file; there is no blanket bypass.

@@ -266,10 +266,11 @@ unlock.
   `id_rsa` and its siblings), or a configuration file whose name ends in a
   credential word; a `.example`, `.sample`, `.template`, `.tmpl` or `.dist`
   name is a committed template and never is. It is secret-shaped by content
-  when the first 64 KiB of a settings or manifest file (`.env`, `.ini`,
-  `.conf`, `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`) carries a
-  private-key block, a bearer header, or a credential-named setting holding a
-  value; outside a settings file that value must itself look like a
+  when any text file carries a private-key or certificate block, or when the
+  first 64 KiB of a settings or manifest file (`.env`, `.ini`, `.conf`,
+  `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`) carries a bearer
+  header or a credential-named setting holding a value; outside a settings
+  file that value must itself look like a
   credential, so a Kubernetes manifest naming a secret it does not hold
   passes. The same vocabulary the detached-run environment filter uses decides
   both. The refusal names every offending path, says whether it is tracked,

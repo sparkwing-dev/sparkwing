@@ -461,6 +461,8 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	writeSnapshotFile(t, repo, "deploy/service.conf", "database_password = hunter2\n", 0o644)
 	writeSnapshotFile(t, repo, ".env.local", "API_TOKEN=ignored\n", 0o644)
 	writeSnapshotFile(t, repo, ".env.example", "API_TOKEN=replace-me\n", 0o644)
+	writeSnapshotFile(t, repo, "notes/backup.txt", "note\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3Blb\r\n", 0o644)
+	writeSnapshotFile(t, repo, "notes/api.txt", "\tKeys: runtimePlumbingKeys{\n", 0o644)
 
 	_, err := captureWorktreeSnapshot(context.Background(), repo, nil)
 	if err == nil {
@@ -469,13 +471,14 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	message := err.Error()
 	for _, want := range []string{
 		".env (name, untracked)", "deploy/service.conf (content, tracked)",
+		"notes/backup.txt (content, untracked)",
 		"git rm --cached", ".gitignore", "--allow-secret-file",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("refusal = %q, want it to mention %q", message, want)
 		}
 	}
-	for _, unwanted := range []string{".env.local", ".env.example"} {
+	for _, unwanted := range []string{".env.local", ".env.example", "notes/api.txt"} {
 		if strings.Contains(message, unwanted) {
 			t.Fatalf("refusal = %q, want no %s", message, unwanted)
 		}
@@ -491,7 +494,8 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 		t.Fatalf("naming an absent path = %v, want it reported", err)
 	}
 
-	snapshot, err := captureWorktreeSnapshot(context.Background(), repo, []string{"./.env", "deploy/service.conf"})
+	snapshot, err := captureWorktreeSnapshot(context.Background(), repo,
+		[]string{"./.env", "deploy/service.conf", "notes/backup.txt"})
 	if err != nil {
 		t.Fatalf("captureWorktreeSnapshot with both paths named: %v", err)
 	}

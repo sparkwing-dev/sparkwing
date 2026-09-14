@@ -516,6 +516,10 @@ func rejectSecretShapedFiles(ctx context.Context, gitDir, tree, baseSHA string, 
 	if err != nil {
 		return fmt.Errorf("inspect snapshot manifest: %w", err)
 	}
+	keyBlocks, err := snapshotKeyBlockPaths(ctx, gitDir, tree)
+	if err != nil {
+		return err
+	}
 	var offenders []secretShapedFile
 	for _, record := range strings.Split(out, "\x00") {
 		meta, path, ok := strings.Cut(record, "\t")
@@ -532,6 +536,10 @@ func rejectSecretShapedFiles(ctx context.Context, gitDir, tree, baseSHA string, 
 		}
 		if envredact.CredentialFileName(path) {
 			offenders = append(offenders, secretShapedFile{path: path, reason: "name"})
+			continue
+		}
+		if keyBlocks[path] {
+			offenders = append(offenders, secretShapedFile{path: path, reason: "content"})
 			continue
 		}
 		if !envredact.CredentialFileScannable(path) {
@@ -605,6 +613,32 @@ func trackedSnapshotPaths(ctx context.Context, gitDir, baseSHA string) map[strin
 		}
 	}
 	return tracked
+}
+
+// safety: a key block travels in any text file, and reading every file to find
+// one would cost a process per file; git grep reads the tree once and skips
+// binary blobs itself.
+func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string]bool, error) {
+	args := []string{"--git-dir", gitDir, "grep", "--full-name", "--files-with-matches", "-I", "-z", "--extended-regexp"}
+	for _, pattern := range envredact.CredentialBlockPatterns() {
+		args = append(args, "-e", pattern)
+	}
+	cmd := exec.CommandContext(ctx, "git", append(args, tree)...)
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("search snapshot for key blocks: %w", snapshotGitError(err))
+	}
+	found := map[string]bool{}
+	for _, record := range strings.Split(string(out), "\x00") {
+		if path := strings.TrimPrefix(record, tree+":"); path != "" && path != record {
+			found[path] = true
+		}
+	}
+	return found, nil
 }
 
 func snapshotBlobPrefix(ctx context.Context, gitDir, sha string, limit int64) ([]byte, error) {
