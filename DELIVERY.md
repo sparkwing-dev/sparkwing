@@ -42,11 +42,11 @@ launcher when testing isolated tool state.
   2 s in the push tier. A commit and a push together stay under the ten seconds
   the tiers are budgeted.
 - **Which tier decides a merge:** the hooks judge what they can in seconds and
-  nothing more, so main may go red. The release is the gate that must be green:
+  nothing more, so main may go red. Main is where the broad checks run:
   `gate` and `pre-release` run in hosted CI on every pull request and every
-  push to main, and the release pipeline runs them again at the boundary. Run
-  `sparkwing run gate` yourself when a change is broad enough that a hosted red
-  would cost more than the wait.
+  push to main. A tag re-runs nothing, so what main is green for is what ships.
+  Run `sparkwing run gate` yourself when a change is broad enough that a hosted
+  red would cost more than the wait.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
@@ -165,8 +165,9 @@ launcher when testing isolated tool state.
   the change touches those boundaries. `sparkwing run security-scan` runs gosec,
   source-mode govulncheck, gitleaks, and `npm audit`. The Security workflow runs
   it on every pull request and uploads gosec findings to code scanning. The
-  release workflow runs it and hosted CodeQL against the resolved tag commit
-  before any artifact build. CodeQL reports alerts; gosec, govulncheck,
+  release workflow runs neither it nor CodeQL against the tagged commit; the
+  run that covered that commit on main is the scan of record. CodeQL reports
+  alerts; gosec, govulncheck,
   gitleaks, and `npm audit` fail the gate. The npm scanner retries a registry
   that times out or answers 5xx, and reuses a recorded pass for a day when
   `web/package-lock.json` and `web/package.json` are byte-identical to the pass,
@@ -301,13 +302,15 @@ launcher when testing isolated tool state.
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
   destructive,prod`; the isolated home keeps prerelease state out of the
   operational runs store, which the release runner refuses to touch. From the
-  tag push on, `.github/workflows/release.yaml` owns the release: its validate
-  stage re-checks the version against the newest published one and runs
-  `sparkwing run release-verify` over the tagged source before anything builds,
-  then it runs every gate on the tagged source,
-  builds the binaries and images, publishes them, and creates the GitHub
-  release from that tag's changelog section. A red check there publishes
-  nothing; the fix is a later patch tag, never a re-cut of a published one.
+  tag push on, `.github/workflows/release.yaml` owns the release, and it checks
+  nothing: it resolves the tag to a commit, builds the binaries and images,
+  signs and publishes them, and creates the GitHub release. `git tag vX.Y.Z &&
+  git push origin vX.Y.Z` from any commit therefore publishes a release. The
+  notes come from that tag's changelog section, and fall back to the annotated
+  tag message and then to a pointer at CHANGELOG.md when the tagged source has
+  no section. A failed build publishes nothing; the fix is a later patch tag,
+  never a re-cut of a published one. The CI/CD group is reintroducing the
+  release-side checks deliberately, one at a time.
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
   bundle is unchanged, then exercise the installed CLI and daemon. To exercise a

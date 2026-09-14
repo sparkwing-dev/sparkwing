@@ -33,7 +33,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push: it re-checks the version against the newest tag, runs every gate on the tagged source, builds the binaries and images, publishes them, and creates the GitHub release from the tag's changelog section. A red check there fails the run and publishes nothing; the fix is a later patch tag. This pipeline never builds or publishes artifacts itself and never runs the broad suites."
+	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. The CI/CD group is reintroducing the release-side checks deliberately. This pipeline never builds or publishes artifacts itself and never runs the broad suites."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -652,7 +652,7 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 // safety: v1.0.0 through v1.6.1 are retracted tombstone tags the module proxy
 // safety: keeps forever (see the retract block in go.mod), so the release line
 // safety: stops below them. Pre-releases do count: dropping one here would let
-// safety: the workflow refuse a version this pipeline just cut.
+// safety: this pipeline cut a version behind one already published.
 const releaseLineCeiling = "v1.0.0"
 
 func onReleaseLine(tag string) bool {
@@ -672,8 +672,8 @@ func highestReleaseTag(tags []string) string {
 	return best
 }
 
-// safety: the workflow runs these gates after the tag exists, so the release
-// safety: being cut is in its own tag list and must not be its own predecessor.
+// safety: release-verify judges a tag that already exists, so the release
+// safety: being judged is in its own tag list and must not be its own predecessor.
 func previousReleaseTag(ctx context.Context, repoDir, version string) (string, error) {
 	tags, err := remoteReleaseTags(ctx, repoDir)
 	if err != nil {

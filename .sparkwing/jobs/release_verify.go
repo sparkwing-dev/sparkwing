@@ -28,11 +28,11 @@ func (ReleaseVerify) ShortHelp() string {
 func (ReleaseVerify) Help() string {
 	return "Reads the version a tag names and checks the source it points at carries what that release owes: " +
 		"a CHANGELOG.md [vX.Y.Z] section with at least one entry (the hosted release publishes that section as the " +
-		"release notes, so an empty one would half-release), a changelog account of any runs-store schema change " +
+		"release notes, and falls back to the tag message when it is missing), a changelog account of any runs-store schema change " +
 		"since the previous release tag, one of any wire-format cut, and a rolled migration guide whose sections every " +
 		"(Breaking) entry links. It reads files and git, changes nothing, " +
-		"and never reaches for a branch tip. The hosted release workflow runs it in the validate stage, so a tag " +
-		"pushed by hand is judged the same way one cut by `sparkwing run release` is."
+		"and never reaches for a branch tip. The hosted release workflow no longer runs it, so this is the check to " +
+		"run by hand before a tag goes out. The CI/CD group is reintroducing it there deliberately."
 }
 
 func (ReleaseVerify) Examples() []sparkwing.Example {

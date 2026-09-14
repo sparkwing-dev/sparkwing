@@ -444,9 +444,11 @@ updaters trust the replacement. The release gate rejects a signer outside the
 embedded trust set. Updaters without the replacement key fail closed rather
 than accepting an unknown signer.
 
-Container images follow the same rule. The release scans each image by
-digest, signs that digest with cosign, then moves `vX.Y.Z` onto it with
-`docker buildx imagetools create`. `bin/publish-image-tags.sh` resolves every
+Container images follow the same rule. The release signs each image digest
+with cosign, then moves `vX.Y.Z` onto it with
+`docker buildx imagetools create`. It no longer scans the image first; the
+CI/CD group is reintroducing that scan deliberately, with the rest of the
+release-side checks. `bin/publish-image-tags.sh` resolves every
 tag before it moves any of them and fails when one already points at a
 different digest, so a `workflow_dispatch` rerun cannot swap bytes under an
 operator who pinned the tag and a refusal cannot leave the registry
@@ -619,8 +621,9 @@ The signing key is release machinery, not per-user configuration:
 
 The `security-scan` pipeline runs four local scanners. The Security GitHub
 Actions workflow runs it on every pull request, on pushes to `main`, and
-weekly. The release workflow calls the same workflow against the resolved tag
-commit and waits for every security job before building release artifacts.
+weekly. The release workflow calls none of it: a tag builds and publishes the
+commit those runs already covered on `main`. The CI/CD group is reintroducing
+the release-side scanners deliberately.
 
 - **gosec** over the public module and the `.sparkwing` pipeline module,
   with the rules that describe how a CI tool works (file inclusion and
@@ -652,9 +655,10 @@ The hosted workflow also runs CodeQL for Go and TypeScript with the
 `security-extended` query suite. CodeQL alerts remain report-only. The workflow
 pins external actions to commit SHAs, and the three Go-based local scanners use
 pinned module versions. The installed npm version and advisory database supply
-`npm audit`; CodeQL has no local pipeline step. A release stops when a scanner
-cannot complete or when gosec, govulncheck, gitleaks, or `npm audit` finds a
-failure.
+`npm audit`; CodeQL has no local pipeline step. A pull request or a push to
+`main` stops when a scanner cannot complete or when gosec, govulncheck,
+gitleaks, or `npm audit` finds a failure. A tag stops for neither, so a
+scanner failure on `main` is what holds a release back, before the tag exists.
 
 ## Operator checklist
 

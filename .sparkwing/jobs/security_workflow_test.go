@@ -280,28 +280,6 @@ func TestSecurityWorkflowHasNoPrivateInfrastructureSurface(t *testing.T) {
 	}
 }
 
-func TestReleaseWaitsForExactSourceSecurityWorkflow(t *testing.T) {
-	release := readHostedCIFile(t, ".github/workflows/release.yaml")
-	requireWorkflowText(t, workflowJob(t, release, "security"),
-		"needs: validate-tag",
-		"uses: ./.github/workflows/security.yaml",
-		"source_ref: ${{ needs.validate-tag.outputs.source_sha }}",
-		"contents: read",
-		"security-events: write",
-	)
-	for _, id := range []string{"build", "build-images"} {
-		job := workflowJob(t, release, id)
-		requireWorkflowText(t, job,
-			"needs: [validate-tag, canonical, security]",
-			"needs.security.result == 'success'",
-		)
-	}
-	security := readHostedCIFile(t, ".github/workflows/security.yaml")
-	if got := strings.Count(security, "ref: ${{ inputs.source_ref || github.sha }}"); got != 2 {
-		t.Fatalf("exact-source security checkouts = %d, want scanner and CodeQL", got)
-	}
-}
-
 func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 	body := readHostedCIFile(t, ".gitleaks.toml")
 	if strings.Contains(body, "paths =") {
