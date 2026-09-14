@@ -84,6 +84,11 @@ unlock.
   a retracted version sits in a proxy's cache, instead of being reported as
   stale against a version nothing may pin.
 
+- **scaffold:** `const FallbackSDKVersion`, the pipeline module pin and the
+  Kubernetes end-to-end fixture name v0.50.5, the newest tag this line carries,
+  in place of v0.52.0. A fresh scaffold builds against a release that every
+  proxy can serve and that carries published binaries.
+
 ## [v0.50.5] - 2026-09-14
 ### Changed
 
