@@ -89,6 +89,19 @@ unlock.
 
 ### Changed
 
+- **k8s runner:** A Job for a cpu class above the warm one is placed on the
+  band of machines its class belongs to. The 4-core and 8-core classes select
+  nodes labelled `sparkwing.dev/cpu-band: small` and tolerate the matching
+  `NoSchedule` taint; 16 cores and above use `large`, and their pods carry a
+  required anti-affinity on that label across `kubernetes.io/hostname` so one
+  holds a machine alone, which the taint alone does not give them because two
+  16-core pods fit one 48-vCPU node. The band merges with the node selector and
+  tolerations the runner was configured with, and an operator entry on that key
+  wins. The 2-core class is placed exactly as before. A cluster serving classes
+  above the warm one needs node pools carrying that label and taint; on a
+  cluster without them the pod is unschedulable and the node fails with the
+  scheduler's message.
+
 - **release:** The hosted release workflow runs no check on a tagged commit. It
   resolves the tag to a commit, builds the binaries and images, signs them,
   publishes them, and creates the GitHub release, so `git tag vX.Y.Z && git push
