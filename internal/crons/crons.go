@@ -218,7 +218,10 @@ type Service struct {
 	// conventionally <home>/crons. Arming with a pin needs it.
 	PinRoot string
 
-	// ArmedBy is recorded when a schedule is first armed, such as user@host.
+	// ArmedBy is recorded when a schedule is first armed, and a row that
+	// recorded none takes this value on its next arming. The local arm path
+	// writes user@host; the controller writes the token principal that pushed
+	// the schedule, which is who its launches are billed to.
 	ArmedBy string
 
 	// Side names which schedules [Service.Tick] evaluates:

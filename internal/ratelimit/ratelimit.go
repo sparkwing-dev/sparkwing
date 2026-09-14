@@ -60,6 +60,26 @@ func (l *Limiter) Allow(key string, now time.Time) bool {
 	return true
 }
 
+// AllowWithRetry consumes a token for key as [Limiter.Allow] does, and
+// on refusal reports how long the caller must wait for one. A refused
+// attempt still charges the bucket, down to a bounded debt, so a caller
+// that keeps knocking while empty is told to wait longer each time. The
+// wait it reports is the real refill time, never shorter.
+func (l *Limiter) AllowWithRetry(key string, now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.refill(key, now, true)
+	if b.tokens >= 1 {
+		b.tokens--
+		return true, 0
+	}
+	// safety: an unbounded debt would let a brief flood name a wait no caller
+	// would honor, so the backlog one key can build is capped at a full window.
+	b.tokens = max(b.tokens-1, -l.burst)
+	wait := time.Duration((1 - b.tokens) / l.burst * float64(l.window))
+	return false, max(wait, 0)
+}
+
 // Peek reports whether key has a token without consuming one. An
 // untracked key reports true; it has spent nothing yet.
 func (l *Limiter) Peek(key string, now time.Time) bool {

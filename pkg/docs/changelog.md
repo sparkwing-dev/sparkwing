@@ -66,6 +66,243 @@ unlock.
 ## [v0.50.2] - 2026-09-14
 ### Added
 
+- **controller + store:** Retention, per-team storage quotas, and a
+  database-size alarm, all off on an existing install. `PUT
+  /api/v1/storage/settings` (scope `admin`) sets the event and node-metric
+  retention windows in days, the size worth an alarm, and the tier a team
+  without a quota row inherits; `GET /api/v1/storage` reads them back with the
+  caller's quota and the month's usage, and adds the database sample, every
+  quota row, and the month's heaviest teams for an operator. Every window is a
+  whole number of days and zero is unbounded, so a controller that sets
+  nothing keeps exactly what it kept before. An hourly timer removes the
+  events and metric samples of finished runs past their window, in batches of
+  5000, and leaves a run that is still going untouched; it then resamples the
+  database size, which SQLite answers as the pages it holds less its free list
+  and Postgres as the sum of `pg_total_relation_size`, so an alarm clears once
+  the rows are gone. A database over `database_alarm_bytes` logs a warning and
+  sets `database.alarm` on `GET /api/v1/health` without degrading the reported
+  status; that route answers without a token, so it publishes the alarm alone.
+  `PUT /api/v1/storage/quotas/{principal}` holds one team to the free or paid
+  tier or to limits of its own: bytes per run, bytes per month, and objects
+  per run. Run events are charged their payload bytes and a published artifact
+  manifest one object, each inside the transaction that writes it, so a
+  refused write is never stored and a failed one is never billed; live logs
+  are not charged, because the controller buffers them in memory and stores
+  nothing. A write past a limit is refused with `413` and a reason naming the
+  limit, the team, what it has stored and what the write asked for. Schema v38
+  adds the `storage_quotas`, `storage_run_usage` and `storage_month_usage`
+  tables plus timestamp indexes on `events` and `node_metrics`, and declares
+  no requirement, so a binary predating it still opens the database.
+
+- **controller:** Trigger flood control bounds how many runs a burst of webhook
+  deliveries or API submissions can create.
+  `sparkwing-controller --max-runs-per-principal-hour N` (chart
+  `controller.maxRunsPerPrincipalHour`) caps the runs one principal may create
+  in a rolling hour, counting a webhook delivery against the repository it
+  names; past the cap a submission is answered `429` with a `Retry-After`
+  naming the real refill delay, which lengthens while a caller keeps knocking.
+  The budget lives in controller memory, so a restart refills every principal.
+  `--shed-queue-depth N` (chart `controller.shedQueueDepth`) sheds a submission
+  with `503` and `Retry-After` once pending triggers reach N.
+  `--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`) answers a
+  content-identical `POST /api/v1/triggers` submission inside D with `409` and
+  the run the first one started; the digest covers the submitting principal, so
+  one tenant is never handed another's run id. Deduplication runs ahead of the
+  shed and the cap, so a GitHub redelivery gets its original run rather than a
+  refusal and never spends the submitter's budget. All three default to off, so
+  a controller that names none behaves as before, and every refusal is logged at
+  warn with the principal and the reason rather than dropped.
+- **controller:** Optional per-runner request budgets on the claim and heartbeat
+  routes. `--claims-per-runner-minute` and `--heartbeats-per-runner-minute`
+  (chart `controller.claimsPerRunnerMinute`,
+  `controller.heartbeatsPerRunnerMinute`) bound what one runner spends a minute,
+  keyed on the token prefix together with the runner the controller derives from
+  the route, falling back to the runner's own `X-Sparkwing-Runner` identity on
+  the three claim routes that name none, so a fleet sharing one token is
+  budgeted runner by runner. It bounds a cooperating runner, not a holder of a
+  valid token that varies its identity. `client.Client.WithRunnerIdentity` sets
+  the value a runner sends and `RunnerIdentity` reads it back;
+  `controller.RecommendedClaimsPerMinuteForSlots` computes the budget an agent
+  of a given `max_concurrent` wants, since its offer slots all poll under the
+  agent's one name. Both default to zero,
+  which is unlimited; 1200 of each suits the cadence the shipped runners use.
+  The agent liveness heartbeat is never budgeted, because losing it tears down
+  an agent and every node under it. Past a budget the route answers `429` with a
+  `Retry-After` and `sparkwing_principal_throttled_total{route_class}` counts
+  it.
+- **runner:** A `429` carrying a `Retry-After` is now backpressure rather than a
+  failure, the way a `503` already was. `client.RateLimitedError` and
+  `client.LoadSignal` expose it; the claim, node-heartbeat and trigger-heartbeat
+  loops wait the header out instead of repolling at their own cadence, and an
+  agent's liveness heartbeat survives a shed one, failing only once silence
+  passes its lease window.
+- **controller + runner:** A claim that finds no work can name the interval the
+  runner should wait before polling again, in the `X-Sparkwing-Poll-After`
+  response header. `--idle-claim-poll D` (chart `controller.idleClaimPoll`,
+  default 5s) caps what the controller suggests, which widens with how long it
+  has had no work and clears the moment work arrives or is handed out; zero
+  suggests nothing. A runner honors the suggestion only to poll less often,
+  spreads its return with jitter, and accepts at most 8s however long the
+  header names. The controller refuses to start unless two of the longest wait
+  its suggestion permits fit inside `--placement-hold` and
+  `--placement-liveness`.
+  `client.Client.PollAdvice` reports the last suggestion a claim carried back.
+  A host's own admission daemon and the loopback controller suggest nothing and
+  budget nothing, because a widened idle poll there costs pickup latency and
+  their unauthenticated callers would share one bucket.
+- **controller + logs + cache:** Egress budgets bound the bytes each
+  service sends to clients: artifact and cache-archive downloads, log
+  reads, the live log stream, and git proxy fetches. On the controller and
+  the logs service, `--egress-monthly-bytes` refuses one principal's
+  downloads past a UTC-month byte total with `429`, a `Retry-After` naming
+  the wait until the month rolls, and a body whose `error` member says who
+  spent what against which limit; `--egress-max-downloads` and
+  `--egress-max-log-streams` cap what one caller holds open at once, which
+  is what bounds how far a burst carries it past the byte budget; those
+  caps key on the pod behind the request, because a runner pool shares one
+  token and a cap keyed on the principal would refuse most of the pool, and
+  the gitcache proxy routes take no slot at all since they are the checkout
+  path.
+  `--egress-daily-alarm-bytes` refuses nothing on any service and raises an
+  alarm reported as `egress.alarm` on the health route, as a line in
+  `problems`, and as a `warn` log line carrying `day_bytes` and
+  `threshold_bytes`. The cache meters and alarms but never refuses, because
+  it authenticates one shared token and a refusal there would fall on every
+  runner at once; its health says so with `egress.enforced: false`. Each
+  service reads its own `SPARKWING_<SERVICE>_EGRESS_<BUDGET>` variables, so
+  one value on a shared ConfigMap cannot apply the same cap three times. A
+  `HEAD` and an error body are charged nothing. Every budget defaults to
+  unlimited, so a deployment that sets none serves what it served before.
+  Counting is in memory; the controller writes each principal's month total
+  to schema v41's `egress_usage` table on its maintenance sweep, reloads it
+  at startup, and prunes past thirteen months, so no response costs a store
+  write and a restart resumes the month. `GET /api/v1/egress` (scope
+  `admin`) reports the budgets, the day and month totals, the alarm, and the
+  principals that have downloaded the most. `controller.replicas` above 1
+  now fails to render, because a second replica both corrupts the local
+  state DB and doubles a per-principal budget. Documented under [Egress
+  budgets](docs/observability.md#egress-budgets).
+- **controller + cli:** Compute guards bound what a controller starts before
+  the credit ledger bills it. `max_concurrent_runners` caps the cloud runners
+  one principal holds, `max_global_runners` caps the whole controller with
+  `runner_alarm` warning below it, `max_run_seconds` caps the wall-clock time a
+  run may hold cloud runners for, `max_nodes_per_run` bounds a metered
+  principal's dynamic fan-out, `max_runs_per_hour` bounds its retry loop,
+  `max_global_nodes_per_run` and `max_global_runs_per_hour` are the operator's
+  equivalents across every principal, and `min_cron_interval_seconds` is the
+  shortest cadence a controller schedule may declare, checked both when a
+  repository arms it and when the tick is about to fire it. Every guard is zero
+  by default, which is unlimited, and the per-principal pair applies only to a
+  principal holding a metered token, so local work is untouched.
+  `GET /api/v1/compute-limits` reads them with the cloud runners in use per
+  principal, `PUT /api/v1/compute-limits` sets them under `admin`, and
+  `sparkwing cluster limits show|set` is the same surface on the command line.
+  Work a guard refuses answers `429` with `"code": "compute_limit"` and a
+  `Retry-After`, which a runner reads as a standing condition and keeps polling
+  through, and the run records a `compute_limit_blocked` event that `sparkwing
+  runs status` prints on its `guard:` line. A run past `max_run_seconds` loses
+  its node on the next heartbeat with the failure reason `compute_limit`.
+  Upgrade note: a controller schedule armed before this release carries no
+  principal, so its launches meet only `max_global_runs_per_hour` until the
+  repository's next push records one.
+- **controller + cache + logs:** Storage ceilings freeze writes once a
+  store holds more than it should. `sparkwing-controller
+  --max-bucket-bytes` and `--max-bucket-objects` (env
+  `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES`,
+  `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS`) set the ceilings and
+  `--warn-bucket-bytes` and `--warn-bucket-objects` set the marks health
+  reports as a warning; all four default to 0, which leaves the bucket
+  unlimited and every existing install unchanged. At or above a ceiling
+  the breaker refuses object writes with an error naming the measurement and
+  the ceiling, while reads and deletes keep working so the bucket can get
+  back under it. The controller counts each write's bytes as it happens
+  and replaces the running total with one paginated listing of the
+  artifact store every `--bucket-reconcile` (env
+  `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE`, hourly; `0` measures only at
+  startup), so nothing lists the bucket per request. `--bucket-store`
+  (env `SPARKWING_OBJECT_STORE_URL`) names the store that listing reads,
+  such as `s3://bucket/prefix`; the controller reads it on the interval
+  and serves none of it. `GET
+  /api/v1/health` reports `object_store.ceiling` as `frozen` and
+  `warning`; `GET /api/v1/object-store/breaker` and `sparkwing cluster
+  object-store status` carry the totals and the ceilings, and `sparkwing
+  cluster object-store reset-breaker` thaws a freeze. A thaw holds until
+  the next measurement, so writes counted in between do not freeze the
+  bucket again. One replica measures per window under a
+  store-wide lease, and the measurement's requests sit outside the
+  object-store request budget, because totalling a large bucket would
+  otherwise spend the whole per-minute list budget in one pass. A
+  multipart upload counts its bytes on the parts and its key on the
+  completion, and an abort is never refused. New metrics:
+  `sparkwing_object_store_bucket_bytes`,
+  `sparkwing_object_store_bucket_objects`,
+  `sparkwing_object_store_bucket_ceiling`,
+  `sparkwing_object_store_bucket_ceiling_frozen`,
+  `sparkwing_object_store_bucket_ceiling_freezes_total`, and
+  `sparkwing_object_store_bucket_ceiling_refused_total`.
+
+  The hosted write path does not run through the controller, so the two
+  services that store what pipelines produce carry the same ceiling:
+  `sparkwing-cache --max-store-bytes`, `--max-store-objects`,
+  `--warn-store-bytes`, `--warn-store-objects` and `--store-reconcile`
+  bound its artifact, dependency-archive and upload trees, and
+  `sparkwing-logs --max-store-bytes`, `--max-store-objects` and
+  `--store-reconcile` (plus `--warn-store-bytes` and
+  `--warn-store-objects`) bound the log store. Each service measures the
+  store it owns, refuses its own writes with `507` naming its own flags
+  while frozen, keeps reads and deletes working, and thaws on the
+  measurement that finds the store back under the ceiling. Every one is
+  off by default, and the chart carries them as `cache.limits.*` and
+  `logs.limits.*`.
+
+  All three report the ceiling where it can be watched: `store_ceiling`
+  on each service's health route (frozen, warning,
+  `measurement_incomplete`, counted bytes and objects, and the last
+  measurement), a `problems` entry for each, and metrics
+  (`sparkwing_logs_store_*`, `sparkwing.cache.store_*`). Recovery does
+  not wait out the interval: deleting a run measures the log store
+  again, and the cache carries two bearer-gated admin routes, `POST
+  /admin/store-ceiling/measure` to walk the trees now and `POST
+  /admin/store-ceiling/thaw` to accept uploads until the next
+  measurement. A thaw is refused with `409` when no measurement is
+  scheduled, because nothing would end it, and the refusal names the
+  route that does work. A measurement is bounded at
+  `--bucket-measure-pages` listings (env
+  `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES`, 1000 by default, a
+  thousand objects each) and half the interval, and the services' own
+  walks stop with their context; one that stops early is discarded
+  rather than folded in, leaving `measurement_incomplete` behind on
+  health and in
+  `sparkwing_object_store_bucket_ceiling_measurement_incomplete`. The
+  cache's measure route answers `202` and walks off the request path, as
+  does the walk a log-run deletion triggers.
+- **cache:** `sparkwing-cache --max-artifact-bytes` and
+  `--max-cache-archive-bytes` (env `SPARKWING_CACHE_MAX_ARTIFACT_BYTES`,
+  `SPARKWING_CACHE_MAX_ARCHIVE_BYTES`) set the size cap for one uploaded
+  artifact and one stored dependency archive. Both default to the 500 MB
+  the service already enforced, and `0` accepts an object of any size. An
+  upload over either cap is refused with `413` naming the cap before a
+  byte reaches the volume; a dependency-cache save that is refused logs a
+  warning and the node proceeds, as it already did.
+- **logs:** `sparkwing-logs --max-line-bytes` (env
+  `SPARKWING_LOGS_MAX_LINE_BYTES`) caps one log line, marker included:
+  every line past it is stored cut to the cap, on a UTF-8 rune boundary,
+  with a `[sparkwing-logs] truncated: line byte cap reached` marker in
+  place of its tail. A cap too small to hold the marker and a byte of
+  output is refused at startup. `--binary-ratio` (env `SPARKWING_LOGS_BINARY_RATIO`) drops an
+  append whose share of non-text bytes runs above it and stores one
+  `[sparkwing-logs] dropped` line for that node log; control bytes count,
+  and so does any byte above `0x7f` outside a valid UTF-8 sequence, which
+  catches a gzip or tar blob while leaving text in any language stored as
+  sent. Both default to 0, which is off.
+- **sdk:** `storage.UsageReporter` is the optional capability an
+  `ArtifactStore` exposes when it can total its own contents, reached
+  through `storage.Usage`, which reports false for a backend that cannot
+  measure itself. The S3 store implements it with one paginated listing,
+  and `storeurl.OpenMeasurementStore` opens a store for that measurement
+  alone, outside the request budget. `store.RunBucketMeasureLeased` runs
+  one measurement per window however many processes share the store.
+
 - **runner + chart:** A runner pool can keep its Go caches across pod
   restarts and warm them at startup. `runner.goCache.persistence.enabled`
   mounts one PersistentVolumeClaim over the runner's `GOCACHE` and
@@ -95,6 +332,47 @@ unlock.
   --name N` revokes the profile's token and removes it, naming the prefix and
   the revoke command whenever the credential it holds is not allowed to make
   that call.
+- **controller:** `/metrics` carries the series an operator alerts on and a
+  meter bills from. `sparkwing_queue_depth` reports outstanding nodes by state
+  (`waiting`, `ready`, `claimed`, `running`, `approval_pending`),
+  `sparkwing_node_claim_wait_seconds` the wait from a node becoming claimable to
+  its first runner taking it, `sparkwing_claim_unavailable_total` the claim
+  requests answered `503`, and `sparkwing_runners_live` the runners heard from
+  inside the liveness window by the label set they advertised.
+  `sparkwing_node_seconds_total{placement="cloud"}` is the billing line and is
+  read from the credit ledger. A claim reserves a minute up front and a finish
+  refunds what the node did not use, so the series counts a reservation as the
+  node consumes it and only ever grows; the `local` series counts what this
+  process settled for unmetered credentials, and a node whose claiming
+  credential has been revoked counts under neither. The
+  `sparkwing_credits_*` family reports balance, grants by kind, reservations,
+  charges and refunds from the ledger, so the totals survive a restart. Both
+  ledger sums refresh every 5 minutes over a covering index; the queue and
+  runner series refresh on the 10-second reaper sweep over a new index on the
+  nodes that have not finished. Principal names, token prefixes, holder ids and
+  run ids stay out of every label; a runner's self-asserted label set is
+  ordered, deduplicated, and collapsed onto `other` past 120 bytes or past the
+  31 busiest sets, and a set that stops reporting loses its series rather than
+  holding one forever. `sparkwing_live_runners` carries the fleet size with no
+  labels, so an empty fleet reads 0 instead of dropping out of the exposition.
+  Documented in [observability.md](docs/observability.md).
+- **store:** `Store.CountNodesByQueueState`, `Store.CreditLedgerTotals` and
+  `Store.NodeSettlement` report the figures the controller exports. The ledger
+  read runs at repeatable-read isolation and measures its held-back
+  reservations against the database clock, so neither a second controller nor a
+  stepped system clock can pull the seconds figure backwards. Schema
+  v39 adds the indexes those reads scan: partial indexes over the nodes that
+  have not finished and over the nodes holding a credit reservation, and
+  covering indexes on the credit grant and charge kinds. The migration adds
+  indexes only, so an older binary still opens the database. It builds them
+  inside the migration transaction, so on PostgreSQL the `credit_charges` build
+  holds a write lock on that table for its duration; upgrade a large deployment
+  in a maintenance window.
+- **controller:** An automatic node retry resets the claim generation along with
+  the rest of the claim state, so the retry's first claim is a first claim. A
+  node's finish settles the ledger against the credential recorded on the node
+  rather than the one posting the finish, so a node whose credential was
+  revoked or un-metered mid-run still releases its credit reservation.
 - **controller:** `sparkwing-controller --dashboard-url URL` announces the
   dashboard through `GET /api/v1/services` as the new `dashboard` field, so a
   client that has just been handed a token can say where to watch its runs. The
@@ -507,6 +785,29 @@ unlock.
   reported as a failed compile carrying no compiler output whenever the cleanup
   could not read the process table; the cleanup failure is now a warning naming
   the process group. A cancelled or failing compile reports as before.
+
+### Docs
+
+- **docs:** Getting started documents the offline guarantee and its
+  boundary. A local run needs the network once, to download modules and
+  compile; after that the cached pipeline binary, the SQLite store, the
+  logs, the dashboard, and the admission daemon are all local. What still
+  reaches out is named: a `latest` or range `sparks:`
+  pin (`--sw-no-update` skips the proxy call, exact tags never make one),
+  a profile with a `controller:` block, whatever the pipeline's own steps
+  do, and `sparkwing update`. `sparks.md` points at the same boundary.
+- **docs:** The user-facing docs lead with two paths. Getting started opens
+  on Local (a program on your machine, and the machines you own through
+  `--sw-fleet`) and Sparkwing Cloud, the hosted controller whose
+  `sparkwing cloud connect --token-stdin` reaches any controller you can
+  reach, including one a team runs itself, and names every other shape in
+  one paragraph under Advanced deployments.
+  `deployment-modes.md` carries the same two paths and groups shared object
+  storage, Postgres, the self-hosted controller, and a peer machine as the
+  controller under Advanced shapes. The README and the docs index open the
+  same way, the sidebar's Infrastructure category is now Advanced and
+  self-hosting, and `cli-cloud.md` joins the CLI reference category. No page
+  or command was removed.
 
 ## [v0.50.1] - 2026-09-13
 

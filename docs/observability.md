@@ -38,6 +38,7 @@ the logs.
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
 | `logs_auth` | The runner's log-append calls were rejected (401/403) by the controller, so the run's structured logs are unrecoverable. | Check the runner token's `logs.write` scope; the run fails loud rather than reporting success with no output. |
+| `credits_exhausted` | The credit balance stayed at zero past the grace period, so the controller cancelled the node. | Grant credits (`sparkwing cluster credits grant`) and rerun. The run's `credits_exhausted` event carries the balance and how long it had been spent. |
 | `logs_dropped` | The log store stayed unreachable past the append retry budget, so log lines were lost. The node's own work may have succeeded; its record of that work is incomplete. | Check the logs backend named in the run's `invocation.backends` -- for `s3`, the bucket, `AWS_REGION`, credentials, and `SPARKWING_S3_ENDPOINT`. The `logs_drop` event carries the lost-line count and the first error. Set `SPARKWING_LOGS_DROP_POLICY=warn` to keep such runs green instead. |
 
 A plain pipeline-level failure (a failed test or command) carries no
@@ -329,18 +330,74 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 
 **Controller** (`sparkwing-controller`, Prometheus):
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `sparkwing_runs_total` | Counter | Runs that reached a terminal state, by pipeline and status |
-| `sparkwing_run_duration_seconds` | Histogram | End-to-end wall time from create to finish |
-| `sparkwing_nodes_claimed_total` | Counter | Successful node claims |
-| `sparkwing_pending_nodes` | Gauge | Claim-queue depth (ready, unclaimed nodes) |
-| `sparkwing_active_runners` | Gauge | Distinct runners with a non-expired lease in the last 2 minutes |
-| `sparkwing_http_requests_total` | Counter | HTTP requests by route, method, status |
-| `sparkwing_http_request_duration_seconds` | Histogram | HTTP latency by route and method |
-| `sparkwing_object_store_requests_total` | Counter | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
-| `sparkwing_object_store_trips_total` | Counter | Times a request class exhausted its budget and began refusing requests |
-| `sparkwing_object_store_tripped` | Gauge | 1 while a request class is refusing requests |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sparkwing_runs_total` | Counter | `pipeline`, `status` | Runs that reached a terminal state |
+| `sparkwing_run_duration_seconds` | Histogram | `outcome`, `pipeline` | End-to-end wall time from create to finish |
+| `sparkwing_nodes_claimed_total` | Counter | `pipeline` | Successful node claims |
+| `sparkwing_pending_nodes` | Gauge | (none) | Claim-queue depth (ready, unclaimed nodes) |
+| `sparkwing_active_runners` | Gauge | (none) | Distinct runners with a non-expired lease in the last 2 minutes |
+| `sparkwing_http_requests_total` | Counter | `method`, `route`, `status` | HTTP requests the controller answered |
+| `sparkwing_http_request_duration_seconds` | Histogram | `method`, `route` | HTTP handling latency |
+| `sparkwing_object_store_requests_total` | Counter | `class`, `outcome` | Object-store requests by class (`put`, `get`, `list`, `delete`) and whether the budget let them reach the store |
+| `sparkwing_object_store_trips_total` | Counter | `class` | Times a request class exhausted its budget and began refusing requests |
+| `sparkwing_object_store_tripped` | Gauge | `class` | 1 while a request class is refusing requests |
+| `sparkwing_object_store_bucket_bytes` | Gauge | (none) | Bytes the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_objects` | Gauge | (none) | Objects the bucket holds, counted per write and replaced by each measurement |
+| `sparkwing_object_store_bucket_ceiling` | Gauge | `unit` | The configured ceiling, by `unit` (`bytes`, `objects`); 0 while that unit is unlimited |
+| `sparkwing_object_store_bucket_ceiling_frozen` | Gauge | (none) | 1 while the bucket is over its ceiling and object writes are refused |
+| `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
+| `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | (none) | Object writes the ceiling refused |
+| `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
+| `sparkwing_auth_token_cache_total` | Counter | `result` | Bearer verifications by how the verified-token cache answered them (`hit`, `miss`, `coalesced`) |
+| `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
+| `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a per-runner budget refused with `429` (`claim`, `heartbeat`) |
+| `sparkwing_queue_depth` | Gauge | `state` | Nodes short of a terminal outcome: `waiting`, `ready`, `claimed`, `running`, `approval_pending` |
+| `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
+| `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |
+| `sparkwing_runners_live` | Gauge | `label_set` | Runners that polled for a claim inside the liveness window, by the label set they advertised |
+| `sparkwing_live_runners` | Gauge | (none) | Runners that polled for a claim inside the liveness window, across every label set |
+| `sparkwing_node_seconds_total` | Counter | `placement` | Node execution seconds: `cloud` is what the ledger has finished charging for, `local` is what this controller process settled for unmetered credentials |
+| `sparkwing_credits_balance_micro` | Gauge | (none) | Micro-credits left to spend |
+| `sparkwing_credits_granted_micro_total` | Counter | `kind` | Micro-credits granted over the ledger's life, by whether the operator paid for the grant (`free`, `paid`) |
+| `sparkwing_credits_reserved_micro_total` | Counter | (none) | Micro-credits claims reserved up front |
+| `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
+| `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned from the unused tail of a claim reservation |
+| `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
+
+`sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
+comes from the credit ledger rather than from a request handler. A claim
+reserves a minute up front and a finish refunds the part the node did not use,
+so the series counts a reservation as the node consumes it rather than all at
+once: the figure only ever grows, which is what a counter has to do. A node the
+credit-exhaustion sweep cancels settles there. A node whose lease expires keeps
+every second its reservation charged, because the requeue writes no refund, and
+it books the unconsumed part at once rather than over the minute: the cloud
+series overstates real runner time by up to one reservation per lease expiry. A
+node whose run fails with no finish reaching the controller keeps the same
+seconds, and the reserved minute enters the total as the clock passes it.
+
+The `local` series counts what this controller process settled for an unmetered
+credential, read from the claiming credential recorded on the node, and it
+restarts at zero with the process. A node whose claiming credential has since
+been revoked counts under neither placement, because guessing would bill the
+operator's own capacity for cloud work. Only a metered credential moves
+credits, so the `sparkwing_credits_*` totals are paid work by construction and
+carry no free-versus-paid split; the split an operator wants is
+`sparkwing_node_seconds_total{placement}` for work and
+`sparkwing_credits_granted_micro_total{kind}` for funding.
+
+`sparkwing_node_claim_wait_seconds` measures from `placement_hold_from`, the
+instant the node became claimable, which survives the `ready_at` bump a
+label-mismatched claim applies. A node re-claimed after a lease-expiry requeue is not
+observed, because the only wait it could report is the previous attempt's. An
+automatic retry is observed, because the retry clears the hold instant and the
+claim generation, which makes its next claim a first claim.
+
+Per-run and per-team attribution lives in the ledger, not in the metrics:
+`GET /api/v1/credits/history` returns each charge with its run and node. A run
+id would mint one series per run, so the exported counters sum the seconds and
+name only the placement.
 
 The `route` label is the pattern the controller registered the request
 against, so every path parameter reaches Prometheus in its declared form
@@ -349,6 +406,36 @@ concurrency key or artifact digest never becomes a label value. A request
 that matches no route is labeled `other`, and so is any `method` outside
 the seven the controller answers, so neither an unrecognized path nor an
 invented request method can grow the series count.
+
+`sparkwing_runners_live` carries a label a runner writes for itself, so the
+exporter sorts and deduplicates each advertised label set and collapses a set
+longer than 120 bytes onto `label_set="other"`. When more than 32 distinct sets
+are live, the busiest 31 keep their own series and the rest are summed into
+`other`, so a set invented to sort first cannot displace a real fleet. A tie in
+size goes to the set already reported, so a newcomer cannot displace a fleet
+that was there first. Each sweep deletes the series for a set it no longer
+sees, which is what keeps the metric from growing with every label array a
+runner has ever sent.
+
+A gauge with no children is absent from the exposition, so
+`sparkwing_runners_live == 0` never evaluates when the fleet is empty. Alert on
+`sparkwing_live_runners`, which carries no labels and is always present, and
+read `sparkwing_runners_live` for the composition of the fleet rather than for
+its size.
+
+Principal identity never becomes a label. `sparkwing_requests_by_principal_total`
+carries the credential's kind; principal names, token prefixes, holder ids and
+run ids stay out of every series.
+
+Sampled series do not refresh at scrape time. `sparkwing_queue_depth`,
+`sparkwing_runners_live`, `sparkwing_pending_nodes` and
+`sparkwing_active_runners` refresh on the controller's reaper loop every 10
+seconds, bounded by an index over the nodes that have not finished. The
+`sparkwing_credits_*` family and `sparkwing_node_seconds_total{placement="cloud"}`
+refresh every 5 minutes, because the ledger sums scan a table that grows with
+every charge and is never pruned; read them as a slow-moving billing figure
+rather than a live gauge. Those totals come from the ledger rather than an
+in-process counter, so they survive a controller restart.
 
 **Cache** (`sparkwing-cache`, OTEL meter):
 
@@ -428,7 +515,309 @@ sparkwing cluster object-store status --profile prod
 sparkwing cluster object-store reset-breaker --profile prod
 ```
 
+A reset clears every tripped class and both window counters, and thaws a
+frozen bucket ceiling; lifetime request and trip totals survive so the
+metrics keep their history. A budget that keeps tripping wants a larger
+limit or a caller that stops retrying, not a repeated reset.
+
+## Storage ceilings
+
+Per-team quotas bound each team; a thousand teams under quota still add
+up, and one quota bug reaches every team at once. A storage ceiling
+bounds the total. Each service that stores what pipelines produce holds
+its own store to a byte ceiling and an object-count ceiling, and freezes
+writes once a measurement reaches either one: existing runs finish,
+further writes are refused with an error naming the ceiling and the
+measurement, and health reports the freeze. Reads and deletes keep
+working, because deleting is how a store gets back under its ceiling.
+
+| Service | What it bounds | Refusal | State on |
+|--------|------|-------------|------|
+| `sparkwing-cache` | the artifact, dependency-archive and upload trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
+| `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
+| `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
+
+Each of the three reports `frozen`, `warning` and
+`measurement_incomplete` on its health route and raises a `problems`
+entry for each, so a frozen or warning store shows as degraded wherever
+health is read. The services also carry their counted bytes and objects
+and the time of the last measurement; the controller keeps its totals on
+the admin-scoped breaker route, because its health answers without a
+token.
+
+The three are independent: each measures the store it owns and freezes
+only its own writes, so no service waits on another to decide. The
+controller's ceiling is the one that reaches an S3 bucket; the services'
+ceilings bound the volumes they write.
+
+### The controller's bucket ceiling
+
+Every ceiling is unlimited by default, so an install that sets nothing
+sees no change. Set the controller's with:
+
+| Flag | Environment | Meaning |
+|--------|------|-------------|
+| `--max-bucket-bytes` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` | Stored bytes at or above which object writes freeze |
+| `--max-bucket-objects` | `SPARKWING_OBJECT_STORE_MAX_BUCKET_OBJECTS` | Objects at or above which object writes freeze |
+| `--warn-bucket-bytes` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_BYTES` | Stored bytes at which health reports a warning |
+| `--warn-bucket-objects` | `SPARKWING_OBJECT_STORE_WARN_BUCKET_OBJECTS` | Objects at which health reports a warning |
+| `--bucket-reconcile` | `SPARKWING_OBJECT_STORE_BUCKET_RECONCILE` | Gap between bucket measurements, hourly by default |
+| `--bucket-store` | `SPARKWING_OBJECT_STORE_URL` | Store URL the measurement reads, such as `s3://bucket/prefix` |
+| `--bucket-measure-pages` | `SPARKWING_OBJECT_STORE_BUCKET_MEASURE_PAGES` | Listings one measurement may spend, 1000 by default |
+
+Counting costs nothing per request. Every write the process sends adds
+its own bytes to a running total, and the controller replaces that total
+with a measured one on the reconciliation interval, because the running
+count drifts: an overwrite counts its key twice and a delete cannot know
+what it removed. A multipart upload counts its bytes on the parts and
+its key on the completion, so one upload counts once; an abort counts
+nothing and is never refused, because aborting is how a frozen bucket
+sheds an upload in flight.
+
+The measurement is one paginated listing of the artifact store, which
+object stores bill per thousand keys, so an install that wants the
+ceiling without the listing sets `--bucket-reconcile 0` and accepts the
+drift. `--bucket-store` names the store the measurement reads; the
+controller reads it on the interval and serves none of it, and a
+controller pointed at no store, or at a backend that cannot total
+itself, keeps the running count. The running count starts at zero on
+restart, so a controller with no measurement source sees only what it
+has written since it started.
+
+Every Sparkwing process reads the same environment, so a runner handed
+`SPARKWING_OBJECT_STORE_MAX_BUCKET_BYTES` refuses its own writes above
+the ceiling too. It counts only what it has written since it started,
+because the measurement belongs to the controller; treat that as a
+backstop on one process rather than a second view of the bucket.
+
+Three properties keep the measurement from becoming the cost it bounds.
+One replica measures per window: the controllers claim a store-wide
+lease, so N replicas cost one listing rather than N. The measurement's
+requests sit outside the object-store request budget, because totalling
+a million-object bucket spends twice the per-minute list budget in one
+pass and would otherwise leave every other reader refused for the rest
+of the minute. And the walk itself is bounded, at `--bucket-measure-pages` listings
+(1000 by default, a thousand objects each) and at half the
+reconciliation interval, whichever comes first.
+
+A measurement that stops at either bound is discarded rather than folded
+in, because a total short of the truth would thaw a store that is still
+full. The ceiling then reports `measurement_incomplete` on health and in
+`sparkwing_object_store_bucket_ceiling_measurement_incomplete`, and
+keeps counting writes until a measurement finishes. A bucket that keeps
+reporting incomplete wants a higher `--bucket-measure-pages`, which is
+the bound that binds first, and then a narrower prefix or S3 Inventory
+in place of the listing.
+
+`GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
+`warning` alone, because that route answers without a token; the totals
+and the ceilings sit behind the admin-scoped
+`GET /api/v1/object-store/breaker` and on `sparkwing cluster
+object-store status`, which also reports `counted_at` (when the running
+count last moved) and `reconciled_at` (when the bucket was last
+measured). Alarm on
+`sparkwing_object_store_bucket_ceiling_frozen` for the freeze and on
+`sparkwing_object_store_bucket_bytes` against
+`sparkwing_object_store_bucket_ceiling` for the approach; S3 publishes
+`BucketSizeBytes` and `NumberOfObjects` daily at no charge, which is the
+same signal from the account side.
+
+Clearing a freeze is an operator decision:
+
+```bash
+sparkwing cluster object-store reset-breaker --profile prod
+```
+
+A thaw is refused while no measurement is scheduled
+(`--bucket-reconcile 0`), because nothing would ever end it and the
+ceiling would be off until the process restarts; raise the ceiling
+instead. Otherwise it thaws the bucket and holds the thaw until the next
+measurement: writes counted in between do not freeze it again, so the
+operator gets the whole window to act. The measurement then decides, and freezes again
+while the bucket is still over the ceiling. Raise the ceiling on the
+controller to keep writes flowing, or delete objects until the
+measurement falls back under it.
+
+### The cache and logs service ceilings
+
+The hosted write path does not run through the controller: a runner
+uploads artifacts and dependency archives to `sparkwing-cache` and posts
+log lines to `sparkwing-logs`, and each service stores them itself. Each
+therefore carries its own ceiling and refuses its own writes with `507`
+and an error naming its own flags.
+
+| Service | Flags | Environment |
+|--------|------|-------------|
+| `sparkwing-cache` | `--max-store-bytes`, `--max-store-objects`, `--warn-store-bytes`, `--warn-store-objects`, `--store-reconcile` | `SPARKWING_CACHE_MAX_STORE_BYTES` and the matching names |
+| `sparkwing-logs` | `--max-store-bytes`, `--max-store-objects`, `--store-reconcile` | `SPARKWING_LOGS_MAX_STORE_BYTES` and the matching names |
+
+Each service counts what it stores as it stores it and walks its own
+trees on `--store-reconcile` (hourly by default, `0` measures once at
+startup). The walk is local file I/O rather than billed requests, it
+stops when the service's context does and reports the total as partial
+rather than folding a short one in, and a
+measurement that finds the store back under its ceiling thaws it.
+`--warn-store-bytes` and `--warn-store-objects` mark the store as
+warning on health without refusing anything. The chart carries all of
+these as `cache.limits.*` and `logs.limits.*`.
+
+Neither service waits out the interval to recover. Deleting a run with
+`DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
+`--retention`, starts a fresh measurement of the log store, so appends
+resume shortly after the delete answers rather than at the end of the
+interval. The cache
+serves no delete of its own, so it carries two bearer-gated admin
+routes: `POST /admin/store-ceiling/measure` starts a walk now, which is
+what turns freeing space on the volume into uploads flowing again, and
+`POST /admin/store-ceiling/thaw` accepts uploads until the next
+measurement. The measure route answers `202` with the state as it stands
+and walks off the request path, so the caller pays no latency for a
+large store and a disconnect cannot abandon the walk; one runs at a
+time. The thaw is refused with `409` when no measurement is scheduled,
+and the refusal points at the measure route. Deleting a run on the logs
+service triggers the same off-request walk. Neither service drops a
+request that arrives while a walk is running: it re-runs once when that
+walk finishes, so a delete the walk had already passed still lands.
 A reset clears every tripped class and both window counters; lifetime
 request and trip totals survive so the metrics keep their history. A
 budget that keeps tripping wants a larger limit or a caller that stops
 retrying, not a repeated reset.
+
+## Egress budgets
+
+Egress is the bytes a Sparkwing service sends to clients: artifact and
+cache-archive downloads, log reads, the live log stream, and git proxy
+fetches. Object-store egress is about nine cents per gigabyte, so a
+terabyte a month is ninety dollars nobody authorised, and a user can
+spend it without writing a single pipeline.
+
+The controller, the logs service, and the cache each count the response
+bodies of those routes twice: once against the principal that asked for
+them, and once against the process total. Every budget below is
+unlimited until an operator sets one.
+
+| Flag | Controller | Logs | Cache | What it does |
+|------|-----------|------|-------|--------------|
+| `--egress-monthly-bytes` | yes | yes | no | Bytes one principal may download in a UTC month. Past it, its downloads answer `429` with a `Retry-After` naming the wait until the month rolls. |
+| `--egress-max-downloads` | yes | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
+| `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
+| `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
+
+Each service reads its own environment variables:
+`SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES`,
+`SPARKWING_LOGS_EGRESS_MONTHLY_BYTES`,
+`SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
+`SPARKWING_<SERVICE>_EGRESS_<BUDGET>`. They are separate on purpose: one
+variable on a shared ConfigMap read by three processes is one cap applied
+three times, which admits three times the bytes the operator wrote down.
+**The per-team monthly cap is the controller's**, and the other services'
+budgets bound their own traffic.
+
+### Refusing needs a principal the service can tell apart
+
+The controller resolves a bearer to a named principal on every download
+route, and the logs service resolves one through the controller's
+whoami, so their monthly and concurrency caps fall on the caller that
+spent the bytes.
+
+The cache authenticates one shared token, so every credentialed caller
+resolves to the same name. It therefore **meters and alarms and never
+refuses**: a cap it could enforce would answer `429` to the bearer every
+runner in the fleet shares, stopping every checkout and cache read at
+once, for up to a month, with no recovery but a pod restart. Its health
+reports `egress.enforced: false` to say so. The cap that protects the
+bill belongs to the controller, which knows who each bearer is.
+
+A service running with auth off resolves every request to `anonymous`,
+which is one shared budget for the same reason; that is the laptop-local
+shape, where no budget is set anyway.
+
+### A bearer can be a pool
+
+A runner pool shares one token, so twenty pods are one principal. The
+byte budget is keyed on the principal deliberately: the bill is the
+team's, however many pods spent it. The **concurrency caps are not**.
+They are keyed on the pod behind the request, taken from the
+`X-Sparkwing-Runner` identity the shipped runners already set for the
+controller's claim budgets, then from the claim-holder header, falling
+back to the principal only when nothing names a pod. A cap of eight keyed
+on the principal would refuse twelve of a twenty-pod pool while the byte
+budget sat untouched.
+
+That identity is cooperative: a caller that invents a pod name gets its
+own slots. The concurrency caps therefore bound an honest pool's burst
+and the blast radius of a stuck client; the monthly byte budget, which
+keys on the principal and cannot be moved by a header, is what bounds a
+caller that is trying to get around it.
+
+For the same reason the gitcache proxy routes take no slot at all. They
+are the checkout path every node walks, so a cap there refuses the clone
+rather than the download it was meant to bound. Those routes are still
+byte-metered, and still refused when the monthly byte budget is spent.
+
+### The alarm
+
+The monthly budget refuses; the daily threshold only alarms. The
+distinction is deliberate: one principal's spend is that principal's
+problem to answer for, and a process's daily total is the operator's.
+The alarm appears as `egress.alarm` on each service's `/api/v1/health`
+(the cache serves it on `/health`), as a line in `problems`, and as a
+`warn`-level log line carrying `day_bytes` and `threshold_bytes`, which
+is what a deployment's alerting keys on. Point CloudWatch alarms on the
+bucket's `BytesDownloaded` metric and the instance's `NetworkOut` at the
+same page, so the bill has a second witness that does not depend on a
+Sparkwing process being up.
+
+### What is and is not charged
+
+A byte counts when it is written to a `2xx` response to a request whose
+method carries a body. A `HEAD` charges nothing, because net/http
+discards what the handler writes to one, and an error body charges
+nothing, because it is not the download the budget is for.
+
+A budget is checked before a response starts, not during it, so a
+principal at zero can still finish whatever it already has in flight.
+The concurrency caps bound that overshoot only as far as they reach. The
+most a team can take past its monthly budget is
+
+```text
+(--egress-max-downloads + --egress-max-log-streams)
+  x  the largest object those slotted routes serve
+  x  the number of pods behind the bearer
+```
+
+because each pod holds its own slots, plus whatever the gitcache proxy
+routes serve, which hold no slot at all. A caller that invents pod names
+multiplies the pod count itself, so treat the formula as the bound on an
+honest fleet and the byte budget as the bound on the rest. Leave the caps
+unlimited and the overshoot is unbounded.
+
+### Persistence and history
+
+Counting is in memory, and only the controller persists it. It writes
+each principal's month total to its store on the maintenance sweep and
+reloads it at startup, so a restart resumes the month rather than handing
+everyone a fresh budget, and no response costs a store write; that sweep
+also prunes totals older than thirteen months, once a month rather than
+on every tick. The logs service and the cache count in memory alone: they
+park nothing for a flush that will never come, and their counters start
+over on a restart.
+
+Read the controller's meter, including the principals that have
+downloaded the most this month, with `GET /api/v1/egress` on an `admin`
+token.
+
+### One meter per process
+
+Like the object-store budget, an egress meter belongs to a process. Two
+controller replicas each count their own bytes, so a per-principal
+budget sized for one replica admits twice that across two.
+
+The persisted number is the high-water mark of any one writer, not the
+sum of them. Within a writer the total only rises, which is what makes a
+restart safe; across writers the row reflects the busier replica and the
+quieter one's bytes are not added to it. Size the budget for one
+process, and run one controller. The chart enforces that:
+`controller.replicas` above 1 fails to render, because the same second
+replica that would corrupt the local state DB would also double a
+per-principal budget and split the daily alarm below its threshold.

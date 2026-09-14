@@ -122,6 +122,16 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 		}
 		return
 	}
+	// safety: a guard set after the schedule was armed still binds it, so the
+	// cadence is measured again here rather than trusted from arming time.
+	refusal, readErr := s.minIntervalRefusal(ctx, sched)
+	if readErr != nil {
+		report.Errors = append(report.Errors,
+			fmt.Sprintf("%s: reading the cadence guard: %v", DisplayName(sched), readErr))
+	} else if refusal != nil {
+		s.recordUnevaluable(ctx, sched, now, dryRun, report, refusal)
+		return
+	}
 
 	report.Evaluated++
 	decision := cronspec.Decide(eval.schedule, eval.loc, sched.CursorAt, now, eval.catchUp)
@@ -141,6 +151,19 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 		}
 	}
 	s.resolveDue(ctx, sched, eval, decision.Due, now, dryRun, report)
+}
+
+// safety: the guard bounds what a controller schedule may cost, and a local
+// schedule spends nothing the operator pays for.
+func (s *Service) minIntervalRefusal(ctx context.Context, sched store.CronSchedule) (refusal, read error) {
+	if sched.Where != store.CronWhereController {
+		return nil, nil
+	}
+	limits, err := s.Store.ComputeLimits(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return RefuseBelowMinInterval(sched.Effective().Cron, limits.CronSeconds), nil
 }
 
 // safety: a host's override can break a cadence the config validated, and such

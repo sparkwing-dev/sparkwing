@@ -27,10 +27,16 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	srcID := r.PathValue("id")
 	full := r.URL.Query().Get("full") == "1"
-	created, err := runretry.Create(r.Context(), s.store, srcID, newRunID(), full, time.Now())
+	// safety: a retry creates a run, so the hourly guard measures the principal
+	// that asked for it exactly as a direct create does.
+	retryCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
+	created, err := runretry.Create(retryCtx, s.store, srcID, newRunID(), full, time.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)

@@ -84,7 +84,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	objectStore, objectStoreProblems := objectStoreHealth()
 	problems = append(problems, objectStoreProblems...)
 
-	resp := map[string]any{"status": "ok", "auth": authState, "object_store": objectStore}
+	egressState, egressProblems := s.egressHealth()
+	problems = append(problems, egressProblems...)
+
+	resp := map[string]any{
+		"status": "ok", "auth": authState,
+		"object_store": objectStore, "database": s.storageHealth(),
+		"egress": egressState,
+	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems
@@ -124,9 +131,15 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.store.CreateRun(r.Context(), body); err != nil {
+	// safety: the per-principal guards measure the authenticated caller, so the
+	// principal comes from the token rather than anything the body asserts.
+	runCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
+	if err := s.store.CreateRun(runCtx, body); err != nil {
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
@@ -485,6 +498,9 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.CreateNode(r.Context(), body); err != nil {
+		if s.writeComputeLimitRefusal(w, r, runID, body.NodeID, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -525,7 +541,7 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.finalizeMeteredNode(r, runID, nodeID)
+	s.settleFinishedNode(r, runID, nodeID)
 	s.liveLogs.Finish(runID, nodeID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -594,7 +610,11 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 			}))
 		}
 	}
-	seq, err := s.store.AppendEvent(r.Context(), runID, body.NodeID, body.Kind, body.Payload)
+	seq, err := s.store.AppendEventCharged(r.Context(), chargedPrincipal(r),
+		runID, body.NodeID, body.Kind, body.Payload)
+	if writeStorageQuotaError(w, s.logger, err) {
+		return
+	}
 	if errors.Is(err, store.ErrLockHeld) {
 		writeError(w, http.StatusConflict, err)
 		return
@@ -802,7 +822,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.admitTrigger(r.Context(), triggerIntake{
+	// safety: a trigger creates the run it names, so the hourly guard measures
+	// the principal that triggered it exactly as a direct create does.
+	triggerCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
+	intake := triggerIntake{
 		RunID:         runID,
 		Pipeline:      body.Pipeline,
 		Args:          body.Args,
@@ -815,7 +838,26 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RetryOf:       body.RetryOf,
 		RepoInherited: repoInherited,
 		At:            time.Now(),
-	}); err != nil {
+	}
+
+	principal := s.floodKey(r, "pipeline:"+body.Pipeline)
+	// safety: a redelivery is answered with the run it already started before
+	// anything is charged, so repeating one never spends the submitter's cap.
+	release, original, duplicate := s.claimSubmissionDigest(principal, intake)
+	if duplicate {
+		writeJSON(w, http.StatusConflict, triggerResp{RunID: original, Status: "duplicate"})
+		return
+	}
+	if !s.admitTriggerSubmission(w, r, principal, body.Trigger.Source) {
+		release()
+		return
+	}
+
+	if err := s.admitTrigger(triggerCtx, intake); err != nil {
+		release()
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -824,6 +866,23 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RunID:  runID,
 		Status: "dispatched",
 	})
+}
+
+// safety: the digest is reserved before the run is created, so two simultaneous
+// identical submissions cannot both start one; the release undoes a reservation no run followed.
+func (s *Server) claimSubmissionDigest(principal string, in triggerIntake) (release func(), original string, duplicate bool) {
+	if s.flood == nil || s.flood.dedupe == nil {
+		return func() {}, "", false
+	}
+	digest := submissionDigest(principal, in)
+	if original, found := s.flood.dedupe.claim(digest, in.RunID, in.At); found {
+		s.logger.Warn("trigger deduplicated",
+			"principal", principal, "pipeline", in.Pipeline,
+			"reason", "an identical submission is already inside the dedupe window",
+			"run_id", original)
+		return func() {}, original, true
+	}
+	return func() { s.flood.dedupe.forget(digest) }, "", false
 }
 
 // safety: Env arrives sanitized; a caller inside the process supplies only keys
@@ -850,7 +909,9 @@ type triggerIntake struct {
 // here -- the trigger, the pending run, the dispatch -- so an HTTP submission
 // and a schedule the controller fired land identically.
 func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
-	if err := s.store.CreateTrigger(ctx, store.Trigger{
+	// safety: the trigger and the run it names are written together, so a guard
+	// that refuses the run leaves no trigger behind for a worker to claim.
+	if err := s.store.CreateTriggerWithRun(ctx, store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
 		Args:           in.Args,
@@ -869,14 +930,7 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		RetryOf:        in.RetryOf,
 		RepoInherited:  in.RepoInherited,
 		IdempotencyKey: in.IdempotencyKey,
-	}); err != nil {
-		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-			return err
-		}
-		return fmt.Errorf("persist trigger: %w", err)
-	}
-
-	if err := s.store.CreateRun(ctx, store.Run{
+	}, store.Run{
 		ID:            in.RunID,
 		Pipeline:      in.Pipeline,
 		Status:        "pending",
@@ -893,8 +947,13 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
 	}); err != nil {
-		return fmt.Errorf("persist run: %w", err)
+		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
+			return err
+		}
+		return fmt.Errorf("persist the trigger and its run: %w", err)
 	}
+
+	s.recordQueueActivity(in.At)
 
 	return s.dispatcher.Dispatch(ctx, RunRequest{
 		RunID:    in.RunID,
@@ -1127,12 +1186,14 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.writeClaimPollAdvice(w)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.recordQueueActivity(time.Now())
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -1471,6 +1532,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			if s.writeCreditsRefusal(w, r, err) {
 				return
 			}
+			if s.writeComputeLimitRefusal(w, r, body.RunID, body.NodeID, err) {
+				return
+			}
 			if writeExecutionAdmissionError(w, err) {
 				return
 			}
@@ -1480,6 +1544,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+				s.writeClaimPollAdvice(w)
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -1491,6 +1556,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "pending")
 			} else {
 				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+				s.writeClaimPollAdvice(w)
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -1517,16 +1583,21 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.writeClaimPollAdvice(w)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if s.writeCreditsRefusal(w, r, err) {
 			return
 		}
+		if s.writeClaimComputeLimitRefusal(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.runnerPresence.awarded(claimer)
+	s.noteRunnerAlarm(r)
 	writeClaimedNode(w, r, s, n)
 }
 
@@ -1610,11 +1681,13 @@ func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID
 }
 
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
+	s.recordQueueActivity(time.Now())
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
 		pipeline = run.Pipeline
 	}
 	observeNodeClaim(pipeline)
+	observeClaimWait(n)
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: n.RunID, NodeID: n.NodeID, Pipeline: pipeline,
 	})
@@ -1895,7 +1968,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	// safety: the runner abandons a node whose claim the controller refuses,
 	// which is how a cancellation for an empty balance reaches it.
-	if s.chargeMeteredHeartbeat(r, runID, nodeID) {
+	if s.chargeMeteredHeartbeat(r, runID, nodeID) || s.stopForWallClockLimit(r, runID, nodeID) {
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
@@ -1960,7 +2033,15 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.SetNodeArtifactManifest(r.Context(), runID, nodeID, body.ManifestDigest); err != nil {
+	if err := s.store.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
+		runID, nodeID, body.ManifestDigest); err != nil {
+		if writeStorageQuotaError(w, s.logger, err) {
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

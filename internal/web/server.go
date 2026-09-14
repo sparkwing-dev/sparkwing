@@ -251,7 +251,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 
 	if opts.LogsURL != "" {
 		authedMux.Handle("/api/v1/logs/",
-			logsProxyAllowList(controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts))))
+			logsProxyAllowList(withLogsIdentityHeader(
+				controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))))
 	}
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/",
@@ -293,7 +294,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)
 		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
-	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
+	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, withViewerIdentity(newViewerTabs(), authedMux)))
 	return securityHeadersMiddleware(opts, router)
 }
 

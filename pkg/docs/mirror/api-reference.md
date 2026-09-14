@@ -17,6 +17,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
+| `GET` | `/api/v1/compute-limits` | `runs.read` |
+| `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
@@ -39,6 +41,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.write` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.write` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.write` |
+| `GET` | `/api/v1/egress` | `admin` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
@@ -133,6 +136,9 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` |
 | `GET` | `/api/v1/secrets/{name}` | `secrets.read` |
 | `GET` | `/api/v1/services` | `authenticated` |
+| `GET` | `/api/v1/storage` | `runs.read` |
+| `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
+| `PUT` | `/api/v1/storage/settings` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

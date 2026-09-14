@@ -13,7 +13,9 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
@@ -49,6 +51,26 @@ type Config struct {
 	GitForkLimit int
 
 	WorkspaceSeedMaxAge time.Duration
+
+	MaxArtifactBytes int64
+
+	MaxCacheArchiveBytes int64
+
+	MaxStoreBytes int64
+
+	MaxStoreObjects int64
+
+	WarnStoreBytes int64
+
+	WarnStoreObjects int64
+
+	StoreReconcile time.Duration
+	// EgressDailyAlarmBytes raises the egress alarm, which health
+	// reports, once this pod has sent this many bytes in a UTC day. It
+	// refuses nothing, because this service authenticates one shared
+	// token and so cannot tell one caller's spend from another's. Zero
+	// is off.
+	EgressDailyAlarmBytes int64
 }
 
 func DefaultConfig() Config {
@@ -63,6 +85,10 @@ func DefaultConfig() Config {
 		ProxyMaxAge:      7 * 24 * time.Hour,
 		SSHKeyDir:        "/etc/ssh-key",
 		GitForkLimit:     4,
+
+		MaxArtifactBytes:     DefaultMaxArtifactBytes,
+		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
+		StoreReconcile:       objectguard.DefaultCeilingReconcile,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 	}
@@ -130,6 +156,15 @@ func New(cfg Config) (*Server, error) {
 	if cfg.WorkspaceSeedMaxAge == 0 {
 		cfg.WorkspaceSeedMaxAge = 24 * time.Hour
 	}
+	if cfg.MaxArtifactBytes < 0 || cfg.MaxCacheArchiveBytes < 0 {
+		return nil, fmt.Errorf("cache: an object size cap must not be negative; pass 0 to accept an object of any size")
+	}
+	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
+		return nil, fmt.Errorf("cache: a store ceiling must not be negative; pass 0 to leave the store unlimited")
+	}
+	if cfg.StoreReconcile < 0 {
+		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
+	}
 
 	dataRoot = cfg.DataDir
 	repoDir = filepath.Join(cfg.DataDir, "repos")
@@ -151,6 +186,23 @@ func New(cfg Config) (*Server, error) {
 	recloneCooldown = cfg.RecloneCooldown
 	gitForkSem = make(chan struct{}, cfg.GitForkLimit)
 	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
+	maxArtifactBytes = cfg.MaxArtifactBytes
+	maxCacheArchiveBytes = cfg.MaxCacheArchiveBytes
+	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{
+			MaxBytes:    cfg.MaxStoreBytes,
+			MaxObjects:  cfg.MaxStoreObjects,
+			WarnBytes:   cfg.WarnStoreBytes,
+			WarnObjects: cfg.WarnStoreObjects,
+		},
+		Reconcile: cfg.StoreReconcile,
+		Subject:   storeCeilingSubject,
+		Remedy:    storeCeilingRemedy,
+	})
+
+	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
+		"and the whole store at %d bytes / %d objects (0 means no cap)",
+		maxArtifactBytes, maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
 
 	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -164,6 +216,10 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
+	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
+	setEgressMeter(egressCfg)
+	logEgressBudgets(egressCfg)
+
 	loadRepoNames()
 	initProxy()
 
@@ -172,6 +228,7 @@ func New(cfg Config) (*Server, error) {
 	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
 	initGitcacheMetrics()
 	initProxyMetrics()
+	initStoreCeilingMetrics()
 	if err := setupSSH(); err != nil {
 		return nil, err
 	}
@@ -180,23 +237,25 @@ func New(cfg Config) (*Server, error) {
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)
 
-	s.mux.HandleFunc("/archive", requireToken(handleArchive))
+	s.mux.HandleFunc("/archive", requireToken(metered(egress.ClassArtifact, handleArchive)))
 	s.mux.HandleFunc("/repos", requireToken(handleRepos))
-	s.mux.HandleFunc("/artifacts/", requireToken(handleArtifacts))
-	s.mux.HandleFunc("/file", requireToken(handleFile))
+	s.mux.HandleFunc("/artifacts/", requireToken(metered(egress.ClassArtifact, handleArtifacts)))
+	s.mux.HandleFunc("/file", requireToken(metered(egress.ClassArtifact, handleFile)))
 	s.mux.HandleFunc("/tree-hash", requireToken(handleTreeHash))
 	s.mux.HandleFunc("/branch-contains", requireToken(handleBranchContains))
-	s.mux.HandleFunc("/bin/", requireToken(handleBin))
-	s.mux.HandleFunc("/cache/", requireToken(handleCache))
+	s.mux.HandleFunc("/bin/", requireToken(metered(egress.ClassArtifact, handleBin)))
+	s.mux.HandleFunc("/cache/", requireToken(metered(egress.ClassArtifact, handleCache)))
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
-	s.mux.HandleFunc("/uploads/", requireToken(handleUploadDownload))
+	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
+	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
+	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
 	s.mux.HandleFunc("/git/register", requireToken(handleGitRegister))
 	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
-	s.mux.HandleFunc("/git/", requireToken(handleGit))
+	s.mux.HandleFunc("/git/", requireToken(metered(egress.ClassGit, handleGit)))
 
-	s.mux.HandleFunc("/proxy/", handleProxy)
+	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
 	s.mux.Handle("/metrics", s.tel.PromHandler)
@@ -215,7 +274,13 @@ func New(cfg Config) (*Server, error) {
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	s.wg.Add(2)
+	setMeasureContext(ctx)
+	measureStore(ctx)
+	s.wg.Add(3)
+	go func() {
+		defer s.wg.Done()
+		storeCeilingLoop(ctx)
+	}()
 	go func() {
 		defer s.wg.Done()
 		backgroundFetchLoop(ctx, s.cfg.FetchInterval)

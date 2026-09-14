@@ -27,6 +27,15 @@ func New(baseURL string, httpClient *http.Client, token string) *Store {
 // FromClient wraps an existing logs.Client.
 func FromClient(c *logs.Client) *Store { return &Store{client: c} }
 
+// WithRunnerIdentity names the runner behind this store's reads, so the
+// logs service counts its concurrent reads and streams against that pod
+// rather than against the token a whole pool shares. It returns the same
+// store for chaining.
+func (s *Store) WithRunnerIdentity(id string) *Store {
+	s.client.WithRunnerIdentity(id)
+	return s
+}
+
 var _ storage.LogStore = (*Store)(nil)
 
 func (s *Store) Append(ctx context.Context, runID, nodeID string, data []byte) error {

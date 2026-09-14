@@ -61,6 +61,7 @@ func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, sinc
 	if err != nil {
 		return nil, err
 	}
+	c.setRunnerIdentity(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
@@ -90,6 +91,7 @@ func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, si
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	c.setRunnerIdentity(req)
 	client := *c.http
 	client.Timeout = 0
 	resp, err := client.Do(req)

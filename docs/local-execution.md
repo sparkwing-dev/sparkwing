@@ -1513,13 +1513,13 @@ does not replace it.
 ### Whoever owns the machine owns admission
 
 The gate is host-local by design: two laptops pointed at the same shared
-backend (Mode 2 / 3 / 4) each run their own daemon, and nothing
-coordinates raw CPU across machines. On a Kubernetes runner the pod's CPU
-is already bounded by the kube scheduler and the warm-runner pool's own
-budget, so admission there belongs to the cluster, not to a sparkwing
-daemon -- runner pods do not start one. Cross-machine coordination is the
-job of global-scope `.Concurrency()` groups, which pool through the
-controller's shared state.
+backend (a bucket, Postgres, or a controller) each run their own daemon,
+and nothing coordinates raw CPU across machines. On a Kubernetes runner
+the pod's CPU is already bounded by the kube scheduler and the
+warm-runner pool's own budget, so admission there belongs to the cluster,
+not to a sparkwing daemon -- runner pods do not start one. Cross-machine
+coordination is the job of global-scope `.Concurrency()` groups, which
+pool through the controller's shared state.
 
 ## Pipeline configuration
 

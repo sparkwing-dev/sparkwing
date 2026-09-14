@@ -202,6 +202,98 @@ request to materialize every row with its plan, args, and payload blobs.
 bearer; any valid token satisfies it, and every client that consumes it
 already holds one.
 
+## Flood control
+
+A push storm, a bot opening hundreds of pull requests, or a misconfigured
+hook delivers thousands of events in minutes, and each one costs a run, a
+log object, and a row. Three controller settings bound what one burst can
+create. All three default to off, so a controller that names none admits
+what it always did.
+
+`--max-runs-per-principal-hour N` (chart
+`controller.maxRunsPerPrincipalHour`) caps the runs one principal may
+create in a rolling hour. An authenticated submission spends its own
+token's budget; a webhook delivery carries no principal, so it spends the
+budget of the repository it names. Past the cap the controller answers
+`429` with a `Retry-After` naming the real refill delay, which lengthens
+while a caller keeps knocking at an empty budget. The budget lives in
+controller memory, so a restart or a rollout refills every principal;
+it bounds a burst, not a month.
+
+`--shed-queue-depth N` (chart `controller.shedQueueDepth`) answers `503`
+with a `Retry-After` once pending triggers reach N, which is the outer
+bound on how deep a backlog one burst can grow. The depth is read at most
+once a second, because a flood asks for it far faster than it changes.
+
+`--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`)
+answers a content-identical `POST /api/v1/triggers` submission inside D
+with `409` and the run the first one started. The digest covers the
+submitting principal, so a `409` naming a run id only ever reaches the
+principal that owns that run and two tenants submitting the same body get
+a run each. A GitHub redelivery is deduped regardless: the store holds
+one trigger per delivery id and one per body digest, so a retried
+delivery answers `409` naming the original run whatever this window says.
+
+Deduplication runs before the shed and the cap, so a redelivery is
+answered with its original run rather than a refusal, and retrying one
+never spends the submitter's budget.
+
+Every refusal is a status a caller can act on and a line in the
+controller log at warn naming the principal and the reason. Nothing is
+dropped silently.
+
+## Per-runner request budgets
+
+The claim and heartbeat routes can carry a budget of their own, because a
+looping runner reaches them thousands of times a minute without ever
+failing authentication. `--claims-per-runner-minute` and
+`--heartbeats-per-runner-minute` (chart
+`controller.claimsPerRunnerMinute`,
+`controller.heartbeatsPerRunnerMinute`) bound what one runner spends per
+rolling minute. Both default to zero, which is unlimited: an operator
+opts in. 1200 of each suits the cadence the shipped runners use -- a pool
+runner claims every 500ms, or 120 a minute, and a node heartbeat runs
+every 3s. An enrolled agent's offer slots all poll under the agent's one
+name, and each slot spends a preparation plus an offer per round, so its
+claim budget is 1200 x `max_concurrent`: 1200 for one slot, 9600 for
+eight. `controller.RecommendedClaimsPerMinuteForSlots` computes it.
+
+The budget is keyed on the runner, not the token. The controller derives
+the runner from the route wherever it can -- the node, run, or agent the
+path names -- and falls back to the `X-Sparkwing-Runner` header only on
+`POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
+`POST /api/v1/triggers/claim`, which name nothing. A runner sends one
+identity for the life of its process (a pool runner its holder prefix, an
+enrolled agent its name), not one per poll: a value that changed per
+request would buy a fresh budget on every claim and grow the controller's
+bucket table at the fleet's poll rate.
+
+**What this bounds is a cooperating runner.** On those three claim routes
+the identity is the runner's own word, so a holder of a valid token that
+varies it gets a fresh budget each time. The budget stops a runaway loop
+and keeps one misbehaving runner in a shared-token fleet from spending
+its peers' claim budget; it is not a defence against an authenticated
+caller who means harm. The token itself is the control that bounds that
+caller -- revoke it.
+
+A runner too old to send an identity shares one bucket with its peers on
+those routes, so during a rolling upgrade a shared-token fleet is
+budgeted as one caller there. Size the budgets per runner and the older
+half of the fleet still clears them, or leave the budgets at zero until
+the rollout finishes.
+
+The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
+never budgeted. An agent that loses it tears down its membership and
+every node under it, which is a far worse outcome than the load one
+heartbeat every few seconds represents.
+
+Past a budget the route answers `429` with a `Retry-After` naming the
+real refill delay, and `sparkwing_principal_throttled_total{route_class}`
+counts it. A runner reads a `429` the way it reads a `503`: it waits the
+header out, capped at 30 seconds, and keeps its claim and its node. A
+host's own admission daemon and the loopback controller budget nothing,
+because their callers are unauthenticated and would share one bucket.
+
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the
@@ -617,6 +709,13 @@ failure.
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
   | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
+  | `--max-line-bytes` (`SPARKWING_LOGS_MAX_LINE_BYTES`) | 0 (off) | Byte cap for one log line, marker included: every line past it is stored cut to the cap with a `[sparkwing-logs] truncated: line byte cap reached` marker in place of its tail. The cut lands on a UTF-8 rune boundary. A cap too small to hold the marker and a byte of output is refused at startup, and raised to that minimum when set through the Go API. |
+  | `--binary-ratio` (`SPARKWING_LOGS_BINARY_RATIO`) | 0 (off) | Share of bytes in one append that read as binary rather than text, above which the append is dropped and one `[sparkwing-logs] dropped` line is stored for that node log. Control bytes count, and so does any byte above `0x7f` that is not part of a valid UTF-8 sequence, which is what catches a gzip or tar blob while leaving text in any language stored as sent; `0.3` is a workable threshold. |
+  | `--max-store-bytes` (`SPARKWING_LOGS_MAX_STORE_BYTES`) | 0 (off) | Stored bytes across the whole log store, not one node or run. At or above it every append is refused with `507` naming the ceiling, until a measurement finds the store back under it. |
+  | `--max-store-objects` (`SPARKWING_LOGS_MAX_STORE_OBJECTS`) | 0 (off) | Same ceiling counted in log files. |
+  | `--warn-store-bytes` (`SPARKWING_LOGS_WARN_STORE_BYTES`) | 0 (off) | Stored bytes at which `/api/v1/health` reports the store as warning, refusing nothing. |
+  | `--warn-store-objects` (`SPARKWING_LOGS_WARN_STORE_OBJECTS`) | 0 (off) | Same warning counted in log files. |
+  | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
   the matches it found with `"truncated": true`. Search also requires
@@ -625,7 +724,8 @@ failure.
 
   The runner-bundle chart passes these through as `logs.limits.*`
   (`maxNodeBytes`, `maxRunBytes`, `maxInflightBytes`, `minFreeBytes`,
-  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`); an
+  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`,
+  `maxLineBytes`, `binaryRatio`); an
   empty value keeps the binary's default. Size them against
   `logs.storage.size`, because a volume left to fill answers `507` to
   every append until you turn on retention or delete runs. A malformed

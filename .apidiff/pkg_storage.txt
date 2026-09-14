@@ -103,3 +103,14 @@ type StateStore interface {
 	ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 	ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
 }
+type StoreUsage struct {
+	Bytes      int64
+	Objects    int64
+	ObservedAt time.Time
+
+	Partial bool
+}
+func Usage(ctx context.Context, store ArtifactStore) (StoreUsage, bool, error)
+type UsageReporter interface {
+	Usage(ctx context.Context) (StoreUsage, error)
+}

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -78,4 +79,11 @@ func splitCSV(s string) []string {
 		return nil
 	}
 	return out
+}
+
+// safety: a runner identity that changed per request would hand the controller
+// a fresh budget every poll and grow its bucket table at the fleet's poll rate,
+// so a caller with no name of its own names this process instead.
+func processRunnerIdentity(role string) string {
+	return logs.ProcessIdentity(role)
 }

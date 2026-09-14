@@ -184,7 +184,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "limits", "image", "webhooks", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -2231,6 +2231,62 @@ per line.`,
 	},
 }
 
+var cmdLimits = Command{
+	Path:     "sparkwing cluster limits",
+	Synopsis: "Read and set the compute guards",
+	Description: `Compute guards bound what the controller starts before the credit
+ledger bills it: the cloud runners one principal holds at once, the cloud
+runners the whole controller holds, the wall-clock seconds a run may hold them
+for, the nodes one run may carry, the runs created per hour, and the shortest
+interval a cloud schedule may declare. Every guard is zero by default, which is
+unlimited, so a controller that sets none behaves as it did before the guards
+existed.`,
+	SubcommandOrder: []string{"show", "set"},
+	Examples: []Example{
+		{"Read the guards and what they measure", "sparkwing cluster limits show --profile prod"},
+		{"Cap the cloud runners one principal holds", "sparkwing cluster limits set --name max_concurrent_runners --value 20 --profile prod"},
+	},
+}
+
+var cmdLimitsShow = Command{
+	Path:     "sparkwing cluster limits show",
+	Synopsis: "Print every compute guard and the cloud runners in use",
+	Description: `Prints each guard with its ceiling, or "unlimited" when nothing set
+one, then the cloud runners claimed now in total and per principal. A
+cloud runner is a claim a metered token holds, so a controller that
+marks no token metered reads zero.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the guards", "sparkwing cluster limits show --profile prod"},
+		{"Read the guards as JSON", "sparkwing cluster limits show --profile prod -o json"},
+	},
+}
+
+var cmdLimitsSet = Command{
+	Path:     "sparkwing cluster limits set",
+	Synopsis: "Set one compute guard",
+	Description: `Sets one guard to a ceiling, or to zero to remove it. The guards are
+max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
+max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
+max_global_runs_per_hour and min_cron_interval_seconds. The per-principal
+guards bind a principal holding a metered token; the max_global_ pair binds
+every run. Work past a guard answers 429 with a Retry-After and the run records
+a compute_limit_blocked event. Requires the admin scope.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "GUARD", Desc: "Guard to set", Required: true, Group: "Input"},
+		{Name: "value", Argument: "N", Desc: "Ceiling; 0 removes it", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Hold the fleet under fifty cloud runners", "sparkwing cluster limits set --name max_global_runners --value 50 --profile prod"},
+		{"Warn at forty", "sparkwing cluster limits set --name runner_alarm --value 40 --profile prod"},
+		{"Remove the per-run node cap", "sparkwing cluster limits set --name max_nodes_per_run --value 0 --profile prod"},
+	},
+}
+
 var cmdTokensList = Command{
 	Path:     "sparkwing cluster tokens list",
 	Synopsis: "List token prefixes + metadata",
@@ -3881,7 +3937,14 @@ SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
 SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
 clears when its day window rolls (day, the default) or waits for an
 operator (manual). A local process that must finish past a tripped
-budget sets SPARKWING_OBJECT_STORE_BREAKER=off.`,
+budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
+
+The same breaker carries the bucket ceiling. A controller started with
+--max-bucket-bytes or --max-bucket-objects measures the bucket on an
+interval, freezes object writes once it holds more than the ceiling,
+and reports the freeze on health and as
+sparkwing_object_store_bucket_ceiling_frozen. Buckets are unlimited by
+default.`,
 	SubcommandOrder: []string{"status", "reset-breaker"},
 	Examples: []Example{
 		{"Clear a tripped budget", "sparkwing cluster object-store reset-breaker --profile prod"},
@@ -3893,8 +3956,9 @@ var cmdClusterObjectStoreStatus = Command{
 	Synopsis: "Show the controller's object-store request budget",
 	Description: `Prints each request class with its per-minute rate, its per-day budget,
 how much of each window the controller has spent, how many times the
-class has tripped, and whether it is refusing requests now. Changes
-nothing.
+class has tripped, and whether it is refusing requests now, followed by
+the bucket ceiling: what the bucket holds, the ceilings it is held to,
+and whether object writes are frozen. Changes nothing.
 
 Hits GET /api/v1/object-store/breaker on the selected profile's
 controller, which needs an admin-scoped token.`,
@@ -3910,11 +3974,13 @@ controller, which needs an admin-scoped token.`,
 
 var cmdClusterObjectStoreResetBreaker = Command{
 	Path:     "sparkwing cluster object-store reset-breaker",
-	Synopsis: "Clear a tripped object-store request budget",
-	Description: `Clears every tripped request class on the selected controller and
-resets its per-minute and per-day window counters, then prints the
-budget as it stands. Lifetime request and trip totals survive, so the
-metrics keep their history.
+	Synopsis: "Clear a tripped object-store budget or ceiling freeze",
+	Description: `Clears every tripped request class on the selected controller, resets
+its per-minute and per-day window counters, and thaws a frozen bucket
+ceiling, then prints the budget as it stands. Lifetime request and trip
+totals survive, so the metrics keep their history. A thawed bucket that
+is still over its ceiling freezes again at the next measurement, so a
+thaw buys the window to delete objects or raise the ceiling.
 
 Reach for this after fixing what caused the trip. A budget that keeps
 tripping wants a larger limit or a caller that stops retrying, not a

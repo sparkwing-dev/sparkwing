@@ -78,10 +78,12 @@ var apiReadRoutes = []string{
 	"GET /api/v1/concurrency/{key}/state",
 	"GET /api/v1/concurrency/{key}/holder",
 	"GET /api/v1/object-store/breaker",
+	"GET /api/v1/egress",
 	"GET /api/v1/pipelines/{name}/latest",
 	"GET /api/v1/pipelines/{name}/profile",
 	"GET /api/v1/crons",
 	"GET /api/v1/crons/{id}",
+	"GET /api/v1/storage",
 }
 
 // safety: these routes hold a response open past any request bound: the event

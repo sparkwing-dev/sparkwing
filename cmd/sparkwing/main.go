@@ -498,6 +498,8 @@ func runCluster(args []string) error {
 		return runTokens(args[1:])
 	case "credits":
 		return runCredits(args[1:])
+	case "limits":
+		return runComputeLimits(args[1:])
 	case "image":
 		return runImage(args[1:])
 	case "webhooks":

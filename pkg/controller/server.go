@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -35,6 +36,12 @@ type Server struct {
 
 	loginLimit *loginLimiter
 
+	flood         *floodControl
+	requestBudget *principalBudget
+
+	idleClaimPoll  time.Duration
+	lastClaimAward atomic.Int64
+
 	githubWebhookSecret  string
 	githubWebhook        GitHubWebhookConfig
 	githubCommitStatuses *githubCommitStatusReporter
@@ -50,12 +57,21 @@ type Server struct {
 	costPerRunnerHour float64
 	costRateSource    string
 
+	computeAlarmMu sync.Mutex
+	computeAlarmOn bool
+
 	bootstrapMu     sync.Mutex
 	bootstrapExpiry time.Time
 	bootstrapNeeded bool
 	bootstrapClosed bool
 
 	artifactStore storage.ArtifactStore
+
+	bucketUsageStore storage.ArtifactStore
+	egress           *egress.Meter
+	// safety: the reaper goroutine is this field's only reader and
+	// writer, which is what lets the once-a-month prune gate skip a lock.
+	egressPrunedMonth string
 
 	cachePodURL  string
 	logsURL      string
@@ -91,6 +107,8 @@ type Server struct {
 	routeProbeMux  *http.ServeMux
 	routeProbePub  *http.ServeMux
 
+	storage storageSample
+
 	localExecution bool
 }
 
@@ -102,6 +120,11 @@ type Server struct {
 // cannot forge attribution or ordinals on a node it never ran.
 func (s *Server) WithLocalExecution() *Server {
 	s.localExecution = true
+	// safety: a host's own controller serves one machine's runs, where a widened
+	// idle poll costs pickup latency and a shed claim has no fleet to protect;
+	// its callers are unauthenticated, so every runner would share one bucket.
+	s.idleClaimPoll = 0
+	s.requestBudget = newPrincipalBudget(RequestBudget{})
 	return s
 }
 
@@ -173,7 +196,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
+	srv := &Server{
 		store:               st,
 		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
@@ -185,7 +208,11 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		liveLogs:            newLiveLogs(),
 		runnerPresence:      newRunnerPresenceRegistry(),
 		cronHolder:          defaultCronHolder(),
+		requestBudget:       newPrincipalBudget(RequestBudget{}),
+		idleClaimPoll:       DefaultMaxIdleClaimPoll,
 	}
+	srv.recordQueueActivity(time.Now())
+	return srv
 }
 
 type placementPolicy struct {
@@ -230,6 +257,16 @@ func (s *Server) WithQueueTimeout(d time.Duration) *Server {
 func (s *Server) WithCostRate(rate float64, source string) *Server {
 	s.costPerRunnerHour = rate
 	s.costRateSource = source
+	return s
+}
+
+// WithBucketUsage names the object store the bucket ceiling measures.
+// The store is read on the reconciliation interval and never served, so
+// pointing the controller at the bucket its runners write to gives the
+// ceiling a measured total without exposing those objects on any route.
+// Without one the ceiling counts only the writes this process made.
+func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server {
+	s.bucketUsageStore = a
 	return s
 }
 
@@ -797,37 +834,39 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog)), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog)), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
-	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat))))
+	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.heartbeatBudgeted(s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat)))))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimSpecificTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
-	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
-	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
+	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
+	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/register", requireScope(ScopeNodesClaim,
 		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheRegister))))
 	mux.Handle("GET /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
-		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit))))
+		s.meteredBytes(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
-		s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit))))
+		s.meteredBytes(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
 	mux.Handle("PUT /api/v1/agents/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEnrollAgent)))
+	// safety: an agent treats a lost liveness heartbeat as fatal, so shedding
+	// one would take the agent and every node it runs down with it.
 	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatAgent)))
 
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
@@ -877,11 +916,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
+	mux.Handle("GET /api/v1/egress", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEgressState)))
+
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
 	mux.Handle("POST /api/v1/object-store/reset-breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleResetObjectStoreBreaker)))
 
-	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))
-	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePrepareNodeClaim)))
+	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNode))))
+	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handlePrepareNodeClaim))))
 	// safety: readiness is a dispatcher decision, so the offer-round routes below bind
 	// to the live claim on the run's trigger rather than to the scope alone. A node claim
 	// never satisfies them, which keeps a runner from skipping its node's dependencies.
@@ -889,14 +930,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleResetNodeForAutoRetry))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleRevokeNodeReady))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinalizeNodeReady))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatNodeClaim))))
 	// safety: a dispatcher that executes a node itself needs the fence every
-	// node mutation is checked against, so it claims the node it names.
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNamedNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNamedNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
+	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat))))
@@ -939,7 +979,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	}
 
 	if s.artifactStore != nil {
-		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleArtifactGet)))
+		mux.Handle("GET /api/v1/artifacts/{key}", requireScope(ScopeRunsRead, s.metered(egress.ClassArtifact, http.HandlerFunc(s.handleArtifactGet))))
 	}
 
 	mux.Handle("POST /api/v1/tokens", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateToken)))
@@ -955,9 +995,15 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
 
+	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
+	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
+	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
+
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
 	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsGrant)))
+	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
+	mux.Handle("PUT /api/v1/compute-limits", requireScope(ScopeAdmin, http.HandlerFunc(s.handleComputeLimitsSet)))
 
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
@@ -1033,6 +1079,7 @@ func (s *Server) authenticated(next http.Handler) http.Handler {
 			})
 			return
 		}
+		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
 		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -1119,8 +1166,13 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		s.logger.Info("concurrency reconcile promoted stranded waiters", "count", n)
 	}
 
+	s.loadEgressUsage(ctx)
+
 	go s.runReaper(ctx, 10*time.Second)
+	go s.runCreditSampler(ctx, creditSampleInterval)
 	go s.runCronTick(ctx, cronTickOffer)
+	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
+	go s.runBucketCeiling(ctx)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)
@@ -1205,6 +1257,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.sweepEgressUsage(ctx)
 			concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
 				CacheCap: s.concurrencyCacheCap,
 			})
@@ -1314,13 +1367,45 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				setPendingNodes(n)
 			}
-			if n, err := s.store.CountActiveRunners(ctx, 2*time.Minute); err != nil {
+			if n, err := s.store.CountActiveRunners(ctx, runnerLivenessWindow); err != nil {
 				s.logger.Error("active runners sample failed", "err", err)
 			} else {
 				setActiveRunners(n)
 			}
+			if counts, err := s.store.CountNodesByQueueState(ctx); err != nil {
+				s.logger.Error("queue depth sample failed", "err", err)
+			} else {
+				setQueueDepth(counts)
+			}
+			liveRunners.sample(s.runnerPresence.liveLabelSets(time.Now(), runnerLivenessWindow))
 		}
 	}
+}
+
+// safety: both ledger sums scan a table that is never pruned, so they run on a
+// timer of their own rather than on every reaper sweep.
+func (s *Server) runCreditSampler(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		s.sampleCreditLedger(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Server) sampleCreditLedger(ctx context.Context) {
+	totals, err := s.store.CreditLedgerTotals(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.logger.Error("credit ledger sample failed", "err", err)
+		}
+		return
+	}
+	ledgerSnapshot.set(totals)
 }
 
 func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*http.Request) string) http.Handler {

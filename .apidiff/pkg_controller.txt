@@ -50,17 +50,30 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const ComputeLimitRefusedCode = "compute_limit"
+const ComputeLimitRetryAfterSeconds = 5
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
 const DefaultLiveLogTotalBytes = 64 << 20
+const DefaultMaxIdleClaimPoll = 5 * time.Second
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+const EgressBudgetCode = "egress_budget_exceeded"
+const EgressDownloadLimitCode = "egress_download_limit"
+const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
+type FloodPolicy struct {
+	RunsPerPrincipalHour int
+
+	ShedQueueDepth int
+
+	DedupeWindow time.Duration
+}
 type GitHubWebhookBinding struct {
 	Repos  []string
 	Secret string
@@ -99,6 +112,7 @@ type GitHubWebhookDisconnectResponse struct {
 	DeliveryURL string
 	HookID      int64
 }
+const IdleClaimPollJitterFactor = 1.25
 type LiveLogRead struct {
 	Start int64
 
@@ -108,6 +122,7 @@ type LiveLogRead struct {
 
 	Done bool
 }
+func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
@@ -125,6 +140,7 @@ type LoopbackState interface {
 
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
+const MaxHonoredIdleClaimPoll = 8 * time.Second
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback
@@ -141,7 +157,11 @@ type ObjectStoreBreakerResponse struct {
 
 	Classes []objectguard.ClassState
 
+	Ceiling objectguard.CeilingState
+
 	Cleared []string
+
+	Thawed bool
 }
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 type PoolConfig struct {
@@ -162,6 +182,13 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
+const RecommendedClaimsPerMinute = 1200
+func RecommendedClaimsPerMinuteForSlots(slots int) int
+const RecommendedHeartbeatsPerMinute = 1200
+type RequestBudget struct {
+	ClaimsPerMinute     int
+	HeartbeatsPerMinute int
+}
 type RunRequest struct {
 	RunID       string
 	Pipeline    string
@@ -189,24 +216,30 @@ type Server struct {
 func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
+func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
+func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
+func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
+func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
+func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
+func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
@@ -216,6 +249,7 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
+func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
@@ -226,6 +260,7 @@ type ServicesResponse struct {
 
 	Dashboard string
 }
+const StorageMaintenanceInterval = time.Hour
 type TrendPoint struct {
 	Bucket    string
 	Total     int
@@ -240,6 +275,8 @@ const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (creditsCollector) Collect(ch chan<- prometheus.Metric)
+func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
 func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
@@ -250,6 +287,8 @@ func (l *liveLogs) Finish(runID, nodeID string)
 func (l *liveLogs) Read(runID, nodeID string, since int64) (liveChunk, bool)
 func (l *liveLogs) Stats() (nodes int, bytes int64)
 func (l *liveLogs) Wait(ctx context.Context, runID, nodeID string, since int64) (liveChunk, bool)
+func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric)
+func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc)
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
 func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (r *statusRecorder) WriteHeader(code int)

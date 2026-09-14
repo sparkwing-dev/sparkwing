@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -24,6 +25,10 @@ type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	runnerIdentity atomic.Pointer[string]
+
+	pollAdvice atomic.Int64
 }
 
 // New constructs a Client targeting the given controller base URL.
@@ -793,11 +798,13 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 	if body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
+	c.setRunnerIdentity(httpReq)
 	resp, err := c.do(httpReq)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	c.recordPollAdvice(resp)
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -1057,6 +1064,7 @@ func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
@@ -1128,6 +1136,7 @@ func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim,
 		return ExecutorClaimOfferResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setRunnerIdentity(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return ExecutorClaimOfferResult{}, err
@@ -1205,11 +1214,13 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setRunnerIdentity(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	c.recordPollAdvice(resp)
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var n store.Node
@@ -1403,6 +1414,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
@@ -1837,8 +1849,13 @@ func controllerLacksRoute(route string) error {
 func readHTTPError(resp *http.Response) error {
 	err := classifyHTTPError(resp)
 	// safety: a server that named a Retry-After is asking to be polled again, which a claim loop must not log as a failure.
-	if wait, ok := parseRetryAfter(resp); ok && resp.StatusCode == http.StatusServiceUnavailable {
-		return &UnavailableError{RetryAfter: wait, Err: err}
+	if wait, ok := parseRetryAfter(resp); ok {
+		switch resp.StatusCode {
+		case http.StatusServiceUnavailable:
+			return &UnavailableError{RetryAfter: wait, Err: err}
+		case http.StatusTooManyRequests:
+			return &RateLimitedError{RetryAfter: wait, Err: err}
+		}
 	}
 	return err
 }
@@ -1870,6 +1887,17 @@ func classifyHTTPError(resp *http.Response) error {
 	if resp.StatusCode == http.StatusPaymentRequired {
 		return fmt.Errorf("%w: %s", store.ErrInsufficientCredits, bytes.TrimSpace(body))
 	}
+	// safety: a compute guard is a standing condition like a spent balance, so
+	// the caller tells it apart from a transport failure and keeps polling.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		var refusal computeLimitRefusalWire
+		if json.Unmarshal(body, &refusal) == nil && refusal.Code == computeLimitRefusedCode {
+			return &store.ComputeLimitError{
+				Limit: refusal.Limit, Cap: refusal.Cap,
+				Observed: refusal.Observed, Scope: refusal.Scope,
+			}
+		}
+	}
 	if resp.StatusCode == http.StatusNotImplemented {
 		return fmt.Errorf("%w: controller returned %s", storage.ErrNotSupported, resp.Status)
 	}
@@ -1884,6 +1912,18 @@ func classifyHTTPError(resp *http.Response) error {
 		return fmt.Errorf("controller %d: %s", resp.StatusCode, bytes.TrimSpace(body))
 	}
 	return errors.New(resp.Status)
+}
+
+// safety: the controller's own code string, repeated here so the client does
+// not import the controller package it is a client of.
+const computeLimitRefusedCode = "compute_limit"
+
+type computeLimitRefusalWire struct {
+	Code     string `json:"code"`
+	Limit    string `json:"limit"`
+	Cap      int64  `json:"cap"`
+	Observed int64  `json:"observed"`
+	Scope    string `json:"scope"`
 }
 
 type executionAdmissionErrorWire struct {

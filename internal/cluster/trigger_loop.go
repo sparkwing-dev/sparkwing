@@ -78,7 +78,8 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		return fmt.Errorf("mkdir work-root: %w", err)
 	}
 
-	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token)
+	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
+		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
 	logger.Info(
 		"trigger loop started",
 		"controller", opts.ControllerURL,
@@ -129,7 +130,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		}
 		if trigger == nil {
 			<-sem
-			sleepOrCancel(ctx, opts.Poll)
+			sleepOrCancel(ctx, advisedPoll(opts.Poll, cli))
 			continue
 		}
 		logger.Info("trigger loop: claimed",
@@ -330,7 +331,8 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	if !errors.As(buildErr, &ce) || len(ce.Output) == 0 {
 		return
 	}
-	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token)
+	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token).
+		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := cli.Append(postCtx, runID, CompileLogNode, ce.Output); err != nil {
@@ -548,7 +550,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 				killChild()
 				return triggerClaimSilenced
 			}
-			if wait, ok := unavailableBackoff(err, 0); ok {
+			if wait, ok := unavailableBackoff(err, minShedBackoff); ok {
 				logger.Debug("trigger loop: heartbeat shed by the controller; backing off",
 					"trigger_id", triggerID, "retry_after", wait, "err", err)
 				if shed.due() {

@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runretry"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -31,7 +32,8 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 			return nil, nil, perr
 		}
 		c = client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-		logc = sparkwinglogs.New(prof.ControllerURL(), nil, prof.ControllerToken())
+		logc = sparkwinglogs.New(prof.ControllerURL(), nil, prof.ControllerToken()).
+			WithRunnerIdentity(logs.ProcessIdentity("cli"))
 		return c, logc, nil
 	}
 	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
@@ -41,7 +43,8 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 	}
 	c = client.New(ctrlURL, nil)
 	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
-		logc = sparkwinglogs.New(logsURL, nil, "")
+		logc = sparkwinglogs.New(logsURL, nil, "").
+			WithRunnerIdentity(logs.ProcessIdentity("cli"))
 	}
 	return c, logc, nil
 }

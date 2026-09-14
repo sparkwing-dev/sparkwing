@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -97,7 +98,8 @@ func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, op
 		return errors.New("runs grep: profile must carry both controller and logs URLs")
 	}
 	c := client.NewWithToken(controllerURL, nil, token)
-	logc := sparkwinglogs.New(logsURL, nil, token)
+	logc := sparkwinglogs.New(logsURL, nil, token).
+		WithRunnerIdentity(logs.ProcessIdentity("cli"))
 	runs, err := c.ListRuns(ctx, store.RunFilter{
 		Limit:     grepFetchLimit(opts),
 		Pipelines: opts.Pipelines,

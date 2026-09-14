@@ -48,7 +48,7 @@ func OpenArtifactStoreFromSpec(ctx context.Context, spec backends.Spec, lookup P
 		}
 		return fs.NewArtifactStore(path)
 	case backends.TypeS3:
-		client, err := newS3Client(ctx)
+		client, err := newS3Client(ctx, true)
 		if err != nil {
 			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
 		}
@@ -77,7 +77,7 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 		}
 		return fs.NewLogStore(path)
 	case backends.TypeS3:
-		client, err := newS3Client(ctx)
+		client, err := newS3Client(ctx, true)
 		if err != nil {
 			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
 		}
@@ -153,7 +153,7 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 		}
 		return store.Open(path)
 	case backends.TypeS3:
-		s3client, err := newS3Client(ctx)
+		s3client, err := newS3Client(ctx, true)
 		if err != nil {
 			return nil, fmt.Errorf("s3://%s: %w", spec.Bucket, err)
 		}

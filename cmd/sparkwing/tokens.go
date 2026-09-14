@@ -340,6 +340,22 @@ func tokensPost(controller, token, path string, body any) ([]byte, error) {
 	return doTokenReq(req)
 }
 
+func tokensPut(controller, token, path string, body any) ([]byte, error) {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodPut, strings.TrimRight(controller, "/")+path, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return doTokenReq(req)
+}
+
 func tokensGet(controller, token, path string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(controller, "/")+path, nil)
 	if err != nil {

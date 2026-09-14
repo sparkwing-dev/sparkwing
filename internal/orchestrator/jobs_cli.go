@@ -316,6 +316,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 			payload["log_path"] = p
 		}
 		addRunStandalone(payload, run)
+		addComputeGuardRefusal(ctx, b, payload, runID)
 		return writeJSON(out, payload)
 	}
 
@@ -419,6 +420,9 @@ func renderStatus(
 		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
 			fmt.Fprintf(out, "%s %s\n", label("admission:"), detail.statusLine())
 		}
+	}
+	if refusal, ok := latestComputeGuardRefusal(ctx, b, runID); ok {
+		fmt.Fprintf(out, "%s %s\n", label("guard:    "), refusal.statusLine())
 	}
 
 	fmt.Fprintln(out)
@@ -556,6 +560,66 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 		return admissionWaitDetail{}, false
 	}
 	return admissionWaitDetail{WaitingNodes: len(waits)}, true
+}
+
+// safety: the newest refusal is what says why a run waits on a runner it
+// never receives, so it is read back from the run's own events.
+type computeGuardRefusal struct {
+	Limit    string `json:"limit"`
+	Cap      int64  `json:"cap"`
+	Observed int64  `json:"observed"`
+	Scope    string `json:"scope,omitempty"`
+}
+
+func (d computeGuardRefusal) statusLine() string {
+	line := fmt.Sprintf("%s reached (%d of %d)", d.Limit, d.Observed, d.Cap)
+	if d.Scope != "" {
+		line += " on " + d.Scope
+	}
+	return line
+}
+
+type runEventLister interface {
+	ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
+}
+
+func latestComputeGuardRefusal(ctx context.Context, b runEventLister, runID string) (computeGuardRefusal, bool) {
+	const page = 500
+	var found computeGuardRefusal
+	var ok bool
+	var after int64
+	for {
+		events, err := b.ListEventsAfter(ctx, runID, after, page)
+		if err != nil || len(events) == 0 {
+			break
+		}
+		// safety: the contract is seq > after, ascending; a backend that
+		// ignores after would otherwise replay one page forever.
+		last := events[len(events)-1].Seq
+		if last <= after {
+			break
+		}
+		for _, event := range events {
+			if event.Kind != store.EventKindComputeLimitBlocked || len(event.Payload) == 0 {
+				continue
+			}
+			var payload computeGuardRefusal
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Limit != "" {
+				found, ok = payload, true
+			}
+		}
+		after = last
+		if len(events) < page {
+			break
+		}
+	}
+	return found, ok
+}
+
+func addComputeGuardRefusal(ctx context.Context, b runEventLister, payload map[string]any, runID string) {
+	if refusal, ok := latestComputeGuardRefusal(ctx, b, runID); ok {
+		payload["compute_guard"] = refusal
+	}
 }
 
 func (d admissionWaitDetail) listStatus() string {
@@ -1627,6 +1691,7 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID, storeLabel 
 		payload["log_path"] = p
 	}
 	addRunStandalone(payload, run)
+	addComputeGuardRefusal(ctx, st, payload, runID)
 	if approvals, err := st.ListApprovalsForRun(ctx, runID); err == nil && len(approvals) > 0 {
 		payload["approvals"] = approvals
 	}

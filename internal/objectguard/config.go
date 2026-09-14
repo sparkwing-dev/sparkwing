@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // EnvPrefix prefixes every environment variable this package reads.
@@ -20,6 +21,26 @@ const EnvBreaker = EnvPrefix + "BREAKER"
 // EnvTripReset chooses what clears a tripped class without an operator:
 // "day" when the day window rolls, "manual" never.
 const EnvTripReset = EnvPrefix + "TRIP_RESET"
+
+// Ceiling variables. Every one of them is unset by default, which
+// leaves the bucket unlimited and the ceiling inert.
+const (
+	// EnvMaxBucketBytes freezes object writes once the bucket stores
+	// this many bytes.
+	EnvMaxBucketBytes = EnvPrefix + "MAX_BUCKET_BYTES"
+	// EnvMaxBucketObjects freezes object writes once the bucket holds
+	// this many objects.
+	EnvMaxBucketObjects = EnvPrefix + "MAX_BUCKET_OBJECTS"
+	// EnvWarnBucketBytes marks the bucket as warning at this many
+	// stored bytes, which refuses nothing.
+	EnvWarnBucketBytes = EnvPrefix + "WARN_BUCKET_BYTES"
+	// EnvWarnBucketObjects marks the bucket as warning at this many
+	// objects, which refuses nothing.
+	EnvWarnBucketObjects = EnvPrefix + "WARN_BUCKET_OBJECTS"
+	// EnvBucketReconcile is the gap between measured bucket totals. "0"
+	// measures once at startup and then not again.
+	EnvBucketReconcile = EnvPrefix + "BUCKET_RECONCILE"
+)
 
 // ConfigFromEnv layers environment overrides onto DefaultConfig. Each
 // class and window has its own variable, spelled
@@ -48,6 +69,11 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s=%q: want %q or %q", EnvTripReset, v, TripResetDay, TripResetManual)
 	}
+	ceiling, err := ceilingFromEnv(getenv)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Ceiling = ceiling
 	switch v := strings.ToLower(strings.TrimSpace(getenv(EnvBreaker))); v {
 	case "":
 	case "on", "1", "true":
@@ -58,6 +84,46 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("%s=%q: want \"on\" or \"off\"", EnvBreaker, v)
 	}
 	return cfg, nil
+}
+
+func ceilingFromEnv(getenv func(string) string) (CeilingConfig, error) {
+	var cfg CeilingConfig
+	var err error
+	if cfg.Limit.MaxBytes, err = int64Env(getenv, EnvMaxBucketBytes); err != nil {
+		return CeilingConfig{}, err
+	}
+	if cfg.Limit.MaxObjects, err = int64Env(getenv, EnvMaxBucketObjects); err != nil {
+		return CeilingConfig{}, err
+	}
+	if cfg.Limit.WarnBytes, err = int64Env(getenv, EnvWarnBucketBytes); err != nil {
+		return CeilingConfig{}, err
+	}
+	if cfg.Limit.WarnObjects, err = int64Env(getenv, EnvWarnBucketObjects); err != nil {
+		return CeilingConfig{}, err
+	}
+	raw := strings.TrimSpace(getenv(EnvBucketReconcile))
+	if raw == "" {
+		cfg.Reconcile = DefaultCeilingReconcile
+		return cfg, nil
+	}
+	d, parseErr := time.ParseDuration(raw)
+	if parseErr != nil || d < 0 {
+		return CeilingConfig{}, fmt.Errorf("%s=%q: want a duration such as 1h or 30m, or 0 to measure the bucket once at startup", EnvBucketReconcile, raw)
+	}
+	cfg.Reconcile = d
+	return cfg, nil
+}
+
+func int64Env(getenv func(string) string, name string) (int64, error) {
+	raw := strings.TrimSpace(getenv(name))
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s=%q: want a whole number, or 0 for no ceiling", name, raw)
+	}
+	return n, nil
 }
 
 func classEnv(c Class, w Window) string {

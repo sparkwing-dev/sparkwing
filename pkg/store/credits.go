@@ -354,6 +354,88 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 	return out, nil
 }
 
+// CreditLedgerTotals is the ledger summed the way a meter reads it: what was
+// granted, split by whether the operator paid for it, and what the charge rows
+// did with it. Every charge belongs to a metered credential by construction,
+// so the charge figures carry no principal split.
+type CreditLedgerTotals struct {
+	// BalanceMicro is what is left to spend.
+	BalanceMicro int64
+	// GrantedFreeMicro and GrantedPaidMicro sum the grants of each kind.
+	GrantedFreeMicro int64
+	GrantedPaidMicro int64
+	// ReservedMicro is the runway claims took up front, refunds included, so
+	// it is the gross reservation rather than the part never returned.
+	ReservedMicro int64
+	// ChargedMicro is what execution billed.
+	ChargedMicro int64
+	// RefundedMicro is the unused reservation tail returned at finish,
+	// reported as a positive amount.
+	RefundedMicro int64
+	// SettledSeconds is the runner seconds the ledger has finished charging
+	// for: every charge row less the part of an open reservation a finish
+	// would still refund. A reservation therefore enters this total as the
+	// node consumes it rather than all at once, so the figure only ever
+	// grows and a caller may export it as a counter.
+	SettledSeconds int64
+}
+
+// CreditLedgerTotals reports the ledger's lifetime sums under one repeatable
+// read, so the grant, charge and reservation figures agree with each other
+// even while claims land. A controller exports them as metrics, where they
+// survive a restart the way an in-process counter does not.
+//
+// Both sums scan a covering index over a table that is never pruned, so a
+// caller samples them on a slow timer rather than on every sweep.
+func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error) {
+	var out CreditLedgerTotals
+	tx, err := s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
+                   FROM credit_grants`,
+		CreditGrantFree, CreditGrantPaid,
+	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro); err != nil {
+		return out, err
+	}
+	var settled, charged int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(amount_micro), 0),
+                        COALESCE(SUM(seconds), 0)
+                   FROM credit_charges`,
+		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
+	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro,
+		&settled, &charged); err != nil {
+		return out, err
+	}
+
+	// safety: counting a reservation whole would make the seconds total fall
+	// by its refund, so the part a finish right now would still return is held
+	// back. The database's clock measures that part, because a sampler's own
+	// clock lets a second controller or an NTP step pull the figure backwards.
+	var refundable int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(CASE WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
+                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
+                                         ELSE 0 END), 0)
+                   FROM nodes WHERE credit_charged_through != 0`,
+	).Scan(&refundable); err != nil {
+		return out, err
+	}
+	out.SettledSeconds = charged - refundable
+
+	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - settled
+	return out, tx.Commit()
+}
+
 // CreditRateMicroPerSecond returns the price of one cloud runner second in
 // micro-credits. A controller that never set one reads the default.
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
@@ -546,8 +628,19 @@ func reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
+	// safety: an empty balance is the refusal a runner already understands, so
+	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+	}
+	limits, err := computeLimitsTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if limits.Any() {
+		if err := enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+			return err
+		}
 	}
 	id, err := newCreditID("charge")
 	if err != nil {
@@ -883,6 +976,24 @@ func (s *Store) eventKindPresent(ctx context.Context, runID, nodeID, kind string
 // node did.
 func (s *Store) CancelNodeForExhaustedCredits(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
+) error {
+	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
+		FailureCreditsExhausted, "credit balance exhausted", now)
+}
+
+// CancelNodeForComputeLimit fails a running node a compute guard stopped,
+// releases its claim, and records the reason on the run. It settles the
+// node's credits first, so a metered node is billed to the instant it
+// stopped.
+func (s *Store) CancelNodeForComputeLimit(
+	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
+) error {
+	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
+		FailureComputeLimit, "compute limit "+limit+" reached", now)
+}
+
+func (s *Store) cancelMeteredNode(
+	ctx context.Context, runID, nodeID, tokenPrefix, reason, message string, now time.Time,
 ) (err error) {
 	if _, err := s.FinalizeNodeCredits(ctx, runID, nodeID, tokenPrefix, now); err != nil {
 		return err
@@ -896,14 +1007,14 @@ func (s *Store) CancelNodeForExhaustedCredits(
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
-   SET `+nodeFailSet+`, error = 'credit balance exhausted', failure_reason = ?, finished_at = ?,
+   SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
        ready_at = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-		FailureCreditsExhausted, now.UnixNano(), runID, nodeID); err != nil {
+		message, reason, now.UnixNano(), runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -914,7 +1025,7 @@ func (s *Store) CancelNodeForExhaustedCredits(
    SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
        failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
  WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		now.UnixNano(), FailureCreditsExhausted, runID, nodeID); err != nil {
+		now.UnixNano(), reason, runID, nodeID); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -20,6 +20,25 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// safety: one seam builds every membership client, so the identity the
+// controller budgets on cannot be wired in one caller and forgotten in another.
+func agentMembershipClient(cfg agentconfig.Config, member agentconfig.Coordinator) *client.Client {
+	return client.NewWithToken(member.Controller, &http.Client{Timeout: 30 * time.Second}, member.Token).
+		WithRunnerIdentity(agentRunnerIdentity(cfg, member))
+}
+
+// safety: the controller budgets claims per runner, so the name has to outlive
+// one poll; an agent that has one uses it and a nameless one falls back to this
+// process.
+func agentRunnerIdentity(cfg agentconfig.Config, member agentconfig.Coordinator) string {
+	for _, name := range []string{member.Name, cfg.Name, cfg.HolderPrefix} {
+		if name != "" {
+			return name
+		}
+	}
+	return processRunnerIdentity("agent")
+}
+
 func agentCoordinators(cfg agentconfig.Config) []agentconfig.Coordinator {
 	if len(cfg.Coordinators) > 0 {
 		return cfg.Coordinators
@@ -38,7 +57,7 @@ func runAgentMembership(ctx context.Context, cfg agentconfig.Config, member agen
 		return err
 	}
 	provider := newHeadroomProvider("", "", limits.localReserve, limits.globalContribution, limits.membershipContribution)
-	ctrl := client.NewWithToken(member.Controller, &http.Client{Timeout: 30 * time.Second}, member.Token)
+	ctrl := agentMembershipClient(cfg, member)
 	exec := func(execCtx context.Context, n *store.Node, holderID string, admission *orchestrator.LocalAdmission) {
 		executePooledNode(execCtx, ctrl, member.Controller, member.Logs, member.Gitcache, member.Token, member.CacheToken,
 			n, holderID, cfg.Lease, cfg.Heartbeat, "agent", logger, admission, provider)
@@ -86,23 +105,19 @@ func runAgentMembershipLoop(ctx context.Context, cfg agentconfig.Config, member 
 		if ctx.Err() != nil {
 			return nil
 		}
-		return err
+		if _, transient := unavailableBackoff(err, 0); !transient {
+			return err
+		}
+		logger.Warn("executor liveness shed on the first heartbeat; starting anyway",
+			"executor", member.Name, "err", err)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errCh := make(chan error, member.MaxConcurrent+1)
 	go func() {
-		for {
-			sleepOrCancel(runCtx, interval)
-			if runCtx.Err() != nil {
-				errCh <- nil
-				return
-			}
-			if err := heartbeatExecutor(runCtx, member.Name, provider, ctrl, logger); err != nil {
-				errCh <- err
-				return
-			}
-		}
+		// safety: liveness ends only on a fatal heartbeat or a cancelled
+		// context, and the return below turns a cancelled one into a clean stop.
+		errCh <- runExecutorLiveness(runCtx, member.Name, interval, provider, ctrl, logger)
 	}()
 	instanceID := time.Now().UnixNano()
 	for slot := range member.MaxConcurrent {
@@ -121,6 +136,40 @@ func runAgentMembershipLoop(ctx context.Context, cfg agentconfig.Config, member 
 		return nil
 	}
 	return err
+}
+
+// safety: an executor heartbeat that fails tears down the membership and every
+// node under it, so a shed one is patience rather than failure and only silence
+// past the lease window is fatal.
+var maxExecutorHeartbeatSilence = 3 * time.Minute
+
+func runExecutorLiveness(ctx context.Context, name string, interval time.Duration, provider headroomProvider, ctrl executorMembershipClient, logger *slog.Logger) error {
+	lastOK := time.Now()
+	shed := newShedLog(shedWarnInterval)
+	for {
+		sleepOrCancel(ctx, interval)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := heartbeatExecutor(ctx, name, provider, ctrl, logger)
+		if err == nil {
+			lastOK = time.Now()
+			continue
+		}
+		silence := time.Since(lastOK)
+		wait, transient := unavailableBackoff(err, minShedBackoff)
+		if !transient || silence >= maxExecutorHeartbeatSilence {
+			return err
+		}
+		logger.Debug("executor liveness shed by the controller; backing off",
+			"executor", name, "retry_after", wait, "err", err)
+		if shed.due() {
+			logger.Warn("controller is shedding executor liveness heartbeats",
+				"executor", name, "retry_after", wait, "err", err,
+				"silence", silence.Round(time.Second))
+		}
+		sleepOrCancel(ctx, wait)
+	}
 }
 
 func heartbeatExecutor(ctx context.Context, executorName string, provider headroomProvider, ctrl executorMembershipClient, logger *slog.Logger) error {

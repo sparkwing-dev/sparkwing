@@ -29,20 +29,8 @@
       "slugs": ["sparks", "sparks-core", "versioning"]
     },
     {
-      "label": "Infrastructure",
-      "slugs": [
-        "deployment",
-        "deployment-modes",
-        "self-hosting",
-        "backends",
-        "scheduling",
-        "warm-pool",
-        "gitcache"
-      ]
-    },
-    {
       "label": "Performance",
-      "slugs": ["fast-builds", "build-caching", "caching"]
+      "slugs": ["fast-builds", "build-caching", "caching", "install-to-green"]
     },
     {
       "label": "Operations",
@@ -55,6 +43,18 @@
         "api",
         "api-reference",
         "mcp"
+      ]
+    },
+    {
+      "label": "Advanced and self-hosting",
+      "slugs": [
+        "deployment",
+        "deployment-modes",
+        "self-hosting",
+        "backends",
+        "scheduling",
+        "warm-pool",
+        "gitcache"
       ]
     },
     {

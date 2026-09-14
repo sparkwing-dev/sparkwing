@@ -150,6 +150,7 @@ func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*Waiter
 func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
 func (c *Client) PauseCron(ctx context.Context, name string) (*crons.ScheduleView, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
+func (c *Client) PollAdvice() time.Duration
 func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
 func (c *Client) PutCronRepo(ctx context.Context, req CronRepoRequest) (*CronReposResponse, error)
 func (c *Client) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (*LiveLogChunk, error)
@@ -169,6 +170,7 @@ func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (stri
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error)
 func (c *Client) RunCronNow(ctx context.Context, name string) (*crons.RunEnvelope, error)
+func (c *Client) RunnerIdentity() string
 func (c *Client) SetCronOverride(ctx context.Context, name string, req CronOverrideRequest) (*crons.ScheduleView, error)
 func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (c *Client) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
@@ -185,6 +187,7 @@ func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (c *Client) WithRunnerIdentity(id string) *Client
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 type ConcurrencyState struct {
 	Key               string
@@ -270,6 +273,8 @@ type LiveLogChunk struct {
 
 	Done bool
 }
+func LoadSignal(err error) (time.Duration, bool)
+const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
@@ -278,7 +283,28 @@ type ObjectStoreBreaker struct {
 	Reset   string
 	Tripped bool
 	Classes []ObjectStoreClassState
+	Ceiling ObjectStoreCeiling
 	Cleared []string
+	Thawed  bool
+}
+type ObjectStoreCeiling struct {
+	Enforced     bool
+	MaxBytes     int64
+	MaxObjects   int64
+	WarnBytes    int64
+	WarnObjects  int64
+	Bytes        int64
+	Objects      int64
+	CountedAt    time.Time
+	ReconciledAt time.Time
+	Reconcile    string
+	Warning      bool
+	Frozen       bool
+	Thawed       bool
+	FrozenAt     time.Time
+	FrozenReason string
+	Freezes      uint64
+	Refused      uint64
 }
 type ObjectStoreClassState struct {
 	Class         string
@@ -293,6 +319,13 @@ type ObjectStoreClassState struct {
 	TrippedAt     time.Time
 	TrippedWindow string
 }
+type RateLimitedError struct {
+	RetryAfter time.Duration
+
+	Err error
+}
+func (e *RateLimitedError) Error() string
+func (e *RateLimitedError) Unwrap() error
 type Secret struct {
 	Name      string
 	Value     string
