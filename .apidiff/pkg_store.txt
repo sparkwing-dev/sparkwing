@@ -417,6 +417,7 @@ const EgressUsageRetentionMonths = 13
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
@@ -623,6 +624,7 @@ var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
 	ReapStalePendingRuns:          (*Store).reapStalePendingRuns,
 	ReapStaleRunningRuns:          (*Store).reapStaleRunningRuns,
+	ReapQueueExpiredRuns:          (*Store).reapQueueExpiredRuns,
 	ReapTimedOutApprovals:         (*Store).reapTimedOutApprovals,
 	FailNodesInRun:                (*Store).failNodesInRun,
 	FailStaleQueuedNodes:          (*Store).failStaleQueuedNodes,
@@ -636,6 +638,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
@@ -1143,6 +1146,7 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
+func (s *Store) CreditGrantReferenceIndexPresent(ctx context.Context) (bool, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
@@ -1260,7 +1264,6 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
-func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
@@ -1298,7 +1301,6 @@ func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIde
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
-func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)

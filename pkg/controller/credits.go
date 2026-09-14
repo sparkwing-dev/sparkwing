@@ -111,6 +111,10 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who,
 	})
+	if errors.Is(err, store.ErrCreditGrantConflict) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

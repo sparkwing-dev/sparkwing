@@ -3621,6 +3621,10 @@ paths:
         reference. A reversal whose `reverses` matches no paid grant is
         refused, and one that takes the balance below zero stops new
         metered claims.
+
+        A replay must carry the terms it carried the first time: a request
+        naming a `kind` and `reference` another grant holds under a different
+        `amount_micro` or `reverses` is refused with 409.
       requestBody:
         required: true
         content:
@@ -3638,6 +3642,11 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreditGrant"}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "409":
+          description: Another grant holds this kind and reference under different terms.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /api/v1/credits/history:
     get:
@@ -4662,7 +4671,7 @@ components:
       required: [kind, amount_micro]
       properties:
         kind: {type: string, description: "free, paid or reversal."}
-        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit."}
+        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit, and one grant may not exceed 10^15."}
         reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
     CreditsRefused:

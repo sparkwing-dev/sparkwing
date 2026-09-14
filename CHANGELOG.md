@@ -20,7 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-## [v0.50.3] - 2026-09-14
 ### Added
 
 - **controller:** `max_concurrent_runners` scales with recent paid credit
@@ -63,6 +62,7 @@ unlock.
   allowed, and the claim path then stops new metered work. Schema v42 adds the
   `reverses` column and a unique index over non-empty `(kind, reference)`
   grants, both additive, so the previous release still opens the database.
+
 - **CLI:** `SPARKWING_DEV_ENV_DISABLE`, holding any value, closes the
   `$SPARKWING_HOME/dev.env` fallback for every key it answers, including
   `SPARKWING_CONTROLLER_URL`, `SPARKWING_LOGS_URL` and the artifact backend's
@@ -70,6 +70,63 @@ unlock.
   environment and nowhere else. A test suite running inside a sparkwing node is
   the case that needs it: it inherits the operator's home, and an unset URL
   would otherwise resolve to whatever development service that dev.env names.
+  allowed, and the claim path then stops new metered work. A replay must carry
+  the terms it carried the first time: a `kind` and `reference` pair another
+  grant holds under a different `amount_micro` or `reverses` answers 409. One
+  grant may not exceed 10^15 micro-credits, a billion credits, which keeps a
+  posted amount from turning a later balance read into an overflow. A refund
+  reports on the new `sparkwing_credits_reversed_micro_total` rather than on
+  the granted series, so summing that series over `kind` stays the money paid
+  in. Schema v42 adds the `reverses` column and a unique index over non-empty
+  `(kind, reference)` grants, both additive, so the previous release still
+  opens the database; the index is retried on every open and skipped while
+  older grants repeat a reference, which `GET /api/v1/health` reports as
+  `database.credit_grant_key` and the controller logs at every start.
+
+### Fixed
+
+- **api:** `api/openapi.yaml` no longer loses the tail of a description
+  An unquoted comma and colon inside a flow-mapping description split the prose
+  and turned its tail into a sibling field nobody wrote, which silently
+  truncated eleven schema descriptions. `bin/check-api-spec.sh` now refuses any
+  mapping key holding a space, which is what such a split produces.
+
+- **controller:** A run whose trigger went back into the claim queue now waits
+  for the next claimant instead of failing three minutes after the claim that
+  held it died. Releasing an expired claim leaves a run nothing has executed yet
+  pending, and the stale-running sweep skips a run whose trigger is queued, so
+  the first run submitted during a runner-pool rollout survives the rollout. The
+  queue timeout (`Server.WithQueueTimeout`, 15 minutes by default) is the bound:
+  a run whose trigger sits unclaimed past it fails with "no runner claimed this
+  run's trigger before the queue deadline" and its trigger is finished in the
+  same sweep, so no late runner executes a child for it. A run still stamping its
+  run-level heartbeat outlives that sweep.
+
+- **controller:** `POST /api/v1/runs/{id}/nodes` now answers `409` naming the
+  run's recorded status and error when the run has already finished, and `409`
+  when the claim that names the run no longer holds it. A child that reaches a
+  reaped run reports why its node was refused instead of a `500`.
+
+### Removed
+
+- **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
+  and the fleet CLI
+
+  `name` and `coordinators` selected a path the controller refuses on both the
+  claim route and the offer route, so the loop they started claimed nothing. A
+  file that still sets either key fails to load with a message naming the
+  removed mode. `sparkwing-runner agent --allow-enrolled-preview` and
+  `sparkwing fleet agents enroll`, whose one-time output was a `coordinators`
+  block, go with them. See the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-is-removed).
+  Claim mode is unchanged and keeps `controller`, `logs`, `token`, `labels`,
+  `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
+  `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
+  add` and the service installer write.
+
+## [v0.50.3] - 2026-09-14
+### Added
+
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a
@@ -93,26 +150,6 @@ unlock.
 
 ### Fixed
 
-- **api:** `api/openapi.yaml` no longer loses the tail of a description
-  An unquoted comma and colon inside a flow-mapping description split the prose
-  and turned its tail into a sibling field nobody wrote, which silently
-  truncated eleven schema descriptions. `bin/check-api-spec.sh` now refuses any
-  mapping key holding a space, which is what such a split produces.
-
-- **controller:** A run whose trigger went back into the claim queue now waits
-  for the next claimant instead of failing three minutes after the claim that
-  held it died. Releasing an expired claim leaves a run nothing has executed yet
-  pending, and the stale-running sweep skips a run whose trigger is queued, so
-  the first run submitted during a runner-pool rollout survives the rollout. The
-  queue timeout (`Server.WithQueueTimeout`, 15 minutes by default) is the bound:
-  a run whose trigger sits unclaimed past it fails with "no runner claimed this
-  run's trigger before the queue deadline" and its trigger is finished in the
-  same sweep, so no late runner executes a child for it. A run still stamping its
-  run-level heartbeat outlives that sweep.
-- **controller:** `POST /api/v1/runs/{id}/nodes` now answers `409` naming the
-  run's recorded status and error when the run has already finished, and `409`
-  when the claim that names the run no longer holds it. A child that reaches a
-  reaped run reports why its node was refused instead of a `500`.
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".
@@ -130,23 +167,6 @@ unlock.
   A metered token reserves and settles its credits on this claim, so a cloud
   node run this way bills its minute. Both `--trigger-runner warm` and
   `--trigger-runner k8s` take the claim.
-
-### Removed
-
-- **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
-  and the fleet CLI
-
-  `name` and `coordinators` selected a path the controller refuses on both the
-  claim route and the offer route, so the loop they started claimed nothing. A
-  file that still sets either key fails to load with a message naming the
-  removed mode. `sparkwing-runner agent --allow-enrolled-preview` and
-  `sparkwing fleet agents enroll`, whose one-time output was a `coordinators`
-  block, go with them. See the
-  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-is-removed).
-  Claim mode is unchanged and keeps `controller`, `logs`, `token`, `labels`,
-  `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
-  `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
-  add` and the service installer write.
 
 ## [v0.50.2] - 2026-09-14
 

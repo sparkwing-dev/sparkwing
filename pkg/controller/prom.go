@@ -632,6 +632,12 @@ var (
 		[]string{"kind"}, nil,
 	)
 
+	creditsReversedDesc = prometheus.NewDesc(
+		"sparkwing_credits_reversed_micro_total",
+		"Micro-credits refunded payments took back out of the ledger, reported positive.",
+		nil, nil,
+	)
+
 	creditsReservedDesc = prometheus.NewDesc(
 		"sparkwing_credits_reserved_micro_total",
 		"Micro-credits claims reserved up front. Only a metered credential reserves, so every micro-credit here is paid work.",
@@ -684,6 +690,7 @@ type creditsCollector struct{}
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- creditsBalanceDesc
 	ch <- creditsGrantedDesc
+	ch <- creditsReversedDesc
 	ch <- creditsReservedDesc
 	ch <- creditsChargedDesc
 	ch <- creditsRefundedDesc
@@ -696,8 +703,8 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric) {
 		float64(t.GrantedFreeMicro), store.CreditGrantFree)
 	ch <- prometheus.MustNewConstMetric(creditsGrantedDesc, prometheus.CounterValue,
 		float64(t.GrantedPaidMicro), store.CreditGrantPaid)
-	ch <- prometheus.MustNewConstMetric(creditsGrantedDesc, prometheus.CounterValue,
-		float64(t.ReversedMicro), store.CreditGrantReversal)
+	ch <- prometheus.MustNewConstMetric(creditsReversedDesc, prometheus.CounterValue,
+		float64(t.ReversedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsReservedDesc, prometheus.CounterValue, float64(t.ReservedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsChargedDesc, prometheus.CounterValue, float64(t.ChargedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsRefundedDesc, prometheus.CounterValue, float64(t.RefundedMicro))
