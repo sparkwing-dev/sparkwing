@@ -29,6 +29,7 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/maintenance/reconcile-orphans",
 	"PUT /api/v1/storage/settings",
 	"PUT /api/v1/storage/quotas/{principal}",
+	"PUT /api/v1/storage/quotas/{principal}/allowance",
 	"POST /api/v1/pipelines/{name}/profile/contention",
 	"POST /api/v1/pipelines/{name}/profile/observations",
 	"POST /api/v1/pipelines/{name}/profile/waits",

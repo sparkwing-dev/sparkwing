@@ -93,6 +93,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 				"node_metric_retention_days", settings.NodeMetricRetentionDays)
 		}
 	}
+	s.billRetainedStorage(ctx)
 	size, err := s.store.DatabaseSize(ctx)
 	if err != nil {
 		s.logger.Error("database size probe failed", "err", err)
@@ -105,6 +106,35 @@ func (s *Server) maintainStorage(ctx context.Context) {
 			"retention_on", settings.RetentionOn())
 	}
 	s.reportLargestTeams(ctx, settings)
+}
+
+// safety: the interval a charge covers is measured off the database clock, so
+// two controllers on one database bill the same day once rather than twice.
+func (s *Server) billRetainedStorage(ctx context.Context) {
+	now, err := s.store.DatabaseNow(ctx)
+	if err != nil {
+		s.logger.Error("reading the database clock for the storage charge failed", "err", err)
+		return
+	}
+	billed, err := s.store.ChargeRetainedStorage(ctx, now)
+	if err != nil {
+		s.logger.Error("charging retained storage failed", "err", err)
+		return
+	}
+	for _, charge := range billed.Charges {
+		s.logger.Info("charged retained storage",
+			"principal", charge.Principal, "bytes", charge.StorageBytes,
+			"seconds", charge.Seconds, "amount_micro", charge.AmountMicro)
+	}
+	swept, err := s.store.SweepStorageAllowance(ctx, now)
+	if err != nil {
+		s.logger.Error("expiring storage above the allowance failed", "err", err)
+		return
+	}
+	if swept.Runs > 0 {
+		s.logger.Info("expired storage above the allowance",
+			"runs", swept.Runs, "bytes", swept.Bytes, "events", swept.Events)
+	}
 }
 
 func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageSettings) {
@@ -133,12 +163,17 @@ func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageS
 
 // safety: the charge rides inside the store call's own transaction, so this
 // only translates the refusal; nothing here may write on its own.
-func writeStorageQuotaError(w http.ResponseWriter, logger interface{ Warn(string, ...any) }, err error) bool {
-	if !errors.Is(err, store.ErrStorageQuota) {
+func writeStorageWriteRefusal(w http.ResponseWriter, logger interface{ Warn(string, ...any) }, err error) bool {
+	switch {
+	case errors.Is(err, store.ErrStorageQuota):
+		logger.Warn("storage quota refused a write", "reason", err.Error())
+		writeError(w, http.StatusRequestEntityTooLarge, err)
+	case errors.Is(err, store.ErrInsufficientCredits):
+		logger.Warn("a spent balance refused a write that would store more", "reason", err.Error())
+		writeError(w, http.StatusPaymentRequired, err)
+	default:
 		return false
 	}
-	logger.Warn("storage quota refused a write", "reason", err.Error())
-	writeError(w, http.StatusRequestEntityTooLarge, err)
 	return true
 }
 
@@ -154,17 +189,25 @@ func chargedPrincipal(r *http.Request) string {
 }
 
 type storageQuotaJSON struct {
-	Principal        string `json:"principal"`
-	Tier             string `json:"tier,omitempty"`
-	MaxBytesPerRun   int64  `json:"max_bytes_per_run"`
-	MaxBytesPerMonth int64  `json:"max_bytes_per_month"`
-	MaxObjectsPerRun int64  `json:"max_objects_per_run"`
+	Principal             string `json:"principal"`
+	Tier                  string `json:"tier,omitempty"`
+	MaxBytesPerRun        int64  `json:"max_bytes_per_run"`
+	MaxBytesPerMonth      int64  `json:"max_bytes_per_month"`
+	MaxObjectsPerRun      int64  `json:"max_objects_per_run"`
+	StorageAllowanceBytes int64  `json:"storage_allowance_bytes"`
+}
+
+type storageAllowanceJSON struct {
+	StorageAllowanceBytes int64 `json:"storage_allowance_bytes"`
 }
 
 type storageUsageJSON struct {
 	Month        string `json:"month"`
 	MonthBytes   int64  `json:"month_bytes"`
 	MonthObjects int64  `json:"month_objects"`
+	// safety: retained bytes are what the storage charge and the allowance
+	// sweep measure, which the month total is not: it outlives its runs.
+	RetainedBytes int64 `json:"retained_bytes"`
 }
 
 type storageTeamJSON struct {
@@ -213,12 +256,18 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	retained, err := s.store.StorageRetainedBytes(ctx, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	size, _, alarm, sampled := s.storage.read()
 	out := storageStateJSON{
 		Settings: storageSettingsToJSON(settings),
 		Quota:    storageQuotaToJSON(quota),
 		Usage: storageUsageJSON{
 			Month: usage.Month, MonthBytes: usage.MonthBytes, MonthObjects: usage.MonthObjects,
+			RetainedBytes: retained,
 		},
 		Alarm: alarm,
 	}
@@ -296,6 +345,7 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 		MaxBytesPerRun:   body.MaxBytesPerRun,
 		MaxBytesPerMonth: body.MaxBytesPerMonth,
 		MaxObjectsPerRun: body.MaxObjectsPerRun,
+		AllowanceBytes:   body.StorageAllowanceBytes,
 	}
 	if err := s.store.SetStorageQuota(r.Context(), quota); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -308,7 +358,8 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Info("storage quota updated", "principal", principal, "tier", stored.Tier,
 		"max_bytes_per_run", stored.MaxBytesPerRun, "max_bytes_per_month", stored.MaxBytesPerMonth,
-		"max_objects_per_run", stored.MaxObjectsPerRun)
+		"max_objects_per_run", stored.MaxObjectsPerRun,
+		"storage_allowance_bytes", stored.AllowanceBytes)
 	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
 }
 
@@ -323,10 +374,36 @@ func storageSettingsToJSON(in store.StorageSettings) storageSettingsJSON {
 
 func storageQuotaToJSON(in store.StorageQuota) storageQuotaJSON {
 	return storageQuotaJSON{
-		Principal:        in.Principal,
-		Tier:             in.Tier,
-		MaxBytesPerRun:   in.MaxBytesPerRun,
-		MaxBytesPerMonth: in.MaxBytesPerMonth,
-		MaxObjectsPerRun: in.MaxObjectsPerRun,
+		Principal:             in.Principal,
+		Tier:                  in.Tier,
+		MaxBytesPerRun:        in.MaxBytesPerRun,
+		MaxBytesPerMonth:      in.MaxBytesPerMonth,
+		MaxObjectsPerRun:      in.MaxObjectsPerRun,
+		StorageAllowanceBytes: in.AllowanceBytes,
 	}
+}
+
+// safety: the allowance is the ceiling the sweep expires oldest-first down to,
+// so it is written on its own rather than through the quota route, which
+// replaces every limit the body leaves out.
+func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Request) {
+	principal := r.PathValue("principal")
+	if !store.ValidStoragePrincipal(principal) {
+		writeError(w, http.StatusBadRequest, fmt.Errorf(
+			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
+		return
+	}
+	var body storageAllowanceJSON
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	stored, err := s.store.SetStorageAllowance(r.Context(), principal, body.StorageAllowanceBytes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.logger.Info("storage allowance updated",
+		"principal", principal, "storage_allowance_bytes", stored.AllowanceBytes)
+	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
 }

@@ -656,6 +656,12 @@ var (
 		nil, nil,
 	)
 
+	creditsStorageDesc = prometheus.NewDesc(
+		"sparkwing_credits_storage_micro_total",
+		"Micro-credits retained bytes billed. This series buys no runner time, so it is the part of the spend the charged series does not carry.",
+		nil, nil,
+	)
+
 	nodeSecondsDesc = prometheus.NewDesc(
 		"sparkwing_node_seconds_total",
 		"Node execution seconds, by placement. The cloud series is the seconds the ledger has finished charging for, which is the billing line; the local series counts what this controller process settled for unmetered credentials.",
@@ -694,6 +700,7 @@ func (creditsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- creditsReservedDesc
 	ch <- creditsChargedDesc
 	ch <- creditsRefundedDesc
+	ch <- creditsStorageDesc
 }
 
 func (creditsCollector) Collect(ch chan<- prometheus.Metric) {
@@ -708,6 +715,7 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(creditsReservedDesc, prometheus.CounterValue, float64(t.ReservedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsChargedDesc, prometheus.CounterValue, float64(t.ChargedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsRefundedDesc, prometheus.CounterValue, float64(t.RefundedMicro))
+	ch <- prometheus.MustNewConstMetric(creditsStorageDesc, prometheus.CounterValue, float64(t.StorageMicro))
 }
 
 // safety: the cloud series is read from the ledger rather than counted in the
