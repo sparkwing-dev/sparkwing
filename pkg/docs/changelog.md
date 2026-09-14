@@ -50,6 +50,19 @@ unlock.
   the rename, the repointed links and the index row without writing. The
   workflow's `release-verify` stage judges the same on the tagged source.
 
+- **api (Breaking):** The credit settings routes drop
+  `billing_cpu_ceiling_cores`.
+  `components.schemas.CreditSettings.properties.billing_cpu_ceiling_cores`,
+  `components.schemas.CreditState.properties.billing_cpu_ceiling_cores` and
+  `components.schemas.SetCreditSettings.properties.billing_cpu_ceiling_cores`
+  are gone from `api/openapi.yaml`, so `GET /api/v1/credits/settings` and the
+  credit state no longer report the field, and `PUT /api/v1/credits/settings`
+  answers 400 to a body that still sets it, because the route refuses a field
+  it does not know. `warm_cpu_class_cores` takes its place on all three
+  schemas: it caps the class the warm pool serves rather than the class a node
+  is billed at, and a node is now billed at the class it pinned. See [migration
+  guide](docs/migrations/_unreleased.md#the-credit-settings-api-drops-billing_cpu_ceiling_cores).
+
 - **runner:** The trigger loop waits 15 seconds between `not our ref` retries
   instead of 10, so the second attempt falls outside the cache's freshness
   window and reads refreshed refs rather than the ones the first attempt saw.
