@@ -35,7 +35,7 @@ func runRaceTouched(ctx context.Context) error {
 			// pkg/store under the race detector outlives it on a one-core hosted
 			// runner; the pipeline's own timeout still bounds the step.
 			cmd := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
-			script := withoutInherited(fmt.Sprintf("cd %q && %s", module, cmd), productTestUnset)
+			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd))
 			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}

@@ -239,7 +239,7 @@ func lastLines(text string, n int) string {
 
 func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 	return withGoTestScratch(func(testRoot string) error {
-		_, err := sparkwing.Bash(ctx, storePostgresGoCommand(runtime.NumCPU())).
+		_, err := sparkwing.Bash(ctx, productTestScript(storePostgresGoCommand(runtime.NumCPU()))).
 			Env("TMPDIR", testRoot).
 			Env("SPARKWING_TEST_STORE", "postgres").
 			Env("SPARKWING_TEST_PG_URL", dsn).

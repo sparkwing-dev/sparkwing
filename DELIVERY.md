@@ -24,6 +24,19 @@ launcher when testing isolated tool state.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` is the proof they fire; a definition alone
   proves nothing.
+- **Which tier decides a merge:** hosted CI on main is the merge check of
+  record, and the local pre-push gate is the fast path that catches a failure
+  before the push costs a round trip. Read a disagreement between them as the
+  hosted result plus a gate bug.
+- **What a test step inherits:** every step that starts a product suite
+  (`test`, `race-touched`, `store-postgres`, and the release contract
+  preflight) unsets `SPARKWING_API_SOCKET`, `SPARKWING_CONTROLLER_URL`,
+  `SPARKWING_LOGS_URL`, `SPARKWING_HOME`, `GIT_INDEX_FILE` and the lease
+  tokens, and exports `SPARKWING_DEV_ENV_DISABLE=1` to close the
+  `$SPARKWING_HOME/dev.env` fallback behind the two URLs. A gate runs inside a
+  sparkwing node, which hands its children the machine's admission socket and
+  the dispatcher's service URLs, so a suite that read them would reach live
+  services and fail only under the gate.
 - **Why vet, build, test and lint are not in the commit tier:** the house
   standard puts all four in the pre-commit chain, and this repo runs them one
   tier later on purpose. Its suite takes 6 to 12 minutes through the shared

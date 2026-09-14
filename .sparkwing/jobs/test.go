@@ -27,7 +27,7 @@ func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 }
 
 func (p *Test) run(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, testGoCommand(runtime.NumCPU())).Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(runtime.NumCPU()))).Run(); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "go test: all packages passed")

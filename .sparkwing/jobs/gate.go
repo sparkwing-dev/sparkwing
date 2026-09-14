@@ -452,7 +452,21 @@ var productTestUnset = []string{
 	// gate is the operator's own. A test binary that inherits it opens the
 	// real runs store instead of the sandbox internal/paths gives it.
 	"SPARKWING_HOME",
+	// safety: the node also hands its children the machine's admission socket
+	// and the service URLs the dispatcher chose, so a suite that reads either
+	// talks to a live daemon or a live controller and reds only inside a gate.
+	wingwire.APISocketEnv,
+	"SPARKWING_CONTROLLER_URL",
+	"SPARKWING_LOGS_URL",
 }
+
+// safety: orchestrator.DevEnvDisableEnv, which the pipeline module cannot
+// import. Clearing the URLs is not enough on its own: they fall back to the
+// dev.env under the home, and a helper binary a suite starts is not a test
+// binary, so internal/paths hands it the operator's home rather than a sandbox.
+const devEnvDisableVar = "SPARKWING_DEV_ENV_DISABLE"
+
+var productTestPin = []string{devEnvDisableVar + "=1"}
 
 func withoutInherited(cmd string, names []string) string {
 	if len(names) == 0 {
@@ -461,16 +475,29 @@ func withoutInherited(cmd string, names []string) string {
 	return "unset " + strings.Join(names, " ") + "; " + cmd
 }
 
+func withPinned(cmd string, bindings []string) string {
+	if len(bindings) == 0 {
+		return cmd
+	}
+	return "export " + strings.Join(bindings, " ") + "; " + cmd
+}
+
+// safety: every step that starts a product test suite runs through here, so
+// the scrub cannot be half-applied across the gate's several test steps.
+func productTestScript(cmd string) string {
+	return withPinned(withoutInherited(cmd, productTestUnset), productTestPin)
+}
+
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil)
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), false)
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), nil)
+	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), false)
 }
 
 func runTest(ctx context.Context) error {
-	return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset)
+	return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), true)
 }
 
 func withGoTestScratch(run func(string) error) error {
@@ -486,7 +513,7 @@ func withGoTestScratch(run func(string) error) error {
 	return errors.Join(testErr, cleanupErr)
 }
 
-func forEachGoModule(ctx context.Context, label, cmd string, unset []string) error {
+func forEachGoModule(ctx context.Context, label, cmd string, scrub bool) error {
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
@@ -502,7 +529,10 @@ func forEachGoModule(ctx context.Context, label, cmd string, unset []string) err
 			continue
 		}
 		command := strings.TrimSuffix(cmd, "./...") + strings.Join(packages, " ")
-		script := withoutInherited(fmt.Sprintf("cd %q && %s", dir, command), unset)
+		script := fmt.Sprintf("cd %q && %s", dir, command)
+		if scrub {
+			script = productTestScript(script)
+		}
 		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
 			failures = append(failures, describeModuleFailure(dir, err))
 		}
