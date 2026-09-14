@@ -183,6 +183,7 @@ never charged.
 - `show` -- Print the balance, the rate, and the recent burn
 - `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
 - `history` -- List grants and charges, newest first
+- `settings` -- Read or set the credit rate, the grace period, and the charge cap
 
 ### Examples
 
@@ -261,14 +262,56 @@ sparkwing cluster credits history --profile prod
 sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
 ```
 
+## `sparkwing cluster credits settings`
+
+Read or set the credit rate, the grace period, and the charge cap
+
+Prints the three runtime settings the ledger prices work with,
+and sets the ones named by a flag. The rate is what one cloud
+runner second costs in micro-credits. The grace period is how
+long a node keeps running after it has consumed the reservation
+its claim paid for with the balance at zero: a node inside that
+reservation is never cancelled, because the ledger already took
+payment for it. The charge cap is the most seconds any one
+charge may bill, which forgives a controller outage or a stalled
+heartbeat loop rather than billing the gap. A flag left off
+leaves that setting alone, and a refused value moves nothing.
+Grace zero cancels a metered node at the first heartbeat past
+its reservation, which bounds the unpaid overrun to one
+heartbeat interval per node. Reading needs the runs.read scope
+and setting needs admin.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--rate-micro N` | Micro-credits one cloud runner second costs, 1 to 1000000000000; a million is one credit |
+| `--grace-seconds N` | Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat |
+| `--max-charge-seconds N` | The most seconds any one charge may bill, 6 to 86400 |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read the settings
+sparkwing cluster credits settings --profile prod
+
+# Cut a node off at the first heartbeat past its reservation
+sparkwing cluster credits settings --grace-seconds 0 --profile prod
+
+# Reprice a cloud runner second at 0.03 credits
+sparkwing cluster credits settings --rate-micro 30000 --profile prod
+```
+
 ## `sparkwing cluster credits show`
 
 Print the balance, the rate, and the recent burn
 
 Prints the balance in credits, what was granted and charged, the
 price of a cloud runner second, the credits burned over the last
-day, the grace period a running node gets after the balance
-reaches zero, and the cap on what any one charge may bill. A
+day, the grace period a node gets past the reservation its claim
+paid for, and the cap on what any one charge may bill. A
 controller that was never granted anything reads a zero balance
 and charges nothing, because nothing is metered until an
 operator marks a token.

@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -202,6 +205,147 @@ func TestCreditsCLIWireMatchesTheController(t *testing.T) {
 	}
 	if !strings.Contains(table.String(), "METERED") {
 		t.Fatalf("tokens table lost the METERED column:\n%s", table.String())
+	}
+}
+
+func TestRenderCreditSettings(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	err := renderCreditSettings(&buf, creditSettingsResp{
+		RateMicroPerSecond: store.DefaultCreditRateMicro,
+		GraceSeconds:       0,
+		MaxChargeSeconds:   store.DefaultCreditMaxChargeSeconds,
+		MicroPerCredit:     store.MicroCreditsPerCredit,
+		CreditsPerDollar:   store.CreditsPerDollar,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"0.020000 credits", "20000 micro", "GRACE", "0s past", "CHARGE CAP", "30s"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("credit settings output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func creditSettingsFlagSet(t *testing.T, args []string) *flag.FlagSet {
+	t.Helper()
+	fs := flag.NewFlagSet("settings", flag.ContinueOnError)
+	fs.Int64("rate-micro", 0, "")
+	fs.Int64("grace-seconds", 0, "")
+	fs.Int64("max-charge-seconds", 0, "")
+	if err := fs.Parse(args); err != nil {
+		t.Fatalf("parse %v: %v", args, err)
+	}
+	return fs
+}
+
+func TestCreditSettingsBodyCarriesOnlyTheFlagsGiven(t *testing.T) {
+	t.Parallel()
+	fs := creditSettingsFlagSet(t, []string{"--grace-seconds", "0"})
+	body := creditSettingsBody(fs, 0, 0, 0)
+	if len(body) != 1 {
+		t.Fatalf("body = %v, want grace alone", body)
+	}
+	if body["grace_seconds"] != int64(0) {
+		t.Fatalf("grace_seconds = %v", body["grace_seconds"])
+	}
+
+	fs = creditSettingsFlagSet(t, []string{"--rate-micro", "30000", "--max-charge-seconds", "45"})
+	body = creditSettingsBody(fs, 30_000, 0, 45)
+	if len(body) != 2 || body["rate_micro_per_second"] != int64(30_000) ||
+		body["max_charge_seconds"] != int64(45) {
+		t.Fatalf("body = %v, want the rate and the cap", body)
+	}
+
+	fs = creditSettingsFlagSet(t, nil)
+	if body = creditSettingsBody(fs, 0, 0, 0); len(body) != 0 {
+		t.Fatalf("a flagless call built %v, so it would write instead of read", body)
+	}
+}
+
+func TestCreditSettingsCLIReportsAValueTheStoreRefuses(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	admin, _, err := st.CreateToken("root", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("admin token: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	for name, body := range map[string]map[string]any{
+		"rate past the ceiling": {"rate_micro_per_second": int64(store.MaxCreditRateMicro) + 1},
+		"rate at zero":          {"rate_micro_per_second": 0},
+		"negative grace":        {"grace_seconds": -1},
+		"cap under the floor":   {"max_charge_seconds": store.MinCreditMaxChargeSeconds - 1},
+		"nothing named":         {},
+	} {
+		if _, err := tokensPut(srv.URL, admin, "/api/v1/credits/settings", body); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	rate, err := st.CreditRateMicroPerSecond(context.Background())
+	if err != nil {
+		t.Fatalf("read rate: %v", err)
+	}
+	if rate != store.DefaultCreditRateMicro {
+		t.Fatalf("rate = %d; a refused write moved it", rate)
+	}
+}
+
+func TestCreditSettingsCLIWireMatchesTheController(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	admin, _, err := st.CreateToken("root", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("admin token: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	raw, err := tokensPut(srv.URL, admin, "/api/v1/credits/settings",
+		map[string]any{"grace_seconds": 0})
+	if err != nil {
+		t.Fatalf("put settings: %v", err)
+	}
+	var view creditSettingsResp
+	if err := json.Unmarshal(raw, &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if view.GraceSeconds != 0 {
+		t.Fatalf("grace = %d, want 0", view.GraceSeconds)
+	}
+	if view.RateMicroPerSecond != store.DefaultCreditRateMicro {
+		t.Fatalf("rate = %d, want the default", view.RateMicroPerSecond)
+	}
+
+	raw, err = tokensGet(srv.URL, admin, "/api/v1/credits/settings")
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	view = creditSettingsResp{}
+	if err := json.Unmarshal(raw, &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if view.GraceSeconds != 0 || view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
+		t.Fatalf("settings read back = %+v", view)
+	}
+	var plain bytes.Buffer
+	if err := writeCreditSettingsPlain(&plain, view); err != nil {
+		t.Fatalf("plain: %v", err)
+	}
+	if !strings.Contains(plain.String(), "grace_seconds\t0\n") {
+		t.Fatalf("plain output = %q", plain.String())
 	}
 }
 

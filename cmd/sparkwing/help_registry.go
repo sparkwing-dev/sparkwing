@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"runtime"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -2163,7 +2165,7 @@ time before it is granted, heartbeats charge the seconds they
 cover, and the finish refunds whatever of the reservation the
 node did not use. Runners the operator did not mark metered are
 never charged.`,
-	SubcommandOrder: []string{"show", "grant", "history"},
+	SubcommandOrder: []string{"show", "grant", "history", "settings"},
 	Examples: []Example{
 		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
 		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
@@ -2175,8 +2177,8 @@ var cmdCreditsShow = Command{
 	Synopsis: "Print the balance, the rate, and the recent burn",
 	Description: `Prints the balance in credits, what was granted and charged, the
 price of a cloud runner second, the credits burned over the last
-day, the grace period a running node gets after the balance
-reaches zero, and the cap on what any one charge may bill. A
+day, the grace period a node gets past the reservation its claim
+paid for, and the cap on what any one charge may bill. A
 controller that was never granted anything reads a zero balance
 and charges nothing, because nothing is metered until an
 operator marks a token.`,
@@ -2234,6 +2236,41 @@ per line.`,
 	Examples: []Example{
 		{"Read the ledger", "sparkwing cluster credits history --profile prod"},
 		{"Sum today's charges", "sparkwing cluster credits history --profile prod -o json | jq 'select(.type==\"charge\") | .amount_micro'"},
+	},
+}
+
+var cmdCreditsSettings = Command{
+	Path:     "sparkwing cluster credits settings",
+	Synopsis: "Read or set the credit rate, the grace period, and the charge cap",
+	Description: `Prints the three runtime settings the ledger prices work with,
+and sets the ones named by a flag. The rate is what one cloud
+runner second costs in micro-credits. The grace period is how
+long a node keeps running after it has consumed the reservation
+its claim paid for with the balance at zero: a node inside that
+reservation is never cancelled, because the ledger already took
+payment for it. The charge cap is the most seconds any one
+charge may bill, which forgives a controller outage or a stalled
+heartbeat loop rather than billing the gap. A flag left off
+leaves that setting alone, and a refused value moves nothing.
+Grace zero cancels a metered node at the first heartbeat past
+its reservation, which bounds the unpaid overrun to one
+heartbeat interval per node. Reading needs the runs.read scope
+and setting needs admin.`,
+	Flags: []FlagSpec{
+		{Name: "rate-micro", Argument: "N", Desc: fmt.Sprintf(
+			"Micro-credits one cloud runner second costs, 1 to %d; a million is one credit",
+			int64(store.MaxCreditRateMicro)), Group: "Input"},
+		{Name: "grace-seconds", Argument: "N", Desc: "Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat", Group: "Input"},
+		{Name: "max-charge-seconds", Argument: "N", Desc: fmt.Sprintf(
+			"The most seconds any one charge may bill, %d to %d",
+			store.MinCreditMaxChargeSeconds, int64(store.MaxCreditMaxChargeSeconds)), Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read the settings", "sparkwing cluster credits settings --profile prod"},
+		{"Cut a node off at the first heartbeat past its reservation", "sparkwing cluster credits settings --grace-seconds 0 --profile prod"},
+		{"Reprice a cloud runner second at 0.03 credits", "sparkwing cluster credits settings --rate-micro 30000 --profile prod"},
 	},
 }
 

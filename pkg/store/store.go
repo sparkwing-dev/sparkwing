@@ -1059,7 +1059,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 43
+const expectedSchemaVersion = 45
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1947,6 +1947,14 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyCreditReferenceMigrationSQLite(ctx, tx)
 	case 43:
 		return applyRunnerCapIndexMigration(ctx, tx)
+	// safety: v44 is permanently spent. The ladder refuses a gap, so this
+	// build records v44 as applied on every store it opens, and nothing can
+	// tell that from a real v44 having run. The per-cpu-class rate table
+	// therefore takes v46.
+	case 44:
+		return nil
+	case 45:
+		return ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditExhaustionCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2276,6 +2284,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyCreditReferenceMigrationPostgres(ctx, tx)
 	case 43:
 		return applyRunnerCapIndexMigration(ctx, tx)
+	// safety: v44 is permanently spent, the same as in the SQLite ladder, so
+	// both dialects agree on what each version is.
+	case 44:
+		return nil
+	case 45:
+		return addColumnsTx(ctx, tx, "nodes", nodesCreditExhaustionCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

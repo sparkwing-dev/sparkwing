@@ -67,6 +67,12 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v43 adds one index and no column, so an older binary keeps
 	// writing the migrated database.
 	43: nil,
+	// safety: v44 is permanently spent and adds no column, so an older binary
+	// keeps writing the migrated database.
+	44: nil,
+	// safety: v45 adds one defaulted column, so an older binary keeps writing
+	// the migrated database and simply never stamps it.
+	45: {nodesCreditExhaustionCols},
 }
 
 func columnSpecMaps() []map[string]string {

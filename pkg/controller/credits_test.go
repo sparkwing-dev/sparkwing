@@ -133,6 +133,17 @@ func ageExhaustionStamp(t *testing.T, st *store.Store, at time.Time) {
 	}
 }
 
+// safety: the grace clock a cancellation runs on is the node's own, so a test
+// reaches the deadline by moving that instant rather than the ledger stamp.
+func ageNodeExhaustionAnchor(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
+	t.Helper()
+	if _, err := st.DB().Exec(
+		`UPDATE nodes SET credit_exhausted_anchor = ? WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), runID, nodeID); err != nil {
+		t.Fatalf("age the node's exhaustion anchor: %v", err)
+	}
+}
+
 func TestCredits_UnmeteredTokenClaimsAndIsNeverCharged(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	ctx := context.Background()
@@ -300,11 +311,20 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	})
 
-	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-30*time.Second))
+	// safety: the node is inside the minute its claim reserved and paid for, so
+	// the spent balance alone must not stop it.
 	if err := c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil); err != nil {
 		t.Fatalf("first heartbeat: %v", err)
 	}
+	node, err := f.store.GetNode(ctx, "run-run-dry", "build")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Status == "done" {
+		t.Fatal("the node was cancelled inside the reservation its claim paid for")
+	}
 	ageExhaustionStamp(t, f.store, time.Now().Add(-time.Minute))
+	ageNodeExhaustionAnchor(t, f.store, "run-run-dry", "build", time.Now().Add(-time.Minute))
 	setNodeChargeWindow(t, f.store, "run-run-dry", "build", time.Now().Add(-2*time.Second))
 
 	err = c.HeartbeatNodeClaim(claimCtx, "run-run-dry", "build", "pod-1", time.Minute, nil)
@@ -312,7 +332,7 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 		t.Fatalf("heartbeat after the grace period = %v, want ErrLockHeld", err)
 	}
 
-	node, err := f.store.GetNode(ctx, "run-run-dry", "build")
+	node, err = f.store.GetNode(ctx, "run-run-dry", "build")
 	if err != nil {
 		t.Fatalf("get node: %v", err)
 	}
@@ -517,5 +537,144 @@ func TestCredits_SetMeteredRouteMarksAnExistingToken(t *testing.T) {
 		f.url+"/api/v1/tokens/swu_notatoken/metered", f.admin, map[string]any{"metered": true})
 	if status != http.StatusNotFound {
 		t.Fatalf("set-metered on an unknown prefix = %d: %s", status, body)
+	}
+}
+
+func creditSettings(t *testing.T, f creditsFixture, method string, body any) (int, creditSettingsView) {
+	t.Helper()
+	status, raw := creditsRequest(t, method, f.url+"/api/v1/credits/settings", f.admin, body)
+	var view creditSettingsView
+	if status == http.StatusOK {
+		if err := json.Unmarshal(raw, &view); err != nil {
+			t.Fatalf("decode settings: %v: %s", err, raw)
+		}
+	}
+	return status, view
+}
+
+type creditSettingsView struct {
+	RateMicroPerSecond int64 `json:"rate_micro_per_second"`
+	GraceSeconds       int64 `json:"grace_seconds"`
+	MaxChargeSeconds   int64 `json:"max_charge_seconds"`
+	MicroPerCredit     int64 `json:"micro_per_credit"`
+	CreditsPerDollar   int64 `json:"credits_per_dollar"`
+}
+
+func TestCreditSettings_ReadsTheDefaultsAndSetsEachValue(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, view := creditSettings(t, f, http.MethodGet, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET settings = %d", status)
+	}
+	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
+		view.GraceSeconds != store.DefaultCreditGraceSeconds ||
+		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
+		t.Fatalf("settings = %+v, want the package defaults", view)
+	}
+	if view.MicroPerCredit != store.MicroCreditsPerCredit || view.CreditsPerDollar != store.CreditsPerDollar {
+		t.Fatalf("unit constants = %d/%d", view.MicroPerCredit, view.CreditsPerDollar)
+	}
+
+	status, view = creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_micro_per_second": 30_000, "grace_seconds": 0, "max_charge_seconds": 45,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("PUT settings = %d", status)
+	}
+	if view.RateMicroPerSecond != 30_000 || view.GraceSeconds != 0 || view.MaxChargeSeconds != 45 {
+		t.Fatalf("settings after the write = %+v", view)
+	}
+	grace, err := f.store.CreditGraceSeconds(context.Background())
+	if err != nil {
+		t.Fatalf("read grace: %v", err)
+	}
+	if grace != 0 {
+		t.Fatalf("stored grace = %d, want 0", grace)
+	}
+}
+
+func TestCreditSettings_LeavesUnnamedValuesAlone(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	if status, _ := creditSettings(t, f, http.MethodPut,
+		map[string]any{"grace_seconds": 0}); status != http.StatusOK {
+		t.Fatalf("PUT grace only = %d", status)
+	}
+	status, view := creditSettings(t, f, http.MethodGet, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET settings = %d", status)
+	}
+	if view.GraceSeconds != 0 {
+		t.Fatalf("grace = %d, want 0", view.GraceSeconds)
+	}
+	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
+		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
+		t.Fatalf("a one-field write moved the other settings: %+v", view)
+	}
+}
+
+func TestCreditSettings_RefusesValuesTheLedgerCannotPrice(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	for name, body := range map[string]map[string]any{
+		"no field named": {},
+		"rate at zero":   {"rate_micro_per_second": 0},
+		"negative rate":  {"rate_micro_per_second": -1},
+		"negative grace": {"grace_seconds": -1},
+		"cap under the heartbeat cadence": {
+			"max_charge_seconds": store.MinCreditMaxChargeSeconds - 1,
+		},
+		"cap past the ceiling": {
+			"max_charge_seconds": int64(store.MaxCreditMaxChargeSeconds) + 1,
+		},
+		"rate past the ceiling": {
+			"rate_micro_per_second": int64(store.MaxCreditRateMicro) + 1,
+		},
+	} {
+		if status, _ := creditSettings(t, f, http.MethodPut, body); status != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", name, status)
+		}
+	}
+
+	status, view := creditSettings(t, f, http.MethodGet, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET settings = %d", status)
+	}
+	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
+		view.GraceSeconds != store.DefaultCreditGraceSeconds ||
+		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
+		t.Fatalf("a refused write moved a setting: %+v", view)
+	}
+}
+
+func TestCreditSettings_RefusesAWriteWhoseOtherFieldIsBad(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, _ := creditSettings(t, f, http.MethodPut,
+		map[string]any{"grace_seconds": 0, "rate_micro_per_second": -5})
+	if status != http.StatusBadRequest {
+		t.Fatalf("mixed write = %d, want 400", status)
+	}
+	grace, err := f.store.CreditGraceSeconds(context.Background())
+	if err != nil {
+		t.Fatalf("read grace: %v", err)
+	}
+	if grace != store.DefaultCreditGraceSeconds {
+		t.Fatalf("grace = %d; the good half of a refused write was applied", grace)
+	}
+}
+
+func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, _ := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/settings", f.readonly, nil)
+	if status != http.StatusOK {
+		t.Fatalf("read with runs.read = %d, want 200", status)
+	}
+	status, _ = creditsRequest(t, http.MethodPut, f.url+"/api/v1/credits/settings", f.readonly,
+		map[string]any{"grace_seconds": 0})
+	if status != http.StatusForbidden {
+		t.Fatalf("write without admin = %d, want 403", status)
 	}
 }

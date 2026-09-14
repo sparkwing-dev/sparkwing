@@ -3588,8 +3588,8 @@ paths:
         of them is one credit, and a hundred credits is one dollar, so a
         ten dollar top-up is a thousand credits. The balance is the sum of
         grants less the sum of charges, computed in SQL. `rate_micro_per_second`
-        prices one cloud runner second, `grace_seconds` is how long a running
-        node survives an empty balance, and `burn_micro` is what the last
+        prices one cloud runner second, `grace_seconds` is how long a node runs
+        past its claim reservation on an empty balance, and `burn_micro` is what the last
         `burn_window_seconds` cost. A controller that was never granted
         anything reads zero and charges nothing.
       responses:
@@ -3669,6 +3669,59 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditHistory"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/credits/settings:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [credits]
+      summary: Read the rate, the grace period, and the charge cap.
+      description: |
+        The three values the ledger prices work with.
+        `rate_micro_per_second` is what one cloud runner second costs.
+        `grace_seconds` is how long a node keeps running once it has consumed
+        the reservation its claim paid for with the balance at zero; a node
+        still inside that reservation is never cancelled, because the ledger
+        already took payment for it. `max_charge_seconds` is the most seconds
+        any one charge may bill, which forgives a controller outage or a
+        stalled heartbeat loop rather than billing the gap. A controller that
+        set none of them reads the defaults.
+      responses:
+        "200":
+          description: The settings in force.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditSettings"}
+    put:
+      x-sparkwing-scope: admin
+      tags: [credits]
+      summary: Set the rate, the grace period, or the charge cap.
+      description: |
+        Sets each setting the body names, in one transaction, and answers the
+        full set as `GET` does. An omitted field leaves that setting as it was,
+        so changing one value is a one-field body. A body that names nothing is
+        refused with `400`, as is a rate outside one micro-credit to a million
+        credits per second, a negative grace period, and a charge cap outside
+        the band whose floor is one second past the longest node heartbeat
+        cadence and whose ceiling is one day. The bounds keep the reservation a
+        claim takes and a capped charge inside a signed 64-bit integer, and the
+        floor keeps a cap from truncating every tick that arrives a little
+        late. A refused body writes none of its fields. `grace_seconds` at zero
+        cancels a metered node at the first heartbeat past the reservation its
+        claim paid for, which bounds the unpaid overrun to one heartbeat
+        interval per node. Charges already written keep the rate they were
+        charged at.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetCreditSettings"}
+      responses:
+        "200":
+          description: The settings after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
   /api/v1/tokens/{prefix}/metered:
@@ -4589,13 +4642,31 @@ components:
         reversed_micro: {type: integer, format: int64, description: "What reversals took back, reported positive."}
         charged_micro: {type: integer, format: int64}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
-        grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
+        grace_seconds: {type: integer, format: int64, description: How long a node runs past its claim reservation with the balance at zero.}
         max_charge_seconds: {type: integer, format: int64, description: "The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop."}
         burn_window_seconds: {type: integer, format: int64}
         burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
         exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
         micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
         credits_per_dollar: {type: integer, format: int64}
+    CreditSettings:
+      x-sparkwing-go-type: pkg/controller.creditSettingsJSON
+      type: object
+      description: The three values the ledger prices work with, and the credit units they are quoted in.
+      properties:
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
+        grace_seconds: {type: integer, format: int64, description: How long a node runs past the reservation its claim paid for with the balance at zero; zero cancels it at the first heartbeat past that reservation.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
+        micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
+        credits_per_dollar: {type: integer, format: int64}
+    SetCreditSettings:
+      x-sparkwing-go-type: pkg/controller.setCreditSettingsReq
+      type: object
+      description: The settings to change. An omitted field is left as it was.
+      properties:
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second; 1 to 1000000000000.}
+        grace_seconds: {type: integer, format: int64, description: Seconds a node runs past its claim reservation on an empty balance; zero or more.}
+        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; from one second past the longest node heartbeat cadence to one day.}
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object
