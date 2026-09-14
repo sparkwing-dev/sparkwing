@@ -232,6 +232,44 @@ func TestAnIdleGapIsNotBilledWhenATeamStoresAgain(t *testing.T) {
 	}
 }
 
+// A team whose retained set is actively written holds its bytes for the whole
+// interval, so it pays for the whole interval. Dating the bytes by their last
+// write let one appended byte before each pass store 100 GiB for free.
+func TestAnActivelyWrittenTeamIsBilledForTheWholeIntervalItHeld(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	start := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "acme", "r1", 100*gib, start)
+
+	if _, err := st.ChargeRetainedStorage(ctx, start); err != nil {
+		t.Fatalf("stamp pass: %v", err)
+	}
+	var billed int64
+	for hour := 1; hour <= 24; hour++ {
+		at := start.Add(time.Duration(hour) * time.Hour)
+		// safety: the run keeps writing, so its usage row is rewritten a
+		// second before every pass; that must not redate the bytes it holds.
+		if _, err := st.DB().Exec(storetest.Rebind(st,
+			`UPDATE storage_run_usage SET updated_at = ? WHERE principal = 'acme'`),
+			at.Add(-time.Second).UnixNano()); err != nil {
+			t.Fatalf("touch the usage row: %v", err)
+		}
+		pass, err := st.ChargeRetainedStorage(ctx, at)
+		if err != nil {
+			t.Fatalf("pass at hour %d: %v", hour, err)
+		}
+		billed += pass.ChargedMicro
+	}
+
+	day := int64(100) * store.CloudStorageRateMicroPerGBDay
+	onePass := day / 24
+	if billed < day-onePass {
+		t.Fatalf("billed %d micro for 100 GiB held a day, want within one pass of %d",
+			billed, day)
+	}
+}
+
 // A team holding nothing keeps no watermark, so nothing stale survives to
 // price its next bytes and sparkwing_meta gains no key per team that ever
 // stored.

@@ -295,15 +295,18 @@ func (s *Store) chargeOneTeamStorage(
 	return charge, tx.Commit()
 }
 
-// safety: a team never pays for more than the allowance it named, and the
-// second figure is how long the oldest of those bytes has been held, which is
-// the ceiling on the interval they can be billed for.
+// safety: the second figure is how long the oldest of these bytes has been
+// held, which is the ceiling on the interval they can be billed for. It comes
+// off the run's creation, which never moves, and not off the usage row, whose
+// timestamp every charged write pushes forward.
 func billableRetainedBytesTx(
 	ctx context.Context, tx *storeTx, principal string, free int64, now time.Time,
 ) (int64, int64, error) {
 	var retained, oldest sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT SUM(bytes), MIN(updated_at) FROM storage_run_usage WHERE principal = ?`, principal).
+	if err := tx.QueryRowContext(ctx, `
+SELECT SUM(u.bytes), MIN(NULLIF(r.created_at, 0))
+  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
+ WHERE u.principal = ?`, principal).
 		Scan(&retained, &oldest); err != nil {
 		return 0, 0, err
 	}
