@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -86,6 +87,16 @@ func newReleaseServer(t *testing.T, version string, assetBytes []byte, signKey e
 	prev := updateBaseURL
 	updateBaseURL = srv.URL
 	t.Cleanup(func() { updateBaseURL = prev })
+
+	withLatestPublishedRelease(t, version)
+}
+
+// safety: a fetch that falls back must reach this server, never github.com.
+func withLatestPublishedRelease(t *testing.T, version string) {
+	t.Helper()
+	prev := updateFetchLatest
+	updateFetchLatest = func(context.Context) (string, error) { return version, nil }
+	t.Cleanup(func() { updateFetchLatest = prev })
 }
 
 func writeCurrentBin(t *testing.T, bytes []byte) string {

@@ -45,7 +45,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
           fi
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]
           remote="https://github.com/${{ github.repository }}.git"
           lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
           source_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
@@ -54,6 +54,48 @@ jobs:
           fi
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.resolve.outputs.source_sha }}
+
+      # The one precondition on a release: a tag may be cut from any commit as
+      # long as its version outranks every version already published. A rebuild
+      # of an existing tag is exempt because that version is already published.
+      - name: Refuse a tag that does not outrank the newest release
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git ls-remote --tags "https://github.com/${{ github.repository }}.git" \
+            | bash bin/check-release-tag-order.sh "$TAG"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.6"
+          cache-dependency-path: |
+            go.sum
+            .sparkwing/go.sum
+
+      - name: Build the tagged Sparkwing CLI
+        run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
+
+      # The changelog section is this release's notes and the schema and wire
+      # gates are what the local pipeline runs before it tags. Running them
+      # here is what makes a hand-pushed tag as safe as a cut one, and running
+      # them in the validate stage is what keeps a failure from half-releasing
+      # after the images are published.
+      - name: Verify the tagged source against the version it names
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --tags origin
+          "$RUNNER_TEMP/sparkwing" run release-verify --version "$TAG" --sw-local-only
 
   canonical:
     name: Verify tagged source

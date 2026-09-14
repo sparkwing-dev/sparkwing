@@ -423,44 +423,58 @@ advanced shape selects is documented in
 
 ## Releasing sparkwing
 
-Sparkwing tags itself via the in-repo `release` pipeline (no consumer
-repo involvement). From the sparkwing checkout:
+A release is a tag push. The `release` pipeline cuts the tag from the commit
+in your working tree, and `.github/workflows/release.yaml` does everything
+else. From the sparkwing checkout:
 
 ```bash
-# preview: full validation chain, stop before tag+push (no allowance needed)
+# preview: resolve the version and the changelog rewrite, stop before tag+push
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
 
 # real release -- push-tag is risk-gated, so --sw-allow is required:
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow destructive,prod                    # auto-bump (default --bump minor) or top unreleased CHANGELOG entry
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod       # auto-bump patch instead
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --version v0.55.0 --sw-allow destructive,prod  # explicit version
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
 ```
 
-The `push-tag` step declares `destructive` and `prod` risk labels, so an
-actual tag+push requires `--sw-allow destructive,prod`; `--sw-dry-run` runs
-every gate but stops before tagging and needs no allowance.
+The recipe, in five steps:
+
+1. Resolve the version, from `--version` or by bumping the newest tag origin
+   carries, and refuse anything that does not outrank it
+   (`discover-version`, `validate-version`).
+2. Rename the CHANGELOG.md `## [Unreleased]` section to `## [vX.Y.Z] - DATE`
+   and open a fresh empty one above it (`prepare-changelog`).
+3. Commit that rewrite, from a clean tree (`check-clean-tree`).
+4. Check the section accounts for any runs-store schema or wire-format change
+   since the previous tag (`gate-schema-changelog`, `gate-wire-changelog`).
+5. Create the annotated `vX.Y.Z` tag and push the branch and the tag
+   (`push-tag`).
+
+That is the whole plan: seven nodes, all of them cheap reads of files and git.
+No suite runs locally, and the pipeline never asks where origin's branch tip
+is, so a release can be cut from any commit as long as its version is ahead of
+the previous one.
+
+The tag push is what starts the release. Hosted CI validates the tag first: it
+re-checks that the version outranks the newest published one with
+`bin/check-release-tag-order.sh`, then runs `sparkwing run release-verify
+--version vX.Y.Z` over the tagged source, which repeats the changelog-section,
+schema and wire checks so a tag pushed by hand is judged the same way a cut one
+is. Only once that passes does it run the full gate, the pre-release tier, the
+security scanners, the Postgres conformance suite and the browser suites
+against the tagged source, builds the binaries for every platform and the five
+container images, publishes them, and creates the GitHub release from that
+tag's changelog section. A red check fails the run and publishes nothing: the
+tag keeps a failed run, no half release exists, and the fix is a later patch
+tag from a later commit. Tags are immutable, so a burnt version is never
+re-cut.
 
 The explicit temporary `SPARKWING_HOME` isolates prerelease state from the
 operational runs store. The release runner refuses the default home so a build
 with a newer embedded schema cannot migrate state used by installed readers.
 
-The pipeline runs validation gates before tagging, including:
+The `push-tag` step declares `destructive` and `prod` risk labels, so an actual
+tag+push requires `--sw-allow destructive,prod`; `--sw-dry-run` stops before
+tagging and needs no allowance.
 
-- `validate-version` -- the resolved tag must be free on origin (refuses
-  force-push)
-- `check-clean-tree` -- working tree must be clean
-- `gate-broad` / `gate-pre-release` -- the broad gate, then the
-  release-boundary checks
-- `prepare-changelog` -- `## [Unreleased]` in CHANGELOG.md must hold at
-  least one entry. The step renames that section to
-  `## [vX.Y.Z] - DATE`, opens a fresh empty `## [Unreleased]` above it,
-  and commits the rewrite, so the tag lands on a tree that already
-  carries the release notes. Splitting entries by hand across both
-  `[Unreleased]` and `[vX.Y.Z]` is ambiguous and the step refuses.
-
-Only after they pass does `push-tag` create the annotated tag and push it
-to origin.
-
-`sparkwing run release` is the canonical sparkwing-side release path. Don't
-hand-tag and `git push` -- it bypasses the validation gates and makes
-silent releases possible.
+`## [Unreleased]` must hold at least one entry, and splitting entries by hand
+across both `[Unreleased]` and `[vX.Y.Z]` is ambiguous, so the changelog step
+refuses it.

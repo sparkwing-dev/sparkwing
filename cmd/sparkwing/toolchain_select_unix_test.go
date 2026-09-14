@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"errors"
@@ -31,7 +32,7 @@ func seedToolchainStore(t *testing.T, version string, asset []byte) (home, binPa
 	t.Setenv("SPARKWING_HOME", home)
 	priv = withTestUpdateKey(t)
 	newReleaseServer(t, version, asset, priv, releaseServerOpts{})
-	binPath, err := ensureToolchainBinary(&bytes.Buffer{}, version)
+	binPath, _, err := ensureToolchainBinary(&bytes.Buffer{}, version)
 	if err != nil {
 		t.Fatalf("seed the store with %s: %v", version, err)
 	}
@@ -43,6 +44,11 @@ func cutTheNetwork(t *testing.T) {
 	prev := updateBaseURL
 	updateBaseURL = "http://127.0.0.1:1"
 	t.Cleanup(func() { updateBaseURL = prev })
+	prevLatest := updateFetchLatest
+	updateFetchLatest = func(context.Context) (string, error) {
+		return "", errors.New("the network is cut for this test")
+	}
+	t.Cleanup(func() { updateFetchLatest = prevLatest })
 }
 
 func TestEnsureToolchainBinaryFetchesVerifiesAndCaches(t *testing.T) {
@@ -63,7 +69,7 @@ func TestEnsureToolchainBinaryFetchesVerifiesAndCaches(t *testing.T) {
 
 	cutTheNetwork(t)
 	var out bytes.Buffer
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
+	if _, _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
 		t.Fatalf("cache hit reached the network: %v", err)
 	}
 	if out.Len() != 0 {
@@ -79,7 +85,7 @@ func TestEnsureToolchainBinaryAnnouncesTheFetchItVerified(t *testing.T) {
 	newReleaseServer(t, "v9.9.9", asset, priv, releaseServerOpts{})
 
 	var out bytes.Buffer
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
+	if _, _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"fetched and verified sparkwing v9.9.9", mustSHA256(asset)} {
@@ -108,7 +114,7 @@ func TestEnsureToolchainBinaryRefetchesOnDigestMismatch(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
+	if _, _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
 		t.Fatalf("re-fetch after tampering: %v", err)
 	}
 	body, err := os.ReadFile(binPath)
@@ -131,7 +137,7 @@ func TestEnsureToolchainBinaryRefusesAnUnsignedManifest(t *testing.T) {
 	}
 	cutTheNetwork(t)
 
-	if _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err == nil {
+	if _, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err == nil {
 		t.Fatal("a store whose manifest carries no trusted signature was accepted")
 	}
 }
@@ -153,7 +159,7 @@ func TestEnsureToolchainBinaryRefusesALocalDigestSidecar(t *testing.T) {
 	}
 	cutTheNetwork(t)
 
-	if _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err == nil {
+	if _, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err == nil {
 		t.Fatal("a self-asserted digest sidecar was accepted as the store's trust anchor")
 	}
 }
@@ -168,7 +174,7 @@ func TestEnsureToolchainBinaryRestoresAStrippedExecuteBit(t *testing.T) {
 	cutTheNetwork(t)
 
 	var out bytes.Buffer
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
+	if _, _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
 		t.Fatalf("a stored binary that lost its execute bit was not healed: %v", err)
 	}
 	if out.Len() != 0 {
@@ -183,7 +189,7 @@ func TestEnsureToolchainBinaryRefusesAReleaseThatReportsAnotherVersion(t *testin
 	priv := withTestUpdateKey(t)
 	newReleaseServer(t, "v9.9.9", releaseFixture("v0.1.0"), priv, releaseServerOpts{})
 
-	_, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	_, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
 	if err == nil {
 		t.Fatal("a release that identifies as another version was cached")
 	}
@@ -259,7 +265,7 @@ func TestEnsureToolchainBinaryAnnouncesARejectedStoreBeforeRefetching(t *testing
 	}
 
 	var out bytes.Buffer
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
+	if _, _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "stored toolchain v9.9.9 failed verification (") {
@@ -277,7 +283,7 @@ func TestToolchainFetchErrorCarriesTheRejectedStoresReason(t *testing.T) {
 	}
 	cutTheNetwork(t)
 
-	_, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	_, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
 	if err == nil {
 		t.Fatal("a tampered store with no network produced no error")
 	}
@@ -296,7 +302,7 @@ func TestEnsureToolchainBinaryDropsAPreFixDigestSidecar(t *testing.T) {
 	}
 	cutTheNetwork(t)
 
-	if _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err != nil {
+	if _, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
@@ -311,7 +317,7 @@ func TestAssertToolchainVersionReportsWhatTheChildPrinted(t *testing.T) {
 	rejecting := []byte("#!/bin/sh\necho \"unknown flag: --offline\" >&2\nexit 2\n")
 	newReleaseServer(t, "v9.9.9", rejecting, priv, releaseServerOpts{})
 
-	_, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	_, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
 	if err == nil {
 		t.Fatal("a release that rejects the version query was cached")
 	}
@@ -319,5 +325,89 @@ func TestAssertToolchainVersionReportsWhatTheChildPrinted(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err.Error(), want)
 		}
+	}
+}
+
+func TestEnsureToolchainBinaryFallsBackWhenThePinHasNoBinariesYet(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	priv := withTestUpdateKey(t)
+	asset := releaseFixture("v9.9.8")
+	newReleaseServer(t, "v9.9.8", asset, priv, releaseServerOpts{})
+
+	var out bytes.Buffer
+	binPath, served, err := ensureToolchainBinary(&out, "v9.9.9")
+	if err != nil {
+		t.Fatalf("a pin whose binaries are unpublished failed instead of falling back: %v", err)
+	}
+	if served != "v9.9.8" {
+		t.Fatalf("served release = %q, want the newest published v9.9.8", served)
+	}
+	body, err := os.ReadFile(binPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(body, asset) {
+		t.Fatal("the fallback stored something other than the newest published release")
+	}
+	for _, want := range []string{"v9.9.9 has no published binaries yet", "falling back to v9.9.8"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("fallback notice %q does not contain %q", out.String(), want)
+		}
+	}
+}
+
+func TestEnsureToolchainBinaryFailsWhenNoPublishedReleasePrecedesThePin(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	priv := withTestUpdateKey(t)
+	newReleaseServer(t, "v9.9.9", releaseFixture("v9.9.9"), priv, releaseServerOpts{omitAsset: true})
+
+	_, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	if err == nil {
+		t.Fatal("a pin with no published predecessor was served anyway")
+	}
+	if !strings.Contains(err.Error(), "v9.9.9") {
+		t.Errorf("error %q does not name the pin", err)
+	}
+}
+
+func TestRunToolchainStaysWhenTheFallbackIsAlreadyRunning(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	priv := withTestUpdateKey(t)
+	newReleaseServer(t, "v9.9.8", releaseFixture("v9.9.8"), priv, releaseServerOpts{})
+
+	prev := toolchainExecFn
+	execed := false
+	toolchainExecFn = func(string, []string, []string) error {
+		execed = true
+		return nil
+	}
+	t.Cleanup(func() { toolchainExecFn = prev })
+
+	var out bytes.Buffer
+	if err := runToolchain(&out, toolchainDecision{action: toolchainSwitch, installed: "v9.9.8", pin: "v9.9.9"}); err != nil {
+		t.Fatalf("runToolchain: %v", err)
+	}
+	if execed {
+		t.Fatal("the fallback re-executed the release already running, which loops on every invocation")
+	}
+}
+
+func TestEnsureToolchainBinaryRefusesAPinWhoseAssetFailsVerification(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", filepath.Join(t.TempDir(), "fresh-home"))
+	priv := withTestUpdateKey(t)
+	wrongDigest := strings.Repeat("ab", 32)
+	newReleaseServer(t, "v9.9.9", releaseFixture("v9.9.9"), priv, releaseServerOpts{sumsDigest: wrongDigest})
+	withLatestPublishedRelease(t, "v9.9.8")
+
+	var out bytes.Buffer
+	_, _, err := ensureToolchainBinary(&out, "v9.9.9")
+	if err == nil {
+		t.Fatal("a release whose signed manifest does not match its bytes was accepted")
+	}
+	if strings.Contains(out.String(), "no published binaries yet") {
+		t.Fatalf("a corrupt release was announced as unpublished and downgraded:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "v9.9.9") {
+		t.Errorf("error %q does not name the pin", err)
 	}
 }

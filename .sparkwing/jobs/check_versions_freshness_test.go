@@ -225,24 +225,23 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 	write(".sparkwing/go.mod", module("v0.38.2"))
 	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.1"))
 
-	aligned, err := releaseVersionArtifactsAligned(dir, "v0.38.2")
+	_, aligned, err := coherentReleaseVersionArtifacts(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if aligned {
 		t.Fatal("fixture-only drift reported aligned")
 	}
-	if got := releaseVersionArtifactsDryRunMessage("v0.38.2"); got != "dry-run: would align release-version artifacts to v0.38.2" {
-		t.Fatalf("fixture-only dry-run message = %q", got)
-	}
-
 	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.2"))
-	aligned, err = releaseVersionArtifactsAligned(dir, "v0.38.2")
+	pinned, aligned, err := coherentReleaseVersionArtifacts(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !aligned {
 		t.Fatal("coherent release artifacts reported drift")
+	}
+	if pinned != "v0.38.2" {
+		t.Fatalf("coherent pin = %q, want v0.38.2", pinned)
 	}
 }
 
@@ -349,12 +348,12 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 	for path, body := range map[string]string{
 		"go.mod":                 "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.0\n",
 		"doc.go":                 "package sparkwing\n",
-		".sparkwing/go.mod":      fakePipelinesGoMod,
+		".sparkwing/go.mod":      fixturePipelinesGoMod,
 		".sparkwing/go.sum":      "",
 		".sparkwing/pipeline.go": "package pipelines\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n",
 		scaffoldFallbackRel:      "package scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
 		filepath.FromSlash(scaffoldAPISnapshotRel): "# pkg/scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
-		"bin/regen-api-snapshot.sh":                fakeRegenAPISnapshot,
+		"bin/regen-api-snapshot.sh":                fixtureRegenAPISnapshot,
 	} {
 		path = filepath.Join(dir, filepath.FromSlash(path))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -440,60 +439,100 @@ func captureGitOutput(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-func TestShouldCheckLocalReplaceFreshness(t *testing.T) {
-	repoRoot := t.TempDir()
-	cases := []struct {
-		name      string
-		relMod    string
-		module    string
-		local     string
-		options   VersionFreshnessOptions
-		wantCheck bool
-	}{
-		{
-			name:      "regular push checks self replace",
-			relMod:    ".sparkwing/go.mod",
-			module:    sdkModulePath,
-			local:     repoRoot,
-			wantCheck: true,
-		},
-		{
-			name:   "release pipeline allows same-checkout self replace",
-			relMod: ".sparkwing/go.mod",
-			module: sdkModulePath,
-			local:  repoRoot,
-			options: VersionFreshnessOptions{
-				AllowReleaseLineSelfReplace: true,
-			},
-			wantCheck: false,
-		},
-		{
-			name:   "release pipeline still checks other local replaces",
-			relMod: "examples/go.mod",
-			module: sdkModulePath,
-			local:  repoRoot,
-			options: VersionFreshnessOptions{
-				AllowReleaseLineSelfReplace: true,
-			},
-			wantCheck: true,
-		},
-		{
-			name:   "release pipeline still checks other modules",
-			relMod: ".sparkwing/go.mod",
-			module: "github.com/sparkwing-dev/sparks-core",
-			local:  repoRoot,
-			options: VersionFreshnessOptions{
-				AllowReleaseLineSelfReplace: true,
-			},
-			wantCheck: true,
-		},
+const fixtureRootGoMod = `module github.com/sparkwing-dev/sparkwing
+
+go 1.26.0
+`
+
+const fixturePipelinesGoMod = `module sparkwing-pipelines
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.1.0
+
+replace github.com/sparkwing-dev/sparkwing => ..
+`
+
+const fixtureKubernetesE2EPipelinesGoMod = `module sparkwing-k8s-e2e-pipelines
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.1.0
+
+replace github.com/sparkwing-dev/sparkwing => ../../../..
+`
+
+const fixtureRegenAPISnapshot = `#!/bin/sh
+set -eu
+version=$(sed -n 's/.*FallbackSDKVersion = "\(v[^"]*\)".*/\1/p' pkg/scaffold/version.go)
+out=${1:-.apidiff}
+mkdir -p "$out"
+printf '# pkg/scaffold\n\nconst FallbackSDKVersion = "%s"\n' "$version" > "$out/pkg_scaffold.txt"
+printf '# pkg/other\n' > "$out/pkg_other.txt"
+`
+
+func gitRun(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := shouldCheckLocalReplaceFreshness(c.relMod, c.module, c.local, repoRoot, c.options)
-			if got != c.wantCheck {
-				t.Errorf("shouldCheckLocalReplaceFreshness() = %v, want %v", got, c.wantCheck)
-			}
-		})
+	return string(out)
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func seedReleaseRepo(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin.git")
+	repo := filepath.Join(base, "repo")
+
+	gitRun(t, base, "init", "--bare", "-b", "main", origin)
+	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "go.mod"), fixtureRootGoMod)
+	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n")
+	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fixturePipelinesGoMod)
+	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
+	writeFile(t, filepath.Join(repo, ".sparkwing", "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
+	fixtureModuleDir := filepath.Join(repo, filepath.FromSlash(kubernetesE2EPipelineModuleRel))
+	if err := os.MkdirAll(fixtureModuleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(fixtureModuleDir, "go.mod"), fixtureKubernetesE2EPipelinesGoMod)
+	writeFile(t, filepath.Join(fixtureModuleDir, "go.sum"), "")
+	writeFile(t, filepath.Join(fixtureModuleDir, "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
+	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, filepath.Dir(scaffoldAPISnapshotRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)), "package scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldAPISnapshotRel)), "# pkg/scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
+	writeFile(t, filepath.Join(repo, "bin", "regen-api-snapshot.sh"), fixtureRegenAPISnapshot)
+
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "test@example.invalid")
+	gitRun(t, repo, "config", "user.name", "test")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+	gitRun(t, repo, "config", "tag.gpgsign", "false")
+	gitRun(t, repo, "config", "core.hooksPath", t.TempDir())
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "seed")
+	gitRun(t, repo, "remote", "add", "origin", origin)
+	gitRun(t, repo, "push", "-u", "origin", "main")
+	return repo
 }

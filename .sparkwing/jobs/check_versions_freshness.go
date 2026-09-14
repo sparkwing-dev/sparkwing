@@ -34,15 +34,7 @@ var sparkwingPinArtifacts = []string{
 	kubernetesE2EPipelineModuleRel + "/go.sum",
 }
 
-type VersionFreshnessOptions struct {
-	AllowReleaseLineSelfReplace bool
-}
-
 func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
-	return CheckVersionsFreshnessWithOptions(ctx, repoRoot, VersionFreshnessOptions{})
-}
-
-func CheckVersionsFreshnessWithOptions(ctx context.Context, repoRoot string, options VersionFreshnessOptions) error {
 	mods, err := findGoModFiles(repoRoot)
 	if err != nil {
 		return fmt.Errorf("scan go.mod files: %w", err)
@@ -74,9 +66,6 @@ func CheckVersionsFreshnessWithOptions(ctx context.Context, repoRoot string, opt
 					problems = append(problems, fmt.Sprintf("%s: replace -> %s: %v", relMod, replace.New.Path, err))
 					continue
 				}
-				if !shouldCheckLocalReplaceFreshness(relMod, req.Mod.Path, localPath, repoRoot, options) {
-					continue
-				}
 				behind, behindBy, err := localBehindRemote(ctx, localPath)
 				if err != nil {
 					problems = append(problems, fmt.Sprintf("%s: replace -> %s: %v", relMod, localPath, err))
@@ -102,24 +91,6 @@ func CheckVersionsFreshnessWithOptions(ctx context.Context, repoRoot string, opt
 		return fmt.Errorf("version freshness:\n  - %s", strings.Join(problems, "\n  - "))
 	}
 	return nil
-}
-
-func shouldCheckLocalReplaceFreshness(relMod, modulePath, localPath, repoRoot string, options VersionFreshnessOptions) bool {
-	if !options.AllowReleaseLineSelfReplace {
-		return true
-	}
-	if relMod != ".sparkwing/go.mod" || modulePath != sdkModulePath {
-		return true
-	}
-	absRepoRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		return true
-	}
-	absLocalPath, err := filepath.Abs(localPath)
-	if err != nil {
-		return true
-	}
-	return filepath.Clean(absLocalPath) != filepath.Clean(absRepoRoot)
 }
 
 func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
@@ -513,14 +484,6 @@ func readPipelineModulePin(repoRoot, moduleDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s has no %s requirement", path, sdkModulePath)
-}
-
-func releaseVersionArtifactsAligned(repoRoot, version string) (bool, error) {
-	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
-	if err != nil {
-		return false, err
-	}
-	return aligned && pinned == version, nil
 }
 
 func coherentReleaseVersionArtifacts(repoRoot string) (string, bool, error) {

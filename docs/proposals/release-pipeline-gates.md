@@ -1,6 +1,8 @@
 # Gate the `release` pipeline on `pre-commit` + `pre-push`
 
-Status: implemented in v0.5.1.
+Status: implemented in v0.5.1, since superseded. The gates named here now run
+in hosted CI against the tagged source instead of in the local release
+pipeline; see "Releasing sparkwing" in [getting-started.md](../getting-started.md).
 
 ## Problem
 

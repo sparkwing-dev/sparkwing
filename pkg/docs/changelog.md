@@ -163,6 +163,27 @@ unlock.
   `sparkwing pipeline hooks install` rewrites the scripts, because each script
   names its pipeline.
 
+- **release pipeline:** A release is a tag push. `sparkwing run release` is
+  seven nodes now -- resolve a version, check it outranks the newest tag origin
+  carries, check the tree is clean, rename the changelog `[Unreleased]` section
+  to the version, check that section accounts for any runs-store schema or
+  wire-format change, commit, tag and push -- and every one of them is a cheap
+  read of files and git. The broad gate, the pre-release tier, the template
+  proof and the contract preflight no longer run locally at the tag boundary:
+  the hosted release workflow runs every one of them against the tagged source
+  before it builds, publishes, or creates the GitHub release, so a red check
+  publishes nothing and the fix is a later patch tag.
+- **release workflow:** The validate stage now refuses a tag before anything
+  builds. `bin/check-release-tag-order.sh` refuses a version that does not
+  outrank the newest one already published, and the new `release-verify`
+  pipeline refuses a tag whose source carries no `[vX.Y.Z]` changelog section
+  or an unaccounted schema or wire cut. A tag pushed by hand is judged the same
+  way one cut by `sparkwing run release` is, and a missing changelog section
+  can no longer surface after the images are published.
+- **cli:** A repository that pins an SDK version whose binaries the release
+  workflow has not published yet no longer fails every hook with a 404. The
+  toolchain fetch warns and falls back to the newest published release, so a
+  repository can pin a version the moment its tag exists.
 - **pkg/store + controller:** The credit surfaces added this cycle carry less
   machinery. The derived runner cap is cached once rather than once per
   principal, because the ledger records no principal and every principal
@@ -242,6 +263,15 @@ unlock.
 
 ### Removed
 
+- **release pipeline:** The `check-branch-published` and
+  `gate-release-lineage` nodes, and the tip check inside `push-tag`, are gone.
+  The pipeline no longer refuses a checkout that origin has moved ahead of, or
+  a line that does not contain the newest release tag, so a release can be cut
+  from any commit whose version is ahead of the previous one. The
+  `bump-self-replace` and `restore-self-replace` nodes are gone with them: a
+  released binary stamps its own tag into a fresh scaffold, and the committed
+  SDK pin is carried forward by the `pre-release` tier's existing auto-bump,
+  which resolves the newest released tag itself.
 - **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
   and the fleet CLI
 

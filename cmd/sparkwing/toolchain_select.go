@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -158,62 +160,104 @@ func readSDKPin(sparkwingDir string) (sdkPin, error) {
 }
 
 func runToolchain(w io.Writer, d toolchainDecision) error {
-	binPath, err := ensureToolchainBinary(w, d.pin)
+	binPath, served, err := ensureToolchainBinary(w, d.pin)
 	if err != nil {
 		return err
 	}
+	if served == d.installed {
+		return nil
+	}
 	fmt.Fprintf(w, "sparkwing: running %s from %s because this repo pins SDK %s and the installed sparkwing is %s\n",
-		d.pin, tildePath(binPath), d.pin, d.installed)
-	return toolchainExecFn(binPath, os.Args[1:], setEnv(os.Environ(), toolchainActiveEnv, d.pin))
+		served, tildePath(binPath), d.pin, d.installed)
+	return toolchainExecFn(binPath, os.Args[1:], setEnv(os.Environ(), toolchainActiveEnv, served))
 }
 
-func ensureToolchainBinary(w io.Writer, version string) (string, error) {
+// safety: returns the release it actually served, which is an older one when
+// safety: version names a tag whose binaries are not published yet; the caller
+// safety: has to exec and announce that release, not the pin.
+func ensureToolchainBinary(w io.Writer, version string) (string, string, error) {
 	if !isReleaseTag(version) {
-		return "", fmt.Errorf("toolchain version %q is not a canonical stable release", version)
+		return "", "", fmt.Errorf("toolchain version %q is not a canonical stable release", version)
 	}
 	p, err := paths.DefaultPaths()
 	if err != nil {
-		return "", fmt.Errorf("locate the sparkwing home for the toolchain store: %w", err)
+		return "", "", fmt.Errorf("locate the sparkwing home for the toolchain store: %w", err)
 	}
 	dir := p.ToolchainDir(version)
 	binPath := p.ToolchainBinary(version)
 	stale := ""
 	if verifyErr := verifyStoredToolchain(dir, binPath); verifyErr == nil {
 		removeLegacyDigestSidecar(binPath)
-		return binPath, nil
+		return binPath, version, nil
 	} else if _, statErr := os.Stat(binPath); statErr == nil {
 		stale = verifyErr.Error()
 		fmt.Fprintf(w, "sparkwing: stored toolchain %s failed verification (%s); fetching again\n", version, stale)
 	}
 	verified, err := fetchVerifiedRelease(version)
 	if err != nil {
-		return "", toolchainFetchError(version, stale, err)
+		// safety: only a missing asset means "not published yet". A signature
+		// safety: or digest failure is a release that is wrong, and serving an
+		// safety: older one in its place would hide it.
+		if !isAssetNotPublished(err) {
+			return "", "", toolchainFetchError(version, stale, err)
+		}
+		published, fallbackErr := newestPublishedRelease(version)
+		if fallbackErr != nil {
+			return "", "", toolchainFetchError(version, stale, err)
+		}
+		fmt.Fprintf(w, "sparkwing: %s has no published binaries yet (%v); falling back to %s\n", version, err, published)
+		return ensureToolchainBinary(w, published)
 	}
-	if err := prepareToolchainStore(p, dir); err != nil {
+	if err := installToolchainRelease(w, p, dir, binPath, version, verified); err != nil {
+		return "", "", err
+	}
+	return binPath, version, nil
+}
+
+// safety: a repository pins a tag the moment it exists, so the newest release
+// safety: below it is what serves until the release workflow publishes.
+func newestPublishedRelease(version string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
+	defer cancel()
+	latest, err := updateFetchLatest(ctx)
+	if err != nil {
 		return "", err
+	}
+	if !isReleaseTag(latest) {
+		return "", fmt.Errorf("latest release %q is not a canonical stable release", latest)
+	}
+	if semver.Compare(latest, version) >= 0 {
+		return "", fmt.Errorf("latest release %s does not precede %s", latest, version)
+	}
+	return latest, nil
+}
+
+func installToolchainRelease(w io.Writer, p paths.Paths, dir, binPath, version string, verified verifiedReleaseAsset) error {
+	if err := prepareToolchainStore(p, dir); err != nil {
+		return err
 	}
 	stage, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", verified.bytes, 0o700)
 	if err != nil {
-		return "", fmt.Errorf("stage %s: %w", binPath, err)
+		return fmt.Errorf("stage %s: %w", binPath, err)
 	}
 	if err := assertToolchainVersion(stage, version); err != nil {
 		_ = os.Remove(stage)
-		return "", err
+		return err
 	}
 	if err := os.Rename(stage, binPath); err != nil {
 		_ = os.Remove(stage)
-		return "", fmt.Errorf("install %s: %w", binPath, err)
+		return fmt.Errorf("install %s: %w", binPath, err)
 	}
 	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName), verified.manifest); err != nil {
-		return "", err
+		return err
 	}
 	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName+".sig"), verified.manifestSig); err != nil {
-		return "", err
+		return err
 	}
 	removeLegacyDigestSidecar(binPath)
 	fmt.Fprintf(w, "sparkwing: fetched and verified sparkwing %s from %s (sha256 %s)\n",
 		version, releaseBaseURL(version), verified.digest)
-	return binPath, nil
+	return nil
 }
 
 func removeLegacyDigestSidecar(binPath string) {

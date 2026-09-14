@@ -290,14 +290,24 @@ launcher when testing isolated tool state.
   guidance before release. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
-- **Release:** merging is not a release. Clean-tree, version, and lineage
-  checks must pass before contract and broad verification start. A release is
-  an explicit operator decision: preview with `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
-  --sw-dry-run`, then use `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
-  --version vX.Y.Z --sw-allow destructive,prod` to rewrite the changelog and
-  push the tag; the isolated home keeps prerelease state out of the operational
-  runs store, which the release runner refuses to touch. GitHub Actions owns
-  public binaries and images after that tag.
+- **Release:** merging is not a release; a release is a tag push. The local
+  `release` pipeline is seven cheap nodes -- resolve a version that outranks the
+  newest tag origin carries, check the tree is clean, rename the changelog
+  `[Unreleased]` section to the version, check that section accounts for any
+  schema or wire cut, commit, tag, push the branch and the tag -- and refuses
+  nothing about where origin's branch tip is, so a tag can be cut from any
+  commit. Preview with
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
+  destructive,prod`; the isolated home keeps prerelease state out of the
+  operational runs store, which the release runner refuses to touch. From the
+  tag push on, `.github/workflows/release.yaml` owns the release: its validate
+  stage re-checks the version against the newest published one and runs
+  `sparkwing run release-verify` over the tagged source before anything builds,
+  then it runs every gate on the tagged source,
+  builds the binaries and images, publishes them, and creates the GitHub
+  release from that tag's changelog section. A red check there publishes
+  nothing; the fix is a later patch tag, never a re-cut of a published one.
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
   bundle is unchanged, then exercise the installed CLI and daemon. To exercise a
