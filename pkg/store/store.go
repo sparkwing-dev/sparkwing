@@ -7013,7 +7013,57 @@ func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, r
 SELECT id FROM runs
  WHERE status = ?
    AND last_heartbeat_at IS NOT NULL
-   AND last_heartbeat_at < ?`, runStatusRunning, cutoff)
+   AND last_heartbeat_at < ?
+   AND NOT EXISTS (
+       SELECT 1 FROM triggers t
+        WHERE t.id = runs.id AND `+triggerRequeuedSQL("t.")+`)`,
+		runStatusRunning, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range ids {
+		if err := s.cascadeOrphanedNodes(ctx, id, reason, now); err != nil {
+			return nil, err
+		}
+		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
+}
+
+// safety: this is the deadline the requeued-trigger exclusions answer to. A run
+// whose trigger went back in the queue survives the orphan sweeps, so without a
+// bound a queue no runner serves would hold it open for good.
+func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline time.Duration, reason string) ([]string, error) {
+	cutoff := time.Now().Add(-deadline).UnixNano()
+	now := time.Now().UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT r.id
+  FROM runs r
+  JOIN triggers t ON t.id = r.id
+ WHERE r.finished_at IS NULL
+   AND r.status IN (?, ?)
+   AND `+triggerRequeuedSQL("t.")+`
+   AND r.started_at > 0
+   AND r.started_at < ?
+   AND t.available_at < ?`,
+		runStatusPending, runStatusRunning, cutoff, cutoff)
 	if err != nil {
 		return nil, err
 	}

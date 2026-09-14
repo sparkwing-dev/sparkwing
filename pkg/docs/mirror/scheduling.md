@@ -14,6 +14,13 @@ them. The controller filters incompatible runners before claim ordering. A node
 with no eligible runner waits until the queue deadline, then fails with
 `queue_timeout` (default 15m).
 
+The same deadline covers the step before any node exists. A dispatched run whose
+trigger no runner has claimed stays pending, and a claim whose runner dies puts
+the trigger back in the queue for the next claimant instead of ending the run.
+The controller fails a run whose trigger sits unclaimed past the queue deadline,
+which is what lets the first run submitted during a runner-pool rollout wait out
+the rollout.
+
 ## Label-match semantics
 
 Labels are compared as **literal equality strings** -- the matcher does

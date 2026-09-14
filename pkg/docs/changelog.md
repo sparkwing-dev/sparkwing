@@ -45,6 +45,18 @@ unlock.
 
 ### Fixed
 
+- **controller:** A run whose trigger went back into the claim queue now waits
+  for the next claimant instead of failing three minutes after the claim that
+  held it died. Releasing an expired claim leaves a run nothing has executed yet
+  pending, and the stale-running sweep skips a run whose trigger is queued, so
+  the first run submitted during a runner-pool rollout survives the rollout. The
+  queue timeout (`Server.WithQueueTimeout`, 15 minutes by default) is the bound:
+  a run whose trigger sits unclaimed past it fails with "no runner claimed this
+  run's trigger before the queue deadline".
+- **controller:** `POST /api/v1/runs/{id}/nodes` now answers `409` naming the
+  run's recorded status and error when the run has already finished, and `409`
+  when the claim that names the run no longer holds it. A child that reaches a
+  reaped run reports why its node was refused instead of a `500`.
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".

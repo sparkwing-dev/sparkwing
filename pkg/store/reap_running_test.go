@@ -171,3 +171,166 @@ func TestReapStaleRunningRuns_IgnoresTerminalRuns(t *testing.T) {
 		t.Errorf("expected status=success preserved, got %q", run.Status)
 	}
 }
+
+func requeueClaimedTrigger(t *testing.T, s *store.Store, id, pipeline string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID:        id,
+		Pipeline:  pipeline,
+		CreatedAt: time.Now().Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if _, err := s.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	ids, err := store.Maintenance.ReapExpiredTriggers(s, ctx)
+	if err != nil {
+		t.Fatalf("ReapExpiredTriggers: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != id {
+		t.Fatalf("expected the expired claim to requeue [%s], got %v", id, ids)
+	}
+}
+
+func TestReapStaleRunningRuns_LeavesRequeuedTriggerRunsAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	const runID, nodeID = "run-requeued", "node-a"
+	requeueClaimedTrigger(t, s, runID, "demo")
+	seedRunAndNode(t, s, runID, nodeID)
+	if err := s.TouchRunHeartbeat(ctx, runID); err != nil {
+		t.Fatalf("TouchRunHeartbeat: %v", err)
+	}
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`),
+		time.Now().Add(-10*time.Minute).UnixNano(), runID); err != nil {
+		t.Fatalf("backdate heartbeat: %v", err)
+	}
+
+	ids, err := store.Maintenance.ReapStaleRunningRuns(s, ctx,
+		1*time.Minute, "test reason")
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("a run whose trigger is back in the claim queue must survive; got %v", ids)
+	}
+	run, err := s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Status != "running" {
+		t.Errorf("expected status=running, got %q", run.Status)
+	}
+	node, err := s.GetNode(ctx, runID, nodeID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.Status != "pending" {
+		t.Errorf("expected the node to stay pending, got %q", node.Status)
+	}
+}
+
+func TestReapQueueExpiredRuns_FailsRunsPastTheQueueDeadline(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	const runID = "run-queue-expired"
+	requeueClaimedTrigger(t, s, runID, "demo")
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        runID,
+		Pipeline:  "demo",
+		Status:    "pending",
+		StartedAt: time.Now().Add(-20 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	ids, err := store.Maintenance.ReapQueueExpiredRuns(s, ctx,
+		15*time.Minute, "test deadline")
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != runID {
+		t.Fatalf("expected to reap [%s], got %v", runID, ids)
+	}
+	run, err := s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Status != "failed" {
+		t.Errorf("expected status=failed, got %q", run.Status)
+	}
+	if run.Error != "test deadline" {
+		t.Errorf("expected error=%q, got %q", "test deadline", run.Error)
+	}
+	if run.FinishedAt == nil {
+		t.Error("expected finished_at to be set")
+	}
+}
+
+func TestReapQueueExpiredRuns_LeavesRunsInsideTheDeadlineAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	const runID = "run-queue-waiting"
+	requeueClaimedTrigger(t, s, runID, "demo")
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        runID,
+		Pipeline:  "demo",
+		Status:    "pending",
+		StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	ids, err := store.Maintenance.ReapQueueExpiredRuns(s, ctx,
+		15*time.Minute, "test deadline")
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("a run inside the queue deadline must survive; got %v", ids)
+	}
+	run, err := s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Status != "pending" {
+		t.Errorf("expected status=pending, got %q", run.Status)
+	}
+}
+
+func TestReapQueueExpiredRuns_LeavesUnclaimedTriggersAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	const runID = "run-never-claimed"
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID:        runID,
+		Pipeline:  "demo",
+		CreatedAt: time.Now().Add(-40 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID:        runID,
+		Pipeline:  "demo",
+		Status:    "pending",
+		StartedAt: time.Now().Add(-40 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	ids, err := store.Maintenance.ReapQueueExpiredRuns(s, ctx,
+		15*time.Minute, "test deadline")
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("a trigger no claimant ever held keeps its existing fate; got %v", ids)
+	}
+}
