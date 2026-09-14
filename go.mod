@@ -12,6 +12,9 @@ go 1.26.0
 // pin to them.
 retract (
 	[v1.0.0, v1.6.1]
+	// Never released. Tagged from a fixture commit on no branch on 2026-09-14
+	// and recalled within the hour; the proxy cached it. v0.50.5 supersedes it.
+	v0.52.0
 	// Never released. Tagged off a branch that never landed on main, the
 	// build failed at signing, no binaries shipped. The proxy cached the
 	// tag before it could be recalled; v0.31.0 supersedes it.

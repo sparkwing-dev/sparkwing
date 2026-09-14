@@ -18,10 +18,14 @@ We are intentionally on the `v0.x.y` line. v0 has no semver
 stability promise -- minors can break things, patches can introduce
 new APIs. We are using v0's flexibility to iterate the contract.
 
-A v1.x.y line on the Go proxy is **retracted** and unsupported -- do
-not pin to it. The `retract` block in `go.mod` is the authoritative
-list. v1.x snapshots stay resolvable (proxy snapshots are immutable)
-but carry no support.
+The `retract` block in `go.mod` is the authoritative list of versions
+this project does not stand behind: the whole v1.x.y line on the Go
+proxy, and v0.52.0, a tag cut from a fixture commit on no branch and
+recalled within the hour. Do not pin to any of them. A retracted
+snapshot stays resolvable, because proxy snapshots are immutable, but
+carries no support and is never re-cut on another commit. Go reads
+retractions from the highest published version's `go.mod`, so an entry
+reaches consumers with the next release that outranks it.
 
 ## Versioning per repo
 
