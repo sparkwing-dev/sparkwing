@@ -9,10 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumn upgrades a database that
-// reached the step before the compute-guard step without nodes.claim_principal, the
-// column that step indexes. Such a database takes the column rather than refusing to open.
-func TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumn(t *testing.T) {
+// TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumns upgrades a database that
+// reached the compute-guard step without the columns that step indexes. Such a database
+// takes each column rather than refusing to open.
+func TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumns(t *testing.T) {
 	target := storetest.New(t)
 	seeded, err := target.TryOpen()
 	if err != nil {
@@ -28,8 +28,15 @@ func TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumn(t *testing.T) {
 		t.Fatalf("seed node: %v", err)
 	}
 	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_nodes_credit_active`,
+		`DROP INDEX IF EXISTS idx_nodes_credit_window`,
 		`DROP INDEX IF EXISTS idx_nodes_credit_principal`,
+		`DROP INDEX IF EXISTS idx_runs_created`,
+		`DROP INDEX IF EXISTS idx_runs_principal_created`,
 		`ALTER TABLE nodes DROP COLUMN claim_principal`,
+		`ALTER TABLE nodes DROP COLUMN credit_charged_through`,
+		`ALTER TABLE runs DROP COLUMN created_at`,
+		`ALTER TABLE runs DROP COLUMN created_principal`,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 40`,
 	} {
 		if _, err := seeded.DB().Exec(stmt); err != nil {
@@ -51,13 +58,18 @@ func TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumn(t *testing.T) {
 		t.Fatalf("version after upgrade = %d, want %d", v, store.ExpectedSchemaVersion())
 	}
 	// safety: selecting the column is how both dialects answer whether it
-	// exists; the row set stays empty so the query reads the schema alone.
-	rows, err := upgraded.DB().Query(`SELECT claim_principal FROM nodes WHERE 1 = 0`)
-	if err != nil {
-		t.Fatalf("the upgrade did not carry nodes.claim_principal: %v", err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close the schema probe: %v", err)
+	// exists; the row set stays empty so each query reads the schema alone.
+	for _, probe := range []string{
+		`SELECT claim_principal, credit_charged_through FROM nodes WHERE 1 = 0`,
+		`SELECT created_at, created_principal FROM runs WHERE 1 = 0`,
+	} {
+		rows, err := upgraded.DB().Query(probe)
+		if err != nil {
+			t.Fatalf("the upgrade did not carry every column it indexes (%s): %v", probe, err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close the schema probe: %v", err)
+		}
 	}
 	node, err := upgraded.GetNode(ctx, "r39", "n1")
 	if err != nil {

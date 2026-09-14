@@ -104,13 +104,13 @@ unlock.
 
 ### Fixed
 
-- **store:** A store whose schema predates `nodes.claim_principal` joining the
-  early-version column sweep now takes the column at the compute-guard step
-  rather than refusing to open. That step indexes the column, but the sweep
-  that supplies it stops running a few versions in, so a store carried past
-  those versions before the column joined the sweep arrived at the index
-  without it and the daemon failed with `no such column: claim_principal`. The
-  step carries the column itself now, on SQLite and on Postgres.
+- **store:** The compute-guard schema step now adds every column its indexes
+  name rather than assuming an earlier step supplied it. It indexes
+  `nodes.claim_principal`, `nodes.credit_charged_through` and `runs.created_at`,
+  and the column sweep that supplies the first and third stops running a few
+  versions in; a store carried past those versions before a column joined the
+  sweep reached the index without it, and opening it failed with
+  `no such column: claim_principal`. Both dialects now carry the columns.
 
 - **CLI + cluster:** `sparkwing worker` and the in-process worker loop now name
   themselves to the controller, honor `X-Sparkwing-Poll-After`, and back off on
