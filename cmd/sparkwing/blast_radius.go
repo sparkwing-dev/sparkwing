@@ -20,6 +20,10 @@ func declaredRisks(ctx context.Context, sparkwingDir, pipelineName string) []ste
 	if err != nil || schemas == nil {
 		return nil
 	}
+	return risksIn(schemas, pipelineName)
+}
+
+func risksIn(schemas []sparkwing.DescribePipeline, pipelineName string) []stepRiskFinding {
 	for _, s := range schemas {
 		if s.Name != pipelineName {
 			continue

@@ -173,8 +173,13 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 	// as `sparkwing run <pipeline> --key value` would, so the repository's
 	// defaults and the pipeline's own args still merge underneath them.
 	result, err := persistSubmission(ctx, l.store, l.paths, submission{
-		Pipeline:     s.Pipeline,
-		RepoDir:      s.RepoPath,
+		Pipeline: s.Pipeline,
+		RepoDir:  s.RepoPath,
+		Gate: riskGate{
+			Surface:      "schedule " + s.ID,
+			Pipeline:     s.Pipeline,
+			PinnedBinary: s.LockedBinary,
+		}.check,
 		Source:       scheduleTriggerSource,
 		ScheduleID:   s.ID,
 		Args:         s.Effective().Args,

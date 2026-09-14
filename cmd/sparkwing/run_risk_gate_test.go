@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,11 +11,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const riskFixtureModule = "riskfixture"
 
 const riskMarkerEnv = "RISK_FIXTURE_MARKER"
+
+// safety: the empty string writes the same fixture pipeline declaring nothing.
+const riskDeclaration = ".\n\t\tRisk(\"destructive\", \"prod\")"
 
 // TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk requires the refusal on the
 // invocation that compiles the pipeline, not only on the one after it.
@@ -32,7 +40,7 @@ func TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", sparkwingHome)
 	offlineStopDaemon(t, sparkwingHome)
 	marker := filepath.Join(t.TempDir(), "ran.txt")
-	repoDir, sparkwingDir := riskWriteFixture(t)
+	repoDir, sparkwingDir := riskWriteFixture(t, riskDeclaration)
 
 	env := append(os.Environ(),
 		"SPARKWING_HOME="+sparkwingHome,
@@ -40,7 +48,7 @@ func TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk(t *testing.T) {
 		"GOWORK=off",
 		riskMarkerEnv+"="+marker,
 	)
-	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
 		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
 	}
 
@@ -87,7 +95,7 @@ func TestRunDetached_RefusesADeclaredRisk(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", sparkwingHome)
 	offlineStopDaemon(t, sparkwingHome)
 	marker := filepath.Join(t.TempDir(), "ran.txt")
-	repoDir, sparkwingDir := riskWriteFixture(t)
+	repoDir, sparkwingDir := riskWriteFixture(t, riskDeclaration)
 
 	env := append(os.Environ(),
 		"SPARKWING_HOME="+sparkwingHome,
@@ -95,7 +103,7 @@ func TestRunDetached_RefusesADeclaredRisk(t *testing.T) {
 		"GOWORK=off",
 		riskMarkerEnv+"="+marker,
 	)
-	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
 		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
 	}
 
@@ -111,6 +119,191 @@ func TestRunDetached_RefusesADeclaredRisk(t *testing.T) {
 	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("the refused launch executed pipeline work: %v", statErr)
 	}
+}
+
+// TestRunDetached_RefusesARiskTheRefDeclares requires the gate to weigh the
+// checkout the run will execute. The working tree declares nothing and the ref
+// declares two labels, so a gate that read the submitting tree would queue the
+// run and the consumer would execute the risk-labeled step.
+func TestRunDetached_RefusesARiskTheRefDeclares(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the risk gate compiles a fixture pipeline binary; run without -short")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	cli := buildSubmitCLI(t)
+
+	sparkwingHome := t.TempDir()
+	t.Setenv("SPARKWING_HOME", sparkwingHome)
+	offlineStopDaemon(t, sparkwingHome)
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	repoDir, sparkwingDir := riskWriteFixture(t, "")
+
+	env := append(os.Environ(),
+		"SPARKWING_HOME="+sparkwingHome,
+		"SPARKWING_LOG_FORMAT=quiet",
+		"GOWORK=off",
+		riskMarkerEnv+"="+marker,
+	)
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
+	}
+
+	git := func(args ...string) {
+		t.Helper()
+		out, gerr := offlineRunTool(gitBin, repoDir, riskGitEnv(t, env), args...)
+		if gerr != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), gerr, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("add", "-A")
+	git("commit", "-q", "-m", "a pipeline that declares nothing")
+	git("checkout", "-q", "-b", "riskybranch")
+	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), fmt.Sprintf(riskFixtureJobs, riskDeclaration))
+	git("commit", "-qam", "the same pipeline declaring a risk")
+	git("checkout", "-q", "main")
+
+	refused, err := offlineRunCLI(cli, repoDir, env, "run", "risky", "--sw-detached", "--sw-ref", "riskybranch")
+	if err == nil {
+		t.Fatalf("a detached launch at a risk-declaring ref was admitted:\n%s", refused)
+	}
+	for _, want := range []string{`step "push"`, "destructive", "prod", "--sw-allow"} {
+		if !strings.Contains(refused, want) {
+			t.Fatalf("the refusal does not name %q:\n%s", want, refused)
+		}
+	}
+	if pid, ok := orchestrator.ConsumerPID(sparkwingHome); ok {
+		t.Fatalf("the refused launch started consumer process %d", pid)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the refused launch executed pipeline work: %v", statErr)
+	}
+}
+
+// TestCronLaunch_RefusesADeclaredRisk requires a scheduled launch to be weighed
+// too: it queues a run through the same submission path with no operator and no
+// allow.
+func TestCronLaunch_RefusesADeclaredRisk(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the risk gate compiles a fixture pipeline binary; run without -short")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+
+	sparkwingHome := t.TempDir()
+	t.Setenv("SPARKWING_HOME", sparkwingHome)
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	t.Setenv(riskMarkerEnv, marker)
+	repoDir, sparkwingDir := riskWriteFixture(t, riskDeclaration)
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, append(os.Environ(), "GOWORK=off"), "mod", "tidy"); tidyErr != nil {
+		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
+	}
+
+	paths := orchestrator.PathsAt(sparkwingHome)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure %s: %v", paths.Root, err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open %s: %v", paths.StateDB(), err)
+	}
+	t.Cleanup(func() {
+		if cerr := st.Close(); cerr != nil {
+			t.Errorf("close %s: %v", paths.StateDB(), cerr)
+		}
+	})
+
+	_, err = cronLauncher{store: st, paths: paths}.Launch(context.Background(),
+		store.CronSchedule{ID: "sched-risky", Pipeline: "risky", RepoPath: repoDir}, time.Now())
+	if err == nil {
+		t.Fatal("a scheduled launch of a risk-declaring pipeline was admitted")
+	}
+	for _, want := range []string{"sched-risky", `step "push"`, "destructive", "prod"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not name %q: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the refused schedule executed pipeline work: %v", statErr)
+	}
+}
+
+// TestCronLaunch_WeighsThePinnedBinary requires the gate to weigh what an armed
+// schedule will exec. Arming keeps the binary it compiled, so a checkout edited
+// afterwards is not what runs, and its declarations are not the ones that count.
+func TestCronLaunch_WeighsThePinnedBinary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the risk gate compiles a fixture pipeline binary; run without -short")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+
+	sparkwingHome := t.TempDir()
+	t.Setenv("SPARKWING_HOME", sparkwingHome)
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	t.Setenv(riskMarkerEnv, marker)
+	repoDir, sparkwingDir := riskWriteFixture(t, riskDeclaration)
+	env := append(os.Environ(), "GOWORK=off", riskMarkerEnv+"="+marker)
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
+	}
+	pinned := filepath.Join(t.TempDir(), "pinned")
+	if out, buildErr := offlineRunTool(goBin, sparkwingDir, env, "build", "-o", pinned, "."); buildErr != nil {
+		t.Fatalf("building the pinned binary: %v\n%s", buildErr, out)
+	}
+	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), fmt.Sprintf(riskFixtureJobs, ""))
+
+	paths := orchestrator.PathsAt(sparkwingHome)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure %s: %v", paths.Root, err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open %s: %v", paths.StateDB(), err)
+	}
+	t.Cleanup(func() {
+		if cerr := st.Close(); cerr != nil {
+			t.Errorf("close %s: %v", paths.StateDB(), cerr)
+		}
+	})
+
+	_, err = cronLauncher{store: st, paths: paths}.Launch(context.Background(),
+		store.CronSchedule{ID: "sched-pinned", Pipeline: "risky", RepoPath: repoDir, LockedBinary: pinned},
+		time.Now())
+	if err == nil {
+		t.Fatal("a schedule pinned to a risk-declaring build was admitted because its checkout declares nothing")
+	}
+	if !strings.Contains(err.Error(), `step "push"`) {
+		t.Fatalf("the refusal does not name the pinned build's step: %v", err)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the refused schedule executed pipeline work: %v", statErr)
+	}
+}
+
+// safety: git reads the operator's identity and hooks from their home, which a
+// fixture commit must not depend on.
+func riskGitEnv(t *testing.T, env []string) []string {
+	t.Helper()
+	return append(append([]string(nil), env...),
+		"HOME="+t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=sparkwing test",
+		"GIT_AUTHOR_EMAIL=test@example.invalid",
+		"GIT_COMMITTER_NAME=sparkwing test",
+		"GIT_COMMITTER_EMAIL=test@example.invalid",
+	)
 }
 
 // TestRun_RefusesASourceTreeItCannotRead requires a refusal, never an
@@ -132,7 +325,7 @@ func TestRun_RefusesASourceTreeItCannotRead(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", sparkwingHome)
 	offlineStopDaemon(t, sparkwingHome)
 	marker := filepath.Join(t.TempDir(), "ran.txt")
-	repoDir, sparkwingDir := riskWriteFixture(t)
+	repoDir, sparkwingDir := riskWriteFixture(t, riskDeclaration)
 
 	env := append(os.Environ(),
 		"SPARKWING_HOME="+sparkwingHome,
@@ -140,7 +333,7 @@ func TestRun_RefusesASourceTreeItCannotRead(t *testing.T) {
 		"GOWORK=off",
 		riskMarkerEnv+"="+marker,
 	)
-	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, env, "mod", "tidy"); tidyErr != nil {
 		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
 	}
 	if err := os.Symlink("nowhere-at-all", filepath.Join(sparkwingDir, "notes.txt")); err != nil {
@@ -156,7 +349,7 @@ func TestRun_RefusesASourceTreeItCannotRead(t *testing.T) {
 	}
 }
 
-func riskWriteFixture(t *testing.T) (repoDir, sparkwingDir string) {
+func riskWriteFixture(t *testing.T, declaration string) (repoDir, sparkwingDir string) {
 	t.Helper()
 	repoDir = t.TempDir()
 	sparkwingDir = filepath.Join(repoDir, ".sparkwing")
@@ -169,7 +362,7 @@ func riskWriteFixture(t *testing.T) (repoDir, sparkwingDir string) {
 		riskFixtureModule, offlineRepoRoot(t)))
 	writeFile(t, filepath.Join(sparkwingDir, "sparkwing.yaml"),
 		"pipelines:\n  - name: risky\n    entrypoint: Risky\n    description: Declares a risk on its first step\n")
-	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), riskFixtureJobs)
+	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), fmt.Sprintf(riskFixtureJobs, declaration))
 	writeFile(t, filepath.Join(sparkwingDir, "main.go"), riskFixtureMain)
 	return repoDir, sparkwingDir
 }
@@ -196,8 +389,7 @@ func (p *Risky) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInpu
 type cutJob struct{ sparkwing.Base }
 
 func (j *cutJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "push", func(ctx context.Context) error { return note("push") }).
-		Risk("destructive", "prod")
+	sparkwing.Step(w, "push", func(ctx context.Context) error { return note("push") })%s
 	return nil, nil
 }
 

@@ -79,14 +79,21 @@ unlock.
   `--sw-allow`. A source tree holding a file sparkwing cannot read is refused
   rather than run, because its declarations cannot be weighed.
 
-- **cli:** A detached launch of a pipeline whose step declares a `Risk` is
-  refused rather than dispatched. `sparkwing run <pipeline> --sw-detached`
-  returned before admission and the trigger carries no allow, so the resident
-  consumer ran the risk-labeled step authorized by nothing. The launch now
-  weighs the declarations the way a foreground run does and refuses with the
-  same message, naming the step, its labels and `--sw-allow`, and saying that a
-  detached launch cannot carry an allow. A pipeline that declares no risk
-  launches detached as before.
+- **cli:** A queued run of a pipeline whose step declares a `Risk` is refused
+  rather than dispatched. `sparkwing run <pipeline> --sw-detached` returned
+  before admission and the trigger carries no allow, so the resident consumer
+  ran the risk-labeled step authorized by nothing. The gate now sits where the
+  run is persisted, weighing the checkout the run will execute: a launch naming
+  `--sw-ref` is weighed at that ref, and its worktree is discarded on refusal.
+  A cron schedule queues through the same submission, so a scheduled run of a
+  risk-declaring pipeline is refused too, naming the schedule, and an armed
+  schedule is weighed against the binary it pinned rather than a checkout that
+  has moved since. The refusal
+  carries the message the foreground gate prints, naming the step, its labels
+  and `--sw-allow`, and says that a queued run carries neither an allow nor a
+  dry run. A pipeline that declares no risk queues as before, and the
+  submission reads the declarations from the build it already made to resolve
+  the pipeline, so weighing them costs it no second hash of the tree.
 
 ## [v0.50.5] - 2026-09-14
 ### Changed
