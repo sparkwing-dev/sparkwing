@@ -77,6 +77,7 @@ func main() {
 		os.Exit(2)
 	}
 
+	scoped := -1
 	if *staged || *base != "" {
 		added, aerr := scopedAdds(root, *staged, *base)
 		if aerr != nil {
@@ -90,6 +91,7 @@ func main() {
 		}
 		violations = onlyAdded(violations, root, added)
 		unread = onlyChanged(unread, root, added)
+		scoped = len(added)
 	}
 
 	if len(violations) > 0 {
@@ -101,7 +103,7 @@ func main() {
 	if len(violations) > 0 || len(unread) > 0 {
 		os.Exit(1)
 	}
-	fmt.Println("commentcheck: clean")
+	fmt.Println(cleanLine(scoped))
 }
 
 func diffFailure(base string, err error) string {
@@ -419,3 +421,17 @@ Fix: tag the comment, do not delete it. A body comment must start with one of
   restates what the code already says, and give an exported declaration a
   GoDoc comment rather than a tag.
 `
+
+// safety: a scoped run whose diff named no Go file reports nothing wrong
+// because it read nothing, and a caller who cannot tell that from a pass
+// trusts a verdict that was never reached.
+func cleanLine(scoped int) string {
+	switch {
+	case scoped == 0:
+		return "commentcheck: clean, but the diff named no Go file, so this run judged nothing"
+	case scoped > 0:
+		return fmt.Sprintf("commentcheck: clean across %d file(s)", scoped)
+	default:
+		return "commentcheck: clean"
+	}
+}
