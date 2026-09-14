@@ -1405,24 +1405,28 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				}
 			}
 
-			if n, err := s.store.CountPendingNodes(ctx); err != nil {
-				s.logger.Error("pending nodes sample failed", "err", err)
-			} else {
-				setPendingNodes(n)
-			}
-			if n, err := s.store.CountActiveRunners(ctx, runnerLivenessWindow); err != nil {
-				s.logger.Error("active runners sample failed", "err", err)
-			} else {
-				setActiveRunners(n)
-			}
-			if counts, err := s.store.CountNodesByQueueState(ctx); err != nil {
-				s.logger.Error("queue depth sample failed", "err", err)
-			} else {
-				setQueueDepth(counts)
-			}
-			liveRunners.sample(s.runnerPresence.liveLabelSets(time.Now(), runnerLivenessWindow))
+			s.sampleOperationalSeries(ctx)
 		}
 	}
+}
+
+func (s *Server) sampleOperationalSeries(ctx context.Context) {
+	if n, err := s.store.CountPendingNodes(ctx); err != nil {
+		s.logger.Error("pending nodes sample failed", "err", err)
+	} else {
+		setPendingNodes(n)
+	}
+	if n, err := s.store.CountActiveRunners(ctx, runnerLivenessWindow); err != nil {
+		s.logger.Error("active runners sample failed", "err", err)
+	} else {
+		setActiveRunners(n)
+	}
+	if counts, err := s.store.CountNodesByQueueState(ctx); err != nil {
+		s.logger.Error("queue depth sample failed", "err", err)
+	} else {
+		setQueueDepth(counts)
+	}
+	liveRunners.sample(s.runnerPresence.liveLabelSets(time.Now(), runnerLivenessWindow))
 }
 
 // safety: both ledger sums scan a table that is never pruned, so they run on a
