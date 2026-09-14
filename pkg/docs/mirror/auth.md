@@ -118,10 +118,11 @@ with the current instant and billed from the next pass, so pricing storage
 never bills for the past, and so a team's first bytes cost one pass before the
 meter reaches them. A team that drops to nothing keeps no watermark, and an
 interval is never billed for longer than the bytes in it have been held, so an
-idle stretch is not charged against whatever a team stores next. Each team's
-watermark moves by compare-and-set, so two controllers on one database bill an
-interval once whatever either clock says, and a clock that steps backwards
-bills nothing rather than billing twice.
+idle stretch is not charged against whatever a team stores next. A team whose
+retained runs all carry no creation date bills nothing for that interval. Each
+team's watermark moves by compare-and-set, so two controllers on one database
+bill an interval once whatever either clock says, and a clock that steps
+backwards bills nothing rather than billing twice.
 
 The amount is `bytes x rate x seconds` divided by a gibibyte-day, truncated
 toward zero, so a fraction of a micro-credit is never billed and truncation
