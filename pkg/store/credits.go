@@ -139,6 +139,16 @@ CREATE INDEX IF NOT EXISTS idx_credit_charges_node ON credit_charges(run_id, nod
 const creditGrantReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_reference
     ON credit_grants(kind, reference) WHERE reference != ''`
 
+// safety: the runner cap sums one kind of grant over a date range on every
+// cache miss, so that pair is an index rather than a scan of the ledger.
+const creditGrantKindCreatedIndex = `CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_created
+    ON credit_grants(kind, created_at)`
+
+func applyRunnerCapIndexMigration(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx, creditGrantKindCreatedIndex)
+	return err
+}
+
 // safety: a reversal names the paid grant's reference here, and its own
 // reference is the refund id, so partial refunds of one payment each land.
 var creditGrantReversesCols = map[string]string{

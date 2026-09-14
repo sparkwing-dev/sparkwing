@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -42,7 +43,7 @@ type computeLimitsResp struct {
 		ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
 		AlarmReached       bool             `json:"alarm_reached"`
 		DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
-		RecentPaidMicro    int64            `json:"recent_paid_micro,omitempty"`
+		RecentPaidMicro    int64            `json:"recent_paid_micro"`
 		ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
 	} `json:"usage"`
 }
@@ -169,9 +170,10 @@ func derivedRunnerCapLabel(view computeLimitsResp) string {
 	if view.Usage.ScaleWindowSeconds <= 0 {
 		return strconv.FormatInt(view.Usage.DerivedRunnerCap, 10)
 	}
+	window := time.Duration(view.Usage.ScaleWindowSeconds) * time.Second
 	return fmt.Sprintf("%d, from %s paid in the last %d days",
 		view.Usage.DerivedRunnerCap, store.FormatCredits(view.Usage.RecentPaidMicro),
-		view.Usage.ScaleWindowSeconds/86400)
+		int64(window/(24*time.Hour)))
 }
 
 func sortedPrincipals(held map[string]int64) []string {

@@ -64,6 +64,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// unique index over references a grant already carries, so an older
 	// binary keeps writing the migrated database.
 	42: {creditGrantReversesCols},
+	// safety: v43 adds one index and no column, so an older binary keeps
+	// writing the migrated database.
+	43: nil,
 }
 
 func columnSpecMaps() []map[string]string {

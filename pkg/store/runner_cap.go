@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"math"
 	"time"
 )
@@ -21,8 +22,9 @@ type RunnerCap struct {
 	// Cap is the cloud runners this principal may hold at once. Zero means
 	// max_concurrent_runners is unset, so nothing bounds the principal.
 	Cap int64
-	// RecentPaidMicro is the paid credit granted over [RunnerScaleWindow], in
-	// micro-credits, which is the figure the cap was derived from.
+	// RecentPaidMicro is the paid credit granted over [RunnerScaleWindow]
+	// less the reversals of those grants, in micro-credits, which is the
+	// figure the cap was derived from. It never reads below zero.
 	RecentPaidMicro int64
 }
 
@@ -35,14 +37,27 @@ type runnerCapEntry struct {
 	cap     RunnerCap
 }
 
-const recentPaidGrantsSQL = `SELECT COALESCE(SUM(amount_micro), 0) FROM credit_grants
-  WHERE kind = ? AND created_at >= ?`
+// safety: a reversal is matched to the payment it names rather than to its own
+// date, so a refund settled after the window still takes back the payment that
+// bought the cap, and a refund of a payment that has aged out changes nothing.
+const recentPaidGrantsSQL = `SELECT COALESCE(SUM(g.amount_micro), 0) FROM credit_grants g
+  WHERE (g.kind = ? AND g.created_at >= ?)
+     OR (g.kind = ? AND g.reverses != '' AND EXISTS (
+           SELECT 1 FROM credit_grants p
+            WHERE p.kind = ? AND p.created_at >= ? AND p.reference != ''
+              AND p.reference = g.reverses))`
 
 func recentPaidGrantsMicro(ctx context.Context, q rowQuerier, now time.Time) (int64, error) {
 	var micro int64
-	err := q.QueryRowContext(ctx, recentPaidGrantsSQL,
-		CreditGrantPaid, now.Add(-RunnerScaleWindow).UnixNano()).Scan(&micro)
-	return micro, err
+	since := now.Add(-RunnerScaleWindow).UnixNano()
+	if err := q.QueryRowContext(ctx, recentPaidGrantsSQL,
+		CreditGrantPaid, since, CreditGrantReversal, CreditGrantPaid, since).Scan(&micro); err != nil {
+		return 0, err
+	}
+	if micro < 0 {
+		return 0, nil
+	}
+	return micro, nil
 }
 
 type storeRowQuerier struct{ s *Store }
@@ -66,9 +81,11 @@ func (l ComputeLimits) runnerCapFrom(paidMicro int64) int64 {
 		base = l.RunnerScaleBase
 	}
 	allowed := base
+	// safety: the step is divided into the paid credit rather than multiplied
+	// up to micro-credits, so a setting an older binary stored past
+	// RunnerScaleMaxStepCredits cannot wrap or divide by zero.
 	if l.RunnerScaleStepCredits > 0 && paidMicro > 0 {
-		stepMicro := l.RunnerScaleStepCredits * MicroCreditsPerCredit
-		allowed = addSteps(base, paidMicro/stepMicro)
+		allowed = addSteps(base, (paidMicro/MicroCreditsPerCredit)/l.RunnerScaleStepCredits)
 	}
 	ceiling := l.RunnerScaleCeiling
 	if ceiling <= 0 {
@@ -76,6 +93,12 @@ func (l ComputeLimits) runnerCapFrom(paidMicro int64) int64 {
 	}
 	if ceiling > 0 && allowed > ceiling {
 		allowed = ceiling
+	}
+	// safety: scaling raises the static guard and never tightens it, so a
+	// ceiling below max_concurrent_runners cannot refuse work the guard alone
+	// would have allowed.
+	if allowed < l.ConcurrentRunners {
+		allowed = l.ConcurrentRunners
 	}
 	return allowed
 }
@@ -113,7 +136,8 @@ func (s *Store) runnerCap(
 	if limits.RunnerScaleStepCredits <= 0 {
 		return RunnerCap{Cap: limits.runnerCapFrom(0)}, nil
 	}
-	if cached, ok := s.cachedRunnerCap(limits, principal, now); ok {
+	cached, epoch, ok := s.cachedRunnerCap(limits, principal, now)
+	if ok {
 		return cached, nil
 	}
 	paid, err := recentPaidGrantsMicro(ctx, q, now)
@@ -121,28 +145,48 @@ func (s *Store) runnerCap(
 		return RunnerCap{}, err
 	}
 	out := RunnerCap{Cap: limits.runnerCapFrom(paid), RecentPaidMicro: paid}
-	s.storeRunnerCap(limits, principal, now, out)
+	s.storeRunnerCap(limits, principal, now, epoch, out)
 	return out, nil
 }
 
-func (s *Store) cachedRunnerCap(limits ComputeLimits, principal string, now time.Time) (RunnerCap, bool) {
+// safety: the epoch the derivation started under travels back to the write, so
+// a grant that lands while the ledger is being read leaves an entry the next
+// lookup rejects rather than one that outlives the payment it missed.
+func (s *Store) cachedRunnerCap(
+	limits ComputeLimits, principal string, now time.Time,
+) (RunnerCap, uint64, bool) {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
+	epoch := s.runnerCapEpoch
 	entry, ok := s.runnerCaps[principal]
-	if !ok || entry.epoch != s.runnerCapEpoch || entry.limits != limits || !now.Before(entry.expires) {
-		return RunnerCap{}, false
+	if !ok || entry.epoch != epoch || entry.limits != limits || !now.Before(entry.expires) {
+		return RunnerCap{}, epoch, false
 	}
-	return entry.cap, true
+	return entry.cap, epoch, true
 }
 
-func (s *Store) storeRunnerCap(limits ComputeLimits, principal string, now time.Time, derived RunnerCap) {
+func (s *Store) storeRunnerCap(
+	limits ComputeLimits, principal string, now time.Time, epoch uint64, derived RunnerCap,
+) {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
 	if s.runnerCaps == nil {
 		s.runnerCaps = map[string]runnerCapEntry{}
 	}
 	s.runnerCaps[principal] = runnerCapEntry{
-		limits: limits, epoch: s.runnerCapEpoch, expires: now.Add(runnerCapTTL), cap: derived,
+		limits: limits, epoch: epoch, expires: now.Add(runnerCapTTL), cap: derived,
+	}
+}
+
+// safety: a ledger the derivation cannot read must not reach a runner as a
+// database error, so the claim meets the static guard it would have been
+// measured against and the read failure reaches the operator through the log.
+func runnerCapReadRefusal(err error, limits ComputeLimits, principal string) error {
+	slog.Warn("compute limits: reading recent paid grants failed; holding the static cap",
+		"principal", principal, "cap", limits.ConcurrentRunners, "err", err)
+	return &ComputeLimitError{
+		Limit: ComputeLimitConcurrentRunners, Cap: limits.ConcurrentRunners,
+		Observed: limits.ConcurrentRunners, Scope: "principal " + principal, Principal: principal,
 	}
 }
 

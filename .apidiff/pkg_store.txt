@@ -979,6 +979,8 @@ type RunnerPresence struct {
 
 	FreeSlots int
 }
+const RunnerScaleMaxRunners = 1_000_000
+const RunnerScaleMaxStepCredits = 1_000_000_000
 const RunnerScaleWindow = 30 * 24 * time.Hour
 type SchemaRequirement struct {
 	Name    string

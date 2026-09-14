@@ -70,6 +70,27 @@ const (
 // payment older than this earns nothing.
 const RunnerScaleWindow = 30 * 24 * time.Hour
 
+// Bounds on the scaling guards. They keep an operator's typo out of the
+// arithmetic that derives a cap, where a step of a few quintillion credits
+// would earn nobody anything and a base of the same would mean no ceiling at
+// all.
+const (
+	// RunnerScaleMaxStepCredits is the largest step runner_scale_step_credits
+	// may declare, ten million dollars of credit.
+	RunnerScaleMaxStepCredits = 1_000_000_000
+	// RunnerScaleMaxRunners is the largest runner count runner_scale_base and
+	// runner_scale_ceiling may declare.
+	RunnerScaleMaxRunners = 1_000_000
+)
+
+// safety: a guard outside these bounds is a typo rather than an intention, and
+// the arithmetic that derives a cap reads better when the inputs are sane.
+var computeLimitCeilings = map[string]int64{
+	ComputeLimitRunnerScaleBase:        RunnerScaleMaxRunners,
+	ComputeLimitRunnerScaleCeiling:     RunnerScaleMaxRunners,
+	ComputeLimitRunnerScaleStepCredits: RunnerScaleMaxStepCredits,
+}
+
 // safety: a claim must not pay for a ledger query, so the derivation is held
 // for this long and a grant clears it early.
 const runnerCapTTL = time.Minute
@@ -272,6 +293,9 @@ func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) e
 	if value < 0 {
 		return errors.New("compute limits: a guard must not be negative")
 	}
+	if most, bounded := computeLimitCeilings[name]; bounded && value > most {
+		return fmt.Errorf("compute limits: %s must not exceed %d", name, most)
+	}
 	return s.setCreditSetting(ctx, computeLimitKey(name), value)
 }
 
@@ -351,7 +375,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 	if limits.ConcurrentRunners > 0 {
 		derived, err := s.runnerCap(ctx, tx, limits, claimant.Principal, now)
 		if err != nil {
-			return err
+			return runnerCapReadRefusal(err, limits, claimant.Principal)
 		}
 		var held int64
 		if err := tx.QueryRowContext(ctx,
