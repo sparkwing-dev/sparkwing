@@ -199,8 +199,8 @@ func runFleetAgentsEnrollTo(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("fleet agents enroll: %w", err)
 	}
 	fmt.Fprintln(stderr, "WARNING: stash this token NOW. It is not recoverable after this command exits.")
-	fmt.Fprintf(stderr, "Enrolled %s in %s. Atomically merge this one-time output into the helper's owner-only agent.yaml (0600 on Unix; protected user ACL on Windows):\n", *name, configPath)
-	fmt.Fprintln(stderr, "NOTE: a coordinators block selects enrolled mode, which sparkwing-runner refuses to start without --allow-enrolled-preview.")
+	fmt.Fprintf(stderr, "Enrolled %s in %s. The printed membership records that credential for the coordinator.\n", *name, configPath)
+	fmt.Fprintln(stderr, "NOTE: agent.yaml carries no enrolled-mode keys. Add a helper that executes work with `sparkwing cluster runners add`.")
 	return nil
 }
 

@@ -40,19 +40,17 @@ Provision one helper membership
 
 Atomically mints a runner credential in the local Sparkwing state
 store and binds its verifier to the trusted executor envelope. The raw
-credential prints once in an agent.yaml membership snippet on stdout. The
+credential prints once on stdout as a coordinator membership record. The
 trusted policy is added to fleet.yaml in the same command. Credential verifier
 and binding data remain in Sparkwing's private local state; fleet.yaml stores
 no token material or token identifier.
 
-Atomically merge stdout into the helper's owner-only agent.yaml (0600 on Unix;
-a protected user ACL on Windows). Direct shell redirection can truncate an
-existing multi-coordinator file before validation and can destroy existing
-memberships.
+Store that record where the helper's operator can reach it, in a file only that
+operator can read.
 
-A coordinators block selects enrolled mode, which sparkwing-runner refuses to
-start without --allow-enrolled-preview; enroll a machine that must execute work
-with 'sparkwing cluster runners add' instead.
+agent.yaml carries no enrolled-mode keys, so sparkwing-runner runs claim mode
+only; enroll a machine that must execute work with 'sparkwing cluster runners
+add' instead.
 
 Use one credential per coordinator membership.
 

@@ -16,9 +16,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -141,24 +139,8 @@ func TestFleetAgentsEnrollUpdatesTrustAndPrintsRawOnlyOnce(t *testing.T) {
 	if strings.Contains(stderr, raw) {
 		t.Fatal("stderr exposed raw credential")
 	}
-	agentPath := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := os.WriteFile(agentPath, []byte(stdout), fssecure.FileMode); err != nil {
-		t.Fatal(err)
-	}
-	if err := fssecure.SecurePrivateConfig(agentPath); err != nil {
-		t.Fatal(err)
-	}
-	loadedAgent, err := agentconfig.Load(agentPath)
-	if err != nil {
-		t.Fatalf("load emitted agent.yaml snippet: %v", err)
-	}
-	normalizedAgent, err := agentconfig.Validate(*loadedAgent)
-	if err != nil {
-		t.Fatalf("validate emitted agent.yaml snippet: %v", err)
-	}
-	if len(normalizedAgent.Coordinators) != 1 || normalizedAgent.Coordinators[0].Controller != "http://127.0.0.1:7443" ||
-		normalizedAgent.Coordinators[0].Logs != "http://127.0.0.1:7443" {
-		t.Fatalf("emitted agent membership = %+v", normalizedAgent.Coordinators)
+	if agent.Coordinators[0].Controller != "http://127.0.0.1:7443" || agent.Coordinators[0].Logs != "http://127.0.0.1:7443" {
+		t.Fatalf("emitted membership = %+v", agent.Coordinators[0])
 	}
 
 	cfg, err := fleet.Load(configPath, nil)
