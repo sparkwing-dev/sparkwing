@@ -146,8 +146,10 @@ func TestDrainGitHubCommitStatuses_DoesNotInheritASpentBudget(t *testing.T) {
 	}
 
 	posted := make(chan struct{}, 4)
+	arrived := make(chan struct{}, 4)
 	release := make(chan struct{})
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		arrived <- struct{}{}
 		<-release
 		posted <- struct{}{}
 		w.WriteHeader(http.StatusCreated)
@@ -164,8 +166,10 @@ func TestDrainGitHubCommitStatuses_DoesNotInheritASpentBudget(t *testing.T) {
 
 	liveLogs := &lockedBuffer{}
 	live := queuedCommitStatusServer(t, github.URL, github.Client(), liveLogs)
+	// safety: the post is in flight when the gate opens, so the drain has to
+	// wait for it rather than finding the queue already empty.
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		<-arrived
 		close(release)
 	}()
 	live.drainGitHubCommitStatuses()
