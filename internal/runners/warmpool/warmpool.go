@@ -2,6 +2,7 @@ package warmpool
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,11 @@ type Config struct {
 	ClaimWaitTimeout  time.Duration
 	HeartbeatInterval time.Duration
 	FallbackLabels    []string
+
+	// UnmatchableGrace is how long a node whose labels this dispatcher's
+	// fallback cannot advertise waits for a runner that can before it fails.
+	// Zero means [DefaultUnmatchableGrace].
+	UnmatchableGrace time.Duration
 }
 
 type Runner struct {
@@ -50,6 +56,9 @@ func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logg
 	if cfg.HeartbeatInterval <= 0 {
 		cfg.HeartbeatInterval = store.DispatchedHeartbeatInterval
 	}
+	if cfg.UnmatchableGrace <= 0 {
+		cfg.UnmatchableGrace = DefaultUnmatchableGrace
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -80,7 +89,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	waitDeadline := time.Now().Add(r.cfg.ClaimWaitTimeout)
 	const unmatchableLogEvery = time.Minute
 	var lastUnmatchableLog time.Time
-	unmatchableSince := time.Now()
+	var unmatchableSince time.Time
 
 	for {
 		select {
@@ -107,7 +116,11 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			// safety: a labeled node may fall back only when the fallback explicitly
 			// advertises every label. Most callers configure none.
 			if !sparkwingruntime.MatchLabels(n.NeedsLabels, r.cfg.FallbackLabels) {
-				if time.Since(unmatchableSince) >= UnmatchableGracePeriod {
+				now := time.Now()
+				if unmatchableSince.IsZero() {
+					unmatchableSince = now
+				}
+				if unmatchableExpired(unmatchableSince, now, r.cfg.UnmatchableGrace) {
 					return r.failUnmatchable(ctx, req, n)
 				}
 				if time.Since(lastUnmatchableLog) >= unmatchableLogEvery {
@@ -153,11 +166,27 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	}
 }
 
-// UnmatchableGracePeriod is how long a node whose labels this dispatcher's
+// DefaultUnmatchableGrace is how long a node whose labels this dispatcher's
 // fallback cannot advertise waits for a runner that can before it fails. It
 // bounds the wait for a labeled runner that has yet to start, and is the only
 // end a node above the warm cpu class has when nothing on the fleet serves it.
-const UnmatchableGracePeriod = 5 * time.Minute
+const DefaultUnmatchableGrace = 5 * time.Minute
+
+// safety: the grace runs from the first sighting of an unmatchable node, and a
+// wait exactly as long as the grace is still inside it.
+func unmatchableExpired(since, now time.Time, grace time.Duration) bool {
+	return now.Sub(since) > grace
+}
+
+// UnmatchableEvent is what a node records when no runner advertises its labels
+// and no fallback may take it. It is the "node_unmatchable" event's payload.
+type UnmatchableEvent struct {
+	NeedsLabels    []string `json:"needs_labels"`
+	FallbackLabels []string `json:"fallback_labels"`
+	CPUClassCores  int64    `json:"cpu_class_cores,omitempty"`
+	GraceSeconds   float64  `json:"grace_seconds"`
+	Detail         string   `json:"detail"`
+}
 
 // safety: a node no runner advertises and no fallback may take would otherwise
 // sit until the run's own deadline with nothing saying why, so the labels and
@@ -165,12 +194,22 @@ const UnmatchableGracePeriod = 5 * time.Minute
 func (r *Runner) failUnmatchable(ctx context.Context, req runner.Request, n *store.Node) runner.Result {
 	msg := fmt.Sprintf(
 		"no runner advertises the labels %v within %s, and this dispatcher's fallback advertises %v",
-		n.NeedsLabels, UnmatchableGracePeriod, r.cfg.FallbackLabels)
+		n.NeedsLabels, r.cfg.UnmatchableGrace, r.cfg.FallbackLabels)
 	if n.CreditCPUClassCores > 0 {
 		msg += fmt.Sprintf("; the node is billed at the %d-core class, which the warm pool does not serve",
 			n.CreditCPUClassCores)
 	}
-	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "node_unmatchable", []byte(msg)); err != nil {
+	payload, err := json.Marshal(UnmatchableEvent{
+		NeedsLabels: n.NeedsLabels, FallbackLabels: r.cfg.FallbackLabels,
+		CPUClassCores: n.CreditCPUClassCores,
+		GraceSeconds:  r.cfg.UnmatchableGrace.Seconds(), Detail: msg,
+	})
+	if err != nil {
+		r.logger.Warn("warmpool: encoding the refusal failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+		payload = []byte(`{}`)
+	}
+	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "node_unmatchable", payload); err != nil {
 		r.logger.Warn("warmpool: recording the refusal failed",
 			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
 	}

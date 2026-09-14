@@ -43,7 +43,8 @@ unlock.
   below the billed class fails the node rather than running it smaller for the
   same price; a pod no node accepts within five minutes fails with the
   scheduler's own message; and a node whose labels no runner advertises and no
-  fallback may take fails after five minutes naming the labels and the class.
+  fallback may take fails after `--warm-unmatchable-grace` (five minutes by
+  default) with a `node_unmatchable` event naming the labels and the class.
   The class is stamped on the node when it becomes ready, so the queue read
   skips the classes a warm runner may not take rather than scanning past them.
   `store.CPUClass`, `store.CreditRateTable.ClassForResource`,

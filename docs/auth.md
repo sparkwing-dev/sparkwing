@@ -127,8 +127,10 @@ both, because a customer must never be billed for a class the pod cannot get.
 A pod no node accepts within five minutes fails the node with the scheduler's
 own message, which is what a class larger than the cluster provisions looks
 like. A node whose `.Requires()` labels no runner advertises, and which no
-fallback may take, fails after five minutes naming the labels and the class, so
-work the fleet cannot serve ends where an operator can see it.
+fallback may take, fails after `--warm-unmatchable-grace` (five minutes by
+default) with a `node_unmatchable` event naming the labels, the labels the
+fallback does advertise, and the class, so work the fleet cannot serve ends
+where an operator can see it.
 
 The class is stamped on the node when it becomes ready, so the queue read
 leaves the classes a warm runner may not take out of the scan entirely and a
