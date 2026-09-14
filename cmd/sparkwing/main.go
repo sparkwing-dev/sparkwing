@@ -368,7 +368,7 @@ func runSparkwing(args []string) error {
 	case "run":
 		return dispatchRun(args[1:])
 	case "run-node":
-		return runNodeCommand(args[1:])
+		return orchestrator.RunNodeCommand(args[1:])
 	case "runs":
 		return runJobs(args[1:])
 	case "queue":

@@ -176,7 +176,8 @@ Warm mode reuses the runner image, pull policy, namespace, service account,
 and cache configuration already present in this chart. It grants the runner
 Role namespace-scoped Job create, get, and delete plus pod list. The default
 `inprocess` mode retains the prior arguments and empty Role.
-The fallback `run-node` process receives the runner token in its environment,
+The fallback Job runs `sparkwing-runner run-node`, the executable the runner
+image installs, and that process receives the runner token in its environment,
 so use warm mode only for trusted pipeline code and rotate short-lived tokens.
 The compiled pipeline binary interprets `runner.triggerRunner.kind=warm`.
 Upgrade the controller, runner, and pipeline module to the same Sparkwing

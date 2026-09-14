@@ -367,7 +367,7 @@ Past the byte bounds the oldest bytes of the widest ring go first; past
 the node bound the ring of the node that wrote least recently is
 released. A node's ring is released shortly after the node finishes, or
 after ten minutes of silence from a node that never reported finishing.
-`sparkwing-controller` takes all four bounds as `--live-log-node-kb`,
+`sparkwing-controller` takes each bound as `--live-log-node-kb`,
 `--live-log-total-mb`, `--live-log-max-nodes` and `--live-log-idle`, and
 refuses a non-positive value.
 

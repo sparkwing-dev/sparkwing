@@ -314,7 +314,8 @@ for overflow. This mode reuses the bundled runner image, namespace, service
 account, pull policy, and cache. It grants namespace-scoped Job lifecycle and
 pod-read access to the runner Role. The default `inprocess` mode keeps the
 existing behavior and renders an empty Role.
-The fallback `run-node` process receives the runner token in its environment,
+The fallback Job runs `sparkwing-runner run-node`, the executable the runner
+image installs, and that process receives the runner token in its environment,
 so use warm mode only for trusted pipeline code and rotate short-lived tokens.
 The compiled pipeline binary interprets `warm`, so upgrade the controller,
 runner, and pipeline module to the same Sparkwing release before enabling it.

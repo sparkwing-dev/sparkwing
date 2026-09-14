@@ -73,7 +73,11 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 
 	var topLevel bytes.Buffer
 	usage(&topLevel)
-	for _, want := range []string{"runner|worker|agent|version", "version - print this executable's offline build identity"} {
+	for _, want := range []string{
+		"runner|worker|agent|run-node|version",
+		"run-node - execute one claimed node (the Kubernetes Job fallback entrypoint)",
+		"version  - print this executable's offline build identity",
+	} {
 		if !bytes.Contains(topLevel.Bytes(), []byte(want)) {
 			t.Errorf("top-level usage %q does not contain %q", topLevel.String(), want)
 		}
