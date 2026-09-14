@@ -239,16 +239,19 @@ func lastLines(text string, n int) string {
 
 func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 	return withGoTestScratch(func(testRoot string) error {
-		_, err := sparkwing.Bash(ctx, storePostgresGoCommand(runtime.NumCPU())).
-			Env("TMPDIR", testRoot).
-			Env("SPARKWING_TEST_STORE", "postgres").
-			Env("SPARKWING_TEST_PG_URL", dsn).
-			Run()
-		if err != nil {
-			return fmt.Errorf("store suite against postgres: %w", err)
-		}
-		sparkwing.Info(ctx, "go test ./pkg/store/...: passed against postgres")
-		return nil
+		return withProductTestHome(func(home string) error {
+			script := productTestScript(storePostgresGoCommand(runtime.NumCPU()), home)
+			_, err := sparkwing.Bash(ctx, script).
+				Env("TMPDIR", testRoot).
+				Env("SPARKWING_TEST_STORE", "postgres").
+				Env("SPARKWING_TEST_PG_URL", dsn).
+				Run()
+			if err != nil {
+				return fmt.Errorf("store suite against postgres: %w", err)
+			}
+			sparkwing.Info(ctx, "go test ./pkg/store/...: passed against postgres")
+			return nil
+		})
 	})
 }
 

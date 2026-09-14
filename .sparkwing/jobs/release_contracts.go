@@ -58,17 +58,19 @@ func (j *checkContractsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error)
 }
 
 func (j *checkContractsJob) run(ctx context.Context) error {
-	for _, check := range releaseContractChecks() {
-		res, err := sparkwing.Bash(ctx, withoutInherited(check.Command, productTestUnset)).Dir(j.RepoDir).Capture()
-		if err != nil {
-			return fmt.Errorf("release contract preflight: %s: %w", check.Label, err)
+	return withProductTestHome(func(home string) error {
+		for _, check := range releaseContractChecks() {
+			res, err := sparkwing.Bash(ctx, productTestScript(check.Command, home)).Dir(j.RepoDir).Capture()
+			if err != nil {
+				return fmt.Errorf("release contract preflight: %s: %w", check.Label, err)
+			}
+			if err := requireContractTestsPassed(check, res.Stdout+res.Stderr); err != nil {
+				return err
+			}
+			sparkwing.Info(ctx, "contract preflight: %s passed (%d named check(s))", check.Label, len(check.Tests))
 		}
-		if err := requireContractTestsPassed(check, res.Stdout+res.Stderr); err != nil {
-			return err
-		}
-		sparkwing.Info(ctx, "contract preflight: %s passed (%d named check(s))", check.Label, len(check.Tests))
-	}
-	return nil
+		return nil
+	})
 }
 
 func requireContractTestsPassed(check contractCheck, output string) error {
