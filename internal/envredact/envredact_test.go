@@ -1,6 +1,9 @@
 package envredact
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestCredentialName(t *testing.T) {
 	cases := []struct {
@@ -231,14 +234,22 @@ func TestCredentialFileName(t *testing.T) {
 		{"id_ed25519", true},
 		{"credentials", true},
 		{"aws/credentials.json", true},
+		{"certs/chain.crt", true},
+		{"certs/chain.cer", true},
+		{"certs/chain.der", true},
 		{"config/token.yaml", true},
 		{"deploy/secrets.yml", true},
 		{".netrc", true},
 		{".ssh/id_rsa.pub", false},
+		{".env.example", false},
+		{"config/prod.env.example", false},
+		{"deploy/secrets.yml.template", false},
+		{"docs/author.txt", false},
+		{"config/authority.yaml", false},
+		{"certs/certificates.txt", false},
 		{"pkg/controller/auth.go", false},
 		{"cmd/sparkwing/secret.go", false},
 		{"web/package.json", false},
-		{"AUTHORS", false},
 		{"Makefile", false},
 		{"docs/authentication.md", false},
 		{"internal/keyring/keyring.rs", false},
@@ -261,8 +272,28 @@ func TestCredentialFileContent(t *testing.T) {
 		{"dotenv assignment", ".env", "APP_NAME=demo\nAPI_TOKEN=live-value\n", true},
 		{"private key block", "deploy/bundle.conf", "-----BEGIN RSA PRIVATE KEY-----\nabc\n", true},
 		{"ordinary settings", "app.conf", "timeout=30s\nregion=us-west-2\n", false},
-		{"unscanned extension", "web/package.json", `{"private": true}`, false},
-		{"binary bytes", "fixtures/blob.txt", "\x00\x01API_TOKEN=live-value\n", false},
+		{"json field name with no secret value", "web/package.json", `{"name":"web","private": true,"license":"MIT"}`, false},
+		{
+			"json service-account key", "deploy/service-account.json",
+			"{\n  \"type\": \"service_account\",\n  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\nMIIEv\\n-----END PRIVATE KEY-----\\n\"\n}", true,
+		},
+		{"json long token value", "deploy/api.json", `{"api_token":"ghp_A1b2C3d4E5f6G7h8I9j0"}`, true},
+		{
+			"yaml field naming a remote secret", "k8s/external-secret.yaml",
+			"spec:\n  data:\n    - secretKey: api-token\n      remoteRef:\n        key: prod/api\n", false,
+		},
+		{
+			"yaml bearer placeholder", "api/openapi.yaml",
+			"    description: \"Authorization: Bearer {token}\"\n    bearerFormat: JWT\n", false,
+		},
+		{
+			"yaml embedded secret value", "k8s/secret.yaml",
+			"data:\n  password: S3cretValue123456789\n", true,
+		},
+		{"ini spaced lowercase assignment", "deploy/app.conf", "timeout = 30s\npassword = hunter2\n", true},
+		{"dotenv template placeholder", ".env.example", "API_TOKEN=replace-me\n", false},
+		{"binary bytes", "fixtures/blob.conf", "\x00\x01API_TOKEN=live-value\n", false},
+		{"prose is never read", "notes.txt", "password = hunter2\n", false},
 		{"empty file", ".env", "", false},
 	}
 	for _, tc := range cases {
@@ -270,12 +301,17 @@ func TestCredentialFileContent(t *testing.T) {
 			t.Errorf("%s: CredentialFileContent = %t, want %t", tc.name, got, tc.want)
 		}
 	}
-	oversize := make([]byte, maxCredentialFileBytes+1)
+	oversize := make([]byte, CredentialFilePrefixBytes*2)
 	for i := range oversize {
 		oversize[i] = 'a'
 	}
 	copy(oversize, []byte("API_TOKEN=live-value\n"))
+	if !CredentialFileContent(".env", oversize) {
+		t.Error("CredentialFileContent missed a credential inside the judged prefix")
+	}
+	copy(oversize, bytes.Repeat([]byte("a"), CredentialFilePrefixBytes))
+	copy(oversize[CredentialFilePrefixBytes:], []byte("\nAPI_TOKEN=live-value\n"))
 	if CredentialFileContent(".env", oversize) {
-		t.Error("CredentialFileContent read a file past the size limit")
+		t.Error("CredentialFileContent read past the judged prefix")
 	}
 }
