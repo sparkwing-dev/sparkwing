@@ -36,9 +36,18 @@ unlock.
   `sparkwing cluster credits grant --kind reversal --amount -1000 --reference
   re_9 --reverses pay_1` is the operator path. A reversal whose `reverses`
   matches no paid grant is refused; one that takes the balance below zero is
-  allowed, and the claim path then stops new metered work. Schema v42 adds the
-  `reverses` column and a unique index over non-empty `(kind, reference)`
-  grants, both additive, so the previous release still opens the database.
+  allowed, and the claim path then stops new metered work. A replay must carry
+  the terms it carried the first time: a `kind` and `reference` pair another
+  grant holds under a different `amount_micro` or `reverses` answers 409. One
+  grant may not exceed 10^15 micro-credits, a billion credits, which keeps a
+  posted amount from turning a later balance read into an overflow. A refund
+  reports on the new `sparkwing_credits_reversed_micro_total` rather than on
+  the granted series, so summing that series over `kind` stays the money paid
+  in. Schema v42 adds the `reverses` column and a unique index over non-empty
+  `(kind, reference)` grants, both additive, so the previous release still
+  opens the database; the index is retried on every open and skipped while
+  older grants repeat a reference, which `GET /api/v1/health` reports as
+  `database.credit_grant_key` and the controller logs at every start.
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a

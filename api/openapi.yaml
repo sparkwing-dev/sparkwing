@@ -3620,6 +3620,10 @@ paths:
         reference. A reversal whose `reverses` matches no paid grant is
         refused, and one that takes the balance below zero stops new
         metered claims.
+
+        A replay must carry the terms it carried the first time: a request
+        naming a `kind` and `reference` another grant holds under a different
+        `amount_micro` or `reverses` is refused with 409.
       requestBody:
         required: true
         content:
@@ -3637,6 +3641,11 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreditGrant"}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "409":
+          description: Another grant holds this kind and reference under different terms.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /api/v1/credits/history:
     get:
@@ -4570,7 +4579,7 @@ components:
       properties:
         balance_micro: {type: integer, format: int64, description: Grants less reversals less charges.}
         granted_micro: {type: integer, format: int64}
-        reversed_micro: {type: integer, format: int64, description: What reversals took back, reported positive.: ''}
+        reversed_micro: {type: integer, format: int64, description: "What reversals took back, reported positive."}
         charged_micro: {type: integer, format: int64}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
@@ -4586,9 +4595,9 @@ components:
       description: One movement of the grant side of the ledger.
       properties:
         id: {type: string}
-        kind: {type: string, description: free, paid or reversal.: ''}
+        kind: {type: string, description: "free, paid or reversal."}
         amount_micro: {type: integer, format: int64, description: Negative on a reversal.}
-        reference: {type: string, description: Payment id, refund id: '', or operator note.: ''}
+        reference: {type: string, description: "Payment id, refund id, or operator note."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
@@ -4654,9 +4663,9 @@ components:
       type: object
       required: [kind, amount_micro]
       properties:
-        kind: {type: string, description: free, paid or reversal.: ''}
-        amount_micro: {type: integer, format: int64, description: Micro-credits to add, negative on a reversal; a million is one credit.: ''}
-        reference: {type: string, description: Payment id, refund id: '', or operator note. A non-empty one is idempotent.: ''}
+        kind: {type: string, description: "free, paid or reversal."}
+        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit, and one grant may not exceed 10^15."}
+        reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON

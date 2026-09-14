@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"testing"
 
@@ -133,5 +134,79 @@ func TestCreditsGrantRouteRefusesAnUnbackedOrPositiveReversal(t *testing.T) {
 		if status, _ := postGrant(t, f, body); status != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", name, status)
 		}
+	}
+}
+
+// An amount near the integer limit would turn every later balance read into an
+// overflow, so the route refuses it before the ledger stores it.
+func TestCreditsGrantRouteBoundsTheAmountAndKeepsTheLedgerReadable(t *testing.T) {
+	f := newCreditsFixture(t, false)
+	for name, body := range map[string]map[string]any{
+		"a paid grant at the integer limit": {
+			"kind": store.CreditGrantPaid, "amount_micro": int64(math.MaxInt64), "reference": "pi_huge",
+		},
+		"a reversal at the integer limit": {
+			"kind": store.CreditGrantReversal, "amount_micro": int64(math.MinInt64),
+			"reference": "re_huge", "reverses": "pi_huge",
+		},
+	} {
+		if status, _ := postGrant(t, f, body); status != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, status)
+		}
+	}
+
+	status, raw := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.admin, nil)
+	if status != http.StatusOK {
+		t.Fatalf("ledger read after the refusals = %d, want 200: %s", status, raw)
+	}
+	var state stateWire
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if state.BalanceMicro != 0 {
+		t.Fatalf("balance = %d, want the refused grants to have written nothing", state.BalanceMicro)
+	}
+}
+
+func TestCreditsGrantRouteRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
+	f := newCreditsFixture(t, false)
+	body := map[string]any{
+		"kind":         store.CreditGrantPaid,
+		"amount_micro": 1000 * store.MicroCreditsPerCredit,
+		"reference":    "pi_terms",
+	}
+	if status, _ := postGrant(t, f, body); status != http.StatusCreated {
+		t.Fatalf("paid grant status = %d, want 201", status)
+	}
+	if status, _ := postGrant(t, f, body); status != http.StatusOK {
+		t.Fatalf("identical replay status = %d, want 200", status)
+	}
+	changed := map[string]any{
+		"kind":         store.CreditGrantPaid,
+		"amount_micro": 999 * store.MicroCreditsPerCredit,
+		"reference":    "pi_terms",
+	}
+	status, _ := creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin, changed)
+	if status != http.StatusConflict {
+		t.Fatalf("a different amount under one reference = %d, want 409", status)
+	}
+}
+
+// The grant key is skipped when grants written before it repeat a reference,
+// and health is where an operator sees that it is off.
+func TestHealthReportsTheGrantKey(t *testing.T) {
+	f := newCreditsFixture(t, false)
+	status, raw := creditsRequest(t, http.MethodGet, f.url+"/api/v1/health", f.admin, nil)
+	if status != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", status)
+	}
+	var health struct {
+		Database map[string]any `json:"database"`
+	}
+	if err := json.Unmarshal(raw, &health); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if enforced, ok := health.Database["credit_grant_key"].(bool); !ok || !enforced {
+		t.Fatalf("health database section = %+v, want credit_grant_key true", health.Database)
 	}
 }
