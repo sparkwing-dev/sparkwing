@@ -114,17 +114,23 @@ func ComputeLimitNames() []string
 const ComputeLimitNodesPerRun = "max_nodes_per_run"
 const ComputeLimitRunSeconds = "max_run_seconds"
 const ComputeLimitRunnerAlarm = "runner_alarm"
+const ComputeLimitRunnerScaleBase = "runner_scale_base"
+const ComputeLimitRunnerScaleCeiling = "runner_scale_ceiling"
+const ComputeLimitRunnerScaleStepCredits = "runner_scale_step_credits"
 const ComputeLimitRunsPerHour = "max_runs_per_hour"
 type ComputeLimits struct {
-	ConcurrentRunners int64
-	GlobalRunners     int64
-	RunnerAlarm       int64
-	RunSeconds        int64
-	NodesPerRun       int64
-	RunsPerHour       int64
-	GlobalNodesPerRun int64
-	GlobalRunsPerHour int64
-	CronSeconds       int64
+	ConcurrentRunners      int64
+	GlobalRunners          int64
+	RunnerAlarm            int64
+	RunSeconds             int64
+	NodesPerRun            int64
+	RunsPerHour            int64
+	GlobalNodesPerRun      int64
+	GlobalRunsPerHour      int64
+	CronSeconds            int64
+	RunnerScaleBase        int64
+	RunnerScaleStepCredits int64
+	RunnerScaleCeiling     int64
 }
 func (l ComputeLimits) Any() bool
 func (l ComputeLimits) Value(name string) (int64, bool)
@@ -942,6 +948,11 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+type RunnerCap struct {
+	Cap int64
+
+	RecentPaidMicro int64
+}
 const RunnerIdentityHeader = "X-Sparkwing-Runner"
 type RunnerPresence struct {
 	Name string
@@ -950,6 +961,7 @@ type RunnerPresence struct {
 
 	FreeSlots int
 }
+const RunnerScaleWindow = 30 * 24 * time.Hour
 type SchemaRequirement struct {
 	Name    string
 	AddedBy string
@@ -1269,6 +1281,7 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
+func (s *Store) RunnerCapFor(ctx context.Context, principal string, now time.Time) (RunnerCap, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
@@ -1448,6 +1461,7 @@ func WithoutClaimFences(ctx context.Context) context.Context
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 func (t *storeTx) Commit() error
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
