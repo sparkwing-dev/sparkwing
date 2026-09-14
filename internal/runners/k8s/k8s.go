@@ -40,6 +40,9 @@ type Config struct {
 	LogsURL       string
 
 	ArtifactStoreURL string
+	// GitcacheURL is the cache the pod compiles a pipeline from when the
+	// image does not carry it; empty leaves run-node unable to fall back.
+	GitcacheURL string
 
 	DependencyProxyURL string
 
@@ -381,6 +384,9 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 	}
 	if r.cfg.ArtifactStoreURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_URL", Value: r.cfg.ArtifactStoreURL})
+	}
+	if r.cfg.GitcacheURL != "" {
+		env = append(env, corev1.EnvVar{Name: "SPARKWING_GITCACHE_URL", Value: r.cfg.GitcacheURL})
 	}
 	if r.cfg.AgentToken != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})

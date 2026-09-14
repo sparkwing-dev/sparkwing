@@ -819,3 +819,23 @@ func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
 		t.Fatal("SPARKWING_CACHE_TOKEN should be absent when the runner has none")
 	}
 }
+
+func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img", GitcacheURL: "http://cache.local"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{})
+	var got string
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "SPARKWING_GITCACHE_URL" {
+			got = e.Value
+		}
+	}
+	if got != "http://cache.local" {
+		t.Fatalf("SPARKWING_GITCACHE_URL = %q, want the configured gitcache", got)
+	}
+	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{})
+	for _, e := range bare.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "SPARKWING_GITCACHE_URL" {
+			t.Fatalf("an unset gitcache must not reach the pod, got %q", e.Value)
+		}
+	}
+}

@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
+  `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
+  does not carry instead of exiting with "cannot fall back to remote compile".
+
+## [v0.50.2] - 2026-09-14
 ### Added
 
 - **controller + store:** Retention, per-team storage quotas, and a
@@ -568,7 +575,7 @@ unlock.
   offer route, so the agent polled and logged an error on every slot while
   claiming nothing. It now exits non-zero naming the state. Remove both keys to
   run the claim-mode loop the service installer writes; see the
-  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-refuses-to-start).
+  [migration guide](docs/migrations/v0.50.2.md#enrolled-agent-configuration-refuses-to-start).
   `--allow-enrolled-preview` restores the polling behavior for the developers of
   the enrolled path.
 - **storage:** Every retry path that can reach an object store now waits an
@@ -598,7 +605,8 @@ unlock.
   refused, naming the key and the line. `pre_commit:` with no body yielded no
   trigger and installed no hook, which read as working. Give every trigger a
   body: `pre_commit: {}` for one with no options, and a mapping of options for
-  the rest. `on:` itself may still be empty.
+  the rest. `on:` itself may still be empty. See the
+  [migration guide](docs/migrations/v0.50.2.md#a-trigger-key-with-no-value-is-refused).
 - **cli:** A schedule's `catch_up` window is capped at 24h. A declaration or a
   host override asking for more is evaluated with 24h: `sparkwing crons
   install` warns at arm time, naming the schedule, the declared window and the
