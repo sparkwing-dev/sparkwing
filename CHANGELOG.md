@@ -22,6 +22,23 @@ unlock.
 
 ### Added
 
+- **controller + cli:** A credit grant carrying a non-empty `reference` is now
+  idempotent, and a refunded payment can be taken back out. `POST
+  /api/v1/credits/grants` returns the grant already written for a `kind` and
+  `reference` pair with 200 instead of adding the credits a second time, so a
+  payment webhook may redeliver; a new grant still answers 201, and an empty
+  reference writes a new row as before. The new `reversal` kind carries a
+  negative `amount_micro`, its own `reference` (the refund id, so partial
+  refunds each land) and `reverses` naming the paid grant's reference, and the
+  balance, `sparkwing cluster credits show` (a `REVERSED` line and
+  `reversed_micro`), `credits history` and
+  `sparkwing_credits_granted_micro_total{kind="reversal"}` account for it.
+  `sparkwing cluster credits grant --kind reversal --amount -1000 --reference
+  re_9 --reverses pay_1` is the operator path. A reversal whose `reverses`
+  matches no paid grant is refused; one that takes the balance below zero is
+  allowed, and the claim path then stops new metered work. Schema v42 adds the
+  `reverses` column and a unique index over non-empty `(kind, reference)`
+  grants, both additive, so the previous release still opens the database.
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a

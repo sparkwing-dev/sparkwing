@@ -696,6 +696,8 @@ func (creditsCollector) Collect(ch chan<- prometheus.Metric) {
 		float64(t.GrantedFreeMicro), store.CreditGrantFree)
 	ch <- prometheus.MustNewConstMetric(creditsGrantedDesc, prometheus.CounterValue,
 		float64(t.GrantedPaidMicro), store.CreditGrantPaid)
+	ch <- prometheus.MustNewConstMetric(creditsGrantedDesc, prometheus.CounterValue,
+		float64(t.ReversedMicro), store.CreditGrantReversal)
 	ch <- prometheus.MustNewConstMetric(creditsReservedDesc, prometheus.CounterValue, float64(t.ReservedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsChargedDesc, prometheus.CounterValue, float64(t.ChargedMicro))
 	ch <- prometheus.MustNewConstMetric(creditsRefundedDesc, prometheus.CounterValue, float64(t.RefundedMicro))

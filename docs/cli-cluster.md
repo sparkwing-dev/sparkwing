@@ -181,7 +181,7 @@ never charged.
 ### Subcommands
 
 - `show` -- Print the balance, the rate, and the recent burn
-- `grant` -- Add free or paid credits to the ledger
+- `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
 - `history` -- List grants and charges, newest first
 
 ### Examples
@@ -196,21 +196,26 @@ sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 
 
 ## `sparkwing cluster credits grant`
 
-Add free or paid credits to the ledger
+Add free or paid credits to the ledger, or reverse a paid grant
 
 Adds credits and records who added them, which kind they are, and
 the payment they came from. One hundred credits is one dollar.
 A grant that lifts the balance above zero lets metered runners
 claim again and stops the cancellation of nodes running on an
-empty balance. Requires the admin scope.
+empty balance. A reference is the payment id: granting it twice
+returns the first grant rather than adding the credits again. A
+reversal takes a refunded payment back out with a negative
+amount, its own reference (the refund id) and --reverses naming
+the paid grant's reference. Requires the admin scope.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--kind KIND` | Grant kind: free \| paid (required) |
-| `--amount N` | Credits to add; 100 credits is one dollar (required) |
-| `--reference REF` | Payment id or operator note recorded with the grant |
+| `--kind KIND` | Grant kind: free \| paid \| reversal (required) |
+| `--amount N` | Credits to add, negative on a reversal; 100 credits is one dollar (required) |
+| `--reference REF` | Payment id or operator note recorded with the grant; granting the same one twice returns the first grant |
+| `--reverses REF` | Reference of the paid grant a reversal takes back |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
@@ -221,6 +226,9 @@ sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 
 
 # Hand out trial credits
 sparkwing cluster credits grant --kind free --amount 500 --profile prod
+
+# Take a refunded payment back out
+sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod
 ```
 
 ## `sparkwing cluster credits history`
