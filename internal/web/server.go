@@ -27,7 +27,6 @@ import (
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
-	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -252,7 +251,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 
 	if opts.LogsURL != "" {
 		authedMux.Handle("/api/v1/logs/",
-			logsProxyAllowList(controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts))))
+			logsProxyAllowList(withLogsIdentityHeader(
+				controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))))
 	}
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/",
@@ -294,7 +294,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)
 		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
-	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, withViewerIdentity(authedMux)))
+	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, withViewerIdentity(newViewerTabs(), authedMux)))
 	return securityHeadersMiddleware(opts, router)
 }
 
@@ -621,49 +621,6 @@ func controllerProxy(controllerURL, token string, loginRequired bool) http.Handl
 	}
 	return proxy
 }
-
-// ViewerIdentityPrefix labels a logs read the dashboard made for one
-// browser session. The logs service budgets concurrent reads and streams
-// per identity, and a dashboard serves every tab through one token, so
-// without a per-viewer name one viewer's tabs spend the cap for everyone
-// the deployment serves.
-const ViewerIdentityPrefix = "dashboard:"
-
-// safety: the logs service trusts this header for counting alone, never
-// for authorization, so a session name is safe on it. Header and context
-// both, because the dashboard reaches that service two ways: the reverse
-// proxy forwards headers, the backend's routes carry a context.
-func withViewerIdentity(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := viewerIdentity(r)
-		if id == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		r = r.Clone(logs.WithReaderIdentity(r.Context(), id))
-		r.Header.Set(store.RunnerIdentityHeader, id)
-		next.ServeHTTP(w, r)
-	})
-}
-
-// safety: a browser that names its tab gets its own slots; one that does
-// not shares its session's, which is still per viewer rather than per
-// deployment.
-func viewerIdentity(r *http.Request) string {
-	p, ok := WebPrincipalFromContext(r.Context())
-	if !ok || p == nil || p.Name == "" {
-		return ""
-	}
-	id := ViewerIdentityPrefix + p.Name
-	if tab := strings.TrimSpace(r.Header.Get(TabHeaderName)); tab != "" {
-		id += "/" + tab
-	}
-	return id
-}
-
-// TabHeaderName is the header a dashboard tab sets to be counted apart
-// from the session's other tabs.
-const TabHeaderName = "X-Sparkwing-Tab"
 
 func notImplementedHandler(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w,
