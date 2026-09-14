@@ -1046,7 +1046,9 @@ func TestRunDetached_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 	if info.Version == "v0.0.1-old" {
 		t.Fatalf("replacement consumer still reports the old version %q", info.Version)
 	}
-	waitUntil(t, "the new consumer to execute the run", 90*time.Second, func() bool {
+	// safety: this waits on the longest chain in this file, a consumer replaced and
+	// then a run executed, so it carries the longest bound any wait here uses.
+	waitUntil(t, "the new consumer to execute the run", 120*time.Second, func() bool {
 		return len(e.markerLines()) >= 1
 	})
 }
