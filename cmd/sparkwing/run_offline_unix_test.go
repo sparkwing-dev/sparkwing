@@ -72,8 +72,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 
 	connected := offlineConnectedEnv(t, fixtureHome, toolPath, sparkwingHome, marker)
 	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, connected, "mod", "tidy"); tidyErr != nil {
-		t.Fatalf("the host module cache does not hold the fixture's modules; "+
-			"run `go mod download all` in the repository first: %v\n%s", tidyErr, out)
+		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
 	}
 
 	firstOut, err := offlineRunCLI(cli, repoDir, connected, "run", "offline")
@@ -257,7 +256,7 @@ func offlineConnectedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, mar
 	t.Helper()
 	return append(offlineBaseEnv(t, fixtureHome, toolPath, sparkwingHome, marker),
 		"GOFLAGS=-mod=mod",
-		"GOPROXY=file://"+filepath.ToSlash(offlineHostModuleProxy(t)),
+		"GOPROXY="+offlineConnectedProxy(t),
 		"GOSUMDB=off",
 	)
 }
@@ -265,6 +264,15 @@ func offlineConnectedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, mar
 // safety: the host module cache's download tree is laid out as a module proxy,
 // so seeding the fixture from it leaves this suite runnable on a host with no
 // network.
+// offlineConnectedProxy puts the host module cache, whose download tree is laid
+// out as a module proxy, ahead of the public one. Everything this fixture needs
+// is normally already on disk, so the run that populates the fixture cache costs
+// no fetch; the public proxy answers only for a module no build here has seen.
+func offlineConnectedProxy(t *testing.T) string {
+	t.Helper()
+	return "file://" + filepath.ToSlash(offlineHostModuleProxy(t)) + ",https://proxy.golang.org,direct"
+}
+
 func offlineHostModuleProxy(t *testing.T) string {
 	t.Helper()
 	proxy := filepath.Join(offlineGoEnv(t, "GOMODCACHE"), "cache", "download")
