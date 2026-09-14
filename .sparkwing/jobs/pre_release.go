@@ -80,7 +80,6 @@ func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr er
 
 type PreRelease struct {
 	sparkwing.Base
-	AllowReleaseLineSelfReplace bool
 }
 
 func (PreRelease) ShortHelp() string {
@@ -139,10 +138,7 @@ func (preRelease *PreRelease) run(jobContext context.Context) error {
 		sparkwing.Info(jobContext, "sparkwing pin: auto-bumped to %s (commit added to push)", bumpedTo)
 	}
 
-	versionOptions := VersionFreshnessOptions{
-		AllowReleaseLineSelfReplace: preRelease.AllowReleaseLineSelfReplace,
-	}
-	if err := CheckVersionsFreshnessWithOptions(jobContext, sparkwing.WorkDir(), versionOptions); err != nil {
+	if err := CheckVersionsFreshness(jobContext, sparkwing.WorkDir()); err != nil {
 		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(jobContext, "version freshness: passed")
