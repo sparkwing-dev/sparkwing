@@ -133,6 +133,19 @@ unlock.
   another name: once a table exists, a `PUT` naming the scalar, alone or beside
   `rate_table`, answers `400` and says to write the table. A stored table this build cannot read
   is an error rather than a silent fallback.
+- **ci:** A new `sleepcheck` gate refuses a test that sleeps or waits on the wall clock.
+  `internal/sleepcheck` fails any `_test.go` that calls `time.Sleep`,
+  `time.After`, `time.Tick`, `time.NewTimer` or `time.NewTicker`, or takes one
+  of them as a value, or that reads `time.Now`, `time.Since` or `time.Until` as
+  a wait: an ordering comparison, a loop condition, or a
+  `context.WithTimeout` or `WithDeadline` argument. Each finding names the
+  alternative on one line, which is a signaled condition from the code under
+  test, an injected or fake clock, or `testing/synctest`. A `time.Now()` that
+  only stamps a fixture value stays allowed, and a file that dot-imports `time`
+  is refused because an unqualified `Sleep` cannot be judged. The new
+  `test-sleeps` step runs the checker in `pre-commit` and `gate` over the
+  change since origin/main, so a new offender fails from the first run while
+  the tests written before the rule keep passing until they are edited.
 
 ### Changed
 
