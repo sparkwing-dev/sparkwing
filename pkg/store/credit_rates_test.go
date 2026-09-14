@@ -29,8 +29,14 @@ func githubRateTable() store.CreditRateTable {
 // test that needs a class has to seed the run's plan snapshot.
 func readyNodeWithCores(t *testing.T, s *store.Store, runID, nodeID string, cores float64) {
 	t.Helper()
+	readyNodePinned(t, s, runID, nodeID, cores, 0)
+}
+
+func readyNodePinned(t *testing.T, s *store.Store, runID, nodeID string, cores float64, memoryBytes int64) {
+	t.Helper()
 	ctx := context.Background()
-	plan := []byte(fmt.Sprintf(`{"nodes":[{"id":%q,"modifiers":{"res_cores":%g}}]}`, nodeID, cores))
+	plan := []byte(fmt.Sprintf(`{"nodes":[{"id":%q,"modifiers":{"res_cores":%g,"res_memory_bytes":%d}}]}`,
+		nodeID, cores, memoryBytes))
 	if err := s.CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(), PlanSnapshot: plan,
 	}); err != nil {
@@ -430,9 +436,9 @@ func TestAClaimantsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 }
 
-// The operator's ceiling is the only thing that lowers a class, so a cluster
-// that gives every node one core bills every node at the smallest class.
-func TestTheBillingCPUCeilingHoldsEveryClassDown(t *testing.T) {
+// A node is billed at the class it pinned, because the class is what its pod
+// is given.
+func TestTheChargeRowCarriesThePinnedClass(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
@@ -440,33 +446,45 @@ func TestTheBillingCPUCeilingHoldsEveryClassDown(t *testing.T) {
 	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	if err := s.SetBillingCPUCeilingCores(ctx, 1); err != nil {
-		t.Fatalf("set the ceiling: %v", err)
-	}
-	readyNodeWithCores(t, s, "run-capped", "build", 64)
-	readyNodeWithCores(t, s, "run-huge", "build", 96)
+	readyNodeWithCores(t, s, "run-eight", "build", 8)
+	readyNodePinned(t, s, "run-wide", "build", 3, 20<<30)
 
-	for _, runID := range []string{"run-capped", "run-huge"} {
-		if _, err := s.ClaimNamedNode(ctx, claimant, runID, "build", "pod-"+runID, time.Minute); err != nil {
-			t.Fatalf("claim %s: %v", runID, err)
+	for _, tc := range []struct {
+		runID string
+		want  int64
+	}{
+		{"run-eight", 8},
+		{"run-wide", 8},
+	} {
+		if _, err := s.ClaimNamedNode(ctx, claimant, tc.runID, "build", "pod-"+tc.runID, time.Minute); err != nil {
+			t.Fatalf("claim %s: %v", tc.runID, err)
 		}
-		if charge := lastChargeFor(t, s, runID); charge.CPUClassCores != 2 {
-			t.Fatalf("%s billed class %d under a one-core ceiling, want 2", runID, charge.CPUClassCores)
+		if charge := lastChargeFor(t, s, tc.runID); charge.CPUClassCores != tc.want {
+			t.Fatalf("%s billed class %d, want %d", tc.runID, charge.CPUClassCores, tc.want)
 		}
 	}
+}
 
-	if err := s.SetBillingCPUCeilingCores(ctx, 0); err != nil {
-		t.Fatalf("lift the ceiling: %v", err)
+// The warm class names where a class runs, so an operator may retire the warm
+// pool with zero but never name a negative class.
+func TestTheWarmCPUClassDefaultsToTwoCoresAndRefusesANegative(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	cores, err := s.WarmCPUClassCores(ctx)
+	if err != nil {
+		t.Fatalf("read the warm class: %v", err)
 	}
-	readyNodeWithCores(t, s, "run-uncapped", "build", 16)
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-uncapped", "build", "pod-2", time.Minute); err != nil {
-		t.Fatalf("claim: %v", err)
+	if cores != store.DefaultWarmCPUClassCores {
+		t.Fatalf("warm class = %d, want %d", cores, store.DefaultWarmCPUClassCores)
 	}
-	if charge := lastChargeFor(t, s, "run-uncapped"); charge.CPUClassCores != 16 {
-		t.Fatalf("with no ceiling a 16-core node billed class %d", charge.CPUClassCores)
+	if err := s.SetWarmCPUClassCores(ctx, 0); err != nil {
+		t.Fatalf("retire the warm pool: %v", err)
 	}
-	if err := s.SetBillingCPUCeilingCores(ctx, -1); err == nil {
-		t.Fatal("a negative ceiling was accepted")
+	if cores, err := s.WarmCPUClassCores(ctx); err != nil || cores != 0 {
+		t.Fatalf("warm class = %d, %v; want 0", cores, err)
+	}
+	if err := s.SetWarmCPUClassCores(ctx, -1); err == nil {
+		t.Fatal("a negative warm class was accepted")
 	}
 }
 
@@ -569,5 +587,51 @@ func TestATableWithoutAFourCoreClassLeavesTheScalarAlone(t *testing.T) {
 	set, err := s.CreditRateTableSet(ctx)
 	if err != nil || !set {
 		t.Fatalf("CreditRateTableSet = %v, %v; want true", set, err)
+	}
+}
+
+// The warm pool shares one machine, so a class larger than it serves is never
+// awarded to a warm runner and waits for a node of its own.
+func TestAWarmClaimRefusesAClassAboveTheWarmPool(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 10_000)
+	readyNodeWithCores(t, s, "run-big", "build", 8)
+
+	n, err := s.ClaimNextReadyNode(ctx, claimant, "pool-1", time.Minute, nil)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("claim = %v, %v; want the queue to look empty to a warm runner", n, err)
+	}
+
+	readyNodeWithCores(t, s, "run-small", "build", 2)
+	n, err = s.ClaimNextReadyNode(ctx, claimant, "pool-1", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("claim a two-core node: %v", err)
+	}
+	if n.RunID != "run-small" {
+		t.Fatalf("claimed %s, want the two-core node", n.RunID)
+	}
+}
+
+// An unmetered claimant is a local claim-mode agent, which claims by its labels
+// and pays nothing, so the ladder does not hold it back.
+func TestAnUnmeteredClaimStillTakesALargeNode(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	_, tok, err := s.CreateTokenWith(ctx, "agent:laptop", store.TokenKindRunner,
+		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{})
+	if err != nil {
+		t.Fatalf("mint a token: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-big", "build", 8)
+
+	n, err := s.ClaimNextReadyNode(ctx,
+		store.ClaimIdentity{Principal: "agent:laptop", TokenPrefix: tok.Prefix}, "laptop-1", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if n.RunID != "run-big" {
+		t.Fatalf("claimed %s, want the eight-core node", n.RunID)
 	}
 }

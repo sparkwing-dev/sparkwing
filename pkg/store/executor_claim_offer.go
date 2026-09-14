@@ -195,6 +195,10 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 			hardEligible = append(hardEligible, item)
 		}
 	}
+	warm, err := s.warmClassFilter(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
 	plans, err := s.loadExecutorPreparePlans(ctx, hardEligible)
 	if err != nil {
 		return nil, err
@@ -214,6 +218,9 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 			return nil, err
 		}
 		charge := executorNodeChargeFromSnapshot(plan.raw, item.nodeID, profiles[executorPrepareProfileKey(plan.pipeline, item.nodeID)])
+		if warm.active && warm.refusesCharge(charge) {
+			continue
+		}
 		summary := ExecutorSchedulingSummary{
 			RunID: item.runID, NodeID: item.nodeID, HardCapabilities: needs,
 			PreferredCapabilities: snapshotNodePrefers(plan.raw, item.nodeID),

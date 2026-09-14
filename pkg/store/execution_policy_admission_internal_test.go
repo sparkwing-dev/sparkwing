@@ -117,8 +117,8 @@ func TestAssistedPrepareSkipsUnsealedAndSixtyFourIneligiblePoliciesBeforeDecode(
 		t.Fatalf("binding selected %q, want eligible", sink.Load().NodeID)
 	}
 	statements := recorder.snapshot()
-	if len(statements) != 9 {
-		t.Fatalf("prepare statements = %d, want fixed snapshot count 9:\n%s", len(statements), strings.Join(statements, "\n---\n"))
+	if len(statements) != 10 {
+		t.Fatalf("prepare statements = %d, want fixed snapshot count 10:\n%s", len(statements), strings.Join(statements, "\n---\n"))
 	}
 	if full := countFullPolicyReads(statements); full != 1 {
 		t.Fatalf("full policy reads = %d, want only the selected candidate", full)

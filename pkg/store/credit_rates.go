@@ -23,7 +23,22 @@ const (
 	// MaxCreditRateTableEntries bounds the table an operator may store, which
 	// keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
+
+	// CPUClassMemoryBytesPerCore is the memory a cpu class carries for each of
+	// its cores, matching the hosted runners a customer compares against. A
+	// node asking for more memory than that takes the class whose memory
+	// covers it.
+	CPUClassMemoryBytesPerCore = 4 << 30
+
+	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no
+	// operator set one. A node above it is executed on a node of its own.
+	DefaultWarmCPUClassCores = 2
 )
+
+// CPUClassMemoryBytes returns the memory a class of this many cores carries.
+func CPUClassMemoryBytes(cores int64) int64 {
+	return cores * CPUClassMemoryBytesPerCore
+}
 
 // safety: these are GitHub Actions' Linux x64 rates carried to the second,
 // which is the comparison every customer makes. The four-core entry is the
@@ -80,19 +95,43 @@ func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 // smallest class whose cores cover the request rounded up to a whole core. It
 // returns an [UnpricedCPUClassError] when the request is above every class.
 func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error) {
+	return t.ClassForResource(ExecutorResource{Cores: cores})
+}
+
+// ClassForResource returns the class that covers both halves of a node's
+// request: the smallest class whose cores cover the cpu rounded up to a whole
+// core and whose memory, [CPUClassMemoryBytesPerCore] for each core, covers the
+// memory asked for. It returns an [UnpricedCPUClassError] when no class is
+// large enough.
+func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {
 	if len(t) == 0 {
 		return CreditRate{}, fmt.Errorf("%w: the rate table prices no cpu class", ErrInvalidCreditSetting)
 	}
 	want := int64(1)
-	if cores > 1 {
-		want = int64(math.Ceil(cores))
+	if res.Cores > 1 {
+		want = int64(math.Ceil(res.Cores))
 	}
 	for _, entry := range t {
-		if entry.Cores >= want {
+		if entry.Cores >= want && CPUClassMemoryBytes(entry.Cores) >= res.MemoryBytes {
 			return entry, nil
 		}
 	}
-	return CreditRate{}, &UnpricedCPUClassError{Cores: want, MaxCores: t[len(t)-1].Cores}
+	largest := t[len(t)-1]
+	if CPUClassMemoryBytes(largest.Cores) < res.MemoryBytes {
+		want = max(want, memoryClassCores(res.MemoryBytes))
+	}
+	return CreditRate{}, &UnpricedCPUClassError{Cores: want, MaxCores: largest.Cores}
+}
+
+// safety: a memory request above every class is reported as the core count
+// that much memory would come with, so the operator adds a class that fits
+// rather than one that still refuses the node.
+func memoryClassCores(bytes int64) int64 {
+	cores := bytes / CPUClassMemoryBytesPerCore
+	if bytes%CPUClassMemoryBytesPerCore != 0 {
+		cores++
+	}
+	return cores
 }
 
 // RateFor returns the micro-credits a second costs at the recorded class,
@@ -272,20 +311,16 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	return tx.Commit()
 }
 
-// safety: the class is resolved from the cpu figure the scheduler sizes the
-// node by, held under the operator's billing ceiling. Nothing a claimant says
-// about itself reaches this, because a runner that priced its own work could
-// bill a 64-core node at the smallest class.
+// safety: the class is resolved from the cpu and memory the scheduler sizes the
+// node by, which is what the pod is given. Nothing a claimant says about itself
+// reaches this, because a runner that priced its own work could bill a 64-core
+// node at the smallest class.
 func nodeCreditClassTx(
-	ctx context.Context, tx *storeTx, table CreditRateTable, runID, nodeID string, ceiling int64,
+	ctx context.Context, q rowQuerier, table CreditRateTable, runID, nodeID string,
 ) (CreditRate, error) {
-	charge, err := nodeChargeTx(ctx, tx, runID, nodeID)
+	charge, err := nodeChargeTx(ctx, q, runID, nodeID)
 	if err != nil {
 		return CreditRate{}, err
 	}
-	cores := charge.Cores
-	if ceiling > 0 && float64(ceiling) < cores {
-		cores = float64(ceiling)
-	}
-	return table.ClassFor(cores)
+	return table.ClassForResource(charge)
 }

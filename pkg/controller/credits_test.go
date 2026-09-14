@@ -560,14 +560,14 @@ func creditSettings(t *testing.T, f creditsFixture, method string, body any) (in
 }
 
 type creditSettingsView struct {
-	RateMicroPerSecond     int64            `json:"rate_micro_per_second"`
-	RateTable              []creditRateView `json:"rate_table"`
-	RateTableSet           bool             `json:"rate_table_set"`
-	BillingCPUCeilingCores int64            `json:"billing_cpu_ceiling_cores"`
-	GraceSeconds           int64            `json:"grace_seconds"`
-	MaxChargeSeconds       int64            `json:"max_charge_seconds"`
-	MicroPerCredit         int64            `json:"micro_per_credit"`
-	CreditsPerDollar       int64            `json:"credits_per_dollar"`
+	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
+	RateTable          []creditRateView `json:"rate_table"`
+	RateTableSet       bool             `json:"rate_table_set"`
+	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
+	GraceSeconds       int64            `json:"grace_seconds"`
+	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
+	MicroPerCredit     int64            `json:"micro_per_credit"`
+	CreditsPerDollar   int64            `json:"credits_per_dollar"`
 }
 
 type creditRateView struct {

@@ -5111,9 +5111,13 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	}
 	labels := newClaimLabels(runnerLabels)
 	placement, _ := ClaimPlacementFromContext(ctx)
+	warm, err := s.warmClassFilter(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement)
+		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm)
 		if err != nil {
 			return nil, err
 		}
@@ -5157,9 +5161,61 @@ type claimCandidate struct {
 	decision placementDecision
 }
 
+// safety: an unmetered claimant, which is every local claim-mode agent, gets a
+// zero filter and the whole queue.
+func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (warmClassFilter, error) {
+	metered, err := s.TokenMetered(ctx, claimant.TokenPrefix)
+	if err != nil || !metered {
+		return warmClassFilter{}, err
+	}
+	table, err := s.CreditRateTable(ctx)
+	if err != nil {
+		return warmClassFilter{}, err
+	}
+	cores, err := s.WarmCPUClassCores(ctx)
+	if err != nil {
+		return warmClassFilter{}, err
+	}
+	return warmClassFilter{table: table, warmCores: cores, active: true}, nil
+}
+
+// safety: a warm runner shares one machine with its neighbours, so a node whose
+// class is larger than the pool serves is passed over here and executed on a
+// node sized to that class instead. The filter reads the same charge the ledger
+// prices, so what a node is billed and where it runs cannot disagree.
+type warmClassFilter struct {
+	table     CreditRateTable
+	warmCores int64
+	active    bool
+}
+
+func (f warmClassFilter) refuses(ctx context.Context, q rowQuerier, runID, nodeID string) (bool, error) {
+	if !f.active {
+		return false, nil
+	}
+	charge, err := nodeChargeTx(ctx, q, runID, nodeID)
+	if err != nil {
+		return false, err
+	}
+	return f.refusesCharge(charge), nil
+}
+
+func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
+	if !f.active {
+		return false
+	}
+	class, err := f.table.ClassForResource(charge)
+	if err != nil {
+		// safety: a request no class covers is refused at the claim that prices
+		// it rather than by a warm runner that already took it.
+		return errors.Is(err, ErrUnpricedCPUClass)
+	}
+	return class.Cores > f.warmCores
+}
+
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement) (*claimCandidate, []nodeKey, error) {
+func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
 	for range claimScanRounds {
@@ -5170,6 +5226,14 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 		for i := range batch {
 			n := &batch[i]
 			if !labelsSatisfied(n.needs, labels.hard) {
+				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
+				continue
+			}
+			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if refused {
 				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
 				continue
 			}

@@ -22,6 +22,22 @@ unlock.
 
 ### Added
 
+- **controller + CLI + pkg/store:** Metered nodes are routed by cpu class. A
+  class is a whole number of cores carrying 4 GiB of memory for each of them,
+  and a node takes the smallest class covering both halves of what it pinned,
+  so a pin of three cores and 20 GB takes the 8-core class. A node above the
+  warm class is never offered to or claimed by a warm runner and runs on a
+  Kubernetes node sized to its class, with cpu and memory requests and limits
+  equal to the class so it never outgrows what it is billed at. The 2-core
+  class stays warm and starts in seconds; a larger class starts a node of its
+  own in one to two minutes. `warm_cpu_class_cores` on the credit settings
+  route (`sparkwing cluster credits settings --warm-cpu-class-cores N`, 2 by
+  default) is the largest class the warm pool serves, and zero starts a node of
+  its own for every class. `store.CreditRateTable.ClassForResource`,
+  `store.CPUClassMemoryBytes`, `store.CPUClassMemoryBytesPerCore` and
+  `store.DefaultWarmCPUClassCores` are the store surface. Local claim-mode
+  agents are unmetered and claim by their labels as before.
+
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a node gets past its claim reservation, and the cap on
@@ -120,10 +136,8 @@ unlock.
   `credits history` print both. `sparkwing cluster credits settings
   --rate-table 2=10000,4=20000,8=36667` writes the ladder, and the route also
   takes it as a list of `{cores, micro_per_second}` or an object keyed by
-  cores. A node is billed at the class its cpu request falls in, held under the
-  new `billing_cpu_ceiling_cores` setting (`--billing-cpu-ceiling-cores`, zero
-  by default) so a cluster handing out smaller pods than its plans ask for
-  bills what it gives; nothing a claimant reports about itself changes a class.
+  cores. A node is billed at the class it pinned, which is the class its pod is
+  given; nothing a claimant reports about itself changes a class.
   A request above the largest class fails the node with `unpriced_cpu_class`
   and a `credits_unpriced_class` event rather than leaving it claimable
   forever. A rate above a million credits a second is refused, because it
