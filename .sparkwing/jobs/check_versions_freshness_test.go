@@ -678,6 +678,9 @@ func seedProxyPinnedRepo(t *testing.T, retract bool) string {
 	gitRun(t, repo, "tag", fixturePinnedVersion)
 
 	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(filepath.Join(base, "proxy")))
+	// safety: the fixture serves invented metadata under the real module path, so
+	// a shared module cache would keep a stub that fails every later checksum.
+	t.Setenv("GOMODCACHE", filepath.Join(base, "modcache"))
 	t.Setenv("GOSUMDB", "off")
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "")
