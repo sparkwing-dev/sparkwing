@@ -260,27 +260,26 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 		}
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		metrics, gerr := http.Get("http://" + metricsAddr + "/metrics")
-		if gerr == nil {
-			body, rerr := io.ReadAll(metrics.Body)
-			_ = metrics.Body.Close()
-			if rerr != nil {
-				t.Fatalf("read metrics: %v", rerr)
-			}
-			if metrics.StatusCode != http.StatusOK {
-				t.Fatalf("metrics listener status = %d, want 200", metrics.StatusCode)
-			}
-			if !strings.Contains(string(body), "go_goroutines") {
-				t.Fatalf("metrics body missing go_goroutines: %s", body)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("metrics listener never answered: %v", gerr)
-		}
-		time.Sleep(20 * time.Millisecond)
+	// safety: the listener is bound before ServeWith runs, so this request
+	// waits in its backlog until the metrics server starts answering.
+	req, rerr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+metricsAddr+"/metrics", nil)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	metrics, gerr := http.DefaultClient.Do(req)
+	if gerr != nil {
+		t.Fatalf("metrics listener never answered: %v", gerr)
+	}
+	body, rerr := io.ReadAll(metrics.Body)
+	_ = metrics.Body.Close()
+	if rerr != nil {
+		t.Fatalf("read metrics: %v", rerr)
+	}
+	if metrics.StatusCode != http.StatusOK {
+		t.Fatalf("metrics listener status = %d, want 200", metrics.StatusCode)
+	}
+	if !strings.Contains(string(body), "go_goroutines") {
+		t.Fatalf("metrics body missing go_goroutines: %s", body)
 	}
 }
 
