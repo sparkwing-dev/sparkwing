@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"testing"
 )
 
@@ -29,19 +30,25 @@ func TestLongDetachedProcessRegressionsRunInParallel(t *testing.T) {
 		"TestRunDetached_ReplacesAConsumerFromAnotherBuild":             false,
 		"TestRunsConsumerStop_RecordsTheInterruptedRun":                 false,
 	}
-	file, err := parser.ParseFile(token.NewFileSet(), "run_detached_process_test.go", nil, 0)
+	sources, err := filepath.Glob("*_test.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
+	for _, source := range sources {
+		file, parseErr := parser.ParseFile(token.NewFileSet(), source, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
 		}
-		if _, ok := targets[fn.Name.Name]; !ok {
-			continue
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if _, ok := targets[fn.Name.Name]; !ok {
+				continue
+			}
+			targets[fn.Name.Name] = firstStatementIsParallel(fn)
 		}
-		targets[fn.Name.Name] = firstStatementIsParallel(fn)
 	}
 	for name, parallel := range targets {
 		if !parallel {
