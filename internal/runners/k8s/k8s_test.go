@@ -976,3 +976,82 @@ func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T
 			*job.Spec.ActiveDeadlineSeconds, want)
 	}
 }
+
+func TestParseJobDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "6h", want: 6 * time.Hour},
+		{in: " 90m ", want: 90 * time.Minute},
+		{in: "30s", wantErr: true},
+		{in: "soon", wantErr: true},
+	} {
+		got, err := ParseJobDeadline(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseJobDeadline(%q) = %s, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("ParseJobDeadline(%q) = %s, %v; want %s", tc.in, got, err, tc.want)
+		}
+	}
+}
+
+// A Job Kubernetes killed at its deadline must not read like the unfenced-write
+// defect: the pod is gone, so the Job condition is the only evidence.
+func TestRunNode_DeadlineKillIsReportedAsItsOwnFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	deadline := int64(3600)
+	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("get", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.Job{
+			Spec: batchv1.JobSpec{ActiveDeadlineSeconds: &deadline},
+			Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
+				Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
+				Reason: DeadlineExceededReason,
+			}}},
+		}, nil
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+
+	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if res.Outcome != sparkwing.Failed {
+		t.Fatalf("outcome = %q, want failed", res.Outcome)
+	}
+	n, err := st.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.FailureReason != store.FailureTimeout {
+		t.Fatalf("failure_reason = %q, want %q", n.FailureReason, store.FailureTimeout)
+	}
+	if !strings.Contains(n.Error, "killed at its active deadline (1h0m0s)") {
+		t.Fatalf("node error = %q, want the deadline named", n.Error)
+	}
+	if strings.Contains(n.Error, "exited without writing terminal state") {
+		t.Fatal("a deadline kill still reads as the missing-terminal-state failure")
+	}
+}

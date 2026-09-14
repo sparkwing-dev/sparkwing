@@ -25,18 +25,23 @@ unlock.
 - **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` (scope
   `nodes.claim`) awards one named node to the caller, through the award and
   credit reservation the queue claim uses, for a dispatcher that executes a
-  node itself. It awards a node the queue has opened to any `nodes.claim`
-  token and an unopened one only to a caller holding the run's live trigger
-  claim, so a pipeline pod's token cannot take work whose dependencies have not
-  run. `store.ClaimNamedNode` and `client.ClaimNodeByID` are its store and
-  client surfaces.
+  node itself. It awards an unlabelled node the queue has opened to any
+  `nodes.claim` token; a node the queue has not opened and a node that declares
+  `.Requires()` labels go only to a caller holding the run's live trigger claim,
+  so a pipeline pod's token cannot take work whose dependencies have not run or
+  work its box cannot do. `store.ClaimNamedNode` and `client.ClaimNodeByID` are
+  its store and client surfaces.
 
 ### Changed
 
 - **cluster:** A Kubernetes runner Job now carries an `activeDeadlineSeconds`:
   ten minutes past the node's own `.Timeout()` where it declared one, and six
-  hours otherwise. `k8s.Config.JobActiveDeadline` sets the default. A wedged
-  pod that used to run until an operator noticed is now bounded.
+  hours otherwise. `--k8s-job-deadline` (env `SPARKWING_K8S_JOB_DEADLINE`, a Go
+  duration of at least a minute) moves that default on both `sparkwing cluster
+  worker` and the trigger worker. A wedged pod that used to run until an
+  operator noticed is now bounded, and a node Kubernetes kills at the deadline
+  fails with `timeout` and an error naming it rather than with the generic
+  "exited without writing terminal state".
 
 ### Fixed
 

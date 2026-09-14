@@ -3753,12 +3753,14 @@ paths:
         the Kubernetes fallback Job needs before it runs a node no agent
         claimed. It passes over no candidate and reads no label: the caller
         already decided this node is its work.
-        Naming a node skips the queue, so the scope alone is not enough. A node
-        the queue has already opened is awarded to any authorized caller; one
-        the queue has not opened is awarded only to a caller holding the run's
-        live trigger claim, which keeps a pipeline pod's token from taking work
-        whose dependencies have not run. An operator token bypasses the check,
-        as it does on every other claim-bound route.
+        Naming a node skips the queue, so the scope alone is not enough. An
+        unlabelled node the queue has already opened is awarded to any
+        authorized caller. A node the queue has not opened, and a node that
+        declares required runner labels, are awarded only to a caller holding
+        the run's live trigger claim: a named claim advertises no labels, and
+        this keeps a pipeline pod's token from taking work whose dependencies
+        have not run or work its box cannot do. An operator token bypasses the
+        check, as it does on every other claim-bound route.
         The claim binds to the calling token and `holder_id` exactly as
         `POST /api/v1/nodes/claim` does, and `lease_secs` is clamped to the
         server cap of 10 minutes. A metered token reserves its first minute
@@ -3800,7 +3802,7 @@ paths:
               schema: {$ref: "#/components/schemas/CreditsRefused"}
         "403":
           description: >-
-            The node is not ready and the caller does not hold the run's live trigger claim.
+            The node is not ready, or requires runner labels, and the caller does not hold the run's live trigger claim.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/AuthError"}

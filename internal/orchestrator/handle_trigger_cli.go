@@ -39,6 +39,8 @@ func runHandleTriggerCLI(args []string) error {
 		"hard CPU ceiling for runner pods as a Kubernetes quantity (8, 500m); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_CPU_CEILING)")
 	k8sMemoryCeiling := fs.String("k8s-memory-ceiling", os.Getenv("SPARKWING_K8S_MEMORY_CEILING"),
 		"hard memory ceiling for runner pods as a Kubernetes quantity (8Gi); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_MEMORY_CEILING)")
+	k8sJobDeadline := fs.String("k8s-job-deadline", os.Getenv("SPARKWING_K8S_JOB_DEADLINE"),
+		"wall-clock bound on one runner Job as a Go duration (6h, 90m); Kubernetes kills a pod that outlives it, and a node's own .Timeout() outranks it (empty = 6h; env: SPARKWING_K8S_JOB_DEADLINE)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	k8sNodeSelector := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR")))
 	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
@@ -105,6 +107,7 @@ func runHandleTriggerCLI(args []string) error {
 			ImagePullPolicy:            *imagePullPolicy,
 			CPUCeiling:                 *k8sCPUCeiling,
 			MemoryCeiling:              *k8sMemoryCeiling,
+			JobDeadline:                *k8sJobDeadline,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
@@ -139,6 +142,7 @@ func runHandleTriggerCLI(args []string) error {
 				ImagePullPolicy:            *imagePullPolicy,
 				CPUCeiling:                 *k8sCPUCeiling,
 				MemoryCeiling:              *k8sMemoryCeiling,
+				JobDeadline:                *k8sJobDeadline,
 			})
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)

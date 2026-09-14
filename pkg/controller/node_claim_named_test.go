@@ -28,6 +28,24 @@ func (f namedClaimFixture) readyNode(t *testing.T, runID, nodeID string) {
 	}
 }
 
+func (f namedClaimFixture) labelledReadyNode(t *testing.T, runID, nodeID string, labels []string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{
+		RunID: runID, NodeID: nodeID, Status: "pending", NeedsLabels: labels,
+	}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+}
+
 // safety: the dispatcher's standing is its live claim on the run's trigger,
 // which is what lets it name a node the queue has not opened.
 func (f namedClaimFixture) claimTrigger(t *testing.T, runID, pipeline string) {
@@ -230,5 +248,45 @@ func TestClaimNodeByID_RefusesANodeOfAFinishedRun(t *testing.T) {
 		ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("claiming a node of a finished run = %v, want ErrLockHeld", err)
+	}
+}
+
+// The queue claim hands a labelled node only to a runner that advertises those
+// labels. A named claim advertises none, so the label requirement has to fall
+// back to the run's dispatcher rather than being skipped.
+func TestClaimNodeByID_RefusesALabelledNodeWithoutTheRunsDispatchClaim(t *testing.T) {
+	f := newNamedClaimFixture(t, store.TokenOptions{})
+	f.labelledReadyNode(t, "run-1", "train", []string{"gpu"})
+
+	_, err := client.NewWithToken(f.url, nil, f.token).
+		ClaimNodeByID(context.Background(), "run-1", "train", "unlabelled:pod", time.Minute)
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("claiming a gpu node from an unlabelled caller = %v, want a refusal", err)
+	}
+	n, err := f.store.GetNode(context.Background(), "run-1", "train")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.Claimed {
+		t.Fatalf("the refused claim still took the labelled node for %q", n.ClaimedBy)
+	}
+	if _, err := f.store.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{},
+		"unlabelled:agent", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the queue claim admitted the same node to the same labels = %v", err)
+	}
+}
+
+func TestClaimNodeByID_AwardsALabelledNodeToTheRunsDispatcher(t *testing.T) {
+	f := newNamedClaimFixture(t, store.TokenOptions{})
+	f.labelledReadyNode(t, "run-1", "train", []string{"gpu"})
+	f.claimTrigger(t, "run-1", "demo")
+
+	n, err := client.NewWithToken(f.url, nil, f.token).
+		ClaimNodeByID(context.Background(), "run-1", "train", "k8s-job:sw-1", time.Minute)
+	if err != nil {
+		t.Fatalf("the run's dispatcher was refused its own labelled node: %v", err)
+	}
+	if n.ClaimedBy != "k8s-job:sw-1" {
+		t.Fatalf("claimed_by = %q, want the dispatcher's holder", n.ClaimedBy)
 	}
 }

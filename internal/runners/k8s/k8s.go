@@ -251,6 +251,10 @@ func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName stri
 	}, true
 }
 
+// safety: this is a wall-clock backstop for a pod Kubernetes would otherwise
+// keep forever, never the node's own deadline. A node's no-progress timeout
+// measures silence rather than elapsed time, so it deliberately does not bound
+// this; only a declared .Timeout() moves it.
 func (r *Runner) jobActiveDeadline(req runner.Request) *int64 {
 	deadline := r.cfg.JobActiveDeadline
 	if deadline <= 0 {
@@ -330,6 +334,14 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		if reason == store.FailureOOMKilled {
 			errMsg = fmt.Sprintf("pod %s OOMKilled", j.Name)
 		}
+		// safety: Kubernetes deletes the pod it kills at the deadline, so the
+		// Job condition is the only record of why the node wrote nothing.
+		if deadlineKilledJob(j) {
+			reason = store.FailureTimeout
+			exitCode = nil
+			errMsg = fmt.Sprintf("Job %s was killed at its active deadline (%s) before the node wrote a terminal state",
+				j.Name, jobDeadlineText(j))
+		}
 		if res.Err == nil {
 			res.Err = errors.New(errMsg)
 		}
@@ -337,6 +349,30 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 			string(sparkwing.Failed), errMsg, nil, reason, exitCode)
 	}
 	return res
+}
+
+// DeadlineExceededReason is the reason Kubernetes stamps on a Job it kills for
+// outliving its activeDeadlineSeconds.
+const DeadlineExceededReason = "DeadlineExceeded"
+
+func deadlineKilledJob(j *batchv1.Job) bool {
+	if j == nil {
+		return false
+	}
+	for _, c := range j.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue &&
+			c.Reason == DeadlineExceededReason {
+			return true
+		}
+	}
+	return false
+}
+
+func jobDeadlineText(j *batchv1.Job) string {
+	if j == nil || j.Spec.ActiveDeadlineSeconds == nil {
+		return "its configured limit"
+	}
+	return (time.Duration(*j.Spec.ActiveDeadlineSeconds) * time.Second).String()
 }
 
 func (r *Runner) inspectTerminatedPod(ctx context.Context, j *batchv1.Job) (string, *int) {
@@ -683,6 +719,23 @@ func ParseCPUCeiling(s string) (float64, error) {
 		return 0, fmt.Errorf("cpu ceiling %q: expected a positive number of cores", s)
 	}
 	return cores, nil
+}
+
+// ParseJobDeadline reads an operator's wall-clock bound on one runner Job as a
+// Go duration ("6h", "90m"). An empty string means [DefaultJobActiveDeadline].
+func ParseJobDeadline(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("job deadline %q: expected a Go duration such as 6h or 90m", s)
+	}
+	if d < time.Minute {
+		return 0, fmt.Errorf("job deadline %q: expected at least a minute", s)
+	}
+	return d, nil
 }
 
 // ParseMemoryCeiling reads an operator's memory ceiling in Kubernetes quantity

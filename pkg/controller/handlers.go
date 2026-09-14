@@ -1570,9 +1570,9 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: naming a node skips the queue, and every pipeline pod carries a
-// nodes.claim token, so the scope alone would let a node body take work whose
-// dependencies have not run. A node the queue already opened is fair game; an
-// unopened one belongs to whoever holds the run's dispatch claim.
+// claim-scoped token, so an unlabelled node the queue already opened is fair
+// game and anything else needs the run's dispatch claim. A named claim
+// advertises no labels, so nothing else could honour a requirement.
 func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.HasScope(ScopeAdmin) {
@@ -1587,7 +1587,7 @@ func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID
 		writeError(w, http.StatusInternalServerError, err)
 		return false
 	}
-	if n.ReadyAt != nil {
+	if n.ReadyAt != nil && len(n.NeedsLabels) == 0 {
 		return true
 	}
 	held, err := s.store.PrincipalHoldsTriggerClaim(r.Context(), runID, claimIdentity(r), time.Now())
@@ -1598,9 +1598,13 @@ func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID
 	if held {
 		return true
 	}
+	reason := "has not been made ready"
+	if len(n.NeedsLabels) > 0 {
+		reason = "requires runner labels a named claim cannot advertise"
+	}
 	writeAuthError(w, http.StatusForbidden, authErrorBody{
 		Code: "claim_required", Principal: p.label(),
-		Message: "node " + runID + "/" + nodeID + " has not been made ready, so naming it requires the run's live trigger claim",
+		Message: "node " + runID + "/" + nodeID + " " + reason + ", so naming it requires the run's live trigger claim",
 	})
 	return false
 }

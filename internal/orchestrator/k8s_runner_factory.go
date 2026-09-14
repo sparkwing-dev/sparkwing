@@ -42,6 +42,10 @@ type K8sRunnerFactoryConfig struct {
 	CPUCeiling string
 
 	MemoryCeiling string
+
+	// JobDeadline is the operator's wall-clock bound on one runner Job as a Go
+	// duration. Empty leaves the runner's own default.
+	JobDeadline string
 }
 
 func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Trigger) runner.Runner, error) {
@@ -70,6 +74,10 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 	memoryCeiling, err := k8srunner.ParseMemoryCeiling(cfg.MemoryCeiling)
 	if err != nil {
 		return nil, fmt.Errorf("--k8s-memory-ceiling: %w", err)
+	}
+	jobDeadline, err := k8srunner.ParseJobDeadline(cfg.JobDeadline)
+	if err != nil {
+		return nil, fmt.Errorf("--k8s-job-deadline: %w", err)
 	}
 	var rc *rest.Config
 	if cfg.Kubeconfig != "" {
@@ -104,6 +112,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		MemoryLimit:        "2Gi",
 		CPUCeiling:         cpuCeiling,
 		MemoryCeiling:      memoryCeiling,
+		JobActiveDeadline:  jobDeadline,
 		PollInterval:       time.Second,
 	}
 	logger := slog.Default()
