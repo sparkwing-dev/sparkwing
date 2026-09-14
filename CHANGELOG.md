@@ -207,7 +207,8 @@ unlock.
   four cores costs more. The four-core class is that setting under another
   name, so a controller that repriced it keeps its own four-core price.
   `sparkwing cluster credits settings --rate-table` sets a ladder of your own,
-  and charges already written keep the class and rate they were billed at.
+  and charges already written keep the class and rate they were billed at. See the
+  [migration guide](docs/migrations/v0.50.4.md#metered-runner-seconds-are-priced-by-cpu-class).
 - **pkg/store:** The credit setters now bound what they accept, because a rate
   near the int64 maximum overflowed the reservation a claim takes and let a
   claim the ledger had to refuse succeed, then billed the next heartbeat
@@ -282,7 +283,7 @@ unlock.
   removed mode. `sparkwing-runner agent --allow-enrolled-preview` and
   `sparkwing fleet agents enroll`, whose one-time output was a `coordinators`
   block, go with them. See the
-  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-is-removed).
+  [migration guide](docs/migrations/v0.50.4.md#enrolled-agent-configuration-is-removed).
   Claim mode is unchanged and keeps `controller`, `logs`, `token`, `labels`,
   `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
   `holder_prefix` and the rest, which is the shape `sparkwing cluster runners

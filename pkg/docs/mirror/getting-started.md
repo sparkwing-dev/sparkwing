@@ -435,7 +435,7 @@ SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
 SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod
 ```
 
-The recipe, in five steps:
+The recipe, step by step:
 
 1. Resolve the version, from `--version` or by bumping the newest tag origin
    carries, and refuse anything that does not outrank it
