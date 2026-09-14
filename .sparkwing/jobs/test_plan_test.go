@@ -52,11 +52,13 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `func (p *Test) run(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(runtime.NumCPU()))).Run(); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "go test: all packages passed")
-	return nil
+	return withProductTestHome(func(home string) error {
+		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(runtime.NumCPU()), home)).Run(); err != nil {
+			return err
+		}
+		sparkwing.Info(ctx, "go test: all packages passed")
+		return nil
+	})
 }`
 	if formatted.String() != want {
 		t.Fatalf("Test.run must execute only the bounded test command, scrubbed of the node's "+

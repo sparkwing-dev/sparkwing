@@ -444,29 +444,49 @@ func checkDocsMirror(ctx context.Context) error {
 	return nil
 }
 
+// safety: a node hands each child the run's own bindings, so a suite that
+// reads one reaches the machine's admission daemon, the operator's controller
+// or cache, or a credential of the run's, and reds only inside a gate.
+// internal/runners/local/env.go is the injector these names track.
 var productTestUnset = []string{
 	wingwire.LeaseTokenEnv,
 	wingwire.ChildLeaseTokenEnv,
-	"GIT_INDEX_FILE",
-	// safety: a node process carries this run's home, which for an ordinary
-	// gate is the operator's own. A test binary that inherits it opens the
-	// real runs store instead of the sandbox internal/paths gives it.
-	"SPARKWING_HOME",
-	// safety: the node also hands its children the machine's admission socket
-	// and the service URLs the dispatcher chose, so a suite that reads either
-	// talks to a live daemon or a live controller and reds only inside a gate.
 	wingwire.APISocketEnv,
+	"GIT_INDEX_FILE",
+	"SPARKWING_AGENT_TOKEN",
+	"SPARKWING_CACHE_URL",
 	"SPARKWING_CONTROLLER_URL",
+	"SPARKWING_DRY_RUN",
 	"SPARKWING_LOGS_URL",
+	"SPARKWING_NODE_ID",
+	"SPARKWING_PARENT_LIVENESS_FD",
+	"SPARKWING_RUN_ID",
+	"SPARKWING_TOKEN",
 }
 
-// safety: orchestrator.DevEnvDisableEnv, which the pipeline module cannot
-// import. Clearing the URLs is not enough on its own: they fall back to the
-// dev.env under the home, and a helper binary a suite starts is not a test
-// binary, so internal/paths hands it the operator's home rather than a sandbox.
+// safety: the injected names a suite may keep, each because it names no
+// service and carries no credential. A name absent from both this map and the
+// list above fails the contract test rather than reaching a suite unread.
+var productTestKept = map[string]string{
+	"SPARKWING_LOG_FORMAT":    "picks a renderer",
+	"SPARKWING_RUNNER_NAME":   "reports which runner executed the node",
+	"SPARKWING_RUNNER_TYPE":   "reports which runner executed the node",
+	"SPARKWING_RUNNER_LABELS": "reports what the local runner advertises",
+	"SPARKWING_START_AT":      "records the window the run already chose",
+	"SPARKWING_STOP_AT":       "records the window the run already chose",
+}
+
+// safety: the pipeline module cannot import internal/orchestrator, so this
+// spelling of its DevEnvDisableEnv is pinned by a contract test instead.
+// Clearing the two URLs is not enough on its own, because both fall back to
+// the dev.env under the home.
 const devEnvDisableVar = "SPARKWING_DEV_ENV_DISABLE"
 
-var productTestPin = []string{devEnvDisableVar + "=1"}
+const productTestHomeVar = "SPARKWING_HOME"
+
+func productTestPins(home string) []string {
+	return []string{devEnvDisableVar + "=1", productTestHomeVar + "=" + shellQuote(home)}
+}
 
 func withoutInherited(cmd string, names []string) string {
 	if len(names) == 0 {
@@ -482,22 +502,42 @@ func withPinned(cmd string, bindings []string) string {
 	return "export " + strings.Join(bindings, " ") + "; " + cmd
 }
 
-// safety: every step that starts a product test suite runs through here, so
-// the scrub cannot be half-applied across the gate's several test steps.
-func productTestScript(cmd string) string {
-	return withPinned(withoutInherited(cmd, productTestUnset), productTestPin)
+// safety: every step that starts a product suite composes its command here, so
+// the scrub cannot be half-applied across the gate's several test steps. The
+// unset runs first, which is what lets the pins survive it.
+func productTestScript(cmd, home string) string {
+	return withoutInherited(withPinned(cmd, productTestPins(home)), productTestUnset)
+}
+
+// safety: a helper binary a suite starts is not a *.test binary, so
+// internal/paths resolves the operator's home for it rather than a per-pid
+// sandbox, and it opens the real runs store. A home of the step's own is what
+// the suite reaches instead.
+func withProductTestHome(run func(home string) error) error {
+	home, err := os.MkdirTemp("", "sparkwing-gate-home-")
+	if err != nil {
+		return fmt.Errorf("create the suite's sparkwing home: %w", err)
+	}
+	runErr := run(home)
+	cleanupErr := os.RemoveAll(home)
+	if cleanupErr != nil {
+		cleanupErr = fmt.Errorf("remove the suite's sparkwing home: %w", cleanupErr)
+	}
+	return errors.Join(runErr, cleanupErr)
 }
 
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), false)
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), "")
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), false)
+	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), "")
 }
 
 func runTest(ctx context.Context) error {
-	return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), true)
+	return withProductTestHome(func(home string) error {
+		return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), home)
+	})
 }
 
 func withGoTestScratch(run func(string) error) error {
@@ -513,7 +553,9 @@ func withGoTestScratch(run func(string) error) error {
 	return errors.Join(testErr, cleanupErr)
 }
 
-func forEachGoModule(ctx context.Context, label, cmd string, scrub bool) error {
+// safety: an empty home means the step starts no product suite, which is the
+// only reason a step skips the scrub.
+func forEachGoModule(ctx context.Context, label, cmd, home string) error {
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
@@ -530,8 +572,8 @@ func forEachGoModule(ctx context.Context, label, cmd string, scrub bool) error {
 		}
 		command := strings.TrimSuffix(cmd, "./...") + strings.Join(packages, " ")
 		script := fmt.Sprintf("cd %q && %s", dir, command)
-		if scrub {
-			script = productTestScript(script)
+		if home != "" {
+			script = productTestScript(script, home)
 		}
 		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
 			failures = append(failures, describeModuleFailure(dir, err))

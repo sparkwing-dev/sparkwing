@@ -198,7 +198,7 @@ func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
 	gitAddAll(t, root)
 	t.Setenv("GIT_INDEX_FILE", gateIndexSnapshot(t, root))
 
-	if err := forEachGoModule(ctx, "go test", "go test ./...", false); err == nil {
+	if err := forEachGoModule(ctx, "go test", "go test ./...", ""); err == nil {
 		t.Fatal("the probe must fail while the gate's index reaches it, or the pass below proves nothing")
 	}
 	if err := runTest(ctx); err != nil {
