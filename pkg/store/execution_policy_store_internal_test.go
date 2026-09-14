@@ -88,6 +88,9 @@ func TestExecutionPolicyInvalidSealRollsBackReadyAndTuple(t *testing.T) {
 }
 
 func TestSQLExecutionPolicyBindingTamperingFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	for name, tamper := range map[string]func(*testing.T, *Store){
 		"pipeline": func(t *testing.T, st *Store) {
 			if _, err := st.DB().Exec(`UPDATE runs SET pipeline = 'other' WHERE id = 'run'`); err != nil {
@@ -268,6 +271,9 @@ func TestNodeJSONNeverContainsExecutionSeal(t *testing.T) {
 }
 
 func TestAgentLossRetryUsesDurableExecutionPolicySnapshot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	t.Run("ignores live source and caller mutation after snapshot", func(t *testing.T) {
 		st, retryID, policy := createSealedAgentLossRetry(t)
 		defer st.Close()

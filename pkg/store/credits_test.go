@@ -959,6 +959,9 @@ func chargeAt(
 }
 
 func TestChargeNodeCreditsCountsGraceFromTheReservationEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	reserved := time.Duration(store.CreditClaimFloorSeconds) * time.Second
 	for _, tc := range []struct {
 		name              string

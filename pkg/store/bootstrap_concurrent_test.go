@@ -12,6 +12,9 @@ import (
 )
 
 func TestCreateFirstUser_ConcurrentBootstrapAdmitsOneAdmin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, tc := range []struct {
 		name string
 		open func(t *testing.T) *store.Store

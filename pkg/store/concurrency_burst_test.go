@@ -124,6 +124,9 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 }
 
 func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	s := storetest.Open(t)
 	ctx := ctxT(t)
 

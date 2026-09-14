@@ -163,6 +163,9 @@ func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 // A caller cannot tell an empty result from a search that gave up, so the
 // store says so in the log when it stops at the horizon short of the limit.
 func TestListTriggers_RepoFilterWarnsWhenItStopsAtTheHorizon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
 	s := storetest.Open(t)
 	ctx := context.Background()
 	base := time.Now().Add(-24 * time.Hour)

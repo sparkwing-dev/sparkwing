@@ -240,6 +240,9 @@ func TestResolveCronDueNeverRewindsTheCursor(t *testing.T) {
 }
 
 func TestDeleteCronSchedulesForRepoCountsWhatWent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	ctx := context.Background()
 	st := storetest.Open(t)
 	armCron(t, st, "crn_a1", "/repo/one", "nightly", cronBase)

@@ -671,6 +671,9 @@ func TestANamedClaimSizingToClassNeedsAMeteredToken(t *testing.T) {
 // A small node behind a queue of large ones is still reachable: the classes a
 // warm runner may not take never enter the scan window.
 func TestAWarmClaimReachesASmallNodeBehindManyLargeOnes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s of real work; the fast class runs under -short")
+	}
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")

@@ -143,6 +143,9 @@ func TestRequirements_BackfilledOnPreRequirementsDatabase(t *testing.T) {
 }
 
 func TestRequirements_ConcurrentColdStartLeavesOneRowEach(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	target := storetest.New(t)
 
 	const openers = 8

@@ -126,6 +126,9 @@ func TestAssistedPrepareSkipsUnsealedAndSixtyFourIneligiblePoliciesBeforeDecode(
 }
 
 func TestAssistedPrepareBoundedCursorDoesNotStarveCompatibleNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	st, claimant := newAssistedAdmissionStore(t)
 	defer st.Close()
 	report := executionpolicy.CurrentRuntimeReport(buildinfo.Identity{
@@ -148,6 +151,9 @@ func TestAssistedPrepareBoundedCursorDoesNotStarveCompatibleNode(t *testing.T) {
 }
 
 func TestAssistedPrepareRuntimeRefusalDoesNotStarveLaterCompatiblePage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st, recorder := newRecordingExecutorStore(t)
 	claimant := initializeAssistedAdmissionStore(t, st)
 	report := executionpolicy.CurrentRuntimeReport(buildinfo.Identity{

@@ -31,6 +31,9 @@ func claimTrigger(t *testing.T, s *store.Store, id, pipeline string) {
 // rather than in a read before it, so this pins that the answers did not
 // move when the check did.
 func TestRequeueUnstartedClaim_AnswersByRunStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string

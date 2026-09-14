@@ -44,6 +44,9 @@ func reclaimAndSucceed(t *testing.T, s *store.Store, id string) {
 // read and the write is what makes that true. Split into two statements, the
 // superseded dispatch's "failed" lands on top of the live "success".
 func TestFinishAtGeneration_ConcurrentReclaimKeepsTheCurrentOutcome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	s := storetest.Open(t)
 	ctx := context.Background()
 

@@ -235,6 +235,9 @@ func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
 }
 
 func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
