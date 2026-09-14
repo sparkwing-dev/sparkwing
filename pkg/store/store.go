@@ -75,6 +75,9 @@ const (
 	// FailureCreditsExhausted: the controller's prepaid credit balance ran
 	// out and the node was cancelled after the grace period.
 	FailureCreditsExhausted = "credits_exhausted"
+	// FailureUnpricedCPUClass: the node's cpu request is above the largest
+	// class the credit rate table prices, so no claim could be billed.
+	FailureUnpricedCPUClass = "unpriced_cpu_class"
 	// FailureLogsAuth: the runner's logs.append calls returned 401/403
 	// against the controller's auth surface. The run's structured
 	// logs are unrecoverable; better to fail loud than report

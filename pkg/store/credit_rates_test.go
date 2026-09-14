@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,9 +107,9 @@ func TestRateTableRejectsAnUnusableEntry(t *testing.T) {
 	}
 }
 
-// An installation that never set a table pays one price for every class, which
-// is what the single rate setting charged on its own.
-func TestUnsetRateTablePricesEveryClassAtTheSingleRate(t *testing.T) {
+// An installation that never set a table bills the GitHub ladder, and its
+// four-core class is the single rate setting under another name.
+func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
@@ -116,13 +117,13 @@ func TestUnsetRateTablePricesEveryClassAtTheSingleRate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rate table: %v", err)
 	}
-	if len(table) == 0 {
-		t.Fatal("the default rate table prices no class")
+	want := githubRateTable()
+	if len(table) != len(want) {
+		t.Fatalf("the default table prices %d classes, want %d", len(table), len(want))
 	}
-	for _, entry := range table {
-		if entry.MicroPerSecond != store.DefaultCreditRateMicro {
-			t.Fatalf("the %d-core class costs %d, want the default %d",
-				entry.Cores, entry.MicroPerSecond, store.DefaultCreditRateMicro)
+	for i, entry := range table {
+		if entry != want[i] {
+			t.Fatalf("the default table prices %+v, want %+v", entry, want[i])
 		}
 	}
 
@@ -133,10 +134,15 @@ func TestUnsetRateTablePricesEveryClassAtTheSingleRate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rate table after the single rate moved: %v", err)
 	}
-	for _, entry := range table {
-		if entry.MicroPerSecond != 50_000 {
-			t.Fatalf("the %d-core class costs %d, want 50000", entry.Cores, entry.MicroPerSecond)
-		}
+	if got := table.RateFor(store.CreditRateBaseClassCores); got != 50_000 {
+		t.Fatalf("four-core class = %d, want the single rate 50000", got)
+	}
+	if got := table.RateFor(8); got != 36_667 {
+		t.Fatalf("eight-core class = %d, want the ladder's 36667", got)
+	}
+	set, err := s.CreditRateTableSet(ctx)
+	if err != nil || set {
+		t.Fatalf("CreditRateTableSet = %v, %v; want false with no table written", set, err)
 	}
 }
 
@@ -383,5 +389,174 @@ func TestAnEarlyFinishRefundsAtTheRateTheClaimReserved(t *testing.T) {
 	}
 	if res.BalanceMicro > 10_000*store.MicroCreditsPerCredit {
 		t.Fatalf("the refund lifted the balance above what was granted: %d", res.BalanceMicro)
+	}
+}
+
+// A rate large enough to overflow the reservation is refused before it can
+// write a negative charge and hand the payer credits it never bought.
+func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
+	table := store.CreditRateTable{{Cores: 2, MicroPerSecond: 200_000_000_000_000_000}}
+	if err := table.Validate(); err == nil {
+		t.Fatal("Validate accepted a rate of 2e17 micro-credits a second")
+	}
+	if err := (store.CreditRateTable{{Cores: 2, MicroPerSecond: store.MaxCreditRateMicro}}).Validate(); err != nil {
+		t.Fatalf("Validate refused the ceiling itself: %v", err)
+	}
+	s := storetest.Open(t)
+	if err := s.SetCreditRateMicroPerSecond(context.Background(), store.MaxCreditRateMicro+1); err == nil {
+		t.Fatal("the single rate accepted a value above the ceiling")
+	}
+}
+
+// The billed class never exceeds the pod the runner reports, so a ceiling that
+// clamped the pod clamps the bill with it.
+func TestClaimBillsTheSmallerOfTheRequestAndTheRunnersOwnCPU(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 10_000)
+	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-clamped", "build", 16)
+	readyNodeWithCores(t, s, "run-roomy", "build", 2)
+
+	clamped := store.WithClaimRunnerCores(ctx, 2)
+	if _, err := s.ClaimNamedNode(clamped, claimant, "run-clamped", "build", "pod-1", time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if charge := lastChargeFor(t, s, "run-clamped"); charge.CPUClassCores != 2 {
+		t.Fatalf("a 16-core node on a 2-core runner billed class %d, want 2", charge.CPUClassCores)
+	}
+
+	roomy := store.WithClaimRunnerCores(ctx, 64)
+	if _, err := s.ClaimNamedNode(roomy, claimant, "run-roomy", "build", "pod-2", time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if charge := lastChargeFor(t, s, "run-roomy"); charge.CPUClassCores != 2 {
+		t.Fatalf("a 2-core node on a 64-core runner billed class %d, want 2", charge.CPUClassCores)
+	}
+}
+
+// A request the table cannot price is still claimable when the runner reports
+// a smaller pod, because that pod is what the customer gets.
+func TestARunnerReportSmallerThanAnUnpricedRequestPricesTheClaim(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 10_000)
+	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-clamped-huge", "build", 96)
+
+	clamped := store.WithClaimRunnerCores(ctx, 8)
+	if _, err := s.ClaimNamedNode(clamped, claimant, "run-clamped-huge", "build", "pod-1", time.Minute); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if charge := lastChargeFor(t, s, "run-clamped-huge"); charge.CPUClassCores != 8 {
+		t.Fatalf("billed class %d, want the 8-core pod the runner reported", charge.CPUClassCores)
+	}
+}
+
+// An empty balance is the refusal a runner already understands, so it is
+// reported even for a node the table cannot price.
+func TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-broke-huge", "build", 96)
+
+	_, err := s.ClaimNamedNode(ctx, claimant, "run-broke-huge", "build", "pod-1", time.Minute)
+	if !errors.Is(err, store.ErrInsufficientCredits) {
+		t.Fatalf("claim on an empty ledger = %v, want ErrInsufficientCredits", err)
+	}
+}
+
+// A node nobody can price fails with the reason, because every poller would
+// otherwise retry it forever.
+func TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 10_000)
+	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	readyNodeWithCores(t, s, "run-unpriced", "build", 96)
+
+	_, err := s.ClaimNamedNode(ctx, claimant, "run-unpriced", "build", "pod-1", time.Minute)
+	var unpriced *store.UnpricedCPUClassError
+	if !errors.As(err, &unpriced) {
+		t.Fatalf("claim = %v, want an unpriced-class refusal", err)
+	}
+	if unpriced.RunID != "run-unpriced" || unpriced.NodeID != "build" {
+		t.Fatalf("the refusal names %s/%s", unpriced.RunID, unpriced.NodeID)
+	}
+
+	if err := s.FailNodeForUnpricedClass(ctx, unpriced, time.Now()); err != nil {
+		t.Fatalf("fail the node: %v", err)
+	}
+	node, err := s.GetNode(ctx, "run-unpriced", "build")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Outcome != "failed" || node.FailureReason != store.FailureUnpricedCPUClass {
+		t.Fatalf("node = %s/%s, want a failure naming the unpriced class", node.Outcome, node.FailureReason)
+	}
+	if !strings.Contains(node.Error, "96") || !strings.Contains(node.Error, "64") {
+		t.Fatalf("the node's error %q names neither size", node.Error)
+	}
+	events, err := s.ListEventsAfter(ctx, "run-unpriced", 0, 50)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	for _, e := range events {
+		if e.Kind == store.EventKindCreditsUnpriced {
+			return
+		}
+	}
+	t.Fatalf("no %s event on the run: %+v", store.EventKindCreditsUnpriced, events)
+}
+
+func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	if _, err := s.DB().Exec(
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('credit_rate_table', 'not json', 1)`,
+	); err != nil {
+		t.Fatalf("write an unreadable table: %v", err)
+	}
+	if _, err := s.CreditRateTable(ctx); err == nil {
+		t.Fatal("an unreadable stored table read as a usable one")
+	}
+	if _, err := s.CreditState(ctx, time.Hour); err == nil {
+		t.Fatal("the credit state hid an unreadable rate table")
+	}
+}
+
+// The scalar is the four-core price, so a table that prices no four-core class
+// leaves it where it stands.
+func TestATableWithoutAFourCoreClassLeavesTheScalarAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	if err := s.SetCreditRateTable(ctx, store.CreditRateTable{
+		{Cores: 2, MicroPerSecond: 10_000}, {Cores: 8, MicroPerSecond: 36_667},
+	}); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	rate, err := s.CreditRateMicroPerSecond(ctx)
+	if err != nil {
+		t.Fatalf("read the single rate: %v", err)
+	}
+	if rate != store.DefaultCreditRateMicro {
+		t.Fatalf("single rate = %d, want the default it was left at", rate)
+	}
+	set, err := s.CreditRateTableSet(ctx)
+	if err != nil || !set {
+		t.Fatalf("CreditRateTableSet = %v, %v; want true", set, err)
 	}
 }

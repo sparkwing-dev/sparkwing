@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+// safety: a node whose plan pins no cpu resolves to one core, which the
+// smallest class of the default rate table covers, so that is the price these
+// fixtures are billed at.
+var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRateMicro).RateFor(1)
 
 type creditsFixture struct {
 	url      string
@@ -278,6 +284,7 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("floor: %v", err)
 	}
+	floor = unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
 	// safety: exactly one reservation, so the first heartbeat past it spends
 	// the balance.
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, floor, "", "root"); err != nil {
@@ -386,8 +393,8 @@ func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
 		t.Fatalf("balance: %v", err)
 	}
 	spent := before - after
-	want := int64(4) * store.DefaultCreditRateMicro
-	if diff := spent - want; diff > store.DefaultCreditRateMicro || diff < -store.DefaultCreditRateMicro {
+	want := int64(4) * unpinnedNodeRateMicro
+	if diff := spent - want; diff > unpinnedNodeRateMicro || diff < -unpinnedNodeRateMicro {
 		t.Fatalf("spent %d for four seconds of work, want %d within one second", spent, want)
 	}
 }
@@ -535,6 +542,7 @@ func creditSettings(t *testing.T, f creditsFixture, method string, body any) (in
 type creditSettingsView struct {
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateView `json:"rate_table"`
+	RateTableSet       bool             `json:"rate_table_set"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 	MicroPerCredit     int64            `json:"micro_per_credit"`
@@ -670,20 +678,23 @@ func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
 
 // An installation that never set a table reads one price for every class, so
 // its bill is what the single rate charged on its own.
-func TestCreditSettings_ReadsAFlatDefaultRateTable(t *testing.T) {
+func TestCreditSettings_ReadsTheDefaultRateLadder(t *testing.T) {
 	f := newCreditsFixture(t, false)
 
 	status, view := creditSettings(t, f, http.MethodGet, nil)
 	if status != http.StatusOK {
 		t.Fatalf("GET settings = %d", status)
 	}
-	if len(view.RateTable) == 0 {
-		t.Fatal("the settings route named no cpu class")
+	if view.RateTableSet {
+		t.Fatal("a controller that set no table reports one")
 	}
-	for _, entry := range view.RateTable {
-		if entry.MicroPerSecond != store.DefaultCreditRateMicro {
-			t.Fatalf("the %d-core class costs %d, want the default %d",
-				entry.Cores, entry.MicroPerSecond, store.DefaultCreditRateMicro)
+	want := store.DefaultCreditRateTable(store.DefaultCreditRateMicro)
+	if len(view.RateTable) != len(want) {
+		t.Fatalf("the settings route named %d classes, want %d", len(view.RateTable), len(want))
+	}
+	for i, entry := range view.RateTable {
+		if entry.Cores != want[i].Cores || entry.MicroPerSecond != want[i].MicroPerSecond {
+			t.Fatalf("the %d-core class costs %d, want %+v", entry.Cores, entry.MicroPerSecond, want[i])
 		}
 	}
 }
@@ -744,8 +755,9 @@ func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("GET settings = %d", status)
 	}
-	for _, entry := range view.RateTable {
-		if entry.MicroPerSecond != store.DefaultCreditRateMicro {
+	want := store.DefaultCreditRateTable(store.DefaultCreditRateMicro)
+	for i, entry := range view.RateTable {
+		if entry.MicroPerSecond != want[i].MicroPerSecond {
 			t.Fatalf("a refused write priced the %d-core class at %d", entry.Cores, entry.MicroPerSecond)
 		}
 	}
@@ -819,5 +831,125 @@ func TestCredits_HistoryNamesTheClassAndRateEachChargeWasBilledAt(t *testing.T) 
 	}
 	if len(state.RateTable) != 2 || state.RateTable[0].MicroPerSecond != 10_000 {
 		t.Fatalf("the credit state names %+v, want the two classes in force", state.RateTable)
+	}
+}
+
+// With a table stored the scalar is the four-core entry under another name, so
+// writing it alone is refused and the caller is told what to write instead.
+func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": map[string]int64{"2": 10_000, "4": 20_000},
+	}); status != http.StatusOK {
+		t.Fatalf("PUT the table = %d", status)
+	}
+	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/credits/settings", f.admin,
+		map[string]any{"rate_micro_per_second": 30_000})
+	if status != http.StatusBadRequest {
+		t.Fatalf("PUT the scalar = %d, want 400", status)
+	}
+	if !strings.Contains(string(body), "rate_table") {
+		t.Fatalf("the refusal does not name the table: %s", body)
+	}
+	_, view := creditSettings(t, f, http.MethodGet, nil)
+	if view.RateMicroPerSecond != 20_000 || !view.RateTableSet {
+		t.Fatalf("the refused write moved the settings: %+v", view)
+	}
+
+	// safety: a body that rewrites the whole table may carry the scalar with it.
+	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_micro_per_second": 21_000,
+		"rate_table":            map[string]int64{"2": 10_000, "4": 20_000},
+	}); status != http.StatusOK {
+		t.Fatalf("PUT both = %d, want 200", status)
+	}
+}
+
+// A claim for a node the table cannot price fails the node with the reason, so
+// the run stops instead of every poller retrying it forever.
+func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": map[string]int64{"2": 10_000, "4": 20_000},
+	}); status != http.StatusOK {
+		t.Fatalf("set the rate table = %d", status)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-huge", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":96}}]}`),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-huge", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, "run-huge", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
+	if status != http.StatusConflict {
+		t.Fatalf("claim = %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), controller.UnpricedCPUClassCode) {
+		t.Fatalf("the refusal carries no code: %s", body)
+	}
+	node, err := f.store.GetNode(ctx, "run-huge", "build")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Outcome != "failed" || node.FailureReason != store.FailureUnpricedCPUClass {
+		t.Fatalf("node = %s/%s, want a failure naming the unpriced class", node.Outcome, node.FailureReason)
+	}
+}
+
+// The ledger prices a node at the pod the runner reports when that is smaller
+// than the node's own request.
+func TestCredits_ClaimReportsTheRunnersCPUAndIsBilledForIt(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": map[string]int64{"2": 10_000, "4": 20_000, "16": 70_000},
+	}); status != http.StatusOK {
+		t.Fatalf("set the rate table = %d", status)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":16}}]}`),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodPost, f.url+"/api/v1/nodes/claim", f.runner,
+		map[string]any{
+			"holder_id": "pod-1", "lease_secs": 60,
+			"capacity": map[string]any{"max_concurrent": 1, "active_claims": 0, "cores": 2},
+		})
+	if status != http.StatusOK {
+		t.Fatalf("claim = %d: %s", status, body)
+	}
+	charges, err := f.store.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatalf("list charges: %v", err)
+	}
+	if len(charges) != 1 || charges[0].CPUClassCores != 2 || charges[0].RateMicroPerSecond != 10_000 {
+		t.Fatalf("reservation = %+v, want the 2-core class the runner reported", charges)
 	}
 }

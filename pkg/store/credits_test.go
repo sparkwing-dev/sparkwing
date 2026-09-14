@@ -11,6 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
+// safety: a node whose plan pins no cpu resolves to one core, which the
+// smallest class of the default rate table covers, so that is the price these
+// fixtures are billed at.
+var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRateMicro).RateFor(1)
+
 func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -149,7 +154,7 @@ func TestMeteredClaimReservesItsFirstMinute(t *testing.T) {
 	if len(charges) != 1 || charges[0].Kind != store.CreditChargeReservation {
 		t.Fatalf("charges after a claim = %+v, want one reservation", charges)
 	}
-	if want := int64(store.CreditClaimFloorSeconds) * store.DefaultCreditRateMicro; charges[0].AmountMicro != want {
+	if want := int64(store.CreditClaimFloorSeconds) * unpinnedNodeRateMicro; charges[0].AmountMicro != want {
 		t.Fatalf("reservation = %d, want %d", charges[0].AmountMicro, want)
 	}
 	if anchor := chargeWindowAnchor(t, s, "run-reserve", "build"); anchor <= time.Now().UnixNano() {
@@ -171,7 +176,7 @@ func TestMeteredClaimIsRefusedWhenTheBalanceCannotCoverTheReservation(t *testing
 	if !errors.As(err, &shortfall) {
 		t.Fatalf("claim error %v does not name the shortfall", err)
 	}
-	if shortfall.RequiredMicro != int64(store.CreditClaimFloorSeconds)*store.DefaultCreditRateMicro {
+	if shortfall.RequiredMicro != int64(store.CreditClaimFloorSeconds)*unpinnedNodeRateMicro {
 		t.Fatalf("required = %d", shortfall.RequiredMicro)
 	}
 
@@ -202,10 +207,7 @@ func TestClaimReservationLetsOnlyOneRunnerClaimTheLastMinute(t *testing.T) {
 	readyNode(t, s, "run-a", "build")
 	readyNode(t, s, "run-b", "build")
 
-	floor, err := s.CreditClaimFloorMicro(ctx)
-	if err != nil {
-		t.Fatalf("floor: %v", err)
-	}
+	floor := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, floor, "pay_exact", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -249,7 +251,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 	if res.Charge == nil || res.Charge.Seconds != 10 || res.Charge.Kind != store.CreditChargeUsage {
 		t.Fatalf("first charge = %+v, want 10 seconds of usage", res.Charge)
 	}
-	if want := int64(10 * store.DefaultCreditRateMicro); res.Charge.AmountMicro != want {
+	if want := int64(10) * unpinnedNodeRateMicro; res.Charge.AmountMicro != want {
 		t.Fatalf("charge amount = %d, want %d", res.Charge.AmountMicro, want)
 	}
 	if res.Cancel {
@@ -411,8 +413,8 @@ func TestFinalizeNodeCreditsRefundsTheUnusedReservation(t *testing.T) {
 		t.Fatalf("balance: %v", err)
 	}
 	spent := before - after
-	want := int64(5) * store.DefaultCreditRateMicro
-	if diff := spent - want; diff > store.DefaultCreditRateMicro || diff < -store.DefaultCreditRateMicro {
+	want := int64(5) * unpinnedNodeRateMicro
+	if diff := spent - want; diff > unpinnedNodeRateMicro || diff < -unpinnedNodeRateMicro {
 		t.Fatalf("spent %d for five seconds of work, want about %d", spent, want)
 	}
 	if anchor := chargeWindowAnchor(t, s, "run-short", "build"); anchor != 0 {
@@ -499,10 +501,7 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-empty", "build")
-	floor, err := s.CreditClaimFloorMicro(ctx)
-	if err != nil {
-		t.Fatalf("floor: %v", err)
-	}
+	floor := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
 	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, floor, "", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

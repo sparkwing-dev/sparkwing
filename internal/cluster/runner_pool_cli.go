@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/cgroupcpu"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
@@ -155,6 +156,13 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// the log says so once rather than on every poll.
 	limitLogged := false
 	shed := newShedLog(shedWarnInterval)
+	// safety: the cpu the kernel caps this runner at is the pod a cloud
+	// customer gets, so every claim reports it and the ledger never prices a
+	// class above it. An uncapped runner reports nothing.
+	runnerCores, capped := cgroupcpu.Limit()
+	if capped {
+		logger.Info(cfg.SourceName+" reports its cpu limit on every claim", "cores", runnerCores)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
@@ -184,7 +192,9 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		report := currentCapacity(ctx, provider)
 		// safety: the loop holds one slot for the claim it is about to make, so
 		// the nodes already executing are the rest of what it holds.
-		capacity := &client.ClaimCapacity{MaxConcurrent: cfg.MaxConcurrent, ActiveClaims: max(len(sem)-1, 0)}
+		capacity := &client.ClaimCapacity{
+			MaxConcurrent: cfg.MaxConcurrent, ActiveClaims: max(len(sem)-1, 0), Cores: runnerCores,
+		}
 		n, err := claimer.ClaimNodeWithCapacity(ctx, holderID, cfg.Labels, cfg.Lease, report.headroom, capacity)
 		if err != nil {
 			<-sem

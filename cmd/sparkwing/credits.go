@@ -49,6 +49,7 @@ type creditStateResp struct {
 	ChargedMicro       int64            `json:"charged_micro"`
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateResp `json:"rate_table"`
+	RateTableSet       bool             `json:"rate_table_set"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 	BurnWindowSeconds  int64            `json:"burn_window_seconds"`
@@ -104,6 +105,7 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 		fmt.Fprintf(tw, "  %d-CORE\t%s credits per second (%d micro)\n",
 			entry.Cores, creditsPerUnit(entry.MicroPerSecond, state.MicroPerCredit), entry.MicroPerSecond)
 	}
+	fmt.Fprint(tw, rateTableOrigin(state.RateTableSet))
 	fmt.Fprintf(tw, "BURN (%s)\t%s credits\n",
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
 	fmt.Fprintf(tw, "GRACE\t%ds after the balance reaches zero\n", state.GraceSeconds)
@@ -124,6 +126,15 @@ func burnWindowLabel(seconds int64) string {
 	return strings.TrimSuffix(label, "0m")
 }
 
+// safety: the flat ladder an unset table prints reads like a priced one, so
+// the reader is told which of the two it is looking at.
+func rateTableOrigin(set bool) string {
+	if set {
+		return "RATE TABLE\tset by the operator\n"
+	}
+	return "RATE TABLE\tnot set; the default ladder applies\n"
+}
+
 // safety: micro-credits carry six places, so a sub-credit rate needs all six.
 func creditsPerUnit(micro, perCredit int64) string {
 	if perCredit <= 0 {
@@ -140,6 +151,7 @@ func creditsPerUnit(micro, perCredit int64) string {
 type creditSettingsResp struct {
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateResp `json:"rate_table"`
+	RateTableSet       bool             `json:"rate_table_set"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 	MicroPerCredit     int64            `json:"micro_per_credit"`
@@ -250,7 +262,11 @@ func parseCreditRateTable(raw string) (map[string]int64, error) {
 		if err != nil {
 			return nil, fmt.Errorf("credits settings: --rate-table rate %q is not a number", micro)
 		}
-		table[strings.TrimSpace(cores)] = value
+		key := strings.TrimSpace(cores)
+		if _, repeated := table[key]; repeated {
+			return nil, fmt.Errorf("credits settings: --rate-table prices %s cores twice", key)
+		}
+		table[key] = value
 	}
 	if len(table) == 0 {
 		return nil, errors.New("credits settings: --rate-table must price at least one cpu class")
@@ -273,6 +289,7 @@ func renderCreditSettings(w io.Writer, view creditSettingsResp) error {
 		fmt.Fprintf(tw, "  %d-CORE\t%s credits per second (%d micro)\n",
 			entry.Cores, creditsPerUnit(entry.MicroPerSecond, view.MicroPerCredit), entry.MicroPerSecond)
 	}
+	fmt.Fprint(tw, rateTableOrigin(view.RateTableSet))
 	fmt.Fprintf(tw, "GRACE\t%ds after the balance reaches zero\n", view.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", view.MaxChargeSeconds)
 	return tw.Flush()
@@ -289,7 +306,8 @@ func writeCreditSettingsPlain(w io.Writer, view creditSettingsResp) error {
 			return err
 		}
 	}
-	return nil
+	_, err := fmt.Fprintf(w, "rate_table_set\t%t\n", view.RateTableSet)
+	return err
 }
 
 type creditGrantResp struct {

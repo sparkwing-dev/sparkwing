@@ -2245,10 +2245,12 @@ var cmdCreditsSettings = Command{
 	Description: `Prints the runtime settings the ledger prices work with, and
 sets the ones named by a flag. The rate table prices one cloud
 runner second at every cpu class, and a node is billed at the
-smallest class that covers its cpu request; a request above the
-largest class is refused at the claim. The rate is what a
-four-core second costs, which is the four-core entry of the
-table under another name. The grace period is how long a
+smaller of the class its cpu request falls in and the class the
+runner executing it reports for itself; a request above the
+largest class that no runner report brings inside it fails the
+node. The rate is what a four-core second costs, which is the
+four-core entry of the table under another name, so once a
+table exists it is set by writing the table. The grace period is how long a
 running node survives an empty balance before the controller
 cancels it, and the charge cap is the most seconds any one
 charge may bill, which forgives a controller outage or a
@@ -2261,7 +2263,7 @@ the single rate at every class. Reading needs the runs.read
 scope and setting needs admin.`,
 	Flags: []FlagSpec{
 		{Name: "rate-table", Argument: "PAIRS", Desc: "Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667", Group: "Input"},
-		{Name: "rate-micro", Argument: "N", Desc: "Micro-credits one four-core cloud runner second costs; a million is one credit", Group: "Input"},
+		{Name: "rate-micro", Argument: "N", Desc: "Micro-credits one four-core cloud runner second costs; refused once a rate table exists", Group: "Input"},
 		{Name: "grace-seconds", Argument: "N", Desc: "Seconds a running node survives an empty balance; 0 cancels at once", Group: "Input"},
 		{Name: "max-charge-seconds", Argument: "N", Desc: "The most seconds any one charge may bill; at least 3", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},

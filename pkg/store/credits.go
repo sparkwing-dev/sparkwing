@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,6 +43,12 @@ const (
 	// integer limit turns a later balance read into an overflow rather than a
 	// number, and no real payment reaches this ceiling.
 	MaxCreditGrantMicro = 1_000_000_000_000_000
+
+	// MaxCreditRateMicro caps the price of one cloud runner second at a
+	// million credits. A rate above it overflows the reservation a claim
+	// multiplies out, which would write a negative charge and hand the payer
+	// credits it never bought.
+	MaxCreditRateMicro = 1_000_000_000_000
 
 	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
 	// Heartbeats arrive every three seconds by default, so the cap engages
@@ -82,6 +89,9 @@ const (
 	// EventKindCreditsExhausted records a node cancelled after the balance
 	// reached zero and the grace period elapsed.
 	EventKindCreditsExhausted = "credits_exhausted"
+	// EventKindCreditsUnpriced records a node failed because its cpu request
+	// is above the largest class the rate table prices.
+	EventKindCreditsUnpriced = "credits_unpriced_class"
 )
 
 // ErrInsufficientCredits is returned when a metered runner's controller has
@@ -366,11 +376,14 @@ type CreditState struct {
 	BalanceMicro       int64
 	RateMicroPerSecond int64
 	RateTable          CreditRateTable
-	GraceSeconds       int64
-	MaxChargeSeconds   int64
-	BurnWindow         time.Duration
-	BurnMicro          int64
-	ExhaustedAt        *time.Time
+	// RateTableSet reports whether an operator wrote the table. A state that
+	// reports false prices every class at RateMicroPerSecond.
+	RateTableSet     bool
+	GraceSeconds     int64
+	MaxChargeSeconds int64
+	BurnWindow       time.Duration
+	BurnMicro        int64
+	ExhaustedAt      *time.Time
 }
 
 // ValidCreditGrantKind reports whether kind is one this ledger stores.
@@ -638,6 +651,11 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 		return out, err
 	}
 	out.RateTable = table
+	tableSet, err := s.CreditRateTableSet(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.RateTableSet = tableSet
 	grace, err := s.CreditGraceSeconds(ctx)
 	if err != nil {
 		return out, err
@@ -751,10 +769,27 @@ func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
 // SetCreditRateMicroPerSecond prices a cloud runner second. Charges already
 // written keep the rate they were charged at.
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error {
+	if err := creditRateInRange(micro); err != nil {
+		return err
+	}
+	return s.setCreditSetting(ctx, metaKeyCreditRateMicro, micro)
+}
+
+func setCreditRateMicroTx(ctx context.Context, tx *storeTx, micro int64) error {
+	if err := creditRateInRange(micro); err != nil {
+		return err
+	}
+	return setCreditSettingTx(ctx, tx, metaKeyCreditRateMicro, formatCreditSetting(micro))
+}
+
+func creditRateInRange(micro int64) error {
 	if micro < 0 {
 		return errors.New("credits: rate must not be negative")
 	}
-	return s.setCreditSetting(ctx, metaKeyCreditRateMicro, micro)
+	if micro > MaxCreditRateMicro {
+		return fmt.Errorf("credits: the rate may not exceed %d micro-credits a second", MaxCreditRateMicro)
+	}
+	return nil
 }
 
 // CreditGraceSeconds returns how long a running node survives an empty
@@ -962,19 +997,27 @@ func (s *Store) reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
-	class, err := nodeCreditClassTx(ctx, tx, table, runID, nodeID)
-	if err != nil {
-		return err
-	}
-	required := class.MicroPerSecond * CreditClaimFloorSeconds
 	balance, err := creditBalanceTx(ctx, tx)
 	if err != nil {
 		return err
+	}
+	class, classErr := nodeCreditClassTx(ctx, tx, table, runID, nodeID)
+	var unpriced *UnpricedCPUClassError
+	if classErr != nil && !errors.As(classErr, &unpriced) {
+		return classErr
+	}
+	required := class.MicroPerSecond * CreditClaimFloorSeconds
+	if unpriced != nil {
+		required = table.BaseRate() * CreditClaimFloorSeconds
 	}
 	// safety: an empty balance is the refusal a runner already understands, so
 	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+	}
+	if unpriced != nil {
+		unpriced.RunID, unpriced.NodeID = runID, nodeID
+		return unpriced
 	}
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
@@ -1379,6 +1422,27 @@ func (s *Store) CancelNodeForExhaustedCredits(
 ) error {
 	return s.cancelMeteredNode(ctx, runID, nodeID, tokenPrefix,
 		FailureCreditsExhausted, "credit balance exhausted", now)
+}
+
+// FailNodeForUnpricedClass fails a node whose cpu request is above the largest
+// class the credit rate table prices, and records an event naming both sizes.
+// A claim the ledger cannot price would otherwise be retried by every poller
+// forever, so the run is told why instead of waiting on a node nobody may take.
+func (s *Store) FailNodeForUnpricedClass(
+	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
+) error {
+	payload, err := json.Marshal(map[string]int64{
+		"cores": refusal.Cores, "max_cores": refusal.MaxCores,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := s.AppendEventOnce(ctx, refusal.RunID, refusal.NodeID,
+		EventKindCreditsUnpriced, payload); err != nil {
+		return err
+	}
+	return s.cancelMeteredNode(ctx, refusal.RunID, refusal.NodeID, "",
+		FailureUnpricedCPUClass, refusal.Error(), now)
 }
 
 // CancelNodeForComputeLimit fails a running node a compute guard stopped,

@@ -22,6 +22,7 @@ type creditStateJSON struct {
 	ChargedMicro       int64            `json:"charged_micro"`
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateJSON `json:"rate_table"`
+	RateTableSet       bool             `json:"rate_table_set"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 	BurnWindowSeconds  int64            `json:"burn_window_seconds"`
@@ -34,6 +35,7 @@ type creditStateJSON struct {
 type creditSettingsJSON struct {
 	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
 	RateTable          []creditRateJSON `json:"rate_table"`
+	RateTableSet       bool             `json:"rate_table_set"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
 	MicroPerCredit     int64            `json:"micro_per_credit"`
@@ -136,6 +138,7 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 		ChargedMicro:       state.ChargedMicro,
 		RateMicroPerSecond: state.RateMicroPerSecond,
 		RateTable:          creditRateTableToJSON(state.RateTable),
+		RateTableSet:       state.RateTableSet,
 		GraceSeconds:       state.GraceSeconds,
 		MaxChargeSeconds:   state.MaxChargeSeconds,
 		BurnWindowSeconds:  int64(creditsBurnWindow.Seconds()),
@@ -166,6 +169,10 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := req.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.refuseDerivedRateWrite(r, req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -205,6 +212,24 @@ func (r setCreditSettingsReq) validate() error {
 			store.MinCreditMaxChargeSeconds)
 	}
 	return nil
+}
+
+// safety: with a table stored the scalar is the four-core entry under another
+// name, so writing it alone would move one class without saying so; the caller
+// is told to write the table instead.
+func (s *Server) refuseDerivedRateWrite(r *http.Request, req setCreditSettingsReq) error {
+	if req.RateMicroPerSecond == nil || req.RateTable != nil {
+		return nil
+	}
+	set, err := s.store.CreditRateTableSet(r.Context())
+	if err != nil {
+		return err
+	}
+	if !set {
+		return nil
+	}
+	return errors.New(
+		"rate_micro_per_second is the four-core entry of the rate table; write rate_table instead")
 }
 
 // safety: the table carries the four-core price into the single rate setting,
@@ -263,6 +288,11 @@ func (s *Server) creditSettingsView(r *http.Request) (creditSettingsJSON, error)
 	}
 	out.RateMicroPerSecond = rate
 	out.RateTable = creditRateTableToJSON(table)
+	tableSet, err := s.store.CreditRateTableSet(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.RateTableSet = tableSet
 	out.GraceSeconds = grace
 	out.MaxChargeSeconds = maxCharge
 	out.MicroPerCredit = store.MicroCreditsPerCredit
@@ -434,13 +464,23 @@ type unpricedClassRefusalJSON struct {
 
 // safety: the ledger cannot price the node, so the claim is refused rather
 // than billed at a class the operator never set.
-func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, err error) bool {
+func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
 	var unpriced *store.UnpricedCPUClassError
 	if !errors.As(err, &unpriced) {
 		return false
 	}
 	s.logger.Warn("claim refused: the credit rate table prices no class this large",
+		"run_id", unpriced.RunID, "node_id", unpriced.NodeID,
 		"cores", unpriced.Cores, "max_cores", unpriced.MaxCores)
+	if unpriced.RunID != "" {
+		// safety: every poller would otherwise retry this node forever, so the
+		// run is failed with the reason rather than left waiting on a claim the
+		// ledger cannot price.
+		if failErr := s.store.FailNodeForUnpricedClass(r.Context(), unpriced, time.Now()); failErr != nil {
+			s.logger.Warn("failing a node the rate table cannot price",
+				"run_id", unpriced.RunID, "node_id", unpriced.NodeID, "err", failErr)
+		}
+	}
 	writeJSON(w, http.StatusConflict, unpricedClassRefusalJSON{
 		Error: unpriced.Error(), Code: UnpricedCPUClassCode,
 		Cores: unpriced.Cores, MaxCores: unpriced.MaxCores,

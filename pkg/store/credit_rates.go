@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"sort"
 )
@@ -26,9 +25,17 @@ const (
 	MaxCreditRateTableEntries = 32
 )
 
-// safety: a class the table does not list is priced by rounding up, so the
-// ladder only has to name the sizes a cluster actually offers.
-var defaultCreditCPUClasses = []int64{2, 4, 8, 16, 32, 64}
+// safety: these are GitHub Actions' Linux x64 rates carried to the second,
+// which is the comparison every customer makes. The four-core entry is the
+// single rate setting under another name, so it follows that setting.
+var defaultCreditRates = []CreditRate{
+	{Cores: 2, MicroPerSecond: 10_000},
+	{Cores: CreditRateBaseClassCores, MicroPerSecond: DefaultCreditRateMicro},
+	{Cores: 8, MicroPerSecond: 36_667},
+	{Cores: 16, MicroPerSecond: 70_000},
+	{Cores: 32, MicroPerSecond: 136_667},
+	{Cores: 64, MicroPerSecond: 270_000},
+}
 
 const metaKeyCreditRateTable = "credit_rate_table"
 
@@ -53,6 +60,8 @@ var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest pri
 // the rate table prices, and names the request and the largest class, so the
 // operator knows which class to add.
 type UnpricedCPUClassError struct {
+	RunID    string
+	NodeID   string
 	Cores    int64
 	MaxCores int64
 }
@@ -109,6 +118,17 @@ func (t CreditRateTable) BaseRate() int64 {
 	return t.RateFor(CreditRateBaseClassCores)
 }
 
+// safety: only a table that prices the base class itself may write the scalar,
+// which is what keeps the two settings naming one price.
+func (t CreditRateTable) baseClassRate() (int64, bool) {
+	for _, entry := range t {
+		if entry.Cores == CreditRateBaseClassCores {
+			return entry.MicroPerSecond, true
+		}
+	}
+	return 0, false
+}
+
 // Validate reports whether every entry prices a whole number of cores above
 // zero at a positive rate and no class appears twice.
 func (t CreditRateTable) Validate() error {
@@ -126,6 +146,10 @@ func (t CreditRateTable) Validate() error {
 		if entry.MicroPerSecond <= 0 {
 			return fmt.Errorf("credits: the rate for the %d-core class must be positive", entry.Cores)
 		}
+		if entry.MicroPerSecond > MaxCreditRateMicro {
+			return fmt.Errorf("credits: the rate for the %d-core class may not exceed %d micro-credits a second",
+				entry.Cores, MaxCreditRateMicro)
+		}
 		if seen[entry.Cores] {
 			return fmt.Errorf("credits: the %d-core class is priced twice", entry.Cores)
 		}
@@ -142,20 +166,24 @@ func (t CreditRateTable) Sorted() CreditRateTable {
 	return out
 }
 
-// DefaultCreditRateTable prices every default cpu class at rate, which is what
-// an installation that never set a table bills: one price for every size, the
-// behavior of the single rate setting on its own.
+// DefaultCreditRateTable is the ladder an installation that never set a table
+// bills: GitHub Actions' Linux x64 rates, with the four-core class priced at
+// rate because the single rate setting is that class under another name.
 func DefaultCreditRateTable(rate int64) CreditRateTable {
-	out := make(CreditRateTable, 0, len(defaultCreditCPUClasses))
-	for _, cores := range defaultCreditCPUClasses {
-		out = append(out, CreditRate{Cores: cores, MicroPerSecond: rate})
+	out := make(CreditRateTable, 0, len(defaultCreditRates))
+	for _, entry := range defaultCreditRates {
+		if entry.Cores == CreditRateBaseClassCores {
+			entry.MicroPerSecond = rate
+		}
+		out = append(out, entry)
 	}
 	return out
 }
 
 // CreditRateTable returns the price of a cloud runner second at every cpu
-// class. An installation that never set a table reads every class at
-// credit_rate_micro_per_second, so its bill is what the single rate charged.
+// class. An installation that never set a table reads
+// [DefaultCreditRateTable], whose four-core class is
+// credit_rate_micro_per_second.
 func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
 	rate, err := s.CreditRateMicroPerSecond(ctx)
 	if err != nil {
@@ -165,7 +193,15 @@ func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
 	if err != nil {
 		return nil, err
 	}
-	return creditRateTable(raw, rate), nil
+	return creditRateTable(raw, rate)
+}
+
+// CreditRateTableSet reports whether an operator has written a rate table. An
+// installation that has not prices every class at the single rate, and the
+// single rate is a setting it may still write.
+func (s *Store) CreditRateTableSet(ctx context.Context) (bool, error) {
+	raw, err := s.creditSettingRaw(ctx, metaKeyCreditRateTable)
+	return raw != "", err
 }
 
 func creditRateTableTx(ctx context.Context, tx *storeTx) (CreditRateTable, error) {
@@ -177,25 +213,22 @@ func creditRateTableTx(ctx context.Context, tx *storeTx) (CreditRateTable, error
 	if err != nil {
 		return nil, err
 	}
-	return creditRateTable(raw, rate), nil
+	return creditRateTable(raw, rate)
 }
 
-// safety: an unreadable table must not stop the ledger charging, so the flat
-// default stands and the unusable value is named in the log.
-func creditRateTable(raw string, rate int64) CreditRateTable {
+// safety: a table nothing can read is refused rather than replaced by the flat
+// default, because falling back would bill every class at a price the operator
+// did not choose and nobody would see it happen.
+func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 	if raw == "" {
-		return DefaultCreditRateTable(rate)
+		return DefaultCreditRateTable(rate), nil
 	}
 	var stored CreditRateTable
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		slog.Warn("credits: the stored rate table is not readable; pricing every class at the single rate",
-			"value", raw, "rate_micro_per_second", rate, "err", err)
-		return DefaultCreditRateTable(rate)
+		return nil, fmt.Errorf("credits: the stored rate table %q is not readable: %w", raw, err)
 	}
 	if err := stored.Validate(); err != nil {
-		slog.Warn("credits: the stored rate table prices nothing usable; pricing every class at the single rate",
-			"value", raw, "rate_micro_per_second", rate, "err", err)
-		return DefaultCreditRateTable(rate)
+		return nil, fmt.Errorf("credits: the stored rate table %q prices nothing usable: %w", raw, err)
 	}
 	out := stored.Sorted()
 	// safety: the two settings name one price, so the scalar an operator or an
@@ -205,7 +238,7 @@ func creditRateTable(raw string, rate int64) CreditRateTable {
 			out[i].MicroPerSecond = rate
 		}
 	}
-	return out
+	return out, nil
 }
 
 // SetCreditRateTable prices every cpu class the cluster offers and writes the
@@ -229,15 +262,20 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	if err := setCreditSettingTx(ctx, tx, metaKeyCreditRateTable, string(encoded)); err != nil {
 		return err
 	}
-	if err := setCreditSettingTx(ctx, tx, metaKeyCreditRateMicro,
-		formatCreditSetting(sorted.BaseRate())); err != nil {
-		return err
+	// safety: the scalar is the four-core price, so a table that prices no
+	// four-core class leaves it where it stands rather than restating a
+	// neighbouring class under a name that does not mean that class.
+	if base, ok := sorted.baseClassRate(); ok {
+		if err := setCreditRateMicroTx(ctx, tx, base); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
 
 // safety: the class is resolved from the same cpu figure the scheduler sizes
-// the node by, so the price follows the pod the cluster actually starts.
+// the node by, and never exceeds the cpu the runner executing it reports, so a
+// ceiling that clamped the pod clamps the bill with it.
 func nodeCreditClassTx(
 	ctx context.Context, tx *storeTx, table CreditRateTable, runID, nodeID string,
 ) (CreditRate, error) {
@@ -245,5 +283,34 @@ func nodeCreditClassTx(
 	if err != nil {
 		return CreditRate{}, err
 	}
-	return table.ClassFor(charge.Cores)
+	class, classErr := table.ClassFor(charge.Cores)
+	reported, ok := ClaimRunnerCoresFromContext(ctx)
+	if !ok || reported <= 0 {
+		return class, classErr
+	}
+	runnerClass, runnerErr := table.ClassFor(reported)
+	if runnerErr != nil {
+		return class, classErr
+	}
+	if classErr != nil || runnerClass.Cores < class.Cores {
+		return runnerClass, nil
+	}
+	return class, classErr
+}
+
+type claimRunnerCoresKey struct{}
+
+// WithClaimRunnerCores records the cpu the runner taking this claim reports for
+// itself, which is the pod the customer actually gets. The ledger bills the
+// smaller of that class and the class the node's own cpu request resolves to,
+// so a ceiling that clamped the pod clamps the bill. A claim that reports
+// nothing is priced by the node's request alone.
+func WithClaimRunnerCores(ctx context.Context, cores float64) context.Context {
+	return context.WithValue(ctx, claimRunnerCoresKey{}, cores)
+}
+
+// ClaimRunnerCoresFromContext returns the cpu a claim reported for its runner.
+func ClaimRunnerCoresFromContext(ctx context.Context) (float64, bool) {
+	cores, ok := ctx.Value(claimRunnerCoresKey{}).(float64)
+	return cores, ok
 }

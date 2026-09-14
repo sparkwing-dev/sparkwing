@@ -92,6 +92,7 @@ type ClaimPlacement struct {
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
+func ClaimRunnerCoresFromContext(ctx context.Context) (float64, bool)
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -291,11 +292,13 @@ type CreditState struct {
 	BalanceMicro       int64
 	RateMicroPerSecond int64
 	RateTable          CreditRateTable
-	GraceSeconds       int64
-	MaxChargeSeconds   int64
-	BurnWindow         time.Duration
-	BurnMicro          int64
-	ExhaustedAt        *time.Time
+
+	RateTableSet     bool
+	GraceSeconds     int64
+	MaxChargeSeconds int64
+	BurnWindow       time.Duration
+	BurnMicro        int64
+	ExhaustedAt      *time.Time
 }
 const CreditsPerDollar = 100
 type CronDeclaration struct {
@@ -467,6 +470,7 @@ type Event struct {
 const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
+const EventKindCreditsUnpriced = "credits_unpriced_class"
 type ExecutionAttempt struct {
 	RunID            string
 	NodeID           string
@@ -608,6 +612,7 @@ const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
+const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
 func FormatCredits(micro int64) string
 var FreeTierQuota = StorageQuota{
@@ -657,6 +662,7 @@ var Maintenance = storeMaintenanceFns{
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
 const MaxCreditGrantMicro = 1_000_000_000_000_000
+const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
@@ -1171,6 +1177,7 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
 func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error)
+func (s *Store) CreditRateTableSet(ctx context.Context) (bool, error)
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
@@ -1188,6 +1195,9 @@ func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentit
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
+func (s *Store) FailNodeForUnpricedClass(
+	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
+) error
 func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID string) (ExecutorClaimRoundResult, error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
@@ -1463,6 +1473,8 @@ const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 func UnknownRequirements(listed []string) []string
 type UnpricedCPUClassError struct {
+	RunID    string
+	NodeID   string
 	Cores    int64
 	MaxCores int64
 }
@@ -1505,6 +1517,7 @@ type WaiterResolution struct {
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
+func WithClaimRunnerCores(ctx context.Context, cores float64) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context

@@ -1479,6 +1479,18 @@ type claimHeadroom struct {
 type claimCapacity struct {
 	MaxConcurrent int `json:"max_concurrent"`
 	ActiveClaims  int `json:"active_claims"`
+	// safety: the ledger prices a metered node by this when it is smaller than
+	// the node's own request, so a claim that reports none bills the request.
+	Cores float64 `json:"cores,omitempty"`
+}
+
+// safety: the bill must never price a class above the pod the customer got, so
+// the cpu the runner reports for itself travels with the claim.
+func claimRunnerCoresContext(ctx context.Context, capacity *claimCapacity) context.Context {
+	if capacity == nil || capacity.Cores <= 0 {
+		return ctx
+	}
+	return store.WithClaimRunnerCores(ctx, capacity.Cores)
 }
 
 var errAssistedOfferRequired = errors.New("credential is enrolled; assisted offer protocol is required")
@@ -1556,16 +1568,17 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		result, err := s.store.OfferExecutorClaim(ctx, claimIdentity(r), store.ExecutorClaimOffer{
-			ExecutorName: body.ExecutorName, HolderID: body.HolderID,
-			RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
-			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
-		})
+		result, err := s.store.OfferExecutorClaim(claimRunnerCoresContext(ctx, body.Capacity),
+			claimIdentity(r), store.ExecutorClaimOffer{
+				ExecutorName: body.ExecutorName, HolderID: body.HolderID,
+				RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
+				ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
+			})
 		if err != nil {
 			if s.writeCreditsRefusal(w, r, err) {
 				return
 			}
-			if s.writeUnpricedClassRefusal(w, err) {
+			if s.writeUnpricedClassRefusal(w, r, err) {
 				return
 			}
 			if s.writeComputeLimitRefusal(w, r, body.RunID, body.NodeID, err) {
@@ -1615,7 +1628,8 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
 	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
-	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
+	n, err := s.store.ClaimNextReadyNode(
+		claimRunnerCoresContext(s.placementContext(r.Context(), claimer), body.Capacity),
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -1626,7 +1640,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		if s.writeCreditsRefusal(w, r, err) {
 			return
 		}
-		if s.writeUnpricedClassRefusal(w, err) {
+		if s.writeUnpricedClassRefusal(w, r, err) {
 			return
 		}
 		if s.writeClaimComputeLimitRefusal(w, r, err) {
@@ -1641,8 +1655,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 }
 
 type claimNamedNodeReq struct {
-	HolderID  string `json:"holder_id"`
-	LeaseSecs int    `json:"lease_secs"`
+	HolderID  string         `json:"holder_id"`
+	LeaseSecs int            `json:"lease_secs"`
+	Capacity  *claimCapacity `json:"capacity,omitempty"`
 }
 
 func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
@@ -1659,13 +1674,13 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 	if !s.mayClaimNamedNode(w, r, runID, nodeID) {
 		return
 	}
-	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
-		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
+	n, err := s.store.ClaimNamedNode(claimRunnerCoresContext(r.Context(), body.Capacity),
+		claimIdentity(r), runID, nodeID, body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
 	if err != nil {
 		if s.writeCreditsRefusal(w, r, err) {
 			return
 		}
-		if s.writeUnpricedClassRefusal(w, err) {
+		if s.writeUnpricedClassRefusal(w, r, err) {
 			return
 		}
 		if errors.Is(err, store.ErrNotFound) {

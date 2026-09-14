@@ -4006,6 +4006,7 @@ paths:
               properties:
                 holder_id: {type: string}
                 lease_secs: {type: integer}
+                capacity: {$ref: "#/components/schemas/ClaimCapacity"}
       responses:
         "200":
           description: Claimed node.
@@ -4646,6 +4647,7 @@ components:
           type: array
           description: The price of a cloud runner second at every cpu class, smallest class first.
           items: {$ref: "#/components/schemas/CreditRate"}
+        rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not prices every class at rate_micro_per_second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
         max_charge_seconds: {type: integer, format: int64, description: "The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop."}
         burn_window_seconds: {type: integer, format: int64}
@@ -4663,6 +4665,7 @@ components:
           type: array
           description: The price of a cloud runner second at every cpu class, smallest class first.
           items: {$ref: "#/components/schemas/CreditRate"}
+        rate_table_set: {type: boolean, description: Whether an operator wrote the table; a controller that has not prices every class at rate_micro_per_second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance; zero cancels it as soon as its reservation is consumed.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
         micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
@@ -4672,7 +4675,7 @@ components:
       type: object
       description: The settings to change. An omitted field is left as it was.
       properties:
-        rate_micro_per_second: {type: integer, format: int64, description: Price of one four-core cloud runner second; must be positive.}
+        rate_micro_per_second: {type: integer, format: int64, description: Price of one four-core cloud runner second; must be positive. Refused with 400 once a rate table exists unless the same body rewrites the table.}
         rate_table:
           description: The price of a cloud runner second at every cpu class, as a list of entries or as an object keyed by cores. Writing it also writes the four-core price to rate_micro_per_second.
           oneOf:
@@ -4896,6 +4899,7 @@ components:
       properties:
         max_concurrent: {type: integer}
         active_claims: {type: integer}
+        cores: {type: number, format: double, description: The cpu this runner is working with; a metered node is billed at the smaller of this class and the class its own cpu request resolves to.}
     ExecutionClaimBinding:
       x-sparkwing-go-type: none
       type: object

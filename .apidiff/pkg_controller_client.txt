@@ -35,6 +35,8 @@ type AcquireSlotResponse struct {
 type ClaimCapacity struct {
 	MaxConcurrent int
 	ActiveClaims  int
+
+	Cores float64
 }
 type Client struct {
 }
@@ -52,6 +54,9 @@ func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
 func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 func (c *Client) ClaimNodeByID(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) (*store.Node, error)
+func (c *Client) ClaimNodeByIDWithCapacity(
+	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, capacity *ClaimCapacity,
+) (*store.Node, error)
 func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, capacity *ClaimCapacity) (*store.Node, error)
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)

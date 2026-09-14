@@ -474,3 +474,37 @@ func TestCreditHistoryRowsCarryTheClassAndRateEachChargeWasBilledAt(t *testing.T
 		t.Errorf("history output names a class on a row that carries none:\n%s", out)
 	}
 }
+
+func TestCreditSettingsBodyRefusesARateTableThatPricesAClassTwice(t *testing.T) {
+	t.Parallel()
+	fs := creditSettingsFlagSet(t, []string{"--rate-table", "2=10000,2=20000"})
+	table, _ := fs.GetString("rate-table")
+	if _, err := creditSettingsBody(fs, 0, 0, 0, table); err == nil {
+		t.Fatal("--rate-table accepted the same class twice")
+	}
+}
+
+// The flat ladder an unset table prints reads like a priced one, so the output
+// says which of the two it is.
+func TestRenderCreditStateSaysWhenNoRateTableIsSet(t *testing.T) {
+	t.Parallel()
+	var unset, set bytes.Buffer
+	state := creditStateResp{
+		RateMicroPerSecond: store.DefaultCreditRateMicro,
+		RateTable:          []creditRateResp{{Cores: 2, MicroPerSecond: store.DefaultCreditRateMicro}},
+		MicroPerCredit:     store.MicroCreditsPerCredit,
+	}
+	if err := renderCreditState(&unset, state); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	state.RateTableSet = true
+	if err := renderCreditState(&set, state); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(unset.String(), "not set") {
+		t.Errorf("an unset table is not called out:\n%s", unset.String())
+	}
+	if !strings.Contains(set.String(), "set by the operator") {
+		t.Errorf("a set table is not called out:\n%s", set.String())
+	}
+}

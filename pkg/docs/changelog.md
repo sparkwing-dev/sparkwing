@@ -103,9 +103,32 @@ unlock.
   `credits history` print both. `sparkwing cluster credits settings
   --rate-table 2=10000,4=20000,8=36667` writes the ladder, and the route also
   takes it as a list of `{cores, micro_per_second}` or an object keyed by
-  cores. An installation that never sets a table pays its single
-  `rate_micro_per_second` at every class, which is what it billed before, and
-  that setting is the four-core entry of the table under another name.
+  cores. A node is billed at the smaller of the class its cpu request falls in
+  and the class the runner executing it reports through the claim's new
+  `capacity.cores`, so a `--k8s-cpu-ceiling` that clamped the pod clamps the
+  bill; the Kubernetes fallback reports the clamped figure and a pooled runner
+  reports the cpu limit its cgroup caps it at. A request no runner report
+  brings inside the table fails the node with `unpriced_cpu_class` and a
+  `credits_unpriced_class` event rather than leaving it claimable forever. A
+  rate above a million credits a second is refused, because it overflows the
+  reservation a claim multiplies out. An installation that never sets a table
+  bills the default ladder, and that setting is the four-core entry of it under
+  another name: once a table exists, a `PUT` naming the scalar alone answers
+  `400` and says to write `rate_table`. A stored table this build cannot read
+  is an error rather than a silent fallback.
+
+### Changed
+
+- **controller (Breaking):** A metered runner second is priced by the node's cpu
+  class from the default rate table, which carries GitHub Actions' Linux x64
+  rates: 2-core 10,000 micro-credits a second, 4-core 20,000, 8-core 36,667,
+  16-core 70,000, 32-core 136,667, 64-core 270,000. Until now every node was
+  billed at `credit_rate_micro_per_second` whatever its size, so a metered node
+  that asks for two cores or less now costs half what it did and a node above
+  four cores costs more. The four-core class is that setting under another
+  name, so a controller that repriced it keeps its own four-core price.
+  `sparkwing cluster credits settings --rate-table` sets a ladder of your own,
+  and charges already written keep the class and rate they were billed at.
 
 ### Fixed
 

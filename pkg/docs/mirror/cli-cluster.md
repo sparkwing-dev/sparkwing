@@ -270,10 +270,12 @@ Read or set the credit rate table, the grace period, and the charge cap
 Prints the runtime settings the ledger prices work with, and
 sets the ones named by a flag. The rate table prices one cloud
 runner second at every cpu class, and a node is billed at the
-smallest class that covers its cpu request; a request above the
-largest class is refused at the claim. The rate is what a
-four-core second costs, which is the four-core entry of the
-table under another name. The grace period is how long a
+smaller of the class its cpu request falls in and the class the
+runner executing it reports for itself; a request above the
+largest class that no runner report brings inside it fails the
+node. The rate is what a four-core second costs, which is the
+four-core entry of the table under another name, so once a
+table exists it is set by writing the table. The grace period is how long a
 running node survives an empty balance before the controller
 cancels it, and the charge cap is the most seconds any one
 charge may bill, which forgives a controller outage or a
@@ -290,7 +292,7 @@ scope and setting needs admin.
 | Flag | Description |
 |---|---|
 | `--rate-table PAIRS` | Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667 |
-| `--rate-micro N` | Micro-credits one four-core cloud runner second costs; a million is one credit |
+| `--rate-micro N` | Micro-credits one four-core cloud runner second costs; refused once a rate table exists |
 | `--grace-seconds N` | Seconds a running node survives an empty balance; 0 cancels at once |
 | `--max-charge-seconds N` | The most seconds any one charge may bill; at least 3 |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
