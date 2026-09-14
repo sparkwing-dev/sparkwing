@@ -33,7 +33,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it and commits that, then pushes the branch and an annotated vX.Y.Z tag. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push: it re-checks the version against the newest tag, runs every gate on the tagged source, builds the binaries and images, publishes them, and creates the GitHub release from the tag's changelog section. A red check there fails the run and publishes nothing; the fix is a later patch tag. This pipeline never builds or publishes artifacts itself and never runs the broad suites."
+	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push: it re-checks the version against the newest tag, runs every gate on the tagged source, builds the binaries and images, publishes them, and creates the GitHub release from the tag's changelog section. A red check there fails the run and publishes nothing; the fix is a later patch tag. This pipeline never builds or publishes artifacts itself and never runs the broad suites."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -288,51 +288,120 @@ func (j *prepareChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 
 func (j *prepareChangelogJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
-	body, err := os.ReadFile(path)
+	body, action, err := j.planned(version)
 	if err != nil {
-		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
-	}
-	action, err := planChangelogRewrite(string(body), version)
-	if err != nil {
-		return fmt.Errorf("release: %w", err)
+		return err
 	}
 	switch action.kind {
 	case rewriteNoop:
 		sparkwing.Info(ctx, "CHANGELOG.md already has [%s] section (%d entries); skipping rewrite", version, action.versionEntries)
-		return nil
 	case rewriteApply:
 		sparkwing.Info(ctx, "renaming CHANGELOG.md [Unreleased] -> [%s] (%d entries)", version, action.unreleasedEntries)
 	}
-	if err := writeChangelogPair(j.RepoDir, action.newBody); err != nil {
+	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
+	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", "CHANGELOG.md", embeddedChangelogRel); err != nil {
+	staged := []string{"CHANGELOG.md", embeddedChangelogRel}
+	switch {
+	case roll.needed && roll.guideOnDisk:
+		body = roll.changelogBody
+		written, err := writeMigrationRoll(j.RepoDir, roll)
+		if err != nil {
+			return fmt.Errorf("release: %w", err)
+		}
+		staged = append(staged, written...)
+		sparkwing.Info(ctx, "docs/migrations/%s was already written; repointed %d link(s), indexed it and reset _unreleased.md",
+			roll.guideName, roll.repointed)
+	case roll.needed:
+		body = roll.changelogBody
+		written, err := writeMigrationRoll(j.RepoDir, roll)
+		if err != nil {
+			return fmt.Errorf("release: %w", err)
+		}
+		staged = append(staged, written...)
+		sparkwing.Info(ctx, "rolled docs/migrations/_unreleased.md -> %s (%d breaking entries, %d links repointed) and indexed it",
+			roll.guideName, roll.breaking, roll.repointed)
+	default:
+		sparkwing.Info(ctx, "[%s] carries no (Breaking) entry, so %s ships without a migration guide", version, version)
+	}
+	if err := writeChangelogPair(j.RepoDir, body); err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", "release: "+version+" changelog"); err != nil {
+	pending, err := runGitIn(ctx, j.RepoDir, "diff", "--cached", "--name-only")
+	if err != nil {
+		return fmt.Errorf("release: read the staged set: %w", err)
+	}
+	if strings.TrimSpace(pending) == "" {
+		sparkwing.Info(ctx, "the rename and the guide are already committed for %s; nothing to commit", version)
+		return nil
+	}
+	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", releaseCommitSubject(version, roll.needed)); err != nil {
 		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
 	}
 	sparkwing.Info(ctx, "committed CHANGELOG.md rewrite for %s", version)
 	return nil
 }
 
-func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
-	body, err := os.ReadFile(path)
+func releaseCommitSubject(version string, rolled bool) string {
+	if rolled {
+		return "release: " + version + " changelog and migration guide"
+	}
+	return "release: " + version + " changelog"
+}
+
+// safety: the index row dates the release the changelog heading dates it, so a
+// rerun over an already-renamed section does not claim a second date.
+func releaseDateFor(body, version string) string {
+	if d := releaseSectionDate(body, version); d != "" {
+		return d
+	}
+	return time.Now().UTC().Format("2006-01-02")
+}
+
+func (j *prepareChangelogJob) planned(version string) (string, changelogRewrite, error) {
+	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
 	if err != nil {
-		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
+		return "", changelogRewrite{}, fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
 	action, err := planChangelogRewrite(string(body), version)
 	if err != nil {
-		return fmt.Errorf("release: %w", err)
+		return "", changelogRewrite{}, fmt.Errorf("release: %w", err)
+	}
+	if action.kind == rewriteApply {
+		return action.newBody, action, nil
+	}
+	return string(body), action, nil
+}
+
+func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	body, action, err := j.planned(version)
+	if err != nil {
+		return err
 	}
 	switch action.kind {
 	case rewriteNoop:
 		sparkwing.Info(ctx, "dry-run: CHANGELOG.md already has [%s] (%d entries); rewrite would be a no-op", version, action.versionEntries)
 	case rewriteApply:
 		sparkwing.Info(ctx, "dry-run: would rename [Unreleased] -> [%s] (%d entries) and commit", version, action.unreleasedEntries)
+	}
+	roll, err := planMigrationRollIn(j.RepoDir, body, version, releaseDateFor(body, version))
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	switch {
+	case roll.needed && roll.guideOnDisk:
+		sparkwing.Info(ctx, "dry-run: docs/migrations/%s is already written; would repoint %d link(s), reset _unreleased.md, and index it as %q",
+			roll.guideName, roll.repointed, roll.summary)
+	case roll.needed:
+		sparkwing.Info(ctx, "dry-run: would rename docs/migrations/_unreleased.md -> %s for %d breaking entries, repoint %d link(s), write a fresh _unreleased.md, and index it as %q",
+			roll.guideName, roll.breaking, roll.repointed, roll.summary)
+	default:
+		sparkwing.Info(ctx, "dry-run: [%s] carries no (Breaking) entry, so no migration guide would be rolled", version)
 	}
 	return nil
 }

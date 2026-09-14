@@ -658,22 +658,23 @@ func readMigrationHeadings(migrations fs.FS, path string) ([]string, bool) {
 	if migrations == nil {
 		return nil, false
 	}
-	f, err := migrations.Open(path)
+	body, err := fs.ReadFile(migrations, path)
 	if err != nil {
 		return nil, false
 	}
-	defer func() { _ = f.Close() }()
+	return markdownHeadings(string(body)), true
+}
+
+// safety: an anchor resolves off any heading level, so restricting this to H2
+// would report a link that works as broken.
+func markdownHeadings(body string) []string {
 	var headings []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	// safety: an anchor resolves off any heading level, so restricting this to
-	// H2 would report a link that works as broken.
-	for scanner.Scan() {
-		if m := headingRe.FindStringSubmatch(scanner.Text()); m != nil {
+	for line := range strings.Lines(body) {
+		if m := headingRe.FindStringSubmatch(strings.TrimRight(line, "\r\n")); m != nil {
 			headings = append(headings, strings.TrimSpace(m[1]))
 		}
 	}
-	return headings, true
+	return headings
 }
 
 func slugifyHeading(s string) string {

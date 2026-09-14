@@ -84,13 +84,7 @@ func readDocHeadings(repo fs.FS, path string) ([]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var headings []string
-	for line := range strings.Lines(string(body)) {
-		if m := headingRe.FindStringSubmatch(strings.TrimRight(line, "\r\n")); m != nil {
-			headings = append(headings, strings.TrimSpace(m[1]))
-		}
-	}
-	return headings, true
+	return markdownHeadings(string(body)), true
 }
 
 func mergeIssues(sets ...[]ChangelogIssue) []ChangelogIssue {

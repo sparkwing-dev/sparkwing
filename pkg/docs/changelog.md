@@ -39,7 +39,32 @@ unlock.
   minutes instead of retrying every cycle. `sparkwing.gitcache.fetch_duration`
   gains `reason` (`on_demand`/`keep_warm`) and `failed` labels. A cache started
   without `--fetch-interval` stops polling on upgrade; pass `--fetch-interval
-  30s` to keep the old cadence.
+  30s` to keep the old cadence. See [migration
+  guide](docs/migrations/_unreleased.md#the-gitcache-refreshes-on-demand-and-stops-polling-by-default).
+
+- **release:** `sparkwing run release` rolls the migration guide with the
+  changelog section it renames: `docs/migrations/_unreleased.md` becomes
+  `vX.Y.Z.md` under a `# Migrating to vX.Y.Z` title, a fresh placeholder takes
+  its place, the release gets a dated row in `docs/migrations/README.md`
+  summarized from its `(Breaking)` entries, and those entries' links are
+  repointed at the rolled guide, all in the one commit. The cut refuses when a
+  `(Breaking)` entry has no section in the guide, naming the entry and its
+  line, because the section's prose is a person's work. `--sw-dry-run` reports
+  the rename, the repointed links and the index row without writing. The
+  workflow's `release-verify` stage judges the same on the tagged source.
+
+- **api (Breaking):** The credit settings routes drop
+  `billing_cpu_ceiling_cores`.
+  `components.schemas.CreditSettings.properties.billing_cpu_ceiling_cores`,
+  `components.schemas.CreditState.properties.billing_cpu_ceiling_cores` and
+  `components.schemas.SetCreditSettings.properties.billing_cpu_ceiling_cores`
+  are gone from `api/openapi.yaml`, so `GET /api/v1/credits/settings` and the
+  credit state no longer report the field, and `PUT /api/v1/credits/settings`
+  answers 400 to a body that still sets it, because the route refuses a field
+  it does not know. `warm_cpu_class_cores` takes its place on all three
+  schemas: it caps the class the warm pool serves rather than the class a node
+  is billed at, and a node is now billed at the class it pinned. See [migration
+  guide](docs/migrations/_unreleased.md#the-credit-settings-api-drops-billing_cpu_ceiling_cores).
 
 - **runner:** The trigger loop waits 15 seconds between `not our ref` retries
   instead of 10, so the second attempt falls outside the cache's freshness
