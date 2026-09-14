@@ -107,7 +107,10 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					r.logger.Warn("warmpool: labeled node unclaimed",
 						"run_id", req.RunID, "node_id", req.NodeID,
 						"needs_labels", n.NeedsLabels,
-						"hint", "no warm runner or configured fallback advertises these labels; start a runner with matching labels or remove .Requires()")
+						"fallback_labels", r.cfg.FallbackLabels,
+						"hint", "this dispatcher's fallback advertises none of these labels, so it waits "+
+							"for a runner that does; a node above the warm cpu class needs that runner "+
+							"to be one sized to its class")
 					lastUnmatchableLog = time.Now()
 				}
 				continue

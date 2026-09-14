@@ -1646,6 +1646,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 type claimNamedNodeReq struct {
 	HolderID  string `json:"holder_id"`
 	LeaseSecs int    `json:"lease_secs"`
+	// safety: without this the caller runs the node on an executor it already
+	// has, so a metered claim is held to the class the warm pool serves.
+	SizesToClass bool `json:"sizes_to_class,omitempty"`
 }
 
 func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
@@ -1663,7 +1666,8 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
-		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
+		body.HolderID, time.Duration(body.LeaseSecs)*time.Second,
+		store.NamedClaimOptions{SizesToClass: body.SizesToClass})
 	if err != nil {
 		if s.writeCreditsRefusal(w, r, err) {
 			return

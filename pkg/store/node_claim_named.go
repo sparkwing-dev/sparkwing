@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+// NamedClaimOptions says what a named claim will give the node it takes.
+type NamedClaimOptions struct {
+	// SizesToClass reports that the caller creates the node's executor at the
+	// cpu class the claim bills, which is what admits a class above the warm
+	// pool. A caller that runs the node on a pod it already has leaves it
+	// false and is held to the warm class.
+	SizesToClass bool
+}
+
 // ClaimNamedNode awards one node the caller names to holderID with a fresh
 // lease, through the award and credit reservation [Store.ClaimNextReadyNode]
 // uses. It is the claim a dispatcher makes for a node it is about to execute
@@ -28,8 +37,29 @@ import (
 // [Store.ClaimNextReadyNode]: a metered token reserves credits here, and
 // [Store.HeartbeatNodeClaim] admits only that token afterwards. lease is
 // clamped to [MaxLeaseDuration].
-func (s *Store) ClaimNamedNode(ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string, lease time.Duration) (*Node, error) {
+//
+// opts says what the caller will give the node. A metered caller that does not
+// size its executor to the node's cpu class is refused a class larger than the
+// warm pool serves, exactly as the queue claim passes over one, so naming a
+// node is not a way around the ladder.
+func (s *Store) ClaimNamedNode(
+	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
+	lease time.Duration, opts NamedClaimOptions,
+) (*Node, error) {
 	lease = clampNodeLease(lease)
+	if !opts.SizesToClass {
+		warm, err := s.warmClassFilter(ctx, claimant)
+		if err != nil {
+			return nil, err
+		}
+		refused, err := warm.refuses(ctx, storeRowQuerier{s}, runID, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		if refused {
+			return nil, ErrLockHeld
+		}
+	}
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
 		return nil, err

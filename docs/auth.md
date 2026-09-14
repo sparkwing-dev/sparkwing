@@ -112,6 +112,17 @@ the warm pool serves, 2 by default; zero starts a node of its own for every
 class. Local claim-mode agents are unmetered and claim by their labels as they
 always have.
 
+A claim answers with the class it billed, as `credit_cpu_class_cores` and
+`credit_cpu_class_memory_bytes`, and the Job is created from those two figures,
+so the pod shape and the bill agree whichever ladder the operator priced. A
+claim that names a node carries `sizes_to_class` to say it creates the node's
+executor at that class; a metered claim without it is held to the warm class.
+A runner cpu or memory ceiling below the billed class fails the node naming
+both, because a customer must never be billed for a class the pod cannot get.
+A pod no node accepts within five minutes fails the node with the scheduler's
+own message, which is what a class larger than the cluster provisions looks
+like.
+
 ## Compute guards
 
 The guards bound what the controller starts before the ledger bills it. Each

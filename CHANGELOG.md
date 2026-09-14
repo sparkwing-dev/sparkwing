@@ -33,10 +33,21 @@ unlock.
   own in one to two minutes. `warm_cpu_class_cores` on the credit settings
   route (`sparkwing cluster credits settings --warm-cpu-class-cores N`, 2 by
   default) is the largest class the warm pool serves, and zero starts a node of
-  its own for every class. `store.CreditRateTable.ClassForResource`,
-  `store.CPUClassMemoryBytes`, `store.CPUClassMemoryBytesPerCore` and
-  `store.DefaultWarmCPUClassCores` are the store surface. Local claim-mode
-  agents are unmetered and claim by their labels as before.
+  its own for every class. A claimed node carries the class it was billed at as
+  `credit_cpu_class_cores` and `credit_cpu_class_memory_bytes`, and the
+  Kubernetes Job is sized from those, so the pod shape and the bill agree
+  whichever ladder an operator priced. A named claim carries `sizes_to_class`
+  to say it creates the node's executor at that class; a metered claim without
+  it is held to the warm class, so naming a node is not a way around the
+  ladder. A runner cpu or memory ceiling below the billed class fails the node
+  rather than running it smaller for the same price, and a pod no node accepts
+  within five minutes fails with the scheduler's own message.
+  `store.CPUClass`, `store.CreditRateTable.ClassForResource`,
+  `store.CPUClassMemoryBytes`, `store.NamedClaimOptions` and
+  `store.DefaultWarmCPUClassCores` are the store surface;
+  `store.ClaimNamedNode` and `client.ClaimNodeByID` take the new option and
+  `CreditRateTable.ClassFor` is replaced by `ClassForResource`. Local
+  claim-mode agents are unmetered and claim by their labels as before.
 - **controller + CLI:** `GET /api/v1/credits/settings` (scope `runs.read`) and
   `PUT /api/v1/credits/settings` (scope `admin`) read and change the credit
   rate, the grace period a node gets past its claim reservation, and the cap on

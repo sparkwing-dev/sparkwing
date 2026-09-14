@@ -981,7 +981,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	// the targeted claim its own Kubernetes node makes.
 	status, body := creditsRequest(t, http.MethodPost,
 		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "pod-1", "lease_secs": 60})
+		map[string]any{"holder_id": "pod-1", "lease_secs": 60, "sizes_to_class": true})
 	if status != http.StatusOK {
 		t.Fatalf("claim = %d: %s", status, body)
 	}
@@ -991,6 +991,96 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 	if len(charges) != 1 || charges[0].CPUClassCores != 16 || charges[0].RateMicroPerSecond != 70_000 {
 		t.Fatalf("reservation = %+v, want the 16-core class the plan asked for", charges)
+	}
+}
+
+// The class the claim response carries is the class the charge row bills,
+// whichever ladder the operator priced, so the pod shape and the bill cannot
+// disagree.
+func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": map[string]int64{"2": 10_000, "64": 270_000},
+	}); status != http.StatusOK {
+		t.Fatalf("set the rate table = %d", status)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":3}}]}`),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodPost,
+		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
+		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
+	if status != http.StatusOK {
+		t.Fatalf("claim = %d: %s", status, body)
+	}
+	var claimed store.Node
+	if err := json.Unmarshal(body, &claimed); err != nil {
+		t.Fatalf("decode the claim: %v: %s", err, body)
+	}
+	charges, err := f.store.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatalf("list charges: %v", err)
+	}
+	if len(charges) != 1 || charges[0].CPUClassCores != 64 {
+		t.Fatalf("reservation = %+v, want the 64-core class this ladder prices", charges)
+	}
+	if claimed.CreditCPUClassCores != charges[0].CPUClassCores {
+		t.Fatalf("claim says class %d, charge row says %d",
+			claimed.CreditCPUClassCores, charges[0].CPUClassCores)
+	}
+	if want := store.CPUClassMemoryBytes(64); claimed.CreditCPUClassMemoryBytes != want {
+		t.Fatalf("claim memory = %d, want %d", claimed.CreditCPUClassMemoryBytes, want)
+	}
+}
+
+// Naming a node is not a way around the ladder: a claimant that will not size
+// its executor to the class is held to the warm one.
+func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-big", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":8}}]}`),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-big", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, "run-big", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodPost,
+		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
+		map[string]any{"holder_id": "runner:warm", "lease_secs": 60})
+	if status != http.StatusConflict {
+		t.Fatalf("named claim without sizes_to_class = %d: %s", status, body)
+	}
+	status, body = creditsRequest(t, http.MethodPost,
+		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
+		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
+	if status != http.StatusOK {
+		t.Fatalf("named claim that sizes to the class = %d: %s", status, body)
 	}
 }
 
@@ -1031,7 +1121,7 @@ func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 
 	status, body = creditsRequest(t, http.MethodPost,
 		f.url+"/api/v1/runs/run-big/nodes/build/claim", f.runner,
-		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60})
+		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
 	if status != http.StatusOK {
 		t.Fatalf("targeted claim = %d: %s", status, body)
 	}
