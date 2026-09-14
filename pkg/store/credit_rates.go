@@ -24,20 +24,27 @@ const (
 	// keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
 
-	// CPUClassMemoryBytesPerCore is the memory a cpu class carries for each of
-	// its cores, matching the hosted runners a customer compares against. A
-	// node asking for more memory than that takes the class whose memory
-	// covers it.
-	CPUClassMemoryBytesPerCore = 4 << 30
+	// safety: the memory a cpu class carries for each of its cores, matching
+	// the hosted runners a customer compares against. A node asking for more
+	// takes the class whose memory covers it.
+	cpuClassMemoryBytesPerCore = 4 << 30
 
 	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no
 	// operator set one. A node above it is executed on a node of its own.
 	DefaultWarmCPUClassCores = 2
 )
 
+// CPUClass is one rung of the runner ladder: a whole number of cores and the
+// memory that comes with them. It is the shape a node's executor owes it, and
+// the shape its claim was billed at.
+type CPUClass struct {
+	Cores       int64 `json:"cores"`
+	MemoryBytes int64 `json:"memory_bytes"`
+}
+
 // CPUClassMemoryBytes returns the memory a class of this many cores carries.
 func CPUClassMemoryBytes(cores int64) int64 {
-	return cores * CPUClassMemoryBytesPerCore
+	return cores * cpuClassMemoryBytesPerCore
 }
 
 // safety: these are GitHub Actions' Linux x64 rates carried to the second,
@@ -79,9 +86,18 @@ type UnpricedCPUClassError struct {
 	NodeID   string
 	Cores    int64
 	MaxCores int64
+	// MemoryBytes is what the node asked for when memory, not cpu, is what no
+	// class covers. Zero when the cpu request alone is above every class.
+	MemoryBytes int64
 }
 
 func (e *UnpricedCPUClassError) Error() string {
+	if e.MemoryBytes > 0 {
+		return fmt.Sprintf(
+			"credits: this node asks for %d bytes of memory, which needs a %d-core class, "+
+				"and the largest priced class is %d; add a class for it to the credit rate table",
+			e.MemoryBytes, e.Cores, e.MaxCores)
+	}
 	return fmt.Sprintf(
 		"credits: this node asks for %d cpu cores and the largest priced class is %d; "+
 			"add a class for it to the credit rate table", e.Cores, e.MaxCores)
@@ -91,16 +107,9 @@ func (e *UnpricedCPUClassError) Error() string {
 // errors.Is without knowing this type.
 func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
-// ClassFor returns the class that prices a node asking for cores, which is the
-// smallest class whose cores cover the request rounded up to a whole core. It
-// returns an [UnpricedCPUClassError] when the request is above every class.
-func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error) {
-	return t.ClassForResource(ExecutorResource{Cores: cores})
-}
-
 // ClassForResource returns the class that covers both halves of a node's
 // request: the smallest class whose cores cover the cpu rounded up to a whole
-// core and whose memory, [CPUClassMemoryBytesPerCore] for each core, covers the
+// core and whose memory, four gibibytes for each core, covers the
 // memory asked for. It returns an [UnpricedCPUClassError] when no class is
 // large enough.
 func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {
@@ -118,7 +127,10 @@ func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, err
 	}
 	largest := t[len(t)-1]
 	if CPUClassMemoryBytes(largest.Cores) < res.MemoryBytes {
-		want = max(want, memoryClassCores(res.MemoryBytes))
+		return CreditRate{}, &UnpricedCPUClassError{
+			Cores: max(want, memoryClassCores(res.MemoryBytes)), MaxCores: largest.Cores,
+			MemoryBytes: res.MemoryBytes,
+		}
 	}
 	return CreditRate{}, &UnpricedCPUClassError{Cores: want, MaxCores: largest.Cores}
 }
@@ -127,8 +139,8 @@ func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, err
 // that much memory would come with, so the operator adds a class that fits
 // rather than one that still refuses the node.
 func memoryClassCores(bytes int64) int64 {
-	cores := bytes / CPUClassMemoryBytesPerCore
-	if bytes%CPUClassMemoryBytesPerCore != 0 {
+	cores := bytes / cpuClassMemoryBytesPerCore
+	if bytes%cpuClassMemoryBytesPerCore != 0 {
 		cores++
 	}
 	return cores

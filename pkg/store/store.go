@@ -3964,6 +3964,14 @@ type Node struct {
 	// label-mismatched claim applies, so the hold expires on schedule.
 	PlacementHoldFrom *time.Time `json:"placement_hold_from,omitempty"`
 
+	// CreditCPUClassCores is the cpu class the claim billed this node at,
+	// which is the shape its executor owes it. Zero on a node no metered
+	// claim priced.
+	CreditCPUClassCores int64 `json:"credit_cpu_class_cores,omitempty"`
+	// CreditCPUClassMemoryBytes is the memory that class carries, which is
+	// what its executor gives the node alongside the cores.
+	CreditCPUClassMemoryBytes int64 `json:"credit_cpu_class_memory_bytes,omitempty"`
+
 	// NeedsLabels: runner labels required (AND semantics). Empty = any.
 	NeedsLabels []string `json:"needs_labels,omitempty"`
 	// PrefersLabels orders soft executor preferences.
@@ -4391,7 +4399,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, o
 	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-	   placement_reason, placement_hold_from,
+	   placement_reason, placement_hold_from, credit_cpu_class,
 	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
@@ -4419,7 +4427,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&supervisorRequirementsJSON, &supervisorRequirementsHash,
 		&bodyRequirementsJSON, &bodyRequirementsHash,
 		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
-		&n.PlacementReason, &holdFromNS, &pipeline)
+		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -4441,6 +4449,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	if err := validateNodeExecutionPolicy(n, pipeline); err != nil {
 		return err
 	}
+	n.CreditCPUClassMemoryBytes = CPUClassMemoryBytes(n.CreditCPUClassCores)
 	if startedNS.Valid {
 		t := time.Unix(0, startedNS.Int64)
 		n.StartedAt = &t
@@ -5231,8 +5240,11 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 			if err != nil {
 				return nil, nil, err
 			}
+			// safety: the node is waiting for a Kubernetes node of its own,
+			// which claims it by name, so passing over it writes nothing: a
+			// bump would rewrite every queued row on every idle poll and move
+			// nothing closer to running.
 			if refused {
-				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
 				continue
 			}
 			n.decision = placement.decide(n.needs, n.prefers, labels, n.holdFrom, time.Now())

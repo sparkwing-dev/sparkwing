@@ -1246,12 +1246,21 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 // [store.ErrNotFound]. A controller too old to serve the route returns
 // [ErrControllerLacksRoute], which a dispatcher answers by running the node the
 // way it did before the fence existed.
-func (c *Client) ClaimNodeByID(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) (*store.Node, error) {
+//
+// sizesToClass reports that the caller creates the node's executor at the cpu
+// class the claim bills; a metered caller that does not is refused a class
+// above the one the warm pool serves.
+func (c *Client) ClaimNodeByID(
+	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, sizesToClass bool,
+) (*store.Node, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/claim",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		body["lease_secs"] = max(int(lease.Seconds()), 1)
+	}
+	if sizesToClass {
+		body["sizes_to_class"] = true
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {

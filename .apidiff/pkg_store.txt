@@ -75,8 +75,11 @@ const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+type CPUClass struct {
+	Cores       int64
+	MemoryBytes int64
+}
 func CPUClassMemoryBytes(cores int64) int64
-const CPUClassMemoryBytesPerCore = 4 << 30
 const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
 const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {
@@ -281,7 +284,6 @@ type CreditRate struct {
 const CreditRateBaseClassCores = 4
 type CreditRateTable []CreditRate
 func (t CreditRateTable) BaseRate() int64
-func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error)
 func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error)
 func (t CreditRateTable) RateFor(cores int64) int64
 func (t CreditRateTable) Sorted() CreditRateTable
@@ -706,6 +708,9 @@ const MicroCreditsPerCredit = 1_000_000
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
+type NamedClaimOptions struct {
+	SizesToClass bool
+}
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
@@ -752,6 +757,10 @@ type Node struct {
 	PlacementReason string
 
 	PlacementHoldFrom *time.Time
+
+	CreditCPUClassCores int64
+
+	CreditCPUClassMemoryBytes int64
 
 	NeedsLabels []string
 
@@ -1155,7 +1164,10 @@ func (s *Store) CancelNodeForExhaustedCredits(
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
-func (s *Store) ClaimNamedNode(ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string, lease time.Duration) (*Node, error)
+func (s *Store) ClaimNamedNode(
+	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
+	lease time.Duration, opts NamedClaimOptions,
+) (*Node, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string, executor ExecutorIdentity) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
@@ -1500,6 +1512,8 @@ type UnpricedCPUClassError struct {
 	NodeID   string
 	Cores    int64
 	MaxCores int64
+
+	MemoryBytes int64
 }
 func (e *UnpricedCPUClassError) Error() string
 func (e *UnpricedCPUClassError) Unwrap() error

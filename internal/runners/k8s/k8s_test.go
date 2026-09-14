@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -36,7 +37,8 @@ import (
 func jobEnv(t *testing.T, cfg Config) map[string]string {
 	t.Helper()
 	r := &Runner{cfg: cfg}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	containers := job.Spec.Template.Spec.Containers
 	if len(containers) != 1 {
 		t.Fatalf("containers = %d, want 1", len(containers))
@@ -166,7 +168,8 @@ func TestResolveDependencyProxy(t *testing.T) {
 
 func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
 		t.Fatalf("imagePullPolicy = %q, want IfNotPresent", got)
 	}
@@ -174,7 +177,8 @@ func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 
 func TestBuildJob_HonoursConfiguredPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", ImagePullPolicy: corev1.PullAlways}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
 		t.Fatalf("imagePullPolicy = %q, want Always", got)
 	}
@@ -216,7 +220,8 @@ func TestBuildJob_UsesWritableGoCachePaths(t *testing.T) {
 
 func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	container := job.Spec.Template.Spec.Containers[0]
 	if !reflect.DeepEqual(container.Command, []string{"sparkwing-runner"}) {
 		t.Fatalf("command = %#v, want sparkwing-runner", container.Command)
@@ -231,7 +236,8 @@ func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 
 func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	pod := job.Spec.Template.Spec
 	if pod.SecurityContext == nil {
 		t.Fatal("pod security context is nil")
@@ -263,7 +269,8 @@ func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 
 func TestBuildJob_MountsScratchOverEveryWritablePath(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	pod := job.Spec.Template.Spec
 	if len(pod.Volumes) != 1 || pod.Volumes[0].Name != scratchVolumeName || pod.Volumes[0].EmptyDir == nil {
 		t.Fatalf("pod volumes = %#v, want one scratch emptyDir", pod.Volumes)
@@ -480,34 +487,42 @@ func bytesOf(q resource.Quantity) int64 {
 	return v
 }
 
-func TestPodResources_PinAboveTheWarmClassAsksForItsWholeClass(t *testing.T) {
+func TestPodResources_ABilledClassIsTheWholePodShape(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
+		class     store.CPUClass
 		res       capacity.Resolution
+		cfg       Config
 		wantCPU   int64
 		wantBytes int64
 	}{
 		{
-			name:      "an eight-core pin",
+			name:      "the eight-core class",
+			class:     store.CPUClass{Cores: 8, MemoryBytes: 32 << 30},
 			res:       capacity.Resolution{Cores: 8, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
+			cfg:       defaultsCfg,
 			wantCPU:   8000,
 			wantBytes: 32 << 30,
 		},
 		{
-			name:      "memory the four-core class cannot hold",
-			res:       capacity.Resolution{Cores: 3, MemoryBytes: 20 << 30, Source: store.CostSourcePin},
-			wantCPU:   8000,
-			wantBytes: 32 << 30,
+			name:      "a class an operator ladder priced, not the default one",
+			class:     store.CPUClass{Cores: 64, MemoryBytes: 256 << 30},
+			res:       capacity.Resolution{Cores: 3, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
+			cfg:       defaultsCfg,
+			wantCPU:   64000,
+			wantBytes: 256 << 30,
 		},
 		{
-			name:      "cpu alone above the warm class",
-			res:       capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
-			wantCPU:   4000,
-			wantBytes: 16 << 30,
+			name:      "a ceiling never shrinks the class the claim billed",
+			class:     store.CPUClass{Cores: 8, MemoryBytes: 32 << 30},
+			res:       capacity.Resolution{Cores: 8, MemoryBytes: 32 << 30, Source: store.CostSourcePin},
+			cfg:       ceilingCfg,
+			wantCPU:   8000,
+			wantBytes: 32 << 30,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := podResources(tc.res, defaultsCfg)
+			rr := podResources(tc.res, tc.class, tc.cfg)
 			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPU {
 				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPU)
 			}
@@ -524,14 +539,62 @@ func TestPodResources_PinAboveTheWarmClassAsksForItsWholeClass(t *testing.T) {
 	}
 }
 
-func TestPodResources_WarmClassPinKeepsItsBurstLimit(t *testing.T) {
-	res := capacity.Resolution{Cores: 2, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, defaultsCfg)
-	if got := milli(rr.Limits[corev1.ResourceCPU]); got != 4000 {
-		t.Errorf("cpu limit = %dm, want 4000m (2x request)", got)
+// A controller too old to price the node sends no class, and the pod keeps the
+// shape it had before classes existed.
+func TestPodResources_NoBilledClassKeepsTheBurstLimits(t *testing.T) {
+	res := capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
+	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 4000 {
+		t.Errorf("cpu request = %dm, want 4000m", got)
+	}
+	if got := milli(rr.Limits[corev1.ResourceCPU]); got != 8000 {
+		t.Errorf("cpu limit = %dm, want 8000m (2x request)", got)
 	}
 	if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != int64(float64(8<<30)*podMemoryLimitFactor) {
 		t.Errorf("mem limit = %d, want %d (1.25x request)", got, int64(float64(8<<30)*podMemoryLimitFactor))
+	}
+}
+
+// A customer billed for a class the operator's ceiling forbids is told so at
+// once, rather than running smaller for the same price.
+func TestCeilingUnderClass(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cfg   Config
+		class store.CPUClass
+		want  string
+	}{
+		{name: "no class", cfg: ceilingCfg, class: store.CPUClass{}, want: ""},
+		{name: "no ceiling", cfg: defaultsCfg, class: store.CPUClass{Cores: 64, MemoryBytes: 256 << 30}, want: ""},
+		{
+			name: "cpu ceiling under the class", cfg: ceilingCfg,
+			class: store.CPUClass{Cores: 8, MemoryBytes: 32 << 30}, want: "cpu ceiling",
+		},
+		{
+			name:  "memory ceiling under the class",
+			cfg:   Config{MemoryCeiling: 2 << 30},
+			class: store.CPUClass{Cores: 2, MemoryBytes: 8 << 30},
+			want:  "memory",
+		},
+		{
+			name:  "a ceiling above the class allows it",
+			cfg:   Config{CPUCeiling: 16, MemoryCeiling: 64 << 30},
+			class: store.CPUClass{Cores: 8, MemoryBytes: 32 << 30}, want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Runner{cfg: tc.cfg}
+			got := r.ceilingUnderClass(tc.class)
+			if tc.want == "" {
+				if got != "" {
+					t.Fatalf("refusal = %q, want none", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("refusal = %q, want it to name %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -596,18 +659,18 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 			wantMemLim: 1 << 30,
 		},
 		{
-			name:       "no configured ceiling leaves the pin its whole class",
+			name:       "no configured ceiling leaves the pin alone",
 			res:        capacity.Resolution{Cores: 64, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
 			cfg:        defaultsCfg,
 			wantCPUReq: 64000,
-			wantCPULim: 64000,
-			wantMemReq: 256 << 30,
-			wantMemLim: 256 << 30,
+			wantCPULim: int64(64000 * podCPULimitFactor),
+			wantMemReq: 128 << 30,
+			wantMemLim: int64(float64(128<<30) * podMemoryLimitFactor),
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := podResources(tc.res, tc.cfg)
+			rr := podResources(tc.res, store.CPUClass{}, tc.cfg)
 			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPUReq {
 				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPUReq)
 			}
@@ -627,7 +690,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
 	for _, cores := range []float64{0.0004, 1e-9, 0.05} {
 		res := capacity.Resolution{Cores: cores, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
-		rr := podResources(res, defaultsCfg)
+		rr := podResources(res, store.CPUClass{}, defaultsCfg)
 		want := int64(capacity.MeasuredCoreFloor * 1000)
 		if got := milli(rr.Requests[corev1.ResourceCPU]); got != want {
 			t.Errorf("pin %v cores: cpu request = %dm, want the %dm floor", cores, got, want)
@@ -641,7 +704,7 @@ func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
 func TestPodResources_CeilingUnderTheFloorStillWins(t *testing.T) {
 	cfg := Config{CPURequest: "100m", MemoryRequest: "128Mi", CPUCeiling: 0.05}
 	res := capacity.Resolution{Cores: 0.0004, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, cfg)
+	rr := podResources(res, store.CPUClass{}, cfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 50 {
 		t.Errorf("cpu request = %dm, want the 50m ceiling, which outranks the core floor", got)
 	}
@@ -699,7 +762,7 @@ func TestParseCeilingRejectsWhatItCannotEnforce(t *testing.T) {
 
 func TestPodResources_MeasuredPeaksDriveRequest(t *testing.T) {
 	res := capacity.Resolution{Cores: 1.5, MemoryBytes: 3 << 30, Source: store.CostSourceMeasured}
-	rr := podResources(res, defaultsCfg)
+	rr := podResources(res, store.CPUClass{}, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 1500 {
 		t.Errorf("cpu request = %dm, want 1500m", got)
 	}
@@ -710,7 +773,7 @@ func TestPodResources_MeasuredPeaksDriveRequest(t *testing.T) {
 
 func TestPodResources_DefaultTierFallsBackToConfig(t *testing.T) {
 	res := capacity.Resolution{Cores: 8, Source: store.CostSourceDefault}
-	rr := podResources(res, defaultsCfg)
+	rr := podResources(res, store.CPUClass{}, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 100 {
 		t.Errorf("default cpu request = %dm, want 100m (config, not half-machine)", got)
 	}
@@ -724,7 +787,7 @@ func TestPodResources_DefaultTierFallsBackToConfig(t *testing.T) {
 
 func TestPodResources_PinCoresOnlyFallsBackForMemory(t *testing.T) {
 	res := capacity.Resolution{Cores: 2, Source: store.CostSourcePin}
-	rr := podResources(res, defaultsCfg)
+	rr := podResources(res, store.CPUClass{}, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 2000 {
 		t.Errorf("cpu request = %dm, want 2000m", got)
 	}
@@ -836,7 +899,8 @@ func TestResolveResources_StaysQuietUnderTheCeiling(t *testing.T) {
 
 func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", ServiceAccountName: "runner-jobs"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	pod := job.Spec.Template.Spec
 	if pod.ServiceAccountName != "runner-jobs" {
 		t.Fatalf("service account = %q, want runner-jobs", pod.ServiceAccountName)
@@ -862,7 +926,7 @@ func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
 
 func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", GitcacheURL: "http://cache.local"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.NodeClaimFence{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	var got string
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "SPARKWING_GITCACHE_URL" {
@@ -872,7 +936,7 @@ func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
 	if got != "http://cache.local" {
 		t.Fatalf("SPARKWING_GITCACHE_URL = %q, want the configured gitcache", got)
 	}
-	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.NodeClaimFence{})
+	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	for _, e := range bare.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "SPARKWING_GITCACHE_URL" {
 			t.Fatalf("an unset gitcache must not reach the pod, got %q", e.Value)
@@ -884,7 +948,7 @@ func fenceJobEnv(t *testing.T, fence store.NodeClaimFence) map[string]string {
 	t.Helper()
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{}, fence)
+		capacity.Resolution{}, store.CPUClass{}, fence)
 	out := map[string]string{}
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		out[e.Name] = e.Value
@@ -987,7 +1051,7 @@ func TestRunNode_ClaimsTheNodeBeforeItCreatesTheJob(t *testing.T) {
 func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{}, store.NodeClaimFence{})
+		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	if job.Spec.ActiveDeadlineSeconds == nil {
 		t.Fatal("the Job carries no ActiveDeadlineSeconds, so a wedged pod outlives its run")
 	}
@@ -997,7 +1061,7 @@ func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
 
 	tuned := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 90 * time.Minute}}
 	job = tuned.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
-		capacity.Resolution{}, store.NodeClaimFence{})
+		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	if want := int64((90 * time.Minute).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("configured ActiveDeadlineSeconds = %d, want %d", *job.Spec.ActiveDeadlineSeconds, want)
 	}
@@ -1008,7 +1072,7 @@ func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T
 	node := sparkwing.Job(plan, "slow", func(context.Context) error { return nil }).Timeout(time.Hour)
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "slow", Node: node},
-		capacity.Resolution{}, store.NodeClaimFence{})
+		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
 			*job.Spec.ActiveDeadlineSeconds, want)
@@ -1091,5 +1155,51 @@ func TestRunNode_DeadlineKillIsReportedAsItsOwnFailure(t *testing.T) {
 	}
 	if strings.Contains(n.Error, "exited without writing terminal state") {
 		t.Fatal("a deadline kill still reads as the missing-terminal-state failure")
+	}
+}
+
+// A pod no node will take must say so, because the alternative is silence
+// until the Job's wall-clock deadline hours later.
+func TestObserveUnschedulable_ReportsTheSchedulersMessage(t *testing.T) {
+	const jobName = "sw-run-1-build"
+	pod := func(phase corev1.PodPhase, conditions ...corev1.PodCondition) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-1",
+				Namespace: "sparkwing",
+				Labels:    map[string]string{"batch.kubernetes.io/job-name": jobName},
+			},
+			Status: corev1.PodStatus{Phase: phase, Conditions: conditions},
+		}
+	}
+	unschedulable := corev1.PodCondition{
+		Type: corev1.PodScheduled, Status: corev1.ConditionFalse,
+		Reason: corev1.PodReasonUnschedulable, Message: "0/3 nodes are available: insufficient cpu",
+	}
+	for _, tc := range []struct {
+		name string
+		pod  *corev1.Pod
+		want string
+	}{
+		{name: "no pod yet", pod: nil, want: ""},
+		{name: "pending but schedulable", pod: pod(corev1.PodPending), want: ""},
+		{name: "already running", pod: pod(corev1.PodRunning, unschedulable), want: ""},
+		{
+			name: "pending and unschedulable", pod: pod(corev1.PodPending, unschedulable),
+			want: "0/3 nodes are available: insufficient cpu",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var kcli *fake.Clientset
+			if tc.pod == nil {
+				kcli = fake.NewSimpleClientset()
+			} else {
+				kcli = fake.NewSimpleClientset(tc.pod)
+			}
+			r := New(kcli, nil, Config{Namespace: "sparkwing"}, slog.Default())
+			if got := r.observeUnschedulable(context.Background(), jobName); got != tc.want {
+				t.Fatalf("observeUnschedulable = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

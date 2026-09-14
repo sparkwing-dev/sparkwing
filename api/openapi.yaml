@@ -4013,6 +4013,7 @@ paths:
               properties:
                 holder_id: {type: string}
                 lease_secs: {type: integer}
+                sizes_to_class: {type: boolean, description: "The caller creates the node's executor at the cpu class the claim bills; without it a metered claim is held to the class the warm pool serves."}
       responses:
         "200":
           description: Claimed node.
@@ -4283,6 +4284,8 @@ components:
           nullable: true
           description: >-
             When the node became claimable, which the local-first hold runs from. Held apart from `ready_at`, which a label-mismatched claim moves to keep the queue in motion.
+        credit_cpu_class_cores: {type: integer, format: int64, description: "The cpu class the claim billed this node at, which is the shape its executor owes it. Absent on a node no metered claim priced."}
+        credit_cpu_class_memory_bytes: {type: integer, format: int64, description: "The memory that class carries, which its executor gives the node alongside the cores."}
         requested_cores: {type: number}
         requested_memory_bytes: {type: integer, format: int64}
         requested_slots: {type: integer}
