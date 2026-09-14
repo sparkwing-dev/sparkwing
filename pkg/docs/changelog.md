@@ -266,7 +266,9 @@ unlock.
   `id_rsa` and its siblings), or a configuration file whose name ends in a
   credential word; a `.example`, `.sample`, `.template`, `.tmpl` or `.dist`
   name is a committed template and never is. It is secret-shaped by content
-  when any text file carries a private-key or certificate block, or when the
+  when any text file that is not source carries a private-key or certificate
+  block (a key pasted into source is not detected, because the markers there
+  are test fixtures), or when the
   first 64 KiB of a settings or manifest file (`.env`, `.ini`, `.conf`,
   `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`) carries a bearer
   header or a credential-named setting holding a value; outside a settings

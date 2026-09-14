@@ -298,6 +298,9 @@ func TestCredentialFileContent(t *testing.T) {
 		{"key block in prose with CRLF", "notes.txt", "note\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3Blb\r\n", true},
 		{"key block in a file with no extension", "backup", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", true},
 		{"certificate block in prose", "chain.md", "-----BEGIN CERTIFICATE-----\nMIIE\n", true},
+		{"key block in a Go fixture", "internal/envredact/envredact_test.go", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", false},
+		{"key block in a TypeScript fixture", "web/app/auth.ts", "-----BEGIN PRIVATE KEY-----\nMIIE\n", false},
+		{"key block in a shell fixture", "bin/seed.sh", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blb\n", false},
 		{"begin marker that is not a key", "notes.txt", "-----BEGIN PGP SIGNED MESSAGE-----\n", false},
 		{"empty file", ".env", "", false},
 	}

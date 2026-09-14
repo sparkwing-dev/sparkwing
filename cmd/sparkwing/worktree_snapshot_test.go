@@ -463,6 +463,7 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 	writeSnapshotFile(t, repo, ".env.example", "API_TOKEN=replace-me\n", 0o644)
 	writeSnapshotFile(t, repo, "notes/backup.txt", "note\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3Blb\r\n", 0o644)
 	writeSnapshotFile(t, repo, "notes/api.txt", "\tKeys: runtimePlumbingKeys{\n", 0o644)
+	writeSnapshotFile(t, repo, "internal/keys_test.go", "const fixture = `-----BEGIN RSA PRIVATE KEY-----`\n", 0o644)
 
 	_, err := captureWorktreeSnapshot(context.Background(), repo, nil)
 	if err == nil {
@@ -478,7 +479,7 @@ func TestCaptureWorktreeSnapshotRefusesSecretShapedFilesUntilEachIsNamed(t *test
 			t.Fatalf("refusal = %q, want it to mention %q", message, want)
 		}
 	}
-	for _, unwanted := range []string{".env.local", ".env.example", "notes/api.txt"} {
+	for _, unwanted := range []string{".env.local", ".env.example", "notes/api.txt", "internal/keys_test.go"} {
 		if strings.Contains(message, unwanted) {
 			t.Fatalf("refusal = %q, want no %s", message, unwanted)
 		}

@@ -634,9 +634,11 @@ func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string
 	}
 	found := map[string]bool{}
 	for _, record := range strings.Split(string(out), "\x00") {
-		if path := strings.TrimPrefix(record, tree+":"); path != "" && path != record {
-			found[path] = true
+		path := strings.TrimPrefix(record, tree+":")
+		if path == "" || path == record || !envredact.CredentialBlockScannable(path) {
+			continue
 		}
+		found[path] = true
 	}
 	return found, nil
 }

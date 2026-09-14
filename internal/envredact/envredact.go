@@ -188,6 +188,15 @@ var credentialBlockPatterns = []string{
 
 var credentialBlock = regexp.MustCompile(strings.Join(credentialBlockPatterns, "|"))
 
+var sourceExtensions = map[string]bool{
+	"go": true, "ts": true, "tsx": true, "js": true, "jsx": true, "mjs": true,
+	"cjs": true, "py": true, "rs": true, "rb": true, "php": true, "java": true,
+	"kt": true, "kts": true, "swift": true, "scala": true, "cs": true, "c": true,
+	"h": true, "cc": true, "cpp": true, "hpp": true, "m": true, "mm": true,
+	"sh": true, "bash": true, "zsh": true, "ps1": true, "pl": true, "lua": true,
+	"sql": true, "proto": true, "vue": true, "svelte": true, "css": true, "scss": true,
+}
+
 // CredentialBlockPatterns returns the extended regular expressions that
 // match a private key or certificate block, for a caller that searches
 // files it does not read itself.
@@ -548,8 +557,19 @@ func CredentialFileScannable(path string) bool {
 	return contentScannedExtension(path)
 }
 
+// CredentialBlockScannable reports whether a file of this name is worth
+// searching for a key or certificate block. A source file is not: the
+// block markers there are test fixtures and parser literals, and a key
+// pasted into source is a code review's problem rather than this
+// package's.
+func CredentialBlockScannable(path string) bool {
+	_, extension := fileNameAndExtension(path)
+	return !sourceExtensions[extension]
+}
+
 // CredentialFileContent reports whether a file's bytes carry a
-// credential. A key or certificate block counts in any text file. A
+// credential. A key or certificate block counts in any text file that
+// is not source. A
 // bearer header or a credential-named field holding a value counts in a
 // settings or manifest file, and outside a settings file the value must
 // itself look like a credential, because a field name alone is how a
@@ -567,7 +587,7 @@ func CredentialFileContent(path string, content []byte) bool {
 		return false
 	}
 	text := string(content)
-	if credentialBlock.MatchString(text) {
+	if CredentialBlockScannable(path) && credentialBlock.MatchString(text) {
 		return true
 	}
 	if !CredentialFileScannable(path) {

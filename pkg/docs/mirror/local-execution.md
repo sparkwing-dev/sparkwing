@@ -441,15 +441,18 @@ configuration file whose name ends in a credential word (`credentials.json`,
 
 It is secret-shaped by content when its bytes carry a private key or
 certificate block, a bearer header, or a credential-named setting that holds a
-value. A key block counts in any text file, whatever its name; the other two
-are looked for only in settings and manifest files (`.env`, `.ini`, `.conf`,
-`.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`), because an API dump
-or a source file carries camel-case identifiers no value rule can tell from a
-token. Outside a settings file the value itself must look like a
-credential -- a key block, or a long unbroken mixed-case token -- so a
-Kubernetes manifest that names a secret it does not hold (`secretKey:
-api-token`) passes while one that embeds the secret does not. The same name
-and value vocabulary the detached-run environment filter uses decides both.
+value. A key block counts in any text file that is not source: a key pasted
+into a `.go`, `.ts`, `.py`, `.rs`, `.sh` or other source file is not detected,
+because the block markers there are test fixtures and parser literals. The
+bearer header and the credential-named setting are looked for only in settings
+and manifest files (`.env`, `.ini`, `.conf`, `.cfg`, `.properties`, `.json`,
+`.yaml`, `.yml`, `.toml`), because an API dump or a source file carries
+camel-case identifiers no value rule can tell from a token. Outside a settings
+file the value itself must look like a credential -- a key block, or a long
+unbroken mixed-case token -- so a Kubernetes manifest that names a secret it
+does not hold (`secretKey: api-token`) passes while one that embeds the secret
+does not. The same name and value vocabulary the detached-run environment
+filter uses decides both.
 
 The refusal lists every offending path and says whether it is tracked:
 `git rm --cached PATH` for a tracked file, `.gitignore` for an untracked one,
