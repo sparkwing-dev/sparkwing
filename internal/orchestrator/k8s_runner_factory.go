@@ -26,9 +26,12 @@ type K8sRunnerFactoryConfig struct {
 	ControllerURL    string
 	LogsURL          string
 	ArtifactStoreURL string
-	AgentToken       string
-	NodeSelector     map[string]string
-	Tolerations      []corev1.Toleration
+	// GitcacheURL is handed to the pod as SPARKWING_GITCACHE_URL so run-node
+	// can compile a pipeline the image does not carry.
+	GitcacheURL  string
+	AgentToken   string
+	NodeSelector map[string]string
+	Tolerations  []corev1.Toleration
 
 	DependencyProxyURL string
 
@@ -89,6 +92,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		ControllerURL:      cfg.ControllerURL,
 		LogsURL:            cfg.LogsURL,
 		ArtifactStoreURL:   cfg.ArtifactStoreURL,
+		GitcacheURL:        cfg.GitcacheURL,
 		DependencyProxyURL: k8srunner.ResolveDependencyProxy(cfg.DependencyProxyURL, cfg.DependencyProxyFallbackURL),
 		ImagePullPolicy:    pullPolicy,
 		AgentToken:         cfg.AgentToken,
