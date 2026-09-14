@@ -107,6 +107,15 @@ unlock.
   when the claim that names the run no longer holds it. A child that reaches a
   reaped run reports why its node was refused instead of a `500`.
 
+- **cli + cluster:** A `--working-tree` trigger now records the commit its
+  checkout shares with the origin default branch, and the runner fetches that
+  commit through the same Git cache and names it with the remote-tracking ref
+  the laptop had. A step that scopes itself with `git merge-base origin/main
+  HEAD` -- comment policy, new-code lint, changelog checks -- reads the same
+  range on a remote runner that it reads locally, instead of failing with "this
+  checkout cannot resolve it". A checkout with no origin remote records no
+  baseline and behaves as it did.
+
 ### Removed
 
 - **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
@@ -150,14 +159,6 @@ unlock.
 
 ### Fixed
 
-- **cli + cluster:** A `--working-tree` trigger now records the commit its
-  checkout shares with the origin default branch, and the runner fetches that
-  commit through the same Git cache and names it with the remote-tracking ref
-  the laptop had. A step that scopes itself with `git merge-base origin/main
-  HEAD` -- comment policy, new-code lint, changelog checks -- reads the same
-  range on a remote runner that it reads locally, instead of failing with "this
-  checkout cannot resolve it". A checkout with no origin remote records no
-  baseline and behaves as it did.
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".
