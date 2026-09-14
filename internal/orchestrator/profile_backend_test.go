@@ -112,6 +112,9 @@ func TestApplyProfileBackends_ControllerProfile(t *testing.T) {
 }
 
 func TestApplyProfileBackends_LocalOnlyShortCircuits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	neutralizeEnv(t)
 	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}
 	opts := Options{LocalOnly: true, DefaultStateDB: filepath.Join(t.TempDir(), "state.db")}

@@ -70,6 +70,9 @@ func registerPodProgressPipe(t *testing.T) {
 }
 
 func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	registerPodProgressPipe(t)
 	isolateProfiles(t)
 	isolateCheckout(t)

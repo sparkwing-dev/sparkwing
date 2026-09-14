@@ -450,6 +450,9 @@ func TestNoProgressTimeout_ResetsOnObservableProgress(t *testing.T) {
 }
 
 func TestTimeout_RemainsAbsoluteWhileProgressContinues(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-absolute-timeout-with-progress"})
 	if err != nil {

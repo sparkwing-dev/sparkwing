@@ -82,6 +82,9 @@ func TestCPUAccountingBurnerProcess(t *testing.T) {
 }
 
 func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	sink := &captureSink{}
 	ctx, cancel := context.WithCancel(context.Background())

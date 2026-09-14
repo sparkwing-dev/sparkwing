@@ -36,6 +36,9 @@ func (noProgressDiagnosticPipeline) Plan(_ context.Context, plan *sparkwing.Plan
 }
 
 func TestNoProgressTimeout_DumpIsAvailableThroughJobLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
+	}
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-diagnostic"})
 	if err != nil {

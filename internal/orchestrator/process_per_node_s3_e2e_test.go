@@ -24,6 +24,9 @@ import (
 )
 
 func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s of real work; the fast class runs under -short")
+	}
 	mod, bin := buildProcPerNodeBinary(t)
 	endpoint, s3client, bucket := fakeBucket(t)
 

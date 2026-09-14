@@ -186,6 +186,9 @@ func TestSkipIf_MultiplePredicatesAllFalse(t *testing.T) {
 }
 
 func TestSkipIf_SlowPredicateDefaultsToRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	slowRan.Store(false)
 	p := newPaths(t)
 	start := time.Now()
