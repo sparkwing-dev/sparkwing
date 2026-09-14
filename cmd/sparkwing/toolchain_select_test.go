@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,7 +163,7 @@ func TestEnsureToolchainBinaryRejectsNoncanonicalVersionBeforeStoreAccess(t *tes
 		t.Fatal(err)
 	}
 
-	_, err := ensureToolchainBinary(&bytes.Buffer{}, "../escape")
+	_, _, err := ensureToolchainBinary(&bytes.Buffer{}, "../escape")
 	if err == nil || !strings.Contains(err.Error(), "not a canonical stable release") {
 		t.Fatalf("noncanonical version error = %v", err)
 	}
@@ -218,8 +220,13 @@ func TestToolchainFetchErrorNamesVersionURLAndRemedy(t *testing.T) {
 	prev := updateBaseURL
 	updateBaseURL = "http://127.0.0.1:1"
 	t.Cleanup(func() { updateBaseURL = prev })
+	prevLatest := updateFetchLatest
+	updateFetchLatest = func(context.Context) (string, error) {
+		return "", errors.New("the network is cut for this test")
+	}
+	t.Cleanup(func() { updateFetchLatest = prevLatest })
 
-	_, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	_, _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
 	if err == nil {
 		t.Fatal("an unreachable release host produced no error")
 	}
