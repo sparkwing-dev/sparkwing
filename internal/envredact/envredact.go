@@ -1,14 +1,19 @@
 // Package envredact classifies environment variables that must not be
 // persisted verbatim. It matches on the name, on the value shape, and
 // rewrites URL and DSN userinfo so a stored environment keeps the host
-// without the password.
+// without the password. The same vocabulary classifies file names and
+// file bytes, so a caller that ships a working tree elsewhere refuses
+// the same credentials this package refuses to persist.
 package envredact
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -102,6 +107,104 @@ var nonCredentialExact = map[string]bool{
 	"OLDPWD":                                true,
 }
 
+var secretFileExtensions = map[string]bool{
+	"pem":      true,
+	"key":      true,
+	"p12":      true,
+	"pfx":      true,
+	"pkcs12":   true,
+	"jks":      true,
+	"keystore": true,
+	"ppk":      true,
+	"kdbx":     true,
+	"crt":      true,
+	"cer":      true,
+	"der":      true,
+}
+
+var secretFileNames = map[string]bool{
+	"id_rsa":     true,
+	"id_dsa":     true,
+	"id_ecdsa":   true,
+	"id_ed25519": true,
+	".netrc":     true,
+	"_netrc":     true,
+	".pgpass":    true,
+	".htpasswd":  true,
+}
+
+var credentialDataExtensions = map[string]bool{
+	"":           true,
+	"json":       true,
+	"yaml":       true,
+	"yml":        true,
+	"txt":        true,
+	"ini":        true,
+	"conf":       true,
+	"cfg":        true,
+	"toml":       true,
+	"properties": true,
+	"secret":     true,
+}
+
+var templateExtensions = map[string]bool{
+	"example":  true,
+	"sample":   true,
+	"template": true,
+	"tmpl":     true,
+	"dist":     true,
+}
+
+var contentScanExtensions = map[string]bool{
+	"":           true,
+	"env":        true,
+	"ini":        true,
+	"conf":       true,
+	"cfg":        true,
+	"properties": true,
+	"secret":     true,
+	"json":       true,
+	"yaml":       true,
+	"yml":        true,
+	"toml":       true,
+}
+
+var settingsExtensions = map[string]bool{
+	"env":        true,
+	"ini":        true,
+	"conf":       true,
+	"cfg":        true,
+	"properties": true,
+	"secret":     true,
+}
+
+const maxCredentialFileBytes = 64 << 10
+
+const minCredentialValueLength = 16
+
+var credentialBlockPatterns = []string{
+	"-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----",
+	"-----BEGIN CERTIFICATE-----",
+}
+
+var credentialBlock = regexp.MustCompile(strings.Join(credentialBlockPatterns, "|"))
+
+var sourceExtensions = map[string]bool{
+	"go": true, "ts": true, "tsx": true, "js": true, "jsx": true, "mjs": true,
+	"cjs": true, "py": true, "rs": true, "rb": true, "php": true, "java": true,
+	"kt": true, "kts": true, "swift": true, "scala": true, "cs": true, "c": true,
+	"h": true, "cc": true, "cpp": true, "hpp": true, "m": true, "mm": true,
+	"sh": true, "bash": true, "zsh": true, "ps1": true, "pl": true, "lua": true,
+	"sql": true, "proto": true, "vue": true, "svelte": true, "css": true, "scss": true,
+}
+
+// CredentialBlockPatterns returns the extended regular expressions that
+// match a private key or certificate block, for a caller that searches
+// files it does not read itself.
+func CredentialBlockPatterns() []string {
+	return append([]string(nil), credentialBlockPatterns...)
+}
+
 const jsonScanDepth = 8
 
 const bearerScheme = "BEARER "
@@ -181,19 +284,14 @@ func credentialShaped(name string) bool {
 }
 
 func credentialSegment(seg string) bool {
+	if namedCredentialSegment(seg) {
+		return true
+	}
 	if nonCredentialSegments[seg] {
 		return false
 	}
-	if credentialWords[seg] {
-		return true
-	}
 	for _, prefix := range credentialPrefixes {
 		if len(seg) > len(prefix) && strings.HasPrefix(seg, prefix) {
-			return true
-		}
-	}
-	for _, suffix := range credentialSuffixes {
-		if len(seg) > len(suffix) && strings.HasSuffix(seg, suffix) {
 			return true
 		}
 	}
@@ -203,6 +301,47 @@ func credentialSegment(seg string) bool {
 		}
 	}
 	return false
+}
+
+// safety: a file or field name is a weaker signal than an environment name, so
+// only a whole credential word or a credential-suffixed compound counts; the
+// prefix rule reads author and authority as credentials.
+func namedCredentialSegment(seg string) bool {
+	if nonCredentialSegments[seg] {
+		return false
+	}
+	if credentialWords[seg] {
+		return true
+	}
+	for _, suffix := range credentialSuffixes {
+		if len(seg) > len(suffix) && strings.HasSuffix(seg, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// safety: the whole-name rule environment variables use reads
+// cluster-secret-store and external-secrets-cr as credentials, which is every
+// Kubernetes manifest naming one, so a file stem or field name matches on its
+// last segment alone.
+func credentialLabel(name string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(name))
+	if credentialExact[upper] {
+		return true
+	}
+	if nonCredentialExact[upper] {
+		return false
+	}
+	segments := nameSegments(name)
+	if len(segments) == 0 {
+		return false
+	}
+	last := segments[len(segments)-1]
+	if namedCredentialSegment(last) {
+		return true
+	}
+	return strings.HasSuffix(last, "S") && namedCredentialSegment(last[:len(last)-1])
 }
 
 func nameSegments(name string) []string {
@@ -349,6 +488,9 @@ func credentialFieldIn(doc any, depth int) bool {
 }
 
 func credentialAssignmentIn(line string) bool {
+	if name, value, ok := assignmentParts(line); ok && value != "" && CredentialName(name) {
+		return true
+	}
 	for _, field := range strings.Fields(line) {
 		name, value, ok := strings.Cut(field, "=")
 		if !ok || value == "" || !envNameShaped(name) {
@@ -376,4 +518,281 @@ func envNameShaped(name string) bool {
 		}
 	}
 	return true
+}
+
+// CredentialFileName reports whether a file name is secret-shaped: a
+// dotenv file, a key or keystore extension, a well-known private key
+// name, or a configuration or data file whose stem is a
+// credential-shaped name. A source file is never secret-shaped by its
+// name, because a name such as auth.go describes code rather than
+// carrying a secret.
+func CredentialFileName(path string) bool {
+	name, extension := fileNameAndExtension(path)
+	if name == "" || templateExtensions[extension] {
+		return false
+	}
+	lower := strings.ToLower(name)
+	if secretFileNames[lower] || dotenvName(lower) {
+		return true
+	}
+	if secretFileExtensions[extension] {
+		return true
+	}
+	if !credentialDataExtensions[extension] {
+		return false
+	}
+	stem := name
+	if extension != "" {
+		stem = name[:len(name)-len(extension)-1]
+	}
+	return credentialLabel(stem)
+}
+
+// CredentialFilePrefixBytes is how much of a file CredentialFileContent
+// judges. A caller reading a file for this package reads no more.
+const CredentialFilePrefixBytes = maxCredentialFileBytes
+
+// CredentialFileScannable reports whether a file of this name is worth
+// reading for credential content.
+func CredentialFileScannable(path string) bool {
+	return contentScannedExtension(path)
+}
+
+// CredentialBlockScannable reports whether a file of this name is worth
+// searching for a key or certificate block. A source file is not: the
+// block markers there are test fixtures and parser literals, and a key
+// pasted into source is a code review's problem rather than this
+// package's.
+func CredentialBlockScannable(path string) bool {
+	_, extension := fileNameAndExtension(path)
+	return !sourceExtensions[extension]
+}
+
+// CredentialFileContent reports whether a file's bytes carry a
+// credential. A key or certificate block counts in any text file that
+// is not source. A
+// bearer header or a credential-named field holding a value counts in a
+// settings or manifest file, and outside a settings file the value must
+// itself look like a credential, because a field name alone is how a
+// manifest describes a secret it does not hold. Binary content is never
+// judged, because the patterns read lines.
+func CredentialFileContent(path string, content []byte) bool {
+	if len(content) == 0 {
+		return false
+	}
+	if len(content) > CredentialFilePrefixBytes {
+		content = content[:CredentialFilePrefixBytes]
+	}
+	content = wholeRunePrefix(content)
+	if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
+		return false
+	}
+	text := string(content)
+	if CredentialBlockScannable(path) && credentialBlock.MatchString(text) {
+		return true
+	}
+	if !CredentialFileScannable(path) {
+		return false
+	}
+	name, extension := fileNameAndExtension(path)
+	settings := settingsExtensions[extension] || dotenvName(strings.ToLower(name))
+	if credentialJSONSecret(text) {
+		return true
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if credentialFileLine(line, settings) {
+			return true
+		}
+	}
+	return false
+}
+
+// safety: a prefix can end inside a multi-byte rune, which would fail the
+// UTF-8 check and leave the whole file unread.
+func wholeRunePrefix(content []byte) []byte {
+	for trim := 0; trim < utf8.UTFMax && len(content) > 0 && !utf8.Valid(content); trim++ {
+		content = content[:len(content)-1]
+	}
+	return content
+}
+
+func credentialFileLine(line string, settings bool) bool {
+	line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+		return false
+	}
+	if bearerSecretIn(line) {
+		return true
+	}
+	name, value, ok := assignmentParts(line)
+	if !ok || value == "" || !credentialLabel(name) {
+		return false
+	}
+	if settings {
+		return true
+	}
+	return credentialSecretValue(value)
+}
+
+func bearerSecretIn(line string) bool {
+	upper := strings.ToUpper(line)
+	for i := 0; i+len(bearerScheme) <= len(upper); i++ {
+		if upper[i:i+len(bearerScheme)] != bearerScheme {
+			continue
+		}
+		if i > 0 && isNameByte(upper[i-1]) {
+			continue
+		}
+		if credentialSecretValue(line[i+len(bearerScheme):]) {
+			return true
+		}
+	}
+	return false
+}
+
+func credentialJSONSecret(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return false
+	}
+	var doc any
+	if json.Unmarshal([]byte(trimmed), &doc) != nil {
+		return false
+	}
+	return secretFieldIn(doc, jsonScanDepth)
+}
+
+func secretFieldIn(doc any, depth int) bool {
+	if depth <= 0 {
+		return false
+	}
+	switch node := doc.(type) {
+	case map[string]any:
+		for k, v := range node {
+			if text, isText := v.(string); isText && credentialLabel(k) && credentialSecretValue(text) {
+				return true
+			}
+			if secretFieldIn(v, depth-1) {
+				return true
+			}
+		}
+	case []any:
+		for _, v := range node {
+			if secretFieldIn(v, depth-1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func assignmentParts(line string) (string, string, bool) {
+	cut := strings.IndexAny(line, "=:")
+	if cut < 0 {
+		return "", "", false
+	}
+	name := strings.Trim(strings.TrimSpace(line[:cut]), `"'`)
+	name = strings.TrimPrefix(strings.TrimSpace(name), "export ")
+	name = strings.TrimPrefix(name, "- ")
+	name = strings.TrimSpace(name)
+	value := strings.TrimSpace(line[cut+1:])
+	if !settingsNameShaped(name) {
+		return "", "", false
+	}
+	return name, value, true
+}
+
+func settingsNameShaped(name string) bool {
+	if len(name) < 2 {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// safety: outside a settings file a credential-shaped field name describes a
+// secret rather than holding one, so the value has to look like one: a key
+// block, or a long unbroken token drawn from more than one character class.
+func credentialSecretValue(value string) bool {
+	v := strings.TrimSpace(strings.Trim(strings.TrimSpace(value), `"',`))
+	if strings.Contains(v, "-----BEGIN ") {
+		return true
+	}
+	if len(v) < minCredentialValueLength || strings.ContainsAny(v, " \t") {
+		return false
+	}
+	return tokenRunIn(v)
+}
+
+// safety: a separator ends the run, so a dotted path such as
+// karpenter.k8s.aws/instance-family never reads as a token.
+func tokenRunIn(value string) bool {
+	run, lower, upper, digit := 0, false, false, false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			lower = true
+			run++
+		case r >= 'A' && r <= 'Z':
+			upper = true
+			run++
+		case r >= '0' && r <= '9':
+			digit = true
+			run++
+		case r == '+' || r == '=' || r == '~':
+			run++
+		default:
+			run, lower, upper, digit = 0, false, false, false
+			continue
+		}
+		classes := 0
+		for _, present := range []bool{lower, upper, digit} {
+			if present {
+				classes++
+			}
+		}
+		if run >= minCredentialValueLength && classes >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// safety: an API dump or a source file carries camel-case identifiers no value
+// rule can tell from a token, so only settings and manifest bytes are read.
+func contentScannedExtension(path string) bool {
+	name, extension := fileNameAndExtension(path)
+	if templateExtensions[extension] {
+		return false
+	}
+	if dotenvName(strings.ToLower(name)) {
+		return true
+	}
+	return contentScanExtensions[extension]
+}
+
+// safety: a dot-leading name such as .envrc is a hidden file with no
+// extension, so the text after that dot must not be read as one.
+func fileNameAndExtension(path string) (string, string) {
+	name := path
+	if cut := strings.LastIndexAny(name, "/\\"); cut >= 0 {
+		name = name[cut+1:]
+	}
+	lower := strings.ToLower(name)
+	dot := strings.LastIndexByte(lower, '.')
+	if dot <= 0 {
+		return name, ""
+	}
+	return name, lower[dot+1:]
+}
+
+func dotenvName(lower string) bool {
+	return lower == ".env" || strings.HasPrefix(lower, ".env.") || strings.HasSuffix(lower, ".env")
 }

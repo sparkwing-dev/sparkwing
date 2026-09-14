@@ -1,6 +1,9 @@
 package envredact
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestCredentialName(t *testing.T) {
 	cases := []struct {
@@ -211,4 +214,125 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCredentialFileName(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{".env", true},
+		{"services/.env", true},
+		{".env.production", true},
+		{"staging.env", true},
+		{"certs/server.pem", true},
+		{"certs/server.key", true},
+		{"keystore.p12", true},
+		{"android/release.jks", true},
+		{"deploy/bundle.pfx", true},
+		{".ssh/id_rsa", true},
+		{"id_ed25519", true},
+		{"credentials", true},
+		{"aws/credentials.json", true},
+		{"certs/chain.crt", true},
+		{"certs/chain.cer", true},
+		{"certs/chain.der", true},
+		{"config/token.yaml", true},
+		{"deploy/secrets.yml", true},
+		{".netrc", true},
+		{".ssh/id_rsa.pub", false},
+		{".env.example", false},
+		{"config/prod.env.example", false},
+		{"deploy/secrets.yml.template", false},
+		{"docs/author.txt", false},
+		{"config/authority.yaml", false},
+		{"certs/certificates.txt", false},
+		{"pkg/controller/auth.go", false},
+		{"cmd/sparkwing/secret.go", false},
+		{"web/package.json", false},
+		{"Makefile", false},
+		{"docs/authentication.md", false},
+		{"internal/keyring/keyring.rs", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := CredentialFileName(tc.path); got != tc.want {
+			t.Errorf("CredentialFileName(%q) = %t, want %t", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestCredentialFileContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		path    string
+		content string
+		want    bool
+	}{
+		{"dotenv assignment", ".env", "APP_NAME=demo\nAPI_TOKEN=live-value\n", true},
+		{"private key block", "deploy/bundle.conf", "-----BEGIN RSA PRIVATE KEY-----\nabc\n", true},
+		{"ordinary settings", "app.conf", "timeout=30s\nregion=us-west-2\n", false},
+		{"json field name with no secret value", "web/package.json", `{"name":"web","private": true,"license":"MIT"}`, false},
+		{
+			"json service-account key", "deploy/service-account.json",
+			"{\n  \"type\": \"service_account\",\n  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\nMIIEv\\n-----END PRIVATE KEY-----\\n\"\n}", true,
+		},
+		{"json long token value", "deploy/api.json", `{"api_token":"ghp_A1b2C3d4E5f6G7h8I9j0"}`, true},
+		{
+			"yaml field naming a remote secret", "k8s/external-secret.yaml",
+			"spec:\n  data:\n    - secretKey: api-token\n      remoteRef:\n        key: prod/api\n", false,
+		},
+		{
+			"yaml bearer placeholder", "api/openapi.yaml",
+			"    description: \"Authorization: Bearer {token}\"\n    bearerFormat: JWT\n", false,
+		},
+		{
+			"yaml embedded secret value", "k8s/secret.yaml",
+			"data:\n  password: S3cretValue123456789\n", true,
+		},
+		{"ini spaced lowercase assignment", "deploy/app.conf", "timeout = 30s\npassword = hunter2\n", true},
+		{"dotenv template placeholder", ".env.example", "API_TOKEN=replace-me\n", false},
+		{"binary bytes", "fixtures/blob.conf", "\x00\x01API_TOKEN=live-value\n", false},
+		{"prose is never read", "notes.txt", "password = hunter2\n", false},
+		{"identifier dump is not a token", ".apidiff/sparkwing.txt", "\tKeys: runtimePlumbingKeys{\n", false},
+		{"key block in prose with CRLF", "notes.txt", "note\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nb3Blb\r\n", true},
+		{"key block in a file with no extension", "backup", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", true},
+		{
+			"assignment in a file with no extension", "deploy/credentials",
+			"[default]\napi_token = Hn4Td8Pw2Kc6Lm9Vb3Yx7Qs5\n", true,
+		},
+		{
+			"direnv export assignment", ".envrc",
+			"export API_TOKEN=Zt7Qm3Lp9Vd2Xb6Nh4Rk8Ws1\n", true,
+		},
+		{
+			"no-extension assignment without a credential value", "Makefile",
+			"REGISTRY = ghcr.io/sparkwing\nTOKEN = $(shell cat token)\n", false,
+		},
+		{"license prose is not a credential", "LICENSE", "Copyright 2026 Sparkwing\n", false},
+		{"certificate block in prose", "chain.md", "-----BEGIN CERTIFICATE-----\nMIIE\n", true},
+		{"key block in a Go fixture", "internal/envredact/envredact_test.go", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n", false},
+		{"key block in a TypeScript fixture", "web/app/auth.ts", "-----BEGIN PRIVATE KEY-----\nMIIE\n", false},
+		{"key block in a shell fixture", "bin/seed.sh", "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blb\n", false},
+		{"begin marker that is not a key", "notes.txt", "-----BEGIN PGP SIGNED MESSAGE-----\n", false},
+		{"empty file", ".env", "", false},
+	}
+	for _, tc := range cases {
+		if got := CredentialFileContent(tc.path, []byte(tc.content)); got != tc.want {
+			t.Errorf("%s: CredentialFileContent = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+	oversize := make([]byte, CredentialFilePrefixBytes*2)
+	for i := range oversize {
+		oversize[i] = 'a'
+	}
+	copy(oversize, []byte("API_TOKEN=live-value\n"))
+	if !CredentialFileContent(".env", oversize) {
+		t.Error("CredentialFileContent missed a credential inside the judged prefix")
+	}
+	copy(oversize, bytes.Repeat([]byte("a"), CredentialFilePrefixBytes))
+	copy(oversize[CredentialFilePrefixBytes:], []byte("\nAPI_TOKEN=live-value\n"))
+	if CredentialFileContent(".env", oversize) {
+		t.Error("CredentialFileContent read past the judged prefix")
+	}
 }

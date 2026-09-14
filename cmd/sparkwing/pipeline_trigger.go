@@ -12,16 +12,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-func parseTriggerFlags(args []string) (pipelineName, profileName string, detach, workingTree, wantHelp bool, passthrough []string, err error) {
+type triggerFlags struct {
+	pipeline         string
+	profile          string
+	detach           bool
+	workingTree      bool
+	wantHelp         bool
+	allowSecretFiles []string
+	passthrough      []string
+}
+
+func parseTriggerFlags(args []string) (triggerFlags, error) {
 	if len(args) == 0 {
-		return "", "", false, false, false, nil, errors.New("pipeline name required (e.g. `sparkwing pipeline trigger release --profile prod`)")
+		return triggerFlags{}, errors.New("pipeline name required (e.g. `sparkwing pipeline trigger release --profile prod`)")
 	}
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		return "", "", false, false, true, nil, nil
+		return triggerFlags{wantHelp: true}, nil
 	}
-	pipelineName = args[0]
-	if strings.HasPrefix(pipelineName, "-") {
-		return "", "", false, false, false, nil, fmt.Errorf("pipeline name must come first; got flag %q", pipelineName)
+	flags := triggerFlags{pipeline: args[0]}
+	if strings.HasPrefix(flags.pipeline, "-") {
+		return triggerFlags{}, fmt.Errorf("pipeline name must come first; got flag %q", flags.pipeline)
 	}
 
 	rest := args[1:]
@@ -30,46 +40,56 @@ func parseTriggerFlags(args []string) (pipelineName, profileName string, detach,
 		a := rest[i]
 		switch {
 		case a == "--":
-			passthrough = append(passthrough, rest[i+1:]...)
+			flags.passthrough = append(flags.passthrough, rest[i+1:]...)
 			i = len(rest)
 		case a == "-h" || a == "--help":
-			return "", "", false, false, true, nil, nil
+			return triggerFlags{wantHelp: true}, nil
 		case a == "--profile":
 			if i+1 < len(rest) {
-				profileName = rest[i+1]
+				flags.profile = rest[i+1]
 				i += 2
 				continue
 			}
 			i++
 		case strings.HasPrefix(a, "--profile="):
-			profileName = strings.TrimPrefix(a, "--profile=")
+			flags.profile = strings.TrimPrefix(a, "--profile=")
 			i++
 		case a == "--detach":
-			detach = true
+			flags.detach = true
 			i++
 		case a == "--detach=true":
-			detach = true
+			flags.detach = true
 			i++
 		case a == "--detach=false":
-			detach = false
+			flags.detach = false
 			i++
 		case a == "--working-tree" || a == "--working-tree=true":
-			workingTree = true
+			flags.workingTree = true
 			i++
 		case a == "--working-tree=false":
-			workingTree = false
+			flags.workingTree = false
+			i++
+		case a == "--allow-secret-file":
+			if i+1 < len(rest) {
+				flags.allowSecretFiles = append(flags.allowSecretFiles, rest[i+1])
+				i += 2
+				continue
+			}
+			i++
+		case strings.HasPrefix(a, "--allow-secret-file="):
+			flags.allowSecretFiles = append(flags.allowSecretFiles, strings.TrimPrefix(a, "--allow-secret-file="))
 			i++
 		default:
-			passthrough = append(passthrough, a)
+			flags.passthrough = append(flags.passthrough, a)
 			i++
 		}
 	}
-	return pipelineName, profileName, detach, workingTree, false, passthrough, nil
+	return flags, nil
 }
 
 func runPipelineTrigger(args []string) error {
-	pipelineName, profileName, detach, workingTree, wantHelp, passthrough, err := parseTriggerFlags(args)
-	if wantHelp {
+	flags, err := parseTriggerFlags(args)
+	if flags.wantHelp {
 		PrintHelp(cmdPipelineTrigger, os.Stdout)
 		return nil
 	}
@@ -77,11 +97,11 @@ func runPipelineTrigger(args []string) error {
 		PrintHelp(cmdPipelineTrigger, os.Stderr)
 		return fmt.Errorf("pipeline trigger: %w", err)
 	}
-	if profileName == "" {
+	if flags.profile == "" {
 		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")
 	}
 
-	prof, err := resolveProfileFlag(profileName)
+	prof, err := resolveProfileFlag(flags.profile)
 	if err != nil {
 		return err
 	}
@@ -91,22 +111,22 @@ func runPipelineTrigger(args []string) error {
 	}
 
 	source := triggerSource("pipeline-trigger")
-	if workingTree {
+	if flags.workingTree {
 		source = triggerSource("pipeline-working-tree")
 	}
-	resp, err := createRemoteTrigger(prof, pipelineName, source, runFlags{}, passthrough, workingTree)
+	resp, err := createRemoteTrigger(prof, flags.pipeline, source, runFlags{allowSecretFiles: flags.allowSecretFiles}, flags.passthrough, flags.workingTree)
 	if err != nil {
 		return err
 	}
 
-	if detach {
+	if flags.detach {
 		fmt.Fprintln(os.Stdout, resp.RunID)
 		return nil
 	}
 
 	ctx := context.Background()
 	fmt.Fprintf(os.Stderr, "triggered %s on %s as %s (status=%s); following...\n",
-		pipelineName, prof.Name, resp.RunID, resp.Status)
+		flags.pipeline, prof.Name, resp.RunID, resp.Status)
 
 	if prof.Logs != nil {
 		format, ferr := resolveTTYAwareOutput("", "pipeline trigger")

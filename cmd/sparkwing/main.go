@@ -262,7 +262,7 @@ func dispatchRun(args []string) error {
 		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 			return err
 		}
-		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir))
+		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir), flags.allowSecretFiles)
 		if err != nil {
 			return fmt.Errorf("--sw-fleet source: %w", err)
 		}

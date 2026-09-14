@@ -5,14 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceidentity"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -86,11 +89,11 @@ func (s *worktreeSnapshot) materialize(ctx context.Context) (string, string, err
 	return checkout, repoURL, nil
 }
 
-func captureWorktreeSnapshot(ctx context.Context, start string) (*worktreeSnapshot, error) {
-	return captureWorktreeSnapshotWithLimits(ctx, start, defaultWorktreeSnapshotLimits)
+func captureWorktreeSnapshot(ctx context.Context, start string, allowedSecretFiles []string) (*worktreeSnapshot, error) {
+	return captureWorktreeSnapshotWithLimits(ctx, start, defaultWorktreeSnapshotLimits, allowedSecretFiles)
 }
 
-func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits) (*worktreeSnapshot, error) {
+func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits, allowedSecretFiles []string) (*worktreeSnapshot, error) {
 	repoRoot, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
@@ -190,6 +193,9 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 		return fail(err)
 	}
 	if err := rejectUnsafeSymlinks(ctx, gitDir, tree); err != nil {
+		return fail(err)
+	}
+	if err := rejectSecretShapedFiles(ctx, gitDir, tree, baseSHA, allowedSecretFiles); err != nil {
 		return fail(err)
 	}
 	fileCount, sourceBytes, err := measureSnapshotTree(ctx, gitDir, tree, limits)
@@ -493,6 +499,179 @@ func splitSnapshotPath(value string) []string {
 		return nil
 	}
 	return strings.Split(value, "/")
+}
+
+const secretShapedFileReport = 10
+
+// safety: the manifest travels to another machine, so a credential in it leaks
+// to whoever runs the job; the named override keeps the decision per file.
+func rejectSecretShapedFiles(ctx context.Context, gitDir, tree, baseSHA string, allowed []string) error {
+	permitted := map[string]bool{}
+	for _, path := range allowed {
+		if normalized := normalizeSnapshotPath(path); normalized != "" {
+			permitted[normalized] = false
+		}
+	}
+	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rz", "--full-tree", tree)
+	if err != nil {
+		return fmt.Errorf("inspect snapshot manifest: %w", err)
+	}
+	keyBlocks, err := snapshotKeyBlockPaths(ctx, gitDir, tree)
+	if err != nil {
+		return err
+	}
+	var offenders []secretShapedFile
+	for _, record := range strings.Split(out, "\x00") {
+		meta, path, ok := strings.Cut(record, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) != 3 || fields[1] != "blob" {
+			continue
+		}
+		if _, named := permitted[path]; named {
+			permitted[path] = true
+			continue
+		}
+		if envredact.CredentialFileName(path) {
+			offenders = append(offenders, secretShapedFile{path: path, reason: "name"})
+			continue
+		}
+		if keyBlocks[path] {
+			offenders = append(offenders, secretShapedFile{path: path, reason: "content"})
+			continue
+		}
+		if !envredact.CredentialFileScannable(path) {
+			continue
+		}
+		content, readErr := snapshotBlobPrefix(ctx, gitDir, fields[2], envredact.CredentialFilePrefixBytes)
+		if readErr != nil {
+			return fmt.Errorf("read snapshot file: %w", readErr)
+		}
+		if envredact.CredentialFileContent(path, content) {
+			offenders = append(offenders, secretShapedFile{path: path, reason: "content"})
+		}
+	}
+	var unmatched []string
+	for path, matched := range permitted {
+		if !matched {
+			unmatched = append(unmatched, path)
+		}
+	}
+	if len(unmatched) > 0 {
+		sort.Strings(unmatched)
+		return fmt.Errorf("--allow-secret-file names %s, which no file in the working-tree snapshot matches; "+
+			"the path is repository-relative", strings.Join(unmatched, ", "))
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	return secretShapedFileError(ctx, gitDir, baseSHA, offenders)
+}
+
+type secretShapedFile struct {
+	path   string
+	reason string
+}
+
+func secretShapedFileError(ctx context.Context, gitDir, baseSHA string, offenders []secretShapedFile) error {
+	tracked := trackedSnapshotPaths(ctx, gitDir, baseSHA)
+	listed := offenders
+	if len(listed) > secretShapedFileReport {
+		listed = listed[:secretShapedFileReport]
+	}
+	described := make([]string, 0, len(listed))
+	for _, offender := range listed {
+		state := "untracked"
+		if tracked[offender.path] {
+			state = "tracked"
+		}
+		described = append(described, fmt.Sprintf("%s (%s, %s)", offender.path, offender.reason, state))
+	}
+	more := ""
+	if len(offenders) > len(listed) {
+		more = fmt.Sprintf("\n  and %d more", len(offenders)-len(listed))
+	}
+	return fmt.Errorf("working-tree snapshot refuses secret-shaped files:\n  %s%s\n"+
+		"untrack a tracked file with `git rm --cached PATH`, ignore an untracked one in .gitignore, "+
+		"or send one anyway with --allow-secret-file PATH",
+		strings.Join(described, "\n  "), more)
+}
+
+// safety: an unreadable base commit leaves every offender described as
+// untracked, which weakens the remedy line but never admits a file.
+func trackedSnapshotPaths(ctx context.Context, gitDir, baseSHA string) map[string]bool {
+	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rz", "--full-tree", "--name-only", baseSHA)
+	if err != nil {
+		return nil
+	}
+	tracked := map[string]bool{}
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" {
+			tracked[path] = true
+		}
+	}
+	return tracked
+}
+
+// safety: a key block travels in any text file, and reading every file to find
+// one would cost a process per file; git grep reads the tree once and skips
+// binary blobs itself.
+func snapshotKeyBlockPaths(ctx context.Context, gitDir, tree string) (map[string]bool, error) {
+	args := []string{"--git-dir", gitDir, "grep", "--full-name", "--files-with-matches", "-I", "-z", "--extended-regexp"}
+	for _, pattern := range envredact.CredentialBlockPatterns() {
+		args = append(args, "-e", pattern)
+	}
+	cmd := exec.CommandContext(ctx, "git", append(args, tree)...)
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("search snapshot for key blocks: %w", snapshotGitError(err))
+	}
+	found := map[string]bool{}
+	for _, record := range strings.Split(string(out), "\x00") {
+		path := strings.TrimPrefix(record, tree+":")
+		if path == "" || path == record || !envredact.CredentialBlockScannable(path) {
+			continue
+		}
+		found[path] = true
+	}
+	return found, nil
+}
+
+func snapshotBlobPrefix(ctx context.Context, gitDir, sha string, limit int64) ([]byte, error) {
+	readCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(readCtx, "git", "--git-dir", gitDir, "cat-file", "blob", sha)
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return nil, pipeErr
+	}
+	if startErr := cmd.Start(); startErr != nil {
+		return nil, snapshotGitError(startErr)
+	}
+	prefix, readErr := io.ReadAll(io.LimitReader(stdout, limit))
+	cancel()
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if waitErr != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return prefix, nil
+}
+
+func normalizeSnapshotPath(path string) string {
+	cleaned := strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
+	for strings.HasPrefix(cleaned, "./") {
+		cleaned = cleaned[2:]
+	}
+	return strings.TrimPrefix(cleaned, "/")
 }
 
 func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {

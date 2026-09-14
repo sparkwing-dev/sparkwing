@@ -20,6 +20,34 @@ unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **cli:** A `--working-tree` trigger, and a `sparkwing run --sw-fleet`
+  snapshot, now refuse to upload a manifest holding a secret-shaped file. A
+  file is secret-shaped by name when it is a dotenv, a key, keystore or
+  certificate file (`.pem`, `.key`, `.crt`, `.cer`, `.der`, `.p12`, `.jks`,
+  `id_rsa` and its siblings), or a configuration file whose name ends in a
+  credential word; a `.example`, `.sample`, `.template`, `.tmpl` or `.dist`
+  name is a committed template and never is. It is secret-shaped by content
+  when any text file that is not source carries a private-key or certificate
+  block (a key pasted into source is not detected, because the markers there
+  are test fixtures), or when the
+  first 64 KiB of a settings or manifest file (`.env`, `.ini`, `.conf`,
+  `.cfg`, `.properties`, `.json`, `.yaml`, `.yml`, `.toml`, or a name with no
+  extension such as `credentials` or `.envrc`) carries a bearer
+  header or a credential-named setting holding a value; outside a settings
+  file that value must itself look like a
+  credential, so a Kubernetes manifest naming a secret it does not hold
+  passes. The same vocabulary the detached-run environment filter uses decides
+  both. The refusal names every offending path, says whether it is tracked,
+  and gives the remedy: `git rm --cached PATH` when tracked, `.gitignore` when
+  not. `--allow-secret-file PATH` (`--sw-allow-secret-file PATH` on `sparkwing
+  run`) sends one named file anyway and is repeatable; it admits only the
+  paths it names and refuses a path that matches no file in the snapshot, so
+  the record of what left the machine is the command itself. Gitignored files
+  never entered the manifest and are unaffected, and a file whose bytes are
+  binary is never read.
+
 ## [v0.50.4] - 2026-09-14
 ### Added
 
