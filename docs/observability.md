@@ -621,16 +621,14 @@ unlimited and the overshoot is unbounded.
 
 ### Persistence and history
 
-Counting is in memory, and only the controller drains it: the logs
-service and the cache count without parking anything, so neither
-accumulates a backlog for a flush that will never come. The controller
-persists each principal's month total to its store on the maintenance
-sweep and reloads it at startup,
-so a restart resumes the month rather than handing everyone a fresh
-budget; no response costs a store write. That sweep also prunes totals
-older than thirteen months, once a month rather than on every tick. The
-logs service and the cache count in memory alone, so their counters
-start over on a restart.
+Counting is in memory, and only the controller persists it. It writes
+each principal's month total to its store on the maintenance sweep and
+reloads it at startup, so a restart resumes the month rather than handing
+everyone a fresh budget, and no response costs a store write; that sweep
+also prunes totals older than thirteen months, once a month rather than
+on every tick. The logs service and the cache count in memory alone: they
+park nothing for a flush that will never come, and their counters start
+over on a restart.
 
 Read the controller's meter, including the principals that have
 downloaded the most this month, with `GET /api/v1/egress` on an `admin`

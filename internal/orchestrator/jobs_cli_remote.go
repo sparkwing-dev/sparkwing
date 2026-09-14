@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -268,7 +269,8 @@ func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, op
 
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	ctrl := client.NewWithToken(controllerURL, nil, token)
-	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token)
+	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token).
+		WithRunnerIdentity(logs.ProcessIdentity("cli"))
 
 	if opts.EventsOnly {
 		return writeEventsViaBackend(ctx, backend.NewClientBackend(ctrl, logc), runID, opts, out)

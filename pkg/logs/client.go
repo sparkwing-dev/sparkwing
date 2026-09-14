@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -51,8 +52,48 @@ func (c *Client) RunnerIdentity() string {
 	return ""
 }
 
+// WithReaderIdentity names the reader behind one request, which a shared
+// client cannot know: a dashboard serves every browser tab through one
+// token, so without this the logs service counts every viewer's reads
+// against the dashboard and one viewer's tabs spend the whole
+// deployment's stream cap. It takes precedence over the client-wide
+// identity for requests made on the returned context.
+func WithReaderIdentity(ctx context.Context, id string) context.Context {
+	if id == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, readerIdentityCtxKey{}, id)
+}
+
+// ReaderIdentityFromContext returns the per-request identity, or the
+// empty string when none was set.
+func ReaderIdentityFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(readerIdentityCtxKey{}).(string)
+	return id
+}
+
+type readerIdentityCtxKey struct{}
+
+// ProcessIdentity names this process for the per-runner budgets the
+// controller and the logs service keep, as "role:host:pid". A caller with
+// no stabler name of its own uses it, because an identity that changed
+// per request would hand the server a fresh budget every poll.
+func ProcessIdentity(role string) string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown-host"
+	}
+	return fmt.Sprintf("%s:%s:%d", role, host, os.Getpid())
+}
+
+// safety: the per-request identity wins, because a client shared by many
+// readers knows only its own name and the request knows whose read it is.
 func (c *Client) setRunnerIdentity(req *http.Request) {
-	if id := c.RunnerIdentity(); id != "" {
+	id := ReaderIdentityFromContext(req.Context())
+	if id == "" {
+		id = c.RunnerIdentity()
+	}
+	if id != "" {
 		req.Header.Set(store.RunnerIdentityHeader, id)
 	}
 }
