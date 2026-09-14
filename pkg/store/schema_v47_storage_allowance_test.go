@@ -14,7 +14,7 @@ func assertStorageAllowanceSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	for _, q := range []string{
-		`SELECT COUNT(storage_allowance_bytes), COUNT(storage_charged_through) FROM storage_quotas`,
+		`SELECT COUNT(storage_allowance_bytes) FROM storage_quotas`,
 		`SELECT COUNT(principal), COUNT(storage_bytes) FROM credit_charges`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
@@ -30,7 +30,6 @@ func downgradeStorageAllowanceToV46(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
 	for _, q := range []string{
 		`ALTER TABLE storage_quotas DROP COLUMN storage_allowance_bytes`,
-		`ALTER TABLE storage_quotas DROP COLUMN storage_charged_through`,
 		`ALTER TABLE credit_charges DROP COLUMN principal`,
 		`ALTER TABLE credit_charges DROP COLUMN storage_bytes`,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 47`,

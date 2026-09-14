@@ -22,11 +22,6 @@ const (
 	// StorageChargeDaySeconds is the day the storage rate prices.
 	StorageChargeDaySeconds = 86_400
 
-	// StorageChargeInterval is how much time must pass before a team is
-	// billed again. The amount is pro rata on the exact interval, so a pass
-	// that arrives late bills what it covers rather than a whole day.
-	StorageChargeInterval = 24 * time.Hour
-
 	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at GitHub's $0.25
 	// per GB-month over a thirty-day month, which is 25 credits a month and
 	// 0.833333 credits a day. Nothing sets it on its own: an installation
@@ -42,32 +37,16 @@ const (
 const (
 	metaKeyStorageRateMicroPerGBDay  = "storage_rate_micro_per_gb_day"
 	metaKeyStorageFreeAllowanceBytes = "storage_free_allowance_bytes"
+
+	// safety: the watermark is per team and a team need not hold a quota row
+	// to hold bytes, so it lives here rather than beside a quota that may not
+	// exist; a row here is created by the first pass that sees the team.
+	metaKeyStorageChargedThroughPrefix = "storage_charged_through/"
 )
 
 // safety: one pass expires a bounded number of runs so a first sweep on a team
 // far above its allowance does not hold the write lock over its whole history.
 const storageAllowanceSweepMaxRuns = 500
-
-// StorageCreditsExhaustedError refuses a write that would grow a team's
-// retained bytes while the ledger has nothing left to pay the rent on them. It
-// reports [ErrInsufficientCredits], so a caller answers it the way it answers a
-// claim the ledger refused.
-type StorageCreditsExhaustedError struct {
-	Principal      string
-	BalanceMicro   int64
-	RequestedBytes int64
-}
-
-func (e *StorageCreditsExhaustedError) Error() string {
-	return fmt.Sprintf(
-		"insufficient credits: team %s cannot store %d more bytes on a balance of %s credits; "+
-			"add credits, and retention releases what is already stored",
-		e.Principal, e.RequestedBytes, FormatCredits(e.BalanceMicro))
-}
-
-// Unwrap reports [ErrInsufficientCredits], so a caller matches the condition
-// without knowing this type.
-func (e *StorageCreditsExhaustedError) Unwrap() error { return ErrInsufficientCredits }
 
 // StorageChargeSweep is what one storage-charge pass billed.
 type StorageChargeSweep struct {
@@ -115,18 +94,6 @@ func validStorageFreeAllowance(bytes int64) error {
 	return nil
 }
 
-// DatabaseNow reads the instant the database keeps. Billing compares one pass
-// against the next, so the interval a charge covers is measured off the clock
-// every controller sharing the database shares, never off a process clock a
-// second controller or an NTP step would disagree with.
-func (s *Store) DatabaseNow(ctx context.Context) (time.Time, error) {
-	var secs int64
-	if err := s.queryRow(ctx, `SELECT `+s.nowSeconds()).Scan(&secs); err != nil {
-		return time.Time{}, fmt.Errorf("storage: read the database clock: %w", err)
-	}
-	return time.Unix(secs, 0).UTC(), nil
-}
-
 // StorageRetainedBytes reports what a team still has stored: the bytes of
 // every run whose rows the controller still holds. Retention and the allowance
 // sweep both take bytes out of it, which is what makes it a measure of what is
@@ -167,25 +134,18 @@ ON CONFLICT (principal) DO UPDATE SET
 }
 
 // safety: the balance and the write that grows the team's bytes share one
-// transaction, so a grant landing beside the check cannot let an unpaid write
-// through and a refused write is never recorded.
+// transaction, so a refused write is never recorded.
 func refuseStorageGrowthOnEmptyBalanceTx(
 	ctx context.Context, tx *storeTx, principal string, bytes int64,
 ) error {
-	rate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
-	if err != nil || rate <= 0 {
-		return err
-	}
 	balance, err := creditBalanceTx(ctx, tx)
-	if err != nil {
+	if err != nil || balance > 0 {
 		return err
 	}
-	if balance > 0 {
-		return nil
-	}
-	return &StorageCreditsExhaustedError{
-		Principal: principal, BalanceMicro: balance, RequestedBytes: bytes,
-	}
+	return fmt.Errorf(
+		"%w: team %s cannot store %d more bytes on a balance of %s credits; "+
+			"add credits, and retention releases what is already stored",
+		ErrInsufficientCredits, principal, bytes, FormatCredits(balance))
 }
 
 // safety: the product of a byte count, a rate and an interval outgrows int64
@@ -208,14 +168,17 @@ func storageChargeMicro(excessBytes, rateMicroPerGBDay, seconds int64) (int64, e
 	return num.Int64(), nil
 }
 
-// ChargeRetainedStorage bills every team for the bytes it has kept above the
-// free allowance since it was last billed, pro rata at the storage rate. A pass
-// bills a team only once [StorageChargeInterval] has passed, and a team the
-// ledger has never billed is stamped with now and billed from the next pass, so
-// turning the rate on never bills for the past.
+// ChargeRetainedStorage bills every team for the bytes it retains, at the
+// storage rate, for the interval since it was last billed. A team is billed on
+// every pass, so the meter's error is one pass interval of held-then-released
+// bytes rather than a whole day of them. Bytes above the team's allowance are
+// not billed, because the allowance is the most a team agreed to pay for, and
+// the free allowance comes off what is left.
 //
-// An installation whose storage rate is zero writes nothing, which is what an
-// install that set no rate reads.
+// A team the ledger has never billed is stamped with now and billed from the
+// next pass, so pricing storage never bills for the past. An installation
+// whose storage rate is zero writes nothing, which is what an install that set
+// no rate reads.
 func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error) {
 	var out StorageChargeSweep
 	rate, err := s.StorageRateMicroPerGBDay(ctx)
@@ -226,17 +189,20 @@ func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (Stora
 	if err != nil {
 		return out, err
 	}
-	quotas, err := s.ListStorageQuotas(ctx)
+	teams, err := s.retainingPrincipals(ctx)
 	if err != nil {
 		return out, err
 	}
-	for _, quota := range quotas {
+	for _, principal := range teams {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		charge, err := s.chargeOneTeamStorage(ctx, quota.Principal, rate, free, now)
+		charge, err := s.chargeOneTeamStorage(ctx, principal, rate, free, now)
+		if errors.Is(err, errStorageChargeRaced) {
+			continue
+		}
 		if err != nil {
-			return out, fmt.Errorf("storage: charge team %s: %w", quota.Principal, err)
+			return out, fmt.Errorf("storage: charge team %s: %w", principal, err)
 		}
 		if charge != nil {
 			out.Charges = append(out.Charges, *charge)
@@ -244,6 +210,27 @@ func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (Stora
 		}
 	}
 	return out, nil
+}
+
+// safety: the teams worth billing are the ones holding bytes, not the ones
+// holding a quota row; a team with retained bytes and no quota row would
+// otherwise store without ever paying for it.
+func (s *Store) retainingPrincipals(ctx context.Context) (_ []string, err error) {
+	rows, err := s.query(ctx,
+		`SELECT principal FROM storage_run_usage GROUP BY principal ORDER BY principal ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []string
+	for rows.Next() {
+		var principal string
+		if err := rows.Scan(&principal); err != nil {
+			return nil, err
+		}
+		out = append(out, principal)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) chargeOneTeamStorage(
@@ -257,46 +244,41 @@ func (s *Store) chargeOneTeamStorage(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return nil, err
 	}
-	var through int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT storage_charged_through FROM storage_quotas WHERE principal = ?`,
-		principal).Scan(&through); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, tx.Commit()
-		}
+	stamped, err := creditSettingRawTx(ctx, tx, storageChargedThroughKey(principal))
+	if err != nil {
 		return nil, err
 	}
-	// safety: a team the rate has never covered is stamped and left, so
-	// turning storage billing on does not bill every byte kept before it.
-	if through == 0 {
-		if err := stampStorageChargedThroughTx(ctx, tx, principal, now.UnixNano()); err != nil {
+	if stamped == "" {
+		if err := stampStorageChargedThroughTx(ctx, tx, principal, "", now.UnixNano()); err != nil {
 			return nil, err
 		}
 		return nil, tx.Commit()
 	}
+	through := parseCreditSetting(stamped, 0)
 	seconds := (now.UnixNano() - through) / int64(time.Second)
-	if seconds < int64(StorageChargeInterval/time.Second) {
+	if seconds <= 0 {
 		return nil, tx.Commit()
 	}
-	var retained sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT SUM(bytes) FROM storage_run_usage WHERE principal = ?`, principal).
-		Scan(&retained); err != nil {
+	// safety: the watermark moves whether or not the truncated amount is worth
+	// a micro-credit, so an interval is never billed twice; what truncation
+	// forgives is at most one micro-credit per team per pass.
+	if err := stampStorageChargedThroughTx(ctx, tx, principal,
+		stamped, through+seconds*int64(time.Second)); err != nil {
 		return nil, err
 	}
-	amount, err := storageChargeMicro(retained.Int64-free, rate, seconds)
+	billable, err := billableRetainedBytesTx(ctx, tx, principal, free)
 	if err != nil {
 		return nil, err
 	}
-	if err := stampStorageChargedThroughTx(ctx, tx, principal,
-		through+seconds*int64(time.Second)); err != nil {
+	amount, err := storageChargeMicro(billable, rate, seconds)
+	if err != nil {
 		return nil, err
 	}
 	if amount <= 0 {
 		return nil, tx.Commit()
 	}
 	charge, err := insertStorageChargeTx(ctx, tx, storageCharge{
-		Principal: principal, Bytes: retained.Int64 - free,
+		Principal: principal, Bytes: billable,
 		Seconds: seconds, AmountMicro: amount, NowNS: now.UnixNano(),
 	})
 	if err != nil {
@@ -305,10 +287,70 @@ func (s *Store) chargeOneTeamStorage(
 	return charge, tx.Commit()
 }
 
-func stampStorageChargedThroughTx(ctx context.Context, tx *storeTx, principal string, at int64) error {
-	_, err := tx.ExecContext(ctx,
-		`UPDATE storage_quotas SET storage_charged_through = ? WHERE principal = ?`, at, principal)
-	return err
+// safety: a team never pays for more than the allowance it named, because that
+// is what every page describing the allowance promises, and the sweep has
+// already expired what stands above it by the time this runs.
+func billableRetainedBytesTx(ctx context.Context, tx *storeTx, principal string, free int64) (int64, error) {
+	var retained sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT SUM(bytes) FROM storage_run_usage WHERE principal = ?`, principal).
+		Scan(&retained); err != nil {
+		return 0, err
+	}
+	quota, err := storageQuotaForTx(ctx, tx, principal)
+	if err != nil {
+		return 0, err
+	}
+	billable := retained.Int64
+	if quota.AllowanceBytes > 0 && billable > quota.AllowanceBytes {
+		billable = quota.AllowanceBytes
+	}
+	return max(billable-free, 0), nil
+}
+
+// safety: the watermark is a compare-and-set against the exact value this pass
+// read, so two controllers passing at once bill one interval once whatever
+// either one's clock says.
+func stampStorageChargedThroughTx(
+	ctx context.Context, tx *storeTx, principal, from string, to int64,
+) error {
+	key := storageChargedThroughKey(principal)
+	if from == "" {
+		res, err := tx.ExecContext(ctx, `
+                INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT (key) DO NOTHING`,
+			key, formatCreditSetting(to), time.Now().UnixNano())
+		if err != nil {
+			return err
+		}
+		return storageWatermarkWon(res)
+	}
+	res, err := tx.ExecContext(ctx,
+		`UPDATE sparkwing_meta SET value = ?, updated_at = ? WHERE key = ? AND value = ?`,
+		formatCreditSetting(to), time.Now().UnixNano(), key, from)
+	if err != nil {
+		return err
+	}
+	return storageWatermarkWon(res)
+}
+
+// safety: another pass moved the watermark first, so this one bills nothing
+// rather than billing the interval a second time.
+var errStorageChargeRaced = errors.New("storage: another pass already billed this interval")
+
+func storageWatermarkWon(res sql.Result) error {
+	moved, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if moved == 0 {
+		return errStorageChargeRaced
+	}
+	return nil
+}
+
+func storageChargedThroughKey(principal string) string {
+	return metaKeyStorageChargedThroughPrefix + principal
 }
 
 type storageCharge struct {
@@ -350,7 +392,7 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 // retention window releases nothing, so nothing drains there.
 func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error) {
 	var out StorageAllowanceSweep
-	quotas, err := s.ListStorageQuotas(ctx)
+	teams, err := s.retainingPrincipals(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -358,20 +400,24 @@ func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (Stora
 	if err != nil {
 		return out, err
 	}
-	for _, quota := range quotas {
+	for _, principal := range teams {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
+		quota, err := s.StorageQuotaFor(ctx, principal)
+		if err != nil {
+			return out, err
+		}
 		if quota.AllowanceBytes > 0 {
-			if err := s.expireAboveCeiling(ctx, quota.Principal, quota.AllowanceBytes, time.Time{}, &out); err != nil {
-				return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", quota.Principal, err)
+			if err := s.expireAboveCeiling(ctx, principal, quota.AllowanceBytes, time.Time{}, &out); err != nil {
+				return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", principal, err)
 			}
 		}
 		if !drain {
 			continue
 		}
-		if err := s.expireAboveCeiling(ctx, quota.Principal, cutoff.free, cutoff.before, &out); err != nil {
-			return out, fmt.Errorf("storage: drain team %s to the free allowance: %w", quota.Principal, err)
+		if err := s.expireAboveCeiling(ctx, principal, cutoff.free, cutoff.before, &out); err != nil {
+			return out, fmt.Errorf("storage: drain team %s to the free allowance: %w", principal, err)
 		}
 	}
 	return out, nil

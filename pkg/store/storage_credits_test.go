@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,24 +119,150 @@ func TestStorageChargeBillsAPartialDayProRata(t *testing.T) {
 	}
 }
 
-func TestStorageChargeWaitsForTheChargeInterval(t *testing.T) {
+// Every pass bills the interval it observes, so bytes held between two passes
+// and released before the next are still paid for. Billing only once a day had
+// elapsed made a day of held-then-released bytes free.
+func TestStorageChargeBillsEveryPassSoReleasedBytesAreNotFree(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, gib)
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
 	start := time.Unix(1_700_000_000, 0).UTC()
-	seedRetainedRun(t, st, "acme", "r1", 3*gib, start.Add(-time.Hour))
+	seedRetainedRun(t, st, "acme", "r1", 24*gib, start.Add(-time.Hour))
 
-	billed := billOneInterval(t, st, start, 12*time.Hour)
-	if len(billed.Charges) != 0 {
-		t.Fatalf("a half day billed %+v, want nothing", billed.Charges)
+	billed := billOneInterval(t, st, start, time.Hour)
+	if len(billed.Charges) != 1 || billed.Charges[0].AmountMicro != store.CloudStorageRateMicroPerGBDay {
+		t.Fatalf("charges = %+v, want one hour of 24 GiB billed as a gibibyte-day", billed.Charges)
 	}
-	// safety: the watermark did not move, so the whole day is billed at once.
-	later, err := st.ChargeRetainedStorage(ctx, start.Add(24*time.Hour))
+	if billed.Charges[0].Seconds != 3600 {
+		t.Fatalf("seconds = %d, want the hour the pass observed", billed.Charges[0].Seconds)
+	}
+
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`DELETE FROM storage_run_usage WHERE run_id = 'r1'`)); err != nil {
+		t.Fatalf("release the bytes: %v", err)
+	}
+	after, err := st.ChargeRetainedStorage(ctx, start.Add(2*time.Hour))
 	if err != nil {
-		t.Fatalf("day pass: %v", err)
+		t.Fatalf("pass after the release: %v", err)
 	}
-	if len(later.Charges) != 1 || later.Charges[0].Seconds != 86_400 {
-		t.Fatalf("charges = %+v, want one covering the whole day", later.Charges)
+	if len(after.Charges) != 0 {
+		t.Fatalf("charges = %+v, want nothing billed for bytes no longer held", after.Charges)
+	}
+	state, err := st.CreditState(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if state.StorageChargedMicro != store.CloudStorageRateMicroPerGBDay {
+		t.Fatalf("storage billed %d, want the one hour the bytes were held",
+			state.StorageChargedMicro)
+	}
+}
+
+// The allowance is the most a team pays for, so bytes standing above it are
+// never billed, even on the pass that is about to expire them.
+// Two passes over one interval bill it once, which is what the watermark's
+// compare-and-set gives two controllers sharing a database.
+func TestTwoPassesOverOneIntervalBillItOnce(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	start := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "acme", "r1", 2*gib, start.Add(-time.Hour))
+
+	billed := billOneInterval(t, st, start, 24*time.Hour)
+	if len(billed.Charges) != 1 {
+		t.Fatalf("charges = %+v, want one", billed.Charges)
+	}
+	again, err := st.ChargeRetainedStorage(ctx, start.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if len(again.Charges) != 0 {
+		t.Fatalf("charges = %+v, want the same interval billed once", again.Charges)
+	}
+	state, err := st.CreditState(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if state.StorageChargedMicro != 2*store.CloudStorageRateMicroPerGBDay {
+		t.Fatalf("storage billed %d, want one day of two gibibytes",
+			state.StorageChargedMicro)
+	}
+}
+
+func TestStorageChargeNeverBillsAboveTheAllowance(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	if _, err := st.SetStorageAllowance(ctx, "acme", gib); err != nil {
+		t.Fatalf("set allowance: %v", err)
+	}
+	start := time.Unix(1_700_000_000, 0).UTC()
+	for i := range 100 {
+		seedRetainedRun(t, st, "acme", fmt.Sprintf("r%d", i), gib,
+			start.Add(-time.Duration(100-i)*time.Hour))
+	}
+
+	if _, err := st.ChargeRetainedStorage(ctx, start); err != nil {
+		t.Fatalf("stamp pass: %v", err)
+	}
+	swept, err := st.SweepStorageAllowance(ctx, start.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.Runs != 99 {
+		t.Fatalf("swept %+v, want the 99 runs above the allowance", swept)
+	}
+	billed, err := st.ChargeRetainedStorage(ctx, start.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if len(billed.Charges) != 1 || billed.Charges[0].StorageBytes != gib {
+		t.Fatalf("charges = %+v, want the one gibibyte the team asked to keep", billed.Charges)
+	}
+	if billed.Charges[0].AmountMicro != store.CloudStorageRateMicroPerGBDay {
+		t.Fatalf("amount = %d, want one gibibyte-day", billed.Charges[0].AmountMicro)
+	}
+}
+
+// A team holding bytes without a quota row of its own is billed the same way,
+// because bytes and not quota rows are what storage costs.
+func TestStorageChargeBillsATeamWithNoQuotaRow(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
+	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
+	}); err != nil {
+		t.Fatalf("set storage settings: %v", err)
+	}
+	start := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "nomad", "r1", 2*gib, start.Add(-time.Hour))
+
+	billed := billOneInterval(t, st, start, 24*time.Hour)
+	if len(billed.Charges) != 1 || billed.Charges[0].Principal != "nomad" {
+		t.Fatalf("charges = %+v, want one for the team with no quota row", billed.Charges)
+	}
+	if billed.Charges[0].AmountMicro != 2*store.CloudStorageRateMicroPerGBDay {
+		t.Fatalf("amount = %d, want two gibibyte-days", billed.Charges[0].AmountMicro)
+	}
+}
+
+// A team with no quota row is refused at zero balance too, because the refusal
+// follows the price and not the quota.
+func TestAnEmptyBalanceRefusesATeamWithNoQuotaRow(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	rate := int64(store.CloudStorageRateMicroPerGBDay)
+	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		StorageRateMicroPerGBDay: &rate,
+	}); err != nil {
+		t.Fatalf("set storage settings: %v", err)
+	}
+	seedRunWithNode(t, st, "r1", "n1", "running")
+	_, err := st.AppendEventCharged(ctx, "nomad", "r1", "n1", "log", []byte("bytes"))
+	if !errors.Is(err, store.ErrInsufficientCredits) {
+		t.Fatalf("append = %v, want an insufficient-credits refusal", err)
 	}
 }
 
@@ -227,8 +355,7 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append on an empty balance = %v, want an insufficient-credits refusal", err)
 	}
-	var refusal *store.StorageCreditsExhaustedError
-	if !errors.As(err, &refusal) || refusal.Principal != "acme" {
+	if !strings.Contains(err.Error(), "acme") {
 		t.Fatalf("refusal = %v, want one naming the team", err)
 	}
 	if got := countRows(t, st, `SELECT COUNT(*) FROM events`); got != 0 {
@@ -405,6 +532,28 @@ func TestSetStorageAllowanceLeavesTheOtherLimitsAlone(t *testing.T) {
 	}
 	if _, err := st.SetStorageAllowance(ctx, "acme", -1); err == nil {
 		t.Fatal("a negative allowance was accepted")
+	}
+}
+
+// The allowance has one writer, so a quota rewrite that says nothing about it
+// leaves it alone rather than zeroing what a team asked to keep.
+func TestAQuotaRewriteKeepsTheAllowance(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if _, err := st.SetStorageAllowance(ctx, "acme", 50*gib); err != nil {
+		t.Fatalf("set allowance: %v", err)
+	}
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{
+		Principal: "acme", Tier: store.StorageTierPaid,
+	}); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+	quota, err := st.StorageQuotaFor(ctx, "acme")
+	if err != nil {
+		t.Fatalf("quota: %v", err)
+	}
+	if quota.AllowanceBytes != 50*gib || quota.MaxBytesPerRun != store.PaidTierQuota.MaxBytesPerRun {
+		t.Fatalf("quota = %+v, want the paid tier with the allowance kept", quota)
 	}
 }
 

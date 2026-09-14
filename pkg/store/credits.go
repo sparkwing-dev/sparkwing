@@ -407,7 +407,11 @@ type CreditState struct {
 	// ReversedMicro is what reversals took back, reported as a positive
 	// amount and already subtracted from the balance.
 	ReversedMicro int64
-	ChargedMicro  int64
+	// ChargedMicro is every charge row, reservations, refunds and storage
+	// included, so that granted less reversed less charged is the balance.
+	// [CreditLedgerTotals.ChargedMicro] is the other figure: runner usage
+	// alone, with storage beside it.
+	ChargedMicro int64
 	// StorageChargedMicro is the part of ChargedMicro that billed retained
 	// bytes rather than runner time.
 	StorageChargedMicro int64
@@ -759,7 +763,9 @@ type CreditLedgerTotals struct {
 	// ReservedMicro is the runway claims took up front, refunds included, so
 	// it is the gross reservation rather than the part never returned.
 	ReservedMicro int64
-	// ChargedMicro is what execution billed.
+	// ChargedMicro is what runner execution billed, and storage is not in it;
+	// StorageMicro carries that. [CreditState.ChargedMicro] is the other
+	// figure: every charge row, so that granted less charged is the balance.
 	ChargedMicro int64
 	// RefundedMicro is the unused reservation tail returned at finish,
 	// reported as a positive amount.
