@@ -35,6 +35,7 @@ unlock.
   CI/CD group; `ci.yaml` still runs them on every pull request and every push to
   main.
 
+## [v0.52.1] - 2026-09-14
 ### Fixed
 
 - **module:** `go.mod` retracts v0.52.0, a tag cut from a fixture commit on no
