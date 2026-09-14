@@ -38,6 +38,9 @@ func TestKillAnswersWhileCleanupWaitsOnStubbornDescendants(t *testing.T) {
 }
 
 func TestTerminateLeavesOnItsOwnDeadlineWhileCleanupIsParked(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	g, _ := parkCleanupOnStubbornDescendants(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)

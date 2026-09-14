@@ -137,6 +137,9 @@ func TestResolveAndWriteNoManifest(t *testing.T) {
 }
 
 func TestResolveAndWriteUpdatesStaleOverlay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	fakeGoBin(t)
 	dir := t.TempDir()
 	writeGoMod(t, dir, map[string]string{

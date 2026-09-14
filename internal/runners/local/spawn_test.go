@@ -163,6 +163,9 @@ func TestRunNode_ForwardsChildStdoutAndStderr(t *testing.T) {
 }
 
 func TestRunNode_CancelTerminatesAndReportsCancelled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newSpawnFixture(t, fakeNodeBinary(t, "sleep 60"))
 	f.seedNode(t, "run-4", "build")
 
@@ -217,6 +220,9 @@ func TestRunNode_PassesTheParentLivenessPipeOnFD3(t *testing.T) {
 }
 
 func TestRunNode_OversizedChildLineDoesNotDeadlockTheRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newSpawnFixture(t, fakeNodeBinary(t,
 		"head -c 2097152 /dev/zero | tr '\\0' 'x'\n"+
 			"echo\n"+

@@ -27,6 +27,9 @@ import (
 // claim_required. The fallback now holds the claim, so a claim-scoped token
 // carries the node to a terminal state and the Job carries the same fence.
 func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.1s of real work; the fast class runs under -short")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))

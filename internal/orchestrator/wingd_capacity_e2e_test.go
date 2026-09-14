@@ -33,6 +33,9 @@ func registerWingdCapacityE2EPipelines() {
 }
 
 func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
+	}
 	registerWingdCapacityE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 64)
@@ -61,6 +64,9 @@ func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
 }
 
 func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)

@@ -10,6 +10,9 @@ import (
 )
 
 func TestWriterAllowsHTTP2IdleIntervals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out, err := NewWriter(w, 20*time.Millisecond)
 		if err != nil {

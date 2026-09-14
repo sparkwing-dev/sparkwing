@@ -33,6 +33,9 @@ func TestLeakCheckSkipsAHelperReExecOfTheTestBinary(t *testing.T) {
 }
 
 func TestLeakCheckStillFailsASuiteThatLeaks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	var env []string
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, hostEnv+"=") {

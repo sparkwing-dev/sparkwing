@@ -120,6 +120,9 @@ func TestRunnerUsesRemoteClaimBeforeFallback(t *testing.T) {
 }
 
 func TestRunnerFallsBackAfterClaimWindow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.1s of real work; the fast class runs under -short")
+	}
 	st, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
 	defer cleanup()
 	fallback := &fallbackRunner{}
@@ -145,6 +148,9 @@ func TestRunnerFallsBackAfterClaimWindow(t *testing.T) {
 }
 
 func TestRunnerFallsBackForLabelsItAdvertises(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.1s of real work; the fast class runs under -short")
+	}
 	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"location=coordinator", "gpu"}, nil)
 	defer cleanup()
 	fallback := &fallbackRunner{}

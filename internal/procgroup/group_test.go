@@ -371,6 +371,9 @@ func waitForProcgroupReady(t *testing.T, path string, timeout time.Duration) {
 }
 
 func TestTerminateSessionReturnsOnlyAfterStubbornSessionIsEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
 	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn")
 	group, err := StartSession(cmd)
@@ -476,6 +479,9 @@ func TestGroupCleanupFailureRetainsAnchorForRetry(t *testing.T) {
 }
 
 func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.7s of real work; the fast class runs under -short")
+	}
 	const count = 50
 	groups := make([]*Group, 0, count)
 	for range count {

@@ -27,6 +27,9 @@ func TestBackoffPollDoublesUpToItsCap(t *testing.T) {
 }
 
 func TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	const window = 500 * time.Millisecond
 	probes := &atomic.Int64{}
 	g := &Group{id: 4242}
