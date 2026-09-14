@@ -149,16 +149,23 @@ unlock.
 
 ### Changed
 
-- **release pipeline:** A release is a tag push. `sparkwing run
-  release` now does five things -- resolve a version, rename the changelog
-  `[Unreleased]` section to it, commit, tag, push the branch and the tag -- and
-  its one precondition is that the version outranks the newest tag origin
-  carries. The broad gate, the pre-release tier, the template proof and the
-  contract preflight no longer run locally at the tag boundary: the hosted
-  release workflow runs every one of them against the tagged source before it
-  builds, publishes, or creates the GitHub release, so a red check publishes
-  nothing and the fix is a later patch tag. The workflow re-checks the version
-  with `bin/check-release-tag-order.sh` before any of that.
+- **release pipeline:** A release is a tag push. `sparkwing run release` is
+  seven nodes now -- resolve a version, check it outranks the newest tag origin
+  carries, check the tree is clean, rename the changelog `[Unreleased]` section
+  to the version, check that section accounts for any runs-store schema or
+  wire-format change, commit, tag and push -- and every one of them is a cheap
+  read of files and git. The broad gate, the pre-release tier, the template
+  proof and the contract preflight no longer run locally at the tag boundary:
+  the hosted release workflow runs every one of them against the tagged source
+  before it builds, publishes, or creates the GitHub release, so a red check
+  publishes nothing and the fix is a later patch tag.
+- **release workflow:** The validate stage now refuses a tag before anything
+  builds. `bin/check-release-tag-order.sh` refuses a version that does not
+  outrank the newest one already published, and the new `release-verify`
+  pipeline refuses a tag whose source carries no `[vX.Y.Z]` changelog section
+  or an unaccounted schema or wire cut. A tag pushed by hand is judged the same
+  way one cut by `sparkwing run release` is, and a missing changelog section
+  can no longer surface after the images are published.
 - **cli:** A repository that pins an SDK version whose binaries the release
   workflow has not published yet no longer fails every hook with a 404. The
   toolchain fetch warns and falls back to the newest published release, so a

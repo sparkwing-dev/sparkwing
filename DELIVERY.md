@@ -270,16 +270,20 @@ launcher when testing isolated tool state.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local
-  `release` pipeline does five things -- resolve a version that outranks the
-  newest tag origin carries, rename the changelog `[Unreleased]` section to it,
-  commit, tag, push the branch and the tag -- and refuses nothing about where
-  origin's branch tip is, so a tag can be cut from any commit. Preview with
+  `release` pipeline is seven cheap nodes -- resolve a version that outranks the
+  newest tag origin carries, check the tree is clean, rename the changelog
+  `[Unreleased]` section to the version, check that section accounts for any
+  schema or wire cut, commit, tag, push the branch and the tag -- and refuses
+  nothing about where origin's branch tip is, so a tag can be cut from any
+  commit. Preview with
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
   destructive,prod`; the isolated home keeps prerelease state out of the
   operational runs store, which the release runner refuses to touch. From the
-  tag push on, `.github/workflows/release.yaml` owns the release: it re-checks
-  the version against the newest tag, runs every gate on the tagged source,
+  tag push on, `.github/workflows/release.yaml` owns the release: its validate
+  stage re-checks the version against the newest published one and runs
+  `sparkwing run release-verify` over the tagged source before anything builds,
+  then it runs every gate on the tagged source,
   builds the binaries and images, publishes them, and creates the GitHub
   release from that tag's changelog section. A red check there publishes
   nothing; the fix is a later patch tag, never a re-cut of a published one.

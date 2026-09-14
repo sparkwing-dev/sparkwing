@@ -438,19 +438,27 @@ SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow dest
 The recipe, in five steps:
 
 1. Resolve the version, from `--version` or by bumping the newest tag origin
-   carries, and refuse anything that does not outrank it.
+   carries, and refuse anything that does not outrank it
+   (`discover-version`, `validate-version`).
 2. Rename the CHANGELOG.md `## [Unreleased]` section to `## [vX.Y.Z] - DATE`
-   and open a fresh empty one above it.
-3. Commit that rewrite.
-4. Create the annotated `vX.Y.Z` tag.
-5. Push the branch and the tag.
+   and open a fresh empty one above it (`prepare-changelog`).
+3. Commit that rewrite, from a clean tree (`check-clean-tree`).
+4. Check the section accounts for any runs-store schema or wire-format change
+   since the previous tag (`gate-schema-changelog`, `gate-wire-changelog`).
+5. Create the annotated `vX.Y.Z` tag and push the branch and the tag
+   (`push-tag`).
 
-Nothing else runs locally. The pipeline never asks where origin's branch tip
+That is the whole plan: seven nodes, all of them cheap reads of files and git.
+No suite runs locally, and the pipeline never asks where origin's branch tip
 is, so a release can be cut from any commit as long as its version is ahead of
 the previous one.
 
-The tag push is what starts the release. Hosted CI re-checks that the version
-outranks the newest tag, then runs the full gate, the pre-release tier, the
+The tag push is what starts the release. Hosted CI validates the tag first: it
+re-checks that the version outranks the newest published one with
+`bin/check-release-tag-order.sh`, then runs `sparkwing run release-verify
+--version vX.Y.Z` over the tagged source, which repeats the changelog-section,
+schema and wire checks so a tag pushed by hand is judged the same way a cut one
+is. Only once that passes does it run the full gate, the pre-release tier, the
 security scanners, the Postgres conformance suite and the browser suites
 against the tagged source, builds the binaries for every platform and the five
 container images, publishes them, and creates the GitHub release from that
