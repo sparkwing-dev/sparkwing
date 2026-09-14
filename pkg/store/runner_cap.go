@@ -28,8 +28,6 @@ type RunnerCap struct {
 	RecentPaidMicro int64
 }
 
-// safety: each principal holds its own derivation, so a cap read for one
-// principal never bounds another principal's claim.
 type runnerCapEntry struct {
 	limits  ComputeLimits
 	epoch   uint64
@@ -67,7 +65,7 @@ func (q storeRowQuerier) QueryRowContext(ctx context.Context, query string, args
 }
 
 // perf: a claim reads the ledger only when a scaling setting can move the
-// per-principal cap.
+// cap.
 func (l ComputeLimits) scales() bool {
 	return l.ConcurrentRunners > 0 && (l.RunnerScaleStepCredits > 0 || l.RunnerScaleBase > 0)
 }
@@ -115,20 +113,21 @@ func addSteps(base, steps int64) int64 {
 	return base + base*steps
 }
 
-// RunnerCapFor reports the concurrent-runner cap this principal is held to,
-// deriving it from the paid grants of the last [RunnerScaleWindow] and
-// caching the result for a minute. A grant clears the cache, so credit loaded
-// or reversed takes effect on the next claim rather than a minute later.
-func (s *Store) RunnerCapFor(ctx context.Context, principal string, now time.Time) (RunnerCap, error) {
+// RunnerCapFor reports the concurrent-runner cap every metered principal is
+// held to, deriving it from the paid grants of the last [RunnerScaleWindow]
+// and caching the result for a minute. A grant clears the cache, so credit
+// loaded or reversed takes effect on the next claim rather than a minute
+// later.
+func (s *Store) RunnerCapFor(ctx context.Context, now time.Time) (RunnerCap, error) {
 	limits, err := s.ComputeLimits(ctx)
 	if err != nil {
 		return RunnerCap{}, err
 	}
-	return s.runnerCap(ctx, storeRowQuerier{s}, limits, principal, now)
+	return s.runnerCap(ctx, storeRowQuerier{s}, limits, now)
 }
 
 func (s *Store) runnerCap(
-	ctx context.Context, q rowQuerier, limits ComputeLimits, principal string, now time.Time,
+	ctx context.Context, q rowQuerier, limits ComputeLimits, now time.Time,
 ) (RunnerCap, error) {
 	if !limits.scales() {
 		return RunnerCap{Cap: limits.ConcurrentRunners}, nil
@@ -136,7 +135,7 @@ func (s *Store) runnerCap(
 	if limits.RunnerScaleStepCredits <= 0 {
 		return RunnerCap{Cap: limits.runnerCapFrom(0)}, nil
 	}
-	cached, epoch, ok := s.cachedRunnerCap(limits, principal, now)
+	cached, epoch, ok := s.cachedRunnerCap(limits, now)
 	if ok {
 		return cached, nil
 	}
@@ -145,35 +144,28 @@ func (s *Store) runnerCap(
 		return RunnerCap{}, err
 	}
 	out := RunnerCap{Cap: limits.runnerCapFrom(paid), RecentPaidMicro: paid}
-	s.storeRunnerCap(limits, principal, now, epoch, out)
+	s.storeRunnerCap(limits, now, epoch, out)
 	return out, nil
 }
 
 // safety: the epoch the derivation started under travels back to the write, so
 // a grant that lands while the ledger is being read leaves an entry the next
 // lookup rejects rather than one that outlives the payment it missed.
-func (s *Store) cachedRunnerCap(
-	limits ComputeLimits, principal string, now time.Time,
-) (RunnerCap, uint64, bool) {
+func (s *Store) cachedRunnerCap(limits ComputeLimits, now time.Time) (RunnerCap, uint64, bool) {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
 	epoch := s.runnerCapEpoch
-	entry, ok := s.runnerCaps[principal]
-	if !ok || entry.epoch != epoch || entry.limits != limits || !now.Before(entry.expires) {
+	entry := s.runnerCapCache
+	if entry.epoch != epoch || entry.limits != limits || !now.Before(entry.expires) {
 		return RunnerCap{}, epoch, false
 	}
 	return entry.cap, epoch, true
 }
 
-func (s *Store) storeRunnerCap(
-	limits ComputeLimits, principal string, now time.Time, epoch uint64, derived RunnerCap,
-) {
+func (s *Store) storeRunnerCap(limits ComputeLimits, now time.Time, epoch uint64, derived RunnerCap) {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
-	if s.runnerCaps == nil {
-		s.runnerCaps = map[string]runnerCapEntry{}
-	}
-	s.runnerCaps[principal] = runnerCapEntry{
+	s.runnerCapCache = runnerCapEntry{
 		limits: limits, epoch: epoch, expires: now.Add(runnerCapTTL), cap: derived,
 	}
 }
@@ -190,12 +182,12 @@ func runnerCapReadRefusal(err error, limits ComputeLimits, principal string) err
 	}
 }
 
-// safety: a reversal must not leave a principal holding the cap its payment
-// bought, so every ledger write retires the derivations taken before it
-// rather than waiting out the minute.
-func (s *Store) invalidateRunnerCaps() {
+// safety: a reversal must not leave a runner holding the cap its payment
+// bought, so every ledger write retires the derivation taken before it rather
+// than waiting out the minute.
+func (s *Store) invalidateRunnerCap() {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
 	s.runnerCapEpoch++
-	clear(s.runnerCaps)
+	s.runnerCapCache = runnerCapEntry{}
 }

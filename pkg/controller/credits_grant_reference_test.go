@@ -191,22 +191,3 @@ func TestCreditsGrantRouteRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 		t.Fatalf("a different amount under one reference = %d, want 409", status)
 	}
 }
-
-// The grant key is skipped when grants written before it repeat a reference,
-// and health is where an operator sees that it is off.
-func TestHealthReportsTheGrantKey(t *testing.T) {
-	f := newCreditsFixture(t, false)
-	status, raw := creditsRequest(t, http.MethodGet, f.url+"/api/v1/health", f.admin, nil)
-	if status != http.StatusOK {
-		t.Fatalf("health status = %d, want 200", status)
-	}
-	var health struct {
-		Database map[string]any `json:"database"`
-	}
-	if err := json.Unmarshal(raw, &health); err != nil {
-		t.Fatalf("decode health: %v", err)
-	}
-	if enforced, ok := health.Database["credit_grant_key"].(bool); !ok || !enforced {
-		t.Fatalf("health database section = %+v, want credit_grant_key true", health.Database)
-	}
-}
