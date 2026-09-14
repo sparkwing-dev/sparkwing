@@ -123,6 +123,23 @@ launcher when testing isolated tool state.
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
   not the caller's. Drop an error only through a helper that logs why.
+- **No sleeps or wall-clock waits in tests:** `internal/sleepcheck` fails any
+  `_test.go` that calls `time.Sleep`, `time.After`, `time.Tick`,
+  `time.NewTimer` or `time.NewTicker`, or that reads `time.Now` or `time.Since`
+  as a wait: an ordering comparison, a loop condition, or a
+  `context.WithTimeout` or `WithDeadline` argument. A `time.Now()` that only
+  stamps a fixture value is allowed. Write the test to wait on the channel,
+  condition, or state the code under test signals, to drive a clock the test
+  injects, or to run under `testing/synctest`, whose clock advances once every
+  goroutine is blocked. The `test-sleeps` step runs the checker in `pre-commit`
+  and `gate` over the staged change, or the change since origin/main when
+  nothing is staged, so a new offender fails from the first run. The offenders
+  that predate the rule live in `internal/sleepcheck/baseline.txt`, one
+  `path:line` each, and the unscoped sweep
+  (`GOWORK=off go run ./internal/sleepcheck .`) fails any finding the baseline
+  does not carry and names every entry that no longer offends. Regenerate with
+  `GOWORK=off go run ./internal/sleepcheck -write-baseline .` after a purge;
+  that list only shrinks.
 - **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
