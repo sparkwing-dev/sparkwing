@@ -256,15 +256,18 @@ runner claims every 500ms, or 120 a minute, and a node heartbeat runs
 every 3s. An enrolled agent's offer slots all poll under the agent's one
 name, and each slot spends a preparation plus an offer per round, so its
 claim budget is 1200 x `max_concurrent`: 1200 for one slot, 9600 for
-eight. `controller.RecommendedClaimsPerMinuteForSlots` computes it.
+eight. `controller.RecommendedClaimsPerMinuteForSlots` computes it. A
+pool runner claims one node at a time whatever its concurrency, so the
+hosted profiles below size its budget from the poll cadence alone and an
+operator running an enrolled agent raises the guard with the flag.
 
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
 path names -- and falls back to the `X-Sparkwing-Runner` header only on
 `POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
 `POST /api/v1/triggers/claim`, which name nothing. A runner sends one
-identity for the life of its process (a pool runner its holder prefix, an
-enrolled agent its name), not one per poll: a value that changed per
+identity for the life of its process (a pool runner its holder prefix and
+process id, an enrolled agent its name), not one per poll: a value that changed per
 request would buy a fresh budget on every claim and grow the controller's
 bucket table at the fleet's poll rate.
 
