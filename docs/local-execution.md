@@ -506,11 +506,15 @@ resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
 
 A foreground coordinator reads its trusted helpers from the `executors` list in
-`fleet.yaml`, which is hand-edited: no command writes that list, and each entry
-must name a credential this machine's Sparkwing state already holds, so
-`--sw-fleet` refuses to start on a file that lists none. Network discovery
-never grants trust. Add a machine that executes work with `sparkwing cluster
-runners add`.
+`fleet.yaml`. Write that list by hand; no command edits it. Each entry names an
+executor that this machine's state database already binds to a live runner
+credential carrying `nodes.claim` and `runs.state`, and a run refuses to start
+when one does not, naming the executor. Create the binding against a controller
+that serves this same state database, which `sparkwing-controller` does: mint
+the credential with `sparkwing cluster runners add --profile <p>`, then bind it
+with `sparkwing cluster agents enroll --profile <p> --name <helper>
+--token-prefix <prefix> --kind agent --location local`. Network discovery never
+grants trust.
 
 An enrolled executor reports liveness to its coordinator, and a controller that
 hears nothing shows it offline. Idle enrollments remain visible. A compatible

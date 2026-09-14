@@ -37,6 +37,8 @@ keys meant an operator could still write a config the runner would not run.
 printed. It minted an executor-bound credential and printed it as a
 `coordinators` block, which no `agent.yaml` accepts. Add a machine that
 executes work with `sparkwing cluster runners add`. `fleet.yaml` keeps its
-`executors` list and every reader of it; the list is now hand-edited, and a
-`--sw-fleet` run whose `fleet.yaml` lists none refuses to start, naming the
-file.
+`executors` list and every reader of it. Write that list by hand, and bind each
+entry to a live runner credential with `sparkwing cluster agents enroll
+--token-prefix` against a controller serving this machine's state database; a
+`--sw-fleet` run refuses to start when the list is empty or an entry has no
+binding, naming the file or the executor.

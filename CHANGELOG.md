@@ -67,6 +67,7 @@ unlock.
 
 - **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
   and the fleet CLI
+
   `name` and `coordinators` selected a path the controller refuses on both the
   claim route and the offer route, so the loop they started claimed nothing. A
   file that still sets either key fails to load with a message naming the
