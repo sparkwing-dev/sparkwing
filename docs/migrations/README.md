@@ -1,10 +1,12 @@
 # Migration guides
 
 One guide per release that contains a breaking change; releases with
-no breaking changes have no guide. The pre-release manicuring agent
-generates the file from the breaking entries in `[Unreleased]` and
-adds its row below. Adopters jumping multiple versions follow the
-guides in ascending version order.
+no breaking changes have no guide. Write each section in
+[_unreleased.md](_unreleased.md) as the breaking change lands, and link
+the changelog entry to its anchor there. `sparkwing run release` rolls
+that file to `vX.Y.Z.md` when it cuts the tag, writes a fresh
+`_unreleased.md`, and adds the row below. Adopters jumping multiple
+versions follow the guides in ascending version order.
 
 Format conventions live in [../changelog-style.md](../changelog-style.md).
 

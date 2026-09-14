@@ -73,8 +73,9 @@ written the other way is invisible to every check below -- including the
 one that requires a migration guide to exist.
 
 Every `(Breaking)` entry MUST link to a section in the release's
-migration guide. The agent generates the guide at release time from
-the breaking entries in `[Unreleased]`.
+migration guide. Write that section in `docs/migrations/_unreleased.md`
+as the change lands and link the entry to its anchor there; the release
+pipeline rolls the file to `vX.Y.Z.md` and repoints the link.
 
 ## Migration guides
 
@@ -83,11 +84,13 @@ One file per release that contains a breaking change:
 the filename; the "from" version is always the prior release. Adopters
 jumping multiple versions read the files in chronological order.
 
-Created whenever the release contains a breaking change, so each
-`(Breaking)` entry's link resolves and
-`https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` is stable for the
-releases that need it. A release with no breaking changes has no guide
-file.
+`docs/migrations/_unreleased.md` holds the sections the next release
+owes. `sparkwing run release` renames it to `v<X.Y.Z>.md`, retitles it
+`# Migrating to v<X.Y.Z>`, leaves a fresh `_unreleased.md` behind it, and
+commits that with the changelog rename, so each `(Breaking)` entry's link
+resolves and `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` is
+stable for the releases that need it. A release with no breaking changes
+has no guide file.
 
 ### File shape
 
@@ -119,9 +122,11 @@ migration. Stable anchor slugs matter; rename with care.
 
 ### Index
 
-`docs/migrations/README.md` is an append-only chronological index.
-The pre-release manicuring agent appends an entry when it generates
-the release's migration guide.
+`docs/migrations/README.md` is an append-only chronological index. The
+release pipeline adds the row when it rolls the guide, dated with the
+changelog section's own date and summarized from the first sentence of
+each `(Breaking)` entry. Tighten that summary by hand afterwards if it
+reads long.
 
 ## What the linter enforces vs what the agent does
 
@@ -145,9 +150,11 @@ Two layers, with deliberately separate concerns:
   env-var gate.
 - **The pre-release manicuring agent** does the judgment work: tightening
   prose, choosing scope prefixes, deciding which entries to merge,
-  generating the migration-guide bodies, pulling internal-cleanup
-  entries that don't belong in adopter-facing notes. The linter
-  surfaces *what's wrong*; the agent decides *how to fix it*.
+  writing the migration-guide bodies into
+  `docs/migrations/_unreleased.md`, pulling internal-cleanup entries
+  that don't belong in adopter-facing notes. The linter surfaces
+  *what's wrong*; the agent decides *how to fix it*; the release
+  pipeline does the mechanical rename, index row and link repointing.
 
 ## Additive versus breaking migrations
 
@@ -196,27 +203,33 @@ Before cutting `vX.Y.Z`, the agent applies this rubric to `[Unreleased]`:
    prose stays; only the prefix is added.
 3. **Surface breaking changes.** Every breaking entry gets the
    `(Breaking)` marker inline after the scope.
-4. **Generate the migration guide.** Create `docs/migrations/v<X.Y.Z>.md`
-   with one H2 per breaking entry. Link each breaking entry to its
-   anchor.
-5. **Append to the migration index.** Add the new file to
-   `docs/migrations/README.md`.
-6. **Optional polish.** Tighten prose; merge near-duplicate entries
+4. **Check the migration guide.** `docs/migrations/_unreleased.md` needs
+   one H2 per breaking entry, and each breaking entry needs a link to
+   its anchor. The release pipeline rolls the file and the index; it
+   refuses to tag when an entry has no section, because the prose is
+   yours to write.
+5. **Optional polish.** Tighten prose; merge near-duplicate entries
    (e.g., two `### Added` bullets for related work); pull pure
    internal-cleanup entries that don't belong (those are dev-facing,
    not adopter-facing).
 
 The release pipeline (`sparkwing run release --version vX.Y.Z`) then
 takes over: validates `[vX.Y.Z]` doesn't exist yet, renames
-`[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD`, commits, pushes branch +
-tag, GH Actions extracts the section as the GitHub Release body.
+`[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD`, rolls
+`docs/migrations/_unreleased.md` to `vX.Y.Z.md` with its index row and
+repoints the section's `(Breaking)` links at it, commits all of that as
+one change, pushes branch + tag, GH Actions extracts the section as the
+GitHub Release body. `--sw-dry-run` prints what it would rename, repoint
+and index without writing anything. The workflow's `release-verify`
+stage judges the same on the tagged source, so a tag pushed by hand is
+held to it too.
 
 ## What goes in `[Unreleased]` between releases
 
 Same shape as a released section, just under the `[Unreleased]`
-heading. Breaking entries can omit the migration-guide link until
-release time -- the agent fills those in when it generates the
-guide. Or include a placeholder: `(migration guide TBD)`, or link
+heading. A breaking entry links
 `docs/migrations/_unreleased.md#<anchor>`, which the linter accepts
-inside `[Unreleased]` and rejects once the section is renamed to a
-version.
+inside `[Unreleased]` and which the release repoints to the rolled
+guide. The linter tolerates a breaking entry with no link at all while
+it sits in `[Unreleased]`, but the release refuses to tag one, so write
+the section before the cut rather than during it.

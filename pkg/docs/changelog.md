@@ -36,7 +36,19 @@ unlock.
   minutes instead of retrying every cycle. `sparkwing.gitcache.fetch_duration`
   gains `reason` (`on_demand`/`keep_warm`) and `failed` labels. A cache started
   without `--fetch-interval` stops polling on upgrade; pass `--fetch-interval
-  30s` to keep the old cadence.
+  30s` to keep the old cadence. See [migration
+  guide](docs/migrations/_unreleased.md#the-gitcache-refreshes-on-demand-and-stops-polling-by-default).
+
+- **release:** `sparkwing run release` rolls the migration guide with the
+  changelog section it renames: `docs/migrations/_unreleased.md` becomes
+  `vX.Y.Z.md` under a `# Migrating to vX.Y.Z` title, a fresh placeholder takes
+  its place, the release gets a dated row in `docs/migrations/README.md`
+  summarized from its `(Breaking)` entries, and those entries' links are
+  repointed at the rolled guide, all in the one commit. The cut refuses when a
+  `(Breaking)` entry has no section in the guide, naming the entry and its
+  line, because the section's prose is a person's work. `--sw-dry-run` reports
+  the rename, the repointed links and the index row without writing. The
+  workflow's `release-verify` stage judges the same on the tagged source.
 
 - **runner:** The trigger loop waits 15 seconds between `not our ref` retries
   instead of 10, so the second attempt falls outside the cache's freshness
