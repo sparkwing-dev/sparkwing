@@ -62,6 +62,9 @@ func proxyTestRequest(method, path string) *http.Request {
 
 func TestProxyAllowList_SessionCannotReachUnproxiedControllerRoutes(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	handler, reached := proxyTestDashboard(t, []string{controller.ScopeAdmin})
 	for _, test := range []struct {
 		method string

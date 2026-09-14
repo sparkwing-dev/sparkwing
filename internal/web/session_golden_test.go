@@ -17,6 +17,9 @@ import (
 
 func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 
 	type controllerState struct {
 		sync.Mutex

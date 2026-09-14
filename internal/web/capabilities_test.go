@@ -232,6 +232,9 @@ func TestGetRunHandler_NotFound(t *testing.T) {
 }
 
 func TestEventsStreamUsesCanonicalPublicProjection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	b := &fakeBackend{
 		getRun: func(string) (*store.Run, error) {
 			return &store.Run{ID: "run-private-event", Status: "success"}, nil

@@ -14,6 +14,9 @@ import (
 )
 
 func TestStreamsSurviveServerWriteTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 	for _, kind := range []string{"logs", "raw logs", "events"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
