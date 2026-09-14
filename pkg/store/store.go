@@ -107,6 +107,9 @@ type Store struct {
 	csrfKey         []byte
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
+	runnerCapMu     sync.Mutex
+	runnerCaps      map[string]runnerCapEntry
+	runnerCapEpoch  uint64
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -1056,7 +1059,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 42
+const expectedSchemaVersion = 45
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1600,6 +1603,9 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return err
 	}
+	if err := s.ensureCreditGrantReferenceIndex(ctx); err != nil {
+		return err
+	}
 	_, err = s.ensureControllerAuthority(ctx)
 	return err
 }
@@ -1938,6 +1944,15 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		_, err := tx.ExecContext(ctx, egressUsageTableSQLite)
 		return err
 	case 42:
+		return applyCreditReferenceMigrationSQLite(ctx, tx)
+	case 43:
+		return applyRunnerCapIndexMigration(ctx, tx)
+	// safety: v44 is the per-cpu-class rate table, which lands on its own
+	// branch; the ladder refuses a gap, so the version is held open here and
+	// that branch replaces this with its migration.
+	case 44:
+		return nil
+	case 45:
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditExhaustionCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2265,6 +2280,14 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		_, err := tx.ExecContext(ctx, egressUsageTablePostgres)
 		return err
 	case 42:
+		return applyCreditReferenceMigrationPostgres(ctx, tx)
+	case 43:
+		return applyRunnerCapIndexMigration(ctx, tx)
+	// safety: v44 is the per-cpu-class rate table, held open the same way as in
+	// the SQLite ladder so both dialects agree on what each version is.
+	case 44:
+		return nil
+	case 45:
 		return addColumnsTx(ctx, tx, "nodes", nodesCreditExhaustionCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -5301,7 +5324,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
@@ -7017,7 +7040,11 @@ func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, r
 SELECT id FROM runs
  WHERE status = ?
    AND last_heartbeat_at IS NOT NULL
-   AND last_heartbeat_at < ?`, runStatusRunning, cutoff)
+   AND last_heartbeat_at < ?
+   AND NOT EXISTS (
+       SELECT 1 FROM triggers t
+        WHERE t.id = runs.id AND `+triggerRequeuedSQL("t.")+`)`,
+		runStatusRunning, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -7042,6 +7069,78 @@ SELECT id FROM runs
 		if err := s.FinishRun(ctx, id, runStatusFailed, reason); err != nil {
 			return nil, err
 		}
+	}
+	return ids, nil
+}
+
+// safety: this is the deadline the requeued-trigger exclusions answer to, or a
+// queue no runner serves would hold a run open for good. An executing run
+// answers only to the heartbeat the stale-running sweep reads, because the
+// claimant that spawned the work can die while the work runs on.
+func (s *Store) reapQueueExpiredRuns(ctx context.Context, deadline, staleHeartbeat time.Duration, reason string) ([]string, error) {
+	now := time.Now()
+	cutoff := now.Add(-deadline).UnixNano()
+	heartbeatCutoff := now.Add(-staleHeartbeat).UnixNano()
+	nowNS := now.UnixNano()
+
+	rows, err := s.query(ctx, `
+SELECT r.id
+  FROM runs r
+  JOIN triggers t ON t.id = r.id
+ WHERE r.finished_at IS NULL
+   AND r.status IN (?, ?)
+   AND `+triggerRequeuedSQL("t.")+`
+   AND r.started_at > 0
+   AND r.started_at < ?
+   AND t.available_at < ?
+   AND (r.status = ?
+        OR (r.last_heartbeat_at IS NOT NULL AND r.last_heartbeat_at < ?))`,
+		runStatusPending, runStatusRunning, cutoff, cutoff,
+		runStatusPending, heartbeatCutoff)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			closeRowsOrLog(rows)
+			return nil, err
+		}
+		candidates = append(candidates, id)
+	}
+	closeRowsOrLog(rows)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for _, id := range candidates {
+		// safety: a claimant can take the run between the select and this write,
+		// so the status the select read is re-asserted rather than trusted.
+		res, err := s.exec(ctx, `
+UPDATE runs SET status = ?, error = ?, finished_at = ?
+ WHERE id = ? AND finished_at IS NULL AND status IN (?, ?)`,
+			runStatusFailed, reason, nowNS, id, runStatusPending, runStatusRunning)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected == 0 {
+			continue
+		}
+		if err := s.cascadeOrphanedNodes(ctx, id, reason, nowNS); err != nil {
+			return nil, err
+		}
+		// safety: the trigger outlives the run it names, so a late claimant would
+		// compile and execute a child for a run this sweep already failed.
+		if err := s.FinishTrigger(ctx, id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
 	}
 	return ids, nil
 }

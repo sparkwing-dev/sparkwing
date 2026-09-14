@@ -360,6 +360,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_node_seconds_total` | Counter | `placement` | Node execution seconds: `cloud` is what the ledger has finished charging for, `local` is what this controller process settled for unmetered credentials |
 | `sparkwing_credits_balance_micro` | Gauge | (none) | Micro-credits left to spend |
 | `sparkwing_credits_granted_micro_total` | Counter | `kind` | Micro-credits granted over the ledger's life, by whether the operator paid for the grant (`free`, `paid`) |
+| `sparkwing_credits_reversed_micro_total` | Counter | (none) | Micro-credits refunded payments took back out of the ledger, reported positive; a reversal never joins the granted series, so summing that series over `kind` stays the money paid in |
 | `sparkwing_credits_reserved_micro_total` | Counter | (none) | Micro-credits claims reserved up front |
 | `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
 | `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned from the unused tail of a claim reservation |

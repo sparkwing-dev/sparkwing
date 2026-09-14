@@ -2194,21 +2194,27 @@ operator marks a token.`,
 
 var cmdCreditsGrant = Command{
 	Path:     "sparkwing cluster credits grant",
-	Synopsis: "Add free or paid credits to the ledger",
+	Synopsis: "Add free or paid credits to the ledger, or reverse a paid grant",
 	Description: `Adds credits and records who added them, which kind they are, and
 the payment they came from. One hundred credits is one dollar.
 A grant that lifts the balance above zero lets metered runners
 claim again and stops the cancellation of nodes running on an
-empty balance. Requires the admin scope.`,
+empty balance. A reference is the payment id: granting it twice
+returns the first grant rather than adding the credits again. A
+reversal takes a refunded payment back out with a negative
+amount, its own reference (the refund id) and --reverses naming
+the paid grant's reference. Requires the admin scope.`,
 	Flags: []FlagSpec{
-		{Name: "kind", Argument: "KIND", Desc: "Grant kind: free | paid", Required: true, Group: "Input"},
-		{Name: "amount", Argument: "N", Desc: "Credits to add; 100 credits is one dollar", Required: true, Group: "Input"},
-		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant", Group: "Input"},
+		{Name: "kind", Argument: "KIND", Desc: "Grant kind: free | paid | reversal", Required: true, Group: "Input"},
+		{Name: "amount", Argument: "N", Desc: "Credits to add, negative on a reversal; 100 credits is one dollar", Required: true, Group: "Input"},
+		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant; granting the same one twice returns the first grant", Group: "Input"},
+		{Name: "reverses", Argument: "REF", Desc: "Reference of the paid grant a reversal takes back", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Load ten dollars against a payment", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
 		{"Hand out trial credits", "sparkwing cluster credits grant --kind free --amount 500 --profile prod"},
+		{"Take a refunded payment back out", "sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod"},
 	},
 }
 
@@ -2308,10 +2314,14 @@ var cmdLimitsSet = Command{
 	Description: `Sets one guard to a ceiling, or to zero to remove it. The guards are
 max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
-max_global_runs_per_hour and min_cron_interval_seconds. The per-principal
+max_global_runs_per_hour, min_cron_interval_seconds, runner_scale_base,
+runner_scale_step_credits and runner_scale_ceiling. The per-principal
 guards bind a principal holding a metered token; the max_global_ pair binds
-every run. Work past a guard answers 429 with a Retry-After and the run records
-a compute_limit_blocked event. Requires the admin scope.`,
+every run. The runner_scale_ trio raises max_concurrent_runners by one
+runner_scale_base for every runner_scale_step_credits of paid credit granted in
+the last 30 days, held under runner_scale_ceiling. Work past a guard answers
+429 with a Retry-After and the run records a compute_limit_blocked event.
+Requires the admin scope.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "GUARD", Desc: "Guard to set", Required: true, Group: "Input"},
 		{Name: "value", Argument: "N", Desc: "Ceiling; 0 removes it", Required: true, Group: "Input"},
@@ -2321,6 +2331,7 @@ a compute_limit_blocked event. Requires the admin scope.`,
 		{"Hold the fleet under fifty cloud runners", "sparkwing cluster limits set --name max_global_runners --value 50 --profile prod"},
 		{"Warn at forty", "sparkwing cluster limits set --name runner_alarm --value 40 --profile prod"},
 		{"Remove the per-run node cap", "sparkwing cluster limits set --name max_nodes_per_run --value 0 --profile prod"},
+		{"Add a hundred runners per 5000 credits loaded", "sparkwing cluster limits set --name runner_scale_step_credits --value 5000 --profile prod"},
 	},
 }
 
@@ -3850,8 +3861,8 @@ Use -q to print names, one per line, for shell piping
 var cmdFleet = Command{
 	Path:     "sparkwing fleet",
 	Synopsis: "Configure foreground assisted execution",
-	Description: `Local fleet configuration and one-time helper provisioning. Running a
-pipeline with assistance still uses sparkwing run PIPELINE --sw-fleet.
+	Description: `Local fleet configuration. Running a pipeline with assistance uses
+sparkwing run PIPELINE --sw-fleet, and fleet.yaml names the helpers it trusts.
 
 Fleet runs transmit an immutable snapshot containing every tracked file and
 every non-ignored untracked file to the executor that wins a node. Review
@@ -3859,7 +3870,7 @@ every non-ignored untracked file to the executor that wins a node. Review
 output reports only the source digest, file count, and total bytes, never file
 names. The snapshot commit has no parent and does not transmit repository
 history.`,
-	SubcommandOrder: []string{"init", "agents"},
+	SubcommandOrder: []string{"init"},
 }
 
 var cmdFleetInit = Command{
@@ -3883,51 +3894,6 @@ and no peer discovery occurs.`,
 		{"Direct Tailscale transport", "sparkwing fleet init --tailnet"},
 		{"Tailscale Serve or a local proxy", "sparkwing fleet init --listen 127.0.0.1:4346 --public-url https://runner.example.com"},
 		{"Advanced direct Tailscale transport", "sparkwing fleet init --listen 100.64.1.2:4346 --public-url http://100.64.1.2:4346 --allow-tailnet-http"},
-	},
-}
-
-var cmdFleetAgents = Command{
-	Path:     "sparkwing fleet agents",
-	Synopsis: "Provision helpers for foreground coordinators",
-	Description: `Creates local verifier-backed credentials and trusted executor enrollments.
-Raw credentials print once and never enter fleet.yaml.`,
-	SubcommandOrder: []string{"enroll"},
-}
-
-var cmdFleetAgentsEnroll = Command{
-	Path:     "sparkwing fleet agents enroll",
-	Synopsis: "Provision one helper membership",
-	Description: `Atomically mints a runner credential in the local Sparkwing state
-store and binds its verifier to the trusted executor envelope. The raw
-credential prints once in an agent.yaml membership snippet on stdout. The
-trusted policy is added to fleet.yaml in the same command. Credential verifier
-and binding data remain in Sparkwing's private local state; fleet.yaml stores
-no token material or token identifier.
-
-Atomically merge stdout into the helper's owner-only agent.yaml (0600 on Unix;
-a protected user ACL on Windows). Direct shell redirection can truncate an
-existing multi-coordinator file before validation and can destroy existing
-memberships.
-
-A coordinators block selects enrolled mode, which sparkwing-runner refuses to
-start without --allow-enrolled-preview; enroll a machine that must execute work
-with 'sparkwing cluster runners add' instead.
-
-Use one credential per coordinator membership.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
-		{Name: "location", Argument: "WHERE", Desc: "Controller-owned placement (local|cloud)", Required: true, Group: "Identity"},
-		{Name: "capability", Argument: "LABEL", Desc: "Trusted capability (repeatable)", Group: "Trust"},
-		{Name: "base-priority", Argument: "N", Desc: "Base scheduling priority (0-100)", Default: "50", Group: "Trust"},
-		{Name: "priority-ceiling", Argument: "N", Desc: "Highest effective priority (0-100)", Default: "100", Group: "Trust"},
-		{Name: "max-concurrent", Argument: "N", Desc: "Trusted concurrent slot ceiling", Default: "1", Group: "Limits"},
-		{Name: "budget-cores", Argument: "N", Desc: "CPU contribution ceiling (0 = uncapped)", Default: "0", Group: "Limits"},
-		{Name: "budget-memory-bytes", Argument: "N", Desc: "Memory contribution ceiling in bytes (0 = uncapped)", Default: "0", Group: "Limits"},
-		{Name: "ttl", Argument: "DURATION", Desc: "Credential lifetime (0 = never expires)", Default: "0", Group: "Credential"},
-	},
-	GroupOrder: []string{"Identity", "Trust", "Limits", "Credential", "Other"},
-	Examples: []Example{
-		{"Provision a laptop helper", "sparkwing fleet agents enroll --name desk --location local --capability toolchain=go --max-concurrent 2"},
 	},
 }
 

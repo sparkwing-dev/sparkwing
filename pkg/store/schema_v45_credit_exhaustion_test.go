@@ -19,7 +19,7 @@ func assertCreditExhaustionSchema(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestSchemaV42FreshSQLiteCreditExhaustionShape(t *testing.T) {
+func TestSchemaV45FreshSQLiteCreditExhaustionShape(t *testing.T) {
 	st, err := storetest.NewSQLite(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -32,13 +32,13 @@ func TestSchemaV42FreshSQLiteCreditExhaustionShape(t *testing.T) {
 }
 
 // safety: stripping the column is what makes reopening the database run the
-// migration against the shape a v41 binary left behind.
-func downgradeCreditExhaustionToV41(t *testing.T, db *sql.DB) {
+// migration against the shape a v44 binary left behind.
+func downgradeCreditExhaustionToV44(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	for _, q := range []string{
 		`ALTER TABLE nodes DROP COLUMN credit_exhausted_anchor`,
-		`DELETE FROM sparkwing_schema_version WHERE version >= 42`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 45`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -46,20 +46,20 @@ func downgradeCreditExhaustionToV41(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestSchemaV42UpgradesRealV41SQLiteShape(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v41.db")
+func TestSchemaV45UpgradesRealV44SQLiteShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v44.db")
 	st, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeCreditExhaustionToV41(t, st.DB())
+	downgradeCreditExhaustionToV44(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	up, err := store.Open(path)
 	if err != nil {
-		t.Fatalf("upgrade v41 to v42: %v", err)
+		t.Fatalf("upgrade v44 to v45: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	assertCreditExhaustionSchema(t, up.DB())
@@ -68,21 +68,21 @@ func TestSchemaV42UpgradesRealV41SQLiteShape(t *testing.T) {
 	}
 }
 
-func TestSchemaV42UpgradesRealV41PostgresShape(t *testing.T) {
+func TestSchemaV45UpgradesRealV44PostgresShape(t *testing.T) {
 	dsn := pgTestSchemaDSN(t)
 	ctx := context.Background()
 	st, err := store.OpenPostgres(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeCreditExhaustionToV41(t, st.DB())
+	downgradeCreditExhaustionToV44(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	up, err := store.OpenPostgres(ctx, dsn)
 	if err != nil {
-		t.Fatalf("upgrade v41 to v42 on Postgres: %v", err)
+		t.Fatalf("upgrade v44 to v45 on Postgres: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	assertCreditExhaustionSchema(t, up.DB())

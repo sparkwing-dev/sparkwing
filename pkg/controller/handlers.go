@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -89,7 +90,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"status": "ok", "auth": authState,
-		"object_store": objectStore, "database": s.storageHealth(),
+		"object_store": objectStore, "database": s.storageHealth(r.Context()),
 		"egress": egressState,
 	}
 	if len(problems) > 0 {
@@ -497,14 +498,47 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("node id and status are required"))
 		return
 	}
+	if s.holdsLiveTriggerClaim(r.Context(), runID) {
+		if run, err := s.store.GetRun(r.Context(), runID); err == nil && run.FinishedAt != nil {
+			writeError(w, http.StatusConflict, finishedRunConflict(runID, run, body.NodeID))
+			return
+		}
+	}
 	if err := s.store.CreateNode(r.Context(), body); err != nil {
 		if s.writeComputeLimitRefusal(w, r, runID, body.NodeID, err) {
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// safety: a fence header the caller merely shaped correctly proves nothing, so
+// the run's recorded status and error go only to a caller whose trigger claim
+// the store would honor on the write itself.
+func (s *Server) holdsLiveTriggerClaim(ctx context.Context, runID string) bool {
+	fence, fenced := store.TriggerClaimFenceFromContext(ctx)
+	if !fenced {
+		return true
+	}
+	live, err := s.store.TriggerClaimFenceIsLive(ctx, runID, fence.Claimant, fence.ClaimGeneration, time.Now())
+	return err == nil && live
+}
+
+// safety: a run the reaper or an operator already ended cannot take new work,
+// and a child told so reports why instead of reading a server fault.
+func finishedRunConflict(runID string, run *store.Run, nodeID string) error {
+	detail := fmt.Sprintf("run %s finished as %s before node %s was created",
+		runID, run.Status, nodeID)
+	if run.Error != "" {
+		detail += ": " + run.Error
+	}
+	return errors.New(detail)
 }
 
 func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
@@ -658,19 +692,21 @@ type triggerResp struct {
 
 // safety: every other trigger_env key a run reads is controller-written, so an inbound copy forges it.
 var submittedTriggerEnvKeys = map[string]bool{
-	"GITHUB_REPOSITORY":          true,
-	sparkwing.EnvGitHubEventName: true,
-	sparkwing.EnvPRNumber:        true,
-	sparkwing.EnvPRAction:        true,
-	sparkwing.EnvPRBaseRef:       true,
-	sparkwing.EnvPRBaseSHA:       true,
-	sparkwing.EnvPRHeadRef:       true,
-	sparkwing.EnvPRHeadSHA:       true,
-	"SPARKWING_START_AT":         true,
-	"SPARKWING_STOP_AT":          true,
-	"SPARKWING_ONLY":             true,
-	"SPARKWING_DRY_RUN":          true,
-	"SPARKWING_NO_CACHE":         true,
+	"GITHUB_REPOSITORY":             true,
+	sparkwing.EnvGitHubEventName:    true,
+	sparkwing.EnvPRNumber:           true,
+	sparkwing.EnvPRAction:           true,
+	sparkwing.EnvPRBaseRef:          true,
+	sparkwing.EnvPRBaseSHA:          true,
+	sparkwing.EnvPRHeadRef:          true,
+	sparkwing.EnvPRHeadSHA:          true,
+	"SPARKWING_START_AT":            true,
+	"SPARKWING_STOP_AT":             true,
+	"SPARKWING_ONLY":                true,
+	"SPARKWING_DRY_RUN":             true,
+	"SPARKWING_NO_CACHE":            true,
+	bincache.WorkspaceBaseRefEnvKey: true,
+	bincache.WorkspaceBaseSHAEnvKey: true,
 }
 
 var githubProvenanceEnvKeys = map[string]bool{

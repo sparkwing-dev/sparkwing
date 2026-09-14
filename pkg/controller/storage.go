@@ -46,9 +46,18 @@ func (s *storageSample) read() (store.DatabaseSize, int64, bool, bool) {
 
 // safety: the health route answers without a token, so it says only whether
 // the alarm stands; sizes and table names go to the admin storage route.
-func (s *Server) storageHealth() map[string]any {
+func (s *Server) storageHealth(ctx context.Context) map[string]any {
 	_, _, alarm, sampled := s.storage.read()
-	return map[string]any{"sampled": sampled, "alarm": alarm}
+	out := map[string]any{"sampled": sampled, "alarm": alarm}
+	enforced, err := s.store.CreditGrantReferenceIndexPresent(ctx)
+	if err != nil {
+		s.logger.Warn("reading whether the database enforces the grant key failed", "err", err)
+		return out
+	}
+	// safety: the key is skipped when grants written before it repeat a
+	// reference, and an operator has no other way to see that it is off.
+	out["credit_grant_key"] = enforced
+	return out
 }
 
 // MaintainStorage runs one compaction and size-sample pass immediately.

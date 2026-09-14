@@ -137,3 +137,14 @@ func documentedOperations(t *testing.T, spec string) map[string]bool {
 	}
 	return out
 }
+
+func TestCommittedSpecDeclaresNoInventedKey(t *testing.T) {
+	spec, _, _ := realSpec(t)
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(stripHeader(spec)), &doc); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := checkKeysAreIdentifiers(doc.Content[0], ""); err != nil {
+		t.Fatalf("api/openapi.yaml holds a key an unquoted description invented: %v\nfix: quote that description", err)
+	}
+}

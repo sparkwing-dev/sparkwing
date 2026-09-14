@@ -3,14 +3,14 @@
 // from. It sits below both the runner that executes against the file and the
 // CLI that writes one, so neither has to import the other.
 //
-// The file selects one of two modes. A name-less singular configuration is
-// claim mode, the mode that executes work. Setting Name or Coordinators
-// selects enrolled mode, which the controller refuses on both the claim route
-// and the offer route; [CheckEnrolledExecutionAvailable] is the refusal every
-// caller shares.
+// The file describes claim mode, the mode that executes work: the runner polls
+// the controller's claim route and runs what it is awarded. A file that still
+// carries the removed enrolled-mode keys fails to load with
+// [EnrolledModeRemoved].
 package agentconfig
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -25,9 +25,7 @@ import (
 )
 
 type Config struct {
-	Name         string        `yaml:"name"`
-	Contribution string        `yaml:"contribution"`
-	Coordinators []Coordinator `yaml:"coordinators"`
+	Contribution string `yaml:"contribution"`
 
 	Controller    string        `yaml:"controller"`
 	Logs          string        `yaml:"logs"`
@@ -46,24 +44,12 @@ type Config struct {
 	LocalAdmission *bool `yaml:"local_admission"`
 
 	LocalReserve string `yaml:"local_reserve"`
-
-	enrolled bool
 }
 
-// Coordinator is one explicitly enrolled controller membership.
-// Each membership carries a distinct credential and may narrow the global
-// slot and contribution ceilings.
-type Coordinator struct {
-	Name          string `yaml:"name"`
-	Controller    string `yaml:"controller"`
-	Logs          string `yaml:"logs"`
-	Gitcache      string `yaml:"gitcache"`
-	CacheToken    string `yaml:"cache_token"`
-	Profile       string `yaml:"profile"`
-	Token         string `yaml:"token"`
-	MaxConcurrent int    `yaml:"max_concurrent"`
-	Contribution  string `yaml:"contribution"`
-}
+// EnrolledModeRemoved is the whole message a configuration carrying the
+// removed enrolled-mode keys fails to load with.
+const EnrolledModeRemoved = "enrolled mode has been removed; " +
+	"delete name and coordinators from agent.yaml to run in claim mode, which executes work"
 
 // Load reads one agent.yaml. The file carries a credential, so it must be an
 // owner-only regular file; an unknown field or a second YAML document is an
@@ -74,8 +60,15 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if selectsEnrolledMode(data) {
+		return nil, fmt.Errorf("parse %s: %s", path, EnrolledModeRemoved)
+	}
 	var cfg Config
-	decoder := yaml.NewDecoder(f)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -90,12 +83,56 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Validate fills in the defaults a loaded Config leaves empty, rejects the
-// settings that cannot work, and decides the mode the file selects. Callers
-// run it before acting on a Config; [Config.Enrolled] reads the decision.
+// safety: the unknown-field error names the key without naming the mode it
+// used to select, so the removed keys are answered before the ordinary parse.
+func selectsEnrolledMode(data []byte) bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
+		return false
+	}
+	return carriesEnrolledKey(doc.Content[0], 0)
+}
+
+// safety: a merge key hides the removed keys behind an alias and YAML admits a
+// key in any case, so both reach the removal message instead of an
+// unknown-field error that names neither the mode nor the key that selected it.
+func carriesEnrolledKey(node *yaml.Node, depth int) bool {
+	const maxMergeDepth = 8
+	if node == nil || depth > maxMergeDepth {
+		return false
+	}
+	switch node.Kind {
+	case yaml.AliasNode:
+		return carriesEnrolledKey(node.Alias, depth+1)
+	case yaml.SequenceNode:
+		for _, item := range node.Content {
+			if carriesEnrolledKey(item, depth+1) {
+				return true
+			}
+		}
+		return false
+	case yaml.MappingNode:
+	default:
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		switch strings.ToLower(strings.TrimSpace(node.Content[i].Value)) {
+		case "name", "coordinators":
+			return true
+		case "<<":
+			if carriesEnrolledKey(node.Content[i+1], depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Validate fills in the defaults a loaded Config leaves empty and rejects the
+// settings that cannot work. Callers run it before acting on a Config.
 func Validate(in Config) (Config, error) {
 	out := in
-	if out.Controller == "" && len(out.Coordinators) == 0 {
+	if out.Controller == "" {
 		return out, errors.New("agent.yaml: controller is required")
 	}
 	if out.Gitcache == "" {
@@ -117,18 +154,7 @@ func Validate(in Config) (Config, error) {
 	if _, err := wingd.ParseBudget(out.Contribution); err != nil {
 		return out, fmt.Errorf("agent.yaml: contribution: %w", err)
 	}
-	out.Name = strings.TrimSpace(out.Name)
-	out.enrolled = out.Name != "" || len(out.Coordinators) > 0
-	if out.enrolled && strings.Contains(out.Name, ":") {
-		return out, errors.New("agent.yaml: name is required and cannot contain ':'")
-	}
-	if out.enrolled {
-		if out.LocalAdmission != nil && !*out.LocalAdmission {
-			return out, errors.New("agent.yaml: local_admission cannot be false for enrolled helper memberships")
-		}
-		required := true
-		out.LocalAdmission = &required
-	} else if out.LocalAdmission == nil {
+	if out.LocalAdmission == nil {
 		disabled := false
 		out.LocalAdmission = &disabled
 	}
@@ -151,70 +177,8 @@ func Validate(in Config) (Config, error) {
 		}
 	}
 	out.Labels = clean
-	membershipTokens := map[string]bool{}
-	membershipControllers := map[string]bool{}
-	for i := range out.Coordinators {
-		member := &out.Coordinators[i]
-		if member.Controller == "" {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].controller is required", i)
-		}
-		if membershipControllers[member.Controller] {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].controller is enrolled more than once", i)
-		}
-		membershipControllers[member.Controller] = true
-		if member.Name == "" {
-			member.Name = out.Name
-		}
-		member.Name = strings.TrimSpace(member.Name)
-		if member.Name == "" || strings.Contains(member.Name, ":") {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].name is required and cannot contain ':'", i)
-		}
-		if member.Token == "" {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].token is required", i)
-		}
-		if membershipTokens[member.Token] {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].token must be distinct", i)
-		}
-		membershipTokens[member.Token] = true
-		if member.Gitcache == "" {
-			member.Gitcache = strings.TrimRight(member.Controller, "/") + "/api/v1/gitcache"
-		}
-		if member.MaxConcurrent <= 0 || member.MaxConcurrent > out.MaxConcurrent {
-			member.MaxConcurrent = out.MaxConcurrent
-		}
-		if member.Contribution == "" {
-			member.Contribution = out.Contribution
-		}
-		if _, err := wingd.ParseBudget(member.Contribution); err != nil {
-			return out, fmt.Errorf("agent.yaml: coordinators[%d].contribution: %w", i, err)
-		}
-	}
-	if out.enrolled && len(out.Coordinators) == 0 && out.Token == "" {
-		return out, errors.New("agent.yaml: token is required for an enrolled helper membership")
-	}
 	return out, nil
 }
-
-// EnrolledExecutionUnavailable is the whole message an agent prints when its
-// configuration selects enrolled mode, which the controller refuses on both
-// the claim route and the offer route.
-const EnrolledExecutionUnavailable = "enrolled execution is not available; " +
-	"remove name and coordinators from agent.yaml to run in claim mode, " +
-	"or pass --allow-enrolled-preview to start the unfinished enrolled path"
-
-// CheckEnrolledExecutionAvailable refuses a configuration that would enter
-// enrolled mode. allowPreview lets a developer of enrolled execution run the
-// unfinished path anyway.
-func CheckEnrolledExecutionAvailable(cfg Config, allowPreview bool) error {
-	if !cfg.enrolled || allowPreview {
-		return nil
-	}
-	return errors.New(EnrolledExecutionUnavailable)
-}
-
-// Enrolled reports whether this configuration selects enrolled mode, which
-// [Validate] decides from Name and Coordinators.
-func (c Config) Enrolled() bool { return c.enrolled }
 
 // DefaultPath is the agent.yaml a runner reads when it is given no --config.
 func DefaultPath() (string, error) {

@@ -52,7 +52,7 @@ var allCommands = []*Command{
 	&cmdAgents, &cmdAgentsList, &cmdAgentsEnroll, &cmdClusterConcurrency, &cmdClusterObjectStore, &cmdClusterObjectStoreStatus, &cmdClusterObjectStoreResetBreaker,
 	&cmdRunners, &cmdRunnersAdd, &cmdRunnersRemove,
 	&cmdCloud, &cmdCloudConnect, &cmdCloudStatus, &cmdCloudDisconnect,
-	&cmdFleet, &cmdFleetInit, &cmdFleetAgents, &cmdFleetAgentsEnroll,
+	&cmdFleet, &cmdFleetInit,
 	&cmdSparks, &cmdSparksCatalog, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
 	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup, &cmdSparksInflate,
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,

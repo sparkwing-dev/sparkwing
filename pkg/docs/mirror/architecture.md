@@ -244,6 +244,27 @@ hand: it is the node's authority to read and close that descriptor, and
 naming one sparkwing did not open points the node at another
 subsystem's file.
 
+### Turning off the dev.env fallback
+
+A process that resolves a service URL reads it from its own environment
+first and falls back to the assignment of the same name in
+`$SPARKWING_HOME/dev.env`, which the local dashboard writes for a
+development stack. The fallback covers every key it is asked for:
+`SPARKWING_CONTROLLER_URL` and `SPARKWING_LOGS_URL` for the run-node and
+trigger paths, and `SPARKWING_CACHE_URL` for the artifact backend.
+`SPARKWING_DEV_ENV_DISABLE`, holding any value, closes the fallback for
+all of them, so the process resolves a service URL from its own
+environment and nowhere else.
+
+A test suite is the case that needs it. A suite running inside a node
+inherits the operator's home, so an unset URL would otherwise resolve to
+whatever development service that dev.env names and the suite would talk
+to it. Before every step that starts a product suite, the repository
+gate exports the variable, pins `SPARKWING_HOME` to a directory of its
+own, and clears the bindings the node injects: the admission socket, the
+controller, logs and cache URLs, the agent and lease tokens, the run and
+node ids, and the parent liveness descriptor.
+
 ### Controller API endpoints
 
 The controller's full route set, methods, and required scopes are in

@@ -115,75 +115,78 @@ func TestConfig_DefaultsSpawnPolicy(t *testing.T) {
 	}
 }
 
-func TestConfig_RequiresLocalAdmissionOnlyForEnrolledMode(t *testing.T) {
+func TestConfig_PreservesADisabledLocalAdmissionChoice(t *testing.T) {
 	disabled := false
-	legacy, err := Validate(Config{Controller: "http://x", LocalAdmission: &disabled})
-	if err != nil || legacy.LocalAdmission == nil || *legacy.LocalAdmission {
-		t.Fatalf("legacy local_admission:false = %+v, %v", legacy.LocalAdmission, err)
+	cfg, err := Validate(Config{Controller: "http://x", LocalAdmission: &disabled})
+	if err != nil || cfg.LocalAdmission == nil || *cfg.LocalAdmission {
+		t.Fatalf("local_admission:false = %+v, %v", cfg.LocalAdmission, err)
 	}
-	if _, err := Validate(Config{Name: "desk", Controller: "http://x", Token: "swr_x", LocalAdmission: &disabled}); err == nil {
-		t.Fatal("enrolled local_admission:false was accepted")
-	}
-	enrolled, err := Validate(Config{Name: "desk", Controller: "http://x", Token: "swr_x"})
-	if err != nil || enrolled.LocalAdmission == nil || !*enrolled.LocalAdmission {
-		t.Fatalf("enrolled local admission default = %+v, %v", enrolled.LocalAdmission, err)
+	enabled := true
+	cfg, err = Validate(Config{Controller: "http://x", LocalAdmission: &enabled})
+	if err != nil || cfg.LocalAdmission == nil || !*cfg.LocalAdmission {
+		t.Fatalf("local_admission:true = %+v, %v", cfg.LocalAdmission, err)
 	}
 }
 
-func TestConfig_MultipleMembershipsRequireDistinctCredentialsAndShareCeilings(t *testing.T) {
-	cfg := Config{
-		Name: "desk", MaxConcurrent: 3, Contribution: "4,8gb",
-		Coordinators: []Coordinator{
-			{Controller: "https://personal.example", Token: "swr_personal", MaxConcurrent: 2},
-			{Controller: "https://team.example", Token: "swr_team", MaxConcurrent: 9, Contribution: "2,4gb"},
-		},
-	}
-	norm, err := Validate(cfg)
-	if err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	if norm.Coordinators[0].Name != "desk" || norm.Coordinators[1].Name != "desk" ||
-		norm.Coordinators[0].Contribution != "4,8gb" || norm.Coordinators[1].MaxConcurrent != 3 {
-		t.Fatalf("membership ceilings = %+v", norm.Coordinators)
-	}
-	cfg.Coordinators[1].Token = "swr_personal"
-	if _, err := Validate(cfg); err == nil {
-		t.Fatal("duplicate membership credential was accepted")
-	}
-}
-
-func TestCheckEnrolledExecutionAvailable_RefusesEveryEnrolledShape(t *testing.T) {
+func TestLoad_RefusesTheRemovedEnrolledKeys(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		cfg  Config
+		name, body string
 	}{
-		{"named singular", Config{Controller: "http://x", Name: "desk", Token: "tok"}},
-		{"coordinators", Config{Controller: "http://x", Coordinators: []Coordinator{
-			{Name: "desk", Controller: "http://x", Token: "tok"},
-		}}},
+		{"name", "controller: http://localhost:4344\nname: desk\ntoken: tok\n"},
+		{"coordinators", "coordinators:\n  - controller: http://localhost:4344\n    token: tok\n"},
+		{"both", "name: desk\ncoordinators:\n  - controller: http://localhost:4344\n    token: tok\n"},
+		{"capitalized name", "controller: http://localhost:4344\nName: desk\ntoken: tok\n"},
+		{"merge key", "base: &b\n  name: desk\ncontroller: http://localhost:4344\ntoken: tok\n<<: *b\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Validate(tc.cfg)
-			if err != nil {
-				t.Fatalf("validate: %v", err)
+			path := writePrivateConfig(t, tc.body)
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), EnrolledModeRemoved) {
+				t.Fatalf("Load error = %v, want %q", err, EnrolledModeRemoved)
 			}
-			err = CheckEnrolledExecutionAvailable(cfg, false)
-			if err == nil || err.Error() != EnrolledExecutionUnavailable {
-				t.Fatalf("refusal = %v, want %q", err, EnrolledExecutionUnavailable)
-			}
-			if err := CheckEnrolledExecutionAvailable(cfg, true); err != nil {
-				t.Fatalf("preview override: %v", err)
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("refusal does not name the file: %v", err)
 			}
 		})
 	}
 }
 
-func TestCheckEnrolledExecutionAvailable_AdmitsClaimMode(t *testing.T) {
-	cfg, err := Validate(Config{Controller: "http://x", Token: "tok", HolderPrefix: "desk"})
+func TestLoad_KeepsEveryClaimModeSetting(t *testing.T) {
+	path := writePrivateConfig(t, `controller: http://localhost:4344
+logs: http://localhost:4345
+token: tok-abc
+holder_prefix: dev-laptop
+max_concurrent: 2
+contribution: 4,8gb
+local_admission: true
+local_reserve: 1,2gb
+labels:
+  - linux
+`)
+	raw, err := Load(path)
 	if err != nil {
-		t.Fatalf("validate: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
-	if err := CheckEnrolledExecutionAvailable(cfg, false); err != nil {
-		t.Fatalf("claim mode refused: %v", err)
+	cfg, err := Validate(*raw)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
+	if cfg.Controller != "http://localhost:4344" || cfg.Logs != "http://localhost:4345" ||
+		cfg.Token != "tok-abc" || cfg.HolderPrefix != "dev-laptop" || cfg.MaxConcurrent != 2 ||
+		cfg.Contribution != "4,8gb" || cfg.LocalReserve != "1,2gb" ||
+		cfg.LocalAdmission == nil || !*cfg.LocalAdmission || len(cfg.Labels) != 1 {
+		t.Fatalf("claim-mode config = %+v", cfg)
+	}
+}
+
+func writePrivateConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fssecure.SecurePrivateConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

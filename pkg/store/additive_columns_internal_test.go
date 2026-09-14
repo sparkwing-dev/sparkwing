@@ -60,9 +60,19 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v41 adds one table nothing older reads and no column, so an
 	// older binary keeps writing the migrated database.
 	41: nil,
-	// safety: v42 adds one defaulted column, so an older binary keeps writing
+	// safety: v42 adds the reversed-reference column with a default and a
+	// unique index over references a grant already carries, so an older
+	// binary keeps writing the migrated database.
+	42: {creditGrantReversesCols},
+	// safety: v43 adds one index and no column, so an older binary keeps
+	// writing the migrated database.
+	43: nil,
+	// safety: v44 is held open for the per-cpu-class rate table and adds
+	// nothing here until that branch lands.
+	44: nil,
+	// safety: v45 adds one defaulted column, so an older binary keeps writing
 	// the migrated database and simply never stamps it.
-	42: {nodesCreditExhaustionCols},
+	45: {nodesCreditExhaustionCols},
 }
 
 func columnSpecMaps() []map[string]string {

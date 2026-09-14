@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -38,9 +39,12 @@ func runComputeLimits(args []string) error {
 type computeLimitsResp struct {
 	Limits map[string]int64 `json:"limits"`
 	Usage  struct {
-		Runners      int64            `json:"runners"`
-		ByPrincipal  map[string]int64 `json:"by_principal,omitempty"`
-		AlarmReached bool             `json:"alarm_reached"`
+		Runners            int64            `json:"runners"`
+		ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
+		AlarmReached       bool             `json:"alarm_reached"`
+		DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
+		RecentPaidMicro    int64            `json:"recent_paid_micro"`
+		ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
 	} `json:"usage"`
 }
 
@@ -127,6 +131,9 @@ func renderComputeLimits(w io.Writer, view computeLimitsResp) error {
 	for _, name := range store.ComputeLimitNames() {
 		fmt.Fprintf(tw, "%s\t%s\n", strings.ToUpper(name), computeLimitLabel(view.Limits[name]))
 	}
+	if view.Usage.DerivedRunnerCap > 0 {
+		fmt.Fprintf(tw, "DERIVED RUNNER CAP\t%s\n", derivedRunnerCapLabel(view))
+	}
 	fmt.Fprintf(tw, "CLOUD RUNNERS\t%d claimed now\n", view.Usage.Runners)
 	if view.Usage.AlarmReached {
 		fmt.Fprintf(tw, "ALARM\treached\n")
@@ -143,6 +150,11 @@ func writeComputeLimitsPlain(w io.Writer, view computeLimitsResp) error {
 			return err
 		}
 	}
+	if view.Usage.DerivedRunnerCap > 0 {
+		if _, err := fmt.Fprintf(w, "derived_runner_cap\t%d\n", view.Usage.DerivedRunnerCap); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(w, "runners\t%d\n", view.Usage.Runners); err != nil {
 		return err
 	}
@@ -152,6 +164,16 @@ func writeComputeLimitsPlain(w io.Writer, view computeLimitsResp) error {
 		}
 	}
 	return nil
+}
+
+func derivedRunnerCapLabel(view computeLimitsResp) string {
+	if view.Usage.ScaleWindowSeconds <= 0 {
+		return strconv.FormatInt(view.Usage.DerivedRunnerCap, 10)
+	}
+	window := time.Duration(view.Usage.ScaleWindowSeconds) * time.Second
+	return fmt.Sprintf("%d, from %s paid in the last %d days",
+		view.Usage.DerivedRunnerCap, store.FormatCredits(view.Usage.RecentPaidMicro),
+		int64(window/(24*time.Hour)))
 }
 
 func sortedPrincipals(held map[string]int64) []string {

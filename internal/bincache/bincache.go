@@ -214,12 +214,8 @@ func FetchPipelineSourceWithCredentials(
 	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
-	if bearer == "" {
-		bearer = cacheToken
-	}
-	return fetchPipelineSource(ctx, gcURL, bearer, repoSSH, branch, sha, parentDir, false,
-		controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
 // FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
@@ -227,12 +223,20 @@ func FetchPipelineWorkspaceSourceWithCredentials(
 	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
-	if bearer == "" {
-		bearer = cacheToken
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+}
+
+// GitcacheBearer resolves the credential a cache read may carry: the controller bearer only for
+// the controller's own proxy origin, otherwise the caller's direct cache token or the environment's.
+func GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken string) string {
+	if bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken); bearer != "" {
+		return bearer
 	}
-	return fetchPipelineSource(ctx, gcURL, bearer, repoSSH, branch, sha, parentDir, true,
-		controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+	if cacheToken != "" {
+		return cacheToken
+	}
+	return CacheToken()
 }
 
 // ControllerRunGitcacheURL turns the admin cache proxy into the claim-bound route used by node executors.
