@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -43,7 +44,7 @@ func (PrePush) Examples() []sparkwing.Example {
 }
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Resources(sparkwing.Cores(prePushCores))
+	plan.Resources(sparkwing.Cores(float64(prePushCores(runtime.NumCPU()))))
 	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
@@ -119,7 +120,17 @@ func checkAPISnapshot(ctx context.Context) error {
 // bounded to what the tier reserves. A burst past the reservation is load the
 // admission daemon cannot schedule against, and it measured an order of
 // magnitude over the pin when the bound was the whole machine.
-const prePushCores = 3
+const prePushCoreCap = 3
+
+// prePushCores holds the tier to what the gate reserves on this machine. The cap
+// is what the compiles need; a machine whose gate reserves less than that cannot
+// seat the tier beside a running gate, so the smaller figure wins.
+func prePushCores(cpuCount int) int {
+	if reserved := int(gateCoreReservation(cpuCount)); reserved < prePushCoreCap {
+		return reserved
+	}
+	return prePushCoreCap
+}
 
 func runBuildTouched(ctx context.Context) error {
 	return goOverTouchedPackages(ctx, "build", "buildable Go file(s)", buildableGoFiles)
@@ -159,7 +170,7 @@ func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]s
 		if verb == "build" && len(pkgs) == 1 {
 			args = "-o /dev/null " + args
 		}
-		cmd := goCommandAt(prePushCores, verb, args)
+		cmd := goCommandAt(prePushCores(runtime.NumCPU()), verb, args)
 		if _, runErr := sparkwing.Bash(ctx, cmd).Dir(module).Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 		}

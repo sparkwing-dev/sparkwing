@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -63,15 +64,32 @@ func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
 			prepush.PriorityValue(), gate.PriorityValue())
 	}
 	hints := prepush.ResourceHints()
-	if hints == nil || hints.Cores != prePushCores {
-		t.Fatalf("pre-push reserved cores = %#v, want the %v its compiles are bounded to", hints, float64(prePushCores))
+	if hints == nil || hints.Cores != float64(prePushCores(runtime.NumCPU())) {
+		t.Fatalf("pre-push reserved cores = %#v, want the %v its compiles are bounded to",
+			hints, float64(prePushCores(runtime.NumCPU())))
 	}
-	if hints.Cores > gateCoreReservation(runtime.NumCPU()) {
-		t.Errorf("pre-push reserves %v, more than the gate's %v, so the fast tier no longer fits beside a running gate",
-			hints.Cores, gateCoreReservation(runtime.NumCPU()))
-	}
-	if got := goCommandAt(prePushCores, "build", "./x"); !strings.Contains(got, "GOMAXPROCS=3") {
-		t.Errorf("the touched compile is not bounded to the reservation: %q", got)
+}
+
+// TestPrePushFitsBesideAGateOnEveryMachine judges the reservation at fixed core
+// counts rather than at this machine's, so a runner smaller than the author's
+// box reaches the same verdict.
+func TestPrePushFitsBesideAGateOnEveryMachine(t *testing.T) {
+	for _, cpuCount := range []int{1, 2, 4, 8, 14, 64} {
+		reserved := float64(prePushCores(cpuCount))
+		if reserved > gateCoreReservation(cpuCount) {
+			t.Errorf("on %d cores pre-push reserves %v, more than the gate's %v, so the fast tier no longer fits beside a running gate",
+				cpuCount, reserved, gateCoreReservation(cpuCount))
+		}
+		if reserved < 1 {
+			t.Errorf("on %d cores pre-push reserves %v, which schedules nothing", cpuCount, reserved)
+		}
+		if reserved > prePushCoreCap {
+			t.Errorf("on %d cores pre-push reserves %v, past the %d its compiles need", cpuCount, reserved, prePushCoreCap)
+		}
+		want := fmt.Sprintf("GOMAXPROCS=%d", prePushCores(cpuCount))
+		if got := goCommandAt(prePushCores(cpuCount), "build", "./x"); !strings.Contains(got, want) {
+			t.Errorf("on %d cores the touched compile is not bounded to the reservation: %q, want %s", cpuCount, got, want)
+		}
 	}
 }
 
