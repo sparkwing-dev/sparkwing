@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.1] - 2026-09-14
 ### Fixed
 
 - **module:** `go.mod` retracts v0.52.0, a tag cut from a fixture commit on no
