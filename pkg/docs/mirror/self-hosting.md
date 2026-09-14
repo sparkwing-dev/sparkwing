@@ -293,3 +293,24 @@ the CLI prints. Per-run totals are removed with their run, so a run that
 retention or an operator deletes stops counting against the per-run limit; the
 month's total outlives it deliberately, so a deleted run does not refund a
 spent month.
+
+### Storage allowances
+
+`storage_allowance_bytes` on a quota row is how many retained bytes the team
+asked to keep. The hourly storage pass expires its oldest finished runs above
+the allowance, so the allowance is the ceiling; zero keeps everything, which is
+what every quota written before this release reads. Write one with
+`PUT /api/v1/storage/quotas/{principal}/allowance` (scope `admin`):
+
+```bash
+curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"storage_allowance_bytes":53687091200}'
+```
+
+`GET /api/v1/storage` reports the allowance and `retained_bytes`, which is what
+the team still has stored and what the storage charge and the sweep both
+measure. What a team retains is charged against the credit ledger once an
+operator prices storage; [Credits](auth.md) describes the rate, the free
+allowance, and what a spent balance does.

@@ -19,6 +19,33 @@ unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **controller + CLI + pkg/store (schema v47):** Retained storage is charged
+  against the credit ledger, against an allowance the customer sets. A team's
+  allowance (`storage_allowance_bytes` beside its quota row, written with
+  `PUT /api/v1/storage/quotas/{principal}/allowance` on the `admin` scope or
+  `sparkwing cluster credits allowance --principal NAME --gb N`) is how many
+  retained bytes it asked to keep: the hourly storage pass expires its oldest
+  finished runs above the allowance, so the allowance is both what a team keeps
+  and the most it pays for. `storage_rate_micro_per_gb_day` and
+  `storage_free_allowance_bytes` on the credit settings route price it:
+  every team is billed for the bytes it keeps above the free allowance, pro
+  rata on the interval since it was last billed, as a `storage` charge naming
+  the team and the bytes, so `sparkwing cluster credits show` and
+  `credits history` separate retained bytes from runner time. The division
+  truncates toward zero, so a fraction of a micro-credit is never billed, and
+  the interval is measured off the database clock. A spent balance refuses a
+  write that would grow a team's retained bytes with `402` and drains its
+  retained bytes to the free allowance as retention releases them; nothing is
+  removed for non-payment inside the retention window. `GET /api/v1/storage`
+  reports `retained_bytes` and the allowance, and
+  `sparkwing_credits_storage_micro_total` is the meter.
+  `store.SetStorageAllowance`, `store.StorageRetainedBytes`,
+  `store.ChargeRetainedStorage`, `store.SweepStorageAllowance`,
+  `store.DatabaseNow` and `store.CreditChargeStorage` are the store surface.
+  Both settings default to zero, so an installation that sets neither writes no
+  storage charge and keeps every byte it kept before.
 
 ## [v0.50.4] - 2026-09-14
 ### Added

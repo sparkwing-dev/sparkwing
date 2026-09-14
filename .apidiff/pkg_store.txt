@@ -97,6 +97,7 @@ type ClaimPlacement struct {
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
+const CloudStorageRateMicroPerGBDay = 833_333
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -212,9 +213,13 @@ type CreditCharge struct {
 	RunID       string
 	NodeID      string
 	TokenPrefix string
+
+	Principal   string
 	Kind        string
 	Seconds     int64
 	AmountMicro int64
+
+	StorageBytes int64
 
 	CPUClassCores int64
 
@@ -234,6 +239,7 @@ type CreditChargeResult struct {
 
 	ForgivenSeconds int64
 }
+const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
 const CreditClaimFloorSeconds = 60
 type CreditGrant struct {
@@ -275,6 +281,8 @@ type CreditLedgerTotals struct {
 
 	RefundedMicro int64
 
+	StorageMicro int64
+
 	SettledSeconds int64
 }
 type CreditRate struct {
@@ -296,30 +304,42 @@ type CreditSettings struct {
 	GraceSeconds int64
 
 	MaxChargeSeconds int64
+
+	StorageRateMicroPerGBDay int64
+
+	StorageFreeAllowanceBytes int64
 }
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond *int64
-	WarmCPUClassCores  *int64
-	GraceSeconds       *int64
-	MaxChargeSeconds   *int64
+	RateMicroPerSecond        *int64
+	WarmCPUClassCores         *int64
+	GraceSeconds              *int64
+	MaxChargeSeconds          *int64
+	StorageRateMicroPerGBDay  *int64
+	StorageFreeAllowanceBytes *int64
 }
 type CreditState struct {
 	GrantedMicro int64
 
-	ReversedMicro      int64
-	ChargedMicro       int64
-	BalanceMicro       int64
-	RateMicroPerSecond int64
-	RateTable          CreditRateTable
+	ReversedMicro int64
+	ChargedMicro  int64
+
+	StorageChargedMicro int64
+	BalanceMicro        int64
+	RateMicroPerSecond  int64
+	RateTable           CreditRateTable
 
 	RateTableSet bool
 
 	WarmCPUClassCores int64
 	GraceSeconds      int64
 	MaxChargeSeconds  int64
-	BurnWindow        time.Duration
-	BurnMicro         int64
-	ExhaustedAt       *time.Time
+
+	StorageRateMicroPerGBDay int64
+
+	StorageFreeAllowanceBytes int64
+	BurnWindow                time.Duration
+	BurnMicro                 int64
+	ExhaustedAt               *time.Time
 }
 const CreditsPerDollar = 100
 type CronDeclaration struct {
@@ -693,6 +713,7 @@ const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
 const MaxRunListLimit = 1000
+const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MeteringFree
 const MeteringPaid
 const MeteringUnknown NodeMetering = iota
@@ -1090,6 +1111,26 @@ const StepFailed = "failed"
 const StepPassed = "passed"
 const StepRunning = "running"
 const StepSkipped = "skipped"
+type StorageAllowanceSweep struct {
+	Runs   int64
+	Bytes  int64
+	Events int64
+}
+const StorageBytesPerGB = 1 << 30
+const StorageChargeDaySeconds = 86_400
+const StorageChargeInterval = 24 * time.Hour
+type StorageChargeSweep struct {
+	Charges []CreditCharge
+
+	ChargedMicro int64
+}
+type StorageCreditsExhaustedError struct {
+	Principal      string
+	BalanceMicro   int64
+	RequestedBytes int64
+}
+func (e *StorageCreditsExhaustedError) Error() string
+func (e *StorageCreditsExhaustedError) Unwrap() error
 const StorageLimitBytesPerMonth = "bytes_per_month"
 const StorageLimitBytesPerRun = "bytes_per_run"
 const StorageLimitObjectsPerRun = "objects_per_run"
@@ -1101,6 +1142,8 @@ type StorageQuota struct {
 	MaxBytesPerRun   int64
 	MaxBytesPerMonth int64
 	MaxObjectsPerRun int64
+
+	AllowanceBytes int64
 }
 func (q StorageQuota) Unlimited() bool
 type StorageQuotaError struct {
@@ -1164,6 +1207,7 @@ func (s *Store) CancelNodeForExhaustedCredits(
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
+func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error)
 func (s *Store) ClaimNamedNode(
 	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
 	lease time.Duration, opts NamedClaimOptions,
@@ -1217,6 +1261,7 @@ func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
+func (s *Store) DatabaseNow(ctx context.Context) (time.Time, error)
 func (s *Store) DatabaseSize(ctx context.Context) (DatabaseSize, error)
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
@@ -1392,16 +1437,21 @@ func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) er
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
+func (s *Store) SetStorageAllowance(ctx context.Context, principal string, bytes int64) (StorageQuota, error)
 func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (s *Store) StorageFreeAllowanceBytes(ctx context.Context) (int64, error)
 func (s *Store) StorageQuotaFor(ctx context.Context, principal string) (StorageQuota, error)
+func (s *Store) StorageRateMicroPerGBDay(ctx context.Context) (int64, error)
+func (s *Store) StorageRetainedBytes(ctx context.Context, principal string) (int64, error)
 func (s *Store) StorageSettings(ctx context.Context) (StorageSettings, error)
 func (s *Store) StorageUsageFor(ctx context.Context, principal, runID, month string) (StorageUsage, error)
 func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSweep, error)
+func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error

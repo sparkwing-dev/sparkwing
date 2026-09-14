@@ -366,6 +366,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_credits_reserved_micro_total` | Counter | (none) | Micro-credits claims reserved up front |
 | `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
 | `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned from the unused tail of a claim reservation |
+| `sparkwing_credits_storage_micro_total` | Counter | (none) | Micro-credits retained bytes billed; this series buys no runner time, so the charged series does not carry it |
 | `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
 
 `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it

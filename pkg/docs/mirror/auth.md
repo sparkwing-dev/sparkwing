@@ -93,6 +93,44 @@ cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
 --amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
 lists every movement newest first.
 
+## Retained storage
+
+Runner time stops costing when a node ends; retained bytes keep costing while
+they are kept, so they are billed from the same ledger. An installation bills
+storage only once an operator prices it: `storage_rate_micro_per_gb_day` is
+what one gibibyte kept for one day costs and `storage_free_allowance_bytes` is
+what every team keeps unbilled, and both are zero until written, so an
+installation that sets neither writes no storage charge.
+
+The hourly storage pass bills every team for the bytes it retains above the
+free allowance, pro rata on the interval since it was last billed, once a day
+has passed. A team the ledger has never billed is stamped with the current
+instant and billed from the next pass, so pricing storage never bills for the
+past. The interval is measured off the database clock, so two controllers on
+one database bill a day once. The amount is `bytes x rate x seconds` divided by
+a gibibyte-day, truncated toward zero, so a fraction of a micro-credit is never
+billed: three gibibytes retained against a one-gibibyte free allowance for one
+day is two gibibyte-days, which at 833,333 micro-credits a gibibyte-day is
+1,666,666 micro-credits, or 25 credits a gibibyte-month, GitHub's $0.25.
+
+The charge is a `storage` row naming the team, the bytes it billed and the
+interval it covered, so `sparkwing cluster credits show` and `credits history`
+separate retained bytes from runner time. It carries no cpu class and no
+per-second rate, because neither priced it.
+
+Each team's allowance is how many retained bytes it asked to keep. The pass
+expires its oldest finished runs above the allowance, so the allowance is both
+what a team keeps and the most it pays for; an allowance of zero keeps
+everything. Read and write one with
+`sparkwing cluster credits allowance --principal NAME --gb N`, which needs
+`admin`.
+
+An empty balance is a hard cut, the same as it is for runner time: a write that
+would grow a team's retained bytes is refused with `402` and a reason naming
+the team and the balance, and the pass drains retained bytes down to the free
+allowance. That drain takes only runs whose retention window has already
+elapsed, so non-payment never removes anything inside the window.
+
 ## Runner classes
 
 A class is a whole number of cores with the memory that comes with it, and it
