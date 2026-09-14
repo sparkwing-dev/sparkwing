@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.6] - 2026-09-14
 ### Added
 
 - **controller + CLI + pkg/store (schema v47):** Retained storage is charged
