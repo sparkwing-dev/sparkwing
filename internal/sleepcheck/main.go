@@ -7,15 +7,12 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gatescope"
 )
-
-const baselineRelPath = "internal/sleepcheck/baseline.txt"
 
 var bannedCalls = map[string]bool{
 	"Sleep":     true,
@@ -25,33 +22,44 @@ var bannedCalls = map[string]bool{
 	"NewTicker": true,
 }
 
+var clockReads = map[string]bool{
+	"Now":   true,
+	"Since": true,
+	"Until": true,
+}
+
 type finding struct {
 	file string
 	line int
 	form string
 }
 
-func (f finding) key() string {
-	return fmt.Sprintf("%s:%d", f.file, f.line)
+type unreadable struct {
+	file string
+	err  error
 }
 
-const usageText = `usage: sleepcheck [-staged | -base ref] [-allow-no-diff] [-write-baseline] [-baseline path] <root>
+const unjudgeable = "cannot judge this file; import time by name"
+
+const usageText = `usage: sleepcheck [-staged | -base ref] [-allow-no-diff] <root>
 
 <root> is one directory to walk, normally the repository root; sleepcheck
 takes no list of files. It parses every _test.go file under <root> and skips
 vendor, testdata, node_modules, .git and .claude-scratch.
 
-Banned in a test: time.Sleep, time.After, time.Tick, time.NewTimer,
-time.NewTicker, and time.Now or time.Since read as a wait or a deadline (a
-greater-or-less comparison, a loop condition, or a context.WithTimeout or
-WithDeadline argument). time.Now() that only stamps a fixture value is allowed.
+Banned in a test: time.Sleep, time.After, time.Tick, time.NewTimer and
+time.NewTicker, whether called or taken as a value, and time.Now, time.Since
+or time.Until read as a wait or a deadline (a greater-or-less comparison, a
+loop condition, or a context.WithTimeout or WithDeadline argument). time.Now()
+that only stamps a fixture value is allowed. A file that dot-imports time
+cannot be judged and fails for that reason.
 
--staged and -base narrow the report to the lines those diffs add; -base also
-reads untracked _test.go files, which git diff alone leaves out. A run with
-neither judges the whole tree against the baseline file, fails any finding the
-baseline does not carry, and names each baseline entry that no longer offends
-so the file only shrinks. -write-baseline rewrites that file from today's
-offenders.
+-staged and -base narrow the report to the lines those diffs add, which is how
+a test written before this rule keeps passing; -base also reads untracked
+_test.go files, which git diff alone leaves out. A run with neither judges
+every test file in the tree. A _test.go file the parser rejects fails the run
+when the scope names it, because a file the gate could not read is a file it
+did not judge.
 
 flags:
 `
@@ -62,8 +70,6 @@ one. Instead of sleeping or reading the clock:
   - inject a clock the test controls, or a fake the code under test accepts
   - use testing/synctest, whose clock advances once every goroutine is blocked
 time.Now() that only stamps a fixture value stays allowed.
-Fix the test rather than adding a line to ` + baselineRelPath + `; that file
-lists the offenders that predate this rule and only ever shrinks.
 `
 
 const alternatives = "wait on a signaled condition, inject a fake clock, or use testing/synctest"
@@ -74,11 +80,9 @@ func usage() {
 }
 
 func main() {
-	staged := flag.Bool("staged", false, "only report waits in the staged diff")
+	staged := flag.Bool("staged", false, "only report waits in the staged diff (the pre-commit gate)")
 	base := flag.String("base", "", "only report waits added vs the fork point from this git ref")
 	allowNoDiff := flag.Bool("allow-no-diff", false, "pass instead of failing when the diff cannot be computed; the run gates nothing")
-	write := flag.Bool("write-baseline", false, "rewrite the baseline file from the offenders in the tree")
-	baselinePath := flag.String("baseline", "", "baseline file to read or write (default "+baselineRelPath+" under <root>)")
 	flag.Usage = usage
 	flag.Parse()
 	if flag.NArg() != 1 {
@@ -87,27 +91,10 @@ func main() {
 	}
 	root := flag.Arg(0)
 
-	findings, err := scan(root)
+	findings, unread, err := scan(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sleepcheck:", err)
 		os.Exit(2)
-	}
-	path := *baselinePath
-	if path == "" {
-		path = filepath.Join(root, filepath.FromSlash(baselineRelPath))
-	}
-
-	if *write {
-		if *staged || *base != "" {
-			fmt.Fprintln(os.Stderr, "sleepcheck: -write-baseline records the whole tree, so it takes neither -staged nor -base")
-			os.Exit(2)
-		}
-		if err := writeBaseline(path, findings); err != nil {
-			fmt.Fprintln(os.Stderr, "sleepcheck:", err)
-			os.Exit(2)
-		}
-		fmt.Printf("sleepcheck: wrote %d offender(s) to %s\n", len(findings), path)
-		return
 	}
 
 	if *staged || *base != "" {
@@ -122,57 +109,41 @@ func main() {
 			return
 		}
 		findings = onlyAdded(findings, added)
-		if len(findings) > 0 {
-			report(findings, "in the change this run judged")
-			os.Exit(1)
-		}
-		fmt.Println("sleepcheck: clean")
-		return
+		unread = onlyChanged(unread, root, added)
 	}
 
-	baseline, berr := readBaseline(path)
-	if berr != nil {
-		fmt.Fprintln(os.Stderr, "sleepcheck:", berr)
-		os.Exit(2)
+	if len(findings) > 0 {
+		report(findings)
 	}
-	fresh, stale := split(findings, baseline)
-	if len(stale) > 0 {
-		fmt.Print(staleReport(stale, path))
+	if len(unread) > 0 {
+		fmt.Print(unreadableFailure(unread))
 	}
-	if len(fresh) > 0 {
-		report(fresh, "outside the baseline")
+	if len(findings) > 0 || len(unread) > 0 {
 		os.Exit(1)
 	}
-	fmt.Printf("sleepcheck: clean (%d baselined offender(s))\n", len(findings))
+	fmt.Println("sleepcheck: clean")
 }
 
 func diffFailure(base string, err error) string {
 	return gatescope.DiffFailure("sleepcheck", base, err)
 }
 
-func scan(root string) ([]finding, error) {
+func scan(root string) ([]finding, []unreadable, error) {
 	var findings []finding
-	var unread []string
+	var unread []unreadable
 	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
 		f, ferr := checkFile(path, rel)
 		if ferr != nil {
-			unread = append(unread, ferr.Error())
+			unread = append(unread, unreadable{file: path, err: ferr})
 			return
 		}
 		findings = append(findings, f...)
 	})
 	if err != nil {
-		return nil, err
-	}
-	// safety: a test file the parser rejected carries no verdict, and a run that
-	// passes it reports health it never established.
-	if len(unread) > 0 {
-		sort.Strings(unread)
-		return nil, fmt.Errorf("%d test file(s) could not be parsed, so this run reached no verdict on them:\n%s",
-			len(unread), strings.Join(unread, "\n"))
+		return nil, nil, err
 	}
 	sortFindings(findings)
-	return findings, nil
+	return findings, unread, nil
 }
 
 func checkFile(path, rel string) ([]finding, error) {
@@ -181,11 +152,14 @@ func checkFile(path, rel string) ([]finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	timePkg := importAlias(file, "time")
+	timePkg, dot := importAlias(file, "time")
+	if dot {
+		return []finding{{file: rel, line: fset.Position(file.Pos()).Line, form: unjudgeable}}, nil
+	}
 	if timePkg == "" {
 		return nil, nil
 	}
-	ctxPkg := importAlias(file, "context")
+	ctxPkg, _ := importAlias(file, "context")
 	elapsed := elapsedNames(file, timePkg)
 
 	var out []finding
@@ -227,27 +201,40 @@ func checkFile(path, rel string) ([]finding, error) {
 					break
 				}
 			}
+		case *ast.SelectorExpr:
+			// safety: a call reaches this node through its CallExpr first and
+			// claims the line, so what lands here is the timer taken as a
+			// value, which a test calls out of sight of this walk.
+			if name, ok := pkgCall(node, timePkg); ok && bannedCalls[name] {
+				add(node.Pos(), "time."+name+" taken as a value")
+			}
 		}
 		return true
 	})
 	return out, nil
 }
 
-func importAlias(file *ast.File, path string) string {
+// safety: a dot import puts Sleep in scope unqualified, and an unqualified
+// name is indistinguishable from the test's own helper without type
+// information this walk does not carry.
+func importAlias(file *ast.File, path string) (alias string, dot bool) {
 	for _, spec := range file.Imports {
 		value, err := strconv.Unquote(spec.Path.Value)
 		if err != nil || value != path {
 			continue
 		}
 		if spec.Name == nil {
-			return filepath.Base(path)
+			return path[strings.LastIndex(path, "/")+1:], false
 		}
-		if spec.Name.Name == "_" || spec.Name.Name == "." {
-			return ""
+		if spec.Name.Name == "." {
+			return "", true
 		}
-		return spec.Name.Name
+		if spec.Name.Name == "_" {
+			return "", false
+		}
+		return spec.Name.Name, false
 	}
-	return ""
+	return "", false
 }
 
 // safety: a rule reading only the comparison misses `elapsed :=
@@ -260,7 +247,7 @@ func elapsedNames(file *ast.File, timePkg string) map[string]bool {
 			return
 		}
 		for i, expr := range rhs {
-			if !callsClock(expr, timePkg, "Since") {
+			if !callsElapsed(expr, timePkg) {
 				continue
 			}
 			if ident, ok := lhs[i].(*ast.Ident); ok {
@@ -292,7 +279,7 @@ func readsClock(expr ast.Expr, timePkg string, elapsed map[string]bool) bool {
 		}
 		switch node := n.(type) {
 		case *ast.CallExpr:
-			if name, ok := pkgCall(node.Fun, timePkg); ok && (name == "Now" || name == "Since") {
+			if name, ok := pkgCall(node.Fun, timePkg); ok && clockReads[name] {
 				found = true
 			}
 		case *ast.Ident:
@@ -305,14 +292,14 @@ func readsClock(expr ast.Expr, timePkg string, elapsed map[string]bool) bool {
 	return found
 }
 
-func callsClock(expr ast.Expr, timePkg, fn string) bool {
+func callsElapsed(expr ast.Expr, timePkg string) bool {
 	found := false
 	ast.Inspect(expr, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return !found
 		}
-		if name, ok := pkgCall(call.Fun, timePkg); ok && name == fn {
+		if name, ok := pkgCall(call.Fun, timePkg); ok && (name == "Since" || name == "Until") {
 			found = true
 		}
 		return !found
@@ -339,80 +326,30 @@ func isOrdering(op token.Token) bool {
 	return op == token.LSS || op == token.GTR || op == token.LEQ || op == token.GEQ
 }
 
-func readBaseline(path string) (map[string]bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]bool{}, nil
-		}
-		return nil, err
-	}
-	entries := map[string]bool{}
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		entries[line] = true
-	}
-	return entries, nil
-}
-
-func writeBaseline(path string, findings []finding) error {
-	var b strings.Builder
-	b.WriteString(baselineHeader)
-	keys := make([]string, 0, len(findings))
-	for _, f := range findings {
-		keys = append(keys, f.key())
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		b.WriteString(key)
-		b.WriteByte('\n')
-	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
-}
-
-const baselineHeader = `# Tests that sleep or wait on the wall clock, one path:line each, recorded when
-# the rule landed. sleepcheck fails any finding this file does not carry, and
-# names an entry that no longer offends so the list only shrinks.
-# Regenerate after a purge: GOWORK=off go run ./internal/sleepcheck -write-baseline .
-`
-
-func split(findings []finding, baseline map[string]bool) (fresh []finding, stale []string) {
-	live := map[string]bool{}
-	for _, f := range findings {
-		key := f.key()
-		live[key] = true
-		if !baseline[key] {
-			fresh = append(fresh, f)
-		}
-	}
-	for key := range baseline {
-		if !live[key] {
-			stale = append(stale, key)
-		}
-	}
-	sort.Strings(stale)
-	return fresh, stale
-}
-
-func staleReport(stale []string, path string) string {
-	var b strings.Builder
-	for _, key := range stale {
-		fmt.Fprintf(&b, "%s: baselined wait is gone\n", key)
-	}
-	fmt.Fprintf(&b, "\nsleepcheck: %d stale baseline entry(ies) in %s. The list only shrinks: "+
-		"run `go run ./internal/sleepcheck -write-baseline .` to drop them.\n\n", len(stale), path)
-	return b.String()
-}
-
-func report(findings []finding, scope string) {
+func report(findings []finding) {
 	for _, f := range findings {
 		fmt.Printf("%s:%d: %s. Instead: %s.\n", f.file, f.line, f.form, alternatives)
 	}
-	fmt.Printf("\nsleepcheck: %d test(s) wait on the wall clock %s.\n\n", len(findings), scope)
+	fmt.Printf("\nsleepcheck: %d test(s) wait on the wall clock.\n\n", len(findings))
 	fmt.Print(advice)
+}
+
+// safety: a file the parser rejected carries no verdict, and a run that passes
+// it reports health it never established.
+func unreadableFailure(unread []unreadable) string {
+	lines := make([]string, len(unread))
+	for i, u := range unread {
+		// safety: a go/parser error already opens with file:line:col, so naming
+		// the file again would print it twice.
+		text := u.err.Error()
+		if !strings.Contains(text, u.file) {
+			text = u.file + ": " + text
+		}
+		lines[i] = text
+	}
+	sort.Strings(lines)
+	return fmt.Sprintf("%s\n\nsleepcheck: %d test file(s) could not be parsed, so this run reached no verdict on them.\n"+
+		"Fix: make each file parse, then run the gate again.\n", strings.Join(lines, "\n"), len(unread))
 }
 
 func sortFindings(findings []finding) {
@@ -429,6 +366,20 @@ func onlyAdded(findings []finding, added map[string]map[int]bool) []finding {
 	for _, f := range findings {
 		if added[f.file][f.line] {
 			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// safety: an unparseable file outside the scope is not something this run
+// claimed to judge. This asks whether the diff names the file, not whether it
+// added lines: a change that only deletes lines is the one most likely to
+// break parsing.
+func onlyChanged(unread []unreadable, root string, added map[string]map[int]bool) []unreadable {
+	var out []unreadable
+	for _, u := range unread {
+		if gatescope.Touched(added, root, u.file) {
+			out = append(out, u)
 		}
 	}
 	return out

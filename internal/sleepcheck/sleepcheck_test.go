@@ -191,7 +191,7 @@ func TestScan_JudgesOnlyTestFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := scan(root)
+	got, _, err := scan(root)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -200,105 +200,46 @@ func TestScan_JudgesOnlyTestFiles(t *testing.T) {
 	}
 }
 
-func TestScan_FailsATestFileItCannotParse(t *testing.T) {
+func TestScan_ReportsAFileItCannotParseWithoutFailingTheWalk(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "broken_test.go"), []byte("package widget\n\nfunc Broken( {\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := scan(root)
-	if err == nil {
-		t.Fatal("scan passed a file it could not read, so the run reports a verdict it never reached")
+	_, unread, err := scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
 	}
-	if !strings.Contains(err.Error(), "broken_test.go") {
-		t.Errorf("error = %q, does not name the file", err)
+	if len(unread) != 1 || filepath.Base(unread[0].file) != "broken_test.go" {
+		t.Fatalf("unreadable = %+v, want the file the parser rejected", unread)
+	}
+	if out := unreadableFailure(unread); !strings.Contains(out, "reached no verdict") {
+		t.Errorf("failure = %q, does not say the run judged nothing there", out)
+	}
+}
+
+func TestOnlyChanged_LeavesABrokenFileOutsideTheScopeAlone(t *testing.T) {
+	root := t.TempDir()
+	unread := []unreadable{
+		{file: filepath.Join(root, "touched_test.go"), err: os.ErrInvalid},
+		{file: filepath.Join(root, "untouched_test.go"), err: os.ErrInvalid},
+	}
+	added := map[string]map[int]bool{"touched_test.go": {3: true}}
+
+	got := onlyChanged(unread, root, added)
+
+	if len(got) != 1 || filepath.Base(got[0].file) != "touched_test.go" {
+		t.Fatalf("onlyChanged = %+v; a test file this commit never touched blocks it", got)
 	}
 }
 
 func TestReport_NamesTheAlternatives(t *testing.T) {
-	for _, want := range []string{"synctest", "fake clock", "signaled", "shrinks"} {
+	for _, want := range []string{"synctest", "fake clock", "signaled"} {
 		if !strings.Contains(advice+alternatives, want) {
 			t.Errorf("the failure advice does not name %q:\n%s\n%s", want, alternatives, advice)
 		}
 	}
 	if strings.Contains(advice, "TODO") {
 		t.Errorf("the advice carries a marker the comment gate refuses:\n%s", advice)
-	}
-}
-
-func TestSplit_FailsNewOffendersAndNamesStaleEntries(t *testing.T) {
-	findings := []finding{
-		{file: "a_test.go", line: 3, form: "time.Sleep"},
-		{file: "b_test.go", line: 9, form: "time.After"},
-	}
-	baseline := map[string]bool{"a_test.go:3": true, "gone_test.go:12": true}
-
-	fresh, stale := split(findings, baseline)
-
-	if len(fresh) != 1 || fresh[0].file != "b_test.go" {
-		t.Fatalf("fresh = %v, want only the offender the baseline does not carry", fresh)
-	}
-	if len(stale) != 1 || stale[0] != "gone_test.go:12" {
-		t.Fatalf("stale = %v, want the entry that no longer offends", stale)
-	}
-}
-
-func TestBaseline_RoundTripsAndOnlyShrinks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "baseline.txt")
-	findings := []finding{
-		{file: "b_test.go", line: 9},
-		{file: "a_test.go", line: 3},
-	}
-	if err := writeBaseline(path, findings); err != nil {
-		t.Fatalf("writeBaseline: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(data)
-	if !strings.HasPrefix(body, "#") {
-		t.Errorf("the baseline opens without the header that says how to regenerate it:\n%s", body)
-	}
-	if strings.Index(body, "a_test.go:3") > strings.Index(body, "b_test.go:9") {
-		t.Errorf("the baseline is unsorted, so two purges conflict on every line:\n%s", body)
-	}
-
-	entries, err := readBaseline(path)
-	if err != nil {
-		t.Fatalf("readBaseline: %v", err)
-	}
-	if len(entries) != 2 || !entries["a_test.go:3"] || !entries["b_test.go:9"] {
-		t.Fatalf("readBaseline = %v, want both offenders", entries)
-	}
-
-	if err := writeBaseline(path, findings[:1]); err != nil {
-		t.Fatalf("writeBaseline: %v", err)
-	}
-	shrunk, err := readBaseline(path)
-	if err != nil {
-		t.Fatalf("readBaseline: %v", err)
-	}
-	if len(shrunk) != 1 || !shrunk["b_test.go:9"] {
-		t.Fatalf("readBaseline = %v after a purge, want only the surviving offender", shrunk)
-	}
-}
-
-func TestReadBaseline_TreatsAMissingFileAsEmpty(t *testing.T) {
-	entries, err := readBaseline(filepath.Join(t.TempDir(), "absent.txt"))
-	if err != nil {
-		t.Fatalf("readBaseline: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("entries = %v, want an empty baseline", entries)
-	}
-}
-
-func TestStaleReport_NamesTheRegenerationCommand(t *testing.T) {
-	out := staleReport([]string{"a_test.go:3"}, "internal/sleepcheck/baseline.txt")
-	for _, want := range []string{"a_test.go:3", "-write-baseline", "only shrinks"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the stale report does not say %q:\n%s", want, out)
-		}
 	}
 }
 
@@ -318,7 +259,7 @@ func TestScopedAdds_ChargesTheBranchAndSkipsCommittedLines(t *testing.T) {
 		t.Errorf("added = %v; a line the base already carried is charged to the branch", added)
 	}
 
-	findings, err := scan(repo)
+	findings, _, err := scan(repo)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -355,8 +296,8 @@ func TestUsage_NamesTheBannedFormsAndTheBaseline(t *testing.T) {
 		"time.Sleep",
 		"time.NewTicker",
 		"stamps a fixture value",
-		"-write-baseline",
-		"only shrinks",
+		"dot-imports time",
+		"-base",
 	} {
 		if !strings.Contains(usageText, want) {
 			t.Errorf("the usage text does not name %q:\n%s", want, usageText)
@@ -403,5 +344,76 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestCheckFile_RejectsTimeUntilAsAWait(t *testing.T) {
+	src := `package widget
+
+import (
+	"testing"
+	"time"
+)
+
+func TestUntil(t *testing.T) {
+	deadline := time.Now().Add(time.Second)
+	for time.Until(deadline) > 0 {
+		_ = deadline
+	}
+	remaining := time.Until(deadline)
+	if remaining > time.Millisecond {
+		t.Fatal("too slow")
+	}
+}
+`
+	got := formsByLine(checkSource(t, src))
+	want := map[int]string{
+		10: "a loop that waits on the wall clock",
+		14: "a deadline compared against the wall clock",
+	}
+	for line, form := range want {
+		if got[line] != form {
+			t.Errorf("line %d = %q, want %q", line, got[line], form)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("findings = %v, want %v", got, want)
+	}
+}
+
+func TestCheckFile_RejectsATimerTakenAsAValue(t *testing.T) {
+	src := `package widget
+
+import (
+	"testing"
+	"time"
+)
+
+func TestValue(t *testing.T) {
+	nap := time.Sleep
+	nap(time.Millisecond)
+}
+`
+	got := formsByLine(checkSource(t, src))
+	if got[9] != "time.Sleep taken as a value" {
+		t.Fatalf("findings = %v; a banned timer handed to a variable is called out of this walk's sight", got)
+	}
+}
+
+func TestCheckFile_RefusesAFileThatDotImportsTime(t *testing.T) {
+	src := `package widget
+
+import (
+	"testing"
+	. "time"
+)
+
+func TestDotted(t *testing.T) {
+	Sleep(Millisecond)
+}
+`
+	got := checkSource(t, src)
+	if len(got) != 1 || got[0].form != unjudgeable {
+		t.Fatalf("findings = %v, want the file refused; an unqualified Sleep is invisible to this walk", got)
 	}
 }
