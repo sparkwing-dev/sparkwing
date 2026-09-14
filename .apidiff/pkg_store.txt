@@ -204,7 +204,11 @@ type CreditCharge struct {
 	Kind        string
 	Seconds     int64
 	AmountMicro int64
-	ChargedAt   time.Time
+
+	CPUClassCores int64
+
+	RateMicroPerSecond int64
+	ChargedAt          time.Time
 }
 const CreditChargeRefund = "refund"
 const CreditChargeReservation = "reservation"
@@ -246,11 +250,23 @@ type CreditLedgerTotals struct {
 
 	SettledSeconds int64
 }
+type CreditRate struct {
+	Cores          int64
+	MicroPerSecond int64
+}
+const CreditRateBaseClassCores = 4
+type CreditRateTable []CreditRate
+func (t CreditRateTable) BaseRate() int64
+func (t CreditRateTable) ClassFor(cores float64) (CreditRate, error)
+func (t CreditRateTable) RateFor(cores int64) int64
+func (t CreditRateTable) Sorted() CreditRateTable
+func (t CreditRateTable) Validate() error
 type CreditState struct {
 	GrantedMicro       int64
 	ChargedMicro       int64
 	BalanceMicro       int64
 	RateMicroPerSecond int64
+	RateTable          CreditRateTable
 	GraceSeconds       int64
 	MaxChargeSeconds   int64
 	BurnWindow         time.Duration
@@ -375,6 +391,7 @@ const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
+func DefaultCreditRateTable(rate int64) CreditRateTable
 const DefaultLeaseDuration = 3 * time.Minute
 func DetectDialect(dsn string) Dialect
 type Dialect int
@@ -412,6 +429,7 @@ var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownToken = errors.New("unknown token")
+var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 var ErrUserNotFound = errors.New("user not found")
 type Event struct {
 	RunID   string
@@ -612,6 +630,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
@@ -1115,6 +1134,7 @@ func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
+func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
@@ -1275,6 +1295,7 @@ func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) e
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error
+func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (err error)
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
 func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
@@ -1403,6 +1424,12 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 func UnknownRequirements(listed []string) []string
+type UnpricedCPUClassError struct {
+	Cores    int64
+	MaxCores int64
+}
+func (e *UnpricedCPUClassError) Error() string
+func (e *UnpricedCPUClassError) Unwrap() error
 type User struct {
 	Name        string
 	PWHash      string
