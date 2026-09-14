@@ -436,9 +436,9 @@ type retractedReleases struct {
 }
 
 // safety: the proxy keeps serving a version forever once it has cached one, so a
-// tag cut by mistake and recalled stays on the list this check reads. The root
-// go.mod's retractions name those versions, and go reads retractions from the
-// highest published version's go.mod, which carries none of them yet.
+// tag cut by mistake and recalled stays on the list this check reads. Go reads a
+// module's retractions from its @latest go.mod, so a line added here reaches
+// that list only from the next release carrying it.
 func repoRetractedReleases(repoRoot string) (retractedReleases, error) {
 	path := filepath.Join(repoRoot, "go.mod")
 	body, err := os.ReadFile(path)

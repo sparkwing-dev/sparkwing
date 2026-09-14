@@ -74,10 +74,12 @@ unlock.
   branch and recalled within the hour. The module proxy had already cached it,
   so its version list still offers v0.52.0 and a pin at that version resolves
   only through a proxy that fetched it, never on `GOPROXY=direct` or a private
-  proxy. Go reads retractions from the highest published version's `go.mod`,
-  which is the v1.x tombstone release, so this entry is a record until the next
-  tombstone carries it. v0.52.0 is never re-cut on another commit: a second tag
-  under that version would mismatch the `go.sum` every consumer has cached.
+  proxy. Go reads a module's retractions from its `@latest` `go.mod`, so this
+  one reaches consumers with the next release that carries it; a release that
+  outranks v0.52.0 is separately what stops version tooling offering the
+  recalled tag as an upgrade. v0.52.0 is never re-cut on another commit: a
+  second tag under that version would mismatch the `go.sum` every consumer has
+  cached.
 
 - **release:** The version freshness check skips versions the repository's own
   `go.mod` retracts. A pin at the newest release this line carries passes while

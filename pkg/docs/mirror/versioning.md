@@ -23,19 +23,26 @@ this project does not stand behind: the whole v1.x.y line, and v0.52.0,
 a tag cut from a fixture commit on no branch and recalled within the
 hour. Do not pin to any of them.
 
-The proxy keeps serving a version it has fetched at least once. v0.52.0
-was fetched, so it still resolves and version tooling still offers it.
-The v1.x tombstones were never fetched through the proxy, and their
-`.info` and `.mod` endpoints answer 404 today. A version the proxy holds
-is never re-cut on another commit: a second tag under that version would
-mismatch the `go.sum` every consumer has already cached.
+Go reads a module's retractions from its `@latest` go.mod, which the
+proxy resolves from the repository's live tags. Every entry in the block
+is in force from the first release that carries it: `go list -m
+-versions` omits every retracted version, and `go list -m -retracted
+-versions` shows them again. A retraction reaches consumers with the
+next ordinary v0.x release whose `go.mod` carries the line, and needs no
+release on the v1 line to deliver it.
 
-Go reads retractions from the highest published version's `go.mod`.
-v1.6.1 heads the proxy's version list, so nothing on the v0 line
-outranks it and only a new v1.6.x tombstone can carry the block, and
-v1.6.1's own `go.mod` is unfetchable. No retraction in this module
-reaches a consumer today; the block is the project's record of what not
-to pin.
+Retracted and resolvable are separate things. The proxy keeps serving a
+version it fetched at least once, so v0.52.0 and v0.30.0 still resolve;
+the v1.x tags were never fetched through it and their `.info` and `.mod`
+endpoints answer 404, though the version list still names them. A
+version the proxy holds is never re-cut on another commit: a second tag
+under that version would mismatch the `go.sum` every consumer has
+already cached.
+
+Version tooling reads the version list rather than the retract block
+until a release carries the line, so a release that outranks v0.52.0 is
+what stops tooling offering the recalled tag as an upgrade. That is a
+separate recommendation from the retraction itself.
 
 ## Versioning per repo
 
