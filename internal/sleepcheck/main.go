@@ -77,7 +77,7 @@ Fix the test rather than adding a line to ` + baselineRelPath + `; that file
 lists the offenders that predate this rule and only ever shrinks.
 `
 
-const alternatives = "wait on a signalled condition, inject a fake clock, or use testing/synctest"
+const alternatives = "wait on a signaled condition, inject a fake clock, or use testing/synctest"
 
 func usage() {
 	fmt.Fprint(flag.CommandLine.Output(), usageText)

@@ -138,7 +138,7 @@ unlock.
   `time.After`, `time.Tick`, `time.NewTimer` or `time.NewTicker`, or that reads
   `time.Now` or `time.Since` as a wait: an ordering comparison, a loop
   condition, or a `context.WithTimeout` or `WithDeadline` argument. Each
-  finding names the alternative on one line, which is a signalled condition
+  finding names the alternative on one line, which is a signaled condition
   from the code under test, an injected or fake clock, or `testing/synctest`. A
   `time.Now()` that only stamps a fixture value stays allowed. The new
   `test-sleeps` step runs the checker in `pre-commit` and `gate` over the

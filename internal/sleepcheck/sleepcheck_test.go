@@ -215,7 +215,7 @@ func TestScan_FailsATestFileItCannotParse(t *testing.T) {
 }
 
 func TestReport_NamesTheAlternatives(t *testing.T) {
-	for _, want := range []string{"synctest", "fake clock", "signalled", "shrinks"} {
+	for _, want := range []string{"synctest", "fake clock", "signaled", "shrinks"} {
 		if !strings.Contains(advice+alternatives, want) {
 			t.Errorf("the failure advice does not name %q:\n%s\n%s", want, alternatives, advice)
 		}
