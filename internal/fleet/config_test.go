@@ -125,33 +125,6 @@ func TestLoadRejectsReachableConfigSymlinkOrBroadMode(t *testing.T) {
 	}
 }
 
-func TestAppendExecutorPublishesOnlyPolicyAndPreservesConfig(t *testing.T) {
-	path := writeConfig(t, "listen: 127.0.0.1:7443\npublic_url: http://127.0.0.1:7443\nlocal:\n  name: laptop\n  contribution: 25%,25%\n")
-	cfg, err := AppendExecutor(path, Executor{
-		Name: "desk", Location: "local",
-		BasePriority: 50, PriorityCeiling: 80, MaxConcurrent: 2,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Local.Name != "laptop" || cfg.Local.Contribution != "25%,25%" || len(cfg.Executors) != 1 {
-		t.Fatalf("updated config = %+v", cfg)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "secret") || strings.Contains(string(body), "token_prefix") || strings.Contains(string(body), "swr_") {
-		t.Fatalf("persisted config = %s", body)
-	}
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != 0o600 {
-			t.Fatalf("mode = %v, %v", info.Mode().Perm(), err)
-		}
-	}
-}
-
 func TestCreateWritesOwnerOnlyConfigAndNeverReplacesIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config", Filename)
 	cfg := Config{

@@ -131,6 +131,23 @@ unlock.
   node run this way bills its minute. Both `--trigger-runner warm` and
   `--trigger-runner k8s` take the claim.
 
+### Removed
+
+- **runner + cli (Breaking):** Enrolled mode leaves `agent.yaml`, the agent CLI
+  and the fleet CLI
+
+  `name` and `coordinators` selected a path the controller refuses on both the
+  claim route and the offer route, so the loop they started claimed nothing. A
+  file that still sets either key fails to load with a message naming the
+  removed mode. `sparkwing-runner agent --allow-enrolled-preview` and
+  `sparkwing fleet agents enroll`, whose one-time output was a `coordinators`
+  block, go with them. See the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-agent-configuration-is-removed).
+  Claim mode is unchanged and keeps `controller`, `logs`, `token`, `labels`,
+  `max_concurrent`, `contribution`, `local_admission`, `local_reserve`,
+  `holder_prefix` and the rest, which is the shape `sparkwing cluster runners
+  add` and the service installer write.
+
 ## [v0.50.2] - 2026-09-14
 
 ### Added

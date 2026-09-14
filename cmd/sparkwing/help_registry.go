@@ -3824,8 +3824,8 @@ Use -q to print names, one per line, for shell piping
 var cmdFleet = Command{
 	Path:     "sparkwing fleet",
 	Synopsis: "Configure foreground assisted execution",
-	Description: `Local fleet configuration and one-time helper provisioning. Running a
-pipeline with assistance still uses sparkwing run PIPELINE --sw-fleet.
+	Description: `Local fleet configuration. Running a pipeline with assistance uses
+sparkwing run PIPELINE --sw-fleet, and fleet.yaml names the helpers it trusts.
 
 Fleet runs transmit an immutable snapshot containing every tracked file and
 every non-ignored untracked file to the executor that wins a node. Review
@@ -3833,7 +3833,7 @@ every non-ignored untracked file to the executor that wins a node. Review
 output reports only the source digest, file count, and total bytes, never file
 names. The snapshot commit has no parent and does not transmit repository
 history.`,
-	SubcommandOrder: []string{"init", "agents"},
+	SubcommandOrder: []string{"init"},
 }
 
 var cmdFleetInit = Command{
@@ -3857,51 +3857,6 @@ and no peer discovery occurs.`,
 		{"Direct Tailscale transport", "sparkwing fleet init --tailnet"},
 		{"Tailscale Serve or a local proxy", "sparkwing fleet init --listen 127.0.0.1:4346 --public-url https://runner.example.com"},
 		{"Advanced direct Tailscale transport", "sparkwing fleet init --listen 100.64.1.2:4346 --public-url http://100.64.1.2:4346 --allow-tailnet-http"},
-	},
-}
-
-var cmdFleetAgents = Command{
-	Path:     "sparkwing fleet agents",
-	Synopsis: "Provision helpers for foreground coordinators",
-	Description: `Creates local verifier-backed credentials and trusted executor enrollments.
-Raw credentials print once and never enter fleet.yaml.`,
-	SubcommandOrder: []string{"enroll"},
-}
-
-var cmdFleetAgentsEnroll = Command{
-	Path:     "sparkwing fleet agents enroll",
-	Synopsis: "Provision one helper membership",
-	Description: `Atomically mints a runner credential in the local Sparkwing state
-store and binds its verifier to the trusted executor envelope. The raw
-credential prints once in an agent.yaml membership snippet on stdout. The
-trusted policy is added to fleet.yaml in the same command. Credential verifier
-and binding data remain in Sparkwing's private local state; fleet.yaml stores
-no token material or token identifier.
-
-Atomically merge stdout into the helper's owner-only agent.yaml (0600 on Unix;
-a protected user ACL on Windows). Direct shell redirection can truncate an
-existing multi-coordinator file before validation and can destroy existing
-memberships.
-
-A coordinators block selects enrolled mode, which sparkwing-runner refuses to
-start without --allow-enrolled-preview; enroll a machine that must execute work
-with 'sparkwing cluster runners add' instead.
-
-Use one credential per coordinator membership.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
-		{Name: "location", Argument: "WHERE", Desc: "Controller-owned placement (local|cloud)", Required: true, Group: "Identity"},
-		{Name: "capability", Argument: "LABEL", Desc: "Trusted capability (repeatable)", Group: "Trust"},
-		{Name: "base-priority", Argument: "N", Desc: "Base scheduling priority (0-100)", Default: "50", Group: "Trust"},
-		{Name: "priority-ceiling", Argument: "N", Desc: "Highest effective priority (0-100)", Default: "100", Group: "Trust"},
-		{Name: "max-concurrent", Argument: "N", Desc: "Trusted concurrent slot ceiling", Default: "1", Group: "Limits"},
-		{Name: "budget-cores", Argument: "N", Desc: "CPU contribution ceiling (0 = uncapped)", Default: "0", Group: "Limits"},
-		{Name: "budget-memory-bytes", Argument: "N", Desc: "Memory contribution ceiling in bytes (0 = uncapped)", Default: "0", Group: "Limits"},
-		{Name: "ttl", Argument: "DURATION", Desc: "Credential lifetime (0 = never expires)", Default: "0", Group: "Credential"},
-	},
-	GroupOrder: []string{"Identity", "Trust", "Limits", "Credential", "Other"},
-	Examples: []Example{
-		{"Provision a laptop helper", "sparkwing fleet agents enroll --name desk --location local --capability toolchain=go --max-concurrent 2"},
 	},
 }
 

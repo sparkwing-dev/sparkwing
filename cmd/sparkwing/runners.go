@@ -264,15 +264,13 @@ func validateAgentFileConfig(cfg agentFileConfig) error {
 	if err := decoder.Decode(&parsed); err != nil {
 		return fmt.Errorf("the assembled agent config does not parse: %w", err)
 	}
-	validated, err := agentconfig.Validate(parsed)
-	if err != nil {
+	if _, err := agentconfig.Validate(parsed); err != nil {
 		return err
 	}
-	return agentconfig.CheckEnrolledExecutionAvailable(validated, false)
+	return nil
 }
 
-// safety: the claim-mode subset install/service-install.sh writes. A name or a coordinator here would select
-// enrolled mode, which the agent refuses to start.
+// safety: the claim-mode subset install/service-install.sh writes.
 type agentFileConfig struct {
 	Controller     string   `yaml:"controller"`
 	Logs           string   `yaml:"logs,omitempty"`

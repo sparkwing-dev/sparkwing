@@ -1,14 +1,44 @@
 # Migrating to the next release
 
-No breaking changes so far. One schema migration takes longer than the
-others on a large database; it needs no action.
+One breaking change, which affects a machine whose `agent.yaml` still carries
+`name` or `coordinators` and anyone running `sparkwing fleet agents enroll`.
+One schema migration also takes longer than the others on a large database; it
+needs no action.
 
-## Schema v38 builds two indexes while the controller starts
+## Enrolled agent configuration is removed
 
-Schema v38 adds three storage tables and builds timestamp indexes on `events`
-and `node_metrics`, which are usually the two largest tables. Budget roughly a
-second per million rows in each. On Postgres the build takes a lock that
-blocks writes to those tables for its duration, so a controller with hundreds
-of millions of event rows is briefly unavailable for writes while it starts.
-Nothing else is required; the migration adds no column and declares no
-requirement, so a binary predating it still opens the database.
+**Before:** `agent.yaml` accepted `name` and `coordinators`, which selected
+enrolled mode. The controller refuses that credential on both the claim route
+and the offer route, so v0.50.2 made the agent refuse to start and name the
+state, and `--allow-enrolled-preview` started the unfinished path anyway.
+
+**After:** both keys are gone from `agent.yaml`, and so are
+`--allow-enrolled-preview` and `sparkwing fleet agents enroll`, whose one-time
+output was a `coordinators` block. A file that still sets either key fails to
+load:
+
+```
+parse ~/.config/sparkwing/agent.yaml: enrolled mode has been removed;
+delete name and coordinators from agent.yaml to run in claim mode, which
+executes work
+```
+
+**What to do:** delete `name` and `coordinators`. What remains is claim mode,
+the mode that executes work. Set `holder_prefix` to the name you want in the
+dashboard; `controller`, `logs`, `token`, `labels`, `max_concurrent`,
+`contribution`, `local_admission`, `local_reserve` and the rest keep their
+meaning. `sparkwing cluster runners add` and `install/service-install.sh` write
+that shape.
+
+**Why:** enrolled mode had no execution behind it in any release. Keeping the
+keys meant an operator could still write a config the runner would not run.
+
+**Edge cases:** `sparkwing fleet agents enroll` is removed with the format it
+printed. It minted an executor-bound credential and printed it as a
+`coordinators` block, which no `agent.yaml` accepts. Add a machine that
+executes work with `sparkwing cluster runners add`. `fleet.yaml` keeps its
+`executors` list and every reader of it. Write that list by hand, and bind each
+entry to a live runner credential with `sparkwing cluster agents enroll
+--token-prefix` against a controller serving this machine's state database; a
+`--sw-fleet` run refuses to start when the list is empty or an entry has no
+binding, naming the file or the executor.

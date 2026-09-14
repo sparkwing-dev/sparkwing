@@ -471,24 +471,21 @@ when testing deterministic placement.
 
 ### Remote machine capacity
 
-`sparkwing-runner agent` has separate legacy and enrolled modes. Claim mode is
-the mode that executes work: an agent whose configuration sets `name` or
-`coordinators` refuses to start and exits non-zero, saying that enrolled
-execution is not available and that removing both keys runs it in claim mode.
-`--allow-enrolled-preview` starts that configuration anyway, against the
-unfinished enrolled path, for the developers of that path. The rest of this
-section describes the enrolled design the refusal holds back.
+`sparkwing-runner agent` runs claim mode, the mode that executes work. Its
+`agent.yaml` carries no `name` and no `coordinators`; a file that still sets
+either key fails to load and names the removed enrolled mode. The rest of this
+section describes the controller-side enrolled design, which no agent
+configuration selects.
 
-The name-less singular configuration uses the existing outbound FIFO
-`/api/v1/nodes/claim` loop. Its `labels` are self-asserted placement terms,
-not administrator-trusted capabilities. `sparkwing cluster runners add` and the
-bundled service installer both write this format. Existing files keep their
-`local_admission` setting, including an explicit `false`; when enabled, legacy
-local admission happens after a claim.
+The configuration uses the outbound FIFO `/api/v1/nodes/claim` loop. Its
+`labels` are self-asserted placement terms, not administrator-trusted
+capabilities. `sparkwing cluster runners add` and the bundled service installer
+both write this format. Existing files keep their `local_admission` setting,
+including an explicit `false`; when enabled, legacy local admission happens
+after a claim.
 
-Named or plural configuration selects enrolled assisted-offer mode. Before
-starting it, a controller administrator binds the executor to the exact prefix
-of a live runner or service token:
+The controller owns the enrolled assisted-offer design. An administrator binds
+an executor to the exact prefix of a live runner or service token:
 
 ```bash
 sparkwing cluster agents enroll --profile prod \
@@ -508,44 +505,21 @@ retry. Capabilities, priority range, concurrency ceiling, and
 resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
 
-`sparkwing fleet agents enroll` prints a `coordinators` membership for this
-shape, so the agent refuses the merged config until enrolled execution ships or
-`--allow-enrolled-preview` is passed.
+A foreground coordinator reads its trusted helpers from the `executors` list in
+`fleet.yaml`. Write that list by hand; no command edits it. Each entry names an
+executor that this machine's state database already binds to a live runner
+credential carrying `nodes.claim` and `runs.state`, and a run refuses to start
+when one does not, naming the executor. Create the binding against a controller
+that serves this same state database, which `sparkwing-controller` does: mint
+the credential with `sparkwing cluster runners add --profile <p>`, then bind it
+with `sparkwing cluster agents enroll --profile <p> --name <helper>
+--token-prefix <prefix> --kind agent --location local`. Network discovery never
+grants trust.
 
-Set `name` for one enrolled coordinator, or use `coordinators` for several.
-Every membership needs a distinct revocable token and its enrolled name;
-network discovery never grants trust. The top-level concurrency and
-contribution settings are machine-wide local ceilings. A membership may narrow
-them, never widen them. wingd enforces both levels when it grants each
-reservation, so simultaneous slots and separate agent processes cannot
-oversubscribe a ceiling after advertising stale headroom:
-
-```yaml
-name: desk
-max_concurrent: 2
-contribution: 4,8gb
-local_admission: true
-local_reserve: 1,2gb
-coordinators:
-  - controller: https://personal.example.com
-    token: <personal-agent-token>
-    max_concurrent: 1
-    contribution: 2,4gb
-  - name: desk-at-work
-    controller: https://team.example.com
-    token: <team-agent-token>
-```
-
-Enrolled mode requires local admission. It probes wingd for finite nonnegative
-headroom and reports liveness to each coordinator; a failed probe sends no
-heartbeat and does not clear the coordinator's last report. Coordinator loops
-restart independently. Idle enrollments remain visible, and stale ones appear
-offline.
-
-For each idle slot, the agent asks a coordinator for the oldest eligible node.
-A compatible sealed node returns `body_attestation_required` before wingd
-reservation or offer. The agent does not reserve local capacity or execute the
-node without an exact compiled-body attestation.
+An enrolled executor reports liveness to its coordinator, and a controller that
+hears nothing shows it offline. Idle enrollments remain visible. A compatible
+sealed node returns `body_attestation_required`, so no helper reserves capacity
+or executes a node without an exact compiled-body attestation.
 
 The retained offer records encode a five-second arbitration rule. Priority 100
 and the exact highest eligible effective priority recorded at round open win
@@ -556,9 +530,8 @@ populate an offer round while compiled-body attestation is absent.
 Run priority and the first matching `Prefers` term add to base priority and are
 then clamped inside each administrator-owned priority range. A preference is a
 small tie-breaking boost, not an absolute override: base priority can still
-outweigh it. Arbitration is scoped to one controller; configured memberships
-share physical slots but do not yet compare priorities across controllers. A
-retry after a lost response recovers the same fenced claim. Legacy direct
+outweigh it. Arbitration is scoped to one controller. A retry after a lost
+response recovers the same fenced claim. Legacy direct
 claims remain FIFO and do not use this ranking.
 
 The controller owns retries after an agent or gateway disappears. The source
