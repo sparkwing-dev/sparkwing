@@ -3,7 +3,8 @@
 sparkwing-cache is sparkwing's in-cluster git cache, blob store, and
 package proxy. It mirrors repositories from GitHub, serves git clones over
 HTTP, stores SHA-scoped Git bundles and legacy code uploads, caches package
-registry responses, and keeps itself fresh with a background fetch loop.
+registry responses, fetches a commit it lacks on demand, and keeps mirrors
+that were used recently warm.
 
 The cache is **read-only for git** - pipelines clone from it but push
 directly to GitHub. This eliminates a class of divergence bugs where
@@ -125,15 +126,36 @@ ingress exposes these routes to machine bearers without accepting browser
 session credentials. A direct cache URL over a LAN, VPN, or tailnet remains
 supported through `agent.yaml` `gitcache` and `cache_token`.
 
-## Background Fetch
+## On-Demand Fetch
 
-The cache periodically fetches upstream for all registered bare repos
-(default: every 30 seconds, configurable via `FETCH_INTERVAL` env var).
+A clone that asks for a commit the mirror does not have makes the cache
+fetch origin before `git upload-pack` answers, and only then refuses. A
+trigger fires seconds after a push, so this is what lets the run build
+the commit that triggered it instead of being told the ref is not ours.
 
-This keeps repos fresh so that:
+The fetch is deduplicated per repository: a burst of triggers on one
+push costs origin one fetch, because every request that waited for the
+repository lock finds either the commit or a fetch that completed after
+it arrived. A commit origin does not have costs one fetch and then the
+same `not our ref` refusal git has always sent.
 
-- Runner clones see recent commits without cold-start fetches
-- Ancestor negotiation for incremental uploads succeeds more often
+The log line `on-demand fetch: <hash> took <duration>` and the
+`sparkwing.gitcache.mirror_fetches` counter (labelled `reason` =
+`on_demand` or `keep_warm`, and `failed`) report these fetches;
+`sparkwing.gitcache.fetch_duration` carries the same labels.
+
+## Keep-Warm Pass
+
+Every `FETCH_INTERVAL` the cache refreshes the mirrors a request touched
+in the last hour, and leaves every other mirror alone. A repository
+nobody is building costs origin nothing, which matters on a hosted cache
+holding many customers' repositories; an active one stays warm, so its
+next clone skips the fetch and ancestor negotiation for incremental
+uploads keeps succeeding.
+
+Setting `FETCH_INTERVAL` to `0` turns the pass off entirely. Correctness
+does not depend on it: every mirror fetches when a request needs a
+commit it lacks.
 
 ## Egress Guards
 
@@ -144,15 +166,16 @@ avoided egress cost.
 ### Fetch freshness throttle
 
 `/archive`, `/file`, `/tree-hash`, `/branch-contains`, and
-`/sync/negotiate` used to run their own `git fetch` on **every** request.
-The background loop already fetches every repo every 30 seconds, so a
-webhook burst multiplied GitHub traffic without making anything fresher.
+`/sync/negotiate` used to run their own `git fetch` on **every** request,
+so a webhook burst multiplied GitHub traffic without making anything
+fresher.
 
-Now a successful fetch (from the background loop, from a request, or from
+Now a successful fetch (from the keep-warm pass, from a request, or from
 `/git/refresh`) marks the repo fresh for `FETCH_FRESH_WINDOW`
 (default 15s), and requests inside that window serve straight from the
-mirror. Worst-case staleness is unchanged in practice: it is still bounded
-by the background fetch interval.
+mirror. The throttle does not apply to a clone that names a commit the
+mirror lacks: that fetch answers a question the window cannot, so it runs
+whatever the window says.
 
 `POST /git/refresh` **is not throttled**. It exists to close the
 `git push && sparkwing pipeline trigger` race, so it always performs a
@@ -190,7 +213,7 @@ Health problems to expect from `GET /health`:
 | Problem text | What it means |
 |--------------|---------------|
 | `repo <hash>: recovery reclone ran N times in 24h -- persistent fetch failure; ...` | The mirror keeps failing to fetch and reclones are papering over it. Read the `recovery reclone:` log line for the git error, fix the cause (often a conflicting ref -- `git remote prune origin`, or delete the conflicting ref inside `/data/repos/<hash>.git`), then let the background loop resume. |
-| `repo <hash>: <friendly fetch error>` | The most recent background fetch failed (SSH, DNS, timeout, fork exhaustion). |
+| `repo <hash>: <friendly fetch error>` | The most recent mirror fetch failed (SSH, DNS, timeout, fork exhaustion). |
 | `repo <hash>: clone failed: ...` / `auto-clone failed: ...` | A mirror that was missing could not be cloned. The repo is on the clone cooldown until it expires or the repo is re-registered; seeding via `POST /sync/seed` also works when upstream is unreachable. |
 
 An operator who wants the old per-request behavior back can set
@@ -478,7 +501,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `SPARKWING_API_TOKEN` | Bearer token for every route outside `/health`, `/metrics`, `/stats`, and `/proxy/`. Required unless auth is disabled |
 | `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | Start without a token, leaving those routes open |
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
-| `FETCH_INTERVAL` | Background fetch interval (default: `30s`) |
+| `FETCH_INTERVAL` | How often the keep-warm pass refreshes mirrors a request touched in the last hour (default: `30s`; `0` turns the pass off) |
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
 | `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |

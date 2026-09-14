@@ -149,6 +149,20 @@ unlock.
 
 ### Changed
 
+- **cache:** The gitcache fetches a commit on demand and no longer polls every
+  mirror. A clone that asks for a commit the mirror lacks now makes the cache
+  fetch origin before `git upload-pack` answers, so a run triggered seconds
+  after a push builds that push instead of being told the ref is not ours; a
+  commit origin does not have costs one fetch and then the same `not our ref`
+  refusal as before. The fetch is deduplicated per repository, so a burst of
+  triggers on one push asks origin once. The background loop becomes a
+  keep-warm pass: it refreshes only mirrors a request touched in the last hour,
+  which leaves a repository nobody is building untouched, and `FETCH_INTERVAL`
+  (`--fetch-interval`) of `0` now turns the pass off entirely instead of
+  falling back to 30 seconds. The default cadence is still 30 seconds. New
+  `sparkwing.gitcache.mirror_fetches` counter, and a `reason`
+  (`on_demand`/`keep_warm`) and `failed` label on it and on
+  `sparkwing.gitcache.fetch_duration`, report what these fetches cost.
 - **checks:** The git pre-push hook runs the new `pre-push` pipeline instead of
   `gate`. It judges the push with the checks that answer in seconds: gofmt and
   the configured formatters over the changed Go files, the comment policy, the
