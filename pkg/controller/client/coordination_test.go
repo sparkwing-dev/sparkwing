@@ -78,6 +78,9 @@ func newCoordinationFixture(t *testing.T) coordinationFixture {
 }
 
 func TestClientTriggerLoopRoutesMatchTheStore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newCoordinationFixture(t)
 	c, st := f.runner, f.store
 	ctx := context.Background()

@@ -124,6 +124,9 @@ func mustRequest(t *testing.T, method, url string, body io.Reader) *http.Request
 }
 
 func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +221,9 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 }
 
 func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	repoURL := "https://git.example.com/acme/widgets.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)

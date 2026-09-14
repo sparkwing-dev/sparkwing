@@ -42,6 +42,9 @@ func postGrant(t *testing.T, f creditsFixture, body map[string]any) (int, grantW
 // A payment webhook redelivers until it sees a 2xx, so the route answers the
 // second delivery with the grant it already wrote.
 func TestCreditsGrantRouteIsIdempotentByReference(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, false)
 	body := map[string]any{
 		"kind":         store.CreditGrantPaid,

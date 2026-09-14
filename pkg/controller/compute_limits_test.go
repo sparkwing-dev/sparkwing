@@ -57,6 +57,9 @@ func computeLimitEvents(t *testing.T, f creditsFixture, runID string) []store.Ev
 }
 
 func TestComputeLimits_ShowAndSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 
 	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
@@ -165,6 +168,9 @@ func TestComputeLimits_ClaimRefusedByTheRunnerGuard(t *testing.T) {
 }
 
 func TestComputeLimits_HeartbeatCancelsANodePastTheWallClockGuard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -242,6 +248,9 @@ func TestComputeLimits_RunCreationRefusedPastTheHourlyCap(t *testing.T) {
 }
 
 func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCronsFixture(t)
 	admin, _, err := f.store.CreateToken("root", store.TokenKindUser,
 		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
@@ -269,6 +278,9 @@ func TestComputeLimits_CronBelowTheMinimumIntervalIsRefused(t *testing.T) {
 // safety: a refusal names the principal it refused, so recording it on another
 // principal's run would put that name in a status its owner reads.
 func TestComputeLimits_RefusalStaysInsideTheRefusedPrincipal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -297,6 +309,9 @@ func TestComputeLimits_RefusalStaysInsideTheRefusedPrincipal(t *testing.T) {
 }
 
 func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -328,6 +343,9 @@ func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
 // safety: a trigger creates the run it names, so the hourly guard has to see
 // the triggering principal rather than an unowned run.
 func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
@@ -362,6 +380,9 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 // safety: a retry storm is exactly the loop the hourly guard exists to bound,
 // so a retry has to count against the principal that asked for it.
 func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
@@ -401,6 +422,9 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 // safety: a schedule's runs belong to the principal that armed it, which is
 // what makes a hot cron count against that team rather than nobody.
 func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCronsFixture(t)
 	ctx := context.Background()
 	body := map[string]any{
@@ -428,6 +452,9 @@ func TestComputeLimits_CronLaunchesCarryTheArmingPrincipal(t *testing.T) {
 // safety: run-now is a launch like any other, so a guard has to refuse it with
 // the same code every other surface answers.
 func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCronsFixture(t)
 	ctx := context.Background()
 	body := map[string]any{
@@ -472,6 +499,9 @@ func TestComputeLimits_CronRunNowAtTheCapAnswers429(t *testing.T) {
 }
 
 func TestComputeLimits_ShowsTheDerivedRunnerCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 
 	_, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)

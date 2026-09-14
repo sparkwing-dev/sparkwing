@@ -238,6 +238,9 @@ func TestOneBudgetDoesNotRefuseAnotherPrincipal(t *testing.T) {
 }
 
 func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	art := &fakeArtifactStore{objects: map[string][]byte{"k": []byte("payload")}}
 	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 1 << 20, MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4}, art)
 	seedLiveLog(t, f, "r1", "n1", "hello\n")

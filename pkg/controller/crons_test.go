@@ -348,6 +348,9 @@ func TestControllerCrons_DisarmAndDeleteRepo(t *testing.T) {
 }
 
 func TestControllerCrons_ScopesAreEnforced(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCronsFixture(t)
 	f.push(cronPushBody())
 
@@ -461,6 +464,9 @@ func TestControllerCrons_OverrideValuesSurviveTheWire(t *testing.T) {
 }
 
 func TestControllerCrons_DetailServesTheWholeRetainedHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCronsFixture(t)
 	pushed := f.push(cronPushBody())
 	schedules, _ := pushed["schedules"].([]any)

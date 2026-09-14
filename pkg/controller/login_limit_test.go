@@ -109,6 +109,9 @@ func TestLoginLimiter_UntrustedPeerCannotRotateWithForwardedHeader(t *testing.T)
 }
 
 func TestLogin_AccountFailureBackoff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	st := newStoreForAuth(t)
 	now := time.Now().UTC()
 	if _, err := st.CreateUser("alice", "correct horse battery", []string{ScopeAdmin}, now); err != nil {
@@ -190,6 +193,9 @@ func TestAuthenticator_NegativeCacheEvictsInsteadOfClosing(t *testing.T) {
 }
 
 func TestLogin_AccountBackoffIsPerClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st := newStoreForAuth(t)
 	now := time.Now().UTC()
 	if _, err := st.CreateUser("alice", "correct horse battery", []string{ScopeAdmin}, now); err != nil {
@@ -252,6 +258,9 @@ func TestWriteLoginUnavailable_HashingBusyIs503(t *testing.T) {
 }
 
 func TestAuthenticator_PrefixBudgetRefusesVariedGuessesWithoutHashing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	st := newStoreForAuth(t)
 	now := time.Now().UTC()
 	raw, _, err := st.CreateToken("runner", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, now)
@@ -397,6 +406,9 @@ func TestAuthenticator_CachedPrincipalNeedsNoStoreOrHash(t *testing.T) {
 }
 
 func TestAuthenticator_PrefixBudgetIsPerClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	st := newStoreForAuth(t)
 	now := time.Now().UTC()
 	raw, _, err := st.CreateToken("runner", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, now)

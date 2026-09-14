@@ -81,6 +81,9 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 }
 
 func TestFinishRun_NoPinNoDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
