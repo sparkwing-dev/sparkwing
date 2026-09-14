@@ -1,14 +1,18 @@
 // Package envredact classifies environment variables that must not be
 // persisted verbatim. It matches on the name, on the value shape, and
 // rewrites URL and DSN userinfo so a stored environment keeps the host
-// without the password.
+// without the password. The same vocabulary classifies file names and
+// file bytes, so a caller that ships a working tree elsewhere refuses
+// the same credentials this package refuses to persist.
 package envredact
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/url"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -101,6 +105,63 @@ var nonCredentialExact = map[string]bool{
 	"PWD":                                   true,
 	"OLDPWD":                                true,
 }
+
+var secretFileExtensions = map[string]bool{
+	"pem":      true,
+	"key":      true,
+	"p12":      true,
+	"pfx":      true,
+	"pkcs12":   true,
+	"jks":      true,
+	"keystore": true,
+	"ppk":      true,
+	"kdbx":     true,
+}
+
+var secretFileNames = map[string]bool{
+	"id_rsa":     true,
+	"id_dsa":     true,
+	"id_ecdsa":   true,
+	"id_ed25519": true,
+	".netrc":     true,
+	"_netrc":     true,
+	".pgpass":    true,
+	".htpasswd":  true,
+}
+
+var credentialDataExtensions = map[string]bool{
+	"":           true,
+	"json":       true,
+	"yaml":       true,
+	"yml":        true,
+	"txt":        true,
+	"ini":        true,
+	"conf":       true,
+	"cfg":        true,
+	"toml":       true,
+	"properties": true,
+	"secret":     true,
+}
+
+var nonSecretFileStems = map[string]bool{
+	"authors":      true,
+	"contributors": true,
+	"maintainers":  true,
+	"authorship":   true,
+}
+
+var contentScanExtensions = map[string]bool{
+	"":           true,
+	"env":        true,
+	"txt":        true,
+	"ini":        true,
+	"conf":       true,
+	"cfg":        true,
+	"properties": true,
+	"secret":     true,
+}
+
+const maxCredentialFileBytes = 64 << 10
 
 const jsonScanDepth = 8
 
@@ -376,4 +437,82 @@ func envNameShaped(name string) bool {
 		}
 	}
 	return true
+}
+
+// CredentialFileName reports whether a file name is secret-shaped: a
+// dotenv file, a key or keystore extension, a well-known private key
+// name, or a configuration or data file whose stem is a
+// credential-shaped name. A source file is never secret-shaped by its
+// name, because a name such as auth.go describes code rather than
+// carrying a secret.
+func CredentialFileName(path string) bool {
+	name, extension := fileNameAndExtension(path)
+	if name == "" {
+		return false
+	}
+	lower := strings.ToLower(name)
+	if secretFileNames[lower] || dotenvName(lower) {
+		return true
+	}
+	if secretFileExtensions[extension] {
+		return true
+	}
+	if !credentialDataExtensions[extension] {
+		return false
+	}
+	stem := name
+	if extension != "" {
+		stem = name[:len(name)-len(extension)-1]
+	}
+	if nonSecretFileStems[strings.ToLower(stem)] {
+		return false
+	}
+	return CredentialName(stem)
+}
+
+// CredentialFileScannable reports whether a file of this name and size
+// is worth reading for credential content. Only a small configuration
+// or data file is: a compiled artifact or an archive has no line
+// structure the value patterns can judge, and a large file is not the
+// shape a leaked secret takes.
+func CredentialFileScannable(path string, size int64) bool {
+	return size > 0 && size <= maxCredentialFileBytes && contentScannedExtension(path)
+}
+
+// CredentialFileContent reports whether the bytes of a scannable file
+// carry a credential. Binary content is never judged, because the value
+// patterns read lines.
+func CredentialFileContent(path string, content []byte) bool {
+	if !CredentialFileScannable(path, int64(len(content))) {
+		return false
+	}
+	if bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
+		return false
+	}
+	return CredentialValue(string(content))
+}
+
+func contentScannedExtension(path string) bool {
+	name, extension := fileNameAndExtension(path)
+	if dotenvName(strings.ToLower(name)) {
+		return true
+	}
+	return contentScanExtensions[extension]
+}
+
+func fileNameAndExtension(path string) (string, string) {
+	name := path
+	if cut := strings.LastIndexAny(name, "/\\"); cut >= 0 {
+		name = name[cut+1:]
+	}
+	lower := strings.ToLower(name)
+	extension := lower[strings.LastIndexByte(lower, '.')+1:]
+	if extension == lower {
+		extension = ""
+	}
+	return name, extension
+}
+
+func dotenvName(lower string) bool {
+	return lower == ".env" || strings.HasPrefix(lower, ".env.") || strings.HasSuffix(lower, ".env")
 }

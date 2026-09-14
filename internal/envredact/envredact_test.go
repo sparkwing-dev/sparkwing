@@ -212,3 +212,70 @@ func TestCredentialTokenBoundaries(t *testing.T) {
 		}
 	})
 }
+
+func TestCredentialFileName(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{".env", true},
+		{"services/.env", true},
+		{".env.production", true},
+		{"staging.env", true},
+		{"certs/server.pem", true},
+		{"certs/server.key", true},
+		{"keystore.p12", true},
+		{"android/release.jks", true},
+		{"deploy/bundle.pfx", true},
+		{".ssh/id_rsa", true},
+		{"id_ed25519", true},
+		{"credentials", true},
+		{"aws/credentials.json", true},
+		{"config/token.yaml", true},
+		{"deploy/secrets.yml", true},
+		{".netrc", true},
+		{".ssh/id_rsa.pub", false},
+		{"pkg/controller/auth.go", false},
+		{"cmd/sparkwing/secret.go", false},
+		{"web/package.json", false},
+		{"AUTHORS", false},
+		{"Makefile", false},
+		{"docs/authentication.md", false},
+		{"internal/keyring/keyring.rs", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := CredentialFileName(tc.path); got != tc.want {
+			t.Errorf("CredentialFileName(%q) = %t, want %t", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestCredentialFileContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		path    string
+		content string
+		want    bool
+	}{
+		{"dotenv assignment", ".env", "APP_NAME=demo\nAPI_TOKEN=live-value\n", true},
+		{"private key block", "deploy/bundle.conf", "-----BEGIN RSA PRIVATE KEY-----\nabc\n", true},
+		{"ordinary settings", "app.conf", "timeout=30s\nregion=us-west-2\n", false},
+		{"unscanned extension", "web/package.json", `{"private": true}`, false},
+		{"binary bytes", "fixtures/blob.txt", "\x00\x01API_TOKEN=live-value\n", false},
+		{"empty file", ".env", "", false},
+	}
+	for _, tc := range cases {
+		if got := CredentialFileContent(tc.path, []byte(tc.content)); got != tc.want {
+			t.Errorf("%s: CredentialFileContent = %t, want %t", tc.name, got, tc.want)
+		}
+	}
+	oversize := make([]byte, maxCredentialFileBytes+1)
+	for i := range oversize {
+		oversize[i] = 'a'
+	}
+	copy(oversize, []byte("API_TOKEN=live-value\n"))
+	if CredentialFileContent(".env", oversize) {
+		t.Error("CredentialFileContent read a file past the size limit")
+	}
+}
