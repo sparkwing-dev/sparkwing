@@ -750,3 +750,74 @@ func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
 		}
 	}
 }
+
+func TestCredits_HistoryNamesTheClassAndRateEachChargeWasBilledAt(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table": map[string]int64{"2": 10_000, "4": 20_000},
+	}); status != http.StatusOK {
+		t.Fatalf("set the rate table = %d", status)
+	}
+	c := client.NewWithToken(f.url, nil, f.runner)
+	seedRunNode(t, f.store, "run-classed", "build")
+	if err := f.store.MarkNodeReady(ctx, "run-classed", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	setNodeChargeWindow(t, f.store, "run-classed", "build", time.Now().Add(-30*time.Second))
+	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
+	if err := c.HeartbeatNodeClaim(claimCtx, "run-classed", "build", "pod-1", time.Minute, nil); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+
+	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/history", f.readonly, nil)
+	if status != http.StatusOK {
+		t.Fatalf("history = %d: %s", status, body)
+	}
+	var history struct {
+		Charges []struct {
+			Kind               string `json:"kind"`
+			CPUClassCores      int64  `json:"cpu_class_cores"`
+			RateMicroPerSecond int64  `json:"rate_micro_per_second"`
+		} `json:"charges"`
+	}
+	if err := json.Unmarshal(body, &history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history.Charges) != 2 {
+		t.Fatalf("charges = %d, want the reservation and the usage", len(history.Charges))
+	}
+	for _, charge := range history.Charges {
+		// safety: a node whose plan pins no cpu resolves to one core, which the
+		// smallest class covers.
+		if charge.CPUClassCores != 2 || charge.RateMicroPerSecond != 10_000 {
+			t.Fatalf("%s charge billed class %d at %d, want the 2-core class at 10000",
+				charge.Kind, charge.CPUClassCores, charge.RateMicroPerSecond)
+		}
+	}
+
+	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.readonly, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET /credits = %d: %s", status, body)
+	}
+	var state struct {
+		RateTable []creditRateView `json:"rate_table"`
+	}
+	if err := json.Unmarshal(body, &state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if len(state.RateTable) != 2 || state.RateTable[0].MicroPerSecond != 10_000 {
+		t.Fatalf("the credit state names %+v, want the two classes in force", state.RateTable)
+	}
+}
