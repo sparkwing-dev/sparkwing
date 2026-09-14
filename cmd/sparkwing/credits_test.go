@@ -346,6 +346,8 @@ func TestCreditSettingsCLIWireMatchesTheController(t *testing.T) {
 	}
 	if !strings.Contains(plain.String(), "grace_seconds\t0\n") {
 		t.Fatalf("plain output = %q", plain.String())
+	}
+}
 
 func TestCreditGrantAmountRule(t *testing.T) {
 	t.Parallel()
