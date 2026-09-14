@@ -14,20 +14,31 @@ launcher when testing isolated tool state.
 
 ## Checks
 
-- **The three local tiers:** `pre-commit` judges the staged change against
-  this repo's source policy and nothing else, which is what keeps it cheap
-  enough to run on every commit; the git pre-commit hook runs it. `gate` is the
-  broad check, and the git pre-push hook runs it. `pre-release` is the
-  release-boundary tier, which the release pipeline runs and no git hook fires;
-  hosted CI runs `gate` and `pre-release` on every pull request and every push
-  to main.
+- **The three tiers:** `pre-commit` judges the staged change against this
+  repo's source policy and nothing else; the git pre-commit hook runs it.
+  `pre-push` is the fast tier the git pre-push hook runs: the scoped
+  formatting, comment and sleep policy over the whole push, the docs mirror,
+  the changelog, OpenAPI and API-snapshot gates, home resolution, and `go
+  build` over the packages the push touches, up to eight of them. Everything
+  else is `gate` (the broad check) and `pre-release` (the release boundary),
+  which `sparkwing run <name>` runs on demand and which hosted CI runs on every
+  pull request and every push to main; no git hook fires either.
   `sparkwing pipeline hooks install` arms the two hooks in a checkout and
   `sparkwing pipeline hooks status` is the proof they fire; a definition alone
   proves nothing.
+- **What the two hooks cost:** measured on a 16-core Linux host with a
+  one-package change, warm caches: `pre-commit` 1.2 s wall (0.8 s inside the
+  run, slowest step `comments` at 0.66 s) and `pre-push` 1.7 s wall (1.3 s
+  inside the run, slowest step `formatters` at 1.24 s, with `build-touched` at
+  0.55 s). Both tiers run their steps in parallel, so each costs what its
+  slowest step costs. A commit and a push together stay under three seconds,
+  against a budget of ten; a change to the pipeline module adds about three
+  seconds to the first run after it, which recompiles `.sparkwing/`.
 - **Which tier decides a merge:** hosted CI on main is the merge check of
-  record, and the local pre-push gate is the fast path that catches a failure
-  before the push costs a round trip. Read a disagreement between them as the
-  hosted result plus a gate bug.
+  record, and the two hooks are the fast path that catches the cheap mistakes
+  before a push costs a round trip. Read a disagreement between them as the
+  hosted result plus a gate bug. Run `sparkwing run gate` yourself when a
+  change is broad enough that a hosted red would cost more than the wait.
 - **What a test step inherits:** every step that starts a product suite
   (`test`, `race-touched`, `store-postgres`, and the release contract
   preflight) clears the bindings `internal/runners/local/env.go` injects into a
@@ -38,15 +49,17 @@ launcher when testing isolated tool state.
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. A variable that injector gains and the scrub does not
   handle fails a contract test in the pipeline module.
-- **Why vet, build, test and lint are not in the commit tier:** the house
-  standard puts all four in the pre-commit chain, and this repo runs them one
-  tier later on purpose. Its suite takes 6 to 12 minutes through the shared
-  admission daemon, and a hook that long is a hook everyone passes
-  `--no-verify`. Measured on a 16-core Linux host: the commit tier is 1.3 s
-  warm and 3.8 s on a typical commit, and a scoped `go vet` alone was 5.4 s on
-  a cold vet cache. All four run at the push, under the pre-push hook wherever
-  it is armed, where a landing pays for them once, and on every hosted pull
-  request.
+- **Why vet, test and lint are in neither hook:** the house standard puts them
+  in the pre-commit chain, and this repo runs them in `gate` on purpose. The
+  broad tier takes 12 to 24 minutes through the shared admission daemon (the
+  Postgres suite 401 s, the race tests 401 s, the full unit suite 315 s, lint
+  117 s), a hook that long is a hook everyone passes `--no-verify`, and it
+  loses the fast-forward race whenever a co-maintainer lands first. Hosted CI
+  runs `gate` and `pre-release` on every pull request and every push to main,
+  so a landing pays for them there. What the push tier keeps of the four is
+  `go build` over the packages the change touches, which measured 0.55 s on a
+  one-package change; above eight packages it names the count and leaves the
+  compile to `gate`.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is

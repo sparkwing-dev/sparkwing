@@ -331,7 +331,7 @@ use (
 ```
 
 The workspace then resolves everything from local checkouts, and sparks
-pinning is suspended for the duration. The pre-push gate refuses to
+pinning is suspended for the duration. The `pre-release` gate refuses to
 push a committed `go.work` or `go.work.sum`, so this stays a local-only
 convenience -- shipped builds always go through the overlay.
 
