@@ -463,7 +463,7 @@ func withoutInherited(cmd string, names []string) string {
 }
 
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil)
+	return forEachGoModule(ctx, "go vet", vetGoCommand(runtime.NumCPU()), nil)
 }
 
 func runBuild(ctx context.Context) error {
@@ -475,8 +475,15 @@ func runTest(ctx context.Context) error {
 }
 
 func runE2E(ctx context.Context) error {
-	return forEachGoModule(ctx, "go test -tags e2e",
-		boundedGoCommand(runtime.NumCPU(), "test", "-tags e2e -timeout 30m ./..."), productTestUnset)
+	return forEachGoModule(ctx, "go test -tags e2e", e2eGoCommand(runtime.NumCPU()), productTestUnset)
+}
+
+func vetGoCommand(cpuCount int) string {
+	return boundedGoCommand(cpuCount, "vet", "-tags e2e ./...")
+}
+
+func e2eGoCommand(cpuCount int) string {
+	return boundedGoCommand(cpuCount, "test", "-tags e2e -timeout 30m ./...")
 }
 
 func withGoTestScratch(run func(string) error) error {

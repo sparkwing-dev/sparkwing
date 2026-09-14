@@ -54,7 +54,7 @@ func lintCommandFor(holdsBudget bool) string {
 	if holdsBudget {
 		flag = "--allow-parallel-runners"
 	}
-	return fmt.Sprintf("golangci-lint run %s ./...", flag)
+	return fmt.Sprintf("golangci-lint run --build-tags e2e %s ./...", flag)
 }
 
 func runGolangciLint(ctx context.Context) error {
