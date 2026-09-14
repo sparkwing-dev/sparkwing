@@ -59,8 +59,9 @@ when the allow-list names it. See `remoteExecutionChildEnvironment` in
 **The process tree dies with the node.** The child leads its own process
 session. When the node finishes or is cancelled, the supervisor sends TERM, then
 KILL, and waits for the session to empty, retrying rather than releasing the
-machine's slot while members are alive; Windows binds the body to a Job Object
-that kills all members and forbids breakaway. See `internal/procgroup` and
+machine's slot while members are alive. Windows starts the body suspended inside
+a kill-on-close Job Object and resumes it there, so nothing it spawns exists
+outside the job. See `internal/procgroup` and
 `internal/orchestrator/run_node_child_process_unix.go`. A node killed without
 running any code leaves its step sessions to the ledger sweeps described in
 [local-execution.md](local-execution.md).
