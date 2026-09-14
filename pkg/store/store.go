@@ -1739,14 +1739,18 @@ func (s *Store) applyVersionSQLite(ctx context.Context, version int) error {
 	return nil
 }
 
+// safety: every statement that changes the shape of a Postgres database takes
+// this one lock, so two openers cannot both decide a missing object is theirs
+// to create.
+const migrateAdvisoryLock = `SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`
+
 func (s *Store) migratePostgres(ctx context.Context) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`); err != nil {
+	if _, err := tx.ExecContext(ctx, migrateAdvisoryLock); err != nil {
 		return fmt.Errorf("acquire migrate advisory lock: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, schemaVersionTable); err != nil {

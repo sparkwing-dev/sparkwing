@@ -306,27 +306,61 @@ func applyCreditReferenceMigrationPostgres(ctx context.Context, tx *storeTx) err
 	return addColumnsTx(ctx, tx, "credit_grants", creditGrantReversesCols)
 }
 
+// safety: two openers that both find the key missing both create it, and
+// Postgres answers the loser with a pg_class duplicate key rather than
+// honoring IF NOT EXISTS, so the attempt runs under the lock the migrations
+// hold.
+func (s *Store) ensureCreditGrantReferenceIndex(ctx context.Context) error {
+	if s.dialect != DialectPostgres {
+		_, err := s.createCreditGrantReferenceIndex(ctx, storeExecer{s: s})
+		return err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if _, err := tx.ExecContext(ctx, migrateAdvisoryLock); err != nil {
+		return fmt.Errorf("acquire migrate advisory lock: %w", err)
+	}
+	raced, err := s.createCreditGrantReferenceIndex(ctx, tx)
+	if err != nil {
+		return err
+	}
+	// safety: the refused create leaves the transaction unable to commit, so
+	// the rollback the defer runs is what a lost race wants anyway.
+	if raced {
+		return nil
+	}
+	return tx.Commit()
+}
+
 // safety: grants written before the reference became a key may already repeat
 // one, and refusing to open a ledger over an operator note costs more than the
 // index buys; the grant path enforces the rule inside the ledger lock anyway.
 // The attempt repeats on every open, so deleting the duplicates enforces the key.
-func (s *Store) ensureCreditGrantReferenceIndex(ctx context.Context) error {
+func (s *Store) createCreditGrantReferenceIndex(ctx context.Context, q migrationQueryExecer) (bool, error) {
 	present, err := s.CreditGrantReferenceIndexPresent(ctx)
 	if err != nil || present {
-		return err
+		return false, err
 	}
-	dupes, err := duplicateGrantReferences(ctx, storeExecer{s: s})
+	dupes, err := duplicateGrantReferences(ctx, q)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(dupes) > 0 {
 		slog.Warn("credits: grants repeat a reference, so the database does not enforce the grant key; "+
 			"delete the duplicate rows and restart to enforce it",
 			"references", strings.Join(dupes, ", "))
-		return nil
+		return false, nil
 	}
-	_, err = s.exec(ctx, creditGrantReferenceIndex)
-	return err
+	if _, err := q.ExecContext(ctx, creditGrantReferenceIndex); err != nil {
+		if isUniqueViolation(err) || strings.Contains(err.Error(), "already exists") {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
 }
 
 // CreditGrantReferenceIndexPresent reports whether the database enforces one
