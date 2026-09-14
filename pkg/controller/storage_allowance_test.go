@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -45,6 +46,82 @@ func TestStorageAllowanceRouteReadsAndSetsOnTheAdminToken(t *testing.T) {
 	}
 	if !strings.Contains(body, `"retained_bytes"`) {
 		t.Fatalf("storage show %q does not report the retained bytes", body)
+	}
+
+	// safety: the quota route is not a second writer of the allowance, so a
+	// quota rewrite keeps what the team asked to keep.
+	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme", f.admin,
+		`{"tier":"paid"}`, false); code != http.StatusOK {
+		t.Fatalf("quota rewrite = %d %s, want 200", code, body)
+	}
+	stored, err := f.store.StorageQuotaFor(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("quota: %v", err)
+	}
+	if stored.AllowanceBytes != 53_687_091_200 {
+		t.Fatalf("quota = %+v, want the allowance kept through a quota rewrite", stored)
+	}
+}
+
+// The pass sweeps before it bills, so a team is never billed for the bytes the
+// sweep is about to expire; the allowance is the most it pays for.
+func TestTheStoragePassSweepsBeforeItBills(t *testing.T) {
+	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 40})
+	ctx := context.Background()
+	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
+	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
+	}); err != nil {
+		t.Fatalf("set the storage rate: %v", err)
+	}
+	if _, err := f.store.SetStorageAllowance(ctx, "acme", 1<<30); err != nil {
+		t.Fatalf("set allowance: %v", err)
+	}
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1_000*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	seedRetainedRuns(t, f.store, "acme", 100, 1<<30)
+
+	f.server.MaintainStorage(ctx)
+	retained, err := f.store.StorageRetainedBytes(ctx, "acme")
+	if err != nil {
+		t.Fatalf("retained: %v", err)
+	}
+	if retained != 1<<30 {
+		t.Fatalf("retained = %d, want the sweep to have applied the allowance", retained)
+	}
+	billed, err := f.store.ChargeRetainedStorage(ctx, time.Now().UTC().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	if len(billed.Charges) != 1 || billed.Charges[0].StorageBytes != 1<<30 {
+		t.Fatalf("charges = %+v, want the one gibibyte the team keeps", billed.Charges)
+	}
+}
+
+// safety: this fixture's store is the SQLite one the controller tests open, so
+// the placeholder needs no dialect rewrite.
+func seedRetainedRuns(t *testing.T, st *store.Store, principal string, runs int, bytes int64) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for i := range runs {
+		id := fmt.Sprintf("seed-%d", i)
+		if err := st.CreateRun(ctx, store.Run{
+			ID: id, Pipeline: "p", Status: "success", StartedAt: now,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", id, err)
+		}
+		if _, err := st.DB().Exec(`UPDATE runs SET created_at = ? WHERE id = ?`,
+			now.Add(-time.Duration(runs-i)*time.Hour).UnixNano(), id); err != nil {
+			t.Fatalf("backdate run %s: %v", id, err)
+		}
+		if _, err := st.DB().Exec(
+			`INSERT INTO storage_run_usage (principal, run_id, bytes, objects, updated_at)
+			 VALUES (?, ?, ?, 0, ?)`, principal, id, bytes, now.UnixNano()); err != nil {
+			t.Fatalf("seed bytes for %s: %v", id, err)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -654,6 +655,10 @@ func runCreditsAllowance(args []string) error {
 	}
 	want := *bytesFlag
 	if fs.Changed("gb") {
+		if *gb > math.MaxInt64/store.StorageBytesPerGB {
+			return fmt.Errorf("credits allowance: --gb must not exceed %d",
+				math.MaxInt64/store.StorageBytesPerGB)
+		}
 		want = *gb * store.StorageBytesPerGB
 	}
 	if want < 0 {

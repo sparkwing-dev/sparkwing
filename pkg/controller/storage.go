@@ -81,8 +81,9 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
 	}
+	now := time.Now().UTC()
 	if settings.RetentionOn() {
-		swept, serr := s.store.SweepRetention(ctx, time.Now().UTC())
+		swept, serr := s.store.SweepRetention(ctx, now)
 		switch {
 		case serr != nil:
 			s.logger.Error("retention sweep failed", "err", serr)
@@ -93,7 +94,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 				"node_metric_retention_days", settings.NodeMetricRetentionDays)
 		}
 	}
-	s.billRetainedStorage(ctx)
+	s.billRetainedStorage(ctx, now)
 	size, err := s.store.DatabaseSize(ctx)
 	if err != nil {
 		s.logger.Error("database size probe failed", "err", err)
@@ -108,13 +109,19 @@ func (s *Server) maintainStorage(ctx context.Context) {
 	s.reportLargestTeams(ctx, settings)
 }
 
-// safety: the interval a charge covers is measured off the database clock, so
-// two controllers on one database bill the same day once rather than twice.
-func (s *Server) billRetainedStorage(ctx context.Context) {
-	now, err := s.store.DatabaseNow(ctx)
+// safety: the sweep runs first, so a team is billed for what it still holds
+// once its allowance has been applied rather than for what stood above it.
+// Two passes cannot bill one interval whatever their clocks say, because the
+// store moves each team's watermark by compare-and-set.
+func (s *Server) billRetainedStorage(ctx context.Context, now time.Time) {
+	swept, err := s.store.SweepStorageAllowance(ctx, now)
 	if err != nil {
-		s.logger.Error("reading the database clock for the storage charge failed", "err", err)
+		s.logger.Error("expiring storage above the allowance failed", "err", err)
 		return
+	}
+	if swept.Runs > 0 {
+		s.logger.Info("expired storage above the allowance",
+			"runs", swept.Runs, "bytes", swept.Bytes, "events", swept.Events)
 	}
 	billed, err := s.store.ChargeRetainedStorage(ctx, now)
 	if err != nil {
@@ -125,15 +132,6 @@ func (s *Server) billRetainedStorage(ctx context.Context) {
 		s.logger.Info("charged retained storage",
 			"principal", charge.Principal, "bytes", charge.StorageBytes,
 			"seconds", charge.Seconds, "amount_micro", charge.AmountMicro)
-	}
-	swept, err := s.store.SweepStorageAllowance(ctx, now)
-	if err != nil {
-		s.logger.Error("expiring storage above the allowance failed", "err", err)
-		return
-	}
-	if swept.Runs > 0 {
-		s.logger.Info("expired storage above the allowance",
-			"runs", swept.Runs, "bytes", swept.Bytes, "events", swept.Events)
 	}
 }
 
@@ -199,6 +197,16 @@ type storageQuotaJSON struct {
 
 type storageAllowanceJSON struct {
 	StorageAllowanceBytes int64 `json:"storage_allowance_bytes"`
+}
+
+// safety: the quota route replaces every limit the body leaves out, so the
+// allowance is not one of the fields it takes; its own route is the only
+// writer and a quota rewrite cannot drop what a team asked to keep.
+type setStorageQuotaJSON struct {
+	Tier             string `json:"tier,omitempty"`
+	MaxBytesPerRun   int64  `json:"max_bytes_per_run"`
+	MaxBytesPerMonth int64  `json:"max_bytes_per_month"`
+	MaxObjectsPerRun int64  `json:"max_objects_per_run"`
 }
 
 type storageUsageJSON struct {
@@ -334,7 +342,7 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
 		return
 	}
-	var body storageQuotaJSON
+	var body setStorageQuotaJSON
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -345,7 +353,6 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 		MaxBytesPerRun:   body.MaxBytesPerRun,
 		MaxBytesPerMonth: body.MaxBytesPerMonth,
 		MaxObjectsPerRun: body.MaxObjectsPerRun,
-		AllowanceBytes:   body.StorageAllowanceBytes,
 	}
 	if err := s.store.SetStorageQuota(r.Context(), quota); err != nil {
 		writeError(w, http.StatusBadRequest, err)

@@ -2197,11 +2197,13 @@ var cmdCreditsAllowance = Command{
 	Path:     "sparkwing cluster credits allowance",
 	Synopsis: "Read or set how many retained bytes a team keeps",
 	Description: `Retained bytes are what a team still has stored after its
-runs end, and they are billed every day at the storage rate. The
-allowance is how many of them the team asked to keep: the sweep
-expires its oldest finished runs above the allowance, so the
-allowance is both what the team keeps and the most it pays for.
-An allowance of zero keeps everything.
+runs end, and the storage pass bills them at the storage rate.
+The allowance is how many of them the team asked to keep: the
+pass expires its oldest finished runs above the allowance before
+it bills and never bills above it, so the allowance is both what
+the team keeps and the most it pays for. An allowance of zero
+keeps everything and caps nothing. This verb is the only writer;
+rewriting a team's quota leaves the allowance alone.
 
 Reading with no flag reports the calling token's own allowance
 and what it currently retains. An admin token reads another
