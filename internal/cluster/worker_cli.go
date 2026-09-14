@@ -52,8 +52,6 @@ func runWorkerCLI(args []string) error {
 		"when the warm pool starts checking offer resolution before K8s fallback (maximum 5s)")
 	warmPoll := fs.Duration("warm-poll", 500*time.Millisecond,
 		"how often the warm pool Runner polls GetNode while waiting")
-	warmUnmatchable := fs.Duration("warm-unmatchable-grace", warmpool.DefaultUnmatchableGrace,
-		"how long a node whose labels no runner advertises waits before it fails")
 	token := fs.String("token", os.Getenv("SPARKWING_AGENT_TOKEN"),
 		"shared-secret bearer token for controller + logs auth (env: SPARKWING_AGENT_TOKEN)")
 	metricsAddr := fs.String("metrics-addr", ":9090",
@@ -162,7 +160,6 @@ func runWorkerCLI(args []string) error {
 		warmCfg := warmpool.Config{
 			PollInterval:     *warmPoll,
 			ClaimWaitTimeout: *warmWait,
-			UnmatchableGrace: *warmUnmatchable,
 		}
 		opts.RunnerFactory = orchestrator.BuildWarmRunnerFactory(*controllerURL, *token, warmCfg, k8sFactory)
 	default:
