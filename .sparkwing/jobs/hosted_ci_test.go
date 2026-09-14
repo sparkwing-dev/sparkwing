@@ -181,6 +181,9 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 	requireWorkflowText(t, workflowJob(t, body, "validate-tag"),
 		"git ls-remote --exit-code --tags",
 		`echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"`,
+		"Refuse a tag that does not outrank the newest release",
+		"bash bin/check-release-tag-order.sh",
+		"if: github.event_name == 'push'",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "canonical"),
 		"needs: validate-tag",

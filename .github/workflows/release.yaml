@@ -55,6 +55,24 @@ jobs:
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ steps.resolve.outputs.source_sha }}
+
+      # The one precondition on a release: a tag may be cut from any commit as
+      # long as its version outranks every version already published. A rebuild
+      # of an existing tag is exempt because that version is already published.
+      - name: Refuse a tag that does not outrank the newest release
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git ls-remote --tags "https://github.com/${{ github.repository }}.git" \
+            | bash bin/check-release-tag-order.sh "$TAG"
+
   canonical:
     name: Verify tagged source
     needs: validate-tag
