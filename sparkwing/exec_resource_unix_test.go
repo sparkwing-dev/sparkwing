@@ -45,6 +45,9 @@ func (c *sampleCollector) peak() (cpu, mem int64) {
 }
 
 func TestExec_ShellBurnerRecordsNonzeroCPU(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
+	}
 	col := &sampleCollector{}
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 	ctx = sparkwing.WithResourceReporter(ctx, col.report)
@@ -63,6 +66,9 @@ func TestExec_ShellBurnerRecordsNonzeroCPU(t *testing.T) {
 }
 
 func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.4s of real work; the fast class runs under -short")
+	}
 	if _, err := exec.LookPath("awk"); err != nil {
 		t.Skip("awk not on PATH")
 	}
@@ -81,6 +87,9 @@ func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
 }
 
 func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	reported := make(chan time.Duration, 4)
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 	started := time.Now()

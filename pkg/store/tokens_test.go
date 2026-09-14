@@ -185,6 +185,9 @@ func TestTokenKindFromPrefix(t *testing.T) {
 }
 
 func TestRotateToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	s := newTestStore(t)
 	now := time.Now().UTC()
 
@@ -283,6 +286,9 @@ func TestCreateToken_StoreRefusesASecondRowOnOnePrefix(t *testing.T) {
 }
 
 func TestAmbiguousPrefixRefusesLookupRevokeAndRotate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	cases := []struct {
 		name string
 		act  func(*Store, string, time.Time) error
@@ -340,6 +346,9 @@ func fakeArgonKey(secret, salt []byte, keyLen uint32) []byte {
 }
 
 func TestRotateToken_ARevokeDuringTheMintIsNotUndone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	s := newTestStore(t)
 	now := time.Now().UTC()
 

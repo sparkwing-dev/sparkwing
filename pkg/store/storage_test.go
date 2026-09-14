@@ -117,6 +117,9 @@ func TestSweepRetentionSparesARunThatIsStillGoing(t *testing.T) {
 }
 
 func TestSweepRetentionRemovesMoreThanOneBatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	st := storetest.Open(t)
 	ctx := context.Background()
 	seedRunWithNode(t, st, "r1", "n1", "success")
@@ -202,6 +205,9 @@ func TestSweepRetentionRemovesNothingWithoutAWindow(t *testing.T) {
 }
 
 func TestDatabaseSizeFallsAfterASweep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.3s of real work; the fast class runs under -short")
+	}
 	st := storetest.Open(t)
 	ctx := context.Background()
 	seedRunWithNode(t, st, "r1", "n1", "success")
