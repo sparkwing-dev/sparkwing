@@ -37,10 +37,10 @@ func run(args []string) error {
 		"root of the package-registry proxy cache. Empty means $DATA_DIR/proxy. Falls back to $PROXY_CACHE_DIR.")
 	fs.DurationVar(&cfg.FetchInterval, "fetch-interval",
 		envDuration("FETCH_INTERVAL", cfg.FetchInterval),
-		"cadence of the keep-warm pass, which refreshes only mirrors a request touched in the last hour. Zero turns the pass off, leaving every mirror to fetch when a request needs a commit it lacks. Falls back to $FETCH_INTERVAL.")
+		"cadence of the keep-warm pass, which refreshes only mirrors a request touched in the last hour. Zero, the default, turns the pass off, leaving every mirror to refresh when a clone reads its refs. Falls back to $FETCH_INTERVAL.")
 	fs.DurationVar(&cfg.FetchFreshWindow, "fetch-fresh-window",
 		envDuration("FETCH_FRESH_WINDOW", cfg.FetchFreshWindow),
-		"how long a successful mirror fetch lets request handlers skip their own fetch. Negative disables the throttle. Falls back to $FETCH_FRESH_WINDOW.")
+		"how long a successful mirror fetch lets request handlers skip their own fetch, which bounds what a caller can spend: at most one origin fetch per repository per window. Negative disables the throttle. Falls back to $FETCH_FRESH_WINDOW.")
 	fs.DurationVar(&cfg.RecloneCooldown, "reclone-cooldown",
 		envDuration("RECLONE_COOLDOWN", cfg.RecloneCooldown),
 		"minimum gap between /archive recovery reclones, and between clone-if-missing attempts, for the same repo. Negative disables the cooldown. Falls back to $RECLONE_COOLDOWN.")

@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -39,7 +38,6 @@ var (
 	gitcacheCacheHits     metric.Int64Counter
 	gitcacheCacheMisses   metric.Int64Counter
 	gitcacheRecoveryRecl  metric.Int64Counter
-	gitcacheMirrorFetch   metric.Int64Counter
 )
 
 func initGitcacheMetrics() {
@@ -54,7 +52,7 @@ func initGitcacheMetrics() {
 		metric.WithUnit("{file}"))
 
 	gitcacheFetchDur, _ = meter.Float64Histogram("sparkwing.gitcache.fetch_duration",
-		metric.WithDescription("Background git fetch duration"),
+		metric.WithDescription("Mirror fetch duration, by what asked for the fetch"),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(0.1, 0.5, 1, 2, 5, 10, 30, 60))
 
@@ -69,10 +67,6 @@ func initGitcacheMetrics() {
 	gitcacheRecoveryRecl, _ = meter.Int64Counter("sparkwing.gitcache.recovery_reclones",
 		metric.WithDescription("Recovery reclones after a failed mirror fetch"),
 		metric.WithUnit("{reclone}"))
-
-	gitcacheMirrorFetch, _ = meter.Int64Counter("sparkwing.gitcache.mirror_fetches",
-		metric.WithDescription("Mirror fetches from origin, by what asked for them"),
-		metric.WithUnit("{fetch}"))
 }
 
 const (
@@ -80,18 +74,15 @@ const (
 	fetchReasonKeepWarm = "keep_warm"
 )
 
-// safety: /metrics is unauthenticated, so the reason may be labelled but the
+// safety: /metrics is unauthenticated, so the reason may be labeled but the
 // repository may not: a per-repo label enumerates the mirror set.
-func recordMirrorFetch(reason string, took time.Duration, failed bool) {
-	attrs := metric.WithAttributes(
+func recordMirrorFetch(ctx context.Context, reason string, took time.Duration, failed bool) {
+	if gitcacheFetchDur == nil {
+		return
+	}
+	gitcacheFetchDur.Record(ctx, took.Seconds(), metric.WithAttributes(
 		attribute.String("reason", reason),
-		attribute.Bool("failed", failed))
-	if gitcacheMirrorFetch != nil {
-		gitcacheMirrorFetch.Add(context.Background(), 1, attrs)
-	}
-	if gitcacheFetchDur != nil {
-		gitcacheFetchDur.Record(context.Background(), took.Seconds(), attrs)
-	}
+		attribute.Bool("failed", failed)))
 }
 
 var (
@@ -156,7 +147,7 @@ var (
 	sshKeyDir             = "/etc/ssh-key"
 	autoRegisterReposSpec string
 
-	fetchFreshWindow = 15 * time.Second
+	fetchFreshWindow = 10 * time.Second
 
 	recloneCooldown = 1 * time.Hour
 
@@ -275,7 +266,6 @@ type repoFetchState struct {
 	reclones    []time.Time
 	lastClone   time.Time
 	lastRequest time.Time
-	fetches     uint64
 }
 
 var bgFetch = &fetchState{repos: map[string]*repoFetchState{}}
@@ -319,25 +309,6 @@ func (fs *fetchState) requestedSince(name string, window time.Duration) bool {
 		return false
 	}
 	return time.Since(rs.lastRequest) < window
-}
-
-// perf: this counts completed attempts, failures included, so a caller that
-// waited for the repo lock can tell whether a peer already asked origin on its
-// behalf and a burst of triggers costs one fetch rather than one each.
-func (fs *fetchState) fetchCount(name string) uint64 {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-	rs := fs.repos[name]
-	if rs == nil {
-		return 0
-	}
-	return rs.fetches
-}
-
-func (fs *fetchState) noteFetch(name string) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	fs.entry(name).fetches++
 }
 
 func (fs *fetchState) fresh(name string) bool {
@@ -453,7 +424,7 @@ var recloneMirror = func(repoURL, bareRepo string) (string, error) {
 
 const mirrorFetchTimeout = 2 * time.Minute
 
-func fetchMirrorIfStale(hash, bareRepo string) (out string, skipped bool, err error) {
+func fetchMirrorIfStale(ctx context.Context, hash, bareRepo string) (out string, skipped bool, err error) {
 	name := stateKey(hash)
 	bgFetch.markRequested(name)
 	if bgFetch.fresh(name) {
@@ -461,116 +432,19 @@ func fetchMirrorIfStale(hash, bareRepo string) (out string, skipped bool, err er
 	}
 	start := time.Now()
 	out, err = mirrorFetch(mirrorFetchTimeout, bareRepo)
-	bgFetch.noteFetch(name)
-	recordMirrorFetch(fetchReasonOnDemand, time.Since(start), err != nil)
+	recordMirrorFetch(ctx, fetchReasonOnDemand, time.Since(start), err != nil)
 	if err == nil {
 		bgFetch.markFetched(name)
 	}
 	return out, false, err
 }
 
-func refreshMirrorBestEffort(hash, bareRepo string) {
-	if _, skipped, err := fetchMirrorIfStale(hash, bareRepo); err != nil {
+func refreshMirrorBestEffort(ctx context.Context, hash, bareRepo string) {
+	if _, skipped, err := fetchMirrorIfStale(ctx, hash, bareRepo); err != nil {
 		log.Printf("warning: mirror fetch for %s failed, serving cached refs: %v", hash, err)
 	} else if skipped {
 		log.Printf("mirror fetch for %s skipped (fetched within %s)", hash, fetchFreshWindow)
 	}
-}
-
-// safety: a trigger fires seconds after a push, so a mirror that would learn the
-// commit only from a later refresh must fetch what the clone asks for before
-// upload-pack answers, or the run is told the ref is not ours.
-func fetchWantsOnDemand(hash, bareRepo string, wants []string) {
-	name := stateKey(hash)
-	bgFetch.markRequested(name)
-	if !mirrorMissing(bareRepo, wants) {
-		return
-	}
-
-	seen := bgFetch.fetchCount(name)
-	lock := repoLock(hash)
-	lock.Lock()
-	defer lock.Unlock()
-
-	// perf: a peer may have fetched while this request waited. Either its fetch
-	// brought the commits in, or origin does not have them yet and asking again
-	// now buys nothing, so a burst of triggers costs origin one fetch.
-	if bgFetch.fetchCount(name) != seen || !mirrorMissing(bareRepo, wants) {
-		return
-	}
-
-	start := time.Now()
-	out, err := mirrorFetch(mirrorFetchTimeout, bareRepo)
-	took := time.Since(start).Truncate(time.Millisecond)
-	bgFetch.noteFetch(name)
-	recordMirrorFetch(fetchReasonOnDemand, time.Since(start), err != nil)
-	if err != nil {
-		bgFetch.markError(name, strings.TrimSpace(fmt.Sprintf("%v %s", err, out)))
-		log.Printf("on-demand fetch: %s failed after %s: %v", hash, took, err)
-		return
-	}
-	bgFetch.markFetched(name)
-	log.Printf("on-demand fetch: %s took %s for %d commit(s) the mirror lacked", hash, took, len(wants))
-}
-
-func mirrorMissing(bareRepo string, objects []string) bool {
-	if len(objects) == 0 {
-		return false
-	}
-	args := append([]string{"-C", bareRepo, "rev-list", "--no-walk", "--quiet", "--end-of-options"}, objects...)
-	_, err := gitOutput(args...)
-	// safety: a check that never ran cannot tell absence from a busy pod, and
-	// spending a fetch on that would let congestion drive upstream traffic.
-	return err != nil && !errors.Is(err, errGitForkUnavailable)
-}
-
-const (
-	maxScannedWants = 64
-
-	wantScanLimit = 64 << 10
-)
-
-// safety: git reads its request from this reader, so every byte read to find
-// the wants has to be handed back in front of the rest of the body.
-func scanWants(body io.Reader) (wants []string, consumed []byte) {
-	consumed, err := io.ReadAll(io.LimitReader(body, wantScanLimit))
-	if err != nil {
-		return nil, consumed
-	}
-	return parseWants(consumed), consumed
-}
-
-// safety: only a validated object id may reach git as a fetch argument, and a
-// body that is not pkt-line ends the scan rather than being walked byte by byte.
-func parseWants(buf []byte) []string {
-	var wants []string
-	for len(buf) >= 4 && len(wants) < maxScannedWants {
-		size, err := strconv.ParseUint(string(buf[:4]), 16, 32)
-		if err != nil {
-			return wants
-		}
-		// safety: 0000 ends a section and 0001 separates v2 arguments from the
-		// command; neither carries a payload, so only the header is consumed.
-		if size == 0 || size == 1 {
-			buf = buf[4:]
-			continue
-		}
-		if size < 4 || int(size) > len(buf) {
-			return wants
-		}
-		line := buf[4:size]
-		buf = buf[size:]
-		rest, ok := bytes.CutPrefix(line, []byte("want "))
-		if !ok {
-			continue
-		}
-		fields := strings.Fields(string(rest))
-		if len(fields) == 0 || !gitObjectRE.MatchString(fields[0]) {
-			continue
-		}
-		wants = append(wants, fields[0])
-	}
-	return wants
 }
 
 func (fs *fetchState) problems() []string {
@@ -650,7 +524,7 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			return
 		}
 
-		fetched, failed := keepWarmPass(interval)
+		fetched, failed := keepWarmPass(ctx, interval)
 
 		if fetched > 0 && failed == fetched {
 			consecutiveAllFail++
@@ -674,7 +548,7 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 // perf: this refreshes only the mirrors a request touched inside the keep-warm
 // window. A hosted cache holds every customer's repository, and walking all of
 // them on a timer fetches code nobody is building.
-func keepWarmPass(interval time.Duration) (fetched, failed int) {
+func keepWarmPass(ctx context.Context, interval time.Duration) (fetched, failed int) {
 	entries, err := os.ReadDir(repoDir)
 	if err != nil {
 		return 0, 0
@@ -706,26 +580,25 @@ func keepWarmPass(interval time.Duration) (fetched, failed int) {
 		fetchStart := time.Now()
 		out, err := mirrorFetch(1*time.Minute, bare)
 		mu.Unlock()
-		bgFetch.noteFetch(e.Name())
-		recordMirrorFetch(fetchReasonKeepWarm, time.Since(fetchStart), err != nil)
+		recordMirrorFetch(ctx, fetchReasonKeepWarm, time.Since(fetchStart), err != nil)
 
 		fetched++
 		bgFetch.mu.Lock()
 		if err != nil {
 			failed++
 			errMsg := strings.TrimSpace(fmt.Sprintf("%v %s", err, out))
-			if rs == nil {
-				rs = bgFetch.entry(e.Name())
+			rs = bgFetch.entry(e.Name())
+			if rs.backoff <= 0 {
 				rs.backoff = interval
 			} else {
-				rs.backoff *= 2
-				rs.backoff = min(rs.backoff, maxFetchBackoff)
+				rs.backoff = min(rs.backoff*2, maxFetchBackoff)
 			}
 			rs.lastError = errMsg
 			rs.lastErrorAt = time.Now()
 			rs.nextRetry = time.Now().Add(rs.backoff)
+			backoff := rs.backoff
 			bgFetch.mu.Unlock()
-			log.Printf("background keep-warm: %s failed (retry in %s): %s", e.Name(), rs.backoff, errMsg)
+			log.Printf("background keep-warm: %s failed (retry in %s): %s", e.Name(), backoff, errMsg)
 		} else {
 			bgFetch.mu.Unlock()
 			bgFetch.markFetched(e.Name())
@@ -814,7 +687,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		bgFetch.markFetched(stateKey(hash))
 	} else {
 		enableSHAFetch(bareRepo)
-		out, skipped, err := fetchMirrorIfStale(hash, bareRepo)
+		out, skipped, err := fetchMirrorIfStale(r.Context(), hash, bareRepo)
 		switch {
 		case skipped:
 			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
@@ -1123,7 +996,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 
 	out, err := gitOutput("-C", bareRepo, "show", "--end-of-options", branch+":"+filePath)
 	if errors.Is(err, errGitForkUnavailable) {
@@ -1168,7 +1041,7 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 
 	ref := branch
 	if path != "" {
@@ -1218,7 +1091,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 
 	_, err := gitOutput("-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch)
 	if errors.Is(err, errGitForkUnavailable) {
@@ -2085,7 +1958,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 
 	lock := repoLock(hash)
 	lock.Lock()
-	refreshMirrorBestEffort(hash, bareRepo)
+	refreshMirrorBestEffort(r.Context(), hash, bareRepo)
 	lock.Unlock()
 
 	ancestor, err := firstCachedObject(bareRepo, req.Commits)
@@ -2499,8 +2372,7 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	bgFetch.markRequested(stateKey(hash))
 	start := time.Now()
 	out, err := mirrorFetch(45*time.Second, bareRepo)
-	bgFetch.noteFetch(stateKey(hash))
-	recordMirrorFetch(fetchReasonOnDemand, time.Since(start), err != nil)
+	recordMirrorFetch(r.Context(), fetchReasonOnDemand, time.Since(start), err != nil)
 	if err != nil {
 		log.Printf("eager refresh: %s failed: %v %s", hash, err, out)
 		http.Error(w, fmt.Sprintf("fetch failed: %s\n%s", err, sshHint(out)), http.StatusBadGateway)
@@ -2584,14 +2456,17 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unsupported service", http.StatusBadRequest)
 			return
 		}
-		// safety: a clone by branch is answered from the mirror's refs and
-		// reports no error, so a mirror nobody refreshed would hand the runner
-		// an old tip and the run would build code that is not the branch.
-		hash := strings.TrimSuffix(filepath.Base(bareRepo), ".git")
-		lock := repoLock(hash)
-		lock.Lock()
-		refreshMirrorBestEffort(hash, bareRepo)
-		lock.Unlock()
+		// safety: a clone reads the mirror's refs and reports no error, so a
+		// mirror that fell behind hands the runner an old tip or no tip at all.
+		// receive-pack is refused anyway, and refreshing for it would let a
+		// rejected push spend an origin fetch.
+		if service == "git-upload-pack" {
+			hash := strings.TrimSuffix(filepath.Base(bareRepo), ".git")
+			lock := repoLock(hash)
+			lock.Lock()
+			refreshMirrorBestEffort(r.Context(), hash, bareRepo)
+			lock.Unlock()
+		}
 		handleInfoRefs(w, r, bareRepo, service)
 
 	case rest == "git-upload-pack":
@@ -2685,11 +2560,6 @@ func handleInfoRefs(w http.ResponseWriter, r *http.Request, bareRepo, service st
 }
 
 func handleGitUploadPack(w http.ResponseWriter, r *http.Request, bareRepo string) {
-	wants, consumed := scanWants(r.Body)
-	// safety: the fetch takes the repo lock and its own fork slot, so it has to
-	// happen before this request holds one.
-	fetchWantsOnDemand(strings.TrimSuffix(filepath.Base(bareRepo), ".git"), bareRepo, wants)
-
 	release, ok := acquireGitForkHTTP(w, r, "upload-pack "+bareRepo)
 	if !ok {
 		return
@@ -2701,7 +2571,7 @@ func handleGitUploadPack(w http.ResponseWriter, r *http.Request, bareRepo string
 
 	// #nosec G702 -- git runs as argv with a constant binary and a repository path this server owns
 	cmd := exec.Command("git", "upload-pack", "--stateless-rpc", bareRepo)
-	cmd.Stdin = io.MultiReader(bytes.NewReader(consumed), r.Body)
+	cmd.Stdin = r.Body
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
