@@ -20,6 +20,29 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **module:** `go.mod` retracts v0.52.0, a tag cut from a fixture commit on no
+  branch and recalled within the hour. The module proxy had already cached it,
+  so its version list still offers v0.52.0 and a pin at that version resolves
+  only through a proxy that fetched it, never on `GOPROXY=direct` or a private
+  proxy. Go reads a module's retractions from its `@latest` `go.mod`, so this
+  one reaches consumers with the next release that carries it; a release that
+  outranks v0.52.0 is separately what stops version tooling offering the
+  recalled tag as an upgrade. v0.52.0 is never re-cut on another commit: a
+  second tag under that version would mismatch the `go.sum` every consumer has
+  cached.
+
+- **release:** The version freshness check skips versions the repository's own
+  `go.mod` retracts. A pin at the newest release this line carries passes while
+  a retracted version sits in a proxy's cache, instead of being reported as
+  stale against a version nothing may pin.
+
+- **scaffold:** `const FallbackSDKVersion`, the pipeline module pin and the
+  Kubernetes end-to-end fixture name v0.50.5, the newest tag this line carries,
+  in place of v0.52.0. A fresh scaffold builds against a release that every
+  proxy can serve and that carries published binaries.
+
 ## [v0.50.6] - 2026-09-14
 ### Added
 

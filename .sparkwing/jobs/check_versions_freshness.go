@@ -41,6 +41,10 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 	if err != nil {
 		return fmt.Errorf("scan go.mod files: %w", err)
 	}
+	retracted, err := repoRetractedReleases(repoRoot)
+	if err != nil {
+		return err
+	}
 	var problems []string
 	for _, modPath := range mods {
 		bs, err := os.ReadFile(modPath)
@@ -58,7 +62,7 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 			}
 			if replace := findReplaceFor(f, req.Mod.Path); replace != nil {
 				if !isLocalReplace(replace) {
-					if msg := checkAgainstLatest(ctx, replace.New.Path, replace.New.Version, modPath); msg != "" {
+					if msg := checkAgainstLatest(ctx, retracted, replace.New.Path, replace.New.Version, modPath); msg != "" {
 						problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 					}
 					continue
@@ -80,7 +84,7 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 					))
 				}
 			} else {
-				if msg := checkAgainstLatest(ctx, req.Mod.Path, req.Mod.Version, modPath); msg != "" {
+				if msg := checkAgainstLatest(ctx, retracted, req.Mod.Path, req.Mod.Version, modPath); msg != "" {
 					problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 				}
 			}
@@ -353,7 +357,7 @@ func hasGitMetadata(dir string) (bool, error) {
 	}
 }
 
-func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile string) string {
+func checkAgainstLatest(ctx context.Context, retracted retractedReleases, modulePath, pinned, fromModFile string) string {
 	if pinned == "" {
 		return ""
 	}
@@ -367,7 +371,7 @@ func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile str
 			)
 		}
 	}
-	latest, err := latestReleasedVersion(ctx, modulePath, fromModFile)
+	latest, err := latestReleasedVersion(ctx, retracted, modulePath, fromModFile)
 	if err != nil {
 		return fmt.Sprintf("%s: cannot resolve latest version (%v)", modulePath, err)
 	}
@@ -393,7 +397,7 @@ func semverMajor(v string) (int, bool) {
 	return n, true
 }
 
-func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) (string, error) {
+func latestReleasedVersion(ctx context.Context, retracted retractedReleases, modulePath, fromModFile string) (string, error) {
 	dir := filepath.Dir(fromModFile)
 	out, err := captureCmd(ctx, dir, "go", "list", "-m", "-versions", modulePath)
 	if err != nil {
@@ -414,6 +418,9 @@ func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) 
 				continue
 			}
 		}
+		if retracted.excludes(modulePath, v) {
+			continue
+		}
 		stable = append(stable, v)
 	}
 	if len(stable) == 0 {
@@ -421,6 +428,47 @@ func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) 
 	}
 	semver.Sort(stable)
 	return stable[len(stable)-1], nil
+}
+
+type retractedReleases struct {
+	module    string
+	intervals []modfile.VersionInterval
+}
+
+// safety: the proxy keeps serving a version forever once it has cached one, so a
+// tag cut by mistake and recalled stays on the list this check reads. Go reads a
+// module's retractions from its @latest go.mod, so a line added here reaches
+// that list only from the next release carrying it.
+func repoRetractedReleases(repoRoot string) (retractedReleases, error) {
+	path := filepath.Join(repoRoot, "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return retractedReleases{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	parsed, err := modfile.Parse(path, body, nil)
+	if err != nil {
+		return retractedReleases{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	out := retractedReleases{}
+	if parsed.Module != nil {
+		out.module = parsed.Module.Mod.Path
+	}
+	for _, retract := range parsed.Retract {
+		out.intervals = append(out.intervals, retract.VersionInterval)
+	}
+	return out, nil
+}
+
+func (r retractedReleases) excludes(modulePath, version string) bool {
+	if r.module == "" || modulePath != r.module {
+		return false
+	}
+	for _, interval := range r.intervals {
+		if semver.Compare(version, interval.Low) >= 0 && semver.Compare(version, interval.High) <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func runGit(ctx context.Context, dir string, args ...string) error {

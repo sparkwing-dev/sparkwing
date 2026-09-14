@@ -18,10 +18,31 @@ We are intentionally on the `v0.x.y` line. v0 has no semver
 stability promise -- minors can break things, patches can introduce
 new APIs. We are using v0's flexibility to iterate the contract.
 
-A v1.x.y line on the Go proxy is **retracted** and unsupported -- do
-not pin to it. The `retract` block in `go.mod` is the authoritative
-list. v1.x snapshots stay resolvable (proxy snapshots are immutable)
-but carry no support.
+The `retract` block in `go.mod` is the authoritative list of versions
+this project does not stand behind: the whole v1.x.y line, and v0.52.0,
+a tag cut from a fixture commit on no branch and recalled within the
+hour. Do not pin to any of them.
+
+Go reads a module's retractions from its `@latest` go.mod, which the
+proxy resolves from the repository's live tags. Every entry in the block
+is in force from the first release that carries it: `go list -m
+-versions` omits every retracted version, and `go list -m -retracted
+-versions` shows them again. A retraction reaches consumers with the
+next ordinary v0.x release whose `go.mod` carries the line, and needs no
+release on the v1 line to deliver it.
+
+Retracted and resolvable are separate things. The proxy keeps serving a
+version it fetched at least once, so v0.52.0 and v0.30.0 still resolve;
+the v1.x tags were never fetched through it and their `.info` and `.mod`
+endpoints answer 404, though the version list still names them. A
+version the proxy holds is never re-cut on another commit: a second tag
+under that version would mismatch the `go.sum` every consumer has
+already cached.
+
+Version tooling reads the version list rather than the retract block
+until a release carries the line, so a release that outranks v0.52.0 is
+what stops tooling offering the recalled tag as an upgrade. That is a
+separate recommendation from the retraction itself.
 
 ## Versioning per repo
 

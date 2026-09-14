@@ -5,13 +5,15 @@ go 1.26.0
 // Pre-launch artifacts. The project hadn't shipped publicly when the
 // v1 line was tagged; it was a misstep that committed us to v1+ semver
 // before we wanted that promise, so we rebaselined on the v0.x.y line.
-// The module proxy caches those tags permanently and honors retractions
-// only from the highest version's go.mod, so v1.6.1 is a tombstone
-// release that carries this block and retracts itself -- that pushes
-// @latest back to the v0.x line. None of these are supported; do not
-// pin to them.
+// The module proxy caches those tags permanently, and go reads the
+// block from the @latest go.mod, so every release on the v0 line
+// carries it and the v1.x tags stay retracted for that reason. None of
+// these are supported; do not pin to them.
 retract (
 	[v1.0.0, v1.6.1]
+	// Never released. Tagged from a fixture commit that is on no branch and
+	// recalled within the hour; the proxy had it. v0.50.5 supersedes it.
+	v0.52.0
 	// Never released. Tagged off a branch that never landed on main, the
 	// build failed at signing, no binaries shipped. The proxy cached the
 	// tag before it could be recalled; v0.31.0 supersedes it.

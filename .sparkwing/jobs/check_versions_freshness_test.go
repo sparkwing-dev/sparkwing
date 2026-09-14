@@ -567,3 +567,122 @@ func seedReleaseRepo(t *testing.T) string {
 	gitRun(t, repo, "push", "-u", "origin", "main")
 	return repo
 }
+
+const fixturePhantomVersion = "v0.52.0"
+
+const fixturePinnedVersion = "v0.1.0"
+
+func TestCheckVersionsFreshnessIgnoresRetractedProxyVersions(t *testing.T) {
+	cases := []struct {
+		name        string
+		retract     bool
+		wantProblem bool
+	}{
+		{name: "a retracted version is not an upgrade", retract: true},
+		{name: "a version the repository stands behind is an upgrade", retract: false, wantProblem: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := seedProxyPinnedRepo(t, c.retract)
+
+			err := CheckVersionsFreshness(context.Background(), repo)
+
+			if c.wantProblem {
+				if err == nil {
+					t.Fatalf("CheckVersionsFreshness reported no problem, want %s offered as an upgrade", fixturePhantomVersion)
+				}
+				if !strings.Contains(err.Error(), fixturePhantomVersion) {
+					t.Fatalf("CheckVersionsFreshness error = %v, want it to name %s", err, fixturePhantomVersion)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CheckVersionsFreshness: %v", err)
+			}
+		})
+	}
+}
+
+func TestRetractedReleasesExcludesOnlyTheOwningModule(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module "+sdkModulePath+`
+
+go 1.26.0
+
+retract (
+	[v1.0.0, v1.6.1]
+	v0.52.0
+)
+`)
+	retracted, err := repoRetractedReleases(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		module  string
+		version string
+		want    bool
+	}{
+		{sdkModulePath, "v0.52.0", true},
+		{sdkModulePath, "v1.3.0", true},
+		{sdkModulePath, "v1.6.1", true},
+		{sdkModulePath, "v0.50.5", false},
+		{sdkModulePath, "v1.7.0", false},
+		{"github.com/sparkwing-dev/sparks-core/templates", "v0.52.0", false},
+	}
+	for _, c := range cases {
+		if got := retracted.excludes(c.module, c.version); got != c.want {
+			t.Errorf("excludes(%q, %q) = %v, want %v", c.module, c.version, got, c.want)
+		}
+	}
+}
+
+func seedProxyPinnedRepo(t *testing.T, retract bool) string {
+	t.Helper()
+	base := t.TempDir()
+	proxy := filepath.Join(base, "proxy", filepath.FromSlash(sdkModulePath), "@v")
+	repo := filepath.Join(base, "repo")
+	if err := os.MkdirAll(proxy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(proxy, "list"), fixturePinnedVersion+"\n"+fixturePhantomVersion+"\n")
+	for _, version := range []string{fixturePinnedVersion, fixturePhantomVersion} {
+		writeFile(t, filepath.Join(proxy, version+".info"), `{"Version":"`+version+`","Time":"2026-01-01T00:00:00Z"}`)
+		writeFile(t, filepath.Join(proxy, version+".mod"), "module "+sdkModulePath+"\n\ngo 1.26.0\n")
+	}
+
+	for _, dir := range []string{".sparkwing", filepath.Join("pkg", "scaffold")} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := "module " + sdkModulePath + "\n\ngo 1.26.0\n"
+	if retract {
+		root += "\nretract " + fixturePhantomVersion + "\n"
+	}
+	writeFile(t, filepath.Join(repo, "go.mod"), root)
+	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n")
+	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"),
+		"module sparkwing-pipelines\n\ngo 1.26.0\n\nrequire "+sdkModulePath+" "+fixturePinnedVersion+"\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)),
+		"package scaffold\n\nconst FallbackSDKVersion = \""+fixturePinnedVersion+"\"\n")
+
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "test@example.invalid")
+	gitRun(t, repo, "config", "user.name", "test")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+	gitRun(t, repo, "config", "tag.gpgsign", "false")
+	gitRun(t, repo, "config", "core.hooksPath", t.TempDir())
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "seed")
+	gitRun(t, repo, "tag", fixturePinnedVersion)
+
+	t.Setenv("GOPROXY", "file://"+filepath.ToSlash(filepath.Join(base, "proxy")))
+	// safety: the fixture serves invented metadata under the real module path, so
+	// a shared module cache would keep a stub that fails every later checksum.
+	t.Setenv("GOMODCACHE", filepath.Join(base, "modcache"))
+	t.Setenv("GOSUMDB", "off")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	return repo
+}
