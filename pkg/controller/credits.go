@@ -26,22 +26,29 @@ type creditStateJSON struct {
 	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	BurnWindowSeconds  int64            `json:"burn_window_seconds"`
-	BurnMicro          int64            `json:"burn_micro"`
-	ExhaustedAt        *int64           `json:"exhausted_at,omitempty"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+
+	StorageChargedMicro       int64 `json:"storage_charged_micro"`
+	StorageRateMicroPerGBDay  int64 `json:"storage_rate_micro_per_gb_day"`
+	StorageFreeAllowanceBytes int64 `json:"storage_free_allowance_bytes"`
+
+	BurnWindowSeconds int64  `json:"burn_window_seconds"`
+	BurnMicro         int64  `json:"burn_micro"`
+	ExhaustedAt       *int64 `json:"exhausted_at,omitempty"`
+	MicroPerCredit    int64  `json:"micro_per_credit"`
+	CreditsPerDollar  int64  `json:"credits_per_dollar"`
 }
 
 type creditSettingsJSON struct {
-	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
-	RateTable          []creditRateJSON `json:"rate_table"`
-	RateTableSet       bool             `json:"rate_table_set"`
-	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+	RateMicroPerSecond        int64            `json:"rate_micro_per_second"`
+	RateTable                 []creditRateJSON `json:"rate_table"`
+	RateTableSet              bool             `json:"rate_table_set"`
+	WarmCPUClassCores         int64            `json:"warm_cpu_class_cores"`
+	GraceSeconds              int64            `json:"grace_seconds"`
+	MaxChargeSeconds          int64            `json:"max_charge_seconds"`
+	StorageRateMicroPerGBDay  int64            `json:"storage_rate_micro_per_gb_day"`
+	StorageFreeAllowanceBytes int64            `json:"storage_free_allowance_bytes"`
+	MicroPerCredit            int64            `json:"micro_per_credit"`
+	CreditsPerDollar          int64            `json:"credits_per_dollar"`
 }
 
 // safety: the wire shape is one entry per cpu class, so a caller reads the
@@ -56,25 +63,30 @@ type creditRateJSON struct {
 // through its own store call, so it rides beside the three scalars rather than
 // inside the update they become.
 type setCreditSettingsReq struct {
-	RateMicroPerSecond *int64             `json:"rate_micro_per_second,omitempty"`
-	RateTable          *creditRateTableIn `json:"rate_table,omitempty"`
-	WarmCPUClassCores  *int64             `json:"warm_cpu_class_cores,omitempty"`
-	GraceSeconds       *int64             `json:"grace_seconds,omitempty"`
-	MaxChargeSeconds   *int64             `json:"max_charge_seconds,omitempty"`
+	RateMicroPerSecond        *int64             `json:"rate_micro_per_second,omitempty"`
+	RateTable                 *creditRateTableIn `json:"rate_table,omitempty"`
+	WarmCPUClassCores         *int64             `json:"warm_cpu_class_cores,omitempty"`
+	GraceSeconds              *int64             `json:"grace_seconds,omitempty"`
+	MaxChargeSeconds          *int64             `json:"max_charge_seconds,omitempty"`
+	StorageRateMicroPerGBDay  *int64             `json:"storage_rate_micro_per_gb_day,omitempty"`
+	StorageFreeAllowanceBytes *int64             `json:"storage_free_allowance_bytes,omitempty"`
 }
 
 func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
 	return store.CreditSettingsUpdate{
-		RateMicroPerSecond: r.RateMicroPerSecond,
-		WarmCPUClassCores:  r.WarmCPUClassCores,
-		GraceSeconds:       r.GraceSeconds,
-		MaxChargeSeconds:   r.MaxChargeSeconds,
+		RateMicroPerSecond:        r.RateMicroPerSecond,
+		WarmCPUClassCores:         r.WarmCPUClassCores,
+		GraceSeconds:              r.GraceSeconds,
+		MaxChargeSeconds:          r.MaxChargeSeconds,
+		StorageRateMicroPerGBDay:  r.StorageRateMicroPerGBDay,
+		StorageFreeAllowanceBytes: r.StorageFreeAllowanceBytes,
 	}
 }
 
 func (r setCreditSettingsReq) namesAScalar() bool {
 	return r.RateMicroPerSecond != nil || r.WarmCPUClassCores != nil ||
-		r.GraceSeconds != nil || r.MaxChargeSeconds != nil
+		r.GraceSeconds != nil || r.MaxChargeSeconds != nil ||
+		r.StorageRateMicroPerGBDay != nil || r.StorageFreeAllowanceBytes != nil
 }
 
 // safety: operators write the table both ways, so a body may name it as a list
@@ -124,9 +136,11 @@ type creditChargeJSON struct {
 	RunID              string `json:"run_id"`
 	NodeID             string `json:"node_id"`
 	TokenPrefix        string `json:"token_prefix"`
+	Principal          string `json:"principal,omitempty"`
 	Kind               string `json:"kind"`
 	Seconds            int64  `json:"seconds"`
 	AmountMicro        int64  `json:"amount_micro"`
+	StorageBytes       int64  `json:"storage_bytes,omitempty"`
 	CPUClassCores      int64  `json:"cpu_class_cores,omitempty"`
 	RateMicroPerSecond int64  `json:"rate_micro_per_second,omitempty"`
 	ChargedAt          int64  `json:"charged_at"`
@@ -161,10 +175,15 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 		WarmCPUClassCores:  state.WarmCPUClassCores,
 		GraceSeconds:       state.GraceSeconds,
 		MaxChargeSeconds:   state.MaxChargeSeconds,
-		BurnWindowSeconds:  int64(creditsBurnWindow.Seconds()),
-		BurnMicro:          state.BurnMicro,
-		MicroPerCredit:     store.MicroCreditsPerCredit,
-		CreditsPerDollar:   store.CreditsPerDollar,
+
+		StorageChargedMicro:       state.StorageChargedMicro,
+		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
+		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,
+
+		BurnWindowSeconds: int64(creditsBurnWindow.Seconds()),
+		BurnMicro:         state.BurnMicro,
+		MicroPerCredit:    store.MicroCreditsPerCredit,
+		CreditsPerDollar:  store.CreditsPerDollar,
 	}
 	if state.ExhaustedAt != nil {
 		v := state.ExhaustedAt.Unix()
@@ -209,7 +228,9 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 	s.logger.Info("credit settings set",
 		"rate_micro_per_second", settings.RateMicroPerSecond,
 		"grace_seconds", settings.GraceSeconds,
-		"max_charge_seconds", settings.MaxChargeSeconds)
+		"max_charge_seconds", settings.MaxChargeSeconds,
+		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
+		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
 	out, err := s.creditSettingsJSON(r, settings)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -267,12 +288,14 @@ func (s *Server) refuseDerivedRateWrite(r *http.Request, body setCreditSettingsR
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
 	return creditSettingsJSON{
-		RateMicroPerSecond: settings.RateMicroPerSecond,
-		WarmCPUClassCores:  settings.WarmCPUClassCores,
-		GraceSeconds:       settings.GraceSeconds,
-		MaxChargeSeconds:   settings.MaxChargeSeconds,
-		MicroPerCredit:     store.MicroCreditsPerCredit,
-		CreditsPerDollar:   store.CreditsPerDollar,
+		RateMicroPerSecond:        settings.RateMicroPerSecond,
+		WarmCPUClassCores:         settings.WarmCPUClassCores,
+		GraceSeconds:              settings.GraceSeconds,
+		MaxChargeSeconds:          settings.MaxChargeSeconds,
+		StorageRateMicroPerGBDay:  settings.StorageRateMicroPerGBDay,
+		StorageFreeAllowanceBytes: settings.StorageFreeAllowanceBytes,
+		MicroPerCredit:            store.MicroCreditsPerCredit,
+		CreditsPerDollar:          store.CreditsPerDollar,
 	}
 }
 
@@ -394,7 +417,8 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 	for _, c := range charges {
 		out.Charges = append(out.Charges, creditChargeJSON{
 			ID: c.ID, RunID: c.RunID, NodeID: c.NodeID, TokenPrefix: c.TokenPrefix,
-			Kind: c.Kind, Seconds: c.Seconds, AmountMicro: c.AmountMicro,
+			Principal: c.Principal, Kind: c.Kind, Seconds: c.Seconds,
+			AmountMicro: c.AmountMicro, StorageBytes: c.StorageBytes,
 			CPUClassCores: c.CPUClassCores, RateMicroPerSecond: c.RateMicroPerSecond,
 			ChargedAt: c.ChargedAt.Unix(),
 		})

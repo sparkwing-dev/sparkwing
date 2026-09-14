@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -25,11 +26,13 @@ func runCredits(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdCredits, os.Stderr)
-		return fmt.Errorf("credits: subcommand required (show|grant|history|settings)")
+		return fmt.Errorf("credits: subcommand required (show|grant|history|settings|allowance)")
 	}
 	switch args[0] {
 	case "show":
 		return runCreditsShow(args[1:])
+	case "allowance":
+		return runCreditsAllowance(args[1:])
 	case "grant":
 		return runCreditsGrant(args[1:])
 	case "history":
@@ -53,11 +56,16 @@ type creditStateResp struct {
 	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
 	GraceSeconds       int64            `json:"grace_seconds"`
 	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	BurnWindowSeconds  int64            `json:"burn_window_seconds"`
-	BurnMicro          int64            `json:"burn_micro"`
-	ExhaustedAt        *int64           `json:"exhausted_at,omitempty"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+
+	StorageChargedMicro       int64 `json:"storage_charged_micro"`
+	StorageRateMicroPerGBDay  int64 `json:"storage_rate_micro_per_gb_day"`
+	StorageFreeAllowanceBytes int64 `json:"storage_free_allowance_bytes"`
+
+	BurnWindowSeconds int64  `json:"burn_window_seconds"`
+	BurnMicro         int64  `json:"burn_micro"`
+	ExhaustedAt       *int64 `json:"exhausted_at,omitempty"`
+	MicroPerCredit    int64  `json:"micro_per_credit"`
+	CreditsPerDollar  int64  `json:"credits_per_dollar"`
 }
 
 func runCreditsShow(args []string) error {
@@ -112,6 +120,11 @@ func renderCreditState(w io.Writer, state creditStateResp) error {
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
 	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", state.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", state.MaxChargeSeconds)
+	if state.StorageChargedMicro != 0 {
+		fmt.Fprintf(tw, "STORAGE CHARGED\t%s credits\n", store.FormatCredits(state.StorageChargedMicro))
+	}
+	fmt.Fprint(tw, storageRateLine(state.StorageRateMicroPerGBDay,
+		state.StorageFreeAllowanceBytes, state.MicroPerCredit))
 	if state.ExhaustedAt != nil {
 		fmt.Fprintf(tw, "EXHAUSTED\t%s\n",
 			time.Unix(*state.ExhaustedAt, 0).UTC().Format("2006-01-02 15:04:05 UTC"))
@@ -160,14 +173,16 @@ func creditsPerUnit(micro, perCredit int64) string {
 }
 
 type creditSettingsResp struct {
-	RateMicroPerSecond int64            `json:"rate_micro_per_second"`
-	RateTable          []creditRateResp `json:"rate_table"`
-	RateTableSet       bool             `json:"rate_table_set"`
-	WarmCPUClassCores  int64            `json:"warm_cpu_class_cores"`
-	GraceSeconds       int64            `json:"grace_seconds"`
-	MaxChargeSeconds   int64            `json:"max_charge_seconds"`
-	MicroPerCredit     int64            `json:"micro_per_credit"`
-	CreditsPerDollar   int64            `json:"credits_per_dollar"`
+	RateMicroPerSecond        int64            `json:"rate_micro_per_second"`
+	RateTable                 []creditRateResp `json:"rate_table"`
+	RateTableSet              bool             `json:"rate_table_set"`
+	WarmCPUClassCores         int64            `json:"warm_cpu_class_cores"`
+	GraceSeconds              int64            `json:"grace_seconds"`
+	MaxChargeSeconds          int64            `json:"max_charge_seconds"`
+	StorageRateMicroPerGBDay  int64            `json:"storage_rate_micro_per_gb_day"`
+	StorageFreeAllowanceBytes int64            `json:"storage_free_allowance_bytes"`
+	MicroPerCredit            int64            `json:"micro_per_credit"`
+	CreditsPerDollar          int64            `json:"credits_per_dollar"`
 }
 
 type creditRateResp struct {
@@ -185,6 +200,10 @@ func runCreditsSettings(args []string) error {
 		"price every cpu class, as CORES=MICRO pairs, for example 2=10000,4=20000,8=36667")
 	warmClass := fs.Int64("warm-cpu-class-cores", store.DefaultWarmCPUClassCores,
 		"largest cpu class the warm runner pool serves; a larger class starts a node of its own")
+	storageRate := fs.Int64("storage-rate-micro-per-gb-day", 0,
+		"micro-credits one gibibyte kept for one day costs; 0 bills no storage")
+	storageFree := fs.Int64("storage-free-allowance-bytes", 0,
+		"retained bytes every team keeps without being billed for them")
 	outputFormat := fs.StringP("output", "o", "",
 		"output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	if err := parseAndCheck(cmdCreditsSettings, fs, args); err != nil {
@@ -197,7 +216,10 @@ func runCreditsSettings(args []string) error {
 	if err != nil {
 		return err
 	}
-	body, err := creditSettingsBody(fs, *rate, *grace, *maxCharge, *rateTable, *warmClass)
+	body, err := creditSettingsBody(fs, creditSettingsFlags{
+		rate: *rate, grace: *grace, maxCharge: *maxCharge, rateTable: *rateTable,
+		warmClass: *warmClass, storageRate: *storageRate, storageFree: *storageFree,
+	})
 	if err != nil {
 		return err
 	}
@@ -230,30 +252,41 @@ func runCreditsSettings(args []string) error {
 // setting. The store owns what each value may be, so the CLI sends what it was
 // given and reports the refusal; only the ladder's own spelling is judged here,
 // because the wire carries it as a map.
-func creditSettingsBody(
-	fs *flag.FlagSet, rate, grace, maxCharge int64, rateTable string, warmClass int64,
-) (map[string]any, error) {
+func creditSettingsBody(fs *flag.FlagSet, in creditSettingsFlags) (map[string]any, error) {
 	body := map[string]any{}
 	if fs.Changed("rate-table") {
-		table, err := parseCreditRateTable(rateTable)
+		table, err := parseCreditRateTable(in.rateTable)
 		if err != nil {
 			return nil, err
 		}
 		body["rate_table"] = table
 	}
-	if fs.Changed("rate-micro") {
-		body["rate_micro_per_second"] = rate
-	}
-	if fs.Changed("warm-cpu-class-cores") {
-		body["warm_cpu_class_cores"] = warmClass
-	}
-	if fs.Changed("grace-seconds") {
-		body["grace_seconds"] = grace
-	}
-	if fs.Changed("max-charge-seconds") {
-		body["max_charge_seconds"] = maxCharge
+	for _, named := range []struct {
+		flag, field string
+		value       int64
+	}{
+		{"rate-micro", "rate_micro_per_second", in.rate},
+		{"warm-cpu-class-cores", "warm_cpu_class_cores", in.warmClass},
+		{"grace-seconds", "grace_seconds", in.grace},
+		{"max-charge-seconds", "max_charge_seconds", in.maxCharge},
+		{"storage-rate-micro-per-gb-day", "storage_rate_micro_per_gb_day", in.storageRate},
+		{"storage-free-allowance-bytes", "storage_free_allowance_bytes", in.storageFree},
+	} {
+		if fs.Changed(named.flag) {
+			body[named.field] = named.value
+		}
 	}
 	return body, nil
+}
+
+type creditSettingsFlags struct {
+	rate        int64
+	grace       int64
+	maxCharge   int64
+	rateTable   string
+	warmClass   int64
+	storageRate int64
+	storageFree int64
 }
 
 // safety: an operator writes the ladder as one flag, so the pairs are parsed
@@ -304,7 +337,19 @@ func renderCreditSettings(w io.Writer, view creditSettingsResp) error {
 	fmt.Fprint(tw, warmClassLine(view.WarmCPUClassCores))
 	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", view.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", view.MaxChargeSeconds)
+	fmt.Fprint(tw, storageRateLine(view.StorageRateMicroPerGBDay,
+		view.StorageFreeAllowanceBytes, view.MicroPerCredit))
 	return tw.Flush()
+}
+
+// safety: a zero rate is the installation that bills no storage at all, which
+// reads differently from a rate of zero credits, so it says so.
+func storageRateLine(rateMicroPerGBDay, freeBytes, perCredit int64) string {
+	if rateMicroPerGBDay <= 0 {
+		return "STORAGE RATE\tnone; retained bytes are not billed\n"
+	}
+	return fmt.Sprintf("STORAGE RATE\t%s credits per gibibyte-day, %d bytes free\n",
+		creditsPerUnit(rateMicroPerGBDay, perCredit), freeBytes)
 }
 
 func writeCreditSettingsPlain(w io.Writer, view creditSettingsResp) error {
@@ -318,8 +363,11 @@ func writeCreditSettingsPlain(w io.Writer, view creditSettingsResp) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(w, "rate_table_set\t%t\nwarm_cpu_class_cores\t%d\n",
-		view.RateTableSet, view.WarmCPUClassCores)
+	_, err := fmt.Fprintf(w,
+		"rate_table_set\t%t\nwarm_cpu_class_cores\t%d\n"+
+			"storage_rate_micro_per_gb_day\t%d\nstorage_free_allowance_bytes\t%d\n",
+		view.RateTableSet, view.WarmCPUClassCores,
+		view.StorageRateMicroPerGBDay, view.StorageFreeAllowanceBytes)
 	return err
 }
 
@@ -414,6 +462,8 @@ type creditChargeResp struct {
 	Kind               string `json:"kind"`
 	Seconds            int64  `json:"seconds"`
 	AmountMicro        int64  `json:"amount_micro"`
+	Principal          string `json:"principal,omitempty"`
+	StorageBytes       int64  `json:"storage_bytes,omitempty"`
 	CPUClassCores      int64  `json:"cpu_class_cores,omitempty"`
 	RateMicroPerSecond int64  `json:"rate_micro_per_second,omitempty"`
 	ChargedAt          int64  `json:"charged_at"`
@@ -441,8 +491,10 @@ type creditHistoryRow struct {
 	Seconds     int64  `json:"seconds,omitempty"`
 	// safety: a grant and a charge written before the rate table carry no
 	// class, so both fields drop out of the row rather than reading as zero.
-	CPUClassCores      int64 `json:"cpu_class_cores,omitempty"`
-	RateMicroPerSecond int64 `json:"rate_micro_per_second,omitempty"`
+	CPUClassCores      int64  `json:"cpu_class_cores,omitempty"`
+	RateMicroPerSecond int64  `json:"rate_micro_per_second,omitempty"`
+	Principal          string `json:"principal,omitempty"`
+	StorageBytes       int64  `json:"storage_bytes,omitempty"`
 }
 
 func runCreditsHistory(args []string) error {
@@ -506,6 +558,7 @@ func creditHistoryRows(history creditHistoryResp) []creditHistoryRow {
 			Type: kind, ID: c.ID, At: c.ChargedAt, AmountMicro: -c.AmountMicro,
 			RunID: c.RunID, NodeID: c.NodeID, TokenPrefix: c.TokenPrefix, Seconds: c.Seconds,
 			CPUClassCores: c.CPUClassCores, RateMicroPerSecond: c.RateMicroPerSecond,
+			Principal: c.Principal, StorageBytes: c.StorageBytes,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].At > rows[j].At })
@@ -543,9 +596,140 @@ func creditRowDetail(row creditHistoryRow) string {
 		}
 		return detail
 	}
+	if row.Type == store.CreditChargeStorage {
+		return fmt.Sprintf("team=%s %d bytes retained over %ds",
+			row.Principal, row.StorageBytes, row.Seconds)
+	}
 	detail := fmt.Sprintf("%s/%s %ds token=%s", row.RunID, row.NodeID, row.Seconds, row.TokenPrefix)
 	if row.CPUClassCores > 0 {
 		detail += fmt.Sprintf(" class=%dc rate=%d", row.CPUClassCores, row.RateMicroPerSecond)
 	}
 	return detail
+}
+
+type storageQuotaResp struct {
+	Principal             string `json:"principal"`
+	Tier                  string `json:"tier,omitempty"`
+	MaxBytesPerRun        int64  `json:"max_bytes_per_run"`
+	MaxBytesPerMonth      int64  `json:"max_bytes_per_month"`
+	MaxObjectsPerRun      int64  `json:"max_objects_per_run"`
+	StorageAllowanceBytes int64  `json:"storage_allowance_bytes"`
+}
+
+type storageStateResp struct {
+	Quota storageQuotaResp `json:"quota"`
+	Usage struct {
+		RetainedBytes int64 `json:"retained_bytes"`
+	} `json:"usage"`
+	Quotas []storageQuotaResp `json:"quotas,omitempty"`
+}
+
+func runCreditsAllowance(args []string) error {
+	fs := flag.NewFlagSet(cmdCreditsAllowance.Path, flag.ContinueOnError)
+	on := addProfileFlag(fs)
+	principal := fs.String("principal", "", "team whose allowance to read or set (default: the calling token's own)")
+	gb := fs.Int64("gb", 0, "gibibytes of retained storage to keep; 0 keeps everything")
+	bytesFlag := fs.Int64("bytes", 0, "bytes of retained storage to keep; 0 keeps everything")
+	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
+	if err := parseAndCheck(cmdCreditsAllowance, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	if fs.Changed("gb") && fs.Changed("bytes") {
+		return errors.New("credits allowance: name --gb or --bytes, not both")
+	}
+	prof, err := resolveProfile(*on)
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "credits allowance"); err != nil {
+		return err
+	}
+	if !fs.Changed("gb") && !fs.Changed("bytes") {
+		return readStorageAllowance(prof, *principal, *outputFormat)
+	}
+	if *principal == "" {
+		return errors.New("credits allowance: --principal names the team whose allowance to set")
+	}
+	want := *bytesFlag
+	if fs.Changed("gb") {
+		if *gb > math.MaxInt64/store.StorageBytesPerGB {
+			return fmt.Errorf("credits allowance: --gb must not exceed %d",
+				math.MaxInt64/store.StorageBytesPerGB)
+		}
+		want = *gb * store.StorageBytesPerGB
+	}
+	if want < 0 {
+		return errors.New("credits allowance: the allowance must not be negative")
+	}
+	resp, err := tokensPut(prof.ControllerURL(), prof.ControllerToken(),
+		"/api/v1/storage/quotas/"+*principal+"/allowance",
+		map[string]any{"storage_allowance_bytes": want})
+	if err != nil {
+		return err
+	}
+	if *outputFormat == "json" {
+		_, err := os.Stdout.Write(append(resp, '\n'))
+		return err
+	}
+	var quota storageQuotaResp
+	if err := json.Unmarshal(resp, &quota); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	fmt.Printf("team %s keeps %d bytes of retained storage\n",
+		quota.Principal, quota.StorageAllowanceBytes)
+	return nil
+}
+
+func readStorageAllowance(prof *profile.Profile, principal, outputFormat string) error {
+	resp, err := tokensGet(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/storage")
+	if err != nil {
+		return err
+	}
+	if outputFormat == "json" {
+		_, err := os.Stdout.Write(append(resp, '\n'))
+		return err
+	}
+	var state storageStateResp
+	if err := json.Unmarshal(resp, &state); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	quota, retained, err := allowanceForPrincipal(state, principal)
+	if err != nil {
+		return err
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "TEAM\t%s\n", quota.Principal)
+	fmt.Fprint(tw, allowanceLine(quota.StorageAllowanceBytes))
+	if retained >= 0 {
+		fmt.Fprintf(tw, "RETAINED\t%d bytes\n", retained)
+	}
+	return tw.Flush()
+}
+
+// safety: the storage route answers with the calling token's own quota and,
+// for an admin, every quota it holds, so another team is read out of that list
+// rather than by asking the route for a team it does not take.
+func allowanceForPrincipal(state storageStateResp, principal string) (storageQuotaResp, int64, error) {
+	if principal == "" || principal == state.Quota.Principal {
+		return state.Quota, state.Usage.RetainedBytes, nil
+	}
+	for _, quota := range state.Quotas {
+		if quota.Principal == principal {
+			return quota, -1, nil
+		}
+	}
+	return storageQuotaResp{}, 0, fmt.Errorf(
+		"credits allowance: this token holds no quota for team %q", principal)
+}
+
+// safety: zero is the team that asked for no ceiling at all, which reads
+// differently from a ceiling of zero bytes.
+func allowanceLine(bytes int64) string {
+	if bytes <= 0 {
+		return "ALLOWANCE\tnone; every retained byte is kept\n"
+	}
+	return fmt.Sprintf("ALLOWANCE\t%d bytes; the oldest runs expire above it\n", bytes)
 }

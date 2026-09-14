@@ -114,6 +114,12 @@ type StorageQuota struct {
 	MaxBytesPerRun   int64
 	MaxBytesPerMonth int64
 	MaxObjectsPerRun int64
+	// AllowanceBytes is how many retained bytes the customer asked to keep.
+	// It is the ceiling the allowance sweep expires oldest-first down to and
+	// the most a team is billed for, and zero keeps everything. Only
+	// [Store.SetStorageAllowance] writes it; [Store.SetStorageQuota] leaves it
+	// where it stands.
+	AllowanceBytes int64
 }
 
 // Unlimited reports whether this quota refuses nothing.
@@ -172,6 +178,9 @@ const storageQuotasTableSQLite = `CREATE TABLE IF NOT EXISTS storage_quotas (
     max_bytes_per_run   INTEGER NOT NULL DEFAULT 0,
     max_bytes_per_month INTEGER NOT NULL DEFAULT 0,
     max_objects_per_run INTEGER NOT NULL DEFAULT 0,
+    -- storage_allowance_bytes: retained bytes the customer asked to keep;
+    -- 0 keeps everything.
+    storage_allowance_bytes INTEGER NOT NULL DEFAULT 0,
     updated_at          INTEGER NOT NULL
 );`
 
@@ -210,6 +219,26 @@ var storageTablesPostgres = func() string {
 		r.Replace(storageRunUsageTableSQLite) + "\n" +
 		r.Replace(storageMonthUsageTableSQLite)
 }()
+
+// safety: zero means what the table already meant, keep everything, so an
+// install upgrading into the column keeps exactly what it kept.
+var storageQuotaAllowanceCols = map[string]string{
+	"storage_allowance_bytes": "INTEGER NOT NULL DEFAULT 0",
+}
+
+func applyStorageAllowanceMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	if err := ensureColumnsSQLite(ctx, tx, "storage_quotas", storageQuotaAllowanceCols); err != nil {
+		return err
+	}
+	return ensureColumnsSQLite(ctx, tx, "credit_charges", creditChargeStorageCols)
+}
+
+func applyStorageAllowanceMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	if err := addColumnsTx(ctx, tx, "storage_quotas", storageQuotaAllowanceCols); err != nil {
+		return err
+	}
+	return addColumnsTx(ctx, tx, "credit_charges", creditChargeStorageCols)
+}
 
 func applyStorageMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	for _, stmt := range []string{
@@ -499,6 +528,9 @@ func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error {
 			return errors.New("storage: quota limits must not be negative")
 		}
 	}
+	// safety: the allowance has one writer, SetStorageAllowance, so a quota
+	// rewrite that says nothing about it cannot silently drop what a team
+	// asked to keep.
 	_, err := s.exec(ctx, `
 INSERT INTO storage_quotas (principal, tier, max_bytes_per_run,
         max_bytes_per_month, max_objects_per_run, updated_at)
@@ -536,9 +568,9 @@ func (s *Store) StorageQuotaFor(ctx context.Context, principal string) (StorageQ
 func (s *Store) storageQuotaRow(ctx context.Context, principal string) (StorageQuota, bool, error) {
 	q := StorageQuota{Principal: principal}
 	err := s.queryRow(ctx, `
-SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run
+SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run, storage_allowance_bytes
   FROM storage_quotas WHERE principal = ?`, principal).
-		Scan(&q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun)
+		Scan(&q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StorageQuota{Principal: principal}, false, nil
 	}
@@ -551,7 +583,8 @@ SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run
 // ListStorageQuotas returns every team with a quota row, by principal.
 func (s *Store) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error) {
 	rows, err := s.query(ctx, `
-SELECT principal, tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run
+SELECT principal, tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run,
+        storage_allowance_bytes
   FROM storage_quotas ORDER BY principal ASC`)
 	if err != nil {
 		return nil, err
@@ -561,7 +594,7 @@ SELECT principal, tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_
 	for rows.Next() {
 		var q StorageQuota
 		if err := rows.Scan(&q.Principal, &q.Tier,
-			&q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun); err != nil {
+			&q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes); err != nil {
 			return nil, err
 		}
 		out = append(out, q)
@@ -606,11 +639,22 @@ func (s *Store) chargeStorageTx(
 	if principal == "" || runID == "" || (bytes <= 0 && objects <= 0) {
 		return nil
 	}
+	rate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
+	if err != nil {
+		return err
+	}
+	if rate > 0 && bytes > 0 {
+		if err := refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, principal, bytes); err != nil {
+			return err
+		}
+	}
 	quota, err := storageQuotaForTx(ctx, tx, principal)
 	if err != nil {
 		return err
 	}
-	if quota.Unlimited() {
+	// safety: priced storage bills every team's bytes, so the total is kept
+	// for all of them; unpriced storage keeps it only where a limit reads it.
+	if rate <= 0 && quota.Unlimited() && quota.AllowanceBytes <= 0 {
 		return nil
 	}
 	if err := lockStorageUsageTx(ctx, tx, principal); err != nil {
@@ -659,9 +703,9 @@ ON CONFLICT (principal, month) DO UPDATE SET
 func storageQuotaForTx(ctx context.Context, tx *storeTx, principal string) (StorageQuota, error) {
 	q := StorageQuota{Principal: principal}
 	err := tx.QueryRowContext(ctx, `
-SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run
+SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run, storage_allowance_bytes
   FROM storage_quotas WHERE principal = ?`, principal).
-		Scan(&q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun)
+		Scan(&q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes)
 	if err == nil {
 		return q, nil
 	}

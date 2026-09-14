@@ -1113,6 +1113,18 @@ paths:
                 required: [seq]
                 properties:
                   seq: {type: integer, format: int64}
+        "402":
+          description: >-
+            Storage is priced and the credit balance is spent, so the payload would grow what the team retains with nothing to pay the rent on it. The event is not stored.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413":
+          description: >-
+            The payload would take the team past one of its storage limits. The reason names the limit, the team, what it has stored and what the write asked for.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /api/v1/triggers:
     post:
@@ -3855,7 +3867,9 @@ paths:
         Naming a `tier` and leaving every limit zero takes that tier's
         limits, so a team moves between tiers without restating three
         numbers. A limit of zero is unbounded, so a quota may cap bytes
-        without capping objects. The answer is the stored quota.
+        without capping objects. This route does not take the retained-storage
+        allowance and never changes it; its own route writes that. The answer
+        is the stored quota.
 
         Run events are charged their payload bytes and a published artifact
         manifest is charged one object, each inside the transaction that
@@ -3864,7 +3878,36 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/StorageQuota"}
+            schema: {$ref: "#/components/schemas/SetStorageQuota"}
+      responses:
+        "200":
+          description: The stored quota.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/StorageQuota"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/storage/quotas/{principal}/allowance:
+    parameters:
+      - in: path
+        name: principal
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: admin
+      tags: [storage]
+      summary: Set how many retained bytes one team keeps.
+      description: |
+        The allowance is how many retained bytes the team asked to keep. The
+        hourly storage pass expires its oldest finished runs above the
+        allowance, so the allowance is both what the team keeps and the most
+        it pays for, and zero keeps everything. The other quota limits are
+        left where they stand. The answer is the stored quota.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StorageAllowance"}
       responses:
         "200":
           description: The stored quota.
@@ -4568,14 +4611,31 @@ components:
         max_bytes_per_run: {type: integer, format: int64}
         max_bytes_per_month: {type: integer, format: int64}
         max_objects_per_run: {type: integer, format: int64}
+        storage_allowance_bytes: {type: integer, format: int64, description: "Retained bytes the team asked to keep and the most it is billed for; the sweep expires its oldest finished runs above this, and 0 keeps everything. Written only by the allowance route."}
+    SetStorageQuota:
+      x-sparkwing-go-type: pkg/controller.setStorageQuotaJSON
+      type: object
+      description: "One team's storage limits. A zero limit is unbounded; the retained-storage allowance is not one of these and is left alone."
+      properties:
+        tier: {type: string, description: free or paid; supplies the limits when they are all zero.}
+        max_bytes_per_run: {type: integer, format: int64}
+        max_bytes_per_month: {type: integer, format: int64}
+        max_objects_per_run: {type: integer, format: int64}
+    StorageAllowance:
+      x-sparkwing-go-type: pkg/controller.storageAllowanceJSON
+      type: object
+      description: How many retained bytes one team asked to keep.
+      properties:
+        storage_allowance_bytes: {type: integer, format: int64, description: "Retained bytes to keep; 0 keeps everything and a negative value is refused."}
     StorageUsage:
       x-sparkwing-go-type: pkg/controller.storageUsageJSON
       type: object
-      description: What one team stored over one calendar month.
+      description: What one team stored over one calendar month, and what it still retains.
       properties:
         month: {type: string, description: Calendar month as YYYY-MM in UTC.}
         month_bytes: {type: integer, format: int64}
         month_objects: {type: integer, format: int64}
+        retained_bytes: {type: integer, format: int64, description: "What the team still has stored, which is what the storage charge and the allowance sweep both measure."}
     StorageTeamUsage:
       x-sparkwing-go-type: pkg/controller.storageTeamJSON
       type: object
@@ -4664,6 +4724,9 @@ components:
         max_charge_seconds: {type: integer, format: int64, description: "The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop."}
         burn_window_seconds: {type: integer, format: int64}
         burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
+        storage_charged_micro: {type: integer, format: int64, description: "The part of charged_micro that billed retained bytes rather than runner time."}
+        storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 bills no storage."}
+        storage_free_allowance_bytes: {type: integer, format: int64, description: Retained bytes every team keeps without being billed for them.}
         exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
         micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
         credits_per_dollar: {type: integer, format: int64}
@@ -4683,6 +4746,8 @@ components:
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a node runs past the reservation its claim paid for with the balance at zero; zero cancels it at the first heartbeat past that reservation.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
+        storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 bills no storage."}
+        storage_free_allowance_bytes: {type: integer, format: int64, description: Retained bytes every team keeps without being billed for them.}
         micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
         credits_per_dollar: {type: integer, format: int64}
     SetCreditSettings:
@@ -4704,6 +4769,8 @@ components:
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second; 1 to 1000000000000.}
         grace_seconds: {type: integer, format: int64, description: Seconds a node runs past its claim reservation on an empty balance; zero or more.}
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; from one second past the longest node heartbeat cadence to one day.}
+        storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 to 1000000000000, and 0 bills no storage."}
+        storage_free_allowance_bytes: {type: integer, format: int64, description: "Retained bytes every team keeps without being billed for them; zero or more."}
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object
@@ -4725,9 +4792,11 @@ components:
         run_id: {type: string}
         node_id: {type: string}
         token_prefix: {type: string}
-        kind: {type: string, description: "reservation, usage, or refund; a refund carries negative seconds and amount."}
+        principal: {type: string, description: "The team a storage charge billed; empty on a charge that billed runner time."}
+        kind: {type: string, description: "reservation, usage, refund, or storage; a refund carries negative seconds and amount."}
         seconds: {type: integer, format: int64}
         amount_micro: {type: integer, format: int64}
+        storage_bytes: {type: integer, format: int64, description: "Retained bytes above the free allowance a storage charge billed; absent on every other kind."}
         cpu_class_cores: {type: integer, format: int64, description: Whole cores of the cpu class billed; absent on a charge written before the rate table.}
         rate_micro_per_second: {type: integer, format: int64, description: The price the charge was billed at; a later change to the rate table leaves it alone.}
         charged_at: {type: integer, format: int64, description: Unix seconds.}

@@ -184,6 +184,7 @@ never charged.
 - `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
 - `history` -- List grants and charges, newest first
 - `settings` -- Read or set the credit rate table, the grace period, and the charge cap
+- `allowance` -- Read or set how many retained bytes a team keeps
 
 ### Examples
 
@@ -193,6 +194,46 @@ sparkwing cluster credits show --profile prod
 
 # Load ten dollars
 sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+```
+
+## `sparkwing cluster credits allowance`
+
+Read or set how many retained bytes a team keeps
+
+Retained bytes are what a team still has stored after its
+runs end, and the storage pass bills them at the storage rate.
+The allowance is how many of them the team asked to keep: the
+pass expires its oldest finished runs above the allowance before
+it bills and never bills above it, so the allowance is both what
+the team keeps and the most it pays for. An allowance of zero
+keeps everything and caps nothing. This verb is the only writer;
+rewriting a team's quota leaves the allowance alone.
+
+Reading with no flag reports the calling token's own allowance
+and what it currently retains. An admin token reads another
+team by naming it. Setting one needs the admin scope and names
+the team. The free allowance every team keeps unbilled and the
+price of a gibibyte-day are controller-wide settings on
+`sparkwing cluster credits settings`.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--principal NAME` | Team whose allowance to read or set; required to set one |
+| `--gb N` | Gibibytes of retained storage to keep; 0 keeps everything |
+| `--bytes N` | Bytes of retained storage to keep; 0 keeps everything |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Read what this token's team keeps
+sparkwing cluster credits allowance --profile prod
+
+# Keep fifty gibibytes for a team
+sparkwing cluster credits allowance --principal acme --gb 50 --profile prod
 ```
 
 ## `sparkwing cluster credits grant`

@@ -95,12 +95,14 @@ const (
 )
 
 // Credit charge kinds. A reservation is taken at claim time, usage rows bill
-// the intervals a node actually ran, and a refund returns the unused tail of
-// a reservation when the node finishes early.
+// the intervals a node actually ran, a refund returns the unused tail of a
+// reservation when the node finishes early, and a storage row bills the bytes
+// a team kept for the interval it kept them.
 const (
 	CreditChargeReservation = "reservation"
 	CreditChargeUsage       = "usage"
 	CreditChargeRefund      = "refund"
+	CreditChargeStorage     = "storage"
 )
 
 // Run event kinds the credit ledger writes.
@@ -178,6 +180,11 @@ const creditChargesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_charges (
     kind         TEXT NOT NULL DEFAULT 'usage',
     seconds      INTEGER NOT NULL,
     amount_micro INTEGER NOT NULL,
+    -- principal: the team a storage row billed; empty on a runner charge.
+    principal    TEXT NOT NULL DEFAULT '',
+    -- storage_bytes: retained bytes above the free allowance a storage row
+    -- billed; 0 on every other kind.
+    storage_bytes INTEGER NOT NULL DEFAULT 0,
     -- cpu_class: whole cores of the class billed; 0 for a row written before
     -- the rate table, which was billed at credit_rate_micro_per_second.
     cpu_class    INTEGER NOT NULL DEFAULT 0,
@@ -218,6 +225,14 @@ var creditsTablesPostgres = func() string {
 // an earlier commit on this lineage stamped 35 is short of it.
 var creditChargeKindCols = map[string]string{
 	"kind": "TEXT NOT NULL DEFAULT 'usage'",
+}
+
+// safety: a storage row bills a team's retained bytes rather than a node's
+// seconds, so the team and the bytes have columns of their own; every row a
+// runner charge wrote carries the empty defaults.
+var creditChargeStorageCols = map[string]string{
+	"principal":     "TEXT NOT NULL DEFAULT ''",
+	"storage_bytes": "INTEGER NOT NULL DEFAULT 0",
 }
 
 // safety: a row billed before the rate table carries class 0, which reads as
@@ -366,9 +381,15 @@ type CreditCharge struct {
 	RunID       string
 	NodeID      string
 	TokenPrefix string
+	// Principal names the team a storage row billed, and is empty on every
+	// row that billed runner time.
+	Principal   string
 	Kind        string
 	Seconds     int64
 	AmountMicro int64
+	// StorageBytes is the retained bytes above the free allowance a storage
+	// row billed, and zero on every other kind.
+	StorageBytes int64
 	// CPUClassCores is the cpu class the row was billed at, in whole cores,
 	// and zero for a row written before the rate table.
 	CPUClassCores int64
@@ -385,11 +406,18 @@ type CreditState struct {
 	GrantedMicro int64
 	// ReversedMicro is what reversals took back, reported as a positive
 	// amount and already subtracted from the balance.
-	ReversedMicro      int64
-	ChargedMicro       int64
-	BalanceMicro       int64
-	RateMicroPerSecond int64
-	RateTable          CreditRateTable
+	ReversedMicro int64
+	// ChargedMicro is every charge row, reservations, refunds and storage
+	// included, so that granted less reversed less charged is the balance.
+	// [CreditLedgerTotals.ChargedMicro] is the other figure: runner usage
+	// alone, with storage beside it.
+	ChargedMicro int64
+	// StorageChargedMicro is the part of ChargedMicro that billed retained
+	// bytes rather than runner time.
+	StorageChargedMicro int64
+	BalanceMicro        int64
+	RateMicroPerSecond  int64
+	RateTable           CreditRateTable
 	// RateTableSet reports whether an operator wrote the table. A state that
 	// reports false bills the default ladder.
 	RateTableSet bool
@@ -397,9 +425,15 @@ type CreditState struct {
 	WarmCPUClassCores int64
 	GraceSeconds      int64
 	MaxChargeSeconds  int64
-	BurnWindow        time.Duration
-	BurnMicro         int64
-	ExhaustedAt       *time.Time
+	// StorageRateMicroPerGBDay is what one gibibyte kept for one day costs,
+	// and zero is an installation that bills no storage.
+	StorageRateMicroPerGBDay int64
+	// StorageFreeAllowanceBytes is how many retained bytes a team keeps
+	// without being billed for them.
+	StorageFreeAllowanceBytes int64
+	BurnWindow                time.Duration
+	BurnMicro                 int64
+	ExhaustedAt               *time.Time
 }
 
 // ValidCreditGrantKind reports whether kind is one this ledger stores.
@@ -647,6 +681,14 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 	out.ChargedMicro = charged.Int64
 	out.BalanceMicro = granted.Int64 - reversed.Int64 - charged.Int64
 
+	var storageCharged sql.NullInt64
+	if err := s.queryRow(ctx,
+		`SELECT SUM(amount_micro) FROM credit_charges WHERE kind = ?`,
+		CreditChargeStorage).Scan(&storageCharged); err != nil {
+		return out, err
+	}
+	out.StorageChargedMicro = storageCharged.Int64
+
 	if window > 0 {
 		var burn sql.NullInt64
 		if err := s.queryRow(ctx,
@@ -687,6 +729,16 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 		return out, err
 	}
 	out.MaxChargeSeconds = maxCharge
+	storageRate, err := s.StorageRateMicroPerGBDay(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.StorageRateMicroPerGBDay = storageRate
+	storageFree, err := s.StorageFreeAllowanceBytes(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.StorageFreeAllowanceBytes = storageFree
 	exhausted, err := s.creditExhaustedAt(ctx)
 	if err != nil {
 		return out, err
@@ -711,11 +763,16 @@ type CreditLedgerTotals struct {
 	// ReservedMicro is the runway claims took up front, refunds included, so
 	// it is the gross reservation rather than the part never returned.
 	ReservedMicro int64
-	// ChargedMicro is what execution billed.
+	// ChargedMicro is what runner execution billed, and storage is not in it;
+	// StorageMicro carries that. [CreditState.ChargedMicro] is the other
+	// figure: every charge row, so that granted less charged is the balance.
 	ChargedMicro int64
 	// RefundedMicro is the unused reservation tail returned at finish,
 	// reported as a positive amount.
 	RefundedMicro int64
+	// StorageMicro is what retained bytes billed, which is the part of the
+	// ledger's spend that bought no runner time.
+	StorageMicro int64
 	// SettledSeconds is the runner seconds the ledger has finished charging
 	// for: every charge row less the part of an open reservation a finish
 	// would still refund. A reservation therefore enters this total as the
@@ -748,16 +805,20 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro, &out.ReversedMicro); err != nil {
 		return out, err
 	}
+	// safety: a storage row bills bytes rather than runner time, so its
+	// interval stays out of the seconds total the cloud placement series is.
 	var settled, charged int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
                         COALESCE(SUM(amount_micro), 0),
-                        COALESCE(SUM(seconds), 0)
+                        COALESCE(SUM(CASE WHEN kind = ? THEN 0 ELSE seconds END), 0)
                    FROM credit_charges`,
 		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
-	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro,
+		CreditChargeStorage, CreditChargeStorage,
+	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro, &out.StorageMicro,
 		&settled, &charged); err != nil {
 		return out, err
 	}
@@ -809,7 +870,7 @@ func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
 }
 
-// CreditSettings are the three values the ledger prices work with.
+// CreditSettings are the values the ledger prices work with.
 type CreditSettings struct {
 	// RateMicroPerSecond is the price of one cloud runner second.
 	RateMicroPerSecond int64
@@ -822,20 +883,29 @@ type CreditSettings struct {
 	GraceSeconds int64
 	// MaxChargeSeconds is the most seconds any one charge may bill.
 	MaxChargeSeconds int64
+	// StorageRateMicroPerGBDay is what one gibibyte kept for one day costs.
+	// Zero bills no storage, which is what an installation that never set it
+	// reads.
+	StorageRateMicroPerGBDay int64
+	// StorageFreeAllowanceBytes is how many retained bytes a team keeps
+	// without being billed for them.
+	StorageFreeAllowanceBytes int64
 }
 
 // CreditSettingsUpdate names the settings to change. A nil field leaves that
 // setting as it stands, so a caller changing one value sends one field and a
 // field added later joins without disturbing these three.
 type CreditSettingsUpdate struct {
-	RateMicroPerSecond *int64
-	WarmCPUClassCores  *int64
-	GraceSeconds       *int64
-	MaxChargeSeconds   *int64
+	RateMicroPerSecond        *int64
+	WarmCPUClassCores         *int64
+	GraceSeconds              *int64
+	MaxChargeSeconds          *int64
+	StorageRateMicroPerGBDay  *int64
+	StorageFreeAllowanceBytes *int64
 }
 
-// CreditSettings reads all three settings together. A controller that set none
-// of them reads the defaults.
+// CreditSettings reads every setting together. A controller that set none of
+// them reads the defaults.
 func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error) {
 	var out CreditSettings
 	tx, err := s.beginSnapshotReadTx(ctx)
@@ -898,6 +968,12 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 	if u.MaxChargeSeconds != nil {
 		out[metaKeyCreditMaxCharge] = *u.MaxChargeSeconds
 	}
+	if u.StorageRateMicroPerGBDay != nil {
+		out[metaKeyStorageRateMicroPerGBDay] = *u.StorageRateMicroPerGBDay
+	}
+	if u.StorageFreeAllowanceBytes != nil {
+		out[metaKeyStorageFreeAllowanceBytes] = *u.StorageFreeAllowanceBytes
+	}
 	return out
 }
 
@@ -905,9 +981,11 @@ func (u CreditSettingsUpdate) byKey() map[string]int64 {
 // names one good setting and one bad one moves neither.
 func (u CreditSettingsUpdate) validate() error {
 	if u.RateMicroPerSecond == nil && u.WarmCPUClassCores == nil &&
-		u.GraceSeconds == nil && u.MaxChargeSeconds == nil {
+		u.GraceSeconds == nil && u.MaxChargeSeconds == nil &&
+		u.StorageRateMicroPerGBDay == nil && u.StorageFreeAllowanceBytes == nil {
 		return fmt.Errorf(
-			"%w: name at least one of the rate, the warm cpu class, the grace period, or the charge cap",
+			"%w: name at least one of the rate, the warm cpu class, the grace period, "+
+				"the charge cap, the storage rate, or the free storage allowance",
 			ErrInvalidCreditSetting)
 	}
 	if u.WarmCPUClassCores != nil {
@@ -927,6 +1005,16 @@ func (u CreditSettingsUpdate) validate() error {
 	}
 	if u.MaxChargeSeconds != nil {
 		if err := validCreditMaxCharge(*u.MaxChargeSeconds); err != nil {
+			return err
+		}
+	}
+	if u.StorageRateMicroPerGBDay != nil {
+		if err := validStorageRate(*u.StorageRateMicroPerGBDay); err != nil {
+			return err
+		}
+	}
+	if u.StorageFreeAllowanceBytes != nil {
+		if err := validStorageFreeAllowance(*u.StorageFreeAllowanceBytes); err != nil {
 			return err
 		}
 	}
@@ -991,10 +1079,20 @@ func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) 
 	if err != nil {
 		return out, err
 	}
+	storageRate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
+	if err != nil {
+		return out, err
+	}
+	storageFree, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, 0)
+	if err != nil {
+		return out, err
+	}
 	out.RateMicroPerSecond = rate
 	out.WarmCPUClassCores = warm
 	out.GraceSeconds = grace
 	out.MaxChargeSeconds = maxCharge
+	out.StorageRateMicroPerGBDay = storageRate
+	out.StorageFreeAllowanceBytes = storageFree
 	return out, nil
 }
 
@@ -1115,8 +1213,8 @@ func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGran
 // ListCreditCharges returns charges newest first, at most limit rows and
 // never more than [CreditHistoryMaxLimit].
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
-	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, kind, seconds, amount_micro,
-	         cpu_class, rate_micro_per_second, charged_at
+	rows, err := s.query(ctx, `SELECT id, run_id, node_id, token_prefix, principal, kind,
+	         seconds, amount_micro, storage_bytes, cpu_class, rate_micro_per_second, charged_at
 	  FROM credit_charges ORDER BY charged_at DESC, id DESC LIMIT ?`, creditLimit(limit))
 	if err != nil {
 		return nil, err
@@ -1126,8 +1224,9 @@ func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCha
 	for rows.Next() {
 		var c CreditCharge
 		var charged int64
-		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Kind,
-			&c.Seconds, &c.AmountMicro, &c.CPUClassCores, &c.RateMicroPerSecond, &charged); err != nil {
+		if err := rows.Scan(&c.ID, &c.RunID, &c.NodeID, &c.TokenPrefix, &c.Principal, &c.Kind,
+			&c.Seconds, &c.AmountMicro, &c.StorageBytes,
+			&c.CPUClassCores, &c.RateMicroPerSecond, &charged); err != nil {
 			return nil, err
 		}
 		c.ChargedAt = time.Unix(0, charged).UTC()

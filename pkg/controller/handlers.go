@@ -647,7 +647,7 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	seq, err := s.store.AppendEventCharged(r.Context(), chargedPrincipal(r),
 		runID, body.NodeID, body.Kind, body.Payload)
-	if writeStorageQuotaError(w, s.logger, err) {
+	if writeStorageWriteRefusal(w, s.logger, err) {
 		return
 	}
 	if errors.Is(err, store.ErrLockHeld) {
@@ -2092,7 +2092,7 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 	}
 	if err := s.store.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
 		runID, nodeID, body.ManifestDigest); err != nil {
-		if writeStorageQuotaError(w, s.logger, err) {
+		if writeStorageWriteRefusal(w, s.logger, err) {
 			return
 		}
 		if errors.Is(err, store.ErrLockHeld) {

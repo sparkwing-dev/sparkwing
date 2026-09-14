@@ -140,6 +140,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/services` | `authenticated` |
 | `GET` | `/api/v1/storage` | `runs.read` |
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
+| `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |

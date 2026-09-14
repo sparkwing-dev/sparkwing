@@ -998,6 +998,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
 	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
+	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
 
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))

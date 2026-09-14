@@ -20,6 +20,43 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **controller + CLI + pkg/store (schema v47):** Retained storage is charged
+  against the credit ledger, against an allowance the customer sets. A team's
+  allowance (`storage_allowance_bytes`, written with
+  `PUT /api/v1/storage/quotas/{principal}/allowance` on the `admin` scope or
+  `sparkwing cluster credits allowance --principal NAME --gb N`) is how many
+  retained bytes it asked to keep: the hourly storage pass expires its oldest
+  finished runs above the allowance before it bills and never bills above it,
+  so the allowance is both what a team keeps and the most it pays for. Only
+  that route writes it; rewriting a quota leaves it alone.
+  `storage_rate_micro_per_gb_day` and `storage_free_allowance_bytes` on the
+  credit settings route price it: every team holding bytes is billed on every
+  pass for the interval since it was last billed, as a `storage` charge naming
+  the team and the bytes, so `sparkwing cluster credits show` and
+  `credits history` separate retained bytes from runner time. The division
+  truncates toward zero, so a fraction of a micro-credit is never billed, and
+  each team's watermark moves by compare-and-set, so two controllers on one
+  database bill an interval once. An interval is never billed for longer than
+  the bytes in it have been held, and a team that drops to nothing keeps no
+  watermark, so an idle stretch is not charged against whatever it stores next.
+  What is billed is run-event payload bytes; artifact content, cache entries
+  and hosted logs are not metered on this release, and a published manifest
+  counts one object against the quota but carries no bytes. A spent balance
+  refuses a write
+  that would grow a team's retained bytes with `402`, at the next storage pass
+  and so up to an hour late, with the storage quota bounding what lands in the
+  meantime, and drains retained bytes to the free allowance as retention
+  releases them; nothing is removed for non-payment inside the retention
+  window. `GET /api/v1/storage` reports `retained_bytes` and the allowance, and
+  `sparkwing_credits_storage_micro_total` is the meter.
+  `store.SetStorageAllowance`, `store.StorageRetainedBytes`,
+  `store.ChargeRetainedStorage`, `store.SweepStorageAllowance` and
+  `store.CreditChargeStorage` are the store surface. Both settings default to
+  zero, so an installation that sets neither writes no storage charge and keeps
+  every byte it kept before.
+
 ## [v0.50.5] - 2026-09-14
 ### Changed
 

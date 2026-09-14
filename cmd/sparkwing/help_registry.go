@@ -2175,7 +2175,7 @@ time before it is granted, heartbeats charge the seconds they
 cover, and the finish refunds whatever of the reservation the
 node did not use. Runners the operator did not mark metered are
 never charged.`,
-	SubcommandOrder: []string{"show", "grant", "history", "settings"},
+	SubcommandOrder: []string{"show", "grant", "history", "settings", "allowance"},
 	Examples: []Example{
 		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
 		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
@@ -2200,6 +2200,37 @@ operator marks a token.`,
 	Examples: []Example{
 		{"Read the balance", "sparkwing cluster credits show --profile prod"},
 		{"Read the balance as JSON", "sparkwing cluster credits show --profile prod -o json"},
+	},
+}
+
+var cmdCreditsAllowance = Command{
+	Path:     "sparkwing cluster credits allowance",
+	Synopsis: "Read or set how many retained bytes a team keeps",
+	Description: `Retained bytes are what a team still has stored after its
+runs end, and the storage pass bills them at the storage rate.
+The allowance is how many of them the team asked to keep: the
+pass expires its oldest finished runs above the allowance before
+it bills and never bills above it, so the allowance is both what
+the team keeps and the most it pays for. An allowance of zero
+keeps everything and caps nothing. This verb is the only writer;
+rewriting a team's quota leaves the allowance alone.
+
+Reading with no flag reports the calling token's own allowance
+and what it currently retains. An admin token reads another
+team by naming it. Setting one needs the admin scope and names
+the team. The free allowance every team keeps unbilled and the
+price of a gibibyte-day are controller-wide settings on
+` + "`sparkwing cluster credits settings`" + `.`,
+	Flags: []FlagSpec{
+		{Name: "principal", Argument: "NAME", Desc: "Team whose allowance to read or set; required to set one", Group: "Input"},
+		{Name: "gb", Argument: "N", Desc: "Gibibytes of retained storage to keep; 0 keeps everything", Group: "Input"},
+		{Name: "bytes", Argument: "N", Desc: "Bytes of retained storage to keep; 0 keeps everything", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Read what this token's team keeps", "sparkwing cluster credits allowance --profile prod"},
+		{"Keep fifty gibibytes for a team", "sparkwing cluster credits allowance --principal acme --gb 50 --profile prod"},
 	},
 }
 
