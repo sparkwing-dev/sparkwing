@@ -255,20 +255,28 @@ func (s *Store) chargeOneTeamStorage(
 		return nil, tx.Commit()
 	}
 	through := parseCreditSetting(stamped, 0)
-	seconds := (now.UnixNano() - through) / int64(time.Second)
-	if seconds <= 0 {
+	gap := (now.UnixNano() - through) / int64(time.Second)
+	if gap <= 0 {
 		return nil, tx.Commit()
 	}
-	// safety: the watermark moves whether or not the truncated amount is worth
-	// a micro-credit, so an interval is never billed twice; what truncation
-	// forgives is at most one micro-credit per team per pass.
+	// safety: the watermark moves the whole gap whether or not the truncated
+	// amount is worth a micro-credit, so an interval is never billed twice;
+	// what truncation forgives is at most one micro-credit per team per pass.
 	if err := stampStorageChargedThroughTx(ctx, tx, principal,
-		stamped, through+seconds*int64(time.Second)); err != nil {
+		stamped, through+gap*int64(time.Second)); err != nil {
 		return nil, err
 	}
-	billable, err := billableRetainedBytesTx(ctx, tx, principal, free)
+	billable, held, err := billableRetainedBytesTx(ctx, tx, principal, free, now)
 	if err != nil {
 		return nil, err
+	}
+	// safety: a team that held nothing for a while carries a watermark from
+	// before the gap, so the interval is clamped to how long the bytes being
+	// billed have actually been held. Without it the first pass after an idle
+	// stretch bills one fresh sample for every week of it.
+	seconds := min(gap, held)
+	if seconds <= 0 {
+		return nil, tx.Commit()
 	}
 	amount, err := storageChargeMicro(billable, rate, seconds)
 	if err != nil {
@@ -287,25 +295,31 @@ func (s *Store) chargeOneTeamStorage(
 	return charge, tx.Commit()
 }
 
-// safety: a team never pays for more than the allowance it named, because that
-// is what every page describing the allowance promises, and the sweep has
-// already expired what stands above it by the time this runs.
-func billableRetainedBytesTx(ctx context.Context, tx *storeTx, principal string, free int64) (int64, error) {
-	var retained sql.NullInt64
+// safety: a team never pays for more than the allowance it named, and the
+// second figure is how long the oldest of those bytes has been held, which is
+// the ceiling on the interval they can be billed for.
+func billableRetainedBytesTx(
+	ctx context.Context, tx *storeTx, principal string, free int64, now time.Time,
+) (int64, int64, error) {
+	var retained, oldest sql.NullInt64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT SUM(bytes) FROM storage_run_usage WHERE principal = ?`, principal).
-		Scan(&retained); err != nil {
-		return 0, err
+		`SELECT SUM(bytes), MIN(updated_at) FROM storage_run_usage WHERE principal = ?`, principal).
+		Scan(&retained, &oldest); err != nil {
+		return 0, 0, err
 	}
 	quota, err := storageQuotaForTx(ctx, tx, principal)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	billable := retained.Int64
 	if quota.AllowanceBytes > 0 && billable > quota.AllowanceBytes {
 		billable = quota.AllowanceBytes
 	}
-	return max(billable-free, 0), nil
+	held := int64(0)
+	if oldest.Valid {
+		held = max((now.UnixNano()-oldest.Int64)/int64(time.Second), 0)
+	}
+	return max(billable-free, 0), held, nil
 }
 
 // safety: the watermark is a compare-and-set against the exact value this pass
@@ -539,5 +553,26 @@ func (s *Store) expireRunStorage(ctx context.Context, principal, runID string) (
 		principal, runID); err != nil {
 		return 0, err
 	}
+	if err := dropSpentStorageWatermarkTx(ctx, tx, principal); err != nil {
+		return 0, err
+	}
 	return events, tx.Commit()
+}
+
+// safety: a team holding nothing keeps no watermark, so the next bytes it
+// stores are billed from the pass that sees them and sparkwing_meta does not
+// accumulate a key for every team that ever stored.
+func dropSpentStorageWatermarkTx(ctx context.Context, tx *storeTx, principal string) error {
+	var left int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM storage_run_usage WHERE principal = ?`, principal).
+		Scan(&left); err != nil {
+		return err
+	}
+	if left > 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx,
+		`DELETE FROM sparkwing_meta WHERE key = ?`, storageChargedThroughKey(principal))
+	return err
 }

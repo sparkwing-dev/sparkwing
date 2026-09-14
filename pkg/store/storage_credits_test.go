@@ -190,6 +190,97 @@ func TestTwoPassesOverOneIntervalBillItOnce(t *testing.T) {
 	}
 }
 
+// A team that held nothing for weeks carries a watermark from before the gap.
+// Billing the gap against the first fresh sample charged a team 503 times an
+// honest hour, so the interval is clamped to how long the bytes billed have
+// actually been held.
+func TestAnIdleGapIsNotBilledWhenATeamStoresAgain(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	start := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "acme", "r1", gib, start.Add(-time.Hour))
+
+	hour := int64(store.CloudStorageRateMicroPerGBDay) / 24
+	billed := billOneInterval(t, st, start, time.Hour)
+	if len(billed.Charges) != 1 || billed.Charges[0].AmountMicro != hour {
+		t.Fatalf("charges = %+v, want one gibibyte-hour of %d micro", billed.Charges, hour)
+	}
+
+	// safety: a cascading delete takes the bytes with no sweep behind them to
+	// prune the watermark, which is the path the clamp has to cover.
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`DELETE FROM storage_run_usage WHERE principal = 'acme'`)); err != nil {
+		t.Fatalf("release the bytes: %v", err)
+	}
+
+	back := start.Add(21 * 24 * time.Hour)
+	seedRetainedRun(t, st, "acme", "r2", gib, back.Add(-time.Hour))
+	after, err := st.ChargeRetainedStorage(ctx, back)
+	if err != nil {
+		t.Fatalf("pass after the idle gap: %v", err)
+	}
+	if len(after.Charges) != 1 {
+		t.Fatalf("charges = %+v, want one", after.Charges)
+	}
+	if got := after.Charges[0].AmountMicro; got > hour {
+		t.Fatalf("billed %d micro after a three-week gap, want at most one gibibyte-hour of %d",
+			got, hour)
+	}
+	if got := after.Charges[0].Seconds; got > 3600 {
+		t.Fatalf("billed %ds, want at most the hour the bytes were held", got)
+	}
+}
+
+// A team holding nothing keeps no watermark, so nothing stale survives to
+// price its next bytes and sparkwing_meta gains no key per team that ever
+// stored.
+func TestTheWatermarkIsGoneOnceATeamHoldsNothing(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	if err := st.SetStorageSettings(ctx, store.StorageSettings{EventRetentionDays: 30}); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "acme", "r1", gib, now.Add(-40*24*time.Hour))
+
+	if _, err := st.ChargeRetainedStorage(ctx, now); err != nil {
+		t.Fatalf("stamp pass: %v", err)
+	}
+	if got := storageWatermarkKeys(t, st); got != 1 {
+		t.Fatalf("watermark keys = %d after a stamp, want 1", got)
+	}
+	swept, err := st.SweepStorageAllowance(ctx, now)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.Runs != 1 {
+		t.Fatalf("swept %+v, want the team drained", swept)
+	}
+	retained, err := st.StorageRetainedBytes(ctx, "acme")
+	if err != nil {
+		t.Fatalf("retained: %v", err)
+	}
+	if retained != 0 {
+		t.Fatalf("retained = %d, want nothing held", retained)
+	}
+	if got := storageWatermarkKeys(t, st); got != 0 {
+		t.Fatalf("watermark keys = %d after the drain, want none", got)
+	}
+}
+
+func storageWatermarkKeys(t *testing.T, st *store.Store) int64 {
+	t.Helper()
+	var n int64
+	if err := st.DB().QueryRow(storetest.Rebind(st,
+		`SELECT COUNT(*) FROM sparkwing_meta WHERE key LIKE ?`),
+		"storage_charged_through/%").Scan(&n); err != nil {
+		t.Fatalf("count watermark keys: %v", err)
+	}
+	return n
+}
+
 func TestStorageChargeNeverBillsAboveTheAllowance(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

@@ -37,10 +37,13 @@ unlock.
   `credits history` separate retained bytes from runner time. The division
   truncates toward zero, so a fraction of a micro-credit is never billed, and
   each team's watermark moves by compare-and-set, so two controllers on one
-  database bill an interval once. What counts is what the controller durably
-  stores and already accounts per team: run-event payload bytes and one object
-  for each published artifact manifest. Artifact content, cache entries and
-  hosted logs are not metered on this release. A spent balance refuses a write
+  database bill an interval once. An interval is never billed for longer than
+  the bytes in it have been held, and a team that drops to nothing keeps no
+  watermark, so an idle stretch is not charged against whatever it stores next.
+  What is billed is run-event payload bytes; artifact content, cache entries
+  and hosted logs are not metered on this release, and a published manifest
+  counts one object against the quota but carries no bytes. A spent balance
+  refuses a write
   that would grow a team's retained bytes with `402`, at the next storage pass
   and so up to an hour late, with the storage quota bounding what lands in the
   meantime, and drains retained bytes to the free allowance as retention

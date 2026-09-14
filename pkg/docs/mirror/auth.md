@@ -102,21 +102,26 @@ what one gibibyte kept for one day costs and `storage_free_allowance_bytes` is
 what every team keeps unbilled, and both are zero until written, so an
 installation that sets neither writes no storage charge.
 
-What counts as a retained byte is what the controller itself durably stores and
-already accounts per team: run-event payload bytes, and one object for each
-published artifact manifest. Artifact content, cache entries and hosted logs
-are not metered on this release, because the controller never sees their sizes:
-a runner writes artifact blobs straight to the object store and the controller
-holds only the manifest digest.
+What the storage charge bills is run-event payload bytes, which is the one
+thing the controller durably stores and already measures per team. Artifact
+content, cache entries and hosted logs are not metered on this release, because
+the controller never sees their sizes: a runner writes artifact blobs straight
+to the object store and the controller holds only the manifest digest. A
+published manifest counts one object against the team's quota and carries no
+bytes, so it costs nothing here.
 
 Each storage pass bills every team holding bytes for the interval since it was
 last billed. The pass runs on the controller's hourly storage timer, so the
 meter's error is one pass interval of bytes held and released between two
 passes, not a whole day of them. A team the ledger has never billed is stamped
 with the current instant and billed from the next pass, so pricing storage
-never bills for the past. Each team's watermark moves by compare-and-set, so
-two controllers on one database bill an interval once whatever either clock
-says, and a clock that steps backwards bills nothing rather than billing twice.
+never bills for the past, and so a team's first bytes cost one pass before the
+meter reaches them. A team that drops to nothing keeps no watermark, and an
+interval is never billed for longer than the bytes in it have been held, so an
+idle stretch is not charged against whatever a team stores next. Each team's
+watermark moves by compare-and-set, so two controllers on one database bill an
+interval once whatever either clock says, and a clock that steps backwards
+bills nothing rather than billing twice.
 
 The amount is `bytes x rate x seconds` divided by a gibibyte-day, truncated
 toward zero, so a fraction of a micro-credit is never billed and truncation
@@ -148,7 +153,9 @@ installation with no retention window drains nothing.
 
 The cut is late by up to one storage pass, at most an hour: a balance that
 reaches zero between passes keeps accepting writes until the next one, and the
-team's storage quota is what bounds how much can land in the meantime.
+team's storage quota is what bounds how much can land in the meantime. For a
+team that held nothing before, the stamp pass comes first, so the cut can take
+two passes to engage.
 
 ## Runner classes
 
