@@ -78,7 +78,9 @@ unlock.
   that had never built the pipeline held no declaration to weigh and every
   risk-labeled step ran unauthorized. `sparkwing run` now builds that binary
   before admission, and the refusal names the step, its labels and
-  `--sw-allow`.
+  `--sw-allow`. A source tree holding a file sparkwing cannot read is refused
+  rather than run, because its declarations cannot be weighed. A detached run
+  is still dispatched before admission.
 
 ### Security
 
