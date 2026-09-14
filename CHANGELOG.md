@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.50.2] - 2026-09-14
 ### Added
 
 - **runner + chart:** A runner pool can keep its Go caches across pod
