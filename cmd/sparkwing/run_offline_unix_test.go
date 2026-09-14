@@ -40,8 +40,9 @@ const offlineStopTimeout = 30 * time.Second
 // fetch is refused and logged by the same request; HTTP_PROXY and HTTPS_PROXY
 // are the recorder, so git over https is too; GIT_CONFIG_GLOBAL and
 // GIT_CONFIG_NOSYSTEM empty the git configuration that could rewrite an https
-// remote into ssh. HOME, GOMODCACHE and GOCACHE are the fixture's own, so every
-// byte the denied runs read was put there by the first run.
+// remote into ssh. HOME and GOMODCACHE are the fixture's own, so every module
+// byte the denied runs read was put there by the first run, and the first run
+// takes those bytes from the host module cache rather than the network.
 func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the offline guarantee downloads modules and compiles a pipeline binary; run without -short")
@@ -69,10 +70,10 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	repoDir, sparkwingDir := offlineWriteFixture(t, gitBin, toolPath, fixtureHome)
 	marker := filepath.Join(t.TempDir(), "ran.txt")
 
-	connected := offlineConnectedEnv(fixtureHome, toolPath, sparkwingHome, marker)
+	connected := offlineConnectedEnv(t, fixtureHome, toolPath, sparkwingHome, marker)
 	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, connected, "mod", "tidy"); tidyErr != nil {
-		t.Skipf("this host cannot download the fixture's modules, so there is no first build to go offline from: %v\n%s",
-			tidyErr, out)
+		t.Fatalf("the host module cache does not hold the fixture's modules; "+
+			"run `go mod download all` in the repository first: %v\n%s", tidyErr, out)
 	}
 
 	firstOut, err := offlineRunCLI(cli, repoDir, connected, "run", "offline")
@@ -84,7 +85,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	}
 
 	denier := offlineNewDenier(t)
-	denied := offlineDeniedEnv(fixtureHome, toolPath, sparkwingHome, marker, denier.url)
+	denied := offlineDeniedEnv(t, fixtureHome, toolPath, sparkwingHome, marker, denier.url)
 
 	cached := denier.mark()
 	secondOut, err := offlineRunCLI(cli, repoDir, denied, "run", "offline")
@@ -224,12 +225,26 @@ func offlineToolPath(t *testing.T, tools ...string) string {
 	return dir
 }
 
-func offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker string) []string {
+func offlineGoEnv(t *testing.T, name string) string {
+	t.Helper()
+	out, err := exec.Command("go", "env", name).Output()
+	if err != nil {
+		t.Fatalf("resolve the host %s: %v", name, err)
+	}
+	value := strings.TrimSpace(string(out))
+	if value == "" {
+		t.Fatalf("the host reports an empty %s", name)
+	}
+	return value
+}
+
+func offlineBaseEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker string) []string {
+	t.Helper()
 	return []string{
 		"HOME=" + fixtureHome,
 		"PATH=" + toolPath,
 		"GOMODCACHE=" + filepath.Join(fixtureHome, "go", "pkg", "mod"),
-		"GOCACHE=" + filepath.Join(fixtureHome, "go", "build"),
+		"GOCACHE=" + offlineGoEnv(t, "GOCACHE"),
 		"GOWORK=off",
 		"GOTOOLCHAIN=local",
 		"SPARKWING_HOME=" + sparkwingHome,
@@ -238,12 +253,32 @@ func offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker string) []strin
 	}
 }
 
-func offlineConnectedEnv(fixtureHome, toolPath, sparkwingHome, marker string) []string {
-	return append(offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker), "GOFLAGS=-mod=mod")
+func offlineConnectedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker string) []string {
+	t.Helper()
+	return append(offlineBaseEnv(t, fixtureHome, toolPath, sparkwingHome, marker),
+		"GOFLAGS=-mod=mod",
+		"GOPROXY=file://"+filepath.ToSlash(offlineHostModuleProxy(t)),
+		"GOSUMDB=off",
+	)
 }
 
-func offlineDeniedEnv(fixtureHome, toolPath, sparkwingHome, marker, recorder string) []string {
-	return append(offlineBaseEnv(fixtureHome, toolPath, sparkwingHome, marker),
+// offlineHostModuleProxy returns the host module cache's download tree, which is
+// laid out as a module proxy. Seeding the first run from it keeps every module
+// this fixture needs on local disk, so the run that populates the fixture cache
+// reaches no network and the guarantee under test can be checked on a host that
+// has none.
+func offlineHostModuleProxy(t *testing.T) string {
+	t.Helper()
+	proxy := filepath.Join(offlineGoEnv(t, "GOMODCACHE"), "cache", "download")
+	if _, statErr := os.Stat(proxy); statErr != nil {
+		t.Fatalf("host module cache holds no download tree at %s: %v", proxy, statErr)
+	}
+	return proxy
+}
+
+func offlineDeniedEnv(t *testing.T, fixtureHome, toolPath, sparkwingHome, marker, recorder string) []string {
+	t.Helper()
+	return append(offlineBaseEnv(t, fixtureHome, toolPath, sparkwingHome, marker),
 		"GOPROXY="+recorder,
 		"GOFLAGS=-mod=readonly",
 		"GIT_CONFIG_GLOBAL=/dev/null",
