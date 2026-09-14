@@ -114,6 +114,10 @@ func adoptWorkspaceBaseline(ctx context.Context, repoDir, gcURL, token, snapshot
 	if err := run("replace", "--graft", snapshotSHA, resolved.SHA); err != nil {
 		return err
 	}
+	// safety: a runner whose global config turns replacement off would read the graft as absent.
+	if err := run("config", "core.useReplaceRefs", "true"); err != nil {
+		return err
+	}
 	return completeShallowCommit(ctx, repoDir, snapshotSHA)
 }
 
