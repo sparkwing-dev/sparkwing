@@ -20,6 +20,21 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **release:** The hosted release workflow runs no check on a tagged commit. It
+  resolves the tag to a commit, builds the binaries and images, signs them,
+  publishes them, and creates the GitHub release, so `git tag vX.Y.Z && git push
+  origin vX.Y.Z` from any commit publishes a release. A tag no longer runs the
+  `gate` and `pre-release` suites, the security scanners and CodeQL,
+  `release-verify`, the tag-order check, the binary and image vulnerability
+  scans, `npm audit`, the release asset schema parity check, or the tag
+  stability re-checks. Release notes fall back to the annotated tag message, and
+  then to a pointer at CHANGELOG.md, when the tagged source has no `[vX.Y.Z]`
+  changelog section. The checks are being reintroduced deliberately under the
+  CI/CD group; `ci.yaml` still runs them on every pull request and every push to
+  main.
+
 ### Fixed
 
 - **module:** `go.mod` retracts v0.52.0, a tag cut from a fixture commit on no

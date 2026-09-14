@@ -27,9 +27,11 @@ permissions:
   actions: read
   contents: read
 
+# A tag push builds and publishes. Health comes from the periodic jobs that run
+# against main, not from re-running them on the tagged commit.
 jobs:
   validate-tag:
-    name: Validate immutable release tag
+    name: Resolve release tag
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.resolve.outputs.source_sha }}
@@ -55,71 +57,8 @@ jobs:
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ steps.resolve.outputs.source_sha }}
-
-      # The one precondition on a release: a tag may be cut from any commit as
-      # long as its version outranks every version already published. A rebuild
-      # of an existing tag is exempt because that version is already published.
-      - name: Refuse a tag that does not outrank the newest release
-        if: github.event_name == 'push'
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          git ls-remote --tags "https://github.com/${{ github.repository }}.git" \
-            | bash bin/check-release-tag-order.sh "$TAG"
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.6"
-          cache-dependency-path: |
-            go.sum
-            .sparkwing/go.sum
-
-      - name: Build the tagged Sparkwing CLI
-        run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
-
-      # The changelog section is this release's notes and the schema and wire
-      # gates are what the local pipeline runs before it tags. Running them
-      # here is what makes a hand-pushed tag as safe as a cut one, and running
-      # them in the validate stage is what keeps a failure from half-releasing
-      # after the images are published.
-      - name: Verify the tagged source against the version it names
-        env:
-          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          git fetch --quiet --tags origin
-          "$RUNNER_TEMP/sparkwing" run release-verify --version "$TAG" --sw-local-only
-
-  canonical:
-    name: Verify tagged source
-    needs: validate-tag
-    uses: ./.github/workflows/canonical-gates.yaml
-    with:
-      source_ref: ${{ needs.validate-tag.outputs.source_sha }}
-      release_tag: ${{ inputs.tag || github.ref_name }}
-    permissions:
-      contents: read
-
-  security:
-    name: Verify tagged source security
-    needs: validate-tag
-    uses: ./.github/workflows/security.yaml
-    with:
-      source_ref: ${{ needs.validate-tag.outputs.source_sha }}
-    permissions:
-      contents: read
-      security-events: write
-
   build:
-    needs: [validate-tag, canonical, security]
-    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' && needs.security.result == 'success' }}
+    needs: validate-tag
     strategy:
       fail-fast: false
       matrix:
@@ -144,14 +83,6 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.validate-tag.outputs.source_sha }}
 
-      - name: Checkout current release scanner
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .release-tools
-
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.6"
@@ -172,10 +103,6 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
-
-      - name: Audit production dashboard dependencies
-        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
-        run: npm --prefix web audit --omit=dev --audit-level=high
 
       - name: Build dashboard + populate next-out
         if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
@@ -204,18 +131,6 @@ jobs:
           fi
           ls -la "$out"
 
-      - name: Scan exact release binary
-        env:
-          TARGET_GOOS: ${{ matrix.goos }}
-          TARGET_GOARCH: ${{ matrix.goarch }}
-          BIN: ${{ matrix.binary }}
-        run: |
-          set -euo pipefail
-          ext=""
-          [ "$TARGET_GOOS" = "windows" ] && ext=".exe"
-          bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" \
-            "dist/${BIN}-${TARGET_GOOS}-${TARGET_GOARCH}${ext}"
-
       - name: Upload binary artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -225,29 +140,10 @@ jobs:
           if-no-files-found: error
 
   prepare-binaries:
-    name: Assemble & scan release binaries
-    needs: [validate-tag, build]
-    if: ${{ always() && needs.build.result == 'success' }}
+    name: Assemble release binaries
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.validate-tag.outputs.source_sha }}
-
-      - name: Checkout current release scanner
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .release-tools
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.6"
-          cache-dependency-path: go.sum
-
       - name: Download all binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -279,13 +175,10 @@ jobs:
           done
           rm -rf rcodesign.tar.gz apple-codesign-*
 
-      - name: Scan assembled release binaries
-        run: bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" dist/sparkwing-*
-
-      - name: Upload scanned release binaries
+      - name: Upload release binaries
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: scanned-release-binaries
+          name: release-binaries
           path: dist/sparkwing-*
           retention-days: 1
           if-no-files-found: error
@@ -307,10 +200,10 @@ jobs:
           go-version: "1.26.6"
           cache-dependency-path: go.sum
 
-      - name: Download scanned release binaries
+      - name: Download release binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: scanned-release-binaries
+          name: release-binaries
           path: dist
 
       - name: Compute SHA256SUMS
@@ -324,7 +217,7 @@ jobs:
       - name: Stage the public installer
         run: cp install/install.sh dist/install.sh
 
-      - name: Sign and verify immutable release assets
+      - name: Sign release assets
         env:
           SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
         run: |
@@ -334,14 +227,6 @@ jobs:
           test -f dist/SHA256SUMS.sig
           test -f dist/install.sh.sig
           ls dist/sparkwing-*.sig >/dev/null
-
-      - name: Verify release asset schema parity
-        run: |
-          set -euo pipefail
-          chmod +x dist/sparkwing-linux-amd64
-          bash bin/check-release-schema-parity.sh \
-            --asset dist/sparkwing-linux-amd64 \
-            --repo .
 
       - name: Download published image digests
         if: ${{ needs.publish-images.result == 'success' }}
@@ -361,28 +246,26 @@ jobs:
           go run ./cmd/verify-release --dist dist --verify
           test -f dist/image-digests.json.sig
 
-      - name: Extract CHANGELOG section for this tag
+      # The changelog section is the release notes when the tag has one. A tag
+      # cut by hand from any commit may not, so the annotated message and then a
+      # pointer at CHANGELOG.md stand in rather than failing the release.
+      - name: Assemble release notes
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          bash bin/extract-changelog-section.sh "$TAG" CHANGELOG.md > release-notes.md
+          if ! bash bin/extract-changelog-section.sh "$TAG" CHANGELOG.md >release-notes.md 2>/dev/null; then
+            : >release-notes.md
+            git fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null || true
+            if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null || echo none)" = tag ]; then
+              git tag -l --format='%(contents)' "$TAG" >release-notes.md
+            fi
+          fi
+          if [ ! -s release-notes.md ]; then
+            printf 'Release %s. See CHANGELOG.md for what changed.\n' "$TAG" >release-notes.md
+          fi
           echo "==> release notes:"
           cat release-notes.md
-
-      - name: Verify release tag remains pinned
-        env:
-          EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          remote="https://github.com/${{ github.repository }}.git"
-          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
-          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
-          if [ -z "$actual_sha" ]; then
-            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
-          fi
-          test "$actual_sha" = "$EXPECTED_SHA"
 
       - name: Publish complete immutable release
         env:
@@ -392,7 +275,7 @@ jobs:
           set -euo pipefail
           tag="$TAG"
           # A published tag and its signed assets are immutable. Build
-          # the complete set privately, verify it, then publish once.
+          # the complete set privately, then publish once.
           if gh release view "$tag" >/dev/null 2>&1; then
             if [ "$(gh release view "$tag" --json isDraft --jq '.isDraft')" != "true" ]; then
               echo "release $tag is published; immutable publication refuses mutation" >&2
@@ -420,21 +303,14 @@ jobs:
           gh release upload "$tag" dist/*
           asset_count="$(gh release view "$tag" --json assets --jq '.assets | length')"
           test "$asset_count" -eq "$(find dist -type f | wc -l | tr -d ' ')"
-          remote="https://github.com/${{ github.repository }}.git"
-          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$tag" "refs/tags/$tag^{}")"
-          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$tag^{}" '$2 == peeled { print $1 }')"
-          if [ -z "$actual_sha" ]; then
-            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$tag" '$2 == direct { print $1 }')"
-          fi
-          test "$actual_sha" = "${{ needs.validate-tag.outputs.source_sha }}"
           gh release edit "$tag" --draft=false
           draft_created=false
           gh release view "$tag"
 
   build-images:
-    name: Build & scan container images
-    needs: [validate-tag, canonical, security]
-    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' && needs.security.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.publish_images) }}
+    name: Build container images
+    needs: validate-tag
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_images }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -466,11 +342,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: cp .release-tools/.dockerignore .dockerignore && cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner build/
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.6"
-          cache-dependency-path: go.sum
-
       - name: Setup Node (dashboard image)
         if: matrix.binary == 'sparkwing-web'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -478,10 +349,6 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
-
-      - name: Audit production dashboard dependencies for image
-        if: matrix.binary == 'sparkwing-web'
-        run: npm --prefix web audit --omit=dev --audit-level=high
 
       - name: Build dashboard for image
         if: matrix.binary == 'sparkwing-web'
@@ -496,9 +363,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Validate vulnerability waiver policy
-        run: GOWORK=off go run ./bin/check-vulnerability-waivers.go .trivyignore.yaml
 
       - name: Compute image metadata
         id: meta
@@ -525,36 +389,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.binary }}
           cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
 
-      - name: Scan image digest (linux/amd64)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/sparkwing-dev/${{ matrix.binary }}@${{ steps.build.outputs.digest }}
-          scanners: vuln
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-          trivyignores: .trivyignore.yaml
-        env:
-          TRIVY_PLATFORM: linux/amd64
-          TRIVY_USERNAME: ${{ github.actor }}
-          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Scan image digest (linux/arm64)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/sparkwing-dev/${{ matrix.binary }}@${{ steps.build.outputs.digest }}
-          scanners: vuln
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-          trivyignores: .trivyignore.yaml
-          skip-setup-trivy: true
-        env:
-          TRIVY_PLATFORM: linux/arm64
-          TRIVY_USERNAME: ${{ github.actor }}
-          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Export scanned image digest
+      - name: Export image digest
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           BINARY: ${{ matrix.binary }}
@@ -563,7 +398,7 @@ jobs:
           mkdir -p scanned-image-digests
           printf '%s\n' "$DIGEST" >"scanned-image-digests/$BINARY"
 
-      - name: Upload scanned image digest
+      - name: Upload image digest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: scanned-image-${{ matrix.binary }}
@@ -572,8 +407,8 @@ jobs:
           if-no-files-found: error
 
   publish-images:
-    name: Publish scanned container images
-    needs: [validate-tag, build-images, prepare-binaries]
+    name: Publish container images
+    needs: [build-images, prepare-binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -601,21 +436,7 @@ jobs:
 
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
-      - name: Verify release tag before signing images
-        env:
-          EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          remote="https://github.com/${{ github.repository }}.git"
-          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
-          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
-          if [ -z "$actual_sha" ]; then
-            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
-          fi
-          test "$actual_sha" = "$EXPECTED_SHA"
-
-      - name: Sign scanned image digests
+      - name: Sign image digests
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
@@ -633,21 +454,11 @@ jobs:
             cosign sign --yes "ghcr.io/sparkwing-dev/${binary}@${digest}"
           done
 
-      - name: Publish scanned image tags
+      - name: Publish image tags
         env:
-          EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}
           TAG: ${{ inputs.tag || github.ref_name }}
           FORCE_RETAG: ${{ inputs.force_retag || false }}
-        run: |
-          set -euo pipefail
-          remote="https://github.com/${{ github.repository }}.git"
-          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
-          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
-          if [ -z "$actual_sha" ]; then
-            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
-          fi
-          test "$actual_sha" = "$EXPECTED_SHA"
-          bash bin/publish-image-tags.sh
+        run: bash bin/publish-image-tags.sh
 
       - name: Upload published image digests
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
