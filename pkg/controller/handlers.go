@@ -497,14 +497,39 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("node id and status are required"))
 		return
 	}
+	if reaped := s.reapedRunConflict(r.Context(), runID, body.NodeID); reaped != nil {
+		writeError(w, http.StatusConflict, reaped)
+		return
+	}
 	if err := s.store.CreateNode(r.Context(), body); err != nil {
 		if s.writeComputeLimitRefusal(w, r, runID, body.NodeID, err) {
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, fmt.Errorf(
+				"the claim naming run %s no longer holds it, so node %s was not created",
+				runID, body.NodeID))
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// safety: a run the reaper or an operator already ended cannot take new work,
+// and a child told so reports why instead of reading a server fault.
+func (s *Server) reapedRunConflict(ctx context.Context, runID, nodeID string) error {
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil || run.FinishedAt == nil {
+		return nil
+	}
+	detail := fmt.Sprintf("run %s finished as %s before node %s was created",
+		runID, run.Status, nodeID)
+	if run.Error != "" {
+		detail += ": " + run.Error
+	}
+	return errors.New(detail)
 }
 
 func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
