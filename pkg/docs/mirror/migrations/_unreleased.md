@@ -70,6 +70,12 @@ old field was; read it as the warm class, not as a ceiling. From the CLI:
 sparkwing cluster credits settings --warm-cpu-class-cores 2
 ```
 
+An operator who had set `billing_cpu_ceiling_cores` gets no carry-over: the
+stored value is left where it is, nothing reads it, and `warm_cpu_class_cores`
+starts at its default of `2` rather than at the ceiling that was set. Set the
+warm class deliberately on a controller that had a ceiling, because the two
+numbers mean different things and the old one is not a starting point.
+
 **Why:** the ceiling existed because a warm pod could be smaller than the plan
 that asked for it, which made the billed class and the delivered class differ.
 Routing a metered node to a Kubernetes node sized to its class closes that gap

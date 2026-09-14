@@ -92,6 +92,10 @@ resolves and `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` is
 stable for the releases that need it. A release with no breaking changes
 has no guide file.
 
+Retitling rewrites the `#` line and nothing else, so the paragraph under it
+is yours: write the release's opening summary into `_unreleased.md` as the
+sections land, not at cut time.
+
 ### File shape
 
 ```markdown
