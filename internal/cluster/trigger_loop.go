@@ -225,13 +225,21 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
-	fetchSource := fetchPipelineSourceWithRetry
-	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
-		fetchSource = fetchPipelineWorkspaceSourceWithRetry
+	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
+	var sparkwingDir string
+	var fetchErr error
+	if workspaceSource {
+		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token,
+			repoURL, branch, sha, workDir, logger, trigger.ID)
+	} else {
+		sparkwingDir, fetchErr = fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token,
+			repoURL, branch, sha, workDir, logger, trigger.ID)
 	}
-	sparkwingDir, fetchErr := fetchSource(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, repoURL, branch, sha, workDir, logger, trigger.ID)
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
+	}
+	if workspaceSource {
+		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, logger)
 	}
 
 	binary, buildErr := triggerBuildOrFetchBinary(sparkwingDir, opts, logger)
@@ -354,21 +362,91 @@ var (
 const notOurRefSubstr = "not our ref"
 
 func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
-	return fetchPipelineSourceWithRetryFn(ctx, fetchSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
+		return fetchSourceFn(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+	}, sha, logger, runID)
 }
 
 func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
-	return fetchPipelineSourceWithRetryFn(ctx, fetchWorkspaceSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
+		return fetchWorkspaceSourceFn(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+	}, sha, logger, runID)
 }
 
-func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func(string, string, string, string, string, string, string) (string, error), gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+var adoptBaselineFn = bincache.AdoptWorkspaceBaseline
+
+func adoptTriggerBaseline(ctx context.Context, opts TriggerLoopOptions, trigger *store.Trigger, checkoutDir, sha string, logger *slog.Logger) {
+	baseline := bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv)
+	if baseline == (bincache.WorkspaceBaseline{}) {
+		return
+	}
+	bearer := bincache.GitcacheBearer(opts.GitcacheURL, opts.ControllerURL, opts.Token, "")
+	err := adoptBaselineWithRetry(ctx, checkoutDir, opts.GitcacheURL, bearer, sha, baseline, logger, trigger.ID)
+	switch {
+	case err == nil:
+		logger.Info("trigger loop: baseline ready",
+			"run_id", trigger.ID, "ref", baseline.Ref, "sha", baseline.SHA)
+	case errors.Is(err, bincache.ErrBaselineUnservable):
+		logger.Debug("trigger loop: source serves only the snapshot, so it carries no baseline",
+			"run_id", trigger.ID, "ref", baseline.Ref)
+	default:
+		logger.Warn("trigger loop: baseline unavailable",
+			"run_id", trigger.ID, "ref", baseline.Ref, "sha", baseline.SHA, "err", err)
+		shipBaselineWarning(ctx, opts, trigger.ID, baseline, err, logger)
+	}
+}
+
+func adoptBaselineWithRetry(ctx context.Context, checkoutDir, gcURL, token, sha string, baseline bincache.WorkspaceBaseline, logger *slog.Logger, runID string) error {
 	attempts := triggerFetchMaxAttempts
 	if attempts < 1 {
 		attempts = 1
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		sparkwingDir, err := fetch(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+		lastErr = adoptBaselineFn(ctx, checkoutDir, gcURL, token, sha, baseline)
+		if lastErr == nil || !strings.Contains(lastErr.Error(), notOurRefSubstr) {
+			return lastErr
+		}
+		if i == attempts-1 {
+			break
+		}
+		logger.Warn("trigger loop: gitcache lagging; retrying the baseline fetch",
+			"run_id", runID, "ref", baseline.Ref, "sha", baseline.SHA, "attempt", i+1, "of", attempts, "err", lastErr)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(triggerFetchRetryDelay):
+		}
+	}
+	return lastErr
+}
+
+// safety: the steps that scope themselves to the baseline report only the ref they cannot
+// resolve, so the reason belongs in the run the reader is looking at.
+func shipBaselineWarning(ctx context.Context, opts TriggerLoopOptions, runID string, baseline bincache.WorkspaceBaseline, cause error, logger *slog.Logger) {
+	if opts.LogsURL == "" {
+		return
+	}
+	line := fmt.Sprintf("sparkwing: %s could not be fetched at %s, so a step that scopes itself to it "+
+		"judges this checkout against nothing: %v\n", baseline.Ref, baseline.SHA, cause)
+	cli := logs.NewClientWithToken(opts.LogsURL, nil, opts.Token).
+		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
+	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := cli.Append(postCtx, runID, CompileLogNode, []byte(line)); err != nil {
+		logger.Warn("trigger loop: failed to ship the baseline warning to logs",
+			"run_id", runID, "err", err)
+	}
+}
+
+func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func() (string, error), sha string, logger *slog.Logger, runID string) (string, error) {
+	attempts := triggerFetchMaxAttempts
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		sparkwingDir, err := fetch()
 		if err == nil {
 			return sparkwingDir, nil
 		}

@@ -36,6 +36,7 @@ var defaultWorktreeSnapshotLimits = worktreeSnapshotLimits{
 type worktreeSnapshot struct {
 	RepoRoot       string
 	BaseSHA        string
+	Baseline       bincache.WorkspaceBaseline
 	SHA            string
 	ManifestDigest string
 	BundlePath     string
@@ -131,7 +132,12 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	if err != nil {
 		return nil, fmt.Errorf("create snapshot workspace: %w", err)
 	}
-	snapshot := &worktreeSnapshot{RepoRoot: repoRoot, BaseSHA: baseSHA, tempDir: tempDir}
+	snapshot := &worktreeSnapshot{
+		RepoRoot: repoRoot,
+		BaseSHA:  baseSHA,
+		Baseline: resolveSnapshotBaseline(ctx, repoRoot),
+		tempDir:  tempDir,
+	}
 	fail := func(err error) (*worktreeSnapshot, error) {
 		_ = snapshot.close()
 		return nil, err
@@ -220,6 +226,33 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	snapshot.BundleSize = info.Size()
 	snapshot.FileCount = fileCount
 	return snapshot, nil
+}
+
+func resolveSnapshotBaseline(ctx context.Context, repoRoot string) bincache.WorkspaceBaseline {
+	ref := strings.TrimSpace(gitOutputOrEmpty(ctx, repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"))
+	if ref == "" {
+		if gitOutputOrEmpty(ctx, repoRoot, "rev-parse", "--verify", "--quiet", "origin/main^{commit}") == "" {
+			return bincache.WorkspaceBaseline{}
+		}
+		ref = "origin/main"
+	}
+	baseline, err := bincache.WorkspaceBaseline{
+		Ref: ref,
+		SHA: strings.TrimSpace(gitOutputOrEmpty(ctx, repoRoot, "merge-base", ref, "HEAD")),
+	}.Resolve()
+	if err != nil {
+		return bincache.WorkspaceBaseline{}
+	}
+	return baseline
+}
+
+// safety: an unresolved baseline is absent rather than fatal, so a git failure reads as empty.
+func gitOutputOrEmpty(ctx context.Context, repoRoot string, args ...string) string {
+	out, err := gitOutput(ctx, repoRoot, nil, args...)
+	if err != nil {
+		return ""
+	}
+	return out
 }
 
 func measureSnapshotTree(ctx context.Context, gitDir, tree string, limits worktreeSnapshotLimits) (int, int64, error) {
