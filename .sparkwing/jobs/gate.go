@@ -146,21 +146,19 @@ func runFrontendBrowser(ctx context.Context) error {
 }
 
 func checkComments(ctx context.Context) error {
-	command, scope, err := commentCheckCommand(ctx)
-	if err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "comments: %s", scope)
-	_, err = sparkwing.Bash(ctx, command).Run()
-	return err
+	return runScopedChecker(ctx, "comments", commentCheckCommand)
 }
 
 func checkTestSleeps(ctx context.Context) error {
-	command, scope, err := sleepCheckCommand(ctx)
+	return runScopedChecker(ctx, "test-sleeps", sleepCheckCommand)
+}
+
+func runScopedChecker(ctx context.Context, step string, plan func(context.Context) (string, string, error)) error {
+	command, scope, err := plan(ctx)
 	if err != nil {
 		return err
 	}
-	sparkwing.Info(ctx, "test-sleeps: %s", scope)
+	sparkwing.Info(ctx, "%s: %s", step, scope)
 	_, err = sparkwing.Bash(ctx, command).Run()
 	return err
 }

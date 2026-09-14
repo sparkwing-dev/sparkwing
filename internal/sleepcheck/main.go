@@ -6,27 +6,16 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
+	"github.com/sparkwing-dev/sparkwing/internal/gatescope"
 )
 
 const baselineRelPath = "internal/sleepcheck/baseline.txt"
-
-var skipDirs = map[string]bool{
-	"vendor":          true,
-	"testdata":        true,
-	"node_modules":    true,
-	".git":            true,
-	".claude-scratch": true,
-}
 
 var bannedCalls = map[string]bool{
 	"Sleep":     true,
@@ -158,43 +147,19 @@ func main() {
 }
 
 func diffFailure(base string, err error) string {
-	scope := "the staged diff"
-	if base != "" {
-		scope = base
-	}
-	return fmt.Sprintf("sleepcheck: cannot compute the diff against %s (%v), so nothing was gated.\n"+
-		"Fix: fetch the base ref and name it, for example `git fetch origin main` then "+
-		"`sleepcheck -base origin/main <root>`.\n"+
-		"Pass -allow-no-diff to accept a run that gates nothing.", scope, err)
+	return gatescope.DiffFailure("sleepcheck", base, err)
 }
 
 func scan(root string) ([]finding, error) {
 	var findings []finding
 	var unread []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, rerr := filepath.Rel(root, path)
-		if rerr != nil {
-			rel = path
-		}
-		f, ferr := checkFile(path, filepath.ToSlash(rel))
+	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
+		f, ferr := checkFile(path, rel)
 		if ferr != nil {
 			unread = append(unread, ferr.Error())
-			return nil
+			return
 		}
 		findings = append(findings, f...)
-		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -470,120 +435,5 @@ func onlyAdded(findings []finding, added map[string]map[int]bool) []finding {
 }
 
 func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool, error) {
-	// safety: git quotes a path holding a non-ASCII byte unless core.quotePath
-	// is off, and a quoted +++ header drops that file from the scope unjudged.
-	args := []string{"-c", "core.quotePath=false", "diff", "--unified=0", "--no-color"}
-	var index string
-	if staged {
-		index = stagedIndex()
-		args = append(args, "--cached")
-	} else {
-		forkPoint := base
-		if out, err := git(root, "", "merge-base", base, "HEAD"); err == nil {
-			forkPoint = strings.TrimSpace(out)
-		}
-		args = append(args, forkPoint)
-	}
-	args = append(args, "--", "*_test.go")
-
-	diff, err := git(root, index, args...)
-	if err != nil {
-		return nil, err
-	}
-	added := parseAddedLines(diff)
-	if !staged {
-		if err := addUntracked(root, added); err != nil {
-			return nil, err
-		}
-	}
-	return added, nil
-}
-
-func addUntracked(root string, added map[string]map[int]bool) error {
-	out, err := git(root, "", "ls-files", "--others", "--exclude-standard", "-z", "--", "*_test.go")
-	if err != nil {
-		return err
-	}
-	for rel := range strings.SplitSeq(out, "\x00") {
-		if rel == "" {
-			continue
-		}
-		data, rerr := os.ReadFile(filepath.Join(root, rel))
-		if rerr != nil {
-			if os.IsNotExist(rerr) {
-				continue
-			}
-			return rerr
-		}
-		set := added[rel]
-		if set == nil {
-			set = map[int]bool{}
-			added[rel] = set
-		}
-		for line := 1; line <= strings.Count(string(data), "\n")+1; line++ {
-			set[line] = true
-		}
-	}
-	return nil
-}
-
-func stagedIndex() string {
-	if os.Getenv("GIT_INDEX_FILE") != "" {
-		return ""
-	}
-	return gitenv.GateIndex()
-}
-
-var hunkRE = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
-
-func parseAddedLines(diff string) map[string]map[int]bool {
-	added := map[string]map[int]bool{}
-	var cur string
-	for line := range strings.SplitSeq(diff, "\n") {
-		switch {
-		case strings.HasPrefix(line, "+++ b/"):
-			cur = strings.TrimPrefix(line, "+++ b/")
-		case strings.HasPrefix(line, "+++ "):
-			cur = ""
-		case strings.HasPrefix(line, "@@") && cur != "":
-			m := hunkRE.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			start, err := strconv.Atoi(m[1])
-			if err != nil {
-				continue
-			}
-			count := 1
-			if m[2] != "" {
-				parsed, perr := strconv.Atoi(m[2])
-				if perr != nil {
-					continue
-				}
-				count = parsed
-			}
-			set := added[cur]
-			if set == nil {
-				set = map[int]bool{}
-				added[cur] = set
-			}
-			for i := 0; i < count; i++ {
-				set[start+i] = true
-			}
-		}
-	}
-	return added
-}
-
-func git(root, index string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-	if index != "" {
-		cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
-	}
-	var out strings.Builder
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-	return out.String(), nil
+	return gatescope.AddedLines(root, staged, base, "*_test.go")
 }
