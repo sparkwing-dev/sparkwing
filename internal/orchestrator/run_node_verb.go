@@ -112,7 +112,7 @@ func RunNodeCommand(args []string) error {
 // DispatchedClaimHeartbeatInterval is how often a dispatched node renews the
 // claim its dispatcher took for it. The dispatcher renews nothing, so this is
 // the only signal that the pod is alive.
-const DispatchedClaimHeartbeatInterval = 5 * time.Second
+const DispatchedClaimHeartbeatInterval = store.DispatchedHeartbeatInterval
 
 // safety: runNodeCLI reads the same variables and supervises an isolated child
 // under them; here the process already is that child, so the fence guards its

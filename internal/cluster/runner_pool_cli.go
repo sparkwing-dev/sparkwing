@@ -533,7 +533,7 @@ func executePooledNode(
 }
 
 var (
-	poolHeartbeatDefaultInterval = 3 * time.Second
+	poolHeartbeatDefaultInterval = store.PoolHeartbeatInterval
 
 	poolHeartbeatTimeout = 2 * time.Second
 

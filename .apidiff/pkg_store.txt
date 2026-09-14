@@ -246,6 +246,18 @@ type CreditLedgerTotals struct {
 
 	SettledSeconds int64
 }
+type CreditSettings struct {
+	RateMicroPerSecond int64
+
+	GraceSeconds int64
+
+	MaxChargeSeconds int64
+}
+type CreditSettingsUpdate struct {
+	RateMicroPerSecond *int64
+	GraceSeconds       *int64
+	MaxChargeSeconds   *int64
+}
 type CreditState struct {
 	GrantedMicro       int64
 	ChargedMicro       int64
@@ -381,6 +393,7 @@ type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
+const DispatchedHeartbeatInterval = 5 * time.Second
 func DisplayProfileKey(key string) string
 type EgressUsage struct {
 	Principal string
@@ -401,6 +414,7 @@ var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidCredentials = errors.New("invalid username or password")
+var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
 var ErrInvalidToken = errors.New("invalid token")
 var ErrLockHeld = errors.New("held by another holder")
 var ErrNoTokenCandidates = errors.New("unknown token")
@@ -612,9 +626,12 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxCreditMaxChargeSeconds = 86_400
+const MaxCreditRateMicro = 1_000_000_000_000
 const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
+const MaxNodeHeartbeatInterval = DispatchedHeartbeatInterval
 const MaxRunListLimit = 1000
 const MeteringFree
 const MeteringPaid
@@ -628,7 +645,7 @@ type MetricSample struct {
 }
 func (m MetricSample) OneShot() bool
 const MicroCreditsPerCredit = 1_000_000
-const MinCreditMaxChargeSeconds = 3
+const MinCreditMaxChargeSeconds = int64(MaxNodeHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 func NearestRankIndex(xs []float64, q float64) int
@@ -828,6 +845,7 @@ type PipelineProfile struct {
 const PlacementFallback = "fallback"
 const PlacementNone = "none"
 const PlacementPreferred = "preference"
+const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
 	Duration        time.Duration
@@ -1115,6 +1133,7 @@ func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
+func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error)
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
@@ -1275,6 +1294,7 @@ func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) e
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error
+func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
 func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error

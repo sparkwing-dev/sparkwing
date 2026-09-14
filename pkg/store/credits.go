@@ -43,12 +43,43 @@ const (
 	// and the customer is not billed for the gap.
 	DefaultCreditMaxChargeSeconds = 30
 
-	// MinCreditMaxChargeSeconds is the lowest charge cap an operator may set.
-	// Heartbeats arrive every three seconds, so a cap under that forgives part
-	// of every ordinary interval and the ledger undercharges steady work
-	// instead of only a stall.
-	MinCreditMaxChargeSeconds = 3
+	// MaxCreditRateMicro is the highest price an operator may put on a cloud
+	// runner second: a million credits, which is ten thousand dollars. The
+	// ceiling is what keeps the arithmetic the ledger does with the rate inside
+	// int64: the largest reservation is the rate times CreditClaimFloorSeconds
+	// and the largest single charge is the rate times MaxCreditMaxChargeSeconds,
+	// and both stay far below the int64 maximum. Without it a rate near that
+	// maximum wraps a reservation negative, and a claim the ledger must refuse
+	// succeeds.
+	MaxCreditRateMicro = 1_000_000_000_000
+
+	// MaxCreditMaxChargeSeconds is the highest charge cap an operator may set.
+	// A day is longer than any heartbeat gap worth billing, and the ceiling is
+	// the other half of what keeps a charge inside int64.
+	MaxCreditMaxChargeSeconds = 86_400
 )
+
+// Node heartbeat cadences. A metered node's charge cap has to clear the
+// longest of them, so they are declared here, beside the cap that is judged
+// against them, and the runners read them from here.
+const (
+	// PoolHeartbeatInterval is how often a pooled runner renews its claim.
+	PoolHeartbeatInterval = 3 * time.Second
+
+	// DispatchedHeartbeatInterval is how often a dispatched node and a warm
+	// pool runner renew theirs.
+	DispatchedHeartbeatInterval = 5 * time.Second
+
+	// MaxNodeHeartbeatInterval is the longest cadence any metered node
+	// renews on.
+	MaxNodeHeartbeatInterval = DispatchedHeartbeatInterval
+)
+
+// MinCreditMaxChargeSeconds is the lowest charge cap an operator may set: one
+// second past the longest heartbeat cadence. A cap at the cadence itself
+// truncates every tick that arrives a little late and forgives the remainder,
+// so the ledger would undercharge ordinary work rather than only a stall.
+const MinCreditMaxChargeSeconds = int64(MaxNodeHeartbeatInterval/time.Second) + 1
 
 // Credit grant kinds.
 const (
@@ -448,26 +479,28 @@ func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
 }
 
-// SetCreditRateMicroPerSecond prices a cloud runner second. Charges already
-// written keep the rate they were charged at.
+// SetCreditRateMicroPerSecond prices a cloud runner second, between one
+// micro-credit and MaxCreditRateMicro. Charges already written keep the rate
+// they were charged at.
 func (s *Store) SetCreditRateMicroPerSecond(ctx context.Context, micro int64) error {
-	if micro < 0 {
-		return errors.New("credits: rate must not be negative")
+	if err := validCreditRate(micro); err != nil {
+		return err
 	}
 	return s.setCreditSetting(ctx, metaKeyCreditRateMicro, micro)
 }
 
-// CreditGraceSeconds returns how long a running node survives an empty
-// balance before the controller cancels it.
+// CreditGraceSeconds returns how long a node keeps running once it has
+// consumed the reservation its claim paid for with the balance at zero.
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
 }
 
-// SetCreditGraceSeconds sets the window between an empty balance and the
-// cancellation of the nodes still running on it.
+// SetCreditGraceSeconds sets the window between a node consuming the
+// reservation its claim paid for on an empty balance and its cancellation.
+// Zero cancels it at the first heartbeat past that reservation.
 func (s *Store) SetCreditGraceSeconds(ctx context.Context, secs int64) error {
-	if secs < 0 {
-		return errors.New("credits: grace must not be negative")
+	if err := validCreditGrace(secs); err != nil {
+		return err
 	}
 	return s.setCreditSetting(ctx, metaKeyCreditGraceSecs, secs)
 }
@@ -479,12 +512,166 @@ func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
 }
 
-// SetCreditMaxChargeSeconds caps the seconds one charge may bill.
+// SetCreditMaxChargeSeconds caps the seconds one charge may bill, between
+// MinCreditMaxChargeSeconds and MaxCreditMaxChargeSeconds.
 func (s *Store) SetCreditMaxChargeSeconds(ctx context.Context, secs int64) error {
-	if secs <= 0 {
-		return errors.New("credits: the charge cap must be positive")
+	if err := validCreditMaxCharge(secs); err != nil {
+		return err
 	}
 	return s.setCreditSetting(ctx, metaKeyCreditMaxCharge, secs)
+}
+
+// CreditSettings are the three values the ledger prices work with.
+type CreditSettings struct {
+	// RateMicroPerSecond is the price of one cloud runner second.
+	RateMicroPerSecond int64
+	// GraceSeconds is how long a node that has consumed its claim reservation
+	// on an empty balance keeps running before the controller cancels it.
+	GraceSeconds int64
+	// MaxChargeSeconds is the most seconds any one charge may bill.
+	MaxChargeSeconds int64
+}
+
+// CreditSettingsUpdate names the settings to change. A nil field leaves that
+// setting as it stands, so a caller changing one value sends one field and a
+// field added later joins without disturbing these three.
+type CreditSettingsUpdate struct {
+	RateMicroPerSecond *int64
+	GraceSeconds       *int64
+	MaxChargeSeconds   *int64
+}
+
+// CreditSettings reads all three settings together. A controller that set none
+// of them reads the defaults.
+func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error) {
+	var out CreditSettings
+	tx, err := s.beginSnapshotReadTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	out, err = creditSettingsTx(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	return out, tx.Commit()
+}
+
+// SetCreditSettings validates every value the update names and writes them in
+// one transaction, so a refused field leaves the ledger exactly as it was. It
+// answers the settings in force after the write. An update naming nothing is
+// refused, as is a rate outside one micro-credit to MaxCreditRateMicro, a
+// negative grace period, and a charge cap outside MinCreditMaxChargeSeconds to
+// MaxCreditMaxChargeSeconds. Every refusal is an ErrInvalidCreditSetting.
+func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error) {
+	var out CreditSettings
+	if err := up.validate(); err != nil {
+		return out, err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	for key, value := range up.byKey() {
+		if _, err := tx.ExecContext(ctx, upsertCreditSettingSQL,
+			key, strconv.FormatInt(value, 10), time.Now().UnixNano()); err != nil {
+			return out, err
+		}
+	}
+	out, err = creditSettingsTx(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	return out, tx.Commit()
+}
+
+// ErrInvalidCreditSetting is the class of every refusal SetCreditSettings and
+// the individual setters return, so a caller answers a bad value differently
+// from a database failure.
+var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
+
+func (u CreditSettingsUpdate) byKey() map[string]int64 {
+	out := make(map[string]int64, 3)
+	if u.RateMicroPerSecond != nil {
+		out[metaKeyCreditRateMicro] = *u.RateMicroPerSecond
+	}
+	if u.GraceSeconds != nil {
+		out[metaKeyCreditGraceSecs] = *u.GraceSeconds
+	}
+	if u.MaxChargeSeconds != nil {
+		out[metaKeyCreditMaxCharge] = *u.MaxChargeSeconds
+	}
+	return out
+}
+
+// safety: every value is judged before any of them is written, so a body that
+// names one good setting and one bad one moves neither.
+func (u CreditSettingsUpdate) validate() error {
+	if u.RateMicroPerSecond == nil && u.GraceSeconds == nil && u.MaxChargeSeconds == nil {
+		return fmt.Errorf("%w: name at least one of the rate, the grace period, or the charge cap",
+			ErrInvalidCreditSetting)
+	}
+	if u.RateMicroPerSecond != nil {
+		if err := validCreditRate(*u.RateMicroPerSecond); err != nil {
+			return err
+		}
+	}
+	if u.GraceSeconds != nil {
+		if err := validCreditGrace(*u.GraceSeconds); err != nil {
+			return err
+		}
+	}
+	if u.MaxChargeSeconds != nil {
+		if err := validCreditMaxCharge(*u.MaxChargeSeconds); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validCreditRate(micro int64) error {
+	if micro <= 0 || micro > MaxCreditRateMicro {
+		return fmt.Errorf("%w: the rate must be between 1 and %d micro-credits per second, got %d",
+			ErrInvalidCreditSetting, int64(MaxCreditRateMicro), micro)
+	}
+	return nil
+}
+
+func validCreditGrace(secs int64) error {
+	if secs < 0 {
+		return fmt.Errorf("%w: the grace period must not be negative, got %d",
+			ErrInvalidCreditSetting, secs)
+	}
+	return nil
+}
+
+func validCreditMaxCharge(secs int64) error {
+	if secs < MinCreditMaxChargeSeconds || secs > MaxCreditMaxChargeSeconds {
+		return fmt.Errorf("%w: the charge cap must be between %d and %d seconds, got %d",
+			ErrInvalidCreditSetting, MinCreditMaxChargeSeconds, int64(MaxCreditMaxChargeSeconds), secs)
+	}
+	return nil
+}
+
+func creditSettingsTx(ctx context.Context, tx *storeTx) (CreditSettings, error) {
+	var out CreditSettings
+	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
+	if err != nil {
+		return out, err
+	}
+	grace, err := creditSettingTx(ctx, tx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
+	if err != nil {
+		return out, err
+	}
+	maxCharge, err := creditSettingTx(ctx, tx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
+	if err != nil {
+		return out, err
+	}
+	out.RateMicroPerSecond = rate
+	out.GraceSeconds = grace
+	out.MaxChargeSeconds = maxCharge
+	return out, nil
 }
 
 func (s *Store) creditSetting(ctx context.Context, key string, fallback int64) (int64, error) {
@@ -524,12 +711,13 @@ func parseCreditSetting(raw string, fallback int64) int64 {
 }
 
 func (s *Store) setCreditSetting(ctx context.Context, key string, v int64) error {
-	_, err := s.exec(ctx,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		key, strconv.FormatInt(v, 10), time.Now().UnixNano())
+	_, err := s.exec(ctx, upsertCreditSettingSQL, key, strconv.FormatInt(v, 10), time.Now().UnixNano())
 	return err
 }
+
+const upsertCreditSettingSQL = `
+        INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
 
 func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
 	var raw string
@@ -767,7 +955,12 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 	out.BalanceMicro = balance
-	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, balance, nowNS, grace)
+	// safety: the claim reservation is runway already paid for, so a node
+	// inside it is never cancelled and the grace period starts where it ends.
+	// The anchor is the instant the node is paid through, so nowNS past it is
+	// the node having run longer than it reserved.
+	exhaustedFor, cancel, err := settleCreditExhaustionTx(
+		ctx, tx, balance, nowNS, grace, nowNS > anchor)
 	if err != nil {
 		return out, err
 	}
@@ -850,7 +1043,7 @@ func insertCreditChargeTx(
 }
 
 func settleCreditExhaustionTx(
-	ctx context.Context, tx *storeTx, balance, nowNS, grace int64,
+	ctx context.Context, tx *storeTx, balance, nowNS, grace int64, pastReservation bool,
 ) (time.Duration, bool, error) {
 	if balance > 0 {
 		if _, err := tx.ExecContext(ctx,
@@ -875,7 +1068,7 @@ func settleCreditExhaustionTx(
 	if exhaustedFor < 0 {
 		exhaustedFor = 0
 	}
-	return exhaustedFor, exhaustedFor >= time.Duration(grace)*time.Second, nil
+	return exhaustedFor, pastReservation && exhaustedFor >= time.Duration(grace)*time.Second, nil
 }
 
 // TokenMetered reports whether the operator marked this token's holder as a

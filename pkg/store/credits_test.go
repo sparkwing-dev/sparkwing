@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -799,5 +800,216 @@ func TestFormatCreditsRendersTwoPlaces(t *testing.T) {
 		if got := store.FormatCredits(c.micro); got != c.want {
 			t.Errorf("FormatCredits(%d) = %q, want %q", c.micro, got, c.want)
 		}
+	}
+}
+
+func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	if err := s.SetCreditRateMicroPerSecond(ctx, store.MaxCreditRateMicro); err != nil {
+		t.Fatalf("the highest allowed rate was refused: %v", err)
+	}
+	floor, err := s.CreditClaimFloorMicro(ctx)
+	if err != nil {
+		t.Fatalf("floor: %v", err)
+	}
+	if floor <= 0 {
+		t.Fatalf("claim floor = %d at the highest allowed rate; it must stay positive", floor)
+	}
+
+	for name, rate := range map[string]int64{
+		"one past the ceiling": store.MaxCreditRateMicro + 1,
+		"the int64 maximum":    math.MaxInt64,
+		"zero":                 0,
+		"negative":             -1,
+	} {
+		if err := s.SetCreditRateMicroPerSecond(ctx, rate); !errors.Is(err, store.ErrInvalidCreditSetting) {
+			t.Errorf("%s was accepted as a rate: %v", name, err)
+		}
+	}
+	rate, err := s.CreditRateMicroPerSecond(ctx)
+	if err != nil {
+		t.Fatalf("read rate: %v", err)
+	}
+	if rate != store.MaxCreditRateMicro {
+		t.Fatalf("rate = %d; a refused write moved it", rate)
+	}
+}
+
+func TestCreditClaimIsRefusedAtTheHighestAllowedRate(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	readyNode(t, s, "run-rate", "build")
+
+	if err := s.SetCreditRateMicroPerSecond(ctx, store.MaxCreditRateMicro); err != nil {
+		t.Fatalf("set rate: %v", err)
+	}
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
+		10*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
+	if !errors.Is(err, store.ErrInsufficientCredits) {
+		t.Fatalf("a claim for ten credits at the highest rate = %v, want a refusal", err)
+	}
+}
+
+func TestCreditSettingsBoundTheChargeCap(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	if err := s.SetCreditMaxChargeSeconds(ctx, store.MinCreditMaxChargeSeconds); err != nil {
+		t.Fatalf("the lowest allowed cap was refused: %v", err)
+	}
+	if err := s.SetCreditMaxChargeSeconds(ctx, store.MaxCreditMaxChargeSeconds); err != nil {
+		t.Fatalf("the highest allowed cap was refused: %v", err)
+	}
+	for name, cap := range map[string]int64{
+		"one under the floor":  store.MinCreditMaxChargeSeconds - 1,
+		"one past the ceiling": store.MaxCreditMaxChargeSeconds + 1,
+		"zero":                 0,
+		"the int64 maximum":    math.MaxInt64,
+	} {
+		if err := s.SetCreditMaxChargeSeconds(ctx, cap); !errors.Is(err, store.ErrInvalidCreditSetting) {
+			t.Errorf("%s was accepted as a charge cap: %v", name, err)
+		}
+	}
+}
+
+func TestCreditMaxChargeFloorClearsTheLongestHeartbeat(t *testing.T) {
+	longest := int64(store.MaxNodeHeartbeatInterval / time.Second)
+	if store.MinCreditMaxChargeSeconds != longest+1 {
+		t.Fatalf("charge cap floor = %d, want one past the %ds heartbeat cadence",
+			store.MinCreditMaxChargeSeconds, longest)
+	}
+	if store.PoolHeartbeatInterval > store.MaxNodeHeartbeatInterval ||
+		store.DispatchedHeartbeatInterval > store.MaxNodeHeartbeatInterval {
+		t.Fatal("a declared heartbeat cadence is longer than the one the cap is judged against")
+	}
+}
+
+func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+
+	rate, grace, maxCharge := int64(30_000), int64(0), int64(45)
+	got, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		RateMicroPerSecond: &rate, GraceSeconds: &grace, MaxChargeSeconds: &maxCharge,
+	})
+	if err != nil {
+		t.Fatalf("set all three: %v", err)
+	}
+	if got.RateMicroPerSecond != rate || got.GraceSeconds != grace || got.MaxChargeSeconds != maxCharge {
+		t.Fatalf("settings = %+v", got)
+	}
+
+	bad := int64(-5)
+	keep := int64(20)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		MaxChargeSeconds: &keep, RateMicroPerSecond: &bad,
+	}); !errors.Is(err, store.ErrInvalidCreditSetting) {
+		t.Fatalf("a mixed update = %v, want a refusal", err)
+	}
+	got, err = s.CreditSettings(ctx)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if got.MaxChargeSeconds != maxCharge {
+		t.Fatalf("charge cap = %d; the good half of a refused update was written", got.MaxChargeSeconds)
+	}
+
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{}); !errors.Is(
+		err, store.ErrInvalidCreditSetting) {
+		t.Fatalf("an update naming nothing = %v, want a refusal", err)
+	}
+}
+
+func TestChargeNodeCreditsNeverCancelsInsideTheClaimReservation(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	readyNode(t, s, "run-reserved", "build")
+	floor, err := s.CreditClaimFloorMicro(ctx)
+	if err != nil {
+		t.Fatalf("floor: %v", err)
+	}
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, floor, "", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	grace := int64(0)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
+		t.Fatalf("set grace: %v", err)
+	}
+	start := time.Now()
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// safety: the claim consumed the whole balance, so every heartbeat inside
+	// the reserved minute reads a spent ledger and must still let it run.
+	for _, at := range []time.Duration{3 * time.Second, 30 * time.Second, store.CreditClaimFloorSeconds * time.Second} {
+		res, err := s.ChargeNodeCredits(ctx, "run-reserved", "build", claimant.TokenPrefix, start.Add(at))
+		if err != nil {
+			t.Fatalf("charge at %s: %v", at, err)
+		}
+		if res.BalanceMicro > 0 {
+			t.Fatalf("balance at %s = %d, want it spent", at, res.BalanceMicro)
+		}
+		if res.Cancel {
+			t.Fatalf("cancelled at %s, inside the minute the claim reserved and paid for", at)
+		}
+	}
+
+	res, err := s.ChargeNodeCredits(ctx, "run-reserved", "build", claimant.TokenPrefix,
+		start.Add((store.CreditClaimFloorSeconds+store.PoolHeartbeatInterval/time.Second)*time.Second))
+	if err != nil {
+		t.Fatalf("charge past the reservation: %v", err)
+	}
+	if !res.Cancel {
+		t.Fatalf("grace zero must cancel at the first heartbeat past the reservation, got %+v", res)
+	}
+}
+
+func TestChargeNodeCreditsKeepsTheGracePeriodPastTheReservation(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	readyNode(t, s, "run-graced", "build")
+	floor, err := s.CreditClaimFloorMicro(ctx)
+	if err != nil {
+		t.Fatalf("floor: %v", err)
+	}
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, floor, "", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	grace := int64(store.DefaultCreditGraceSeconds)
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
+		t.Fatalf("set grace: %v", err)
+	}
+	start := time.Now()
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	reservationEnd := start.Add(store.CreditClaimFloorSeconds * time.Second)
+	res, err := s.ChargeNodeCredits(ctx, "run-graced", "build", claimant.TokenPrefix,
+		reservationEnd.Add(5*time.Second))
+	if err != nil {
+		t.Fatalf("charge past the reservation: %v", err)
+	}
+	if res.Cancel {
+		t.Fatalf("cancelled five seconds past the reservation with a %ds grace period", grace)
+	}
+
+	rewindChargeWindow(t, s, "run-graced", "build", reservationEnd)
+	res, err = s.ChargeNodeCredits(ctx, "run-graced", "build", claimant.TokenPrefix,
+		reservationEnd.Add(time.Duration(grace+5)*time.Second))
+	if err != nil {
+		t.Fatalf("charge after the grace period: %v", err)
+	}
+	if !res.Cancel {
+		t.Fatalf("a node past its reservation and past the grace period must be cancelled, got %+v", res)
 	}
 }
