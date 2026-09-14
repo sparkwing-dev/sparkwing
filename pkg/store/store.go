@@ -7071,12 +7071,12 @@ SELECT r.id
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
+			closeRowsOrLog(rows)
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	_ = rows.Close()
+	closeRowsOrLog(rows)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}

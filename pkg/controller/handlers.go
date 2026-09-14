@@ -497,8 +497,8 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("node id and status are required"))
 		return
 	}
-	if reaped := s.reapedRunConflict(r.Context(), runID, body.NodeID); reaped != nil {
-		writeError(w, http.StatusConflict, reaped)
+	if run, err := s.store.GetRun(r.Context(), runID); err == nil && run.FinishedAt != nil {
+		writeError(w, http.StatusConflict, finishedRunConflict(runID, run, body.NodeID))
 		return
 	}
 	if err := s.store.CreateNode(r.Context(), body); err != nil {
@@ -519,11 +519,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 
 // safety: a run the reaper or an operator already ended cannot take new work,
 // and a child told so reports why instead of reading a server fault.
-func (s *Server) reapedRunConflict(ctx context.Context, runID, nodeID string) error {
-	run, err := s.store.GetRun(ctx, runID)
-	if err != nil || run.FinishedAt == nil {
-		return nil
-	}
+func finishedRunConflict(runID string, run *store.Run, nodeID string) error {
 	detail := fmt.Sprintf("run %s finished as %s before node %s was created",
 		runID, run.Status, nodeID)
 	if run.Error != "" {
