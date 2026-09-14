@@ -1235,6 +1235,54 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 	}
 }
 
+// ClaimNodeByID claims the one node runID/nodeID for holderID, whatever its
+// place in the queue, and returns it with the claim fence the caller must send
+// on every later write: ClaimedBy, ClaimGeneration, ClaimMembershipID, and
+// ReservationID. A dispatcher that runs a node no agent claimed calls this so
+// its own writes carry a live claim.
+//
+// A node another claim holds, a finished node, a node of a finished run, or one
+// the caller may not name returns [store.ErrLockHeld]; an unknown node returns
+// [store.ErrNotFound]. A controller too old to serve the route returns
+// [ErrControllerLacksRoute], which a dispatcher answers by running the node the
+// way it did before the fence existed.
+func (c *Client) ClaimNodeByID(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) (*store.Node, error) {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/claim",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	body := map[string]any{"holder_id": holderID}
+	if lease > 0 {
+		body["lease_secs"] = max(int(lease.Seconds()), 1)
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var n store.Node
+		if err := json.NewDecoder(resp.Body).Decode(&n); err != nil {
+			return nil, err
+		}
+		return &n, nil
+	case http.StatusForbidden:
+		return nil, fmt.Errorf("%w: %w", store.ErrLockHeld, readHTTPError(resp))
+	case http.StatusNotFound:
+		return nil, notFound(resp)
+	default:
+		return nil, readHTTPError(resp)
+	}
+}
+
 func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-start",
 		url.PathEscape(runID), url.PathEscape(nodeID))

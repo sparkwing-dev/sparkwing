@@ -242,6 +242,7 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	remoteBrokeredArtifactEnv:            true,
 	remoteBrokeredClaimEnv:               true,
 	"SPARKWING_NODE_CLAIM_HOLDER":        true,
+	"SPARKWING_NODE_CLAIM_LEASE_SECONDS": true,
 	"SPARKWING_NODE_CLAIM_GENERATION":    true,
 	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
 	"SPARKWING_NODE_CLAIM_RESERVATION":   true,

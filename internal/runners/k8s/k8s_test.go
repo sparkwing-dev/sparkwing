@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,7 +36,7 @@ import (
 func jobEnv(t *testing.T, cfg Config) map[string]string {
 	t.Helper()
 	r := &Runner{cfg: cfg}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	containers := job.Spec.Template.Spec.Containers
 	if len(containers) != 1 {
 		t.Fatalf("containers = %d, want 1", len(containers))
@@ -164,7 +166,7 @@ func TestResolveDependencyProxy(t *testing.T) {
 
 func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
 		t.Fatalf("imagePullPolicy = %q, want IfNotPresent", got)
 	}
@@ -172,7 +174,7 @@ func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 
 func TestBuildJob_HonoursConfiguredPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", ImagePullPolicy: corev1.PullAlways}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
 		t.Fatalf("imagePullPolicy = %q, want Always", got)
 	}
@@ -214,7 +216,7 @@ func TestBuildJob_UsesWritableGoCachePaths(t *testing.T) {
 
 func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	container := job.Spec.Template.Spec.Containers[0]
 	if !reflect.DeepEqual(container.Command, []string{"sparkwing-runner"}) {
 		t.Fatalf("command = %#v, want sparkwing-runner", container.Command)
@@ -229,7 +231,7 @@ func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 
 func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	pod := job.Spec.Template.Spec
 	if pod.SecurityContext == nil {
 		t.Fatal("pod security context is nil")
@@ -261,7 +263,7 @@ func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 
 func TestBuildJob_MountsScratchOverEveryWritablePath(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	pod := job.Spec.Template.Spec
 	if len(pod.Volumes) != 1 || pod.Volumes[0].Name != scratchVolumeName || pod.Volumes[0].EmptyDir == nil {
 		t.Fatalf("pod volumes = %#v, want one scratch emptyDir", pod.Volumes)
@@ -796,7 +798,7 @@ func TestResolveResources_StaysQuietUnderTheCeiling(t *testing.T) {
 
 func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", ServiceAccountName: "runner-jobs"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault}, store.NodeClaimFence{})
 	pod := job.Spec.Template.Spec
 	if pod.ServiceAccountName != "runner-jobs" {
 		t.Fatalf("service account = %q, want runner-jobs", pod.ServiceAccountName)
@@ -822,7 +824,7 @@ func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
 
 func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img", GitcacheURL: "http://cache.local"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{})
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.NodeClaimFence{})
 	var got string
 	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "SPARKWING_GITCACHE_URL" {
@@ -832,10 +834,224 @@ func TestBuildJob_HandsThePodTheGitcacheURL(t *testing.T) {
 	if got != "http://cache.local" {
 		t.Fatalf("SPARKWING_GITCACHE_URL = %q, want the configured gitcache", got)
 	}
-	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{})
+	bare := (&Runner{cfg: Config{Image: "img"}}).buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{}, store.NodeClaimFence{})
 	for _, e := range bare.Spec.Template.Spec.Containers[0].Env {
 		if e.Name == "SPARKWING_GITCACHE_URL" {
 			t.Fatalf("an unset gitcache must not reach the pod, got %q", e.Value)
 		}
+	}
+}
+
+func fenceJobEnv(t *testing.T, fence store.NodeClaimFence) map[string]string {
+	t.Helper()
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{}, fence)
+	out := map[string]string{}
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		out[e.Name] = e.Value
+	}
+	return out
+}
+
+func TestBuildJob_HandsThePodTheClaimFence(t *testing.T) {
+	env := fenceJobEnv(t, store.NodeClaimFence{
+		HolderID: "k8s-job:sw-abc", MembershipID: "m-1",
+		ReservationID: "res-1", ClaimGeneration: 7,
+	})
+	for name, want := range map[string]string{
+		ClaimHolderEnv:       "k8s-job:sw-abc",
+		ClaimGenerationEnv:   "7",
+		ClaimMembershipEnv:   "m-1",
+		ClaimReservationEnv:  "res-1",
+		ClaimLeaseSecondsEnv: "600",
+	} {
+		if env[name] != want {
+			t.Errorf("%s = %q, want %q", name, env[name], want)
+		}
+	}
+}
+
+func TestBuildJob_OmitsTheClaimFenceWhenNoClaimWasAwarded(t *testing.T) {
+	env := fenceJobEnv(t, store.NodeClaimFence{})
+	for _, name := range []string{ClaimHolderEnv, ClaimGenerationEnv, ClaimMembershipEnv, ClaimReservationEnv} {
+		if _, ok := env[name]; ok {
+			t.Errorf("%s is set on a Job that holds no claim", name)
+		}
+	}
+}
+
+func TestRunNode_ClaimsTheNodeBeforeItCreatesTheJob(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	kcli := fake.NewSimpleClientset()
+	created := make(chan *batchv1.Job, 1)
+	kcli.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		job := action.(k8stesting.CreateAction).GetObject().(*batchv1.Job)
+		select {
+		case created <- job:
+		default:
+		}
+		return false, nil, nil
+	})
+	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.Job{Status: batchv1.JobStatus{Succeeded: 1}}, nil
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+
+	r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+
+	n, err := st.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.ClaimedBy != "k8s-job:"+JobName("run-1", "build", 0) {
+		t.Fatalf("claimed_by = %q, want the dispatcher's Job holder", n.ClaimedBy)
+	}
+	if n.ClaimGeneration < 1 {
+		t.Fatalf("claim generation = %d, want a live fence", n.ClaimGeneration)
+	}
+	var job *batchv1.Job
+	select {
+	case job = <-created:
+	default:
+		t.Fatal("no Job was created")
+	}
+	env := map[string]string{}
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	if env[ClaimHolderEnv] != n.ClaimedBy {
+		t.Fatalf("%s = %q, want the awarded holder", ClaimHolderEnv, env[ClaimHolderEnv])
+	}
+	if env[ClaimGenerationEnv] != strconv.FormatInt(n.ClaimGeneration, 10) {
+		t.Fatalf("%s = %q, want generation %d", ClaimGenerationEnv, env[ClaimGenerationEnv], n.ClaimGeneration)
+	}
+}
+
+func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{}, store.NodeClaimFence{})
+	if job.Spec.ActiveDeadlineSeconds == nil {
+		t.Fatal("the Job carries no ActiveDeadlineSeconds, so a wedged pod outlives its run")
+	}
+	if want := int64(DefaultJobActiveDeadline.Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want %d", *job.Spec.ActiveDeadlineSeconds, want)
+	}
+
+	tuned := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 90 * time.Minute}}
+	job = tuned.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{}, store.NodeClaimFence{})
+	if want := int64((90 * time.Minute).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("configured ActiveDeadlineSeconds = %d, want %d", *job.Spec.ActiveDeadlineSeconds, want)
+	}
+}
+
+func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "slow", func(context.Context) error { return nil }).Timeout(time.Hour)
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "slow", Node: node},
+		capacity.Resolution{}, store.NodeClaimFence{})
+	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
+			*job.Spec.ActiveDeadlineSeconds, want)
+	}
+}
+
+func TestParseJobDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "6h", want: 6 * time.Hour},
+		{in: " 90m ", want: 90 * time.Minute},
+		{in: "30s", wantErr: true},
+		{in: "soon", wantErr: true},
+	} {
+		got, err := ParseJobDeadline(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseJobDeadline(%q) = %s, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("ParseJobDeadline(%q) = %s, %v; want %s", tc.in, got, err, tc.want)
+		}
+	}
+}
+
+// A Job Kubernetes killed at its deadline must not read like the unfenced-write
+// defect: the pod is gone, so the Job condition is the only evidence.
+func TestRunNode_DeadlineKillIsReportedAsItsOwnFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	deadline := int64(3600)
+	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("get", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.Job{
+			Spec: batchv1.JobSpec{ActiveDeadlineSeconds: &deadline},
+			Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
+				Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
+				Reason: DeadlineExceededReason,
+			}}},
+		}, nil
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+
+	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if res.Outcome != sparkwing.Failed {
+		t.Fatalf("outcome = %q, want failed", res.Outcome)
+	}
+	n, err := st.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.FailureReason != store.FailureTimeout {
+		t.Fatalf("failure_reason = %q, want %q", n.FailureReason, store.FailureTimeout)
+	}
+	if !strings.Contains(n.Error, "killed at its active deadline (1h0m0s)") {
+		t.Fatalf("node error = %q, want the deadline named", n.Error)
+	}
+	if strings.Contains(n.Error, "exited without writing terminal state") {
+		t.Fatal("a deadline kill still reads as the missing-terminal-state failure")
 	}
 }

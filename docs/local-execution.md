@@ -585,6 +585,39 @@ agent-only because the fallback Job does not advertise labels. Saturated or
 offline agents therefore spill generic work to Kubernetes without weakening
 placement requirements.
 
+Before it creates the Job the dispatcher claims that one node for itself with
+its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands
+the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
+`SPARKWING_NODE_CLAIM_GENERATION`, `SPARKWING_NODE_CLAIM_MEMBERSHIP`,
+`SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`.
+`run-node` sends that fence on every state write and log append. The claim is
+what the controller's node-mutation fence admits, and on a metered token it is
+what reserves the minute the run bills. The plain `--trigger-runner k8s` path
+takes the same claim, because it builds the same Job.
+
+The route awards an unlabelled node the queue has already opened to any
+`nodes.claim` token. A node the queue has not opened, and a node that declares
+`.Requires()` labels, go only to a caller holding the run's live trigger claim,
+which is the dispatcher: a named claim advertises no labels, so nothing else
+could match the requirement. A node body's token therefore cannot take work
+whose dependencies have not run or work its box cannot do. The route refuses a
+node another claim holds and a node of a run that has finished.
+
+The pod is the only renewer: it extends the lease every five seconds from the
+moment its process starts, and the dispatcher renews nothing, so a pod that
+never runs releases the node when the ten-minute lease lapses rather than
+holding a billed claim for as long as the dispatcher watches an
+`ImagePullBackOff`. The same ten minutes is the cost of a dispatcher that dies
+mid-node: nothing releases a claim, so the node waits out the lease before the
+reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten
+minutes past the node's own `.Timeout()` where it declared one and six hours
+otherwise, so a wedged pod cannot outlive the run that wanted it.
+`--k8s-job-deadline` (env `SPARKWING_K8S_JOB_DEADLINE`, a Go duration of at
+least a minute) moves that six hours. A no-progress timeout measures silence
+rather than elapsed time, so it deliberately does not bound the Job. A node
+Kubernetes kills at the deadline fails with `timeout` and an error naming the
+deadline, which is how an operator tells it from a pod that crashed.
+
 The full-chart path is
 `sparkwing-runner-bundle.runner.triggerRunner.kind: warm`, together with
 `sparkwing-runner-bundle.runner.automountServiceAccountToken: true`. The

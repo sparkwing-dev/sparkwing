@@ -48,6 +48,11 @@ func RunNodeOnce(
 		cfg.claimFence.HolderID = holderID
 		ctx = withNodeClaimHolder(ctx, holderID)
 		ctx = store.WithNodeClaimFence(ctx, cfg.claimFence)
+	} else if cfg.claimFence.HolderID != "" && cfg.claimFence.ClaimGeneration > 0 {
+		// safety: this process is already the isolated execution, so the claim
+		// fences its own writes rather than handing the node to a child.
+		ctx = withNodeClaimHolder(ctx, cfg.claimFence.HolderID)
+		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), cfg.claimFence)
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -568,6 +573,9 @@ func runNodeCLI(args []string) error {
 		}
 		runOpts = append(runOpts, brokeredExecutionChild(os.Getenv(remoteBrokeredArtifactEnv) == "1"))
 	}
+	// safety: RunNodeCommand reads the same claim variables for a Job's pod,
+	// where the process already is the isolated execution; here it supervises
+	// one, so a claim means handing the node to a child through the broker.
 	if os.Getenv(remoteBrokeredClaimEnv) == "1" {
 		holderID = "brokered-execution"
 		runOpts = append(runOpts, func(c *runNodeConfig) {

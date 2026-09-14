@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +76,10 @@ type Config struct {
 	TTLSecondsAfterFinished int32
 
 	MissingJobGracePeriod time.Duration
+
+	// JobActiveDeadline bounds a fallback Job whose node declared no timeout.
+	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it.
+	JobActiveDeadline time.Duration
 }
 
 type Runner struct {
@@ -111,7 +116,13 @@ var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
-	job := r.buildJob(name, req, r.resolveResources(ctx, req))
+	fence, claimed := r.claimNode(ctx, req, name)
+	if claimed {
+		// safety: the dispatcher reached here holding the run's trigger claim,
+		// and the controller refuses a request that carries both identities.
+		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
+	}
+	job := r.buildJob(name, req, r.resolveResources(ctx, req), fence)
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -204,6 +215,63 @@ func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID strin
 	}
 }
 
+// ClaimLease is the lease the dispatcher takes on a node it executes through a
+// Job, and the lease the pod renews once it starts. The dispatcher never
+// renews it: a pod that never runs must let its claim lapse rather than hold a
+// billed claim for as long as the dispatcher watches an ImagePullBackOff.
+const ClaimLease = store.MaxLeaseDuration
+
+// DefaultJobActiveDeadline bounds a fallback Job whose node declared no
+// timeout, so a pod that wedges cannot outlive the run that wanted it.
+const DefaultJobActiveDeadline = 6 * time.Hour
+
+// safety: the node's own timeout must fire first, so it records an outcome
+// rather than vanishing with the pod Kubernetes deleted.
+const jobDeadlineSlack = 10 * time.Minute
+
+// safety: a controller that does not carry the targeted-claim route, or a node
+// some other holder already took, leaves the Job running exactly as it did
+// before the fence existed rather than failing the node here.
+func (r *Runner) claimNode(ctx context.Context, req runner.Request, jobName string) (store.NodeClaimFence, bool) {
+	holderID := "k8s-job:" + jobName
+	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease)
+	if errors.Is(err, client.ErrControllerLacksRoute) {
+		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
+			"run_id", req.RunID, "node_id", req.NodeID)
+		return store.NodeClaimFence{}, false
+	}
+	if err != nil {
+		r.logger.Warn("k8s: claiming the node for its Job failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
+		return store.NodeClaimFence{}, false
+	}
+	return store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}, true
+}
+
+// safety: this is a wall-clock backstop for a pod Kubernetes would otherwise
+// keep forever, never the node's own deadline. A node's no-progress timeout
+// measures silence rather than elapsed time, so it deliberately does not bound
+// this; only a declared .Timeout() moves it.
+func (r *Runner) jobActiveDeadline(req runner.Request) *int64 {
+	deadline := r.cfg.JobActiveDeadline
+	if deadline <= 0 {
+		deadline = DefaultJobActiveDeadline
+	}
+	if req.Node != nil {
+		if declared := req.Node.TimeoutDuration(); declared > 0 {
+			deadline = declared + jobDeadlineSlack
+		}
+	}
+	secs := int64(deadline.Seconds())
+	if secs < 1 {
+		secs = 1
+	}
+	return &secs
+}
+
 func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, jobName string) runner.Result {
 	deadline := time.NewTimer(r.cfg.MissingJobGracePeriod)
 	defer deadline.Stop()
@@ -266,6 +334,14 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		if reason == store.FailureOOMKilled {
 			errMsg = fmt.Sprintf("pod %s OOMKilled", j.Name)
 		}
+		// safety: Kubernetes deletes the pod it kills at the deadline, so the
+		// Job condition is the only record of why the node wrote nothing.
+		if deadlineKilledJob(j) {
+			reason = store.FailureTimeout
+			exitCode = nil
+			errMsg = fmt.Sprintf("Job %s was killed at its active deadline (%s) before the node wrote a terminal state",
+				j.Name, jobDeadlineText(j))
+		}
 		if res.Err == nil {
 			res.Err = errors.New(errMsg)
 		}
@@ -273,6 +349,30 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 			string(sparkwing.Failed), errMsg, nil, reason, exitCode)
 	}
 	return res
+}
+
+// DeadlineExceededReason is the reason Kubernetes stamps on a Job it kills for
+// outliving its activeDeadlineSeconds.
+const DeadlineExceededReason = "DeadlineExceeded"
+
+func deadlineKilledJob(j *batchv1.Job) bool {
+	if j == nil {
+		return false
+	}
+	for _, c := range j.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue &&
+			c.Reason == DeadlineExceededReason {
+			return true
+		}
+	}
+	return false
+}
+
+func jobDeadlineText(j *batchv1.Job) string {
+	if j == nil || j.Spec.ActiveDeadlineSeconds == nil {
+		return "its configured limit"
+	}
+	return (time.Duration(*j.Spec.ActiveDeadlineSeconds) * time.Second).String()
 }
 
 func (r *Runner) inspectTerminatedPod(ctx context.Context, j *batchv1.Job) (string, *int) {
@@ -368,7 +468,19 @@ func nodePin(node *sparkwing.JobNode) *capacity.Pin {
 // this one binary, so a Job that named any other would fail to start.
 const JobBinary = "sparkwing-runner"
 
-func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution) *batchv1.Job {
+// Claim fence environment. The pod reads these to rebuild the claim the
+// dispatcher took for it, which every node state write and log append is
+// checked against. They are the variable names an agent-claimed node already
+// travels under, so one reader in run-node serves both.
+const (
+	ClaimHolderEnv       = "SPARKWING_NODE_CLAIM_HOLDER"
+	ClaimGenerationEnv   = "SPARKWING_NODE_CLAIM_GENERATION"
+	ClaimMembershipEnv   = "SPARKWING_NODE_CLAIM_MEMBERSHIP"
+	ClaimReservationEnv  = "SPARKWING_NODE_CLAIM_RESERVATION"
+	ClaimLeaseSecondsEnv = "SPARKWING_NODE_CLAIM_LEASE_SECONDS"
+)
+
+func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resolution, fence store.NodeClaimFence) *batchv1.Job {
 	env := []corev1.EnvVar{
 		{Name: "SPARKWING_CONTROLLER_URL", Value: r.cfg.ControllerURL},
 		{Name: "SPARKWING_RUN_ID", Value: req.RunID},
@@ -396,6 +508,7 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_TOKEN", Value: tok})
 	}
 	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
+	env = append(env, claimFenceEnv(fence)...)
 
 	container := corev1.Container{
 		Name:            "runner",
@@ -460,11 +573,25 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
+			ActiveDeadlineSeconds:   r.jobActiveDeadline(req),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec:       podSpec,
 			},
 		},
+	}
+}
+
+func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {
+	if fence.HolderID == "" || fence.ClaimGeneration < 1 {
+		return nil
+	}
+	return []corev1.EnvVar{
+		{Name: ClaimHolderEnv, Value: fence.HolderID},
+		{Name: ClaimGenerationEnv, Value: strconv.FormatInt(fence.ClaimGeneration, 10)},
+		{Name: ClaimMembershipEnv, Value: fence.MembershipID},
+		{Name: ClaimReservationEnv, Value: fence.ReservationID},
+		{Name: ClaimLeaseSecondsEnv, Value: strconv.Itoa(int(ClaimLease.Seconds()))},
 	}
 }
 
@@ -592,6 +719,23 @@ func ParseCPUCeiling(s string) (float64, error) {
 		return 0, fmt.Errorf("cpu ceiling %q: expected a positive number of cores", s)
 	}
 	return cores, nil
+}
+
+// ParseJobDeadline reads an operator's wall-clock bound on one runner Job as a
+// Go duration ("6h", "90m"). An empty string means [DefaultJobActiveDeadline].
+func ParseJobDeadline(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("job deadline %q: expected a Go duration such as 6h or 90m", s)
+	}
+	if d < time.Minute {
+		return 0, fmt.Errorf("job deadline %q: expected at least a minute", s)
+	}
+	return d, nil
 }
 
 // ParseMemoryCeiling reads an operator's memory ceiling in Kubernetes quantity

@@ -1601,6 +1601,85 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	writeClaimedNode(w, r, s, n)
 }
 
+type claimNamedNodeReq struct {
+	HolderID  string `json:"holder_id"`
+	LeaseSecs int    `json:"lease_secs"`
+}
+
+func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
+	var body claimNamedNodeReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.HolderID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return
+	}
+	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
+	if !s.mayClaimNamedNode(w, r, runID, nodeID) {
+		return
+	}
+	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
+		body.HolderID, time.Duration(body.LeaseSecs)*time.Second)
+	if err != nil {
+		if s.writeCreditsRefusal(w, r, err) {
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeClaimedNode(w, r, s, n)
+}
+
+// safety: naming a node skips the queue, and every pipeline pod carries a
+// claim-scoped token, so an unlabeled node the queue already opened is fair
+// game and anything else needs the run's dispatch claim. A named claim
+// advertises no labels, so nothing else could honor a requirement.
+func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok || p.HasScope(ScopeAdmin) {
+		return true
+	}
+	n, err := s.store.GetNode(r.Context(), runID, nodeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if n.ReadyAt != nil && len(n.NeedsLabels) == 0 {
+		return true
+	}
+	held, err := s.store.PrincipalHoldsTriggerClaim(r.Context(), runID, claimIdentity(r), time.Now())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if held {
+		return true
+	}
+	reason := "has not been made ready"
+	if len(n.NeedsLabels) > 0 {
+		reason = "requires runner labels a named claim cannot advertise"
+	}
+	writeAuthError(w, http.StatusForbidden, authErrorBody{
+		Code: "claim_required", Principal: p.label(),
+		Message: "node " + runID + "/" + nodeID + " " + reason + ", so naming it requires the run's live trigger claim",
+	})
+	return false
+}
+
 func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
 	s.recordQueueActivity(time.Now())
 	pipeline := ""

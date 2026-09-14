@@ -3887,6 +3887,84 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ComputeLimits"}
 
+  /api/v1/runs/{id}/nodes/{nodeID}/claim:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Claim this one node, whatever its place in the queue.
+      description: |
+        A dispatcher that executes a node itself calls this so its own process
+        holds the claim every node mutation is checked against, which is what
+        the Kubernetes fallback Job needs before it runs a node no agent
+        claimed. It passes over no candidate and reads no label: the caller
+        already decided this node is its work.
+        Naming a node skips the queue, so the scope alone is not enough. An
+        unlabelled node the queue has already opened is awarded to any
+        authorized caller. A node the queue has not opened, and a node that
+        declares required runner labels, are awarded only to a caller holding
+        the run's live trigger claim: a named claim advertises no labels, and
+        this keeps a pipeline pod's token from taking work whose dependencies
+        have not run or work its box cannot do. An operator token bypasses the
+        check, as it does on every other claim-bound route.
+        The claim binds to the calling token and `holder_id` exactly as
+        `POST /api/v1/nodes/claim` does, and `lease_secs` is clamped to the
+        server cap of 10 minutes. A metered token reserves its first minute
+        here, so the node run bills through this claim.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.claimNamedNodeReq
+              type: object
+              required: [holder_id]
+              properties:
+                holder_id: {type: string}
+                lease_secs: {type: integer}
+      responses:
+        "200":
+          description: Claimed node.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/Node"}
+                  - x-sparkwing-go-partial: pkg/store.Node
+                    type: object
+                    description: >-
+                      Exact claim fence returned only to the authenticated caller that won this claim.
+                    properties:
+                      claimed_by: {type: string}
+                      claim_generation: {type: integer, format: int64}
+                      claim_membership_id: {type: string}
+                      reservation_id: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "402":
+          description: >-
+            The claiming token is metered and the credit balance does not cover a minute of its time. The node is not claimed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditsRefused"}
+        "403":
+          description: >-
+            The node is not ready, or requires runner labels, and the caller does not hold the run's live trigger claim.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthError"}
+        "404": {description: No such node.}
+        "409":
+          description: >-
+            Another claim holds the node, the node or its run finished, or its placement is pinned.
+
 components:
   securitySchemes:
     bearerToken:

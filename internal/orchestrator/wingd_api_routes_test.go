@@ -77,6 +77,7 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/bounce",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/bounce",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume",
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/deps",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch",
