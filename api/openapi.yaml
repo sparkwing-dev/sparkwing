@@ -4561,7 +4561,7 @@ components:
         by_principal: {type: object, additionalProperties: {type: integer, format: int64}, description: The same count per principal.}
         alarm_reached: {type: boolean, description: Whether the count reached runner_alarm.}
         derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal is held to once recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
-        recent_paid_micro: {type: integer, format: int64, description: Paid credit granted over the scaling window, in micro-credits: '', which is what the derived cap was read from.: ''}
+        recent_paid_micro: {type: integer, format: int64, description: "Paid credit granted over the scaling window, in micro-credits, less the reversals of grants inside it."}
         scale_window_seconds: {type: integer, format: int64, description: How far back paid credit counts toward the derived cap.}
     SetComputeLimits:
       x-sparkwing-go-type: pkg/controller.setComputeLimitsReq
@@ -4576,11 +4576,11 @@ components:
       properties:
         balance_micro: {type: integer, format: int64, description: Grants less reversals less charges.}
         granted_micro: {type: integer, format: int64}
-        reversed_micro: {type: integer, format: int64, description: What reversals took back, reported positive.: ''}
+        reversed_micro: {type: integer, format: int64, description: "What reversals took back, reported positive."}
         charged_micro: {type: integer, format: int64}
         rate_micro_per_second: {type: integer, format: int64, description: Price of one cloud runner second.}
         grace_seconds: {type: integer, format: int64, description: How long a running node survives an empty balance.}
-        max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop.: ''}
+        max_charge_seconds: {type: integer, format: int64, description: "The most seconds any one charge may bill, which forgives a controller outage or a stalled heartbeat loop."}
         burn_window_seconds: {type: integer, format: int64}
         burn_micro: {type: integer, format: int64, description: Charged over the burn window.}
         exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
@@ -4592,9 +4592,9 @@ components:
       description: One movement of the grant side of the ledger.
       properties:
         id: {type: string}
-        kind: {type: string, description: free, paid or reversal.: ''}
+        kind: {type: string, description: "free, paid or reversal."}
         amount_micro: {type: integer, format: int64, description: Negative on a reversal.}
-        reference: {type: string, description: Payment id, refund id: '', or operator note.: ''}
+        reference: {type: string, description: "Payment id, refund id, or operator note."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
@@ -4607,7 +4607,7 @@ components:
         run_id: {type: string}
         node_id: {type: string}
         token_prefix: {type: string}
-        kind: {type: string, description: reservation, usage: '', or refund; a refund carries negative seconds and amount.: ''}
+        kind: {type: string, description: "reservation, usage, or refund; a refund carries negative seconds and amount."}
         seconds: {type: integer, format: int64}
         amount_micro: {type: integer, format: int64}
         charged_at: {type: integer, format: int64, description: Unix seconds.}
@@ -4660,9 +4660,9 @@ components:
       type: object
       required: [kind, amount_micro]
       properties:
-        kind: {type: string, description: free, paid or reversal.: ''}
-        amount_micro: {type: integer, format: int64, description: Micro-credits to add, negative on a reversal; a million is one credit.: ''}
-        reference: {type: string, description: Payment id, refund id: '', or operator note. A non-empty one is idempotent.: ''}
+        kind: {type: string, description: "free, paid or reversal."}
+        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit."}
+        reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON

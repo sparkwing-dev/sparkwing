@@ -85,6 +85,12 @@ unlock.
 
 ### Fixed
 
+- **api:** `api/openapi.yaml` no longer loses the tail of a description
+  An unquoted comma and colon inside a flow-mapping description split the prose
+  and turned its tail into a sibling field nobody wrote, which silently
+  truncated eleven schema descriptions. `bin/check-api-spec.sh` now refuses any
+  mapping key holding a space, which is what such a split produces.
+
 - **cluster:** A warm-mode fallback Job now carries `SPARKWING_GITCACHE_URL`, so
   `sparkwing-runner run-node` can fetch and compile a pipeline the runner image
   does not carry instead of exiting with "cannot fall back to remote compile".
