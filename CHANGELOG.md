@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.5] - 2026-09-15
 ### Changed
 
 - **controller + chart:** the controller opens PostgreSQL when
