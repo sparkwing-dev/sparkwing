@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.3] - 2026-09-15
 ### Added
 
 - **controller + chart:** `--limits-profile` (chart `controller.limitsProfile`)
@@ -166,7 +167,7 @@ unlock.
   budget from `controller.CompliantClaimPollsPerMinute` instead, which reports
   what an empty-queue poll cadence costs, and remember that an awarded claim
   spends no budget. See
-  [the migration guide](docs/migrations/_unreleased.md#the-claim-budget-recommendation-helpers-are-removed).
+  [the migration guide](docs/migrations/v0.52.3.md#the-claim-budget-recommendation-helpers-are-removed).
 
 ## [v0.52.1] - 2026-09-14
 ### Fixed
