@@ -307,7 +307,7 @@ type Meter struct {
 	now        func() time.Time
 	principals map[string]*principalCounters
 	// safety: a month roll zeroes a principal's counter, so the closing
-	// total is parked here for the next Dirty rather than lost between
+	// total is parked here for the next Flush rather than lost between
 	// the roll and the flush that would have persisted it. Only a meter
 	// whose owner drains it parks anything; see [Meter.WithPersistence].
 	persists       bool
