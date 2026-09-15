@@ -28,11 +28,11 @@ func TestBudgetPassesATierInsideItsClass(t *testing.T) {
 
 func TestBudgetFailsAnOverrunNamingTheSlowestStep(t *testing.T) {
 	_, err := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
-		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"test-touched", 20 * time.Second}}, false)
+		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"lint-touched", 20 * time.Second}}, false)
 	if err == nil {
 		t.Fatal("a tier at twice its budget passed")
 	}
-	if !strings.Contains(err.Error(), "test-touched") || !strings.Contains(err.Error(), "20s") {
+	if !strings.Contains(err.Error(), "lint-touched") || !strings.Contains(err.Error(), "20s") {
 		t.Errorf("the failure names neither the slowest step nor its cost: %v", err)
 	}
 }
