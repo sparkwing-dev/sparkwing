@@ -59,7 +59,7 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 // when the class overruns its ten seconds.
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
-	budget := newTierBudget("pre-push", prePushBudget)
+	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)
 	budget.step(w, "gofmt", runGofmtOverThePush)
 	budget.step(w, "formatters", runFormattersOverThePush)
 	budget.step(w, "comments", checkCommentsOverThePush)

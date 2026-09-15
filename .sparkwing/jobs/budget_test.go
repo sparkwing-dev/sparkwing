@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,7 +18,7 @@ import (
 
 func TestBudgetPassesATierInsideItsClass(t *testing.T) {
 	line, err := budgetVerdict("pre-commit", 3*time.Second, 900*time.Millisecond,
-		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"comments", 880 * time.Millisecond}}, false)
+		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"comments", 880 * time.Millisecond}}, false, -1)
 	if err != nil {
 		t.Fatalf("a tier inside its budget failed: %v", err)
 	}
@@ -28,7 +29,7 @@ func TestBudgetPassesATierInsideItsClass(t *testing.T) {
 
 func TestBudgetFailsAnOverrunNamingTheSlowestStep(t *testing.T) {
 	_, err := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
-		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"lint-touched", 20 * time.Second}}, false)
+		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"lint-touched", 20 * time.Second}}, false, -1)
 	if err == nil {
 		t.Fatal("a tier at twice its budget passed")
 	}
@@ -39,14 +40,14 @@ func TestBudgetFailsAnOverrunNamingTheSlowestStep(t *testing.T) {
 
 func TestBudgetLeavesTheVerdictToTheCheckThatFailed(t *testing.T) {
 	_, err := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
-		[]stepTiming{{"gofmt", 20 * time.Second}}, true)
+		[]stepTiming{{"gofmt", 20 * time.Second}}, true, -1)
 	if err != nil {
 		t.Fatalf("the budget judged a tier whose own check failed, so the push reports the wrong cause: %v", err)
 	}
 }
 
 func TestBudgetJudgesNothingWhenNoStepRan(t *testing.T) {
-	line, err := budgetVerdict("pre-commit", 3*time.Second, time.Hour, nil, false)
+	line, err := budgetVerdict("pre-commit", 3*time.Second, time.Hour, nil, false, -1)
 	if err != nil || line != "" {
 		t.Fatalf("budgetVerdict(no steps) = %q, %v; want silence", line, err)
 	}
@@ -112,6 +113,55 @@ func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "the check found something") {
 		t.Errorf("the budget replaced the check's own verdict: %v", err)
+	}
+}
+
+// safety: the fileset the waiver reads is the tier's own scope, so a stub
+// scope is what puts a test on either side of the threshold.
+func filesetOf(count int) scopeFunc {
+	return func(context.Context, string, func([]string) []string) ([]string, string, error) {
+		files := make([]string, count)
+		for i := range files {
+			files[i] = fmt.Sprintf("pkg/file%d.go", i)
+		}
+		return files, fmt.Sprintf("%d Go file(s)", count), nil
+	}
+}
+
+func overrunWithFileset(t *testing.T, count int) error {
+	t.Helper()
+	b := newTierBudget("probe", time.Nanosecond).over(filesetOf(count))
+	w := sparkwing.NewWork()
+	b.step(w, "cheap", func(context.Context) error { return nil })
+	b.verdict(w)
+	_, err := sparkwing.RunWork(t.Context(), w)
+	return err
+}
+
+func TestBudgetEnforcesUpToTheFilesetATierIsBudgetedFor(t *testing.T) {
+	if err := overrunWithFileset(t, budgetWaiverFiles); err == nil {
+		t.Fatalf("a tier past its budget over %d Go files passed; the budget stops meaning anything", budgetWaiverFiles)
+	}
+}
+
+func TestBudgetIsWaivedForAFilesetWiderThanATierIsBudgetedFor(t *testing.T) {
+	if err := overrunWithFileset(t, budgetWaiverFiles+1); err != nil {
+		t.Fatalf("a %d-file change failed the budget; these steps cost per file, so a wide change is not a tier that grew: %v",
+			budgetWaiverFiles+1, err)
+	}
+}
+
+func TestBudgetEnforcesWhenTheFilesetCannotBeRead(t *testing.T) {
+	b := newTierBudget("probe", time.Nanosecond).over(
+		func(context.Context, string, func([]string) []string) ([]string, string, error) {
+			return nil, "", errors.New("no baseline")
+		})
+	w := sparkwing.NewWork()
+	b.step(w, "cheap", func(context.Context) error { return nil })
+	b.verdict(w)
+
+	if _, err := sparkwing.RunWork(t.Context(), w); err == nil {
+		t.Fatal("a tier that cannot size its change stopped keeping its promise")
 	}
 }
 

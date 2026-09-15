@@ -20,6 +20,12 @@ const (
 
 const budgetStepID = "budget"
 
+// perf: Korey accepts a long tier for a wide change. The source-policy steps
+// cost per file, so a fileset several times a normal change's size costs
+// several times its time without any tier having grown; above this the verdict
+// reports and passes rather than failing the commit or the push.
+const budgetWaiverFiles = 50
+
 type stepTiming struct {
 	id   string
 	took time.Duration
@@ -28,6 +34,7 @@ type stepTiming struct {
 type tierBudget struct {
 	tier     string
 	limit    time.Duration
+	scopeOf  scopeFunc
 	declared []sparkwing.WorkDep
 
 	mu       sync.Mutex
@@ -39,6 +46,26 @@ type tierBudget struct {
 
 func newTierBudget(tier string, limit time.Duration) *tierBudget {
 	return &tierBudget{tier: tier, limit: limit}
+}
+
+// safety: the scope is the tier's own, so the waiver counts the files the tier
+// judged rather than a second reading of the change.
+func (b *tierBudget) over(scopeOf scopeFunc) *tierBudget {
+	b.scopeOf = scopeOf
+	return b
+}
+
+// safety: a scope that cannot be read enforces the budget. A tier that stops
+// knowing how wide its change is must not stop keeping its promise.
+func (b *tierBudget) changedGoFiles(ctx context.Context) int {
+	if b.scopeOf == nil {
+		return -1
+	}
+	files, _, err := b.scopeOf(ctx, "Go file(s)", existingGoFiles)
+	if err != nil {
+		return -1
+	}
+	return len(files)
 }
 
 // safety: wrapping is the only way a step enters the budget, so a step
@@ -82,7 +109,7 @@ func (b *tierBudget) report(ctx context.Context) error {
 	steps, stepFail := b.steps, b.stepFail
 	b.mu.Unlock()
 
-	line, err := budgetVerdict(tier, limit, took, steps, stepFail)
+	line, err := budgetVerdict(tier, limit, took, steps, stepFail, b.changedGoFiles(ctx))
 	if line != "" {
 		sparkwing.Info(ctx, "%s", line)
 	}
@@ -92,7 +119,7 @@ func (b *tierBudget) report(ctx context.Context) error {
 // safety: a red tier reports the failed check, not the budget. Its steps were
 // cancelled part-way, so their durations measure the cancellation rather than
 // the work, and a budget verdict on them would name the wrong cause.
-func budgetVerdict(tier string, limit, took time.Duration, steps []stepTiming, stepFail bool) (string, error) {
+func budgetVerdict(tier string, limit, took time.Duration, steps []stepTiming, stepFail bool, changed int) (string, error) {
 	if len(steps) == 0 {
 		return "", nil
 	}
@@ -104,8 +131,15 @@ func budgetVerdict(tier string, limit, took time.Duration, steps []stepTiming, s
 	}
 	line := fmt.Sprintf("%s ran %s of its %s budget; slowest step %q at %s",
 		tier, took.Round(time.Millisecond), limit, slowest.id, slowest.took.Round(time.Millisecond))
+	if changed >= 0 {
+		line += fmt.Sprintf(" over %d Go file(s)", changed)
+	}
 	if stepFail || took <= limit {
 		return line, nil
+	}
+	if changed > budgetWaiverFiles {
+		return line + fmt.Sprintf("; the budget is waived past %d Go files, because these steps cost per file",
+			budgetWaiverFiles), nil
 	}
 	return line, fmt.Errorf("%s ran %s, over the %s this check class promises. The slowest step is %q at %s: "+
 		"make it cheaper or move it to a slower class",
