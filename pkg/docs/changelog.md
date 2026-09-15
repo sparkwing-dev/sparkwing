@@ -29,6 +29,9 @@ unlock.
   through `Store.SetComputeLimits`. A rejected field, explicit JSON null or
   database write leaves every setting unchanged, and each operation returns
   the complete settings snapshot after a successful commit.
+- **checks:** `pre-push` reserves the combined CPU demand of its concurrent
+  build, vet and fast lint steps. The fast linter now bounds both Go and linter
+  parallelism to the per-task share.
 
 ## [v0.52.5] - 2026-09-15
 ### Changed

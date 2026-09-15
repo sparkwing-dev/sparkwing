@@ -46,7 +46,11 @@ file. Other syntax and workflow checks remain active.
   `pre-push` is the fast tier the git pre-push hook runs, and it repeats
   nothing the commit tier already ran: the changelog, OpenAPI and API-snapshot
   gates, and `go build`, `go vet` and the fast linter subset over the packages
-  the push touches, with no package-count cutoff. The tiers shift left, so a
+  the push touches, with no package-count cutoff. A
+  runner reserves the combined CPU demand of those three concurrent compiler
+  tasks, up to 9 cores. Smaller runners divide their available cores across
+  the tasks.
+  The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use
   pre-merge-commit; neither hook tier proves source policy over those resulting

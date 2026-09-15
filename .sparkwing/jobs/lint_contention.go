@@ -77,8 +77,8 @@ var prePushLinters = []string{
 // load to run beside whatever holds it. A minute bounds a hung run, well over
 // the second the subset measures.
 func fastLintCommand(cores int, pkgs []string) string {
-	return fmt.Sprintf("GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 1m --enable-only %s %s",
-		shellQuote(sparkwing.ToolCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
+	return fmt.Sprintf("GOMAXPROCS=%d GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 1m --enable-only %s %s",
+		cores, shellQuote(sparkwing.ToolCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
 }
 
 func runGolangciLint(ctx context.Context) error {

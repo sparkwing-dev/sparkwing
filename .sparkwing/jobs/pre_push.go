@@ -42,7 +42,7 @@ func (PrePush) Examples() []sparkwing.Example {
 }
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	plan.Resources(sparkwing.Cores(float64(prePushCores(runtime.NumCPU()))))
+	plan.Resources(sparkwing.Cores(float64(prePushReservationCores(runtime.NumCPU()))))
 	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
@@ -88,20 +88,29 @@ func checkAPISnapshot(ctx context.Context) error {
 	return nil
 }
 
-// perf: the compiles are the one part of this tier that fans out, so they are
-// bounded to what the tier reserves. A burst past the reservation is load the
-// admission daemon cannot schedule against, and it measured an order of
-// magnitude over the pin when the bound was the whole machine.
+// perf: build, vet and lint compile concurrently. Each task stays small, while
+// the plan reserves their combined demand so admission can account for the
+// work before it starts.
 const prePushCoreCap = 3
 
-// prePushCores holds the tier to what the gate reserves on this machine. The cap
-// is what the compiles need; a machine whose gate reserves less than that cannot
-// seat the tier beside a running gate, so the smaller figure wins.
-func prePushCores(cpuCount int) int {
-	if reserved := int(gateCoreReservation(cpuCount)); reserved < prePushCoreCap {
-		return reserved
+const prePushCompilerTasks = 3
+
+func prePushReservationCores(cpuCount int) int {
+	if cpuCount < 1 {
+		return 1
 	}
-	return prePushCoreCap
+	if cap := prePushCompilerTasks * prePushCoreCap; cpuCount > cap {
+		return cap
+	}
+	return cpuCount
+}
+
+func prePushTaskCores(cpuCount int) int {
+	cores := prePushReservationCores(cpuCount) / prePushCompilerTasks
+	if cores < 1 {
+		return 1
+	}
+	return cores
 }
 
 func runBuildTouched(ctx context.Context) error {
@@ -120,7 +129,7 @@ func runVetTouched(ctx context.Context) error {
 func runFastLintTouched(ctx context.Context) error {
 	return overTouchedPackages(ctx, "lint-touched", "lint", "Go file(s)", existingGoFiles,
 		func(_ string, pkgs []string) string {
-			return fastLintCommand(prePushCores(runtime.NumCPU()), pkgs)
+			return fastLintCommand(prePushTaskCores(runtime.NumCPU()), pkgs)
 		})
 }
 
@@ -134,7 +143,7 @@ func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]s
 			if verb == "build" && len(pkgs) == 1 {
 				args = "-o /dev/null " + args
 			}
-			return goCommandAt(prePushCores(runtime.NumCPU()), verb, args)
+			return goCommandAt(prePushTaskCores(runtime.NumCPU()), verb, args)
 		})
 }
 
