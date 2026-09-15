@@ -31,8 +31,8 @@ func (ReleaseVerify) Help() string {
 		"release notes, and falls back to the tag message when it is missing), a changelog account of any runs-store schema change " +
 		"since the previous release tag, one of any wire-format cut, and a rolled migration guide whose sections every " +
 		"(Breaking) entry links. It reads files and git, changes nothing, " +
-		"and never reaches for a branch tip. The hosted release workflow no longer runs it, so this is the check to " +
-		"run by hand before a tag goes out. The CI/CD group is reintroducing it there deliberately."
+		"and never reaches for a branch tip. The local release cut runs these checks before push-tag. " +
+		"This standalone command also inspects an existing tag; the hosted release remains build and publish only."
 }
 
 func (ReleaseVerify) Examples() []sparkwing.Example {
