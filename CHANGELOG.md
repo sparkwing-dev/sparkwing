@@ -96,7 +96,8 @@ unlock.
   the push touches, and the `release` pipeline runs build, the full linter and
   the fast test class before it tags. A test whose own runtime passes 200 ms
   guards itself with `testing.Short`, so the fast class stays fast; `gate`
-  still runs the suite without `-short`.
+  still runs the suite without `-short`. No test suite runs in a hook tier: the
+  fast test class belongs to the release cut.
 - **k8s runner:** A Job for a cpu class above the warm one is placed on the
   band of machines its class belongs to. The 4-core and 8-core classes select
   nodes labeled `sparkwing.dev/cpu-band: small` and tolerate the matching

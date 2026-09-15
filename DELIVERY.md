@@ -98,10 +98,12 @@ launcher when testing isolated tool state.
   keeps of the four is the packages the change touches: `go build`, `go vet`,
   and the fast linter subset, the whole-tree linters minus the type-and-SSA
   family, which costs minutes. Above eight packages it names the count and
-  leaves the whole-tree forms to `gate`. The fast test class stays out of this
-  tier: the short suite of `pkg/store` alone measured 53 s, five times the
-  tier's whole budget, because several hundred of its tests each cost between
-  50 and 200 ms in fixture setup.
+  leaves the whole-tree forms to `gate`. No test suite runs in a hook tier:
+  the fast test class belongs to the release cut, and the hooks run formatters,
+  sweeps, contract gates and linters. The suites are the wrong shape for a
+  ten-second tier -- the short suite of `pkg/store` alone measured 53 s,
+  because several hundred of its tests each cost between 50 and 200 ms in
+  fixture setup.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
