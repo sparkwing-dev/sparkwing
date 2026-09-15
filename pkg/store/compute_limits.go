@@ -334,7 +334,13 @@ func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) 
 		return ComputeLimits{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	for name, value := range updates {
+	// safety: Postgres locks metadata rows as it updates them, so overlapping
+	// batches use one key order and cannot wait on each other in reverse.
+	for _, name := range ComputeLimitNames() {
+		value, ok := updates[name]
+		if !ok {
+			continue
+		}
 		if err := setCreditSettingTx(ctx, tx, computeLimitKey(name), formatCreditSetting(value)); err != nil {
 			return ComputeLimits{}, err
 		}

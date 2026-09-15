@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -820,15 +821,6 @@ func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
 }
 
-// safety: the rate table writes its four-core entry here, so it passes through
-// the same bound the setting's own caller does.
-func setCreditRateMicroTx(ctx context.Context, tx *storeTx, micro int64) error {
-	if err := validCreditRate(micro); err != nil {
-		return err
-	}
-	return setCreditSettingTx(ctx, tx, metaKeyCreditRateMicro, formatCreditSetting(micro))
-}
-
 // CreditGraceSeconds returns how long a node keeps running once it has
 // consumed the reservation its claim paid for with the balance at zero.
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
@@ -909,19 +901,31 @@ func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) 
 	if err := up.validate(); err != nil {
 		return out, err
 	}
+	scalars := up.byKey()
+	writes := make(map[string]string, len(scalars)+2)
+	for key, value := range scalars {
+		writes[key] = strconv.FormatInt(value, 10)
+	}
+	if up.RateTable != nil {
+		if err := addCreditRateTableWrites(writes, *up.RateTable); err != nil {
+			return out, err
+		}
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return out, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	for key, value := range up.byKey() {
-		if _, err := tx.ExecContext(ctx, upsertCreditSettingSQL,
-			key, strconv.FormatInt(value, 10), time.Now().UnixNano()); err != nil {
-			return out, err
-		}
+	keys := make([]string, 0, len(writes))
+	for key := range writes {
+		keys = append(keys, key)
 	}
-	if up.RateTable != nil {
-		if err := setCreditRateTableTx(ctx, tx, *up.RateTable); err != nil {
+	sort.Strings(keys)
+	// safety: Postgres locks metadata rows as it updates them, so overlapping
+	// batches use one key order and cannot wait on each other in reverse.
+	for _, key := range keys {
+		if _, err := tx.ExecContext(ctx, upsertCreditSettingSQL,
+			key, writes[key], time.Now().UnixNano()); err != nil {
 			return out, err
 		}
 	}

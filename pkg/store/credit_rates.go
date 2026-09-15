@@ -300,7 +300,7 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	return err
 }
 
-func setCreditRateTableTx(ctx context.Context, tx *storeTx, table CreditRateTable) error {
+func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) error {
 	if err := table.Validate(); err != nil {
 		return err
 	}
@@ -309,16 +309,12 @@ func setCreditRateTableTx(ctx context.Context, tx *storeTx, table CreditRateTabl
 	if err != nil {
 		return fmt.Errorf("credits: encode the rate table: %w", err)
 	}
-	if err := setCreditSettingTx(ctx, tx, metaKeyCreditRateTable, string(encoded)); err != nil {
-		return err
-	}
+	writes[metaKeyCreditRateTable] = string(encoded)
 	// safety: the scalar is the four-core price, so a table that prices no
 	// four-core class leaves it where it stands rather than restating a
 	// neighboring class under a name that does not mean that class.
 	if base, ok := sorted.baseClassRate(); ok {
-		if err := setCreditRateMicroTx(ctx, tx, base); err != nil {
-			return err
-		}
+		writes[metaKeyCreditRateMicro] = formatCreditSetting(base)
 	}
 	return nil
 }
