@@ -631,14 +631,23 @@ func (r *Runner) buildJob(
 	}
 
 	band := cpuBand(class.Cores)
+	selector := bandNodeSelector(r.cfg.NodeSelector, band)
+	placed := ""
+	if band != "" {
+		// safety: the operator's value for this key wins the selector, so the
+		// toleration, the label and the anti-affinity follow the pool the pod
+		// selects; a toleration for another value leaves it selecting a pool
+		// whose taint it does not tolerate.
+		placed = selector[cpuBandKey]
+	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		ServiceAccountName: r.cfg.ServiceAccountName,
 		// safety: pipeline code runs here, so the pod gets no API token
 		AutomountServiceAccountToken: boolPtr(false),
-		NodeSelector:                 bandNodeSelector(r.cfg.NodeSelector, band),
-		Tolerations:                  bandTolerations(r.cfg.Tolerations, band),
-		Affinity:                     bandAntiAffinity(band),
+		NodeSelector:                 selector,
+		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
+		Affinity:                     bandAntiAffinity(band, placed),
 		Containers:                   []corev1.Container{container},
 		Volumes: []corev1.Volume{{
 			Name:         scratchVolumeName,
@@ -663,10 +672,10 @@ func (r *Runner) buildJob(
 		"sparkwing.dev/run-id":         sanitizeK8sName(truncate(req.RunID, 63)),
 		"sparkwing.dev/node-id":        sanitizeK8sName(truncate(req.NodeID, 63)),
 	}
-	if band != "" {
+	if placed != "" {
 		// safety: the anti-affinity term below selects pods, so the band a pod
 		// belongs to has to be readable off the pod and not only off its node.
-		labels[cpuBandKey] = band
+		labels[cpuBandKey] = placed
 	}
 
 	ttl := r.cfg.TTLSecondsAfterFinished
@@ -703,8 +712,9 @@ const bandTopologyKey = "kubernetes.io/hostname"
 
 func cpuBand(cores int64) string {
 	switch {
-	// safety: the warm pool serves 2 and below, so those Jobs keep the
-	// placement the operator configured and reach no band pool.
+	// safety: 2 and below is the warm pool's default reach, which
+	// warm_cpu_class_cores moves, and the band pools start at 4 either way, so
+	// a Job at those sizes keeps the placement the operator configured.
 	case cores <= 2:
 		return ""
 	case cores <= 8:
@@ -725,8 +735,8 @@ func bandNodeSelector(static map[string]string, band string) map[string]string {
 	return out
 }
 
-func bandTolerations(static []corev1.Toleration, band string) []corev1.Toleration {
-	if band == "" {
+func bandTolerations(static []corev1.Toleration, placed string) []corev1.Toleration {
+	if placed == "" {
 		return static
 	}
 	for _, t := range static {
@@ -741,13 +751,13 @@ func bandTolerations(static []corev1.Toleration, band string) []corev1.Toleratio
 	return append(out, corev1.Toleration{
 		Key:      cpuBandKey,
 		Operator: corev1.TolerationOpEqual,
-		Value:    band,
+		Value:    placed,
 		Effect:   corev1.TaintEffectNoSchedule,
 	})
 }
 
-func bandAntiAffinity(band string) *corev1.Affinity {
-	if band != cpuBandLarge {
+func bandAntiAffinity(band, placed string) *corev1.Affinity {
+	if band != cpuBandLarge || placed == "" {
 		return nil
 	}
 	// safety: the taint alone does not give a large Job the machine, because
@@ -756,7 +766,7 @@ func bandAntiAffinity(band string) *corev1.Affinity {
 	return &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
 		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
 			LabelSelector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{cpuBandKey: band},
+				MatchLabels: map[string]string{cpuBandKey: placed},
 			},
 			TopologyKey: bandTopologyKey,
 		}},

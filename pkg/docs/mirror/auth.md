@@ -178,7 +178,7 @@ class. Local claim-mode agents are unmetered and claim by their labels as they
 always have.
 
 Each class above the warm one names the band of machines it runs on. The 4-core
-and 8-core classes select nodes labelled `sparkwing.dev/cpu-band: small` and
+and 8-core classes select nodes labeled `sparkwing.dev/cpu-band: small` and
 tolerate the `sparkwing.dev/cpu-band=small:NoSchedule` taint. The 16-core class
 and every class above it select and tolerate `large` on the same key, and their
 pods carry a required anti-affinity on that label across
@@ -189,6 +189,12 @@ this key, so a cluster that pins Jobs its own way keeps doing so. A cluster that
 serves classes above the warm one needs node pools carrying that label and that
 taint; without them the pod is unschedulable and the node fails as below, with
 the scheduler's own message.
+
+The whole machine is bought with throughput. Concurrency in the large band is
+the number of machines the pool's own limit allows, one Job to each, and nothing
+queues behind it: a pool bounded at three 32-vCPU machines runs three 16-core
+Jobs at once and fails the fourth after the five-minute wait below, and a class
+that fills the pool's limit on its own runs one at a time.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
 `credit_cpu_class_memory_bytes`, and the Job is created from those two figures,

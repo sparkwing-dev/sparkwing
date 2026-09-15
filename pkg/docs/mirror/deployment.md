@@ -48,7 +48,7 @@ Kubernetes API. The spawned Jobs mount no ServiceAccount token.
 A Job for a cpu class above the warm one selects and tolerates a
 `sparkwing.dev/cpu-band` band, `small` for 4 and 8 cores and `large` for 16 and
 above, on top of whatever node selector and tolerations the runner was
-configured with. A cluster offering those classes needs node pools labelled and
+configured with. A cluster offering those classes needs node pools labeled and
 tainted with that key and value; on a cluster without them the pod never
 schedules and the node fails with the scheduler's message. See
 [Runner classes](auth.md#runner-classes).
