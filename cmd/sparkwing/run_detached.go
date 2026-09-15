@@ -210,10 +210,11 @@ type submission struct {
 	PinnedBinary string
 	PinnedDigest string
 
-	// safety: weighed against the checkout the run will execute, which is the
-	// ref worktree when the submission names a ref, so a risk a ref declares
-	// cannot be queued past it. Every caller sets one.
-	Gate func(repoDir string) error
+	// safety: weighed against what the run will execute, which is the ref
+	// worktree when the submission names a ref and the pinned binary when it
+	// carries one, so a risk either declares cannot be queued past it. Every
+	// caller sets one.
+	Gate func(repoDir, pinnedBinary string) error
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
@@ -260,7 +261,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		worktree = built
 		repoDir = built
 	}
-	if err := sub.Gate(repoDir); err != nil {
+	if err := sub.Gate(repoDir, sub.PinnedBinary); err != nil {
 		discardRefWorktree(ctx, paths, worktree)
 		return submitResult{}, err
 	}
@@ -596,18 +597,14 @@ type riskGate struct {
 	// gate weighs that build instead of making a second one.
 	SubmitDir string
 	Declared  []sparkwing.DescribePipeline
-
-	// safety: an armed schedule execs this build in place of the checkout, so
-	// a checkout edited since the pin is not what the run will execute.
-	PinnedBinary string
 }
 
-func (g riskGate) check(execDir string) error {
+func (g riskGate) check(execDir, pinnedBinary string) error {
 	sparkwingDir := filepath.Join(execDir, ".sparkwing")
 	declared := g.Declared
 	switch {
-	case g.PinnedBinary != "":
-		raw, err := runDescribeBinary(context.Background(), sparkwingDir, g.PinnedBinary)
+	case pinnedBinary != "":
+		raw, err := runDescribeBinary(context.Background(), sparkwingDir, pinnedBinary)
 		if err != nil {
 			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
 		}

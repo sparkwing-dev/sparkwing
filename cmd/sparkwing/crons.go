@@ -176,9 +176,8 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 		Pipeline: s.Pipeline,
 		RepoDir:  s.RepoPath,
 		Gate: riskGate{
-			Surface:      "schedule " + s.ID,
-			Pipeline:     s.Pipeline,
-			PinnedBinary: s.LockedBinary,
+			Surface:  "schedule " + s.ID,
+			Pipeline: s.Pipeline,
 		}.check,
 		Source:       scheduleTriggerSource,
 		ScheduleID:   s.ID,

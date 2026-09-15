@@ -64,11 +64,12 @@ then.
 
 A queued run of a pipeline that declares a risk is refused. The trigger carries
 no allow, so the launch weighs the declarations before it persists the run, and
-weighs them against the checkout the run will execute: the `--sw-ref` worktree
-when the launch names a ref, the working tree otherwise. A scheduled run goes
-through the same submission and is refused the same way, weighed against the
-binary an armed schedule pinned. Run a risk-labeled
-pipeline in the foreground, where `--sw-allow` authorizes it.
+weighs what the run will execute: the `--sw-ref` worktree when the launch names
+a ref, the binary an armed schedule pinned, the working tree otherwise. A
+scheduled run goes through the same submission and is refused the same way.
+`sparkwing runs retry` is not weighed yet: it re-queues the source run's own
+declarations, so a retry of a risk-declaring run is not refused. Run a
+risk-labeled pipeline in the foreground, where `--sw-allow` authorizes it.
 
 `--profile NAME` selects the storage and dispatch addressing
 (state/cache/logs, and any controller auth). Execution still happens

@@ -83,17 +83,19 @@ unlock.
   rather than dispatched. `sparkwing run <pipeline> --sw-detached` returned
   before admission and the trigger carries no allow, so the resident consumer
   ran the risk-labeled step authorized by nothing. The gate now sits where the
-  run is persisted, weighing the checkout the run will execute: a launch naming
+  run is persisted and weighs what the run will execute: a launch naming
   `--sw-ref` is weighed at that ref, and its worktree is discarded on refusal.
   A cron schedule queues through the same submission, so a scheduled run of a
   risk-declaring pipeline is refused too, naming the schedule, and an armed
   schedule is weighed against the binary it pinned rather than a checkout that
-  has moved since. The refusal
-  carries the message the foreground gate prints, naming the step, its labels
-  and `--sw-allow`, and says that a queued run carries neither an allow nor a
-  dry run. A pipeline that declares no risk queues as before, and the
-  submission reads the declarations from the build it already made to resolve
-  the pipeline, so weighing them costs it no second hash of the tree.
+  has moved since. The refusal carries the message the foreground gate prints,
+  naming the step, its labels and `--sw-allow`, and says that a queued run
+  carries neither an allow nor a dry run. `sparkwing runs retry` is not weighed
+  yet: it re-queues the source run's own declarations, so a retry of a
+  risk-declaring run is still queued without an allow. A pipeline that declares
+  no risk queues as before, and the submission reads the declarations from the
+  build it already made to resolve the pipeline, so weighing them costs it no
+  second hash of the tree.
 
 ## [v0.50.5] - 2026-09-14
 ### Changed
