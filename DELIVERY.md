@@ -38,11 +38,10 @@ launcher when testing isolated tool state.
   5 minutes for build, the full linter and the fast test class in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
-  Above 25 changed Go files the verdict reports the span and the slowest step
-  and passes: the source-policy steps cost per file, so a wide change costs
-  several times a normal one without any tier having grown. Twenty-five is what
-  one core formats inside the commit tier's three seconds. At or below it the
-  budget is enforced. The
+  Above 25 changed Go files, the two hook tiers waive only their time budgets
+  and still report the span and slowest step. Every selected check still runs.
+  At or below 25 files, both hook budgets are enforced. The release cut always
+  enforces its five-minute budget, regardless of change size. The
   budget judges the span the job's own steps cover, not the admission wait or
   the 2.5 s the pipeline binary takes to recompile after a Go change. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
