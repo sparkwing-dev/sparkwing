@@ -26,7 +26,5 @@ for binary in sparkwing-controller sparkwing-runner sparkwing-cache sparkwing-lo
     --label "org.opencontainers.image.licenses=$license" \
     --label "org.opencontainers.image.created=$created" \
     --output "type=image,name=$image,push-by-digest=true,name-canonical=true,push=true" \
-    --cache-from "type=gha,scope=runtime-$binary-$GOARCH" \
-    --cache-to "type=gha,mode=max,scope=runtime-$binary-$GOARCH" \
     --metadata-file "image-platform-digests/$binary-$GOARCH.json" .
 done

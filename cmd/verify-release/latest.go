@@ -9,10 +9,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-func publishedReleasePages(path string) ([]byte, error) {
-	if path != "" {
-		return os.ReadFile(path)
-	}
+func publishedReleasePages() ([]byte, error) {
 	repo := os.Getenv("GITHUB_REPOSITORY")
 	if repo == "" {
 		return nil, fmt.Errorf("GITHUB_REPOSITORY is required to list published releases")

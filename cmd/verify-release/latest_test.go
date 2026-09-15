@@ -7,11 +7,17 @@ import (
 )
 
 func TestLatestReleaseSelectionCommand(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "releases.json")
-	if err := os.WriteFile(path, []byte(`[[{"tag_name":"v0.52.1","draft":false,"prerelease":false}], [{"tag_name":"v0.52.2","draft":false,"prerelease":false}]]`), 0o600); err != nil {
+	dir := t.TempDir()
+	stub := `#!/bin/sh
+test "$1" = api && test "$2" = --paginate && test "$3" = --slurp && test "$4" = 'repos/fixture/release/releases?per_page=100' || exit 1
+printf '%s' '[[{"tag_name":"v0.52.1","draft":false,"prerelease":false}],[{"tag_name":"v0.52.2","draft":false,"prerelease":false}]]'
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := run([]string{"--latest-tag", "v0.52.3", "--releases", path}); err != nil {
+	t.Setenv("PATH", dir)
+	t.Setenv("GITHUB_REPOSITORY", "fixture/release")
+	if err := run([]string{"--latest-tag", "v0.52.3"}); err != nil {
 		t.Fatal(err)
 	}
 }

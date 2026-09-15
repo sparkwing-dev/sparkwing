@@ -30,12 +30,11 @@ func run(args []string) error {
 	verify := fs.Bool("verify", false, "verify existing signatures")
 	public := fs.Bool("public-key", false, "print the public key derived from the signing seed")
 	latest := fs.String("latest-tag", "", "report whether this tag outranks the published stable releases")
-	releases := fs.String("releases", "", "paginated release JSON from gh api --paginate --slurp")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *latest != "" {
-		body, err := publishedReleasePages(*releases)
+		body, err := publishedReleasePages()
 		if err != nil {
 			return err
 		}
