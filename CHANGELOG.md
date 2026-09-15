@@ -20,6 +20,12 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **checks:** `pre-push` now enforces a one-minute hard limit while run timings
+  measure its ten-second warm-cache performance target. The run cannot identify
+  compiler-cache temperature, so the target remains observational.
+
 ### Fixed
 
 - **store + controller:** Credit rate tables and their scalar settings now

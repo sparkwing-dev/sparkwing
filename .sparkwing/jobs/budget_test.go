@@ -27,13 +27,24 @@ func TestBudgetPassesATierInsideItsClass(t *testing.T) {
 	}
 }
 
-func TestBudgetFailsAnOverrunNamingTheSlowestStep(t *testing.T) {
-	_, err := budgetVerdict("pre-push", 10*time.Second, 21*time.Second,
-		[]stepTiming{{"gofmt", 200 * time.Millisecond}, {"lint-touched", 20 * time.Second}}, false, -1)
-	if err == nil {
-		t.Fatal("a tier at twice its budget passed")
+func TestPrePushBudgetPassesAnElevenSecondSpan(t *testing.T) {
+	line, err := budgetVerdict("pre-push", prePushBudget, 11*time.Second,
+		[]stepTiming{{"build-touched", 10 * time.Second}, {"lint-touched", 11 * time.Second}}, false, -1)
+	if err != nil {
+		t.Fatalf("an eleven-second pre-push span failed its hard budget: %v", err)
 	}
-	if !strings.Contains(err.Error(), "lint-touched") || !strings.Contains(err.Error(), "20s") {
+	if !strings.Contains(line, "lint-touched") {
+		t.Errorf("the verdict does not name the slowest step: %q", line)
+	}
+}
+
+func TestPrePushBudgetFailsPastOneMinuteNamingTheSlowestStep(t *testing.T) {
+	_, err := budgetVerdict("pre-push", prePushBudget, time.Minute+time.Millisecond,
+		[]stepTiming{{"build-touched", 59 * time.Second}, {"lint-touched", time.Minute + time.Millisecond}}, false, -1)
+	if err == nil {
+		t.Fatal("a pre-push span past one minute passed")
+	}
+	if !strings.Contains(err.Error(), "lint-touched") || !strings.Contains(err.Error(), "1m0.001s") {
 		t.Errorf("the failure names neither the slowest step nor its cost: %v", err)
 	}
 }

@@ -29,8 +29,9 @@ func (PrePush) Help() string {
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
 		"judged by `gate`. Every step reads the commits being pushed, the range origin/main..HEAD, and never " +
-		"the index, so whatever is staged cannot narrow what the push is judged against. The tier is budgeted " +
-		"at ten seconds and fails when its steps overrun it, naming the slowest. The full test suite, " +
+		"the index, so whatever is staged cannot narrow what the push is judged against. The tier has a " +
+		"one-minute hard limit and fails when its steps overrun it, naming the slowest. Run timings measure " +
+		"progress toward its ten-second warm-cache target; the run has no compiler-cache temperature signal. The full test suite, " +
 		"golangci-lint over every module, the race gate, the Postgres suite and the dashboard suites run in " +
 		"`gate`, which hosted CI runs on every pull request and every push to main."
 }
@@ -52,8 +53,8 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 //
 // perf: they run in parallel rather than cheapest-first, so the tier costs
 // what its slowest member costs and a chain would only make the verdict later.
-// FailFast still stops the first failure, and the budget step fails the tier
-// when the class overruns its ten seconds.
+// FailFast still stops the first failure. The budget step enforces the one-minute
+// hard limit; run timings measure the separate ten-second warm-cache target.
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)

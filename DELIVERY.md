@@ -64,10 +64,10 @@ file. Other syntax and workflow checks remain active.
   were installed when the pre-push hook ran `gate` keeps running `gate` until
   `sparkwing pipeline hooks install` rewrites them.
 - **The three check classes and their budgets:** `pre-commit` is the source
-  policy at 3 seconds, `pre-push` the fast tier at 10 seconds, and the release
-  cut, the `release-cut-checks` job the `release` pipeline runs before it tags,
-  5 minutes for build, full lint, the fast test class, published-version and
-  SDK-pin checks, and changelog-link checks in parallel.
+  policy at 3 seconds, `pre-push` the fast tier with a one-minute hard limit,
+  and the release cut, the `release-cut-checks` job the `release` pipeline runs
+  before it tags, 5 minutes for build, full lint, the fast test class,
+  published-version and SDK-pin checks, and changelog-link checks in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
@@ -99,19 +99,17 @@ file. Other syntax and workflow checks remain active.
   ref selection and pinned-binary risk fixtures remain in the full class.
   `gate` runs the suite without `-short`, which is where every guarded test is
   still judged.
-- **What the two hooks cost:** measured on this 16-core Linux host beside one
-  other agent's suite. A change to a Go file invalidates the cached
-  `.sparkwing/` pipeline binary, because that module replaces the SDK with the
-  checkout itself, so the first hook run after one pays about 2.5 s to
-  recompile it: a one-package Go change measured 3.4 s to commit (0.77 s inside
-  the run) and 4.1 s to push (1.6 s inside the run), and a push whose binary is
-  already warm measured 1.9 s (1.4 s inside the run). A docs-only change
-  measured 1.2 s to commit and 1.7 s to push. The worst case seen was 6.8 s for
-  a push that both recompiled and failed. Both tiers run their steps in
-  parallel, so each costs what its slowest step costs: `comments` at 0.8 s in
-  the commit tier, `formatters` at 1.2 s and the two touched compiles at about
-  2 s in the push tier. A commit and a push together stay under the ten seconds
-  the tiers are budgeted.
+- **What the two hooks cost:** measured on this 16-core Linux host. `pre-push`
+  retains a ten-second target when the compiler cache is warm. Run records
+  expose total and per-step durations, but they carry no compiler-cache
+  temperature signal, so the target is measured rather than enforced. A warm
+  integrated run over 13 changed Go files took 10.678 s and missed the target;
+  fast lint took 10.678 s and build took 9.782 s. A controlled cold run of the
+  same functional checks took 24.432 s, and broader cold parallel samples took
+  51.182 s and 56.923 s. These observations fit the one-minute hard limit but
+  do not establish a ceiling for every cold input. A change to a Go file also
+  invalidates the cached `.sparkwing/` pipeline binary, so the first hook run
+  after one pays about 2.5 s to recompile it outside the timed job span.
 - **Which tier decides a merge:** the hooks judge what they can in seconds and
   nothing more, so main may go red. Follow the [release failure policy](#release-failure-policy).
   Main is where the broad checks run:

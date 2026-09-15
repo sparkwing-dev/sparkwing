@@ -14,7 +14,7 @@ import (
 // somebody measures the hooks again.
 const (
 	preCommitBudget  = 3 * time.Second
-	prePushBudget    = 10 * time.Second
+	prePushBudget    = time.Minute
 	releaseCutBudget = 5 * time.Minute
 )
 
