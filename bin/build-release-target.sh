@@ -13,8 +13,15 @@ if [ "$GOOS" = windows ]; then
   ext=.exe
 fi
 mkdir -p dist
+build_dir="$(mktemp -d)"
+trap 'rm -rf "$build_dir"' EXIT
+packages=()
 for binary in "${binaries[@]}"; do
-  CGO_ENABLED=0 GOWORK=off go build -trimpath \
-    -ldflags="-s -w -X main.Version=${TAG}" \
-    -o "dist/${binary}-${GOOS}-${GOARCH}${ext}" "./cmd/${binary}"
+  packages+=("./cmd/${binary}")
+done
+CGO_ENABLED=0 GOWORK=off go build -trimpath \
+  -ldflags="-s -w -X main.Version=${TAG}" \
+  -o "$build_dir/" "${packages[@]}"
+for binary in "${binaries[@]}"; do
+  mv "$build_dir/$binary${ext}" "dist/${binary}-${GOOS}-${GOARCH}${ext}"
 done
