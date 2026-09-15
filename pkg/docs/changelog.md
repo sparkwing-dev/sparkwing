@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.4] - 2026-09-15
 ### Changed
 
 - **release:** The local cut checks published module freshness, coherent SDK
