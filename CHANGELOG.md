@@ -50,6 +50,11 @@ unlock.
   without `-short`. No test suite runs in a hook tier: the fast test class
   belongs to the release cut.
 
+### Fixed
+
+- **checks:** accept GitHub's supported publication queue with the pinned
+  actionlint version while retaining explicit serialization contract checks.
+
 ## [v0.52.3] - 2026-09-15
 ### Added
 

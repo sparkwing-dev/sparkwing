@@ -30,6 +30,22 @@ func TestActionlintCommandIsPinned(t *testing.T) {
 	}
 }
 
+func TestActionlintAcceptsTheReleasePublicationQueue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: invokes the pinned actionlint tool")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	if err := runActionlint(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInstallToGreenHarnessRunsOnTheCheckoutAndRecordsRatherThanGates(t *testing.T) {
 	const want = "bash bin/install-to-green.sh --build --output json"
 	if installToGreenCommand != want {

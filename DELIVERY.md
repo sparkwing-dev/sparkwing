@@ -35,6 +35,12 @@ not hosted latency.
 
 ### Check tiers
 
+Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.
+Its config ignores only that exact diagnostic in `release.yaml`. The workflow
+contract tests require the publication job's shared group, `queue: max`, and
+`cancel-in-progress: false`, and reject uncovered queue use elsewhere in that
+file. Other syntax and workflow checks remain active.
+
 - **The three tiers:** `pre-commit` judges the staged change against this
   repo's source policy and nothing else; the git pre-commit hook runs it.
   `pre-push` is the fast tier the git pre-push hook runs, and it repeats

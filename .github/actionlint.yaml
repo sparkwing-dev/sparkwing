@@ -1,0 +1,6 @@
+# v1.7.12 predates GitHub's queue setting. The publication contract tests cover
+# its value and cancellation policy until https://github.com/rhysd/actionlint/issues/657 is fixed.
+paths:
+  .github/workflows/release.yaml:
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
