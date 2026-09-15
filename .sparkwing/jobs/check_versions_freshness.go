@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+
+	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
@@ -505,6 +507,13 @@ func captureCmd(ctx context.Context, dir, name string, args ...string) (string, 
 }
 
 func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string, retErr error) {
+	branch, err := sparkwinggit.CurrentBranch(ctx, repoRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve sparkwing pin checkout branch: %w", err)
+	}
+	if branch == "" {
+		return "", nil
+	}
 	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)

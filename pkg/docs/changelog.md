@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.5, so a fresh scaffold
+  compiles against that release.
 - **checks:** `pre-push` now enforces a one-minute hard limit while run timings
   measure its ten-second warm-cache performance target. The run cannot identify
   compiler-cache temperature, so the target remains observational.
@@ -38,6 +40,9 @@ unlock.
 - **checks:** `pre-push` reserves the combined CPU demand of its concurrent
   build, vet and fast lint steps. The fast linter now bounds both Go and linter
   parallelism to the per-task share.
+- **checks:** The automatic Sparkwing pin bump leaves a detached checkout's HEAD,
+  tree and index unchanged. Hosted pre-release reports stale pins instead of
+  committing an unreachable bump.
 
 ## [v0.52.5] - 2026-09-15
 ### Changed

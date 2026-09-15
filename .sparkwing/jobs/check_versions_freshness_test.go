@@ -316,6 +316,33 @@ func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
 	}
 }
 
+func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	gitRun(t, repo, "tag", "v0.99.0")
+	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// past the tag\n")
+	gitRun(t, repo, "add", "doc.go")
+	gitRun(t, repo, "commit", "-m", "move past the tag")
+	gitRun(t, repo, "checkout", "--detach", "HEAD")
+	before := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
+
+	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bumped != "" {
+		t.Fatalf("detached auto bump returned %q, want no commit", bumped)
+	}
+	if after := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD")); after != before {
+		t.Fatalf("detached auto bump changed HEAD from %s to %s", before, after)
+	}
+	if status := strings.TrimSpace(gitRun(t, repo, "status", "--porcelain")); status != "" {
+		t.Fatalf("detached auto bump changed the tree or index:\n%s", status)
+	}
+	if err := CheckVersionsFreshness(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
+		t.Fatalf("stale detached checkout freshness error = %v, want the available v0.99.0 release", err)
+	}
+}
+
 func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *testing.T) {
 	dir := t.TempDir()
 
