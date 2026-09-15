@@ -112,6 +112,57 @@ func TestSetComputeLimitRejectsUnknownAndNegative(t *testing.T) {
 	}
 }
 
+func TestSetComputeLimitsWritesEveryNamedGuardOrNone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	limits, err := s.SetComputeLimits(ctx, map[string]int64{
+		store.ComputeLimitGlobalRunners:          7,
+		store.ComputeLimitRunnerScaleStepCredits: 10,
+	})
+	if err != nil {
+		t.Fatalf("set limits: %v", err)
+	}
+	if limits.GlobalRunners != 7 || limits.RunnerScaleStepCredits != 10 {
+		t.Fatalf("limits = %+v", limits)
+	}
+	if _, err := s.SetComputeLimits(ctx, map[string]int64{
+		store.ComputeLimitGlobalRunners:          8,
+		store.ComputeLimitRunnerScaleStepCredits: math.MaxInt64,
+	}); !errors.Is(err, store.ErrInvalidComputeLimitSetting) {
+		t.Fatalf("mixed update = %v, want invalid setting", err)
+	}
+	limits, err = s.ComputeLimits(ctx)
+	if err != nil {
+		t.Fatalf("read limits: %v", err)
+	}
+	if limits.GlobalRunners != 7 {
+		t.Fatalf("the good half of a refused update set the global cap to %d", limits.GlobalRunners)
+	}
+}
+
+func TestSetComputeLimitsRollsBackWhenOneGuardWriteFails(t *testing.T) {
+	s := storetest.OpenSQLite(t)
+	ctx := context.Background()
+	if _, err := s.DB().Exec(`CREATE TRIGGER refuse_scale_step BEFORE INSERT ON sparkwing_meta
+WHEN NEW.key = 'compute_limit_runner_scale_step_credits'
+BEGIN SELECT RAISE(ABORT, 'scale step refused'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	if _, err := s.SetComputeLimits(ctx, map[string]int64{
+		store.ComputeLimitGlobalRunners:          7,
+		store.ComputeLimitRunnerScaleStepCredits: 10,
+	}); err == nil {
+		t.Fatal("the rejected compute settings write succeeded")
+	}
+	limits, err := s.ComputeLimits(ctx)
+	if err != nil {
+		t.Fatalf("read limits: %v", err)
+	}
+	if limits.Any() {
+		t.Fatalf("the failed transaction changed limits: %+v", limits)
+	}
+}
+
 func TestNodesPerRunGuardRefusesAMeteredPrincipalPastTheCap(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

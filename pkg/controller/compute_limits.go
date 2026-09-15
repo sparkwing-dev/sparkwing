@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +49,25 @@ type setComputeLimitsReq struct {
 	Limits map[string]int64 `json:"limits"`
 }
 
+func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Limits map[string]*int64 `json:"limits"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&wire); err != nil {
+		return err
+	}
+	r.Limits = make(map[string]int64, len(wire.Limits))
+	for name, value := range wire.Limits {
+		if value == nil {
+			return fmt.Errorf("%s must not be null", name)
+		}
+		r.Limits[name] = *value
+	}
+	return nil
+}
+
 func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request) {
 	out, err := s.computeLimitsView(r)
 	if err != nil {
@@ -63,28 +83,17 @@ func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if len(req.Limits) == 0 {
-		writeError(w, http.StatusBadRequest, errors.New("limits must name at least one guard"))
-		return
-	}
-	for name, value := range req.Limits {
-		if !store.ValidComputeLimit(name) {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("unknown guard %q", name))
-			return
-		}
-		if value < 0 {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("%s must not be negative", name))
-			return
-		}
-	}
-	for name, value := range req.Limits {
-		if err := s.store.SetComputeLimit(r.Context(), name, value); err != nil {
+	limits, err := s.store.SetComputeLimits(r.Context(), req.Limits)
+	if err != nil {
+		if errors.Is(err, store.ErrInvalidComputeLimitSetting) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		s.logger.Info("compute guard set", "limit", name, "value", value)
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	out, err := s.computeLimitsView(r)
+	s.logger.Info("compute guards set", "count", len(req.Limits))
+	out, err := s.computeLimitsViewWith(r, limits)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -97,6 +106,10 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 	if err != nil {
 		return computeLimitsJSON{}, err
 	}
+	return s.computeLimitsViewWith(r, limits)
+}
+
+func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimits) (computeLimitsJSON, error) {
 	usage, err := s.store.ComputeUsage(r.Context())
 	if err != nil {
 		return computeLimitsJSON{}, err

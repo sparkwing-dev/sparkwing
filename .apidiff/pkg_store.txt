@@ -299,6 +299,9 @@ func (t CreditRateTable) Validate() error
 type CreditSettings struct {
 	RateMicroPerSecond int64
 
+	RateTable    CreditRateTable
+	RateTableSet bool
+
 	WarmCPUClassCores int64
 
 	GraceSeconds int64
@@ -311,6 +314,7 @@ type CreditSettings struct {
 }
 type CreditSettingsUpdate struct {
 	RateMicroPerSecond        *int64
+	RateTable                 *CreditRateTable
 	WarmCPUClassCores         *int64
 	GraceSeconds              *int64
 	MaxChargeSeconds          *int64
@@ -489,6 +493,7 @@ var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: 
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrInsufficientCredits = errors.New("insufficient credits")
+var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
 var ErrInvalidCredentials = errors.New("invalid username or password")
 var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
 var ErrInvalidToken = errors.New("invalid token")
@@ -1413,6 +1418,7 @@ func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.
 func (s *Store) RunnerCapFor(ctx context.Context, now time.Time) (RunnerCap, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
+func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
 func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (err error)
 func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error)
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
@@ -1426,6 +1432,9 @@ func (s *Store) SetNodeArtifactManifestCharged(
 ) (err error)
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
+func (s *Store) SetOperatorCreditSettings(
+	ctx context.Context, up CreditSettingsUpdate,
+) (_ CreditSettings, err error)
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error

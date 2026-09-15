@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,9 +60,7 @@ type creditRateJSON struct {
 }
 
 // safety: a nil field leaves that setting where it stands, which is what lets a
-// caller send only the settings it means to change. The rate table is written
-// through its own store call, so it rides beside the three scalars rather than
-// inside the update they become.
+// caller send only the settings it means to change.
 type setCreditSettingsReq struct {
 	RateMicroPerSecond        *int64             `json:"rate_micro_per_second,omitempty"`
 	RateTable                 *creditRateTableIn `json:"rate_table,omitempty"`
@@ -73,7 +72,7 @@ type setCreditSettingsReq struct {
 }
 
 func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
-	return store.CreditSettingsUpdate{
+	out := store.CreditSettingsUpdate{
 		RateMicroPerSecond:        r.RateMicroPerSecond,
 		WarmCPUClassCores:         r.WarmCPUClassCores,
 		GraceSeconds:              r.GraceSeconds,
@@ -81,12 +80,80 @@ func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
 		StorageRateMicroPerGBDay:  r.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: r.StorageFreeAllowanceBytes,
 	}
+	if r.RateTable != nil {
+		out.RateTable = &r.RateTable.table
+	}
+	return out
 }
 
-func (r setCreditSettingsReq) namesAScalar() bool {
-	return r.RateMicroPerSecond != nil || r.WarmCPUClassCores != nil ||
-		r.GraceSeconds != nil || r.MaxChargeSeconds != nil ||
-		r.StorageRateMicroPerGBDay != nil || r.StorageFreeAllowanceBytes != nil
+func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		RateMicroPerSecond        optionalCreditInt64     `json:"rate_micro_per_second"`
+		RateTable                 optionalCreditRateTable `json:"rate_table"`
+		WarmCPUClassCores         optionalCreditInt64     `json:"warm_cpu_class_cores"`
+		GraceSeconds              optionalCreditInt64     `json:"grace_seconds"`
+		MaxChargeSeconds          optionalCreditInt64     `json:"max_charge_seconds"`
+		StorageRateMicroPerGBDay  optionalCreditInt64     `json:"storage_rate_micro_per_gb_day"`
+		StorageFreeAllowanceBytes optionalCreditInt64     `json:"storage_free_allowance_bytes"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&wire); err != nil {
+		return err
+	}
+	*r = setCreditSettingsReq{
+		RateMicroPerSecond:        wire.RateMicroPerSecond.pointer(),
+		RateTable:                 wire.RateTable.pointer(),
+		WarmCPUClassCores:         wire.WarmCPUClassCores.pointer(),
+		GraceSeconds:              wire.GraceSeconds.pointer(),
+		MaxChargeSeconds:          wire.MaxChargeSeconds.pointer(),
+		StorageRateMicroPerGBDay:  wire.StorageRateMicroPerGBDay.pointer(),
+		StorageFreeAllowanceBytes: wire.StorageFreeAllowanceBytes.pointer(),
+	}
+	return nil
+}
+
+type optionalCreditInt64 struct {
+	value int64
+	set   bool
+}
+
+func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("credit setting must be an integer, not null")
+	}
+	if err := json.Unmarshal(raw, &v.value); err != nil {
+		return err
+	}
+	v.set = true
+	return nil
+}
+
+func (v *optionalCreditInt64) pointer() *int64 {
+	if !v.set {
+		return nil
+	}
+	return &v.value
+}
+
+type optionalCreditRateTable struct {
+	value creditRateTableIn
+	set   bool
+}
+
+func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error {
+	if err := t.value.UnmarshalJSON(raw); err != nil {
+		return err
+	}
+	t.set = true
+	return nil
+}
+
+func (t *optionalCreditRateTable) pointer() *creditRateTableIn {
+	if !t.set {
+		return nil
+	}
+	return &t.value
 }
 
 // safety: operators write the table both ways, so a body may name it as a list
@@ -96,6 +163,9 @@ type creditRateTableIn struct {
 }
 
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("rate_table must be a list or object, not null")
+	}
 	var list []creditRateJSON
 	if err := json.Unmarshal(raw, &list); err == nil {
 		t.table = make(store.CreditRateTable, 0, len(list))
@@ -198,12 +268,7 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	out, err := s.creditSettingsJSON(r, settings)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
 }
 
 func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request) {
@@ -212,11 +277,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.refuseDerivedRateWrite(r, body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	settings, err := s.writeCreditSettings(r, body)
+	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			writeError(w, http.StatusBadRequest, err)
@@ -231,64 +292,14 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		"max_charge_seconds", settings.MaxChargeSeconds,
 		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
 		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
-	out, err := s.creditSettingsJSON(r, settings)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// safety: the table carries its four-core entry into the single rate setting,
-// so it is written first and a body naming both ends on the scalar the caller
-// asked for.
-func (s *Server) writeCreditSettings(
-	r *http.Request, body setCreditSettingsReq,
-) (store.CreditSettings, error) {
-	ctx := r.Context()
-	if body.RateTable != nil {
-		if err := body.RateTable.table.Validate(); err != nil {
-			return store.CreditSettings{}, err
-		}
-		if err := s.store.SetCreditRateTable(ctx, body.RateTable.table); err != nil {
-			return store.CreditSettings{}, err
-		}
-		s.logger.Info("credit setting set",
-			"setting", "rate_table", "classes", len(body.RateTable.table))
-		if !body.namesAScalar() {
-			return s.store.CreditSettings(ctx)
-		}
-	}
-	return s.store.SetCreditSettings(ctx, body.update())
-}
-
-// safety: with a table stored the scalar is the four-core entry under another
-// name, so writing it alone would move one class without saying so; the caller
-// is told to write the table instead.
-func (s *Server) refuseDerivedRateWrite(r *http.Request, body setCreditSettingsReq) error {
-	if body.RateMicroPerSecond == nil {
-		return nil
-	}
-	if body.RateTable != nil {
-		return fmt.Errorf(
-			"%w: rate_micro_per_second is the four-core entry of the rate table; name one or the other",
-			store.ErrInvalidCreditSetting)
-	}
-	set, err := s.store.CreditRateTableSet(r.Context())
-	if err != nil {
-		return err
-	}
-	if !set {
-		return nil
-	}
-	return fmt.Errorf(
-		"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
-		store.ErrInvalidCreditSetting)
+	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
 }
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
 	return creditSettingsJSON{
 		RateMicroPerSecond:        settings.RateMicroPerSecond,
+		RateTable:                 creditRateTableToJSON(settings.RateTable),
+		RateTableSet:              settings.RateTableSet,
 		WarmCPUClassCores:         settings.WarmCPUClassCores,
 		GraceSeconds:              settings.GraceSeconds,
 		MaxChargeSeconds:          settings.MaxChargeSeconds,
@@ -297,24 +308,6 @@ func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
 		MicroPerCredit:            store.MicroCreditsPerCredit,
 		CreditsPerDollar:          store.CreditsPerDollar,
 	}
-}
-
-func (s *Server) creditSettingsJSON(
-	r *http.Request, settings store.CreditSettings,
-) (creditSettingsJSON, error) {
-	ctx := r.Context()
-	out := creditSettingsToJSON(settings)
-	table, err := s.store.CreditRateTable(ctx)
-	if err != nil {
-		return out, err
-	}
-	out.RateTable = creditRateTableToJSON(table)
-	set, err := s.store.CreditRateTableSet(ctx)
-	if err != nil {
-		return out, err
-	}
-	out.RateTableSet = set
-	return out, nil
 }
 
 func creditRateTableToJSON(table store.CreditRateTable) []creditRateJSON {
