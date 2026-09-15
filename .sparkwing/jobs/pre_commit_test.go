@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -91,8 +92,13 @@ func TestPreCommitAdmitsAheadOfTheBroadGate(t *testing.T) {
 			precommit.PriorityValue(), gate.PriorityValue())
 	}
 	hints := precommit.ResourceHints()
-	if hints == nil || hints.Cores <= 0 || hints.Cores > 1 {
-		t.Fatalf("pre-commit reserved cores = %#v, want a pin of at most one so it fits beside a running gate", hints)
+	want := float64(formatterWorkers(runtime.NumCPU()))
+	if hints == nil || hints.Cores != want {
+		t.Fatalf("pre-commit reserved cores = %#v, want the %v its formatters fan out to", hints, want)
+	}
+	if hints.Cores > gateCoreReservation(runtime.NumCPU()) {
+		t.Fatalf("pre-commit reserves %v, more than the gate's %v, so the commit tier no longer fits beside a running gate",
+			hints.Cores, gateCoreReservation(runtime.NumCPU()))
 	}
 }
 

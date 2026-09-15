@@ -36,7 +36,12 @@ launcher when testing isolated tool state.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed. The
   budget judges the span the job's own steps cover, not the admission wait or
-  the 2.5 s the pipeline binary takes to recompile after a Go change. `gate`
+  the 2.5 s the pipeline binary takes to recompile after a Go change. The
+  formatters are the per-file cost in the two hook tiers, and `goimports`
+  inside `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt`
+  measured 0.38 s and `goimports` 10.9 s. The step splits its file list one
+  process per reserved core, which is why the commit tier reserves the fan-out
+  width rather than one core. `gate`
   and `pre-release` are the heavier classes: they carry no budget and run
   asynchronously, on demand and in hosted CI. Measured on this 16-core Linux
   host with a warm cache, the release cut's three members cost 9 s (build),

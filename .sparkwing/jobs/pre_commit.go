@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -47,10 +48,10 @@ func (PreCommit) Examples() []sparkwing.Example {
 const hookTierPriority = 10
 
 func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	// perf: measured on a 16-core Linux host at 0.6 cores sustained over the
-	// whole run; one core is the smallest pin that never throttles the two
-	// steps that fan out (gofmt and the tracked-binary sweep).
-	plan.Resources(sparkwing.Cores(1))
+	// perf: the formatters split their file list one process per reserved
+	// core, and the runs store measured this tier at 3.55 cores sustained
+	// against its old one-core pin, so the pin is the fan-out width.
+	plan.Resources(sparkwing.Cores(float64(formatterWorkers(runtime.NumCPU()))))
 	plan.Priority(hookTierPriority)
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
