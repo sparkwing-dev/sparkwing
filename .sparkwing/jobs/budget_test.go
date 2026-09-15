@@ -85,24 +85,35 @@ func TestBudgetTimesEveryStepTheTierDeclares(t *testing.T) {
 	}
 }
 
-func TestBudgetFailsTheTierWhenItsOwnStepsOverrun(t *testing.T) {
-	b := newTierBudget("probe", time.Nanosecond)
+func TestBudgetRecordsACompletedStep(t *testing.T) {
+	b := newTierBudget("probe", 3*time.Second)
 	w := sparkwing.NewWork()
 	b.step(w, "cheap", func(context.Context) error { return nil })
+	if _, err := sparkwing.RunWork(t.Context(), w); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.steps) != 1 || b.steps[0].id != "cheap" || b.steps[0].took < 0 {
+		t.Fatalf("completed step timing = %+v, want one nonnegative duration for cheap", b.steps)
+	}
+}
+
+func TestBudgetFailsTheTierWhenItsRecordedStepsOverrun(t *testing.T) {
+	b := recordedOverrun()
+	w := sparkwing.NewWork()
 	b.verdict(w)
 
 	_, err := sparkwing.RunWork(t.Context(), w)
 	if err == nil {
 		t.Fatal("a tier past its budget passed; nothing stops a class from regrowing")
 	}
-	if !strings.Contains(err.Error(), "cheap") {
+	if !strings.Contains(err.Error(), "slow") {
 		t.Errorf("the failure does not name the slowest step: %v", err)
 	}
 }
 
 func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
 	reported := false
-	b := newTierBudget("probe", time.Nanosecond).over(
+	b := newTierBudget("probe", 3*time.Second).over(
 		func(context.Context, string, func([]string) []string) ([]string, string, error) {
 			reported = true
 			return nil, "no Go files", nil
@@ -147,34 +158,43 @@ func filesetOf(count int) scopeFunc {
 
 func overrunWithFileset(t *testing.T, count int) error {
 	t.Helper()
-	b := newTierBudget("probe", time.Nanosecond).over(filesetOf(count))
+	b := recordedOverrun().over(filesetOf(count))
 	w := sparkwing.NewWork()
-	b.step(w, "cheap", func(context.Context) error { return nil })
 	b.verdict(w)
 	_, err := sparkwing.RunWork(t.Context(), w)
 	return err
 }
 
+func recordedOverrun() *tierBudget {
+	b := newTierBudget("probe", 3*time.Second)
+	start := time.Unix(0, 0)
+	b.record("slow", start, start.Add(4*time.Second), nil)
+	return b
+}
+
 func TestBudgetEnforcesUpToTheFilesetATierIsBudgetedFor(t *testing.T) {
-	if err := overrunWithFileset(t, budgetWaiverFiles); err == nil {
-		t.Fatalf("a tier past its budget over %d Go files passed; the budget stops meaning anything", budgetWaiverFiles)
+	for _, count := range []int{24, 25} {
+		if err := overrunWithFileset(t, count); err == nil {
+			t.Fatalf("a tier past its budget over %d Go files passed; the budget stops meaning anything", count)
+		}
 	}
 }
 
 func TestBudgetIsWaivedForAFilesetWiderThanATierIsBudgetedFor(t *testing.T) {
-	if err := overrunWithFileset(t, budgetWaiverFiles+1); err != nil {
-		t.Fatalf("a %d-file change failed the budget; these steps cost per file, so a wide change is not a tier that grew: %v",
-			budgetWaiverFiles+1, err)
+	for _, count := range []int{26, 27} {
+		if err := overrunWithFileset(t, count); err != nil {
+			t.Fatalf("a %d-file change failed the budget; these steps cost per file, so a wide change is not a tier that grew: %v",
+				count, err)
+		}
 	}
 }
 
 func TestBudgetEnforcesWhenTheFilesetCannotBeRead(t *testing.T) {
-	b := newTierBudget("probe", time.Nanosecond).over(
+	b := recordedOverrun().over(
 		func(context.Context, string, func([]string) []string) ([]string, string, error) {
 			return nil, "", errors.New("no baseline")
 		})
 	w := sparkwing.NewWork()
-	b.step(w, "cheap", func(context.Context) error { return nil })
 	b.verdict(w)
 
 	if _, err := sparkwing.RunWork(t.Context(), w); err == nil {
