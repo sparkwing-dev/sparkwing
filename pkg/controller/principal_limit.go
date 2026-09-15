@@ -8,31 +8,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Recommended per-runner request budgets for the claim and heartbeat routes,
-// per rolling minute, computed from the cadence the shipped runners actually
-// use. A pool runner claims every 500ms (120 a minute); a node heartbeat runs
-// every 3s (20 a minute per node) and a trigger heartbeat every 3s. Ten times
-// that leaves room for retries and bursts while still bounding a runner stuck
-// in a tight loop. An enrolled agent's offer slots poll under the agent's one
-// name, so an operator running many slots per agent scales the claim budget by
-// that count.
+// RecommendedHeartbeatsPerMinute is the per-runner heartbeat budget suggested
+// for the cadence the shipped runners keep: a node heartbeat runs every 3s and
+// a trigger heartbeat every 3s, and ten times that leaves room for retries and
+// bursts while still bounding a runner stuck in a tight loop.
 //
-// They are recommendations, not defaults: a controller budgets nothing until
-// an operator names a number.
-const (
-	RecommendedClaimsPerMinute     = 1200
-	RecommendedHeartbeatsPerMinute = 1200
-)
-
-// RecommendedClaimsPerMinuteForSlots returns the claim budget suggested for a
-// runner working slots offer slots at once. An enrolled agent's slots all poll
-// under the agent's one name, and each slot spends a preparation and an offer
-// per round at the 500ms cadence, so its budget is the per-runner
-// recommendation multiplied by its max_concurrent. Fewer than one slot is read
-// as one.
-func RecommendedClaimsPerMinuteForSlots(slots int) int {
-	return RecommendedClaimsPerMinute * max(slots, 1)
-}
+// It is a recommendation, not a default: a controller budgets nothing until an
+// operator names a number. For the claim routes, work the budget from
+// [CompliantClaimPollsPerMinute] instead; an awarded claim spends no budget.
+const RecommendedHeartbeatsPerMinute = 1200
 
 // RequestBudget is how many requests one runner may make per rolling minute to
 // the claim routes and to the heartbeat routes. Zero in either field leaves
@@ -65,18 +49,20 @@ func (s *Server) WithRequestBudget(b RequestBudget) *Server {
 }
 
 const (
-	budgetWindow     = time.Minute
-	budgetClassClaim = "claim"
-	budgetClassBeat  = "heartbeat"
+	budgetWindow        = time.Minute
+	budgetClassClaim    = "claim"
+	budgetClassBeat     = "heartbeat"
+	budgetClassIdlePoll = "idle_poll"
 )
 
 type principalBudget struct {
+	policy     RequestBudget
 	claims     *ratelimit.Limiter
 	heartbeats *ratelimit.Limiter
 }
 
 func newPrincipalBudget(b RequestBudget) *principalBudget {
-	p := &principalBudget{}
+	p := &principalBudget{policy: b}
 	if b.ClaimsPerMinute > 0 {
 		p.claims = ratelimit.New(b.ClaimsPerMinute, budgetWindow)
 	}
@@ -84,6 +70,15 @@ func newPrincipalBudget(b RequestBudget) *principalBudget {
 		p.heartbeats = ratelimit.New(b.HeartbeatsPerMinute, budgetWindow)
 	}
 	return p
+}
+
+// safety: the view reports the budget the operator asked for, which a limiter
+// built from it no longer carries once it is spending tokens.
+func (p *principalBudget) values() RequestBudget {
+	if p == nil {
+		return RequestBudget{}
+	}
+	return p.policy
 }
 
 func (p *principalBudget) limiter(class string) *ratelimit.Limiter {
@@ -143,8 +138,50 @@ func runnerIdentity(r *http.Request) string {
 	return "unnamed"
 }
 
+// safety: an award is work this controller chose to hand out, and the loop that
+// gets one re-claims at once rather than waiting its poll interval, so charging
+// it would bound how fast a runner may execute rather than how fast it may ask.
+// Only a claim that came back empty spends the budget.
 func (s *Server) claimBudgeted(next http.Handler) http.Handler {
-	return s.budgeted(budgetClassClaim, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limiter := s.requestBudget.limiter(budgetClassClaim)
+		if limiter == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		key := s.runnerBudgetKey(r)
+		now := time.Now()
+		if !limiter.Peek(key, now) {
+			// safety: the refusal is charged, so a runner that keeps knocking
+			// through an empty budget is told to wait longer each time.
+			_, wait := limiter.AllowWithRetry(key, now)
+			observePrincipalThrottled(budgetClassClaim)
+			s.logger.Warn("request shed",
+				"runner", key, "route_class", budgetClassClaim, "retry_after", wait,
+				"reason", "per-runner request budget exhausted")
+			writeRetryAfter(w, wait, "too many "+budgetClassClaim+" requests from this runner")
+			return
+		}
+		awarded := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(awarded, r)
+		if awarded.status != http.StatusOK {
+			limiter.Penalize(key, now)
+		}
+	})
+}
+
+// safety: the gate holds a runner to the interval this controller suggested it,
+// so it guards only the two routes that carry the suggestion. A route naming
+// the trigger or node it wants is no idle poll, and the preparation half of an
+// offer round would otherwise charge one round twice.
+func (s *Server) idlePollBudgeted(next http.Handler) http.Handler {
+	budgeted := s.claimBudgeted(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.admitIdleClaimPoll(w, r) {
+			return
+		}
+		budgeted.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) heartbeatBudgeted(next http.Handler) http.Handler {

@@ -19,7 +19,7 @@ func TestBindDefaultsToUnlimited(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := read()
+	cfg, _, err := read()
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
@@ -41,7 +41,7 @@ func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := read()
+	cfg, _, err := read()
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
@@ -57,7 +57,7 @@ func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 	if err := fs.Parse([]string{"--egress-monthly-bytes=1", "--egress-max-log-streams=0"}); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = read()
+	cfg, _, err = read()
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
@@ -88,7 +88,7 @@ func TestEachServiceReadsItsOwnVariables(t *testing.T) {
 		if err := fs.Parse(nil); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := read()
+		cfg, _, err := read()
 		if err != nil {
 			t.Fatalf("%s: read = %v", tc.svc, err)
 		}
@@ -119,7 +119,7 @@ func TestACacheRegistersNoPerPrincipalBudget(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := read()
+	cfg, _, err := read()
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
@@ -135,7 +135,7 @@ func TestBindRefusesAMalformedEnvironment(t *testing.T) {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err := read()
+	_, _, err := read()
 	if err == nil {
 		t.Fatal("a malformed budget parsed as a default")
 	}
@@ -150,11 +150,50 @@ func TestBindRefusesANegativeBudget(t *testing.T) {
 	if err := fs.Parse([]string{"--egress-daily-alarm-bytes=-1"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := read()
+	_, _, err := read()
 	if err == nil {
 		t.Fatal("a negative budget was accepted")
 	}
 	if !strings.Contains(err.Error(), egress.FlagDailyAlarmBytes) {
 		t.Errorf("error %q does not name the flag", err)
+	}
+}
+
+// TestBind_NamedReportsEitherChannel covers a caller that fills unset budgets
+// from a profile: zero is unlimited and a value in its own right, so a budget
+// set to zero through the environment has to read as named, not as unset.
+func TestBind_NamedReportsEitherChannel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+		want egress.Named
+	}{
+		{name: "nothing named"},
+		{
+			name: "zero through the environment",
+			env:  map[string]string{egress.EnvName(egress.ServiceController, egress.EnvMaxLogStreams): "0"},
+			want: egress.Named{MaxLogStreams: true},
+		},
+		{
+			name: "zero on the command line",
+			args: []string{"--egress-max-downloads=0"},
+			want: egress.Named{MaxDownloads: true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("controller", flag.ContinueOnError)
+			read := egress.Bind(fs, envOf(tc.env), egress.ServiceController, egress.ControllerSurfaces)
+			if err := fs.Parse(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			_, named, err := read()
+			if err != nil {
+				t.Fatalf("read = %v, want nil", err)
+			}
+			if named != tc.want {
+				t.Errorf("named = %+v, want %+v", named, tc.want)
+			}
+		})
 	}
 }

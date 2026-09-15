@@ -254,36 +254,44 @@ failing authentication. `--claims-per-runner-minute` and
 `controller.claimsPerRunnerMinute`,
 `controller.heartbeatsPerRunnerMinute`) bound what one runner spends per
 rolling minute. Both default to zero, which is unlimited: an operator
-opts in. 1200 of each suits the cadence the shipped runners use -- a pool
-runner claims every 500ms, or 120 a minute, and a node heartbeat runs
-every 3s. An enrolled agent's offer slots all poll under the agent's one
-name, and each slot spends a preparation plus an offer per round, so its
-claim budget is 1200 x `max_concurrent`: 1200 for one slot, 9600 for
-eight. `controller.RecommendedClaimsPerMinuteForSlots` computes it.
+opts in.
+
+A claim that comes back with a node spends no claim budget. An award is
+work the controller chose to hand out, and the loop that gets one
+re-claims at once rather than waiting its poll interval, so charging it
+would bound how fast a runner may execute rather than how fast it may
+ask. What the budget bounds is empty polling, which a runner can do
+without limit: a pool runner polls every 500ms, or 120 a minute, so 480
+allows four times that cadence. Heartbeats carry no such exemption; 1200
+suits the 3s cadence the shipped runners keep.
 
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
 path names -- and falls back to the `X-Sparkwing-Runner` header only on
 `POST /api/v1/nodes/claim`, `POST /api/v1/nodes/claim/prepare` and
 `POST /api/v1/triggers/claim`, which name nothing. A runner sends one
-identity for the life of its process (a pool runner its holder prefix, an
-enrolled agent its name), not one per poll: a value that changed per
-request would buy a fresh budget on every claim and grow the controller's
-bucket table at the fleet's poll rate.
+identity for the life of its process (a pool runner its holder prefix and
+process id, an enrolled agent its name), not one per poll: a value that
+changed per request would buy a fresh budget on every claim and grow the
+controller's bucket table at the fleet's poll rate.
 
 **What this bounds is a cooperating runner.** On those three claim routes
 the identity is the runner's own word, so a holder of a valid token that
 varies it gets a fresh budget each time. The budget stops a runaway loop
 and keeps one misbehaving runner in a shared-token fleet from spending
 its peers' claim budget; it is not a defence against an authenticated
-caller who means harm. The token itself is the control that bounds that
-caller -- revoke it.
+caller who means harm. The per-token budget below is what bounds that
+caller, and the token itself is the control that ends it -- revoke it.
 
 A runner too old to send an identity shares one bucket with its peers on
 those routes, so during a rolling upgrade a shared-token fleet is
 budgeted as one caller there. Size the budgets per runner and the older
 half of the fleet still clears them, or leave the budgets at zero until
 the rollout finishes.
+
+`--limits-profile` turns the budgets on as a set, so a hosted controller
+carries one setting rather than one per guard. It is described under
+[Limits profiles](#limits-profiles) below.
 
 The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
 never budgeted. An agent that loses it tears down its membership and
@@ -296,6 +304,101 @@ counts it. A runner reads a `429` the way it reads a `503`: it waits the
 header out, capped at 30 seconds, and keeps its claim and its node. A
 host's own admission daemon and the loopback controller budget nothing,
 because their callers are unauthenticated and would share one bucket.
+
+## Per-token request budget
+
+`--requests-per-token-minute` bounds every route one token can reach,
+keyed on the token prefix alone. It is the guard that binds a caller
+varying the runner it says it is: on the two claim routes the runner name
+is the caller's own word, so the per-runner budgets above bound a runaway
+loop rather than a holder of a valid token who means harm. The agent
+liveness heartbeat is spared here too. Past the budget a request answers
+`429` with a `Retry-After`, counted under
+`sparkwing_principal_throttled_total{route_class="token"}`.
+
+`--requests-per-minute-alarm` refuses nothing. It is the rate, across
+every caller, past which the controller logs at warn and counts
+`sparkwing_request_rate_alarm_total`, once a minute: the notice that one
+pod is serving more than it was sized for.
+
+## Idle-poll enforcement
+
+A controller told to enforce its idle-poll suggestion answers a claim
+poll that arrives sooner than the widest interval it suggests with `429`
+and a `Retry-After` naming the rest of the wait, instead of a claim.
+Enforcement starts only once that widest interval has been the standing
+suggestion for a whole interval, so a runner is never refused against an
+interval it was not yet told about, and it lifts the moment work is
+handed out, so a fleet is never held off a queue that has since filled. A
+runner that honors the suggestion waits at least that long by
+construction and is never refused; a runner that ignores the header pays
+the wait it was told about, which is never longer than one suggestion, so
+two refused polls and a runner's own spread still fit inside the
+placement hold. A controller that suggests nothing, which is
+any controller with `--idle-claim-poll=0` and every host's own admission
+daemon, enforces nothing.
+
+The gate guards the two routes that carry the suggestion, `POST
+/api/v1/nodes/claim` and `POST /api/v1/triggers/claim`. A route that
+names the trigger or the node it wants is no idle poll, and the
+preparation half of an offer round would charge the round twice. It is
+keyed the way the per-runner budgets are, on the token prefix together
+with the runner, and the runner a pool names itself carries its process
+id, so two runner processes on one host are two runners rather than one
+polling twice.
+
+Before turning enforcement on, check what the fleet is running. A caller
+older than v0.50.1 sends no `X-Sparkwing-Runner`, so every such caller on
+one token shares a single gate slot and all but the first are refused
+every round. They hold their claims and their nodes, because a `429` is
+backpressure they already honor, but they pick work up no faster than
+one runner would. Roll the fleet forward first, or leave
+`--idle-claim-poll` at zero until it is.
+
+Enforcement is off unless a limits profile turns it on;
+`sparkwing_principal_throttled_total{route_class="idle_poll"}` counts the
+refusals.
+
+## Limits profiles
+
+`--limits-profile` (chart `controller.limitsProfile`) names a set of
+abuse guards a hosted controller runs with, so provisioning writes one
+setting rather than one per guard. Empty, the default, supplies none: a
+self-hosted controller keeps every budget unlimited and enforces no idle
+poll, which is what it served before profiles existed.
+
+| Guard | `cloud` | `cloud-free` |
+| --- | --- | --- |
+| `--claims-per-runner-minute` | 480 | 240 |
+| `--heartbeats-per-runner-minute` | 1200 | 600 |
+| `--requests-per-token-minute` | 2000 | 600 |
+| `--requests-per-minute-alarm` | 5000 | 5000 |
+| `--egress-max-log-streams` | 50 | 10 |
+| `--egress-max-downloads` | 20 | 5 |
+| Idle-poll enforcement | on | on |
+
+The claim budgets are worked from the cadence the shipped claim loop
+keeps rather than from a round number. It polls once every 500ms while
+the queue is empty, which is 120 requests a minute, and claims once more
+for each node it starts: `cloud` allows four times that cadence and
+`cloud-free` twice, so a runner keeping its configured cadence is never
+refused and one stuck in a tight loop is held to about the work it was
+asked to do. The heartbeat budgets carry the shipped cadence with the
+same headroom the recommendation above uses, and the free tier halves the
+paid figure. The per-token budgets carry the rest of what a runner
+spends: a two-slot runner honoring its cadences spends roughly 300
+requests a minute once its node heartbeats and state writes are counted,
+so the free tier carries one such runner and the paid tier several under
+one token. The alarm is what one controller pod is sized to serve. The
+egress caps are the concurrency one team is expected to read logs and
+artifacts at.
+
+A profile fills a guard only where the command line and the environment
+named none, and a guard the operator named wins whatever its value,
+including an explicit zero that turns it off. Raising one guard on a
+hosted controller is one flag beside the profile rather than a fork of
+it. `sparkwing cluster limits show` prints the budgets in force beside
+the stored compute guards.
 
 ## Webhooks
 

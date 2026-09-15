@@ -88,3 +88,29 @@ func TestRenderComputeLimitsShowsTheDerivedCap(t *testing.T) {
 		t.Errorf("plain output is missing the derived cap:\n%s", plain.String())
 	}
 }
+
+func TestRenderComputeLimitsShowsTheRequestBudgets(t *testing.T) {
+	t.Parallel()
+	var view computeLimitsResp
+	view.Budgets.ClaimsPerRunnerMinute = 9600
+	view.Budgets.HeartbeatsPerRunnerMinute = 1200
+	view.Budgets.IdleClaimPollSeconds = 5
+	view.Budgets.IdleClaimPollEnforced = true
+	view.Budgets.MaxLogStreamsPerPrincipal = 50
+
+	var pretty, plain bytes.Buffer
+	if err := renderComputeLimits(&pretty, view); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if err := writeComputeLimitsPlain(&plain, view); err != nil {
+		t.Fatalf("render plain: %v", err)
+	}
+	for _, want := range []string{"CLAIMS_PER_RUNNER_MINUTE", "9600", "5s, enforced", "MAX_DOWNLOADS_PER_PRINCIPAL", "unlimited"} {
+		if !strings.Contains(pretty.String(), want) {
+			t.Errorf("budgets are missing %q:\n%s", want, pretty.String())
+		}
+	}
+	if !strings.Contains(plain.String(), "heartbeats_per_runner_minute\t1200\n") {
+		t.Errorf("plain budgets are missing the heartbeat budget:\n%s", plain.String())
+	}
+}

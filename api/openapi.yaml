@@ -4678,6 +4678,7 @@ components:
       properties:
         limits: {type: object, additionalProperties: {type: integer, format: int64}, description: Guard name to ceiling; zero is unlimited.}
         usage: {$ref: "#/components/schemas/ComputeUsage"}
+        budgets: {$ref: "#/components/schemas/RequestBudgets"}
     ComputeUsage:
       x-sparkwing-go-type: pkg/controller.computeUsageJSON
       type: object
@@ -4689,6 +4690,19 @@ components:
         derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal is held to once recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
         recent_paid_micro: {type: integer, format: int64, description: "Paid credit granted over the scaling window, in micro-credits, less the reversals of grants inside it."}
         scale_window_seconds: {type: integer, format: int64, description: How far back paid credit counts toward the derived cap.}
+    RequestBudgets:
+      x-sparkwing-go-type: pkg/controller.requestBudgetsJSON
+      type: object
+      description: "The controller's process-level request budgets, which it reports beside the stored guards and which only its own flags set."
+      properties:
+        claims_per_runner_minute: {type: integer, format: int64, description: "Claim requests one runner may spend per rolling minute; zero is unlimited."}
+        heartbeats_per_runner_minute: {type: integer, format: int64, description: "Heartbeat requests one runner may spend per rolling minute; zero is unlimited."}
+        idle_claim_poll_seconds: {type: integer, format: int64, description: "Widest idle poll interval the controller suggests to a claim loop; zero suggests nothing."}
+        idle_claim_poll_enforced: {type: boolean, description: "Whether a claim arriving sooner than the suggested interval is answered 429 rather than a claim."}
+        max_log_streams_per_principal: {type: integer, format: int64, description: "Live log streams one principal may hold open at once; zero is unlimited."}
+        max_downloads_per_principal: {type: integer, format: int64, description: "Metered downloads one principal may hold open at once; zero is unlimited."}
+        requests_per_token_minute: {type: integer, format: int64, description: "Requests one token may spend per rolling minute across every route; zero is unlimited."}
+        requests_per_minute_alarm: {type: integer, format: int64, description: "Request rate across every caller past which the controller raises an alarm; it refuses nothing and zero raises none."}
     SetComputeLimits:
       x-sparkwing-go-type: pkg/controller.setComputeLimitsReq
       type: object

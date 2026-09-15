@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"net/url"
 	"strconv"
@@ -629,13 +630,24 @@ func (r *Runner) buildJob(
 		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolumeName, MountPath: "/tmp"}},
 	}
 
+	band := cpuBand(class.Cores)
+	selector := bandNodeSelector(r.cfg.NodeSelector, band)
+	placed := ""
+	if band != "" {
+		// safety: the operator's value for this key wins the selector, so the
+		// toleration, the label and the anti-affinity follow the pool the pod
+		// selects; a toleration for another value leaves it selecting a pool
+		// whose taint it does not tolerate.
+		placed = selector[cpuBandKey]
+	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		ServiceAccountName: r.cfg.ServiceAccountName,
 		// safety: pipeline code runs here, so the pod gets no API token
 		AutomountServiceAccountToken: boolPtr(false),
-		NodeSelector:                 r.cfg.NodeSelector,
-		Tolerations:                  r.cfg.Tolerations,
+		NodeSelector:                 selector,
+		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
+		Affinity:                     bandAntiAffinity(band, placed),
 		Containers:                   []corev1.Container{container},
 		Volumes: []corev1.Volume{{
 			Name:         scratchVolumeName,
@@ -660,6 +672,11 @@ func (r *Runner) buildJob(
 		"sparkwing.dev/run-id":         sanitizeK8sName(truncate(req.RunID, 63)),
 		"sparkwing.dev/node-id":        sanitizeK8sName(truncate(req.NodeID, 63)),
 	}
+	if placed != "" {
+		// safety: the anti-affinity term below selects pods, so the band a pod
+		// belongs to has to be readable off the pod and not only off its node.
+		labels[cpuBandKey] = placed
+	}
 
 	ttl := r.cfg.TTLSecondsAfterFinished
 	backoff := r.cfg.BackoffLimit
@@ -679,6 +696,81 @@ func (r *Runner) buildJob(
 			},
 		},
 	}
+}
+
+// safety: a band nodepool labels its nodes with this key and taints them with
+// the same key and value, so these three strings must read the same as
+// k8s/karpenter/nodepool-sparkwing-jobs.yaml in the kikd-infra repository. A
+// Job that names neither the label nor the taint lands on no band node.
+const (
+	cpuBandKey   = "sparkwing.dev/cpu-band"
+	cpuBandSmall = "small"
+	cpuBandLarge = "large"
+)
+
+const bandTopologyKey = "kubernetes.io/hostname"
+
+func cpuBand(cores int64) string {
+	switch {
+	// safety: 2 and below is the warm pool's default reach, which
+	// warm_cpu_class_cores moves, and the band pools start at 4 either way, so
+	// a Job at those sizes keeps the placement the operator configured.
+	case cores <= 2:
+		return ""
+	case cores <= 8:
+		return cpuBandSmall
+	default:
+		return cpuBandLarge
+	}
+}
+
+func bandNodeSelector(static map[string]string, band string) map[string]string {
+	if band == "" {
+		return static
+	}
+	out := map[string]string{cpuBandKey: band}
+	// safety: the operator's own selector is the deployment's last word, so a
+	// cluster that already pins Jobs by this key keeps the value it chose.
+	maps.Copy(out, static)
+	return out
+}
+
+func bandTolerations(static []corev1.Toleration, placed string) []corev1.Toleration {
+	if placed == "" {
+		return static
+	}
+	for _, t := range static {
+		// safety: an operator toleration on this key already says what the
+		// deployment tolerates; a second entry would widen it behind his back.
+		if t.Key == cpuBandKey {
+			return static
+		}
+	}
+	out := make([]corev1.Toleration, 0, len(static)+1)
+	out = append(out, static...)
+	return append(out, corev1.Toleration{
+		Key:      cpuBandKey,
+		Operator: corev1.TolerationOpEqual,
+		Value:    placed,
+		Effect:   corev1.TaintEffectNoSchedule,
+	})
+}
+
+func bandAntiAffinity(band, placed string) *corev1.Affinity {
+	if band != cpuBandLarge || placed == "" {
+		return nil
+	}
+	// safety: the taint alone does not give a large Job the machine, because
+	// two 16-core pods fit one 48-vCPU node; repelling the band's own pods is
+	// what makes the whole node the guarantee the class ladder sells.
+	return &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{cpuBandKey: placed},
+			},
+			TopologyKey: bandTopologyKey,
+		}},
+	}}
 }
 
 func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {

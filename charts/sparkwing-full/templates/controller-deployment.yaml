@@ -116,8 +116,17 @@ spec:
             {{- with .Values.controller.heartbeatsPerRunnerMinute }}
             - {{ printf "--heartbeats-per-runner-minute=%d" (int .) | quote }}
             {{- end }}
+            {{- with .Values.controller.requestsPerTokenMinute }}
+            - {{ printf "--requests-per-token-minute=%d" (int .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.requestsPerMinuteAlarm }}
+            - {{ printf "--requests-per-minute-alarm=%d" (int .) | quote }}
+            {{- end }}
             {{- with .Values.controller.idleClaimPoll }}
             - {{ printf "--idle-claim-poll=%s" . | quote }}
+            {{- end }}
+            {{- with .Values.controller.limitsProfile }}
+            - {{ printf "--limits-profile=%s" . | quote }}
             {{- end }}
             {{- $bucket := .Values.controller.bucketCeiling | default dict }}
             {{- range $limit := list
