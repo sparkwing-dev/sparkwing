@@ -14,6 +14,7 @@ func publishedReleasePages() ([]byte, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("GITHUB_REPOSITORY is required to list published releases")
 	}
+	// #nosec G702 -- gh receives one repos/-prefixed endpoint argument without a shell or option expansion.
 	body, err := exec.Command("gh", "api", "--paginate", "--slurp", "repos/"+repo+"/releases?per_page=100").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list published releases: %w", err)

@@ -22,6 +22,22 @@ printf '%s' '[[{"tag_name":"v0.52.1","draft":false,"prerelease":false}],[{"tag_n
 	}
 }
 
+func TestLatestLookupKeepsRepositoryInOneEndpointArgument(t *testing.T) {
+	dir := t.TempDir()
+	stub := `#!/bin/sh
+test "$#" -eq 4 && test "$1" = api && test "$2" = --paginate && test "$3" = --slurp && test "$4" = "repos/$GITHUB_REPOSITORY/releases?per_page=100" || exit 1
+printf '%s' '[[]]'
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("GITHUB_REPOSITORY", "--hostname=example.invalid/$(exit 99); exit 99")
+	if err := run([]string{"--latest-tag", "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLatestUsesEveryPublishedStableVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name, tag, body string
