@@ -174,11 +174,12 @@ func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 	}
 }
 
-func TestProcessPerNode_NestedRunDoesNotReuseTheParentHandle(t *testing.T) {
+func TestProcessPerNode_NestedRunKeepsParentControlsPrivate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: builds and runs the process-per-node fixture")
 	}
 	mod, bin := buildProcPerNodeBinary(t)
+	hostBin := wingdHostBin(t)
 
 	home := t.TempDir()
 	stopHomeDaemon(t, home)
@@ -187,7 +188,7 @@ func TestProcessPerNode_NestedRunDoesNotReuseTheParentHandle(t *testing.T) {
 	nestedHandle := filepath.Join(t.TempDir(), "nested-run.json")
 	runEnv := append(os.Environ(),
 		"SPARKWING_HOME="+home,
-		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
+		"SPARKWING_WINGD_BIN="+hostBin,
 		"SPARKWING_LOG_FORMAT=json",
 		"PROC_PROBE_DIR="+probe,
 		"SPARKWING_RUN_HANDLE_FILE="+handle,
@@ -241,6 +242,42 @@ func TestProcessPerNode_NestedRunDoesNotReuseTheParentHandle(t *testing.T) {
 		if err != nil || run == nil || run.Status != "success" {
 			t.Fatalf("run %s = %+v, %v; want success", runID, run, err)
 		}
+	}
+
+	for _, testCase := range []struct {
+		name                string
+		nestedStartAt       string
+		wantPrepareExecuted bool
+	}{
+		{name: "implicit child runs its own range", wantPrepareExecuted: true},
+		{name: "explicit child range is preserved", nestedStartAt: "selected"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			home := t.TempDir()
+			stopHomeDaemon(t, home)
+			probe := t.TempDir()
+			env := append(os.Environ(),
+				"SPARKWING_HOME="+home,
+				"SPARKWING_WINGD_BIN="+hostBin,
+				"SPARKWING_LOG_FORMAT=json",
+				"PROC_PROBE_DIR="+probe,
+				"SPARKWING_START_AT=launch-child",
+				"SPARKWING_STOP_AT=launch-child",
+			)
+			if testCase.nestedStartAt != "" {
+				env = append(env, "NESTED_START_AT="+testCase.nestedStartAt)
+			}
+
+			runBin(t, mod, env, bin, "nestedparent")
+			readPID(t, probe, "nested-child")
+			_, prepareErr := os.Stat(filepath.Join(probe, "nested-child-prepare.pid"))
+			if testCase.wantPrepareExecuted && prepareErr != nil {
+				t.Fatalf("implicit child skipped its prepare step: %v", prepareErr)
+			}
+			if !testCase.wantPrepareExecuted && !os.IsNotExist(prepareErr) {
+				t.Fatalf("explicit child selection ran prepare; stat error = %v", prepareErr)
+			}
+		})
 	}
 }
 
@@ -509,39 +546,71 @@ func (p *Spawnproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+type NestedChildJob struct{ sparkwing.Base }
+
+func (j *NestedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	prepare := sparkwing.Step(w, "prepare", func(context.Context) error {
+		StampPID("nested-child-prepare")
+		return nil
+	})
+	selected := sparkwing.Step(w, "selected", func(context.Context) error {
+		StampPID("nested-child")
+		return nil
+	}).Needs(prepare)
+	return selected, nil
+}
+
 type Nestedchild struct{ sparkwing.Base }
 
 func (p *Nestedchild) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "inner", func(context.Context) error {
-		StampPID("nested-child")
-		return nil
-	})
+	sparkwing.Job(plan, "inner", &NestedChildJob{})
 	return nil
+}
+
+func nestedRunEnv(handle string) []string {
+	startAt := os.Getenv("NESTED_START_AT")
+	env := make([]string, 0, len(os.Environ())+3)
+	for _, item := range os.Environ() {
+		if strings.HasPrefix(item, "SPARKWING_RUN_HANDLE_FILE=") {
+			continue
+		}
+		if startAt != "" && (strings.HasPrefix(item, "SPARKWING_START_AT=") ||
+			strings.HasPrefix(item, "SPARKWING_STOP_AT=")) {
+			continue
+		}
+		env = append(env, item)
+	}
+	if handle != "" {
+		env = append(env, "SPARKWING_RUN_HANDLE_FILE="+handle)
+	}
+	if startAt != "" {
+		env = append(env, "SPARKWING_START_AT="+startAt, "SPARKWING_STOP_AT="+startAt)
+	}
+	return env
+}
+
+type NestedParentJob struct{ sparkwing.Base }
+
+func (j *NestedParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "launch-child", func(ctx context.Context) error {
+		cmd := exec.CommandContext(ctx, os.Args[0], "nestedchild")
+		cmd.Env = nestedRunEnv("")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("nested run: %w: %s", err, output)
+		}
+		cmd = exec.CommandContext(ctx, os.Args[0], "nestedchild")
+		cmd.Env = nestedRunEnv(os.Getenv("NESTED_RUN_HANDLE_FILE"))
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("explicit nested run: %w: %s", err, output)
+		}
+		return nil
+	}), nil
 }
 
 type Nestedparent struct{ sparkwing.Base }
 
 func (p *Nestedparent) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "outer", func(ctx context.Context) error {
-		cmd := exec.CommandContext(ctx, os.Args[0], "nestedchild")
-		cmd.Env = os.Environ()
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("nested run: %w: %s", err, output)
-		}
-		nestedHandle := os.Getenv("NESTED_RUN_HANDLE_FILE")
-		env := make([]string, 0, len(os.Environ())+1)
-		for _, item := range os.Environ() {
-			if !strings.HasPrefix(item, "SPARKWING_RUN_HANDLE_FILE=") {
-				env = append(env, item)
-			}
-		}
-		cmd = exec.CommandContext(ctx, os.Args[0], "nestedchild")
-		cmd.Env = append(env, "SPARKWING_RUN_HANDLE_FILE="+nestedHandle)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("explicit nested run: %w: %s", err, output)
-		}
-		return nil
-	})
+	sparkwing.Job(plan, "outer", &NestedParentJob{})
 	return nil
 }
 

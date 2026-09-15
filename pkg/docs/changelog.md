@@ -50,6 +50,9 @@ unlock.
 - **runner:** A foreground run's handle-file path stops at its own process.
   Local and remote node children no longer hand that path to nested Sparkwing
   commands, which otherwise refuse because the parent already created it.
+- **runner:** A node consumes its WorkStep range before starting the step body.
+  Nested Sparkwing commands begin with their own unselected step range unless
+  the nested invocation supplies one explicitly.
 
 ## [v0.52.5] - 2026-09-15
 ### Changed
