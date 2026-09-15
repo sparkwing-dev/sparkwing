@@ -104,6 +104,7 @@ unlock.
   concurrency is the number of machines the pool's limit allows, one Job to
   each, and nothing queues behind it, so a Job past that count fails after the
   five-minute unschedulable wait rather than waiting for a machine to free.
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.2, so a fresh scaffold compiles against that release.
 
 - **release:** The hosted release workflow runs no check on a tagged commit. It
   resolves the tag to a commit, builds the binaries and images, signs them,
