@@ -93,6 +93,20 @@ func (c *Client) EnqueueTrigger(
 	repo string,
 	branch string,
 ) (string, error)
+func (c *Client) EnqueueTriggerForAwait(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	requestedOutputNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error)
 func (c *Client) EnqueueTriggerWithEnv(
 	ctx context.Context,
 	pipeline string,
@@ -388,6 +402,8 @@ type TriggerRequest struct {
 	ParentRunID string
 
 	ParentNodeID string
+
+	RequestedOutputNodeID string
 
 	RetryOf string
 }

@@ -623,7 +623,20 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	p, authenticated := PrincipalFromContext(r.Context())
 	if authenticated && !p.HasScope(ScopeAdmin) {
-		if body.NodeID == "" {
+		if binding, bound := executionBindingFromContext(r.Context()); bound {
+			if body.NodeID == "" || runID != binding.RunID {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "credential_bound", Principal: p.label(),
+					Message: "execution credential may append events only to its execution nodes",
+				})
+				return
+			}
+			var authorized bool
+			r, authorized = s.executionCredentialNodeRequest(w, r, *binding, runID, body.NodeID)
+			if !authorized {
+				return
+			}
+		} else if body.NodeID == "" {
 			var authorized bool
 			r, authorized = s.triggerClaimRequest(w, r, runID)
 			if !authorized {
@@ -677,13 +690,14 @@ type triggerReqGit struct {
 }
 
 type triggerReq struct {
-	Pipeline     string            `json:"pipeline"`
-	Args         map[string]string `json:"args,omitempty"`
-	Trigger      triggerReqMeta    `json:"trigger,omitempty"`
-	Git          triggerReqGit     `json:"git,omitempty"`
-	ParentRunID  string            `json:"parent_run_id,omitempty"`
-	ParentNodeID string            `json:"parent_node_id,omitempty"`
-	RetryOf      string            `json:"retry_of,omitempty"`
+	Pipeline              string            `json:"pipeline"`
+	Args                  map[string]string `json:"args,omitempty"`
+	Trigger               triggerReqMeta    `json:"trigger,omitempty"`
+	Git                   triggerReqGit     `json:"git,omitempty"`
+	ParentRunID           string            `json:"parent_run_id,omitempty"`
+	ParentNodeID          string            `json:"parent_node_id,omitempty"`
+	RequestedOutputNodeID string            `json:"requested_output_node_id,omitempty"`
+	RetryOf               string            `json:"retry_of,omitempty"`
 }
 
 type triggerResp struct {
@@ -810,20 +824,17 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
 	if binding, bound := executionBindingFromContext(r.Context()); bound {
-		if body.ParentRunID != binding.RunID || body.ParentNodeID != binding.RootNodeID {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code:    "credential_bound",
-				Message: "execution credential may create only a direct child of its bound node",
-			})
-			return
-		}
-		live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+		ownedParent, err := s.store.ExecutionCredentialOwnsNode(
+			r.Context(), *binding, body.ParentRunID, body.ParentNodeID, time.Now())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if !live {
-			writeError(w, http.StatusConflict, store.ErrLockHeld)
+		if body.ParentRunID != binding.RunID || !ownedParent {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:    "credential_bound",
+				Message: "execution credential may create only a direct child of its execution nodes",
+			})
 			return
 		}
 	}
@@ -881,18 +892,19 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	// the principal that triggered it exactly as a direct create does.
 	triggerCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
 	intake := triggerIntake{
-		RunID:         runID,
-		Pipeline:      body.Pipeline,
-		Args:          body.Args,
-		Source:        body.Trigger.Source,
-		User:          body.Trigger.User,
-		Env:           sanitizeTriggerEnv(body.Trigger.Env),
-		Git:           body.Git,
-		ParentRunID:   body.ParentRunID,
-		ParentNodeID:  body.ParentNodeID,
-		RetryOf:       body.RetryOf,
-		RepoInherited: repoInherited,
-		At:            time.Now(),
+		RunID:                 runID,
+		Pipeline:              body.Pipeline,
+		Args:                  body.Args,
+		Source:                body.Trigger.Source,
+		User:                  body.Trigger.User,
+		Env:                   sanitizeTriggerEnv(body.Trigger.Env),
+		Git:                   body.Git,
+		ParentRunID:           body.ParentRunID,
+		ParentNodeID:          body.ParentNodeID,
+		RequestedOutputNodeID: body.RequestedOutputNodeID,
+		RetryOf:               body.RetryOf,
+		RepoInherited:         repoInherited,
+		At:                    time.Now(),
 	}
 
 	principal := s.floodKey(r, "pipeline:"+body.Pipeline)
@@ -943,17 +955,18 @@ func (s *Server) claimSubmissionDigest(principal string, in triggerIntake) (rele
 // safety: Env arrives sanitized; a caller inside the process supplies only keys
 // a run may read, because nothing filters it again here.
 type triggerIntake struct {
-	RunID         string
-	Pipeline      string
-	Args          map[string]string
-	Source        string
-	User          string
-	Env           map[string]string
-	Git           triggerReqGit
-	ParentRunID   string
-	ParentNodeID  string
-	RetryOf       string
-	RepoInherited bool
+	RunID                 string
+	Pipeline              string
+	Args                  map[string]string
+	Source                string
+	User                  string
+	Env                   map[string]string
+	Git                   triggerReqGit
+	ParentRunID           string
+	ParentNodeID          string
+	RequestedOutputNodeID string
+	RetryOf               string
+	RepoInherited         bool
 	// safety: a second intake under one key fails with
 	// store.ErrDuplicateIdempotencyKey rather than starting a second run.
 	IdempotencyKey string
@@ -967,24 +980,25 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 	// safety: the trigger and the run it names are written together, so a guard
 	// that refuses the run leaves no trigger behind for a worker to claim.
 	if err := s.store.CreateTriggerWithRun(ctx, store.Trigger{
-		ID:             in.RunID,
-		Pipeline:       in.Pipeline,
-		Args:           in.Args,
-		TriggerSource:  in.Source,
-		TriggerUser:    in.User,
-		TriggerEnv:     in.Env,
-		GitBranch:      in.Git.Branch,
-		GitSHA:         in.Git.SHA,
-		Repo:           in.Git.Repo,
-		RepoURL:        in.Git.RepoURL,
-		GithubOwner:    in.Git.GithubOwner,
-		GithubRepo:     in.Git.GithubRepo,
-		CreatedAt:      in.At,
-		ParentRunID:    in.ParentRunID,
-		ParentNodeID:   in.ParentNodeID,
-		RetryOf:        in.RetryOf,
-		RepoInherited:  in.RepoInherited,
-		IdempotencyKey: in.IdempotencyKey,
+		ID:                    in.RunID,
+		Pipeline:              in.Pipeline,
+		Args:                  in.Args,
+		TriggerSource:         in.Source,
+		TriggerUser:           in.User,
+		TriggerEnv:            in.Env,
+		GitBranch:             in.Git.Branch,
+		GitSHA:                in.Git.SHA,
+		Repo:                  in.Git.Repo,
+		RepoURL:               in.Git.RepoURL,
+		GithubOwner:           in.Git.GithubOwner,
+		GithubRepo:            in.Git.GithubRepo,
+		CreatedAt:             in.At,
+		ParentRunID:           in.ParentRunID,
+		ParentNodeID:          in.ParentNodeID,
+		RequestedOutputNodeID: in.RequestedOutputNodeID,
+		RetryOf:               in.RetryOf,
+		RepoInherited:         in.RepoInherited,
+		IdempotencyKey:        in.IdempotencyKey,
 	}, store.Run{
 		ID:            in.RunID,
 		Pipeline:      in.Pipeline,
@@ -1150,12 +1164,13 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 			}
 			allowedParent = run.RetryOf != "" && parentRunID == run.RetryOf
 		}
-		live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+		ownedParent, err := s.store.ExecutionCredentialOwnsNode(
+			r.Context(), *binding, binding.RunID, parentNodeID, time.Now())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if !live || !allowedParent || parentNodeID != binding.RootNodeID {
+		if !ownedParent || !allowedParent {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code:    "credential_bound",
 				Message: "execution credential cannot inspect this child lineage",

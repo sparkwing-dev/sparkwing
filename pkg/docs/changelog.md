@@ -26,9 +26,11 @@ unlock.
   controller-owned execution path with a bound, delegated credential and the
   named `hosted` dispatch policy. Schema 48 adds the credential binding that
   prevents older controllers from authenticating it as an ordinary runner and
-  records each active claim's run-owner quota identity. `Client.FinalizeNodeReady`
-  now takes the dispatch policy directly; the HTTP endpoint still accepts an
-  empty request body from an older client.
+  records each active claim's run-owner quota identity. Schema 49 records the
+  one child output a `RunAndAwait` caller may read. `Client.FinalizeNodeReady`
+  now takes the dispatch policy directly, and `Client.EnqueueTriggerForAwait`
+  records that requested child output. The HTTP finalization endpoint still
+  accepts an empty request body from an older client.
   See the [migration guide](docs/migrations/_unreleased.md#bound-hosted-execution-credentials).
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.5, so a fresh scaffold
   compiles against that release.

@@ -783,6 +783,7 @@ CREATE TABLE IF NOT EXISTS triggers (
     repo_inherited        INTEGER NOT NULL DEFAULT 0,
     retry_of              TEXT NOT NULL DEFAULT '',
     parent_node_id        TEXT NOT NULL DEFAULT '',
+    requested_output_node_id TEXT NOT NULL DEFAULT '',
     idempotency_key       TEXT NOT NULL DEFAULT '',
     claim_seq             INTEGER NOT NULL DEFAULT 0,
     claim_principal       TEXT NOT NULL DEFAULT '',
@@ -1069,7 +1070,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 48
+const expectedSchemaVersion = 49
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1842,6 +1843,7 @@ var migrationRequirements = map[int][]string{
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
 	48: {"bound-execution-credentials"},
+	49: {"bound-child-output-grants"},
 }
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
@@ -1996,6 +1998,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		}
 		_, err := tx.ExecContext(ctx, claimQuotaPrincipalIndex)
 		return err
+	case 49:
+		return ensureColumnsSQLite(ctx, tx, "triggers", map[string]string{
+			"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
+		})
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2349,6 +2355,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, claimQuotaPrincipalIndex)
 		return err
+	case 49:
+		return addColumnsTx(ctx, tx, "triggers", map[string]string{
+			"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
+		})
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2591,18 +2601,19 @@ var columnMigrations = []columnSpec{
 		"last_heartbeat_at": "INTEGER",
 	}},
 	{"triggers", map[string]string{
-		"parent_run_id":   "TEXT",
-		"repo":            "TEXT NOT NULL DEFAULT ''",
-		"repo_url":        "TEXT NOT NULL DEFAULT ''",
-		"github_owner":    "TEXT NOT NULL DEFAULT ''",
-		"github_repo":     "TEXT NOT NULL DEFAULT ''",
-		"repo_inherited":  "INTEGER NOT NULL DEFAULT 0",
-		"retry_of":        "TEXT NOT NULL DEFAULT ''",
-		"retry_source":    "TEXT NOT NULL DEFAULT ''",
-		"parent_node_id":  "TEXT NOT NULL DEFAULT ''",
-		"full":            "INTEGER NOT NULL DEFAULT 0",
-		"idempotency_key": "TEXT NOT NULL DEFAULT ''",
-		"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
+		"parent_run_id":            "TEXT",
+		"repo":                     "TEXT NOT NULL DEFAULT ''",
+		"repo_url":                 "TEXT NOT NULL DEFAULT ''",
+		"github_owner":             "TEXT NOT NULL DEFAULT ''",
+		"github_repo":              "TEXT NOT NULL DEFAULT ''",
+		"repo_inherited":           "INTEGER NOT NULL DEFAULT 0",
+		"retry_of":                 "TEXT NOT NULL DEFAULT ''",
+		"retry_source":             "TEXT NOT NULL DEFAULT ''",
+		"parent_node_id":           "TEXT NOT NULL DEFAULT ''",
+		"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
+		"full":                     "INTEGER NOT NULL DEFAULT 0",
+		"idempotency_key":          "TEXT NOT NULL DEFAULT ''",
+		"claim_seq":                "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"concurrency_waiters", map[string]string{
 		"holder_id":         "TEXT NOT NULL DEFAULT ''",
@@ -6286,6 +6297,9 @@ type Trigger struct {
 	// ParentNodeID: which parent node spawned this; for retry-lineage
 	// chaining across nested spawns.
 	ParentNodeID string `json:"parent_node_id,omitempty"`
+	// RequestedOutputNodeID is the one node output the spawning
+	// RunAndAwait caller waits for. Empty means it waits only for status.
+	RequestedOutputNodeID string `json:"requested_output_node_id,omitempty"`
 	// Full: "rerun all" mode for manual retries. When true, the
 	// orchestrator ignores skip-passed rehydration and re-executes
 	// every node even though retry_of is set. The dashboard's
@@ -6467,12 +6481,13 @@ func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
 		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-		              idempotency_key, webhook_delivery, webhook_replay_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id,
+		              requested_output_node_id, "full", idempotency_key, webhook_delivery, webhook_replay_key)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
-		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
+		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID,
+		t.RequestedOutputNodeID, fullInt,
 		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
 	)
 	if err != nil && isUniqueViolation(err) {
@@ -6898,7 +6913,8 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id,
+       requested_output_node_id, "full",
        idempotency_key, claim_seq, webhook_delivery
   FROM triggers
  WHERE status = ? AND available_at <= ?
@@ -6936,7 +6952,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	err = tx.QueryRowContext(ctx, sel, args...).Scan(
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID,
+		&t.RequestedOutputNodeID, &fullInt,
 		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery,
 	)
 	if parent.Valid {
@@ -7571,12 +7588,14 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id,
+       requested_output_node_id, "full",
        idempotency_key, claim_seq, webhook_delivery
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID,
+		&t.RequestedOutputNodeID, &fullInt,
 		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
 		return nil, err
 	}
@@ -7612,12 +7631,14 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id,
+       requested_output_node_id, parent_run_id, "full",
        idempotency_key, claim_seq, webhook_delivery
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID,
+		&t.RequestedOutputNodeID, &parent, &fullInt,
 		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -7728,7 +7749,8 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id,
+       requested_output_node_id, "full",
        idempotency_key, claim_seq, webhook_delivery
   FROM triggers`
 	const orderAndLimit = `
@@ -7799,7 +7821,8 @@ func (s *Store) listTriggerPage(ctx context.Context, query string, args []any) (
 		if err := rows.Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
-			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID,
+			&t.RequestedOutputNodeID, &fullInt,
 			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
 			return nil, err
 		}

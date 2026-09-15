@@ -567,6 +567,9 @@ type TriggerRequest struct {
 	// spawning, so a parent retry can locate the prior child by
 	// (parent_run_id, parent_node_id, pipeline).
 	ParentNodeID string `json:"parent_node_id,omitempty"`
+	// RequestedOutputNodeID names the child output the spawning
+	// RunAndAwait call will read. Empty means it waits only for status.
+	RequestedOutputNodeID string `json:"requested_output_node_id,omitempty"`
 	// RetryOf marks this trigger as a retry of the named run; used by
 	// skip-passed rehydration to seed outputs from the prior run.
 	RetryOf string `json:"retry_of,omitempty"`
@@ -887,12 +890,45 @@ func (c *Client) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error) {
+	return c.enqueueTriggerRequest(ctx, pipeline, args, parentRunID, parentNodeID, "", retryOf,
+		source, user, repo, branch, triggerEnv)
+}
+
+// EnqueueTriggerForAwait records the one child output a RunAndAwait caller
+// may read through its execution credential.
+func (c *Client) EnqueueTriggerForAwait(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	requestedOutputNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
+	return c.enqueueTriggerRequest(ctx, pipeline, args, parentRunID, parentNodeID, requestedOutputNodeID, retryOf,
+		source, user, repo, branch, triggerEnv)
+}
+
+func (c *Client) enqueueTriggerRequest(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID, parentNodeID, requestedOutputNodeID, retryOf string,
+	source, user, repo, branch string,
+	triggerEnv map[string]string,
+) (string, error) {
 	req := TriggerRequest{
-		Pipeline:     pipeline,
-		Args:         args,
-		ParentRunID:  parentRunID,
-		ParentNodeID: parentNodeID,
-		RetryOf:      retryOf,
+		Pipeline:              pipeline,
+		Args:                  args,
+		ParentRunID:           parentRunID,
+		ParentNodeID:          parentNodeID,
+		RequestedOutputNodeID: requestedOutputNodeID,
+		RetryOf:               retryOf,
 		Trigger: TriggerMeta{
 			Source: source,
 			User:   user,

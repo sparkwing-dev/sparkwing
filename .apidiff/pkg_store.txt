@@ -1569,6 +1569,8 @@ type Trigger struct {
 
 	ParentNodeID string
 
+	RequestedOutputNodeID string
+
 	Full bool
 
 	IdempotencyKey string

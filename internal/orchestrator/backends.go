@@ -227,6 +227,12 @@ func (s3StateAdapter) EnqueueTriggerWithEnv(
 	return "", ErrTriggersUnsupported
 }
 
+func (s3StateAdapter) EnqueueTriggerForAwait(
+	context.Context, string, map[string]string, string, string, string, string, string, string, string, string, map[string]string,
+) (string, error) {
+	return "", ErrTriggersUnsupported
+}
+
 func (s3StateAdapter) ListNodes(context.Context, string) ([]*store.Node, error) {
 	return nil, s3Unsupported("ListNodes")
 }
@@ -560,6 +566,24 @@ func (l localState) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error) {
+	return l.EnqueueTriggerForAwait(ctx, pipeline, args, parentRunID, parentNodeID, "", retryOf,
+		source, user, repo, branch, triggerEnv)
+}
+
+func (l localState) EnqueueTriggerForAwait(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	requestedOutputNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error) {
 	if pipeline == "" {
 		return "", errors.New("EnqueueTrigger: pipeline required")
 	}
@@ -581,17 +605,18 @@ func (l localState) EnqueueTriggerWithEnv(
 	}
 	runID := localNewRunID()
 	tg := store.Trigger{
-		ID:            runID,
-		Pipeline:      pipeline,
-		Args:          args,
-		TriggerSource: firstNonEmptyStr(source, "await-pipeline"),
-		TriggerUser:   user,
-		CreatedAt:     time.Now(),
-		ParentRunID:   parentRunID,
-		ParentNodeID:  parentNodeID,
-		RetryOf:       retryOf,
-		TriggerEnv:    triggerEnv,
-		RepoInherited: repo == "" && parentRunID != "",
+		ID:                    runID,
+		Pipeline:              pipeline,
+		Args:                  args,
+		TriggerSource:         firstNonEmptyStr(source, "await-pipeline"),
+		TriggerUser:           user,
+		CreatedAt:             time.Now(),
+		ParentRunID:           parentRunID,
+		ParentNodeID:          parentNodeID,
+		RequestedOutputNodeID: requestedOutputNodeID,
+		RetryOf:               retryOf,
+		TriggerEnv:            triggerEnv,
+		RepoInherited:         repo == "" && parentRunID != "",
 	}
 	if repo != "" {
 		tg.Repo = repo
@@ -635,6 +660,23 @@ type triggerEnqueuerWithEnv interface {
 	) (string, error)
 }
 
+type triggerAwaitEnqueuer interface {
+	EnqueueTriggerForAwait(
+		ctx context.Context,
+		pipeline string,
+		args map[string]string,
+		parentRunID string,
+		parentNodeID string,
+		requestedOutputNodeID string,
+		retryOf string,
+		source string,
+		user string,
+		repo string,
+		branch string,
+		triggerEnv map[string]string,
+	) (string, error)
+}
+
 func enqueueTriggerWithEnv(
 	ctx context.Context,
 	state StateBackend,
@@ -659,6 +701,22 @@ func enqueueTriggerWithEnv(
 		return "", errors.New("EnqueueTriggerWithEnv: state backend cannot persist trigger env")
 	}
 	return state.EnqueueTrigger(ctx, pipeline, args, parentRunID, parentNodeID, retryOf, source, user, repo, branch)
+}
+
+func enqueueTriggerForAwait(
+	ctx context.Context,
+	state StateBackend,
+	pipeline string,
+	args map[string]string,
+	parentRunID, parentNodeID, requestedOutputNodeID, retryOf string,
+	source, user, repo, branch string,
+	triggerEnv map[string]string,
+) (string, error) {
+	if awaiter, ok := state.(triggerAwaitEnqueuer); ok {
+		return awaiter.EnqueueTriggerForAwait(ctx, pipeline, args, parentRunID, parentNodeID,
+			requestedOutputNodeID, retryOf, source, user, repo, branch, triggerEnv)
+	}
+	return "", errors.New("RunAndAwait: state backend cannot persist the requested output node")
 }
 
 func sparkwingGithubSplit(slug string) (owner, repo string) {

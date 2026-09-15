@@ -228,8 +228,8 @@ func RunNodeOnce(
 				}
 			}
 
-			childRunID, err := stateClient.EnqueueTriggerWithEnv(innerCtx,
-				req.Pipeline, req.Args, runID, currentNode, childRetryOf,
+			childRunID, err := stateClient.EnqueueTriggerForAwait(innerCtx,
+				req.Pipeline, req.Args, runID, currentNode, req.NodeID, childRetryOf,
 				"await-pipeline", "", req.Repo, req.Branch, nil)
 			if err != nil {
 				return nil, fmt.Errorf("enqueue trigger: %w", err)

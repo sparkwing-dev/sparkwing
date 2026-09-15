@@ -65,6 +65,10 @@ type loopbackTriggerEnqueuerWithEnv interface {
 	EnqueueTriggerWithEnv(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string, triggerEnv map[string]string) (string, error)
 }
 
+type loopbackTriggerAwaitEnqueuer interface {
+	EnqueueTriggerForAwait(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, requestedOutputNodeID, retryOf, source, user, repo, branch string, triggerEnv map[string]string) (string, error)
+}
+
 type loopbackExecutionRunGetter interface {
 	GetRunForExecution(ctx context.Context, runID string) (*store.Run, error)
 }
@@ -994,7 +998,14 @@ func (l *Loopback) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	var runID string
 	var err error
-	if withEnv, ok := l.state.(loopbackTriggerEnqueuerWithEnv); ok {
+	if awaiter, ok := l.state.(loopbackTriggerAwaitEnqueuer); ok {
+		runID, err = awaiter.EnqueueTriggerForAwait(r.Context(), body.Pipeline, body.Args,
+			body.ParentRunID, body.ParentNodeID, body.RequestedOutputNodeID, body.RetryOf,
+			body.Trigger.Source, body.Trigger.User, body.Git.Repo, body.Git.Branch, env)
+	} else if body.RequestedOutputNodeID != "" {
+		writeError(w, http.StatusBadRequest, errors.New("state backend cannot persist the requested output node"))
+		return
+	} else if withEnv, ok := l.state.(loopbackTriggerEnqueuerWithEnv); ok {
 		runID, err = withEnv.EnqueueTriggerWithEnv(r.Context(), body.Pipeline, body.Args,
 			body.ParentRunID, body.ParentNodeID, body.RetryOf,
 			body.Trigger.Source, body.Trigger.User, body.Git.Repo, body.Git.Branch, env)

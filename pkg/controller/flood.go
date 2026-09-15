@@ -266,7 +266,7 @@ func submissionDigest(principal string, in triggerIntake) string {
 	// safety: a 409 names another caller's run id, so the digest is scoped to
 	// the principal and one tenant can never be answered with another's run.
 	write(principal)
-	write(in.Pipeline, in.Source, in.User, in.ParentRunID, in.ParentNodeID, in.RetryOf)
+	write(in.Pipeline, in.Source, in.User, in.ParentRunID, in.ParentNodeID, in.RequestedOutputNodeID, in.RetryOf)
 	write(in.Git.Branch, in.Git.SHA, in.Git.Repo, in.Git.RepoURL, in.Git.GithubOwner, in.Git.GithubRepo)
 	writeSortedMap(write, in.Args)
 	writeSortedMap(write, in.Env)

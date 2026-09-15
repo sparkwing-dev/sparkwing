@@ -27,12 +27,18 @@ func downgradeBoundExecutionToV47(t *testing.T, db *sql.DB) {
 	if _, err := db.Exec(`ALTER TABLE nodes DROP COLUMN claim_quota_principal`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`ALTER TABLE triggers DROP COLUMN requested_output_node_id`); err != nil {
+		t.Fatal(err)
+	}
 	for _, column := range boundExecutionTokenColumns {
 		if _, err := db.Exec(`ALTER TABLE tokens DROP COLUMN ` + column); err != nil {
 			t.Fatalf("drop tokens.%s: %v", column, err)
 		}
 	}
 	if _, err := db.Exec(`DELETE FROM sparkwing_requirements WHERE name = 'bound-execution-credentials'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM sparkwing_requirements WHERE name = 'bound-child-output-grants'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 48`); err != nil {

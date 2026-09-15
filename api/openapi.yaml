@@ -4501,6 +4501,7 @@ components:
           type: string
           enum: ["", manual, auto]
         parent_node_id: {type: string}
+        requested_output_node_id: {type: string}
         full: {type: boolean}
         repo_inherited:
           type: boolean
@@ -4554,6 +4555,7 @@ components:
             github_repo: {type: string}
         parent_run_id: {type: string}
         parent_node_id: {type: string}
+        requested_output_node_id: {type: string}
         retry_of: {type: string}
     Approval:
       x-sparkwing-go-type: pkg/store.Approval

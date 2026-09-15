@@ -36,6 +36,14 @@ type Principal struct {
 
 // HasScope reports whether the principal carries the named scope.
 func (p *Principal) HasScope(s string) bool {
+	if p == nil {
+		return false
+	}
+	// safety: execution credentials remain confined even if their internal
+	// issuer accidentally copies an administrative scope from a pool token.
+	if p.executionBinding != nil && s == ScopeAdmin {
+		return false
+	}
 	return slices.Contains(p.Scopes, s)
 }
 

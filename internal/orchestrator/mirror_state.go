@@ -338,6 +338,18 @@ func (m *mirrorStateBackend) EnqueueTriggerWithEnv(
 	)
 }
 
+func (m *mirrorStateBackend) EnqueueTriggerForAwait(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID, parentNodeID, requestedOutputNodeID, retryOf string,
+	source, user, repo, branch string,
+	triggerEnv map[string]string,
+) (string, error) {
+	return enqueueTriggerForAwait(ctx, m.canonical, pipeline, args, parentRunID, parentNodeID,
+		requestedOutputNodeID, retryOf, source, user, repo, branch, triggerEnv)
+}
+
 func (m *mirrorStateBackend) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error) {
 	return m.canonical.ListNodeMetrics(ctx, runID, nodeID)
 }

@@ -1713,8 +1713,8 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 
-		childRunID, err := enqueueTriggerWithEnv(ctx, s.backends.State,
-			req.Pipeline, req.Args, s.runID, currentNode, childRetryOf,
+		childRunID, err := enqueueTriggerForAwait(ctx, s.backends.State,
+			req.Pipeline, req.Args, s.runID, currentNode, req.NodeID, childRetryOf,
 			"await-pipeline", "", req.Repo, req.Branch,
 			leaseTriggerEnv(ctx),
 		)

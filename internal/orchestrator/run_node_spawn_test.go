@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -194,10 +195,23 @@ func TestRunNodeOnce_BoundCredentialCreatesAndReadsDirectChildRun(t *testing.T) 
 			return
 		}
 		finished := time.Now()
-		childFinished <- st.CreateRun(context.Background(), store.Run{
-			ID: childID, Pipeline: "bound-await-child", Status: "success",
-			StartedAt: finished, FinishedAt: &finished,
-		})
+		if err := st.CreateRun(context.Background(), store.Run{
+			ID: childID, Pipeline: "bound-await-child", Status: "running", StartedAt: finished,
+		}); err != nil {
+			childFinished <- err
+			return
+		}
+		if err := st.CreateNode(context.Background(), store.Node{
+			RunID: childID, NodeID: "result", Status: "pending",
+		}); err != nil {
+			childFinished <- err
+			return
+		}
+		if err := st.FinishNode(context.Background(), childID, "result", "success", "", []byte(`{"value":"ok"}`)); err != nil {
+			childFinished <- err
+			return
+		}
+		childFinished <- st.FinishRun(context.Background(), childID, "success", "")
 	}()
 
 	res, err := orchestrator.RunNodeOnce(ctx, controllerURL, "", "run-bound-await", "parent",
@@ -222,11 +236,21 @@ func (podSpawnFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwin
 
 type boundAwaitPipe struct{ sparkwing.Base }
 
+type boundAwaitOutput struct {
+	Value string `json:"value"`
+}
+
 func (boundAwaitPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "parent", func(ctx context.Context) error {
-		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "bound-await-child", "",
+		output, err := sparkwing.RunAndAwait[boundAwaitOutput, sparkwing.NoInputs](ctx, "bound-await-child", "result",
 			sparkwing.WithFreshTimeout(5*time.Second))
-		return err
+		if err != nil {
+			return err
+		}
+		if output.Value != "ok" {
+			return fmt.Errorf("child output value = %q, want ok", output.Value)
+		}
+		return nil
 	})
 	return nil
 }

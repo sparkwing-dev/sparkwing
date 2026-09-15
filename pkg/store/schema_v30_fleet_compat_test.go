@@ -24,7 +24,7 @@ var fleetRequirementNames = []string{
 // safety: every requirement a migration above v29 stamps, so a fixture wound
 // back below one of them does not keep listing what it can no longer support.
 var postV29RequirementNames = append(append([]string{}, fleetRequirementNames...),
-	"cron-schedule-names-v1", "bound-execution-credentials")
+	"cron-schedule-names-v1", "bound-execution-credentials", "bound-child-output-grants")
 
 func deleteFleetRequirements(t *testing.T, db *sql.DB) {
 	t.Helper()

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -485,7 +484,20 @@ func (s *Server) triggerClaimRequest(w http.ResponseWriter, r *http.Request, run
 
 func (s *Server) runClaimRequest(w http.ResponseWriter, r *http.Request, runID string) (*http.Request, bool) {
 	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p.HasScope(ScopeAdmin) {
+	if !ok {
+		return r, true
+	}
+	if binding, bound := executionBindingFromContext(r.Context()); bound {
+		if runID != binding.RunID {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "credential_bound", Principal: p.label(),
+				Message: "execution credential does not own run " + runID,
+			})
+			return r, false
+		}
+		return s.executionCredentialNodeRequest(w, r, *binding, runID, binding.RootNodeID)
+	}
+	if p.HasScope(ScopeAdmin) {
 		return r, true
 	}
 	hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
@@ -529,7 +541,7 @@ func (s *Server) runClaimRequest(w http.ResponseWriter, r *http.Request, runID s
 func (s *Server) claimedBy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
-		if !ok || p.HasScope(ScopeAdmin) {
+		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -543,35 +555,15 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 				})
 				return
 			}
-			fence, fenceErr := nodeClaimFenceFromRequest(r)
-			if fenceErr != nil || fence.HolderID != binding.HolderID || fence.ClaimGeneration != binding.ClaimGeneration {
-				writeError(w, http.StatusConflict, store.ErrLockHeld)
+			var allowed bool
+			r, allowed = s.executionCredentialNodeRequest(w, r, *binding, runID, nodeID)
+			if !allowed {
 				return
 			}
-			live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-			if !live {
-				writeError(w, http.StatusConflict, store.ErrLockHeld)
-				return
-			}
-			owned, err := s.store.ExecutionCredentialOwnsNode(r.Context(), *binding, runID, nodeID, time.Now())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-			if !owned {
-				writeAuthError(w, http.StatusForbidden, authErrorBody{
-					Code: "credential_bound", Principal: p.label(),
-					Message: "execution credential does not own node " + runID + "/" + nodeID,
-				})
-				return
-			}
-			r = r.WithContext(store.WithExecutionCredentialFence(r.Context(), store.ExecutionCredentialFence{
-				Binding: *binding, Fence: fence,
-			}))
+			next.ServeHTTP(w, r)
+			return
+		}
+		if p.HasScope(ScopeAdmin) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -816,36 +808,14 @@ func (s *Server) executionCredentialAllowsRun(
 	if err != nil {
 		return false, err
 	}
-	return trigger.ParentRunID == binding.RunID && trigger.ParentNodeID == binding.RootNodeID, nil
+	if trigger.ParentRunID != binding.RunID {
+		return false, nil
+	}
+	return s.store.ExecutionCredentialOwnsNode(ctx, binding, binding.RunID, trigger.ParentNodeID, time.Now())
 }
 
 func (s *Server) executionCredentialAllowsRead(r *http.Request, binding store.ExecutionCredentialBinding) (bool, error) {
-	runID := r.PathValue("id")
-	allowed, err := s.executionCredentialAllowsRun(r.Context(), binding, runID)
-	if err != nil || !allowed {
-		return allowed, err
-	}
-	if runID != binding.RunID {
-		return true, nil
-	}
-	nodeID := r.PathValue("nodeID")
-	if nodeID == "" {
-		if strings.HasSuffix(r.URL.Path, "/nodes") || strings.HasSuffix(r.URL.Path, "/steps") {
-			return false, nil
-		}
-		return true, nil
-	}
-	if store.ExecutionCredentialAllowsNode(binding, runID, nodeID) {
-		return s.store.ExecutionCredentialOwnsNode(r.Context(), binding, runID, nodeID, time.Now())
-	}
-	if !strings.HasSuffix(r.URL.Path, "/output") {
-		return false, nil
-	}
-	root, err := s.store.GetNode(r.Context(), binding.RunID, binding.RootNodeID)
-	if err != nil {
-		return false, err
-	}
-	return slices.Contains(root.Deps, nodeID), nil
+	return s.executionCredentialAllowsHTTP(r.Context(), r, r.Pattern, binding)
 }
 
 // safety: a profile outlives the run that writes it, so a write needs a live claim
@@ -855,7 +825,7 @@ func (s *Server) executionCredentialAllowsRead(r *http.Request, binding store.Ex
 func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
-		if !ok || p.HasScope(ScopeAdmin) {
+		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -877,6 +847,10 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 				})
 				return
 			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		if p.HasScope(ScopeAdmin) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -984,7 +958,8 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //     pass-through.
 func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(s.tokenBudgeted(unsupportedRouteFallback(mux))))
+	router.Handle("/", s.authenticated(s.tokenBudgeted(
+		s.executionCredentialBoundary(mux, unsupportedRouteFallback(mux)))))
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 }
