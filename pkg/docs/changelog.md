@@ -22,6 +22,11 @@ unlock.
 
 ### Changed
 
+- **release:** The local cut checks published module freshness, coherent SDK
+  pins and changelog links before preparing release notes, then validates the
+  rolled notes and migration guide before committing. These checks run before
+  push-tag; hosted release remains build and publish only.
+
 - **release:** build each platform's binaries together, share one dashboard
   build, and package the released Linux executables into images. Older stable
   releases published later no longer replace a higher published version as

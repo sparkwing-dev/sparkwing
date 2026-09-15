@@ -37,6 +37,16 @@ var sparkwingPinArtifacts = []string{
 }
 
 func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
+	return checkVersionsFreshness(ctx, repoRoot, true)
+}
+
+// safety: a release may come from an older checkout; a local replacement's
+// distance from origin/main is a development check, not a published-pin check.
+func checkPublishedVersionsFreshness(ctx context.Context, repoRoot string) error {
+	return checkVersionsFreshness(ctx, repoRoot, false)
+}
+
+func checkVersionsFreshness(ctx context.Context, repoRoot string, checkLocalReplacements bool) error {
 	mods, err := findGoModFiles(repoRoot)
 	if err != nil {
 		return fmt.Errorf("scan go.mod files: %w", err)
@@ -65,6 +75,9 @@ func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 					if msg := checkAgainstLatest(ctx, retracted, replace.New.Path, replace.New.Version, modPath); msg != "" {
 						problems = append(problems, fmt.Sprintf("%s: %s", relMod, msg))
 					}
+					continue
+				}
+				if !checkLocalReplacements {
 					continue
 				}
 				localPath, err := resolveLocalReplacePath(replace.New.Path, modPath)

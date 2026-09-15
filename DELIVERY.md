@@ -56,7 +56,8 @@ not hosted latency.
 - **The three check classes and their budgets:** `pre-commit` is the source
   policy at 3 seconds, `pre-push` the fast tier at 10 seconds, and the release
   cut, the `release-cut-checks` job the `release` pipeline runs before it tags,
-  5 minutes for build, the full linter and the fast test class in parallel.
+  5 minutes for build, full lint, the fast test class, published-version and
+  SDK-pin checks, and changelog-link checks in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
@@ -359,11 +360,13 @@ not hosted latency.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local
-  `release` pipeline is seven cheap nodes -- resolve a version that outranks the
-  newest tag origin carries, check the tree is clean, rename the changelog
-  `[Unreleased]` section to the version, check that section accounts for any
-  schema or wire cut, commit, tag, push the branch and the tag -- and refuses
-  nothing about where origin's branch tip is, so a tag can be cut from any
+  `release` pipeline checks the chosen version against origin tags, checks the
+  clean tree, and verifies published module freshness, coherent SDK pins and
+  changelog links in the fixed five-minute build/lint/short-test class. It then
+  renames `[Unreleased]`, rolls the migration guide, validates the resulting
+  section and guide before committing, and checks schema/wire change coverage.
+  All refusals precede push-tag. Freshness checks published versions, not the
+  position of local replacements against origin/main, so a cut may use an older
   commit. Preview with
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run`, then
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow
@@ -376,8 +379,8 @@ not hosted latency.
   notes come from that tag's changelog section, and fall back to the annotated
   tag message and then to a pointer at CHANGELOG.md when the tagged source has
   no section. A failed build publishes nothing; the fix is a later patch tag,
-  never a re-cut of a published one. The CI/CD group is reintroducing the
-  release-side checks deliberately, one at a time.
+  never a re-cut of a published one. State-dependent source checks belong in
+  the local cut, before the tag exists.
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
   bundle is unchanged, then exercise the installed CLI and daemon. To exercise a

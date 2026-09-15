@@ -33,7 +33,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before it tags, the release cut runs its check class: build, the full linter and the fast test class in parallel, budgeted at five minutes, which fails the cut when it overruns. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
+	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, SDK pin coherence and changelog links alongside build, full lint and the fast test class, under one fixed five-minute budget. Local replacement checkouts are not required to match origin/main. Rolled changelog and migration-guide checks run before the changelog commit, and every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -112,8 +112,27 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	budget.step(w, "build", runBuild)
 	budget.step(w, "lint", runGolangciLint)
 	budget.step(w, "test", runShortTest)
+	budget.step(w, "version-freshness", func(ctx context.Context) error {
+		return checkPublishedVersionsFreshness(ctx, sparkwing.WorkDir())
+	})
+	budget.step(w, "sdk-pins", func(context.Context) error {
+		return checkReleasePins(sparkwing.WorkDir())
+	})
+	budget.step(w, "changelog-links", checkChangelogLinks)
 	budget.verdict(w)
 	return nil, nil
+}
+
+func checkReleasePins(repoDir string) error {
+	_, aligned, err := coherentReleaseVersionArtifacts(repoDir)
+	if err != nil {
+		return fmt.Errorf("release sdk-pins: %w", err)
+	}
+	if !aligned {
+		return fmt.Errorf("release sdk-pins: align %s, %s, .sparkwing/go.mod and %s/go.mod before cutting a release",
+			scaffoldFallbackRel, scaffoldAPISnapshotRel, kubernetesE2EPipelineModuleRel)
+	}
+	return nil
 }
 
 func repoRoot() (string, error) {
@@ -348,6 +367,12 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	}
 	if err := writeChangelogPair(j.RepoDir, body); err != nil {
 		return fmt.Errorf("release: %w", err)
+	}
+	if err := checkChangelogSection(ctx, j.RepoDir, version); err != nil {
+		return fmt.Errorf("release changelog-section: %w", err)
+	}
+	if err := checkMigrationGuide(ctx, j.RepoDir, version); err != nil {
+		return fmt.Errorf("release migration-guide: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, append([]string{"add"}, staged...)...); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
