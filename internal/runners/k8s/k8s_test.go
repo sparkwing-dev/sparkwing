@@ -1203,3 +1203,162 @@ func TestObserveUnschedulable_ReportsTheSchedulersMessage(t *testing.T) {
 		})
 	}
 }
+
+func classJob(t *testing.T, cfg Config, cores int64) *batchv1.Job {
+	t.Helper()
+	class := store.CPUClass{Cores: cores, MemoryBytes: store.CPUClassMemoryBytes(cores)}
+	return (&Runner{cfg: cfg}).buildJob("job-name",
+		runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, class, store.NodeClaimFence{})
+}
+
+func bandToleration(pod corev1.PodSpec) *corev1.Toleration {
+	for i, tol := range pod.Tolerations {
+		if tol.Key == "sparkwing.dev/cpu-band" {
+			return &pod.Tolerations[i]
+		}
+	}
+	return nil
+}
+
+func TestBuildJob_PlacesEachClassOnItsCPUBand(t *testing.T) {
+	for _, tc := range []struct {
+		cores        int64
+		band         string
+		wholeMachine bool
+	}{
+		{cores: 2, band: ""},
+		{cores: 4, band: "small"},
+		{cores: 8, band: "small"},
+		{cores: 16, band: "large", wholeMachine: true},
+		{cores: 32, band: "large", wholeMachine: true},
+		{cores: 64, band: "large", wholeMachine: true},
+	} {
+		t.Run(strconv.FormatInt(tc.cores, 10), func(t *testing.T) {
+			job := classJob(t, Config{Image: "img"}, tc.cores)
+			pod := job.Spec.Template.Spec
+
+			if tc.band == "" {
+				if pod.NodeSelector != nil {
+					t.Fatalf("nodeSelector = %v, want none for a warm-pool class", pod.NodeSelector)
+				}
+				if tol := bandToleration(pod); tol != nil {
+					t.Fatalf("toleration = %#v, want none for a warm-pool class", tol)
+				}
+				if pod.Affinity != nil {
+					t.Fatalf("affinity = %#v, want none for a warm-pool class", pod.Affinity)
+				}
+				if _, ok := job.Spec.Template.Labels["sparkwing.dev/cpu-band"]; ok {
+					t.Fatalf("pod labels = %v, want no band label", job.Spec.Template.Labels)
+				}
+				return
+			}
+
+			if got := pod.NodeSelector["sparkwing.dev/cpu-band"]; got != tc.band {
+				t.Fatalf("nodeSelector band = %q, want %q", got, tc.band)
+			}
+			tol := bandToleration(pod)
+			if tol == nil {
+				t.Fatalf("tolerations = %#v, want one for the %s band taint", pod.Tolerations, tc.band)
+			}
+			if tol.Value != tc.band || tol.Effect != corev1.TaintEffectNoSchedule ||
+				tol.Operator != corev1.TolerationOpEqual {
+				t.Fatalf("toleration = %#v, want %s NoSchedule on Equal", tol, tc.band)
+			}
+			if got := job.Spec.Template.Labels["sparkwing.dev/cpu-band"]; got != tc.band {
+				t.Fatalf("pod band label = %q, want %q so the anti-affinity term can select it", got, tc.band)
+			}
+
+			term := podAntiAffinityTerm(pod)
+			if !tc.wholeMachine {
+				if term != nil {
+					t.Fatalf("anti-affinity = %#v, want none below the large band", term)
+				}
+				return
+			}
+			if term == nil {
+				t.Fatal("no required anti-affinity term, so two large Jobs may share one node")
+			}
+			if term.TopologyKey != "kubernetes.io/hostname" {
+				t.Fatalf("topologyKey = %q, want kubernetes.io/hostname", term.TopologyKey)
+			}
+			if term.LabelSelector == nil || term.LabelSelector.MatchLabels["sparkwing.dev/cpu-band"] != tc.band {
+				t.Fatalf("anti-affinity selector = %#v, want the %s band label", term.LabelSelector, tc.band)
+			}
+		})
+	}
+}
+
+func podAntiAffinityTerm(pod corev1.PodSpec) *corev1.PodAffinityTerm {
+	if pod.Affinity == nil || pod.Affinity.PodAntiAffinity == nil {
+		return nil
+	}
+	terms := pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	if len(terms) == 0 {
+		return nil
+	}
+	return &terms[0]
+}
+
+func TestBuildJob_MergesTheBandWithTheOperatorsOwnPlacement(t *testing.T) {
+	cfg := Config{
+		Image:        "img",
+		NodeSelector: map[string]string{"pool": "runners"},
+		Tolerations: []corev1.Toleration{{
+			Key: "dedicated", Operator: corev1.TolerationOpEqual,
+			Value: "sparkwing", Effect: corev1.TaintEffectNoSchedule,
+		}},
+	}
+	pod := classJob(t, cfg, 8).Spec.Template.Spec
+	want := map[string]string{"pool": "runners", "sparkwing.dev/cpu-band": "small"}
+	if !reflect.DeepEqual(pod.NodeSelector, want) {
+		t.Fatalf("nodeSelector = %v, want %v", pod.NodeSelector, want)
+	}
+	if len(pod.Tolerations) != 2 || pod.Tolerations[0].Key != "dedicated" {
+		t.Fatalf("tolerations = %#v, want the operator's kept beside the band's", pod.Tolerations)
+	}
+	if cfg.NodeSelector["sparkwing.dev/cpu-band"] != "" || len(cfg.Tolerations) != 1 {
+		t.Fatalf("buildJob wrote back into the operator's config: %#v", cfg)
+	}
+}
+
+func TestBuildJob_LetsTheOperatorOverrideTheBand(t *testing.T) {
+	cfg := Config{
+		Image:        "img",
+		NodeSelector: map[string]string{"sparkwing.dev/cpu-band": "house"},
+		Tolerations: []corev1.Toleration{{
+			Key: "sparkwing.dev/cpu-band", Operator: corev1.TolerationOpExists,
+		}},
+	}
+	pod := classJob(t, cfg, 16).Spec.Template.Spec
+	if got := pod.NodeSelector["sparkwing.dev/cpu-band"]; got != "house" {
+		t.Fatalf("nodeSelector band = %q, want the operator's own value", got)
+	}
+	if len(pod.Tolerations) != 1 || pod.Tolerations[0].Operator != corev1.TolerationOpExists {
+		t.Fatalf("tolerations = %#v, want only the operator's own entry", pod.Tolerations)
+	}
+}
+
+func TestBuildJob_ToleratesThePoolItSelects(t *testing.T) {
+	cfg := Config{
+		Image:        "img",
+		NodeSelector: map[string]string{"sparkwing.dev/cpu-band": "house"},
+	}
+	job := classJob(t, cfg, 16)
+	pod := job.Spec.Template.Spec
+	tol := bandToleration(pod)
+	if tol == nil {
+		t.Fatalf("tolerations = %#v, want one for the pool the selector names", pod.Tolerations)
+	}
+	if tol.Value != "house" {
+		t.Fatalf("toleration value = %q, want house: a pod that selects the operator's pool "+
+			"and tolerates another value never schedules", tol.Value)
+	}
+	if got := job.Spec.Template.Labels["sparkwing.dev/cpu-band"]; got != "house" {
+		t.Fatalf("pod band label = %q, want house", got)
+	}
+	term := podAntiAffinityTerm(pod)
+	if term == nil || term.LabelSelector.MatchLabels["sparkwing.dev/cpu-band"] != "house" {
+		t.Fatalf("anti-affinity selector = %#v, want the pool the pod actually lands on", term)
+	}
+}
