@@ -109,7 +109,8 @@ file. Other syntax and workflow checks remain active.
   2 s in the push tier. A commit and a push together stay under the ten seconds
   the tiers are budgeted.
 - **Which tier decides a merge:** the hooks judge what they can in seconds and
-  nothing more, so main may go red. Main is where the broad checks run:
+  nothing more, so main may go red. Follow the [release failure policy](#release-failure-policy).
+  Main is where the broad checks run:
   `gate` and `pre-release` run in hosted CI on every pull request and every
   push to main. A tag re-runs nothing, so what main is green for is what ships.
   Run `sparkwing run gate` yourself when a change is broad enough that a hosted
@@ -384,9 +385,9 @@ file. Other syntax and workflow checks remain active.
   git push origin vX.Y.Z` from any commit therefore publishes a release. The
   notes come from that tag's changelog section, and fall back to the annotated
   tag message and then to a pointer at CHANGELOG.md when the tagged source has
-  no section. A failed build publishes nothing; the fix is a later patch tag,
-  never a re-cut of a published one. State-dependent source checks belong in
-  the local cut, before the tag exists.
+  no section. State-dependent source checks belong in the local cut, before
+  the tag exists. Handle refusals and failed builds through the
+  [release failure policy](#release-failure-policy).
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
   bundle is unchanged, then exercise the installed CLI and daemon. To exercise a
@@ -397,3 +398,14 @@ file. Other syntax and workflow checks remain active.
   store migration keeps the older `sparkwing` working on the same database. Verify SDK,
   templates, integrations, browser behavior, or release assets when those
   surfaces changed.
+
+## Release failure policy
+
+Main may be red. If a change breaks it and the fix is not obvious, revert that
+change first. Fix local preflight refusals on main, rerun the affected checks
+after the correction, and retry the cut. Fix a failed hosted build forward on
+main and publish a later patch tag. Never re-cut or move a published release tag.
+
+Do not rerun an unchanged failing check merely to obtain green. A demonstrated
+environment or tool setup correction can justify rerunning the same source.
+Retain the original failure and correction as evidence.
