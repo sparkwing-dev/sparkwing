@@ -727,6 +727,31 @@ func syncDocsMirror(ctx context.Context, repoRoot string) error {
 	return nil
 }
 
+const pinBumpFallbackEmail = "gates@sparkwing.invalid"
+
+const pinBumpFallbackName = "sparkwing gates"
+
+// safety: a commit needs an author and a checkout nobody configured has none, so the
+// bump names one rather than failing. A box that configured an identity keeps it,
+// because the fallback is what the commit takes only where both fields are empty.
+func pinBumpIdentityArgs(email, name string) []string {
+	if strings.TrimSpace(email) != "" && strings.TrimSpace(name) != "" {
+		return nil
+	}
+	return []string{"-c", "user.email=" + pinBumpFallbackEmail, "-c", "user.name=" + pinBumpFallbackName}
+}
+
+func configuredGitIdentity(ctx context.Context, repoRoot string) (email, name string) {
+	read := func(key string) string {
+		out, err := exec.CommandContext(ctx, "git", "-C", repoRoot, "config", "--get", key).Output()
+		if err != nil {
+			return ""
+		}
+		return string(bytes.TrimSpace(out))
+	}
+	return read("user.email"), read("user.name")
+}
+
 func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error {
 	addArgs := []string{
 		"-C", repoRoot, "add", "--",
@@ -735,8 +760,10 @@ func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error
 	if out, err := exec.CommandContext(ctx, "git", addArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %w\n%s", err, bytes.TrimSpace(out))
 	}
-	msg := "chore: bump sparkwing pin to " + version
-	if out, err := exec.CommandContext(ctx, "git", "-C", repoRoot, "commit", "-m", msg).CombinedOutput(); err != nil {
+	commitArgs := []string{"-C", repoRoot}
+	commitArgs = append(commitArgs, pinBumpIdentityArgs(configuredGitIdentity(ctx, repoRoot))...)
+	commitArgs = append(commitArgs, "commit", "-m", "chore: bump sparkwing pin to "+version)
+	if out, err := exec.CommandContext(ctx, "git", commitArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %w\n%s", err, bytes.TrimSpace(out))
 	}
 	return nil

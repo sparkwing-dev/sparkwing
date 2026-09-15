@@ -177,6 +177,37 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		}
 	})
 
+	t.Run("commits on a checkout that configured no identity", func(t *testing.T) {
+		for _, key := range []string{
+			"GIT_AUTHOR_EMAIL", "GIT_AUTHOR_NAME",
+			"GIT_COMMITTER_EMAIL", "GIT_COMMITTER_NAME", "EMAIL",
+		} {
+			t.Setenv(key, "")
+			if err := os.Unsetenv(key); err != nil {
+				t.Fatalf("unset %s: %v", key, err)
+			}
+		}
+		t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+		t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+		dir := t.TempDir()
+		mustGit(t, dir, "init")
+		mustGit(t, dir, "config", "commit.gpgsign", "false")
+		mustGit(t, dir, "config", "core.hooksPath", t.TempDir())
+		createBumpFiles(t, dir)
+
+		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err != nil {
+			t.Fatalf("a checkout that configured no identity could not commit the bump: %v", err)
+		}
+		author, err := captureGit(context.Background(), dir, "log", "--format=%ae", "-1")
+		if err != nil {
+			t.Fatalf("git log: %v", err)
+		}
+		if got := strings.TrimSpace(author); got != pinBumpFallbackEmail {
+			t.Errorf("commit author = %q, want the fallback %q", got, pinBumpFallbackEmail)
+		}
+	})
+
 	t.Run("returns error when staged paths do not exist", func(t *testing.T) {
 		dir := initRepo(t)
 
@@ -685,4 +716,33 @@ func seedProxyPinnedRepo(t *testing.T, retract bool) string {
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "")
 	return repo
+}
+
+func TestPinBumpIdentityArgs(t *testing.T) {
+	cases := []struct {
+		name         string
+		email        string
+		author       string
+		wantFallback bool
+	}{
+		{"both configured", "dev@example.com", "Dev", false},
+		{"neither configured", "", "", true},
+		{"email only", "dev@example.com", "", true},
+		{"name only", "", "Dev", true},
+		{"blank configured", "  ", "  ", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := pinBumpIdentityArgs(c.email, c.author)
+			if c.wantFallback {
+				if !slices.Contains(got, "user.email="+pinBumpFallbackEmail) {
+					t.Errorf("pinBumpIdentityArgs(%q, %q) = %v, want the fallback identity", c.email, c.author, got)
+				}
+				return
+			}
+			if got != nil {
+				t.Errorf("pinBumpIdentityArgs(%q, %q) = %v, want the configured identity kept", c.email, c.author, got)
+			}
+		})
+	}
 }
