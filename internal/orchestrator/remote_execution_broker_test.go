@@ -27,6 +27,7 @@ import (
 func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
 	private := []string{
 		"SPARKWING_AGENT_TOKEN=parent-token",
+		"SPARKWING_RUN_HANDLE_FILE=/tmp/parent-run.json",
 		remoteExecutionCapabilityEnv + "=stale-capability",
 		remoteBrokeredClaimEnv + "=1",
 		"SPARKWING_NODE_CLAIM_HOLDER=holder-secret",

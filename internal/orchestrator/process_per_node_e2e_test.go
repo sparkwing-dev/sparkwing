@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"os"
 	"os/exec"
@@ -173,6 +174,76 @@ func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 	}
 }
 
+func TestProcessPerNode_NestedRunDoesNotReuseTheParentHandle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds and runs the process-per-node fixture")
+	}
+	mod, bin := buildProcPerNodeBinary(t)
+
+	home := t.TempDir()
+	stopHomeDaemon(t, home)
+	probe := t.TempDir()
+	handle := filepath.Join(t.TempDir(), "parent-run.json")
+	nestedHandle := filepath.Join(t.TempDir(), "nested-run.json")
+	runEnv := append(os.Environ(),
+		"SPARKWING_HOME="+home,
+		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
+		"SPARKWING_LOG_FORMAT=json",
+		"PROC_PROBE_DIR="+probe,
+		"SPARKWING_RUN_HANDLE_FILE="+handle,
+		"NESTED_RUN_HANDLE_FILE="+nestedHandle,
+	)
+
+	runBin(t, mod, runEnv, bin, "nestedparent")
+	readPID(t, probe, "nested-child")
+
+	body, err := os.ReadFile(handle)
+	if err != nil {
+		t.Fatalf("read parent run handle: %v", err)
+	}
+	var got struct {
+		Pipeline string `json:"pipeline"`
+		RunID    string `json:"run_id"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode parent run handle: %v", err)
+	}
+	if got.Pipeline != "nestedparent" {
+		t.Fatalf("run handle pipeline = %q, want the outer run", got.Pipeline)
+	}
+	parentRunID := got.RunID
+	body, err = os.ReadFile(nestedHandle)
+	if err != nil {
+		t.Fatalf("read nested run handle: %v", err)
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode nested run handle: %v", err)
+	}
+	if got.Pipeline != "nestedchild" {
+		t.Fatalf("nested run handle pipeline = %q, want the explicit nested run", got.Pipeline)
+	}
+
+	if got.RunID == parentRunID {
+		t.Fatal("nested handle reused the parent run id")
+	}
+	nestedRunID := got.RunID
+	st, err := store.Open(orchestrator.PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatalf("open run store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close run store: %v", err)
+		}
+	})
+	for _, runID := range []string{parentRunID, nestedRunID} {
+		run, err := st.GetRun(context.Background(), runID)
+		if err != nil || run == nil || run.Status != "success" {
+			t.Fatalf("run %s = %+v, %v; want success", runID, run, err)
+		}
+	}
+}
+
 func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 5.7s of real work; the fast class runs under -short")
@@ -292,6 +363,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -437,6 +509,42 @@ func (p *Spawnproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+type Nestedchild struct{ sparkwing.Base }
+
+func (p *Nestedchild) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "inner", func(context.Context) error {
+		StampPID("nested-child")
+		return nil
+	})
+	return nil
+}
+
+type Nestedparent struct{ sparkwing.Base }
+
+func (p *Nestedparent) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "outer", func(ctx context.Context) error {
+		cmd := exec.CommandContext(ctx, os.Args[0], "nestedchild")
+		cmd.Env = os.Environ()
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("nested run: %w: %s", err, output)
+		}
+		nestedHandle := os.Getenv("NESTED_RUN_HANDLE_FILE")
+		env := make([]string, 0, len(os.Environ())+1)
+		for _, item := range os.Environ() {
+			if !strings.HasPrefix(item, "SPARKWING_RUN_HANDLE_FILE=") {
+				env = append(env, item)
+			}
+		}
+		cmd = exec.CommandContext(ctx, os.Args[0], "nestedchild")
+		cmd.Env = append(env, "SPARKWING_RUN_HANDLE_FILE="+nestedHandle)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("explicit nested run: %w: %s", err, output)
+		}
+		return nil
+	})
+	return nil
+}
+
 type BounceOut struct {
 	Attempt int ` + "`json:\"attempt\"`" + `
 	PID     int ` + "`json:\"pid\"`" + `
@@ -512,6 +620,8 @@ func init() {
 	sparkwing.Register("orphanproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Orphanproof{} })
 	sparkwing.Register("spawnnode", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Spawnnode{} })
 	sparkwing.Register("bounceproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Bounceproof{} })
+	sparkwing.Register("nestedchild", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Nestedchild{} })
+	sparkwing.Register("nestedparent", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Nestedparent{} })
 }
 `
 

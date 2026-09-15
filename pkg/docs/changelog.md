@@ -52,6 +52,9 @@ unlock.
   post-test race and Postgres fanout does not hit the generic 30-minute
   dispatcher watchdog. Failed hosted canonical runs get two minutes to print
   their stored status and last 500 log lines before runner cleanup.
+- **runner:** A foreground run's handle-file path stops at its own process.
+  Local and remote node children no longer hand that path to nested Sparkwing
+  commands, which otherwise refuse because the parent already created it.
 
 ## [v0.52.5] - 2026-09-15
 ### Changed
