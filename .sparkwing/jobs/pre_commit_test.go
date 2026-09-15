@@ -39,7 +39,7 @@ func nodeIDs(nodes []*sparkwing.JobNode) []string {
 
 func TestPreCommitRunsTheSourcePolicyStepsAndNothingElse(t *testing.T) {
 	want := []string{
-		"changelog-links", "comments", "docs-mirror", "em-dashes", "formatters",
+		"budget", "changelog-links", "comments", "docs-mirror", "em-dashes", "formatters",
 		"gofmt", "home-resolution", "test-sleeps", "tracked-binaries", "tracker-ids",
 	}
 	if got := stepIDs(t, &PreCommit{}); !slices.Equal(got, want) {
@@ -68,6 +68,9 @@ func TestPreCommitStepsAllRunInParallel(t *testing.T) {
 		t.Error("pre-commit must fail fast: the author is holding a commit open")
 	}
 	for _, s := range w.Steps() {
+		if s.ID() == budgetStepID {
+			continue
+		}
 		if deps := s.DepIDs(); len(deps) != 0 {
 			t.Errorf("step %q waits on %v; every step here is sub-second, so serializing them only delays the verdict", s.ID(), deps)
 		}
@@ -97,12 +100,22 @@ func TestGateStillRunsEveryStepTheHookTiersAlsoRun(t *testing.T) {
 	gate := stepIDs(t, &Gate{})
 	// safety: the gate's whole-module vet and build are what the push tier
 	// runs over the touched packages alone.
-	broader := map[string]string{"build-touched": "build", "vet-touched": "vet"}
+	broader := map[string]string{
+		"build-touched": "build",
+		"vet-touched":   "vet",
+		"lint-touched":  "lint",
+		"test-touched":  "test",
+	}
 	for tier, ids := range map[string][]string{
 		"pre-commit": stepIDs(t, &PreCommit{}),
 		"pre-push":   stepIDs(t, &PrePush{}),
 	} {
 		for _, id := range ids {
+			// safety: the budget is each tier's own verdict on its own class,
+			// not a check the broad tier owes a copy of.
+			if id == budgetStepID {
+				continue
+			}
 			if slices.Contains(gate, id) || slices.Contains(gate, broader[id]) {
 				continue
 			}

@@ -31,7 +31,8 @@ func (PreCommit) Help() string {
 		"The push boundary adds the contract gates and a compile of the touched packages in `pre-push`; " +
 		"go vet, go build, go test, golangci-lint, the race gate and the dashboard suites run in `gate`, " +
 		"on demand and in hosted CI. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes " +
-		"and tracker IDs."
+		"and tracker IDs. The tier is budgeted at three seconds and fails when its steps overrun it, " +
+		"naming the slowest."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -63,16 +64,18 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 // would only make the verdict later. FailFast still stops the first failure.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
-	sparkwing.Step(w, "gofmt", runGofmtOnTheChange)
-	sparkwing.Step(w, "formatters", runFormatters)
-	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
-	sparkwing.Step(w, "em-dashes", checkEmDashes)
-	sparkwing.Step(w, "comments", checkComments)
-	sparkwing.Step(w, "test-sleeps", checkTestSleeps)
-	sparkwing.Step(w, "tracked-binaries", checkTrackedBinaries)
-	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
-	sparkwing.Step(w, "changelog-links", checkChangelogLinks)
-	sparkwing.Step(w, "home-resolution", checkHomeResolution)
+	budget := newTierBudget("pre-commit", preCommitBudget)
+	budget.step(w, "gofmt", runGofmtOnTheChange)
+	budget.step(w, "formatters", runFormatters)
+	budget.step(w, "tracker-ids", checkTrackerIDs)
+	budget.step(w, "em-dashes", checkEmDashes)
+	budget.step(w, "comments", checkComments)
+	budget.step(w, "test-sleeps", checkTestSleeps)
+	budget.step(w, "tracked-binaries", checkTrackedBinaries)
+	budget.step(w, "docs-mirror", checkDocsMirror)
+	budget.step(w, "changelog-links", checkChangelogLinks)
+	budget.step(w, "home-resolution", checkHomeResolution)
+	budget.verdict(w)
 	return nil, nil
 }
 

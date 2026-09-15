@@ -12,9 +12,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: the whole local release. Every suite that once gated the tag runs in
-// safety: hosted CI against the tagged source, so a node outside this list is
-// safety: work the release does not need.
+// safety: the whole local release: the tag recipe plus the release cut's own
+// safety: check class. The heavier suites run in hosted CI against the tagged
+// safety: source, so a node outside this list is work the release does not need.
 var releaseRecipe = []string{
 	"check-clean-tree",
 	"discover-version",
@@ -22,6 +22,7 @@ var releaseRecipe = []string{
 	"gate-wire-changelog",
 	"prepare-changelog",
 	"push-tag",
+	"release-cut-checks",
 	"validate-version",
 }
 
@@ -92,7 +93,7 @@ func TestReleasePlanTagsOnlyAfterTheChangelogCommit(t *testing.T) {
 	plan := releasePlan(t)
 
 	deps := ancestors(t, plan, "push-tag")
-	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog"} {
+	for _, need := range []string{"validate-version", "check-clean-tree", "prepare-changelog", "gate-schema-changelog", "gate-wire-changelog", "release-cut-checks"} {
 		if !deps[need] {
 			t.Errorf("push-tag must depend on %s; the tag has to land on the tree that already carries the release notes", need)
 		}
@@ -100,6 +101,17 @@ func TestReleasePlanTagsOnlyAfterTheChangelogCommit(t *testing.T) {
 		if n.IsContinueOnError() || n.IsOptional() {
 			t.Errorf("%s must block push-tag on failure, but is marked ContinueOnError/Optional", need)
 		}
+	}
+}
+
+func TestReleaseCutChecksJudgeTheTreeBeforeTheChangelogCommit(t *testing.T) {
+	plan := releasePlan(t)
+
+	if !ancestors(t, plan, "prepare-changelog")["release-cut-checks"] {
+		t.Error("prepare-changelog must wait on release-cut-checks; a commit landing under a running lint or suite changes the tree it is reading")
+	}
+	if ancestors(t, plan, "release-cut-checks")["prepare-changelog"] {
+		t.Error("the cut's checks wait on the commit they exist to precede")
 	}
 }
 

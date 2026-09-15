@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // PrePush is the fast tier at the push boundary: the source-policy steps the
 // commit tier scopes to one commit, judged here over the whole push, the
-// contract gates a single commit cannot answer, and a compile of the packages
-// the push touches. Everything that vets, lints, races or tests a whole module
-// is Gate, which runs on demand and in hosted CI.
+// contract gates a single commit cannot answer, and a compile, a fast lint and
+// the fast test class over the packages the push touches. Everything that
+// races or tests a whole module without -short is Gate, which runs on demand
+// and in hosted CI.
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Fast gate for the push boundary: scoped source policy, contract gates, and a compile of the touched packages"
+	return "Fast gate for the push boundary: scoped source policy, contract gates, and a compile, lint and short test of the touched packages"
 }
 
 func (PrePush) Help() string {
@@ -29,8 +31,11 @@ func (PrePush) Help() string {
 		"(bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table " +
 		"(bin/check-api-spec.sh), the public API surface matching the .apidiff/ snapshot " +
 		"(bin/check-api-snapshot.sh), no product file that resolves the sparkwing home itself instead of " +
-		"through internal/paths.DefaultPaths, and `go build` and `go vet` over the packages holding the " +
-		"changed Go files. Every scoped step reads the commits being pushed, the range " +
+		"through internal/paths.DefaultPaths, `go build` and `go vet` over the packages holding the " +
+		"changed Go files, the fast linter subset over those same packages, and `go test -short` over them, " +
+		"which is the fast test class: a test whose own runtime passes 200 ms guards itself with " +
+		"testing.Short. The tier is budgeted at ten seconds and fails when its steps overrun it, naming " +
+		"the slowest. Every scoped step reads the commits being pushed, the range " +
 		"origin/main..HEAD, and never the index, so whatever is staged cannot narrow what the push is " +
 		"judged against. go vet, the full test suite, golangci-lint, the race gate, " +
 		"the Postgres suite and the dashboard suites run in `gate`, which hosted CI runs on every pull " +
@@ -52,22 +57,27 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 
 // Work declares the fast push-boundary steps.
 //
-// perf: they run in parallel rather than cheapest-first. The slowest measured
-// a second, so the tier costs what its slowest member costs and a chain would
-// only make the verdict later. FailFast still stops the first failure.
+// perf: they run in parallel rather than cheapest-first, so the tier costs
+// what its slowest member costs and a chain would only make the verdict later.
+// FailFast still stops the first failure, and the budget step fails the tier
+// when the class overruns its ten seconds.
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
-	sparkwing.Step(w, "gofmt", runGofmtOverThePush)
-	sparkwing.Step(w, "formatters", runFormattersOverThePush)
-	sparkwing.Step(w, "comments", checkCommentsOverThePush)
-	sparkwing.Step(w, "test-sleeps", checkTestSleepsOverThePush)
-	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
-	sparkwing.Step(w, "home-resolution", checkHomeResolution)
-	sparkwing.Step(w, "changelog", checkChangelogRequired)
-	sparkwing.Step(w, "api-spec", checkAPISpec)
-	sparkwing.Step(w, "api-snapshot", checkAPISnapshot)
-	sparkwing.Step(w, "build-touched", runBuildTouched)
-	sparkwing.Step(w, "vet-touched", runVetTouched)
+	budget := newTierBudget("pre-push", prePushBudget)
+	budget.step(w, "gofmt", runGofmtOverThePush)
+	budget.step(w, "formatters", runFormattersOverThePush)
+	budget.step(w, "comments", checkCommentsOverThePush)
+	budget.step(w, "test-sleeps", checkTestSleepsOverThePush)
+	budget.step(w, "docs-mirror", checkDocsMirror)
+	budget.step(w, "home-resolution", checkHomeResolution)
+	budget.step(w, "changelog", checkChangelogRequired)
+	budget.step(w, "api-spec", checkAPISpec)
+	budget.step(w, "api-snapshot", checkAPISnapshot)
+	budget.step(w, "build-touched", runBuildTouched)
+	budget.step(w, "vet-touched", runVetTouched)
+	budget.step(w, "lint-touched", runFastLintTouched)
+	budget.step(w, "test-touched", runShortTestsTouched)
+	budget.verdict(w)
 	return nil, nil
 }
 
@@ -142,8 +152,49 @@ func runVetTouched(ctx context.Context) error {
 	return goOverTouchedPackages(ctx, "vet", "Go file(s)", existingGoFiles)
 }
 
+// perf: the fast linter subset over the packages the push touches. The full
+// set measured ninety seconds over both modules, which is the release cut's
+// price to pay, not the push boundary's.
+func runFastLintTouched(ctx context.Context) error {
+	return overTouchedPackages(ctx, "lint-touched", "lint", "Go file(s)", existingGoFiles,
+		func(_ string, pkgs []string) string {
+			return fastLintCommand(prePushCores(runtime.NumCPU()), pkgs)
+		})
+}
+
+// safety: a suite reaches the operator's home, the admission socket and the
+// dispatcher's service URLs unless the scrub every other product suite uses
+// travels with it.
+func runShortTestsTouched(ctx context.Context) error {
+	return withProductTestHome(func(home string) error {
+		return overTouchedPackages(ctx, "test-touched", "test", "Go file(s)", existingGoFiles,
+			func(_ string, pkgs []string) string {
+				args := fmt.Sprintf("-short -timeout %s %s", prePushTestTimeout, strings.Join(pkgs, " "))
+				return productTestScript(goCommandAt(prePushCores(runtime.NumCPU()), "test", args), home)
+			})
+	})
+}
+
+// perf: a test the fast class runs is a test that answers in milliseconds, so
+// a package still running after a minute is hung rather than slow, and the
+// push boundary is the wrong place to wait for go test's ten-minute default.
+const prePushTestTimeout = time.Minute
+
 func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]string) []string) error {
-	step := verb + "-touched"
+	return overTouchedPackages(ctx, verb+"-touched", "compile", noun, keep,
+		func(_ string, pkgs []string) string {
+			args := strings.Join(pkgs, " ")
+			// safety: go build discards its output for several packages but writes
+			// a lone package's binary beside the module, where ./cmd/sparkwing
+			// collides with the sparkwing/ SDK directory and refuses to build.
+			if verb == "build" && len(pkgs) == 1 {
+				args = "-o /dev/null " + args
+			}
+			return goCommandAt(prePushCores(runtime.NumCPU()), verb, args)
+		})
+}
+
+func overTouchedPackages(ctx context.Context, step, verb, noun string, keep func([]string) []string, command func(module string, pkgs []string) string) error {
 	files, scope, err := pushRangeScope(ctx, noun, keep)
 	if err != nil {
 		return err
@@ -155,7 +206,12 @@ func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]s
 	targets := touchedPackageTargets(files, modules)
 	sparkwing.Info(ctx, "%s: %s", step, scope)
 	if len(targets) == 0 {
-		sparkwing.Info(ctx, "%s: no Go package changed; nothing to compile", step)
+		sparkwing.Info(ctx, "%s: no Go package changed; nothing to %s", step, verb)
+		return nil
+	}
+	if count := countTargets(targets); count > prePushPackageCap {
+		sparkwing.Info(ctx, "%s: %d packages changed, past the %d this tier fits; the whole-tree form runs in gate",
+			step, count, prePushPackageCap)
 		return nil
 	}
 
@@ -163,23 +219,15 @@ func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]s
 	for _, module := range mapKeys(targets) {
 		pkgs := targets[module]
 		sparkwing.Info(ctx, "%s: %s: %s", step, module, strings.Join(pkgs, " "))
-		args := strings.Join(pkgs, " ")
-		// safety: go build discards its output for several packages but writes
-		// a lone package's binary beside the module, where ./cmd/sparkwing
-		// collides with the sparkwing/ SDK directory and refuses to build.
-		if verb == "build" && len(pkgs) == 1 {
-			args = "-o /dev/null " + args
-		}
-		cmd := goCommandAt(prePushCores(runtime.NumCPU()), verb, args)
-		if _, runErr := sparkwing.Bash(ctx, cmd).Dir(module).Run(); runErr != nil {
+		if _, runErr := sparkwing.Bash(ctx, command(module, pkgs)).Dir(module).Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 		}
 	}
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("go %s failed in %d module(s):\n  - %s",
-		verb, len(failures), strings.Join(failures, "\n  - "))
+	return fmt.Errorf("%s failed in %d module(s):\n  - %s",
+		step, len(failures), strings.Join(failures, "\n  - "))
 }
 
 // safety: go build reads no test file, and a directory holding only tests has
@@ -194,6 +242,20 @@ func buildableGoFiles(all []string) []string {
 		out = append(out, f)
 	}
 	return out
+}
+
+// perf: a push wide enough to change more packages than this cannot be
+// compiled, linted and tested inside the tier's ten seconds, so it names the
+// count and leaves the whole-tree forms to the broad tier rather than holding
+// the push for minutes.
+const prePushPackageCap = 8
+
+func countTargets(targets map[string][]string) int {
+	count := 0
+	for _, pkgs := range targets {
+		count += len(pkgs)
+	}
+	return count
 }
 
 func init() {

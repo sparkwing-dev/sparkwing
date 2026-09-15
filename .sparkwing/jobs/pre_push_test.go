@@ -14,9 +14,9 @@ import (
 
 func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
 	want := []string{
-		"api-snapshot", "api-spec", "build-touched", "changelog", "comments",
-		"docs-mirror", "formatters", "gofmt", "home-resolution", "test-sleeps",
-		"vet-touched",
+		"api-snapshot", "api-spec", "budget", "build-touched", "changelog", "comments",
+		"docs-mirror", "formatters", "gofmt", "home-resolution", "lint-touched",
+		"test-sleeps", "test-touched", "vet-touched",
 	}
 	if got := stepIDs(t, &PrePush{}); !slices.Equal(got, want) {
 		t.Fatalf("pre-push steps = %v, want %v", got, want)
@@ -44,6 +44,9 @@ func TestPrePushStepsAllRunInParallel(t *testing.T) {
 		t.Error("pre-push must fail fast: the author is holding a push open")
 	}
 	for _, s := range w.Steps() {
+		if s.ID() == budgetStepID {
+			continue
+		}
 		if deps := s.DepIDs(); len(deps) != 0 {
 			t.Errorf("step %q waits on %v; every step here answers in about a second, so serializing them only delays the verdict", s.ID(), deps)
 		}
@@ -107,6 +110,24 @@ func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "internal") {
 		t.Errorf("the failure names neither the module nor the package: %v", err)
+	}
+}
+
+func TestThePushTierLeavesAPushWiderThanItsCapToTheBroadTier(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	for i := 0; i <= prePushPackageCap; i++ {
+		pkg := fmt.Sprintf("wide%d", i)
+		writeGoFile(t, filepath.Join(root, pkg, "broken.go"),
+			fmt.Sprintf("package %s\n\nfunc Broken() int { return \"not an int\" }\n", pkg))
+	}
+	gitCommitAll(t, root, "a push wider than the tier fits")
+
+	if err := runBuildTouched(context.Background()); err != nil {
+		t.Fatalf("the tier compiled %d packages rather than naming the count and leaving them to gate: %v",
+			prePushPackageCap+1, err)
 	}
 }
 
