@@ -60,6 +60,26 @@ Common values: `gp3` (EKS), `standard-rwo` (GKE), `managed-csi` (AKS),
 The controller logs a `WARNING` at startup when no PVC declares a class
 and the cluster has no default StorageClass.
 
+### PostgreSQL state
+
+Sparkwing Cloud runs its controller state on PostgreSQL. Self-hosted installs
+keep SQLite by default. To use PostgreSQL, create a Secret whose value is a DSN
+and configure the chart to read it:
+
+```bash
+kubectl -n sparkwing create secret generic sparkwing-database \
+    --from-literal=dsn='postgres://sparkwing:<password>@database.example:5432/sparkwing?sslmode=require'
+
+helm upgrade --install sparkwing charts/sparkwing-full \
+    --set controller.databaseSecret.name=sparkwing-database \
+    --set controller.databaseSecret.key=dsn \
+    --set controller.storage.type=emptyDir
+```
+
+The controller reads the Secret as `SPARKWING_PG_URL`. Keep the DSN out of Helm
+values and command arguments. Initialize and verify the PostgreSQL data before
+starting the controller against it.
+
 ## Migrating from the Docker Compose example
 
 Treat the Helm installation as a new deployment. Sparkwing provides no

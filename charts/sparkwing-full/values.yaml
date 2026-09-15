@@ -239,7 +239,12 @@ controller:
   # see what the state DB already holds.
   requireAuth: false
 
-  # State DB lives on a PVC. Single-instance, so RWO is fine.
+  # Optional Secret containing a PostgreSQL DSN. Empty keeps SQLite.
+  databaseSecret:
+    name: ""
+    key: dsn
+
+  # SQLite state lives on a PVC. Set type=emptyDir with databaseSecret.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
     # "emptyDir" runs ephemeral (state lost on pod restart).

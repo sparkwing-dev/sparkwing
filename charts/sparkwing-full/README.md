@@ -232,6 +232,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.size` | State DB volume size. | `5Gi` |
 | `controller.storage.pvc.storageClassName` | Override default StorageClass. | `""` |
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
+| `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN. Empty keeps SQLite. | `""` |
+| `controller.databaseSecret.key` | Key holding the PostgreSQL DSN. | `dsn` |
 | `controller.githubWebhookSecret.name` | Secret holding `webhook-secret`. | `""` |
 | `controller.githubStatusToken.name` | Secret holding a GitHub token with commit-status write access. | `""` |
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |

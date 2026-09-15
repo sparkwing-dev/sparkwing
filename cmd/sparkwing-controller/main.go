@@ -320,7 +320,7 @@ func run(args []string) error {
 	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	st, serr := store.Open(p.StateDB())
+	st, serr := openControllerStore(context.Background(), p.StateDB())
 	if serr != nil {
 		return mapStoreOpenError(serr)
 	}

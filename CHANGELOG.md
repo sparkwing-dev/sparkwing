@@ -22,6 +22,10 @@ unlock.
 
 ### Changed
 
+- **controller + chart:** the controller opens PostgreSQL when
+  `SPARKWING_PG_URL` is present, and the chart reads that DSN from a named
+  Kubernetes Secret. SQLite remains the default.
+
 - **release:** The local cut checks published module freshness, coherent SDK
   pins and changelog links before preparing release notes, then validates the
   rolled notes and migration guide before committing. These checks run before
