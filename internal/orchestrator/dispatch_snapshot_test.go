@@ -281,6 +281,7 @@ func TestCollectDispatchEnv_ExcludesMachineLocalControlChannels(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/this-machine-only/bin/sparkwing")
 	t.Setenv("SPARKWING_FLEET_PARENT_GUARD", "http://127.0.0.1:12345")
 	t.Setenv("SPARKWING_FLEET_PARENT_TOKEN", "private-lifetime-token")
+	t.Setenv("SPARKWING_RUN_HANDLE_FILE", "/tmp/parent-run.json")
 	t.Setenv("SPARKWING_FOO", "kept")
 
 	got := collectDispatchEnv(context.Background(), buildNode(t, "deploy", &stubJob{}), "run-7", nil).values
@@ -288,7 +289,11 @@ func TestCollectDispatchEnv_ExcludesMachineLocalControlChannels(t *testing.T) {
 	if v, ok := got[wingdclient.HostBinEnv]; ok {
 		t.Fatalf("%s=%q was captured into the dispatch snapshot; a replay elsewhere would exec it", wingdclient.HostBinEnv, v)
 	}
-	for _, key := range []string{"SPARKWING_FLEET_PARENT_GUARD", "SPARKWING_FLEET_PARENT_TOKEN"} {
+	for _, key := range []string{
+		"SPARKWING_FLEET_PARENT_GUARD",
+		"SPARKWING_FLEET_PARENT_TOKEN",
+		"SPARKWING_RUN_HANDLE_FILE",
+	} {
 		if v, ok := got[key]; ok {
 			t.Fatalf("%s=%q was captured into the dispatch snapshot", key, v)
 		}

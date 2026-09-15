@@ -87,7 +87,9 @@ file. Other syntax and workflow checks remain active.
   boundary for the long test and change-sensitive post-test fanout, not a claim
   that every gate completes in 40 minutes. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
-  run handle. Measured on this 16-core Linux
+  run handle. That publication path stops at the parent runner rather than
+  entering node processes, so nested Sparkwing commands choose their own
+  output. Measured on this 16-core Linux
   host with a warm cache, the release cut's three members cost 9 s (build),
   92 s (the full linter over both modules) and 81 s (`go test -short`), so the
   class costs about 95 s of its 5 minutes; the same suite without `-short`

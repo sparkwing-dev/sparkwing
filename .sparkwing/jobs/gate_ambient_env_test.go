@@ -77,9 +77,11 @@ var nodeEnvConstants = map[string]string{
 	"ParentLivenessFDEnv":         "SPARKWING_PARENT_LIVENESS_FD",
 }
 
-var envConstantReference = regexp.MustCompile(`\b(?:wingwire\.)?[A-Z][A-Za-z0-9]*Env\b`)
+// safety: names in the removal list never reach children, so only setter
+// calls define the injector output this contract must cover.
+var envConstantReference = regexp.MustCompile(`\bset\(\s*((?:wingwire\.)?[A-Z][A-Za-z0-9]*Env)\b`)
 
-var envNameLiteral = regexp.MustCompile(`"(SPARKWING_[A-Z0-9_]+)"`)
+var envNameLiteral = regexp.MustCompile(`\bset\(\s*"(SPARKWING_[A-Z0-9_]+)"`)
 
 func readProductSource(t *testing.T, parts ...string) string {
 	t.Helper()
@@ -106,7 +108,8 @@ func TestEveryVariableTheNodeInjectorSetsIsScrubbedPinnedOrRecorded(t *testing.T
 	for _, m := range envNameLiteral.FindAllStringSubmatch(injector, -1) {
 		injected[m[1]] = true
 	}
-	for _, reference := range envConstantReference.FindAllString(injector, -1) {
+	for _, match := range envConstantReference.FindAllStringSubmatch(injector, -1) {
+		reference := match[1]
 		name, ok := nodeEnvConstants[reference]
 		if !ok {
 			t.Errorf("the node injector reads %s, a constant this contract cannot resolve; "+

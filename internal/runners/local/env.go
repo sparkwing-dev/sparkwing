@@ -19,8 +19,9 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	// safety: the dispatcher decides where this node's controller calls go, so
 	// an inherited socket is dropped whichever way it decided. A pipeline run
 	// from inside another run's node inherits that run's socket otherwise, and
-	// dials a daemon that has never heard of it.
-	drop := []string{wingwire.APISocketEnv}
+	// dials a daemon that has never heard of it. The parent's run-handle path is
+	// also process-local: a nested run would contend for the same output file.
+	drop := []string{wingwire.APISocketEnv, "SPARKWING_RUN_HANDLE_FILE"}
 	if cfg.APISocket != "" {
 		drop = append(drop, tokenEnvNames...)
 	}
