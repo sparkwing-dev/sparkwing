@@ -140,6 +140,9 @@ func TestClassForOperationBillsAnUnknownOperationAsAWrite(t *testing.T) {
 // fixed wall-clock window: a caller that never stops retrying reaches the
 // store at most its per-minute budget of times, however long it spins.
 func TestBudgetBoundsAHotLoopAgainstAFailingBucket(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	const budget = 20
 	endpoint, hits := bucketThatFails(t, 1<<30)
 	l := objectguard.New(testConfig(budget, 0))

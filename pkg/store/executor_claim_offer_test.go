@@ -296,6 +296,9 @@ func TestExecutorClaimOfferDeadlineUsesPriorityAndRecoversLostWinnerResponse(t *
 }
 
 func TestExecutorClaimOfferFinalizationReresolvesNarrowedEnrollment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, test := range []struct {
 		name   string
 		labels []string

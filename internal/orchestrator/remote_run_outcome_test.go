@@ -92,6 +92,9 @@ func TestRemoteRunOutcome_ReportsTerminalStatus(t *testing.T) {
 }
 
 func TestRemoteRunOutcome_UnreadableStatusIsAnError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	url := outcomeController(t, "success", "")
 	var buf bytes.Buffer
 	status, err := orchestrator.RemoteRunOutcome(context.Background(), url, "", "run-missing", &buf)
@@ -104,6 +107,9 @@ func TestRemoteRunOutcome_UnreadableStatusIsAnError(t *testing.T) {
 }
 
 func TestRemoteRunOutcome_RetriesOneTransportBlip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

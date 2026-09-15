@@ -137,6 +137,9 @@ func TestExclusive_SerializesConcurrentHolders(t *testing.T) {
 }
 
 func TestExclusive_AcrossRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	p := newPaths(t)
 	assertExclusiveSerialization(t, p, 2)
 }

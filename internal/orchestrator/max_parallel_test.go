@@ -12,6 +12,9 @@ import (
 )
 
 func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	const fanOut = 30
 	const cap = 4
 

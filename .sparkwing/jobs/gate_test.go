@@ -91,6 +91,9 @@ func writeGoFile(t *testing.T, path, content string) {
 }
 
 func TestGoStepsRefuseAnUnparseableFileInTheProductModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
 
@@ -126,6 +129,9 @@ func TestGoStepsRefuseAnUnparseableFileInTheProductModule(t *testing.T) {
 }
 
 func TestTestStepRefusesAFailingProductTest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
 
@@ -153,6 +159,9 @@ func TestGoStepsStillCoverThePipelineModule(t *testing.T) {
 }
 
 func TestGoStepsCoverEveryCommittedModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
 
@@ -191,6 +200,9 @@ func TestTheTestStepStripsTheGatesOwnBindingsFromItsChildren(t *testing.T) {
 }
 
 func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
 
@@ -248,6 +260,9 @@ func gateIndexSnapshot(t *testing.T, root string) string {
 }
 
 func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
 
@@ -318,6 +333,9 @@ func TestGateRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
 }
 
 func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	root := t.TempDir()
 	web := filepath.Join(root, "web")
 	if err := os.MkdirAll(web, 0o755); err != nil {
@@ -377,6 +395,9 @@ func TestFrontendUnitRunnerRejectsZeroDiscovery(t *testing.T) {
 }
 
 func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	tests := []struct {
 		name    string
 		script  string
@@ -407,6 +428,9 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 }
 
 func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	root := t.TempDir()
 	web := filepath.Join(root, "web")
 	if err := os.MkdirAll(web, 0o755); err != nil {
@@ -438,6 +462,9 @@ func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T
 }
 
 func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	root := t.TempDir()
 	web := filepath.Join(root, "web")
 	if err := os.MkdirAll(web, 0o755); err != nil {
@@ -470,6 +497,9 @@ func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
 }
 
 func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	root := t.TempDir()
 	web := filepath.Join(root, "web")
 	if err := os.MkdirAll(web, 0o755); err != nil {
@@ -895,6 +925,9 @@ func TestHomeResolutionExemptions(t *testing.T) {
 }
 
 func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"),
 		"package dependency\n\nfunc Broken( {\n")

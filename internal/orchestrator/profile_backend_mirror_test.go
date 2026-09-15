@@ -58,6 +58,9 @@ func TestApplyProfileBackendsWithMirror_S3NoMirrorWhenDisabled(t *testing.T) {
 }
 
 func TestApplyProfileBackendsWithMirror_ControllerSetsMirrorLocal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 	neutralizeEnv(t)
 	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_test"}}
 	paths := Paths{Root: t.TempDir()}

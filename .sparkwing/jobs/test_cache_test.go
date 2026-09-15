@@ -11,6 +11,9 @@ import (
 )
 
 func TestOrdinaryTestStepsReusePassingResults(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
 	for name, run := range map[string]func(context.Context) error{
 		"gate": runTest,
 		"test": (&Test{}).run,

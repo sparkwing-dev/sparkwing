@@ -339,6 +339,9 @@ func TestLoginRequiredConfigurationFailsClosed(t *testing.T) {
 
 func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	type upstreamRequest struct {
 		path          string
 		body          string
@@ -754,6 +757,9 @@ func assertNoClearedCookies(t *testing.T, cookies []*http.Cookie) {
 
 func TestGitcacheMachineProxyRejectsARequestWithNoBearer(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	reached := false
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reached = true
@@ -786,6 +792,9 @@ func TestGitcacheMachineProxyRejectsARequestWithNoBearer(t *testing.T) {
 }
 
 func TestGitcacheMachineProxyCapsConcurrentStreams(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.0s of real work; the fast class runs under -short")
+	}
 	release := make(chan struct{})
 	admitted := make(chan struct{}, gitcacheStreamLimit+1)
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -900,6 +909,9 @@ func gitcacheStream(dashboardURL string) func() (int, string, error) {
 
 func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/auth/bootstrap-needed" {
 			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})

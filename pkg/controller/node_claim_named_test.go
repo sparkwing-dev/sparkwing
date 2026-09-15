@@ -136,6 +136,9 @@ func TestClaimNodeByID_ReportsANodeThatDoesNotExist(t *testing.T) {
 }
 
 func TestClaimNodeByID_NeedsTheClaimScope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newNamedClaimFixture(t, store.TokenOptions{})
 	f.readyNode(t, "run-1", "build")
 	reader, _, err := f.store.CreateToken("reader", store.TokenKindRunner,

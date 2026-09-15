@@ -54,6 +54,9 @@ func bootstrapAdmin(t *testing.T, ts *httptest.Server) {
 }
 
 func TestCreateUser_ScopesFlowIntoTheSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, test := range []struct {
 		name    string
 		request map[string]any
@@ -135,6 +138,9 @@ func TestCreateUser_RejectsUnknownScope(t *testing.T) {
 }
 
 func TestCreateUser_RejectsMalformedScopeList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, test := range []struct {
 		name   string
 		scopes []string

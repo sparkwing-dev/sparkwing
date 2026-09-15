@@ -270,10 +270,16 @@ func runConcurrentPropertySuite(t *testing.T, newStore func(*testing.T) *store.S
 }
 
 func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
 	runSequentialPropertySuite(t, storetest.OpenSQLite)
 }
 
 func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
+	}
 	runConcurrentPropertySuite(t, storetest.OpenSQLite)
 }
 
@@ -286,6 +292,9 @@ func TestConcurrency_PropertyConcurrentOpsHoldInvariants_Postgres(t *testing.T) 
 }
 
 func TestConcurrency_PropertyFIFOPromotionOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
+	}
 	runFIFOPropertySuite(t, storetest.OpenSQLite)
 }
 

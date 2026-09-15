@@ -33,7 +33,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. The CI/CD group is reintroducing the release-side checks deliberately. This pipeline never builds or publishes artifacts itself and never runs the broad suites."
+	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before it tags, the release cut runs its check class: build, the full linter and the fast test class in parallel, budgeted at five minutes, which fails the cut when it overruns. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -69,11 +69,16 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 	})
 
+	// safety: the class judges the tree the tag will carry, and it judges it
+	// before prepare-changelog commits, so no lint or suite reads a checkout
+	// that changes under it.
+	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{})
+
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	changelog.Needs(discover, validate, clean)
+	changelog.Needs(discover, validate, clean, cutChecks)
 
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
 		RepoDir: repoDir,
@@ -91,8 +96,24 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, schemaGate, wireGate)
+	pushTag.Needs(validate, clean, changelog, schemaGate, wireGate, cutChecks)
 	return nil
+}
+
+type releaseCutChecksJob struct{ sparkwing.Base }
+
+// perf: the release cut is the third check class. Build, the full linter and
+// the fast test class run in parallel under one budget; the race, Postgres,
+// chaos and browser suites are the heavier classes that hosted CI runs on
+// every pull request and every push to main.
+func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	w.ParallelFailures(sparkwing.FailFast)
+	budget := newTierBudget("release cut", releaseCutBudget)
+	budget.step(w, "build", runBuild)
+	budget.step(w, "lint", runGolangciLint)
+	budget.step(w, "test", runShortTest)
+	budget.verdict(w)
+	return nil, nil
 }
 
 func repoRoot() (string, error) {

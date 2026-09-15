@@ -81,6 +81,9 @@ func blockAssistedChildTestProcess() {
 }
 
 func TestAssistedChildCancellationWaitsForStubbornDescendant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
 	command := assistedChildHelperCommand("cancel", pidFile, true)
 	childContext, cancel := context.WithCancelCause(context.Background())

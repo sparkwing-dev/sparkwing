@@ -10,6 +10,9 @@ import (
 )
 
 func TestServiceOutputStoppedRoutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.2s of real work; the fast class runs under -short")
+	}
 	for _, tc := range []struct {
 		args    []string
 		service string
@@ -54,6 +57,9 @@ func TestServiceOutputStoppedRoutes(t *testing.T) {
 }
 
 func TestServiceOutputDoesNotTrustOpaqueDashboardPID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "dashboard.pid"), fmt.Appendf(nil, "%d", os.Getpid()), 0o600); err != nil {
 		t.Fatal(err)
@@ -73,6 +79,9 @@ func TestServiceOutputDoesNotTrustOpaqueDashboardPID(t *testing.T) {
 }
 
 func TestServiceOutputRejectsModesBeforeStart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	for _, args := range [][]string{{"serve", "start"}, {"runs", "consumer", "start"}} {
 		for _, flag := range [][]string{{"--output="}, {"-o=jsonl"}, {"--output"}} {
 			cmd := outputContractCommand(t, append(append([]string{}, args...), flag...)...)

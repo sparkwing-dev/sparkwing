@@ -15,6 +15,9 @@ import (
 )
 
 func TestResolveCloneURL_NoCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_GITCACHE", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 
@@ -116,6 +119,9 @@ func TestCacheCloneURL_DistinguishesEqualBasenames(t *testing.T) {
 }
 
 func TestCloneThroughSecuredGitcache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	cases := []struct {
 		name       string
 		token      string

@@ -352,6 +352,9 @@ func TestRun_EscapeHatchLetsAPinnedRunProceedUnadmitted(t *testing.T) {
 }
 
 func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	cases := []struct{ name, pipeline string }{
 		{"plan-level box scope", "host-gated-plan-box"},
 		{"node-level box scope", "host-gated-node-box"},

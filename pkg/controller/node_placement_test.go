@@ -319,6 +319,9 @@ func TestPlacement_RunnerAdvertisingNoCapacityHoldsNothing(t *testing.T) {
 // Presence is bound to the credential that polls, so a second token cannot
 // inherit the standing a first one earned under the same runner name.
 func TestPlacement_PresenceIsBoundToTheClaimingCredential(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st := placementStore(t)
 	proven, _, err := st.CreateToken("proven-runner", store.TokenKindRunner,
 		[]string{"nodes.claim"}, 0, time.Now().UTC())

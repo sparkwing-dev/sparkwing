@@ -33,6 +33,9 @@ func TestRetryStopsAfterItsAttemptBudget(t *testing.T) {
 }
 
 func TestRetryPacesItsAttempts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	r := newRetry("acquire", 0)
 	start := time.Now()
 	for i := 0; i < 4; i++ {
@@ -108,6 +111,9 @@ func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 }
 
 func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.6s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	failingDaemon(t, home)
 

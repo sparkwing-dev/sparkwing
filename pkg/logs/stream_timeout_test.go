@@ -12,6 +12,9 @@ import (
 )
 
 func TestStreamSurvivesServerWriteTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	s, err := logs.New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)

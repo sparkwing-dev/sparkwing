@@ -13,6 +13,9 @@ import (
 
 func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 
 	seed, err := store.Open(dbPath)
@@ -83,6 +86,9 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 
 func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	seed, err := store.Open(dbPath)
 	if err != nil {

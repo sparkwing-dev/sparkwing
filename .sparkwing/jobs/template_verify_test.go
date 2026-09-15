@@ -122,6 +122,9 @@ func TestSeedFixture_RejectsUnknown(t *testing.T) {
 }
 
 func TestGoModuleFixture_HasCoverableStatements(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not installed")
 	}
@@ -181,6 +184,9 @@ func TestFixtureToolchainReady_GoAndNoneAlwaysReady(t *testing.T) {
 }
 
 func TestNodeFixture_PassesNpm(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	if _, err := exec.LookPath("npm"); err != nil {
 		t.Skip("npm not installed")
 	}

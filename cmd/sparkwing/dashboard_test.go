@@ -11,6 +11,9 @@ import (
 )
 
 func TestWaitForListenerOrExit_FailsFastOnEarlyExit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	exited := make(chan struct{})
 	close(exited)
 
@@ -28,6 +31,9 @@ func TestWaitForListenerOrExit_FailsFastOnEarlyExit(t *testing.T) {
 }
 
 func TestWaitForListenerOrExit_TimesOutWhenAliveButSilent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	exited := make(chan struct{})
 	err := waitForListenerOrExit("127.0.0.1:1", exited, 300*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "failed to accept connections") {

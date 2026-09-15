@@ -257,6 +257,9 @@ func TestTrends_PipelineFilter(t *testing.T) {
 }
 
 func TestTrendsRejectsCachedQueryFailures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, failure := range []string{"query", "scan", "iteration"} {
 		t.Run(failure, func(t *testing.T) {
 			st, err := store.Open(filepath.Join(t.TempDir(), "store.db"))

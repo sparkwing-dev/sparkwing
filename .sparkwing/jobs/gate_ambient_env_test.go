@@ -29,6 +29,9 @@ func listeningUnixSocket(t *testing.T) string {
 }
 
 func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
 

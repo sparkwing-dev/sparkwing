@@ -15,6 +15,9 @@ import (
 )
 
 func TestStream_TailsAppendedContent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {
@@ -137,6 +140,9 @@ func TestStream_ContextCancellationStops(t *testing.T) {
 }
 
 func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {

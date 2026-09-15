@@ -875,6 +875,9 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 }
 
 func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
 	const (
 		dispatchBudget = 500 * time.Millisecond
 		admissionHold  = 750 * time.Millisecond
@@ -932,6 +935,9 @@ func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
 }
 
 func TestWingd_LocalRunAdmitsReadyNodeAtNodeCost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 10)
@@ -1052,6 +1058,9 @@ func TestWingd_SemaphoresOnlyRunStillAdmitsNodeHostCost(t *testing.T) {
 }
 
 func TestWingd_RecoveryNodeAdmitsHostCost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 10)
@@ -1187,6 +1196,9 @@ func TestWingd_ChildTriggerUsesNodeHostLeaseWhenRunLeaseHasNoResources(t *testin
 }
 
 func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 10)
@@ -1266,6 +1278,9 @@ func (b *syncBuffer) count(sub string) int {
 }
 
 func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)
@@ -1683,6 +1698,9 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 }
 
 func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	cases := []struct {
 		name          string
 		runID         string
@@ -1939,6 +1957,9 @@ func TestWingd_DaemonFirstCancelSurvivesImmediateClientExit(t *testing.T) {
 }
 
 func TestWingd_DaemonFirstCancelFinalizesQueuedClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)
 	_, st, _ := openWingdBackends(t, home)
@@ -2009,6 +2030,9 @@ func TestWingd_DaemonFirstCancelFinalizesQueuedClient(t *testing.T) {
 }
 
 func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)

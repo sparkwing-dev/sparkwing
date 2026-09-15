@@ -81,6 +81,9 @@ func init() {
 }
 
 func TestPause_BeforeRun_HoldsUntilReleased(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
 		Pipeline: "orch-pause-ok",
@@ -118,6 +121,9 @@ func TestPause_BeforeRun_HoldsUntilReleased(t *testing.T) {
 }
 
 func TestPause_BeforeRun_Timeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_PAUSE_TIMEOUT", "200ms")
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
@@ -150,6 +156,9 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 }
 
 func TestPause_After_HoldsAfterSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
 		Pipeline: "orch-pause-ok",
@@ -182,6 +191,9 @@ func TestPause_After_HoldsAfterSuccess(t *testing.T) {
 }
 
 func TestPause_OnFailure_PausesOnError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
 		Pipeline: "orch-pause-fail",
@@ -241,6 +253,9 @@ func TestPause_OnFailure_SkipsOnSuccess(t *testing.T) {
 }
 
 func TestPause_OnFailure_SkipsOnCancelled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
 		Pipeline: "orch-middle-fails",

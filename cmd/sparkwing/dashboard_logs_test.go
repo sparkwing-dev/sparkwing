@@ -57,6 +57,9 @@ func TestServeLogsBoundsRecordsAndPreservesPlain(t *testing.T) {
 }
 
 func TestServeLogsFollowEmitsAppendsAndCancels(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := t.TempDir()
 	path := filepath.Join(home, dashboardLogFile)
 	if err := os.WriteFile(path, []byte("first\npar"), 0o600); err != nil {

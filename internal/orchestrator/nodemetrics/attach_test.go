@@ -158,6 +158,9 @@ func TestAttach_LoopStopsWithLastNodeAndRestarts(t *testing.T) {
 }
 
 func TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	inTick := make(chan struct{})
 	release := make(chan struct{})
 	var calls, resumed atomic.Int64

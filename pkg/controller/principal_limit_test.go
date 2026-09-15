@@ -191,6 +191,9 @@ func TestRequestBudget_RecommendationsClearTheShippedCadence(t *testing.T) {
 }
 
 func TestRequestBudget_SharedTokenFleetStaysAliveUnderTheRecommendedBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	base := newBudgetServer(t, controller.RequestBudget{
 		ClaimsPerMinute:     controller.CompliantClaimPollsPerMinute() * 4,
 		HeartbeatsPerMinute: controller.RecommendedHeartbeatsPerMinute,

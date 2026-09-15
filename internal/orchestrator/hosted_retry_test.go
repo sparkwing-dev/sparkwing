@@ -105,6 +105,9 @@ func (a *restartableAPI) stop() {
 }
 
 func TestHostedRetry_SurvivesADaemonRestartBetweenWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
@@ -223,6 +226,9 @@ func TestHostedRetry_DoesNotRepeatAnAppendTheDaemonMayHaveTaken(t *testing.T) {
 }
 
 func TestHostedRetry_GivesUpNamingTheDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	sock := filepath.Join(t.TempDir(), "api.sock")
 	transport := newHostedRetryTransport(apiSocketTransport(sock))
 	transport.budget = 300 * time.Millisecond
@@ -244,6 +250,9 @@ func TestHostedRetry_GivesUpNamingTheDaemon(t *testing.T) {
 }
 
 func TestNodeTransports_LogsLeaveTheAPISocketAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	var socketHits, tcpHits atomic.Int32
 	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		socketHits.Add(1)
@@ -279,6 +288,9 @@ func TestNodeTransports_LogsLeaveTheAPISocketAlone(t *testing.T) {
 }
 
 func TestHostedRetry_AWedgedDaemonDoesNotInviteASecondBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	var attempts atomic.Int32
 	api := newRestartableAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts.Add(1)

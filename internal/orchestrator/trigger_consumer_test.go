@@ -280,6 +280,9 @@ func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *
 }
 
 func TestServeConsumer_IdleExitReleasesTheHome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 
@@ -582,6 +585,9 @@ func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
 }
 
 func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -746,6 +752,9 @@ func TestHeartbeat_SurfacesAnOperatorCancelRequest(t *testing.T) {
 }
 
 func TestHeartbeat_OperatorCancelStopsTheDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	dispatchCtx, stopHeartbeat := context.WithCancel(context.Background())
 	defer stopHeartbeat()
 

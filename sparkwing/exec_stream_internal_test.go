@@ -33,6 +33,9 @@ func TestDrainStreams_CollectsOutputBufferedBeforeAnyReaderExists(t *testing.T) 
 }
 
 func TestDrainStreams_GivesUpWhenAWriterOutlivesTheCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)

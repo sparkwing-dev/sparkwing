@@ -374,6 +374,9 @@ func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
 }
 
 func TestMetrics_AuthTokenCacheAndHashingBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	base, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 

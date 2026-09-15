@@ -14,6 +14,9 @@ import (
 )
 
 func TestConformance_LogStore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	conformance.TestLogStore(t, func() storage.LogStore {
 		var mu sync.Mutex
 		blobs := map[string][]byte{}

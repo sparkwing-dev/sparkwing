@@ -19,6 +19,9 @@ import (
 // isolation is real rather than merely parsed. The child process runs the
 // fetched binary and reports its exit code back through cliError.
 func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	if os.Getenv("SPARKWING_TEST_BINARIES_CHILD") == "1" {
 		err := compileAndExec(os.Getenv("SPARKWING_TEST_BINARIES_COMPILE_DIR"), nil,
 			append(os.Environ(), "SPARKWING_FLEET=1", "GOWORK=off"), compileOptions{NoUpdate: true})
@@ -63,6 +66,9 @@ func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
 // compile must miss and build locally. Reading the cache surface instead
 // would serve the seeded binary and exit 23.
 func TestCompileAndExec_TheSubSpecOverridesTheCacheSurface(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	pipelineDir := writeExitModule(t, "binariesplain", 17)
 	storeDir := filepath.Join(t.TempDir(), "binaries-store")
 	seedArtifactStore(t, storeDir, pipelineDir, 23)

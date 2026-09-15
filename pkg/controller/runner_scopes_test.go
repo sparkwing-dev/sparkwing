@@ -75,6 +75,9 @@ func seedSecret(t *testing.T, st *store.Store, name, value, repo string, shared 
 // that regains an `admin` requirement fails this test rather than the
 // operator's first pipeline.
 func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
@@ -186,6 +189,9 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 // holding the run's trigger claim, so the three readiness routes answer that
 // claim and refuse every other bearer of the same scope set.
 func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, raw := newScopedFixture(t, runnerScopes)
 	now := time.Now().UTC()
 	strangerRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner, runnerScopes, 0, now)
@@ -236,6 +242,9 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 // set. Another bearer of the same scopes reaches none of it, and the two
 // cross-run routes stay admin.
 func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, raw := newScopedFixture(t, runnerScopes)
 	now := time.Now().UTC()
 	strangerRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner, runnerScopes, 0, now)
@@ -332,6 +341,9 @@ func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 }
 
 func TestTriggerClaimMutation_RequiresExactTokenAndGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, ownerRaw := newScopedFixture(t, runnerScopes)
 	otherRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner,
 		runnerScopes, 0, time.Now().UTC())
@@ -786,6 +798,9 @@ func TestRunnerScopes_RunAndTriggerReadsStillNeedTheClaim(t *testing.T) {
 // A pin outlives the run that writes it, so the route is bound to a
 // live claim on a run of that pipeline rather than to the scope alone.
 func TestRunnerScopes_ProfilePinNeedsAClaimOnThatPipeline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
@@ -830,6 +845,9 @@ func TestRunnerScopes_ProfilePinNeedsAClaimOnThatPipeline(t *testing.T) {
 }
 
 func TestRunnerScopes_ClaimScopedReadsExpireAndKeepSecretsNodeOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	t.Run("trigger claim", func(t *testing.T) {
 		f, raw := newScopedFixture(t, []string{controller.ScopeTriggersClaim})
 		ctx := context.Background()

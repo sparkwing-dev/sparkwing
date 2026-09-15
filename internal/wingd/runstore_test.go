@@ -101,6 +101,9 @@ func TestHandshakeReportsWhyTheStoreIsUnusable(t *testing.T) {
 }
 
 func TestShutdownWaitsForAnInFlightFinalize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	entered := make(chan struct{})
 	finalized := make(chan string, 1)

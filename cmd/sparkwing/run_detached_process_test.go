@@ -263,6 +263,9 @@ func (e *submitTestEnv) env() []string {
 }
 
 func TestRunDetached_UsesEachSubmissionEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	e.extraEnv = []string{"SPARKWING_SUBMIT_TEST_ENV=first"}
 	e.submit()
@@ -421,6 +424,9 @@ func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() boo
 
 func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	ack := e.submit()
@@ -460,6 +466,9 @@ func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 
 func TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	e.extraEnv = []string{"SPARKWING_CONTROLLER_URL=http://127.0.0.1:1", "SPARKWING_LOGS_URL="}
 	runSnapshotGit(t, e.repoDir, "init")
@@ -516,6 +525,9 @@ func TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes(t *testing.T) {
 
 func TestRunDetached_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	first := e.submit("--sw-idempotency-key", "deploy-once")
@@ -541,6 +553,9 @@ func TestRunDetached_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 
 func TestRunDetached_DistinctKeysAreDistinctRuns(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	a := e.submit("--sw-idempotency-key", "a")
 	b := e.submit("--sw-idempotency-key", "b")
@@ -554,6 +569,9 @@ func TestRunDetached_DistinctKeysAreDistinctRuns(t *testing.T) {
 
 func TestRunDetached_RequestIDDoesNotDeduplicate(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	a := e.submit("--sw-request-id", "trace-1")
 	b := e.submit("--sw-request-id", "trace-1")
@@ -577,6 +595,9 @@ func TestRunDetached_RequestIDDoesNotDeduplicate(t *testing.T) {
 
 func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	first := e.submit()
@@ -624,6 +645,9 @@ func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 
 func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	if out, err := e.run("runs", "consumer", "status", "--home", e.home); err == nil {
@@ -690,6 +714,9 @@ func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T)
 
 func TestRunDetached_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	out := e.mustRun(append(e.detachArgs("fixture", "--sw-output", "json"),
 		"--", "--request-id", "belongs-to-the-pipeline")...)
@@ -714,6 +741,9 @@ func TestRunDetached_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 
 func TestRunDetached_RefusesAPipelineNothingDeclares(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	out, err := e.run(e.detachArgs("no-such-pipeline")...)
 	if err == nil {
@@ -814,6 +844,9 @@ func (e *submitTestEnv) startsInMarker() int {
 
 func TestRunDetached_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 10.1s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
@@ -922,6 +955,9 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 
 func TestRunDetached_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	other := t.TempDir()
 	t.Cleanup(e.stopConsumer)
@@ -965,6 +1001,9 @@ func TestRunDetached_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 
 func TestRunDetached_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	e.submitWithArgs([]string{"--sw-idempotency-key", "k"}, []string{"--env", "staging"})
 
@@ -982,6 +1021,9 @@ func TestRunDetached_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 
 func TestRunDetached_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	first := e.submit("--sw-idempotency-key", "k")
 
@@ -1015,6 +1057,9 @@ func TestRunDetached_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 
 func TestRunDetached_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 
 	old := exec.Command(e.bin, "__runs-consume", "--home", e.home,
@@ -1055,6 +1100,9 @@ func TestRunDetached_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 
 func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
@@ -1137,6 +1185,9 @@ func TestRun_RefusesADetachedOnlyFlagWithoutDetached(t *testing.T) {
 
 func TestRunDetached_PublishesTheRunHandleFile(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	e := newSubmitTestEnv(t)
 	handle := filepath.Join(t.TempDir(), "handle.json")
 

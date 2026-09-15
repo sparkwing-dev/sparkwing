@@ -116,6 +116,9 @@ func wedgedHome(t *testing.T, greet func(*bufio.Reader, net.Conn)) (paths.Paths,
 }
 
 func TestDiagnose_NamesADaemonThatAnswersNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	p, home, sock := wedgedHome(t, nil)
 
 	report := diagnoseWithBudget(t, p, home, strayTestWait)
@@ -137,6 +140,9 @@ func TestDiagnose_NamesADaemonThatAnswersNothing(t *testing.T) {
 }
 
 func TestDiagnose_NamesADaemonThatWedgesBehindItsHandshake(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.1s of real work; the fast class runs under -short")
+	}
 	p, home, _ := wedgedHome(t, answerHandshakeOnly)
 
 	report := diagnoseWithBudget(t, p, home, strayTestWait)
@@ -156,6 +162,9 @@ func TestDiagnose_NamesADaemonThatWedgesBehindItsHandshake(t *testing.T) {
 // bare deadline error, and must not accuse the daemon of a wedge it did not
 // prove.
 func TestDiagnose_DegradesRatherThanSpendingAShortBudgetOnTheDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	p, home, _ := wedgedHome(t, nil)
 
 	report := diagnoseWithBudget(t, p, home, time.Second)

@@ -105,6 +105,9 @@ func TestBindProjectPipelines_ResolvesTypedArgsPipelineForHelp(t *testing.T) {
 }
 
 func TestDescribeAll_IncludesTypedArgsPipelineAfterBind(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	entrypoint := typedHelpTestName("TypedHelpEntryDescribe")
 	pipelineName := typedHelpTestName("typed-help-describe-")
 	sparkwing.RegisterEntrypoint[typedHelpArgs](entrypoint, func() sparkwing.Pipeline[typedHelpArgs] {

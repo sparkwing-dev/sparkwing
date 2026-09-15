@@ -47,6 +47,9 @@ func failingRunReads(next http.Handler, parentRunID string) http.Handler {
 }
 
 func TestRunNodeOnce_ChildAwaitTimeoutNamesWhatTheParentObserved(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	if _, ok := sparkwing.Lookup("await-evidence-pipe"); !ok {
 		sparkwing.Register[sparkwing.NoInputs]("await-evidence-pipe",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return awaitEvidencePipe{} })

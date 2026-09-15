@@ -62,6 +62,9 @@ func TestCreateTokenIfNoneExist_WritesOnceOnEmptyTable(t *testing.T) {
 }
 
 func TestCreateTokenIfNoneExist_WritesOverTokensThatNoLongerAuthenticate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	now := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
 
 	for _, tc := range []struct {

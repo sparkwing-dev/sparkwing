@@ -157,6 +157,9 @@ func TestExplicitAwaitNeverTrustsReservedLookingTriggerEnvironment(t *testing.T)
 }
 
 func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhileParentLives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not allow the describe process to unlink its running executable")
 	}
@@ -404,6 +407,9 @@ func TestLocateTriggerRepo_RetryRejectsRevisionDriftBeforeCompilation(t *testing
 }
 
 func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	leaseRoot := t.TempDir()
 	t.Setenv("TMPDIR", leaseRoot)
 	t.Cleanup(func() {

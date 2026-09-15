@@ -9,6 +9,9 @@ import (
 )
 
 func TestTriggerBinaryUploadUsesCacheTokenNotAgentToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-write-token")
 	var uploadAuthorization string

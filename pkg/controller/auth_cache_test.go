@@ -11,6 +11,9 @@ import (
 )
 
 func TestAuthenticate_ConcurrentClaimsVerifyOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st := newStoreForAuth(t)
 	now := time.Now().UTC()
 	raw, _, err := st.CreateToken("pool", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, now)
@@ -53,6 +56,9 @@ func TestAuthenticate_ConcurrentClaimsVerifyOnce(t *testing.T) {
 }
 
 func TestAuthenticate_RevokedTokenStopsWithinTheCacheWindow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st := newStoreForAuth(t)
 	start := time.Now().UTC()
 	raw, tok, err := st.CreateToken("pool", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, start)

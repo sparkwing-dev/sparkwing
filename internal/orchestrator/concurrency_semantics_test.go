@@ -488,6 +488,9 @@ func TestMemo_InFlightDedupeOnContent(t *testing.T) {
 }
 
 func TestScope_BoxSerializesAcrossRunsOnSameHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	resetSem()
 	gate := installSemStepGate(t)
 	p := newPaths(t)
@@ -563,6 +566,9 @@ func TestScope_RunIsolatesPerRun(t *testing.T) {
 }
 
 func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	resetSem()
 	gate := installSemStepGate(t)
 	p := newPaths(t)
@@ -607,6 +613,9 @@ func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
 }
 
 func TestConcurrency_WaitDoesNotHoldWorkerSlot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	resetSem()
 	gate := installSemStepGate(t)
 	freeNodeLatency.Store(0)
@@ -653,6 +662,9 @@ func TestConcurrency_WaitDoesNotHoldWorkerSlot(t *testing.T) {
 }
 
 func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	resetSem()
 	p := newPaths(t)
 	leaderDone := make(chan struct{})

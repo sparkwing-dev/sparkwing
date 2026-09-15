@@ -48,6 +48,9 @@ func detachedDaemonRepo(t *testing.T) string {
 // the consumer's child resolves a host with exec.LookPath("sparkwing") and fails
 // admission against a daemon from another build.
 func TestRunDetachedPreWarmsTheDaemonBeforeStartingTheConsumer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	if runtime.GOOS == "windows" {
 		t.Skip("the detached-consumer contract is exercised on POSIX process semantics")
 	}
@@ -89,6 +92,9 @@ func TestRunDetachedPreWarmsTheDaemonBeforeStartingTheConsumer(t *testing.T) {
 // launch intact and never touches admission, so hosting a daemon for it can
 // drain and replace this machine's daemon for nothing.
 func TestRunDetachedDoesNotPreWarmForALaunchThatSkipsAdmission(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	if runtime.GOOS == "windows" {
 		t.Skip("the detached-consumer contract is exercised on POSIX process semantics")
 	}

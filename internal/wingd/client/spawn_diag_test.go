@@ -13,6 +13,9 @@ import (
 )
 
 func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	stateDir, err := wingd.StateDir(home)
 	if err != nil {

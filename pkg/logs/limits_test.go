@@ -280,6 +280,9 @@ func TestLogs_SlowBodyDoesNotBlockOtherAppends(t *testing.T) {
 }
 
 func TestLogs_ConcurrentAppendsHoldTheByteCaps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	const (
 		capBytes = 1024
 		writers  = 64
@@ -914,6 +917,9 @@ func TestLogs_DeletingARunRemeasuresAndThawsTheStore(t *testing.T) {
 }
 
 func TestLogs_ADeleteDuringAWalkStillClearsTheFreeze(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	fix := newCeilingServer(t, objectguard.CeilingConfig{
 		Limit:     objectguard.CeilingLimit{MaxBytes: 4096},
 		Reconcile: time.Hour,

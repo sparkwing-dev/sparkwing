@@ -351,6 +351,9 @@ func TestWingd_NoProgressTimeoutPausesForToolSlotAndResumesAfterGrant(t *testing
 }
 
 func TestWingd_ToolSlotQueueTimeoutFallsBackRatherThanBlockingForever(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	registerToolSlotE2EPipeline()
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)

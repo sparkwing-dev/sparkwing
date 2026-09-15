@@ -1149,6 +1149,9 @@ func TestHandleBinFailedPutLeavesNoSidecar(t *testing.T) {
 }
 
 func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	for i := 0; i < 25; i++ {
 		oldDir := binsDir
 		binsDir = t.TempDir()

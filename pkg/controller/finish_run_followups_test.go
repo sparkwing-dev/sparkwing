@@ -56,6 +56,9 @@ func seedFinishRunFollowUpState(t *testing.T, st *store.Store, runID string) str
 // nothing else produces a finished run's commit status, so a client that
 // disconnects mid-handler must not take the fold or the status with it.
 func TestFinishRun_FollowUpsSurviveARequestCancel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)

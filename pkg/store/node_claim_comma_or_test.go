@@ -44,6 +44,9 @@ func TestNodeClaim_CommaORTermClaimableByEitherAlternative(t *testing.T) {
 }
 
 func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	ctx := context.Background()
 	cases := []struct {
 		name      string

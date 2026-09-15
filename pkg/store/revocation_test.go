@@ -53,6 +53,9 @@ func TestRevokeToken_AlreadyEffectiveIsRejected(t *testing.T) {
 }
 
 func TestDeleteUser_RevokesSessionsAndTokens(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	s := newTestStore(t)
 	now := time.Now().UTC()
 

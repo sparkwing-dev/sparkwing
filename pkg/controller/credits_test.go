@@ -289,6 +289,9 @@ func creditChargesOfKind(charges []store.CreditCharge, kind string) []store.Cred
 }
 
 func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	floor, err := f.store.CreditClaimFloorMicro(ctx)
@@ -373,6 +376,9 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 // nothing more, because the finish settles the tail and refunds the rest of
 // the claim reservation.
 func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -421,6 +427,9 @@ func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
 }
 
 func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, false)
 
 	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits", f.readonly, nil)
@@ -509,6 +518,9 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 }
 
 func TestCredits_SetMeteredRouteMarksAnExistingToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, false)
 	ctx := context.Background()
 
@@ -792,6 +804,9 @@ func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
 }
 
 func TestCredits_HistoryNamesTheClassAndRateEachChargeWasBilledAt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -942,6 +957,9 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 // A claim that asserts its own cpu changes nothing: the class comes from the
 // plan the controller holds.
 func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
@@ -998,6 +1016,9 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 // whichever ladder the operator priced, so the pod shape and the bill cannot
 // disagree.
 func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,

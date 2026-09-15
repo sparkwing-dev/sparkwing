@@ -23,6 +23,9 @@ func (s *countingLogStore) Stream(context.Context, string, string) (io.ReadClose
 }
 
 func TestStreamNode_PausesBetweenReconnects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	const window = 600 * time.Millisecond
 	ls := &countingLogStore{}
 	ctx, cancel := context.WithTimeout(context.Background(), window)

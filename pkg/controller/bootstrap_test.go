@@ -123,6 +123,9 @@ func TestBootstrap_AuthEnabledRequiresAdminForFirstUser(t *testing.T) {
 }
 
 func TestBootstrap_ConcurrentSignupRace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 

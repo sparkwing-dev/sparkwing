@@ -147,6 +147,9 @@ func TestLogReadsWithoutABearerAreRefusedAndMeterNothing(t *testing.T) {
 }
 
 func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	s, h := newEgressLogsServer(t, egress.Config{MaxStreamsPerPrincipal: 1})
 	appendLog(t, h, "alice", "r1", "n1", "hello\n")
 

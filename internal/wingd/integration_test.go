@@ -674,6 +674,9 @@ func TestExplicitCancelRetainsLegacyFinalizerCompatibility(t *testing.T) {
 }
 
 func TestExplicitCancelPersistenceFailureIsNotAcknowledged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	legacyFinalized := make(chan string, 1)
 	startDaemon(t, wingd.Config{
@@ -1128,6 +1131,9 @@ func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 }
 
 func TestSharedCancelPersistenceFailureFallsBackWithoutSuppression(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	legacy := make(chan string, 2)
 	startDaemon(t, wingd.Config{
@@ -1382,6 +1388,9 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 }
 
 func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	sampler := newFakeSampler(8, 16<<30)
 	sampler.set(wingd.HostStat{
@@ -1920,6 +1929,9 @@ func TestGrantedSubmitReconnectRejectsSemaphoresOnlyMismatch(t *testing.T) {
 }
 
 func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
 
@@ -1979,6 +1991,9 @@ func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
 }
 
 func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
 		Home:             home,

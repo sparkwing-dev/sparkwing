@@ -89,6 +89,9 @@ func TestParseRunFilterClampsLimit(t *testing.T) {
 }
 
 func TestListRunsClampsLimitToTheCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)

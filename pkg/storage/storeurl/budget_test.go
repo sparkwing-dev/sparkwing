@@ -55,6 +55,9 @@ func useLimiter(t *testing.T, l *objectguard.Limiter) {
 // the client the factory hands out: one failing call bills that many
 // requests and no more.
 func TestOpenArtifactStoreCapsTheSDKRetryer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s of real work; the fast class runs under -short")
+	}
 	endpoint, hits := countingBucket(t, http.StatusInternalServerError)
 	s3Env(t, endpoint)
 	useLimiter(t, objectguard.New(objectguard.DefaultConfig()))

@@ -9,6 +9,9 @@ import (
 )
 
 func TestDispatchFleetCompileFailureCleansExactSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	tmp := t.TempDir()
 	repo := initSnapshotRepo(t)
 	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {

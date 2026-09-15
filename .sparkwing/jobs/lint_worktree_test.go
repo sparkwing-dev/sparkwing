@@ -26,6 +26,9 @@ issues:
 // repository root, so every finding the linter recorded under the alias sat
 // outside the diff and the baseline filter dropped it.
 func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	requireGolangciLint(t)
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")

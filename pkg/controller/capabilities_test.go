@@ -51,6 +51,9 @@ func newServerWithArtifacts(t *testing.T, art storage.ArtifactStore) string {
 
 func TestArtifactsEndpoint_RouteAbsentWhenUnconfigured(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	base := newServerWithArtifacts(t, nil)
 
 	resp, err := http.Get(base + "/api/v1/artifacts/abcd1234")
@@ -65,6 +68,9 @@ func TestArtifactsEndpoint_RouteAbsentWhenUnconfigured(t *testing.T) {
 
 func TestArtifactsEndpoint_RoundTrip(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	art := &fakeArtifactStore{
 		objects: map[string][]byte{"good-key": []byte("payload")},
 	}
@@ -137,6 +143,9 @@ func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
 
 func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -158,6 +167,9 @@ func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
 
 func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -195,6 +207,9 @@ func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 
 func TestReconcileHook_NoHookIsPassThrough(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {

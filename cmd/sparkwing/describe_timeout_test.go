@@ -10,6 +10,9 @@ import (
 )
 
 func TestDescribeCacheBoundsUnresponsiveBinary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.0s of real work; the fast class runs under -short")
+	}
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix executable fixture")
 	}

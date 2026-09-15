@@ -121,6 +121,9 @@ func TestGitcacheStreamDeadline_CoversTheRegisterRoute(t *testing.T) {
 }
 
 func TestWaiterNotifyStreamDeadline_SurvivesTheServerWriteTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)

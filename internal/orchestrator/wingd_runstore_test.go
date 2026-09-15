@@ -209,6 +209,9 @@ func TestRunStoreMaintenanceReapsALapsedHolder(t *testing.T) {
 }
 
 func TestWingdDaemonReapsWhileServingAndClosesTheStoreOnIdleExit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	home := wingdTestHome(t)
 	createStore(t, home)
 	seed, err := NewHeldRunStore(home)
@@ -254,6 +257,9 @@ func TestWingdDaemonReapsWhileServingAndClosesTheStoreOnIdleExit(t *testing.T) {
 }
 
 func TestHeldRunStoreReadsWhileTheReaperWaitsOnAForeignWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	home := t.TempDir()
 	createStore(t, home)
 	runs, err := NewHeldRunStore(home)

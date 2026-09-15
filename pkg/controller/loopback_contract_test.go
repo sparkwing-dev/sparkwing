@@ -103,6 +103,9 @@ func TestLoopbackContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 
 func TestLoopbackContract_MatchesTheRealController(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)

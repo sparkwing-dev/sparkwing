@@ -56,6 +56,9 @@ func TestController_Health(t *testing.T) {
 }
 
 func TestController_WaiterNotifyPromotesOrphanedQueue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -104,6 +107,9 @@ func TestController_WaiterNotifyPromotesOrphanedQueue(t *testing.T) {
 }
 
 func TestController_WaiterNotifyMissingKeyEndsStream(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
 

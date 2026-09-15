@@ -209,6 +209,9 @@ func TestMirrorStateBackendKeepsCapacityWritesOnTheCanonical(t *testing.T) {
 }
 
 func TestCanonicalStateUnwrapsTheMirrorSoAChildStaysOutOfIt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	canonical := coordinationStore(t)
 	mirror := coordinationStore(t)
 	ctx := context.Background()

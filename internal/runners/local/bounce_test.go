@@ -112,6 +112,9 @@ func nodeEvents(t *testing.T, f *spawnFixture, runID, kind string) []store.Event
 }
 
 func TestRunNode_BounceKillsTheProcessAndRunsTheNodeAgain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	script, attempts, release := bounceScript(t)
 	f := newSpawnFixture(t, fakeNodeBinary(t, script))
 	f.seedNode(t, "run-b1", "build")
@@ -312,6 +315,9 @@ func TestSettleOpenBounces_ClosesWhatAnAttemptLeftOpen(t *testing.T) {
 }
 
 func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	dir := t.TempDir()
 	attempts := filepath.Join(dir, "attempts")
 	wait := filepath.Join(dir, "wait")
@@ -374,6 +380,9 @@ func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
 }
 
 func TestSettleBounce_DoesNotRespawnWhenTheNodeCannotBeRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"))
 	f.seedNode(t, "run-b6", "build")
 	ctx := context.Background()
@@ -413,6 +422,9 @@ func TestSettleBounce_DoesNotRespawnWhenTheNodeCannotBeRead(t *testing.T) {
 }
 
 func TestSupervise_AHungBouncePollDoesNotStallTheHeartbeat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.1s of real work; the fast class runs under -short")
+	}
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"))
 	ctx := context.Background()
 	f.seedNode(t, "run-b7", "build")

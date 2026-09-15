@@ -48,6 +48,9 @@ func lintFixtureRepo(t *testing.T) string {
 }
 
 func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 6.6s of real work; the fast class runs under -short")
+	}
 	for _, dir := range productDirs {
 		t.Run(dir, func(t *testing.T) {
 			root := lintFixtureRepo(t)
@@ -73,6 +76,9 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 }
 
 func TestLintStillCoversThePipelineModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 	root := lintFixtureRepo(t)
 	ctx := context.Background()
 
@@ -86,6 +92,9 @@ func TestLintStillCoversThePipelineModule(t *testing.T) {
 }
 
 func TestLintCoversEveryCommittedModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
 	root := lintFixtureRepo(t)
 	ctx := context.Background()
 

@@ -218,19 +218,6 @@ func pushRangeScope(ctx context.Context, noun string, keep func([]string) []stri
 		len(files), noun, gateBaselineRef, base), nil
 }
 
-func pushRangeCheckerCommand(ctx context.Context, tool, noun string, keep func([]string) []string) (command, scope string, err error) {
-	_, scope, err = pushRangeScope(ctx, noun, keep)
-	if err != nil {
-		return "", "", err
-	}
-	base, err := resolveGateBase(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	return fmt.Sprintf("go run ./internal/%s -base %s .", tool, base),
-		fmt.Sprintf("%s, plus every untracked %s", scope, noun), nil
-}
-
 var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
 
 var homeDirJoin = regexp.MustCompile(`filepath\.Join\([^,)]*[Hh]ome[^,)]*,\s*"\.sparkwing"`)
@@ -607,6 +594,15 @@ func runBuild(ctx context.Context) error {
 func runTest(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
 		return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), home)
+	})
+}
+
+// perf: the fast test class. A test whose own runtime passes 200 ms guards
+// itself with testing.Short, so this is the same suite without the members
+// that make it minutes long.
+func runShortTest(ctx context.Context) error {
+	return withProductTestHome(func(home string) error {
+		return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "-short ./..."), home)
 	})
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const riskFixtureModule = "riskfixture"
@@ -23,6 +24,47 @@ const riskMarkerEnv = "RISK_FIXTURE_MARKER"
 
 // safety: the empty string writes the same fixture pipeline declaring nothing.
 const riskDeclaration = ".\n\t\tRisk(\"destructive\", \"prod\")"
+
+func TestPersistSubmissionRefusesDeclaredRiskBeforeQueuing(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	repoDir := t.TempDir()
+	gate := riskGate{
+		Surface: "detached", Pipeline: "risky", SubmitDir: repoDir,
+		Declared: []sparkwing.DescribePipeline{{
+			Name: "risky",
+			RisksBySteps: []sparkwing.DescribeStepRisks{{
+				NodeID: "cut", StepID: "push", Labels: []string{"destructive", "prod"},
+			}},
+		}},
+	}
+	_, err = persistSubmission(t.Context(), st, paths, submission{
+		Pipeline: "risky", RepoDir: repoDir, Gate: gate.check,
+	})
+	var blocked *sparkwing.RiskBlockedError
+	if !errors.As(err, &blocked) || blocked.StepID != "push" ||
+		strings.Join(blocked.MissingLabels, ",") != "destructive,prod" {
+		t.Fatalf("submission refusal = %v, want the step and both unapproved labels", err)
+	}
+	triggers, err := st.ListTriggers(t.Context(), store.TriggerFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(triggers) != 0 {
+		t.Fatalf("refused submission persisted %d triggers", len(triggers))
+	}
+}
 
 // TestRun_FirstRunInAFreshHomeRefusesADeclaredRisk requires the refusal on the
 // invocation that compiles the pipeline, not only on the one after it.

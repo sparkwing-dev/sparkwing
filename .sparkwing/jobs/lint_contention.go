@@ -57,6 +57,30 @@ func lintCommandFor(holdsBudget bool) string {
 	return fmt.Sprintf("golangci-lint run %s ./...", flag)
 }
 
+// perf: the subset that answers in about a second over the packages one push
+// touches. Every name is enabled in .golangci.yml, the whole set the release
+// cut runs; what the subset leaves out is the type-and-SSA family, which
+// costs minutes over a module.
+var prePushLinters = []string{
+	"bidichk",
+	"copyloopvar",
+	"depguard",
+	"ineffassign",
+	"misspell",
+	"nolintlint",
+	"unconvert",
+	"usestdlibvars",
+}
+
+// perf: the hook holds a push open, so it never queues behind the box-wide
+// golangci-lint lock; the subset over a handful of packages is small enough
+// load to run beside whatever holds it. A minute bounds a hung run, well over
+// the second the subset measures.
+func fastLintCommand(cores int, pkgs []string) string {
+	return fmt.Sprintf("GOLANGCI_LINT_CACHE=%s golangci-lint run --allow-parallel-runners -j %d --timeout 1m --enable-only %s %s",
+		shellQuote(sparkwing.ToolCacheDir("golangci-lint")), cores, strings.Join(prePushLinters, ","), strings.Join(pkgs, " "))
+}
+
 func runGolangciLint(ctx context.Context) error {
 	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
 	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")

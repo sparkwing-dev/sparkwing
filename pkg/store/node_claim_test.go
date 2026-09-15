@@ -466,6 +466,9 @@ func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 }
 
 func TestNodeClaim_LegacyRunnerCannotSelfAssertReservedLocation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	for _, selector := range []string{"local", "location=coordinator", "location=local", "location=cloud"} {
 		t.Run(selector, func(t *testing.T) {
 			s := storetest.Open(t)

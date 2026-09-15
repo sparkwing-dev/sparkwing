@@ -117,6 +117,9 @@ const killSentinel = "SPARKWING_TEST_SAVE_UNTIL_KILLED"
 const killedSaveEntries = 100000
 
 func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	if os.Getenv(killSentinel) != "" {
 		saveUntilKilled(os.Getenv(killSentinel))
 		return

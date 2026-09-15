@@ -207,6 +207,9 @@ func TestNodeClaimOwnership_TerminalEventKeepsExactAttribution(t *testing.T) {
 }
 
 func TestTriggerClaimOwnership_RequiresExactLiveRunBoundGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	newClaim := func(t *testing.T) (scopedFixture, *client.Client, *store.Trigger) {
 		t.Helper()
 		f, raw := newScopedFixture(t, runnerScopes)
@@ -335,6 +338,9 @@ func TestNodeClaimOwnership_ServerCapsTheRequestedLease(t *testing.T) {
 }
 
 func TestNodeClaimOwnership_TwoTokensSharingAPrincipalNameDoNotCrossAuthorize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	f := newOwnershipFixture(t)
 	now := time.Now().UTC()
 	twin, _, err := f.store.CreateToken("runner-a", store.TokenKindRunner,

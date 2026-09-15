@@ -186,6 +186,9 @@ func TestRunsApprovalsList_ReadsTheStandaloneStore(t *testing.T) {
 }
 
 func TestRunsAnnotate_UnreadableStandaloneStoreIsNamed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	paths := standaloneHome(t)
 	aged := filepath.Join(paths.StandaloneSchemaDir(20), "state.db")
 	writeRun(t, aged, "run-old")

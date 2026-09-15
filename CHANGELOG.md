@@ -24,6 +24,21 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.3, so a fresh scaffold compiles against that release.
 
+- **checks:** The three check classes carry enforced time budgets: `pre-commit`
+  3 seconds, `pre-push` 10 seconds, and the release cut 5 minutes. Each tier's
+  job times its own steps and fails when the class overruns, naming the slowest
+  step and its cost. Above 25 changed Go files, the hook tiers waive only their
+  time budgets and still run every selected check. The release cut always
+  enforces its five-minute budget. `pre-push` repeats nothing
+  `pre-commit` already ran: it keeps the changelog, OpenAPI and API-snapshot
+  gates and adds `go build`, `go vet` and the fast linter subset over the
+  packages the push touches, without a package-count cutoff. It no longer
+  re-runs the formatters, comment, sleep and regex sweeps, the docs mirror or home resolution. The
+  `release` pipeline runs build, the full linter and the fast test class before
+  it tags. A test whose own runtime passes 200 ms guards itself with
+  `testing.Short`, so the fast class stays fast; `gate` still runs the suite
+  without `-short`. No test suite runs in a hook tier: the fast test class
+  belongs to the release cut.
 
 ## [v0.52.3] - 2026-09-15
 ### Added

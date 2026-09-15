@@ -11,6 +11,9 @@ import (
 
 func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})

@@ -112,6 +112,9 @@ func TestTriggerClaimHeartbeat_Silenced(t *testing.T) {
 }
 
 func TestTriggerClaimHeartbeat_TransientRecovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	withFastTriggerHeartbeat(t, 5*time.Millisecond, 20*time.Millisecond, 500*time.Millisecond)
 
 	ts, handler, _ := newTriggerHeartbeatServer(t)

@@ -23,6 +23,9 @@ func TestAutoBumpLeavesThePinAloneAtTheTagBeingReleased(t *testing.T) {
 }
 
 func TestAutoBumpStillMovesThePinWhenTheTagIsBehindHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	repo := seedReleaseRepo(t)
 	gitRun(t, repo, "tag", "v0.2.0")
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n\n// a later commit\n")

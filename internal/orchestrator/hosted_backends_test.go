@@ -102,6 +102,9 @@ func countStoreOpens(t *testing.T) *storeOpenLog {
 }
 
 func TestHostedRun_OpensNoStoreAndMintsNoToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	_, runs := startAPIDaemon(t, home, nil)
@@ -152,6 +155,9 @@ func TestHostedRun_OpensNoStoreAndMintsNoToken(t *testing.T) {
 }
 
 func TestHostedRun_MemoSlotIsArbitratedByTheDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	_, runs := startAPIDaemon(t, home, nil)

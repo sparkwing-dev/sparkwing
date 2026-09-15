@@ -47,6 +47,9 @@ func TestOutbox_StageCollapsesSupersededRowsForTheSameKey(t *testing.T) {
 }
 
 func TestOutbox_StageRefusesWhenTheQueueIsFull(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.8s of real work; the fast class runs under -short")
+	}
 	art := newMemArt()
 	outbox, err := s3state.OpenOutbox(filepath.Join(t.TempDir(), "outbox.db"), art, time.Hour)
 	if err != nil {
@@ -127,6 +130,9 @@ func (h *holdFirstPutArt) Put(ctx context.Context, key string, r io.Reader) erro
 }
 
 func TestOutbox_StageDoesNotLetAnInFlightReplayOvertakeTheNewestBlob(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	key := "runs/r/state.ndjson"
 	art := newHoldFirstPutArt(key)
 	outbox, err := s3state.OpenOutbox(filepath.Join(t.TempDir(), "outbox.db"), art, time.Hour)

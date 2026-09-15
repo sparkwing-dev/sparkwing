@@ -63,6 +63,9 @@ func TestLiveLog_AppendNeedsTheNodesOwnClaim(t *testing.T) {
 }
 
 func TestLiveLog_ReadIsNotFoundForANodeThatNeverWrote(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
 	f := newLiveLogFixture(t)
 	_, err := client.NewWithToken(f.url, nil, f.owner).
 		ReadNodeLiveLog(context.Background(), "run-1", "only", 0)

@@ -105,6 +105,9 @@ func TestWingdAPIServesARunOverTheSocketAndMintsNoToken(t *testing.T) {
 }
 
 func TestWingdAPIListenerMovesToTheSuccessor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := wingdTestHome(t)
 	createStore(t, home)
 	sock, _ := startAPIDaemon(t, home, nil)
@@ -165,6 +168,9 @@ func TestWingdAPIStatusReportsTheSocket(t *testing.T) {
 }
 
 func TestRevokingATokenTakesEffectOnTheReadRoutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := wingdTestHome(t)
 	createStore(t, home)
 	sock, _ := startAPIDaemon(t, home, nil)
@@ -243,6 +249,9 @@ func statusWithToken(t *testing.T, httpClient *http.Client, url, token string) i
 }
 
 func TestAStreamingRouteOutlivesTheRequestBound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.6s of real work; the fast class runs under -short")
+	}
 	home := wingdTestHome(t)
 	createStore(t, home)
 	const bound = 300 * time.Millisecond

@@ -207,6 +207,9 @@ func TestResolveSparks_EnvVar_SkipsResolve(t *testing.T) {
 }
 
 func TestResolveSparks_ProxyDown_FailsLoudly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 30.0s of real work; the fast class runs under -short")
+	}
 	t.Setenv("GOPROXY", "http://127.0.0.1:1")
 	t.Setenv("GOPRIVATE", "")
 	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"

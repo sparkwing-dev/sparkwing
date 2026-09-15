@@ -32,6 +32,9 @@ func semReqCancel(runID, key string, cancelTimeoutMS int64) wingwire.AdmissionRe
 }
 
 func TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1})
 
@@ -239,6 +242,9 @@ func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 }
 
 func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home})
 
@@ -260,6 +266,9 @@ func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
 }
 
 func TestReattach_RejectedAfterGrace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home})
 
@@ -438,6 +447,9 @@ func TestRefreshRunning_LeavesStoppedDaemonStopped(t *testing.T) {
 }
 
 func TestVersionTakeover_DevBuildAcceptsSameSourceReleaseDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
 
@@ -454,6 +466,9 @@ func TestVersionTakeover_DevBuildAcceptsSameSourceReleaseDaemon(t *testing.T) {
 }
 
 func TestVersionTakeover_ReleaseAcceptsSameSourceDirtyDevDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0+dirty"})
 
@@ -470,6 +485,9 @@ func TestVersionTakeover_ReleaseAcceptsSameSourceDirtyDevDaemon(t *testing.T) {
 }
 
 func TestVersionTakeover_ReleaseLeavesCleanSourceDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2-dev+e99c1800"})
 
@@ -487,6 +505,9 @@ func TestVersionTakeover_ReleaseLeavesCleanSourceDaemon(t *testing.T) {
 
 func TestIdleExit_NoWork(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 250 * time.Millisecond})
@@ -497,6 +518,9 @@ func TestIdleExit_NoWork(t *testing.T) {
 
 func TestIdleExit_WaitsForHolders(t *testing.T) {
 	t.Parallel()
+	if testing.Short() {
+		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+	}
 
 	home := shortHome(t)
 	const idleTimeout = 300 * time.Millisecond

@@ -9,6 +9,9 @@ import (
 )
 
 func TestSeededToolCache_ReportsTheDonorsPathsWhenTheDonorRunHadFindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
 	root := lintFixtureRoot(t)
 	donor := seedLintWorktree(t, filepath.Join(root, "donor"))
 	target := seedLintWorktree(t, filepath.Join(root, "target"))
@@ -26,6 +29,9 @@ func TestSeededToolCache_ReportsTheDonorsPathsWhenTheDonorRunHadFindings(t *test
 }
 
 func TestSeededToolCache_NamesTheDonorEvenWhenTheDonorRunReportedNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
 	root := lintFixtureRoot(t)
 	donor := seedLintWorktree(t, filepath.Join(root, "donor"))
 	target := seedLintWorktree(t, filepath.Join(root, "target"))

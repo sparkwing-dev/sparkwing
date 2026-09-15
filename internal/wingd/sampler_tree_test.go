@@ -40,6 +40,9 @@ func TestCollectSubtree_ToleratesCycle(t *testing.T) {
 }
 
 func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	requireObservableProcCPU(t)
 	root := startProcessTree(t, `sh -c "while :; do :; done" & sleep 5`)
 	p := newProcSampler()
@@ -50,6 +53,9 @@ func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 }
 
 func TestProcSampler_IdleTreeIsZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	requireObservableProcCPU(t)
 	root := startProcessTree(t, `sleep 5 & wait`)
 	p := newProcSampler()

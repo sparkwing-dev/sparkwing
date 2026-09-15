@@ -351,6 +351,9 @@ func TestSchemaV30RepairsRecognizableOldFleetPostgresLineages(t *testing.T) {
 }
 
 func TestSchemaV30RepairsRecognizableOldFleetSQLiteLineages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	for _, stage := range []int{28, 29, 30} {
 		t.Run(fmt.Sprintf("v%d", stage), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "old-fleet.db")

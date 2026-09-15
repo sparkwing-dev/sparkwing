@@ -22,6 +22,9 @@ func startBackgroundFetch(t *testing.T, interval time.Duration) {
 }
 
 func TestBackgroundFetchWaitsForTheHandlerLockOnTheSameRepo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	repoURL, _, _ := gitcacheFixture(t)
 	bgFetch.markRequested(stateKey(repoHash(repoURL)))
 

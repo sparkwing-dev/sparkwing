@@ -46,6 +46,9 @@ func TestSQLiteDSNEscapesURIMetacharactersInPath(t *testing.T) {
 }
 
 func TestOpenWritesTheStatDatabaseWhenPathHasURIMetacharacters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, dirName := range []string{"a#b", "q?x", "pct%41x"} {
 		t.Run(dirName, func(t *testing.T) {
 			root := t.TempDir()

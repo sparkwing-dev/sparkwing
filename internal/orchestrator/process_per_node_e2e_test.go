@@ -18,6 +18,9 @@ import (
 )
 
 func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.5s of real work; the fast class runs under -short")
+	}
 	mod, bin := buildProcPerNodeBinary(t)
 
 	home := t.TempDir()
@@ -97,6 +100,9 @@ func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs 
 }
 
 func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.4s of real work; the fast class runs under -short")
+	}
 	mod, bin := buildProcPerNodeBinary(t)
 
 	home := t.TempDir()
@@ -168,6 +174,9 @@ func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 }
 
 func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.7s of real work; the fast class runs under -short")
+	}
 	mod, bin := buildProcPerNodeBinary(t)
 
 	home := t.TempDir()

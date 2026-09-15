@@ -89,6 +89,9 @@ func TestPlanConcurrency_KeyCarriesScope(t *testing.T) {
 }
 
 func TestPlanConcurrency_QueueTimeoutTripsLoud(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	group := sparkwing.NewConcurrencyGroup("deploy-qt-trip", sparkwing.ConcurrencyLimit{
 		Capacity:     1,
 		OnLimit:      sparkwing.Queue,
@@ -109,6 +112,9 @@ func TestPlanConcurrency_QueueTimeoutTripsLoud(t *testing.T) {
 }
 
 func TestPlanConcurrency_ZeroQueueTimeoutWaitsIndefinitely(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
 	group := sparkwing.NewConcurrencyGroup("deploy-qt-zero", sparkwing.ConcurrencyLimit{
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,

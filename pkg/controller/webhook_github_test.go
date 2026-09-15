@@ -260,6 +260,9 @@ func prWebhookBody(action string, number int) []byte {
 }
 
 func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, action := range []string{"opened", "synchronize", "reopened"} {
 		t.Run(action, func(t *testing.T) {
 			ts, st := newWebhookServer(t, testWebhookSecret)
@@ -319,6 +322,9 @@ func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
 }
 
 func TestWebhookGitHub_PullRequestActionIgnored(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, action := range []string{"closed", "labeled", "edited", "assigned"} {
 		t.Run(action, func(t *testing.T) {
 			ts, st := newWebhookServer(t, testWebhookSecret)
@@ -339,6 +345,9 @@ func TestWebhookGitHub_PullRequestActionIgnored(t *testing.T) {
 }
 
 func TestWebhookGitHub_BodyTooLarge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	ts, _ := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"filler":"` + strings.Repeat("x", 2<<20) + `"}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook(testWebhookSecret, body))
@@ -359,6 +368,9 @@ func pushBodyFor(repo string) []byte {
 }
 
 func TestWebhookGitHub_RepositoryBinding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	cfg := controller.GitHubWebhookConfig{
 		Pipelines: map[string]controller.GitHubWebhookBinding{
 			"sample-app-build": {Repos: []string{"acme/sample-app"}},
@@ -398,6 +410,9 @@ func TestWebhookGitHub_RepositoryBinding(t *testing.T) {
 }
 
 func TestWebhookGitHub_ScopedSecrets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
+	}
 	cfg := controller.GitHubWebhookConfig{
 		Pipelines: map[string]controller.GitHubWebhookBinding{
 			"pipeline-scoped": {Secret: "pipeline-secret"},

@@ -77,6 +77,9 @@ func runWedgePipe(t *testing.T, conc *wedgeConcurrency) (*orchestrator.Result, *
 }
 
 func TestWaitThenRun_ContinuousResolveFailureTripsWedgeBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "250ms")
 	conc := &wedgeConcurrency{failResolves: -1, resolveErr: errors.New("database is locked (5) (SQLITE_BUSY)")}
 
@@ -93,6 +96,9 @@ func TestWaitThenRun_ContinuousResolveFailureTripsWedgeBudget(t *testing.T) {
 }
 
 func TestWaitThenRun_IntermittentResolveFailureRecovers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	conc := &wedgeConcurrency{failResolves: 3, resolveErr: errors.New("database is locked (5) (SQLITE_BUSY)")}
 
 	res, _ := runWedgePipe(t, conc)

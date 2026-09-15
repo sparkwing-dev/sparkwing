@@ -14,9 +14,8 @@ import (
 
 func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
 	want := []string{
-		"api-snapshot", "api-spec", "build-touched", "changelog", "comments",
-		"docs-mirror", "formatters", "gofmt", "home-resolution", "test-sleeps",
-		"vet-touched",
+		"api-snapshot", "api-spec", "budget", "build-touched", "changelog",
+		"lint-touched", "vet-touched",
 	}
 	if got := stepIDs(t, &PrePush{}); !slices.Equal(got, want) {
 		t.Fatalf("pre-push steps = %v, want %v", got, want)
@@ -44,6 +43,9 @@ func TestPrePushStepsAllRunInParallel(t *testing.T) {
 		t.Error("pre-push must fail fast: the author is holding a push open")
 	}
 	for _, s := range w.Steps() {
+		if s.ID() == budgetStepID {
+			continue
+		}
 		if deps := s.DepIDs(); len(deps) != 0 {
 			t.Errorf("step %q waits on %v; every step here answers in about a second, so serializing them only delays the verdict", s.ID(), deps)
 		}
@@ -110,6 +112,23 @@ func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 	}
 }
 
+func TestBuildTouchedRejectsBrokenPackagesInAWidePush(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	for i := range 9 {
+		pkg := fmt.Sprintf("wide%d", i)
+		writeGoFile(t, filepath.Join(root, pkg, "broken.go"),
+			fmt.Sprintf("package %s\n\nfunc Broken() int { return \"not an int\" }\n", pkg))
+	}
+	gitCommitAll(t, root, "a push wider than the tier fits")
+
+	if err := runBuildTouched(t.Context()); err == nil {
+		t.Fatal("build-touched passed nine packages that do not compile")
+	}
+}
+
 func TestBuildTouchedIgnoresChangesGoBuildNeverReads(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
@@ -165,39 +184,14 @@ func TestVetTouchedJudgesTheTestFilesBuildNeverReads(t *testing.T) {
 	}
 }
 
-func TestTheHookTiersAndTheGateRunTheSameCheckers(t *testing.T) {
-	root := gateFixtureRepo(t)
-	gitCommitAll(t, root, "clean base")
-	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	ctx := context.Background()
-
-	for _, tc := range []struct {
-		checker string
-		hook    func(context.Context) (string, string, error)
-		gate    func(context.Context) (string, string, error)
-	}{
-		{"comments", pushRangeCommentCommand, commentCheckCommand},
-		{"test-sleeps", pushRangeSleepCommand, sleepCheckCommand},
-	} {
-		hookCmd, _, err := tc.hook(ctx)
-		if err != nil {
-			t.Fatal(err)
+func TestThePushTierRepeatsNothingTheCommitTierAlreadyRan(t *testing.T) {
+	commit := stepIDs(t, &PreCommit{})
+	for _, id := range stepIDs(t, &PrePush{}) {
+		if id == budgetStepID {
+			continue
 		}
-		gateCmd, _, err := tc.gate(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if tool(hookCmd) != tool(gateCmd) {
-			t.Errorf("%s runs %q at the push and %q in the gate: a shared step name that runs a different check is how a tier stops judging what it claims to",
-				tc.checker, tool(hookCmd), tool(gateCmd))
+		if slices.Contains(commit, id) {
+			t.Errorf("pre-push runs %q, which pre-commit already ran over the same files: the tiers shift left, and a push pays only for what the whole change since main can answer", id)
 		}
 	}
-}
-
-func tool(command string) string {
-	fields := strings.Fields(command)
-	if len(fields) < 3 {
-		return command
-	}
-	return strings.Join(fields[:3], " ")
 }

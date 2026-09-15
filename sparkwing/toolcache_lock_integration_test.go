@@ -20,6 +20,9 @@ import (
 const contentionMessage = "parallel golangci-lint is running"
 
 func TestLintWithoutSerialRunnersFailsWhileAnotherRunHoldsTheLock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5.3s of real work; the fast class runs under -short")
+	}
 	dir, tmp := lintFixture(t)
 	release := holdLintLock(t, tmp, 0)
 	defer release()
@@ -38,6 +41,9 @@ func TestLintWithoutSerialRunnersFailsWhileAnotherRunHoldsTheLock(t *testing.T) 
 }
 
 func TestLintWithSerialRunnersWaitsForTheLockThenRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 3.5s of real work; the fast class runs under -short")
+	}
 	dir, tmp := lintFixture(t)
 	const held = 3 * time.Second
 	release := holdLintLock(t, tmp, held)

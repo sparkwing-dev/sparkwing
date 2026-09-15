@@ -67,6 +67,9 @@ func startNestedHelper() bool {
 }
 
 func TestFailedCommandCleansNestedGroupsBeforeReturningStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	signals := make(chan os.Signal, 1)
 	started := make(chan int, 1)
 	done := make(chan int, 1)
@@ -86,6 +89,9 @@ func TestFailedCommandCleansNestedGroupsBeforeReturningStatus(t *testing.T) {
 }
 
 func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	signals := make(chan os.Signal, 1)
 	started := make(chan int, 1)
 	done := make(chan int, 1)

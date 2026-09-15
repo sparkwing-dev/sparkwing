@@ -121,6 +121,9 @@ func TestTheSweepPrunesMonthsPastRetentionExactlyOnce(t *testing.T) {
 // safety: the sweep drains this meter whenever the server has a store, so
 // marking it must not depend on where in the builder chain the call lands.
 func TestPersistenceDoesNotDependOnBuilderOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	for _, tc := range []struct {
 		name  string
 		build func(*store.Store) *Server

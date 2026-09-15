@@ -55,6 +55,9 @@ func TestSecretsRoundTrip(t *testing.T) {
 }
 
 func TestSecrets_AdminReadResolvesTheNamedRunsRepository(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f, _ := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	admin, _, err := f.store.CreateToken("ops", store.TokenKindUser,

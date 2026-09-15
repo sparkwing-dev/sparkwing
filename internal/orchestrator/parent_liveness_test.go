@@ -57,6 +57,9 @@ func TestWatchLiveness_ExitsWhenCancelIsIgnored(t *testing.T) {
 }
 
 func TestWatchLiveness_NodeThatStopsInTimeIsNotKilled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
+	}
 	r, closeWrite := livenessPipe(t)
 	var exits atomic.Int64
 	stop := watchLiveness(r, func() {}, 2*time.Second, func(int) { exits.Add(1) })

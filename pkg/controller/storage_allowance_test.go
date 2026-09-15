@@ -66,6 +66,9 @@ func TestStorageAllowanceRouteReadsAndSetsOnTheAdminToken(t *testing.T) {
 // The pass sweeps before it bills, so a team is never billed for the bytes the
 // sweep is about to expire; the allowance is the most it pays for.
 func TestTheStoragePassSweepsBeforeItBills(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 40})
 	ctx := context.Background()
 	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
@@ -174,6 +177,9 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 }
 
 func TestStorageMaintenanceBillsRetainedBytesAndReportsThemOnCreditsShow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
 	ctx := context.Background()
 	// safety: a handful of event bytes at the cloud rate truncates to nothing,

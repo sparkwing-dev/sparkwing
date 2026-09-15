@@ -197,6 +197,9 @@ func waitForOutboxCondition(t *testing.T, check func() bool) {
 }
 
 func TestOutboxBackgroundDrainReportsTransitionsWithoutRetrySpam(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
 	logs := &lockedLogBuffer{}
 	art := newControlledArtifactStore()
 	art.setPutErrorFactory(awsPutErrorFactory(403, "AccessDenied", "access denied"))
@@ -288,6 +291,9 @@ func TestOutboxErrorFingerprintFallsBackForNonSmithyErrors(t *testing.T) {
 }
 
 func TestOutboxBackgroundDrainStatusOnlyFingerprintUsesUnderlyingCause(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.4s of real work; the fast class runs under -short")
+	}
 	logs := &lockedLogBuffer{}
 	art := newControlledArtifactStore()
 	art.setPutErrorFactory(statusOnlyPutErrorFactory(403, "gateway refused write"))

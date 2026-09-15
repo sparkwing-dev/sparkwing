@@ -33,6 +33,9 @@ func holdGitForkSlot(t *testing.T) func() {
 }
 
 func TestEveryGitCallSiteWaitsForAForkSlot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
+	}
 	repoURL, bareRepo, _ := gitcacheFixture(t)
 	setWindows(t, time.Hour, time.Hour)
 	countFetches(t, nil)
@@ -91,6 +94,9 @@ func TestEveryGitCallSiteWaitsForAForkSlot(t *testing.T) {
 }
 
 func TestGitSmartHTTPRefusesWhenNoForkSlotIsFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 10.1s of real work; the fast class runs under -short")
+	}
 	_, bareRepo, _ := gitcacheFixture(t)
 	isolateRepoNames(t)
 	repoNamesMu.Lock()
@@ -211,6 +217,9 @@ func shortenGitForkWait(t *testing.T, d time.Duration) {
 }
 
 func TestGitSmartHTTPWaitsForAForkSlotBeforeRefusing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	_, bareRepo, _ := gitcacheFixture(t)
 	isolateRepoNames(t)
 	repoNamesMu.Lock()
@@ -240,6 +249,9 @@ func TestGitSmartHTTPWaitsForAForkSlotBeforeRefusing(t *testing.T) {
 }
 
 func TestGitSmartHTTPServesTheRequestThatWinsALateSlot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	}
 	_, bareRepo, _ := gitcacheFixture(t)
 	isolateRepoNames(t)
 	repoNamesMu.Lock()
@@ -269,6 +281,9 @@ func TestGitSmartHTTPServesTheRequestThatWinsALateSlot(t *testing.T) {
 }
 
 func TestForkExhaustionIsNotReportedAsAMissingRefOrCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
 	repoURL, bareRepo, _ := gitcacheFixture(t)
 	setWindows(t, time.Hour, time.Hour)
 	countFetches(t, nil)

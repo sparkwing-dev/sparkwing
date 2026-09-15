@@ -116,6 +116,9 @@ func (f *failingBucket) ConditionalWritesSupported(context.Context) (bool, error
 // background replay spends its attempt cap, reports the stall, and then
 // retries at its ceiling rather than re-billing a PUT every interval.
 func TestOutboxReplayPacesItselfAfterGivingUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
 	const (
 		maxAttempts = 6
 		maxBackoff  = 150 * time.Millisecond
@@ -214,6 +217,9 @@ func TestOutboxReplayResumesAndClearsItsStall(t *testing.T) {
 // loop reaches an unreachable store a handful of times, not once per
 // interval.
 func TestFlushLoopBacksOffAgainstAPermanentlyFailingBucket(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
 	const (
 		window       = time.Second
 		interval     = 5 * time.Millisecond
@@ -304,6 +310,9 @@ func (s *selectiveBucket) List(context.Context, string) ([]string, error) {
 // costs a bounded number of requests over a fixed window instead of
 // spinning at wire speed.
 func TestCASLoopStaysBoundedUnderPermanentContention(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 2.8s of real work; the fast class runs under -short")
+	}
 	const (
 		window       = 750 * time.Millisecond
 		requestBound = 200
