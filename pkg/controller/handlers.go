@@ -1963,10 +1963,25 @@ func (s *Server) handleResetNodeForAutoRetry(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DispatchPolicy store.NodeDispatchPolicy `json:"dispatch_policy,omitempty"`
+	}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.DispatchPolicy != "" && body.DispatchPolicy != store.DispatchHosted {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unknown node dispatch policy %q", body.DispatchPolicy))
+		return
+	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	result, err := s.store.FinalizeExecutorClaimRound(r.Context(), runID, nodeID)
+	result, err := s.store.FinalizeExecutorClaimRound(r.Context(), runID, nodeID, body.DispatchPolicy, nil)
 	if err != nil {
+		if errors.Is(err, store.ErrHostedExecutionUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, err)
+			return
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return

@@ -1390,10 +1390,22 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 // FinalizeNodeReady atomically awards the best pending offer or transfers an
 // unclaimed node to the coordinator's local or cloud fallback.
 func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
+	return c.FinalizeNodeReadyWithPolicy(ctx, runID, nodeID, "")
+}
+
+func (c *Client) FinalizeNodeReadyWithPolicy(
+	ctx context.Context,
+	runID, nodeID string,
+	policy store.NodeDispatchPolicy,
+) (store.ExecutorClaimRoundResult, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finalize-ready",
 		url.PathEscape(runID), url.PathEscape(nodeID))
+	var body any
+	if policy != "" {
+		body = map[string]any{"dispatch_policy": policy}
+	}
 	var resp store.ExecutorClaimRoundResult
-	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
+	if err := c.post(ctx, path, body, http.StatusOK, &resp); err != nil {
 		return store.ExecutorClaimRoundResult{}, err
 	}
 	return resp, nil

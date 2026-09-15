@@ -229,6 +229,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 	want := []string{
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
+		"bound-execution-credentials",
 		"cron-schedule-names-v1",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
@@ -256,6 +257,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	want := []string{
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
+		"bound-execution-credentials",
 		"cron-schedule-names-v1",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",

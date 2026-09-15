@@ -199,7 +199,8 @@ type Principal struct {
 	Kind        string
 	Scopes      []string
 	TokenPrefix string
-	Authed      time.Time
+
+	Authed time.Time
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)

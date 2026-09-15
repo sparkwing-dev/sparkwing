@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -84,6 +85,25 @@ type ExecutorClaimOfferResult struct {
 type ExecutorClaimRoundResult struct {
 	Revoked bool
 	Pending bool
+	Hosted  *HostedNodeClaim `json:"-"`
+}
+
+type NodeDispatchPolicy string
+
+const DispatchHosted NodeDispatchPolicy = "hosted"
+
+var ErrHostedExecutionUnavailable = errors.New("hosted execution is not configured")
+
+type HostedClaimSpec struct {
+	Binding ExecutionCredentialBinding
+	Scopes  []string
+	TTL     time.Duration
+}
+
+type HostedNodeClaim struct {
+	Node      *Node
+	RawBearer string
+	Token     *Token
 }
 
 type executorOfferEvent struct {
@@ -1222,11 +1242,28 @@ func claimedExecutorOffer(ctx context.Context, tx *storeTx, claimant ClaimIdenti
 
 // FinalizeExecutorClaimRound awards the best live offer after the deadline or
 // atomically transfers the still-unclaimed node to coordinator fallback.
-func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID string) (ExecutorClaimRoundResult, error) {
-	return s.finalizeExecutorClaimRoundAt(ctx, runID, nodeID, time.Now())
+func (s *Store) FinalizeExecutorClaimRound(
+	ctx context.Context,
+	runID, nodeID string,
+	policy NodeDispatchPolicy,
+	hosted *HostedClaimSpec,
+) (ExecutorClaimRoundResult, error) {
+	return s.finalizeExecutorClaimRoundAt(ctx, runID, nodeID, policy, hosted, time.Now())
 }
 
-func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID string, now time.Time) (ExecutorClaimRoundResult, error) {
+func (s *Store) finalizeExecutorClaimRoundAt(
+	ctx context.Context,
+	runID, nodeID string,
+	policy NodeDispatchPolicy,
+	hosted *HostedClaimSpec,
+	now time.Time,
+) (ExecutorClaimRoundResult, error) {
+	if policy != "" && policy != DispatchHosted {
+		return ExecutorClaimRoundResult{}, fmt.Errorf("unknown node dispatch policy %q", policy)
+	}
+	if policy == DispatchHosted && hosted == nil {
+		return ExecutorClaimRoundResult{}, ErrHostedExecutionUnavailable
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return ExecutorClaimRoundResult{}, err
@@ -1248,31 +1285,51 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 	if err != nil {
 		return ExecutorClaimRoundResult{}, err
 	}
-	if !readyAt.Valid || claimedBy.Valid || status == nodeStatusDone {
+	if claimedBy.Valid || status == nodeStatusDone {
 		if err := tx.Commit(); err != nil {
 			return ExecutorClaimRoundResult{}, err
 		}
 		return ExecutorClaimRoundResult{}, nil
 	}
-	if opened.Valid && now.Before(time.Unix(0, opened.Int64).Add(nodeClaimOfferWindow)) {
+	if policy == "" && !readyAt.Valid {
+		if err := tx.Commit(); err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
+		return ExecutorClaimRoundResult{}, nil
+	}
+	if policy == "" && opened.Valid && now.Before(time.Unix(0, opened.Int64).Add(nodeClaimOfferWindow)) {
 		if err := tx.Commit(); err != nil {
 			return ExecutorClaimRoundResult{}, err
 		}
 		return ExecutorClaimRoundResult{Pending: true}, nil
 	}
-	if winner, err := s.awardBestExecutorOffer(ctx, tx, runID, nodeID, now, "deadline"); err == nil && winner != nil {
-		if err := tx.Commit(); err != nil {
-			return ExecutorClaimRoundResult{}, err
+	if policy == "" {
+		winner, offerErr := s.awardBestExecutorOffer(ctx, tx, runID, nodeID, now, "deadline")
+		if offerErr == nil && winner != nil {
+			if err := tx.Commit(); err != nil {
+				return ExecutorClaimRoundResult{}, err
+			}
+			return ExecutorClaimRoundResult{}, nil
 		}
-		return ExecutorClaimRoundResult{}, nil
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return ExecutorClaimRoundResult{}, err
+		if offerErr != nil && !errors.Is(offerErr, ErrNotFound) {
+			return ExecutorClaimRoundResult{}, offerErr
+		}
 	}
 	if requiredCoordinator != "" || requiredLocation != "" {
 		if err := tx.Commit(); err != nil {
 			return ExecutorClaimRoundResult{}, err
 		}
 		return ExecutorClaimRoundResult{Pending: true}, nil
+	}
+	if hosted != nil {
+		claim, err := s.awardHostedNodeTx(ctx, tx, runID, nodeID, policy, *hosted, now)
+		if err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
+		return ExecutorClaimRoundResult{Hosted: claim}, nil
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone, runID, nodeID)
@@ -1307,4 +1364,78 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 		return ExecutorClaimRoundResult{}, err
 	}
 	return ExecutorClaimRoundResult{Revoked: changed == 1}, nil
+}
+
+func (s *Store) awardHostedNodeTx(
+	ctx context.Context,
+	tx *storeTx,
+	runID, nodeID string,
+	policy NodeDispatchPolicy,
+	spec HostedClaimSpec,
+	now time.Time,
+) (*HostedNodeClaim, error) {
+	binding := spec.Binding
+	if binding.RunID != runID || binding.RootNodeID != nodeID || binding.DelegatedPrincipal == "" || binding.DelegatedTokenPrefix == "" {
+		return nil, errors.New("hosted claim binding does not match the node")
+	}
+	delegates, err := selectTokensByPrefixTx(ctx, tx, binding.DelegatedTokenPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if len(delegates) != 1 || delegates[0].Principal != binding.DelegatedPrincipal || !delegates[0].IsValid(now) || !delegates[0].Metered {
+		return nil, errors.New("hosted claim requires one live metered delegated token")
+	}
+	raw, err := mintRaw(TokenPrefixRunner)
+	if err != nil {
+		return nil, err
+	}
+	principal := "hosted:" + raw[:PrefixLen]
+	tok, err := insertTokenRow(ctx, tx, raw, principal, TokenKindRunner, spec.Scopes, spec.TTL, now,
+		TokenOptions{ExecutionBinding: &binding})
+	if err != nil {
+		return nil, err
+	}
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	readyClause := ""
+	if policy == "" {
+		readyClause = " AND ready_at IS NOT NULL"
+	}
+	holderID := "hosted:" + runID + ":" + nodeID
+	claimant := ClaimIdentity{Principal: binding.DelegatedPrincipal, TokenPrefix: binding.DelegatedTokenPrefix}
+	res, err := tx.ExecContext(ctx, `UPDATE nodes
+   SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+       lease_expires_at = ?, coordinator_id = ?, executor_kind = 'k8s', executor_id = ?,
+       executor_location = 'cloud', reservation_id = '', claim_membership_id = '',
+       credit_charged_through = 0, placement_reason = ?, claim_generation = claim_generation + 1,
+       ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL
+ WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone+readyClause+`
+   AND required_coordinator_id = '' AND required_executor_location = ''
+   AND `+nodeExecutionUnsealed,
+		holderID, claimant.Principal, claimant.TokenPrefix, now.Add(MaxLeaseDuration).UnixNano(),
+		coordinatorID, holderID, PlacementFallback, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changed != 1 {
+		return nil, ErrLockHeld
+	}
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, runID, nodeID, now); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return nil, err
+	}
+	n := &nodeRecord{}
+	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+ FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID), n); err != nil {
+		return nil, err
+	}
+	return &HostedNodeClaim{Node: &n.Node, RawBearer: raw, Token: tok}, nil
 }

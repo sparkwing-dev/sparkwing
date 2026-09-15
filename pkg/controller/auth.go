@@ -24,11 +24,14 @@ import (
 
 // Principal is the request-scoped authenticated identity.
 type Principal struct {
-	Name        string    // free-form label ("alice", "pool-prod")
-	Kind        string    // "user" | "runner" | "service"
-	Scopes      []string  // exact-string set membership
-	TokenPrefix string    // non-secret prefix for audit
-	Authed      time.Time // when this request authenticated
+	Name             string   // free-form label ("alice", "pool-prod")
+	Kind             string   // "user" | "runner" | "service"
+	Scopes           []string // exact-string set membership
+	TokenPrefix      string   // non-secret prefix for audit
+	claimPrincipal   string
+	claimTokenPrefix string
+	executionBinding *store.ExecutionCredentialBinding
+	Authed           time.Time // when this request authenticated
 }
 
 // HasScope reports whether the principal carries the named scope.
@@ -329,11 +332,16 @@ func (a *Authenticator) verify(raw, key, client string, now time.Time) (*Princip
 		)
 	}
 	principal := &Principal{
-		Name:        tok.Principal,
-		Kind:        tok.Kind,
-		Scopes:      tok.Scopes,
-		TokenPrefix: tok.Prefix,
-		Authed:      now,
+		Name:             tok.Principal,
+		Kind:             tok.Kind,
+		Scopes:           tok.Scopes,
+		TokenPrefix:      tok.Prefix,
+		Authed:           now,
+		executionBinding: cloneExecutionBinding(tok.ExecutionBinding),
+	}
+	if tok.ExecutionBinding != nil {
+		principal.claimPrincipal = tok.ExecutionBinding.DelegatedPrincipal
+		principal.claimTokenPrefix = tok.ExecutionBinding.DelegatedTokenPrefix
 	}
 
 	// safety: an Invalidate that landed during this read must win, or the revoked row is re-cached for a full TTL.
@@ -487,6 +495,13 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			a.writeAuthFailure(w, err)
 			return
 		}
+		if !executionCredentialAllowsRequest(p.executionBinding, r) {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "credential_bound", Principal: p.label(),
+				Message: "execution credential is bound to another controller resource",
+			})
+			return
+		}
 		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
 		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
@@ -571,7 +586,36 @@ func claimIdentity(r *http.Request) store.ClaimIdentity {
 		return store.ClaimIdentity{}
 	}
 	// safety: the token prefix, not the shared principal label, is what binds a claim.
+	if p.claimPrincipal != "" && p.claimTokenPrefix != "" {
+		return store.ClaimIdentity{Principal: p.claimPrincipal, TokenPrefix: p.claimTokenPrefix}
+	}
 	return store.ClaimIdentity{Principal: p.Name, TokenPrefix: p.TokenPrefix}
+}
+
+func cloneExecutionBinding(binding *store.ExecutionCredentialBinding) *store.ExecutionCredentialBinding {
+	if binding == nil {
+		return nil
+	}
+	copy := *binding
+	return &copy
+}
+
+func executionCredentialAllowsRequest(binding *store.ExecutionCredentialBinding, r *http.Request) bool {
+	if binding == nil {
+		return true
+	}
+	switch r.URL.Path {
+	case "/api/v1/auth/whoami", "/api/v1/services":
+		return true
+	}
+	runPrefix := "/api/v1/runs/" + binding.RunID
+	if r.URL.Path == runPrefix || strings.HasPrefix(r.URL.Path, runPrefix+"/") {
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") && r.URL.Query().Get("run") == binding.RunID {
+		return true
+	}
+	return false
 }
 
 func (p *Principal) label() string {

@@ -107,6 +107,11 @@ func (c *Client) EnqueueTriggerWithEnv(
 	triggerEnv map[string]string,
 ) (string, error)
 func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error)
+func (c *Client) FinalizeNodeReadyWithPolicy(
+	ctx context.Context,
+	runID, nodeID string,
+	policy store.NodeDispatchPolicy,
+) (store.ExecutorClaimRoundResult, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error

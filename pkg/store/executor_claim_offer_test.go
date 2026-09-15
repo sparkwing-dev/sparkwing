@@ -353,7 +353,7 @@ func TestExecutorClaimOfferFinalizationReresolvesNarrowedEnrollment(t *testing.T
 			if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), time.Now().Add(-6*time.Second).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
-			result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
+			result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil)
 			if err != nil || result.Revoked || result.Pending {
 				t.Fatalf("finalize = %+v, %v", result, err)
 			}
@@ -438,7 +438,7 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 	}
 	setOfferedAt(t, s, "holder-z", stamp)
 	setOfferedAt(t, s, "holder-a", stamp+int64(time.Second))
-	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
+	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil)
 	if err != nil || result.Revoked || result.Pending {
 		t.Fatalf("finalize = %+v, %v", result, err)
 	}
@@ -464,7 +464,7 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 	if _, err := s2.DB().Exec(storetest.Rebind(s2, `UPDATE node_claim_offers SET offered_at = ?`), stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s2.FinalizeExecutorClaimRound(ctx, "run", "work"); err != nil {
+	if _, err := s2.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	n, err = s2.GetNode(ctx, "run", "work")
@@ -595,11 +595,11 @@ func TestExecutorClaimFinalizationIgnoresExpiredOffersAndTransfersFallbackOnce(t
 	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE node_claim_offers SET last_seen_at = ?`), time.Now().Add(-3*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
+	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil)
 	if err != nil || !result.Revoked || result.Pending {
 		t.Fatalf("finalize = %+v, %v", result, err)
 	}
-	again, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
+	again, err := s.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil)
 	if err != nil || again.Revoked || again.Pending {
 		t.Fatalf("second finalize = %+v, %v", again, err)
 	}
@@ -630,7 +630,7 @@ func TestExecutorClaimOfferLifecycleEventsAreTransitionOnlyAndRedacted(t *testin
 	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE node_claim_offers SET last_seen_at = ?`), time.Now().Add(-3*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work"); err != nil || !result.Revoked {
+	if result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil); err != nil || !result.Revoked {
 		t.Fatalf("finalize = %+v, %v", result, err)
 	}
 	events, err := s.ListEventsAfter(ctx, "run", 0, 100)
@@ -705,7 +705,7 @@ func TestExecutorClaimOfferAndFallbackHaveOneWinner(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		fallback, fallbackErr = s.FinalizeExecutorClaimRound(ctx, "run", "work")
+		fallback, fallbackErr = s.FinalizeExecutorClaimRound(ctx, "run", "work", "", nil)
 	}()
 	close(start)
 	wg.Wait()

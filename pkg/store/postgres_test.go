@@ -1053,7 +1053,7 @@ func TestPostgresDeadlineAwardDoesNotBlockUnrelatedClaimHeartbeat(t *testing.T) 
 	}
 	finalized := make(chan error, 1)
 	go func() {
-		_, err := st.FinalizeExecutorClaimRound(ctx, "shared-round", "work")
+		_, err := st.FinalizeExecutorClaimRound(ctx, "shared-round", "work", "", nil)
 		finalized <- err
 	}()
 	waitForPostgresSharedEligibilityLock(t, st)

@@ -3187,6 +3187,20 @@ paths:
         eligible offer. If no live offer remains and placement permits the
         coordinator, clears readiness so the coordinator can execute locally.
         A still-open round or hard placement requirement reports `pending`.
+        `dispatch_policy: hosted` is reserved for the controller-owned Job
+        dispatcher: it skips offers and never exposes the node as ready. A
+        controller without that dispatcher returns 503 without changing the node.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: none
+              type: object
+              properties:
+                dispatch_policy:
+                  type: string
+                  enum: [hosted]
       responses:
         "200":
           description: Resolution state.
@@ -3200,7 +3214,9 @@ paths:
                   revoked: {type: boolean, description: Readiness moved back to coordinator fallback.}
                   pending: {type: boolean, description: The offer window or a hard placement requirement remains unresolved.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "400": {$ref: "#/components/responses/BadRequest"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "503": {description: Hosted execution is not configured; the node is unchanged.}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/crons:

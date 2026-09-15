@@ -22,6 +22,11 @@ unlock.
 
 ### Changed
 
+- **store + controller (Breaking):** Hosted-node finalization can reserve the
+  controller-owned execution path with a bound, delegated credential and the
+  named `hosted` dispatch policy. Schema 48 adds the credential binding that
+  prevents older controllers from authenticating it as an ordinary runner.
+  See the [migration guide](docs/migrations/_unreleased.md#bound-hosted-execution-credentials).
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.5, so a fresh scaffold
   compiles against that release.
 - **checks:** `pre-push` now enforces a one-minute hard limit while run timings

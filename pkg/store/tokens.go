@@ -42,6 +42,13 @@ const PrefixLen = 12
 
 const mintAttempts = 5
 
+var executionCredentialCols = map[string]string{
+	"execution_run_id":       "TEXT NOT NULL DEFAULT ''",
+	"execution_root_node_id": "TEXT NOT NULL DEFAULT ''",
+	"delegated_principal":    "TEXT NOT NULL DEFAULT ''",
+	"delegated_token_prefix": "TEXT NOT NULL DEFAULT ''",
+}
+
 // Bearer rejection reasons. ErrNoTokenCandidates and ErrUnknownToken
 // carry the same message so the response never tells a caller whether
 // a prefix exists; only ErrUnknownToken means a stored hash was
@@ -67,13 +74,24 @@ type Token struct {
 	ReplacedBy string // non-empty when this token has been rotated
 	// Metered marks a token the operator mints for a runner credits pay
 	// for. Only the operator sets it; a runner's own labels never do.
-	Metered bool
+	Metered          bool
+	ExecutionBinding *ExecutionCredentialBinding
+}
+
+// ExecutionCredentialBinding confines an ephemeral hosted-node bearer while
+// preserving the pool identity that owns its claim and billing.
+type ExecutionCredentialBinding struct {
+	RunID                string
+	RootNodeID           string
+	DelegatedPrincipal   string
+	DelegatedTokenPrefix string
 }
 
 // TokenOptions carries the fields a mint sets beyond the required ones.
 type TokenOptions struct {
 	// Metered marks the minted token as one whose claims cost credits.
-	Metered bool
+	Metered          bool
+	ExecutionBinding *ExecutionCredentialBinding
 }
 
 // IsValid reports whether the token is usable at `now`.
@@ -257,27 +275,45 @@ func insertTokenRow(
 	if opts.Metered {
 		metered = 1
 	}
+	binding := ExecutionCredentialBinding{}
+	if opts.ExecutionBinding != nil {
+		binding = *opts.ExecutionBinding
+		if binding.RunID == "" || binding.RootNodeID == "" || binding.DelegatedPrincipal == "" || binding.DelegatedTokenPrefix == "" {
+			return nil, errors.New("tokens: execution binding requires run, root node, delegated principal, and delegated token prefix")
+		}
+	}
 	if _, err := e.ExecContext(ctx, `
-        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at, metered)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at, metered,
+                            execution_run_id, execution_root_node_id, delegated_principal, delegated_token_prefix)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
 		hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
 		now.UTC().Unix(),
 		expiresUnix(expires),
 		metered,
+		binding.RunID, binding.RootNodeID, binding.DelegatedPrincipal, binding.DelegatedTokenPrefix,
 	); err != nil {
 		return nil, fmt.Errorf("tokens: insert: %w", err)
 	}
 	return &Token{
-		Hash:      hash,
-		Prefix:    raw[:PrefixLen],
-		Principal: principal,
-		Kind:      kind,
-		Scopes:    scoped,
-		CreatedAt: now.UTC(),
-		ExpiresAt: expires,
-		Metered:   opts.Metered,
+		Hash:             hash,
+		Prefix:           raw[:PrefixLen],
+		Principal:        principal,
+		Kind:             kind,
+		Scopes:           scoped,
+		CreatedAt:        now.UTC(),
+		ExpiresAt:        expires,
+		Metered:          opts.Metered,
+		ExecutionBinding: cloneExecutionBinding(opts.ExecutionBinding),
 	}, nil
+}
+
+func cloneExecutionBinding(binding *ExecutionCredentialBinding) *ExecutionCredentialBinding {
+	if binding == nil {
+		return nil
+	}
+	copy := *binding
+	return &copy
 }
 
 func isTokenPrefixCollision(err error) bool {
@@ -328,7 +364,9 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 const selectTokensByPrefixSQL = `
         SELECT hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
-               COALESCE(replaced_by, ''), metered
+               COALESCE(replaced_by, ''), metered,
+               COALESCE(execution_run_id, ''), COALESCE(execution_root_node_id, ''),
+               COALESCE(delegated_principal, ''), COALESCE(delegated_token_prefix, '')
           FROM tokens
          WHERE prefix = ?`
 
@@ -357,14 +395,20 @@ func scanTokenRows(rows *sql.Rows) ([]Token, error) {
 		var scopes string
 		var expiresAt, lastUsedAt, revokedAt sql.NullInt64
 		var created, metered int64
+		var execution ExecutionCredentialBinding
 		if err := rows.Scan(
 			&t.Hash, &t.Prefix, &t.Principal, &t.Kind, &scopes,
 			&created, &expiresAt, &lastUsedAt, &revokedAt,
 			&t.ReplacedBy, &metered,
+			&execution.RunID, &execution.RootNodeID,
+			&execution.DelegatedPrincipal, &execution.DelegatedTokenPrefix,
 		); err != nil {
 			return nil, err
 		}
 		t.Metered = metered != 0
+		if execution.RunID != "" {
+			t.ExecutionBinding = &execution
+		}
 		t.Scopes = splitScopes(scopes)
 		t.CreatedAt = time.Unix(created, 0).UTC()
 		if expiresAt.Valid {
@@ -421,7 +465,9 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 	q := `
         SELECT hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
-               COALESCE(replaced_by, ''), metered
+               COALESCE(replaced_by, ''), metered,
+               COALESCE(execution_run_id, ''), COALESCE(execution_root_node_id, ''),
+               COALESCE(delegated_principal, ''), COALESCE(delegated_token_prefix, '')
           FROM tokens
     `
 	args := []any{}
@@ -505,7 +551,7 @@ func (s *Store) rotateToken(
 	}
 
 	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
-		TokenOptions{Metered: oldTok.Metered})
+		TokenOptions{Metered: oldTok.Metered, ExecutionBinding: cloneExecutionBinding(oldTok.ExecutionBinding)})
 	if err != nil {
 		return "", nil, nil, err
 	}

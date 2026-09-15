@@ -261,7 +261,7 @@ func TestExecutorRoundWorkIsBoundedAtEnrollmentLimit(t *testing.T) {
 	}
 	deadlineCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if _, err := st.FinalizeExecutorClaimRound(deadlineCtx, "bounded", "work"); err != nil {
+	if _, err := st.FinalizeExecutorClaimRound(deadlineCtx, "bounded", "work", "", nil); err != nil {
 		t.Fatalf("finalize %d offers: %v", MaxEnrolledExecutors, err)
 	}
 	node, err := st.GetNode(ctx, "bounded", "work")
@@ -334,7 +334,7 @@ func TestExecutorAwardRejectsCorruptOfferCardinalityAboveLimit(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.FinalizeExecutorClaimRound(ctx, "offer-overflow", "work"); !errors.Is(err, errExecutorOfferLimit) {
+	if _, err := st.FinalizeExecutorClaimRound(ctx, "offer-overflow", "work", "", nil); !errors.Is(err, errExecutorOfferLimit) {
 		t.Fatalf("finalize over offer limit = %v", err)
 	}
 }

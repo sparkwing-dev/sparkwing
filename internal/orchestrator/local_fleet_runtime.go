@@ -163,7 +163,7 @@ func (c localStoreFleetCoordinator) RevokeNodeReady(ctx context.Context, runID, 
 }
 
 func (c localStoreFleetCoordinator) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
-	return c.store.FinalizeExecutorClaimRound(ctx, runID, nodeID)
+	return c.store.FinalizeExecutorClaimRound(ctx, runID, nodeID, "", nil)
 }
 
 func (c localStoreFleetCoordinator) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {

@@ -1023,7 +1023,7 @@ func TestSchemaV30RetryPreservesControllerOwnedPlacement(t *testing.T) {
 		time.Now().Add(-time.Minute).UnixNano(), retryID, "build"); err != nil {
 		t.Fatal(err)
 	}
-	round, err := s.FinalizeExecutorClaimRound(ctx, retryID, "build")
+	round, err := s.FinalizeExecutorClaimRound(ctx, retryID, "build", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

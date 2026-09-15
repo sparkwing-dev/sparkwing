@@ -472,6 +472,7 @@ type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
+const DispatchHosted NodeDispatchPolicy = "hosted"
 const DispatchedHeartbeatInterval = 5 * time.Second
 func DisplayProfileKey(key string) string
 type EgressUsage struct {
@@ -492,6 +493,7 @@ var ErrExecutorCredentialMismatch = errors.New("executor credential does not mat
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
+var ErrHostedExecutionUnavailable = errors.New("hosted execution is not configured")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
 var ErrInvalidCredentials = errors.New("invalid username or password")
@@ -552,6 +554,12 @@ type ExecutionAttemptFinish struct {
 	ExecutorKind string
 }
 func ExecutionAttemptOrdinalFromContext(ctx context.Context) (int, bool)
+type ExecutionCredentialBinding struct {
+	RunID                string
+	RootNodeID           string
+	DelegatedPrincipal   string
+	DelegatedTokenPrefix string
+}
 type ExecutionStart struct {
 	HolderID        string
 	MembershipID    string
@@ -605,6 +613,7 @@ type ExecutorClaimPreparation struct {
 type ExecutorClaimRoundResult struct {
 	Revoked bool
 	Pending bool
+	Hosted  *HostedNodeClaim
 }
 type ExecutorEligibilityPreview struct {
 	MembershipID    string
@@ -679,6 +688,16 @@ type GitHubWebhookBinding struct {
 	HookID    int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+type HostedClaimSpec struct {
+	Binding ExecutionCredentialBinding
+	Scopes  []string
+	TTL     time.Duration
+}
+type HostedNodeClaim struct {
+	Node      *Node
+	RawBearer string
+	Token     *Token
 }
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
@@ -848,6 +867,7 @@ type NodeDispatch struct {
 	SecretRedactions int
 	RedactedKeys     []byte
 }
+type NodeDispatchPolicy string
 type NodeMetering int
 type NodeSettlement struct {
 	Seconds          float64
@@ -1276,7 +1296,12 @@ func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Tim
 func (s *Store) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
 ) error
-func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID string) (ExecutorClaimRoundResult, error)
+func (s *Store) FinalizeExecutorClaimRound(
+	ctx context.Context,
+	runID, nodeID string,
+	policy NodeDispatchPolicy,
+	hosted *HostedClaimSpec,
+) (ExecutorClaimRoundResult, error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
@@ -1487,7 +1512,8 @@ type Token struct {
 	RevokedAt  *time.Time
 	ReplacedBy string
 
-	Metered bool
+	Metered          bool
+	ExecutionBinding *ExecutionCredentialBinding
 }
 func (t *Token) HasScope(scope string) bool
 func (t *Token) IsValid(now time.Time) bool
@@ -1496,7 +1522,8 @@ const TokenKindRunner = "runner"
 const TokenKindService = "service"
 const TokenKindUser = "user"
 type TokenOptions struct {
-	Metered bool
+	Metered          bool
+	ExecutionBinding *ExecutionCredentialBinding
 }
 const TokenPrefixIndexName = "idx_tokens_prefix"
 const TokenPrefixRunner = "swr"

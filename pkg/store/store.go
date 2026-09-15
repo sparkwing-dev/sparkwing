@@ -940,7 +940,11 @@ CREATE TABLE IF NOT EXISTS tokens (
     expires_at   INTEGER,              -- NULL = never expires
     last_used_at INTEGER,
     revoked_at   INTEGER,
-    replaced_by  TEXT                  -- prefix of rotation successor
+    replaced_by  TEXT,                 -- prefix of rotation successor
+    execution_run_id       TEXT NOT NULL DEFAULT '',
+    execution_root_node_id TEXT NOT NULL DEFAULT '',
+    delegated_principal    TEXT NOT NULL DEFAULT '',
+    delegated_token_prefix TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 
@@ -1062,7 +1066,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 47
+const expectedSchemaVersion = 48
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1834,6 +1838,7 @@ var migrationRequirements = map[int][]string{
 	31: {assistedExecutionPolicyRequirement},
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
+	48: {"bound-execution-credentials"},
 }
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
@@ -1974,6 +1979,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyCreditClassMigrationSQLite(ctx, tx)
 	case 47:
 		return applyStorageAllowanceMigrationSQLite(ctx, tx)
+	case 48:
+		return ensureColumnsSQLite(ctx, tx, "tokens", executionCredentialCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2313,6 +2320,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyCreditClassMigrationPostgres(ctx, tx)
 	case 47:
 		return applyStorageAllowanceMigrationPostgres(ctx, tx)
+	case 48:
+		return addColumnsTx(ctx, tx, "tokens", executionCredentialCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2483,6 +2492,7 @@ type columnSpec struct {
 }
 
 var columnMigrations = []columnSpec{
+	{"tokens", executionCredentialCols},
 	{"node_steps", map[string]string{
 		"annotations_json": "BLOB",
 		"summary":          "TEXT NOT NULL DEFAULT ''",
