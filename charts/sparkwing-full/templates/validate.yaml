@@ -8,6 +8,9 @@
 {{- if and .Values.controller.githubWebhookSecret.name (not .Values.controller.githubWebhookSecret.key) -}}
 {{- fail "sparkwing-full: controller.githubWebhookSecret.key is required when controller.githubWebhookSecret.name is set" -}}
 {{- end -}}
+{{- if and .Values.controller.databaseSecret.name (not .Values.controller.databaseSecret.key) -}}
+{{- fail "sparkwing-full: controller.databaseSecret.key is required when controller.databaseSecret.name is set" -}}
+{{- end -}}
 {{- if and .Values.controller.secretsKey.name (not .Values.controller.secretsKey.key) -}}
 {{- fail "sparkwing-full: controller.secretsKey.key is required when controller.secretsKey.name is set" -}}
 {{- end -}}

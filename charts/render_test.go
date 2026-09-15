@@ -25,8 +25,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.11" {
-		t.Fatalf("full chart version = %q, want 0.1.11", chart.Version)
+	if chart.Version != "0.1.12" {
+		t.Fatalf("full chart version = %q, want 0.1.12", chart.Version)
 	}
 }
 
@@ -1229,6 +1229,29 @@ func TestControllerGitHubStatusEnvironment(t *testing.T) {
 	if dashboardURL != "https://sparkwing.example.com/team" {
 		t.Errorf("SPARKWING_DASHBOARD_URL = %q", dashboardURL)
 	}
+}
+
+func TestControllerDatabaseEnvironmentUsesSecret(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	controller := renderController(t,
+		"controller.databaseSecret.name=sparkwing-database",
+		"controller.databaseSecret.key=connection",
+	)
+	for _, env := range controller.Env {
+		if env.Name != "SPARKWING_PG_URL" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("SPARKWING_PG_URL is not a secretKeyRef: %+v", env)
+		}
+		if got := *env.ValueFrom.SecretKeyRef; got.Name != "sparkwing-database" || got.Key != "connection" {
+			t.Fatalf("SPARKWING_PG_URL secretKeyRef = %+v", got)
+		}
+		return
+	}
+	t.Fatal("controller has no SPARKWING_PG_URL secretKeyRef")
 }
 
 func renderLogs(t *testing.T, sets ...string) string {

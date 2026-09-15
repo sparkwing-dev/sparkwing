@@ -20,6 +20,12 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **controller + chart:** the controller opens PostgreSQL when
+  `SPARKWING_PG_URL` is present, and the chart reads that DSN from a named
+  Kubernetes Secret. SQLite remains the default.
+
 ### Fixed
 
 - **store:** Concurrent SQLite cold starts read the schema version and
