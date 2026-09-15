@@ -19,9 +19,11 @@ launcher when testing isolated tool state.
   `pre-push` is the fast tier the git pre-push hook runs, and it repeats
   nothing the commit tier already ran: the changelog, OpenAPI and API-snapshot
   gates, and `go build`, `go vet` and the fast linter subset over the packages
-  the push touches, up to eight of them. The tiers shift left, so a push whose
-  commits skipped the commit hook is judged by `gate` rather than a second
-  time here. Everything
+  the push touches, with no package-count cutoff. The tiers shift left, so a
+  push whose commits skipped the commit hook is judged by `gate` rather than a second
+  time here. Rebase replay does not fire pre-commit, and automatic merges use
+  pre-merge-commit; neither hook tier proves source policy over those resulting
+  trees. Run `gate` when that evidence is required. Everything
   else is `gate` (the broad check) and `pre-release` (the release boundary),
   which `sparkwing run <name>` runs on demand and which hosted CI runs on every
   pull request and every push to main; no git hook fires either.
@@ -61,8 +63,11 @@ launcher when testing isolated tool state.
   own runtime passes 200 ms guards itself with
   `if testing.Short() { t.Skip("slow: ...") }` naming what costs the time, so a
   new slow test is either cheap enough for the fast class or says why it is
-  not. `gate` runs the suite without `-short`, which is where every guarded
-  test is still judged.
+  not. The short class retains a real-store risk-admission test that requires
+  an unapproved submission to leave the queue empty. First-run compilation,
+  ref selection and pinned-binary risk fixtures remain in the full class.
+  `gate` runs the suite without `-short`, which is where every guarded test is
+  still judged.
 - **What the two hooks cost:** measured on this 16-core Linux host beside one
   other agent's suite. A change to a Go file invalidates the cached
   `.sparkwing/` pipeline binary, because that module replaces the SDK with the
@@ -102,8 +107,9 @@ launcher when testing isolated tool state.
   and every push to main, so a landing pays for them there. What the push tier
   keeps of the four is the packages the change touches: `go build`, `go vet`,
   and the fast linter subset, the whole-tree linters minus the type-and-SSA
-  family, which costs minutes. Above eight packages it names the count and
-  leaves the whole-tree forms to `gate`. No test suite runs in a hook tier:
+  family, which costs minutes. Every touched package is checked even on a
+  wide push; the file-count waiver relaxes only elapsed time. No test suite
+  runs in a hook tier:
   the fast test class belongs to the release cut, and the hooks run formatters,
   sweeps, contract gates and linters. The suites are the wrong shape for a
   ten-second tier -- the short suite of `pkg/store` alone measured 53 s,

@@ -25,7 +25,7 @@ func (PrePush) Help() string {
 		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
 		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
 		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
-		"fast linter subset over the packages holding the changed Go files, up to eight of them. It repeats " +
+		"fast linter subset over every package holding changed Go files. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
 		"judged by `gate`. Every step reads the commits being pushed, the range origin/main..HEAD, and never " +
@@ -153,12 +153,6 @@ func overTouchedPackages(ctx context.Context, step, verb, noun string, keep func
 		sparkwing.Info(ctx, "%s: no Go package changed; nothing to %s", step, verb)
 		return nil
 	}
-	if count := countTargets(targets); count > prePushPackageCap {
-		sparkwing.Info(ctx, "%s: %d packages changed, past the %d this tier fits; the whole-tree form runs in gate",
-			step, count, prePushPackageCap)
-		return nil
-	}
-
 	var failures []string
 	for _, module := range mapKeys(targets) {
 		pkgs := targets[module]
@@ -186,20 +180,6 @@ func buildableGoFiles(all []string) []string {
 		out = append(out, f)
 	}
 	return out
-}
-
-// perf: a push wide enough to change more packages than this cannot be
-// compiled, linted and tested inside the tier's ten seconds, so it names the
-// count and leaves the whole-tree forms to the broad tier rather than holding
-// the push for minutes.
-const prePushPackageCap = 8
-
-func countTargets(targets map[string][]string) int {
-	count := 0
-	for _, pkgs := range targets {
-		count += len(pkgs)
-	}
-	return count
 }
 
 func init() {

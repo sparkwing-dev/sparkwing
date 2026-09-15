@@ -101,10 +101,24 @@ func TestBudgetFailsTheTierWhenItsOwnStepsOverrun(t *testing.T) {
 }
 
 func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
-	b := newTierBudget("probe", time.Nanosecond)
+	reported := false
+	b := newTierBudget("probe", time.Nanosecond).over(
+		func(context.Context, string, func([]string) []string) ([]string, string, error) {
+			reported = true
+			return nil, "no Go files", nil
+		})
 	w := sparkwing.NewWork()
 	w.ParallelFailures(sparkwing.FailFast)
-	b.step(w, "red", func(context.Context) error { return errors.New("the check found something") })
+	started := make(chan struct{})
+	b.step(w, "red", func(context.Context) error {
+		<-started
+		return errors.New("the check found something")
+	})
+	b.step(w, "cancelled", func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
 	b.verdict(w)
 
 	_, err := sparkwing.RunWork(t.Context(), w)
@@ -113,6 +127,9 @@ func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "the check found something") {
 		t.Errorf("the budget replaced the check's own verdict: %v", err)
+	}
+	if !reported {
+		t.Error("the budget verdict did not run after fail-fast cancelled a sibling step")
 	}
 }
 

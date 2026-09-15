@@ -32,7 +32,8 @@ unlock.
   cost per file. `pre-push` repeats nothing
   `pre-commit` already ran: it keeps the changelog, OpenAPI and API-snapshot
   gates and adds `go build`, `go vet` and the fast linter subset over the
-  packages the push touches, and it no longer re-runs the formatters, the
+  packages the push touches, without a package-count cutoff. It no longer
+  re-runs the formatters, the
   comment, sleep and regex sweeps, the docs mirror or home resolution. The
   `release` pipeline runs build, the full linter and the fast test class before
   it tags. A test whose own runtime passes 200 ms guards itself with

@@ -112,21 +112,20 @@ func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 	}
 }
 
-func TestThePushTierLeavesAPushWiderThanItsCapToTheBroadTier(t *testing.T) {
+func TestBuildTouchedRejectsBrokenPackagesInAWidePush(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
-	for i := 0; i <= prePushPackageCap; i++ {
+	for i := range 9 {
 		pkg := fmt.Sprintf("wide%d", i)
 		writeGoFile(t, filepath.Join(root, pkg, "broken.go"),
 			fmt.Sprintf("package %s\n\nfunc Broken() int { return \"not an int\" }\n", pkg))
 	}
 	gitCommitAll(t, root, "a push wider than the tier fits")
 
-	if err := runBuildTouched(context.Background()); err != nil {
-		t.Fatalf("the tier compiled %d packages rather than naming the count and leaving them to gate: %v",
-			prePushPackageCap+1, err)
+	if err := runBuildTouched(t.Context()); err == nil {
+		t.Fatal("build-touched passed nine packages that do not compile")
 	}
 }
 
