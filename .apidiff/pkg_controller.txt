@@ -319,6 +319,8 @@ func (nodeSecondsCollector) Collect(ch chan<- prometheus.Metric)
 func (nodeSecondsCollector) Describe(ch chan<- *prometheus.Desc)
 func (objectStoreCollector) Collect(ch chan<- prometheus.Metric)
 func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
+func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
+func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error
 func (r *statusRecorder) WriteHeader(code int)

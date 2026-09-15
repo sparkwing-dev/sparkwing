@@ -735,6 +735,24 @@ func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
 	}
 }
 
+func TestCreditSettings_RefusesNullInDuplicateAndAcceptsCaseFold(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, _ := creditSettings(t, f, http.MethodPut, json.RawMessage(
+		`{"rate_table":{"4":20000},"grace_seconds":null,"grace_seconds":0}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("duplicate null write = %d, want 400", status)
+	}
+	_, view := creditSettings(t, f, http.MethodGet, nil)
+	if view.RateTableSet {
+		t.Fatalf("the duplicate null write stored a table: %+v", view)
+	}
+	status, view = creditSettings(t, f, http.MethodPut, map[string]any{"GRACE_SECONDS": 0})
+	if status != http.StatusOK || view.GraceSeconds != 0 {
+		t.Fatalf("case-folded valid write = %d, %+v", status, view)
+	}
+}
+
 func TestCreditSettings_ConcurrentTableAndScalarKeepASerialResult(t *testing.T) {
 	const scalarWrites = 8
 	for attempt := range 10 {

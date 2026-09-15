@@ -87,22 +87,73 @@ func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
 }
 
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
-	type wire setCreditSettingsReq
+	var wire struct {
+		RateMicroPerSecond        optionalCreditInt64     `json:"rate_micro_per_second"`
+		RateTable                 optionalCreditRateTable `json:"rate_table"`
+		WarmCPUClassCores         optionalCreditInt64     `json:"warm_cpu_class_cores"`
+		GraceSeconds              optionalCreditInt64     `json:"grace_seconds"`
+		MaxChargeSeconds          optionalCreditInt64     `json:"max_charge_seconds"`
+		StorageRateMicroPerGBDay  optionalCreditInt64     `json:"storage_rate_micro_per_gb_day"`
+		StorageFreeAllowanceBytes optionalCreditInt64     `json:"storage_free_allowance_bytes"`
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode((*wire)(r)); err != nil {
+	if err := dec.Decode(&wire); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	for name, value := range fields {
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-			return fmt.Errorf("%s must not be null", name)
-		}
+	*r = setCreditSettingsReq{
+		RateMicroPerSecond:        wire.RateMicroPerSecond.pointer(),
+		RateTable:                 wire.RateTable.pointer(),
+		WarmCPUClassCores:         wire.WarmCPUClassCores.pointer(),
+		GraceSeconds:              wire.GraceSeconds.pointer(),
+		MaxChargeSeconds:          wire.MaxChargeSeconds.pointer(),
+		StorageRateMicroPerGBDay:  wire.StorageRateMicroPerGBDay.pointer(),
+		StorageFreeAllowanceBytes: wire.StorageFreeAllowanceBytes.pointer(),
 	}
 	return nil
+}
+
+type optionalCreditInt64 struct {
+	value int64
+	set   bool
+}
+
+func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("credit setting must be an integer, not null")
+	}
+	if err := json.Unmarshal(raw, &v.value); err != nil {
+		return err
+	}
+	v.set = true
+	return nil
+}
+
+func (v *optionalCreditInt64) pointer() *int64 {
+	if !v.set {
+		return nil
+	}
+	return &v.value
+}
+
+type optionalCreditRateTable struct {
+	value creditRateTableIn
+	set   bool
+}
+
+func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error {
+	if err := t.value.UnmarshalJSON(raw); err != nil {
+		return err
+	}
+	t.set = true
+	return nil
+}
+
+func (t *optionalCreditRateTable) pointer() *creditRateTableIn {
+	if !t.set {
+		return nil
+	}
+	return &t.value
 }
 
 // safety: operators write the table both ways, so a body may name it as a list

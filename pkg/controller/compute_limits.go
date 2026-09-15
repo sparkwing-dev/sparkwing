@@ -50,31 +50,20 @@ type setComputeLimitsReq struct {
 }
 
 func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error {
-	type wire setComputeLimitsReq
+	var wire struct {
+		Limits map[string]*int64 `json:"limits"`
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode((*wire)(r)); err != nil {
+	if err := dec.Decode(&wire); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	limits, present := fields["limits"]
-	if !present {
-		return nil
-	}
-	if bytes.Equal(bytes.TrimSpace(limits), []byte("null")) {
-		return errors.New("limits must be an object, not null")
-	}
-	var values map[string]json.RawMessage
-	if err := json.Unmarshal(limits, &values); err != nil {
-		return err
-	}
-	for name, value := range values {
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+	r.Limits = make(map[string]int64, len(wire.Limits))
+	for name, value := range wire.Limits {
+		if value == nil {
 			return fmt.Errorf("%s must not be null", name)
 		}
+		r.Limits[name] = *value
 	}
 	return nil
 }

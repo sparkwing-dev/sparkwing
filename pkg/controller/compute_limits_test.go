@@ -149,6 +149,16 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("null limits = %d: %s", status, body)
 	}
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		map[string]any{"LIMITS": map[string]any{store.ComputeLimitGlobalRunners: nil}})
+	if status != http.StatusBadRequest {
+		t.Fatalf("case-folded null write = %d: %s", status, body)
+	}
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		json.RawMessage(`{"limits":{"max_global_runners":null},"limits":{"runner_alarm":3}}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("duplicate null write = %d: %s", status, body)
+	}
 	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
 	if status != http.StatusOK {
 		t.Fatalf("show = %d: %s", status, body)
@@ -161,6 +171,23 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 	}
 	if got := view.Limits[store.ComputeLimitGlobalRunners]; got != 7 {
 		t.Fatalf("explicit null reset the global runner cap to %d", got)
+	}
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		map[string]any{"LIMITS": map[string]any{store.ComputeLimitGlobalRunners: 8}})
+	if status != http.StatusOK {
+		t.Fatalf("case-folded valid write = %d: %s", status, body)
+	}
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		json.RawMessage(`{"limits":{"max_global_runners":9},"LIMITS":{"runner_alarm":3}}`))
+	if status != http.StatusOK {
+		t.Fatalf("duplicate valid write = %d: %s", status, body)
+	}
+	if err := json.Unmarshal(body, &view); err != nil {
+		t.Fatalf("decode duplicate result: %v", err)
+	}
+	if view.Limits[store.ComputeLimitGlobalRunners] != 9 ||
+		view.Limits[store.ComputeLimitRunnerAlarm] != 3 {
+		t.Fatalf("duplicate valid write did not merge: %v", view.Limits)
 	}
 }
 
