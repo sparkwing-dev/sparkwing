@@ -25,6 +25,8 @@ unlock.
 - **controller + chart:** the controller opens PostgreSQL when
   `SPARKWING_PG_URL` is present, and the chart reads that DSN from a named
   Kubernetes Secret. SQLite remains the default.
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.4, so a fresh scaffold compiles against that release.
+
 
 ### Fixed
 
