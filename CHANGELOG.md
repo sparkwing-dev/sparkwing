@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **checks:** accept GitHub's supported publication queue with the pinned
+  actionlint version while retaining explicit serialization contract checks.
+
 ### Changed
 
 - **release:** The local cut checks published module freshness, coherent SDK

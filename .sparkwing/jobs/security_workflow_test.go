@@ -42,6 +42,64 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+func releaseQueueContract(body string) error {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		return err
+	}
+	jobs := mappingValue(&doc, "jobs")
+	publication := mappingValue(mappingValue(jobs, "release"), "concurrency")
+	for _, field := range []struct{ key, value, tag string }{
+		{"group", "release-publication", "!!str"},
+		{"queue", "max", "!!str"},
+		{"cancel-in-progress", "false", "!!bool"},
+	} {
+		node := mappingValue(publication, field.key)
+		if node == nil || node.Kind != yaml.ScalarNode || node.Value != field.value || node.Tag != field.tag {
+			return fmt.Errorf("release publication concurrency requires %s: %s", field.key, field.value)
+		}
+	}
+	if mappingValue(mappingValue(&doc, "concurrency"), "queue") != nil {
+		return fmt.Errorf("the queue compatibility exception covers only the release publication job")
+	}
+	for i := 0; i+1 < len(jobs.Content); i += 2 {
+		if jobs.Content[i].Value != "release" && mappingValue(mappingValue(jobs.Content[i+1], "concurrency"), "queue") != nil {
+			return fmt.Errorf("the queue compatibility exception does not cover job %s", jobs.Content[i].Value)
+		}
+	}
+	return nil
+}
+
+func TestReleasePublicationRetainsItsSerializedQueue(t *testing.T) {
+	if err := releaseQueueContract(readHostedCIFile(t, ".github/workflows/release.yaml")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReleaseQueueContractRefusesUnsafeOrUncoveredConfiguration(t *testing.T) {
+	const valid = "jobs:\n  release:\n    concurrency:\n      group: release-publication\n      queue: max\n      cancel-in-progress: false\n"
+	if err := releaseQueueContract(valid); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"missing queue":  strings.Replace(valid, "      queue: max\n", "", 1),
+		"unknown queue":  strings.Replace(valid, "queue: max", "queue: banana", 1),
+		"numeric queue":  strings.Replace(valid, "queue: max", "queue: 1", 1),
+		"cancel running": strings.Replace(valid, "cancel-in-progress: false", "cancel-in-progress: true", 1),
+		"quoted false":   strings.Replace(valid, "cancel-in-progress: false", "cancel-in-progress: 'false'", 1),
+		"per-tag group":  strings.Replace(valid, "group: release-publication", "group: release-${{ github.ref_name }}", 1),
+		"workflow queue": valid + "concurrency: {group: other, queue: max}\n",
+		"other job":      valid + "  other:\n    concurrency: {group: other, queue: max}\n",
+		"invalid YAML":   "jobs: [",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := releaseQueueContract(body); err == nil {
+				t.Fatal("unsafe or unvalidated queue configuration passed")
+			}
+		})
+	}
+}
+
 func trailingComment(lines []string, line int, value string) string {
 	if line < 1 || line > len(lines) {
 		return ""
