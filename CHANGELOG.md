@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.4, so a fresh scaffold compiles against that release.
+
+
 ### Fixed
 
 - **store:** Concurrent SQLite cold starts read the schema version and
