@@ -97,12 +97,23 @@ func TestBoundCredentialCannotAppendToAnotherClaim(t *testing.T) {
 }
 
 func TestBoundCredentialAdminScopeCannotBypassBoundary(t *testing.T) {
-	_, bound, _ := boundaryBoundClient(t)
+	st, bound, _ := boundaryBoundClient(t)
 	if _, err := bound.ListRuns(context.Background(), store.RunFilter{}); err == nil {
 		t.Fatal("bound credential listed global runs through admin scope")
 	}
 	if _, err := bound.GetPipelineProfile(context.Background(), "other-pipeline", "build"); err == nil {
 		t.Fatal("bound credential read another pipeline profile through admin scope")
+	}
+	root, err := st.GetNode(context.Background(), "bound-run", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fenced := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
+		HolderID: root.ClaimedBy, MembershipID: root.ClaimMembershipID,
+		ReservationID: root.ReservationID, ClaimGeneration: root.ClaimGeneration,
+	})
+	if err := bound.UpdateNodeDeps(fenced, "bound-run", "build", []string{"private"}); err == nil {
+		t.Fatal("bound credential widened its dependency-output grant")
 	}
 }
 

@@ -14,7 +14,6 @@ import (
 var executionNodePatterns = map[string]bool{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/start":             true,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/finish":            true,
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/deps":              true,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch":          true,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/logs":              true,
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/metrics":           true,
