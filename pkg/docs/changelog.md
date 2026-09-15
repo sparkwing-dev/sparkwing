@@ -92,8 +92,9 @@ unlock.
 - **checks:** The three check classes carry enforced time budgets: `pre-commit`
   3 seconds, `pre-push` 10 seconds, and the release cut 5 minutes. Each tier's
   job times its own steps and fails when the class overruns, naming the slowest
-  step and its cost; above 50 changed Go files it reports the same figures and
-  passes, because those steps cost per file. `pre-push` repeats nothing
+  step and its cost; above 25 changed Go files, what one core formats inside
+  three seconds, it reports the same figures and passes, because those steps
+  cost per file. `pre-push` repeats nothing
   `pre-commit` already ran: it keeps the changelog, OpenAPI and API-snapshot
   gates and adds `go build`, `go vet` and the fast linter subset over the
   packages the push touches, and it no longer re-runs the formatters, the

@@ -36,17 +36,17 @@ launcher when testing isolated tool state.
   5 minutes for build, the full linter and the fast test class in parallel.
   Each of those jobs times its own steps and fails when the class overruns,
   naming the slowest step and its cost, so a class cannot regrow unnoticed.
-  Above 50 changed Go files the verdict reports the span and the slowest step
+  Above 25 changed Go files the verdict reports the span and the slowest step
   and passes: the source-policy steps cost per file, so a wide change costs
-  several times a normal one without any tier having grown. At or below 50 the
+  several times a normal one without any tier having grown. Twenty-five is what
+  one core formats inside the commit tier's three seconds. At or below it the
   budget is enforced. The
   budget judges the span the job's own steps cover, not the admission wait or
   the 2.5 s the pipeline binary takes to recompile after a Go change. The
-  formatters are the per-file cost in the two hook tiers, and `goimports`
-  inside `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt`
-  measured 0.38 s and `goimports` 10.9 s. The step splits its file list one
-  process per reserved core, which is why the commit tier reserves the fan-out
-  width rather than one core. `gate`
+  formatters are the per-file cost in the commit tier, and `goimports` inside
+  `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt` measured
+  0.38 s, `goimports` 10.9 s and `gofmt` 0.09 s, so a Go file costs about
+  0.11 s. `gate`
   and `pre-release` are the heavier classes: they carry no budget and run
   asynchronously, on demand and in hosted CI. Measured on this 16-core Linux
   host with a warm cache, the release cut's three members cost 9 s (build),

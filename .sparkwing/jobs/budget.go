@@ -20,11 +20,11 @@ const (
 
 const budgetStepID = "budget"
 
-// perf: Korey accepts a long tier for a wide change. The source-policy steps
-// cost per file, so a fileset several times a normal change's size costs
-// several times its time without any tier having grown; above this the verdict
-// reports and passes rather than failing the commit or the push.
-const budgetWaiverFiles = 50
+// perf: what one core formats inside the commit tier's three seconds, at the
+// 0.11 s a Go file costs in golangci-lint fmt. A wider change is accepted as
+// long rather than failed: these steps cost per file, so a fileset several
+// times a normal one costs several times its time with no tier having grown.
+const budgetWaiverFiles = 25
 
 type stepTiming struct {
 	id   string

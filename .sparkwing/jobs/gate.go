@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 
@@ -333,74 +332,16 @@ func formattersOverScope(ctx context.Context, scopeOf scopeFunc) error {
 	if len(files) == 0 {
 		return nil
 	}
-	return formatFiles(ctx, files, scope)
-}
-
-// perf: goimports costs 0.109 s per file inside golangci-lint fmt and is the
-// whole of this step's price: gofumpt over the same hundred files measured
-// 0.38 s and goimports 10.9 s. The tool has no concurrency of its own, so one
-// process per reserved core is what holds a wide change inside the budget.
-func formatFiles(ctx context.Context, files []string, scope string) error {
-	chunks := chunkFiles(files, formatterWorkers(runtime.NumCPU()))
-	diffs := make([]string, len(chunks))
-	failures := make([]error, len(chunks))
-
-	var wg sync.WaitGroup
-	for i, chunk := range chunks {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			diffs[i], failures[i] = formatChunk(ctx, chunk)
-		}()
-	}
-	wg.Wait()
-
-	if err := errors.Join(failures...); err != nil {
-		return fmt.Errorf("golangci-lint fmt: %w", err)
-	}
-	unformatted := strings.TrimSpace(strings.Join(diffs, "\n"))
-	if unformatted == "" {
-		return nil
-	}
-	return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt -- %s`:\n%s",
-		scope, shellQuoteAll(files), unformatted)
-}
-
-func formatChunk(ctx context.Context, files []string) (string, error) {
 	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff -- "+shellQuoteAll(files)).Capture()
 	if runErr == nil {
-		return "", nil
+		return nil
 	}
 	var execErr *sparkwing.ExecError
 	if errors.As(runErr, &execErr) && strings.TrimSpace(execErr.Stdout) != "" {
-		return strings.TrimSpace(execErr.Stdout), nil
+		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt -- %s`:\n%s",
+			scope, shellQuoteAll(files), strings.TrimSpace(execErr.Stdout))
 	}
-	return "", runErr
-}
-
-// perf: the fan-out width and the cores every tier reserves are the same
-// figure, so a tier that splits the formatter still fits beside a running gate.
-func formatterWorkers(cpuCount int) int {
-	if workers := int(gateCoreReservation(cpuCount)); workers > 1 {
-		return workers
-	}
-	return 1
-}
-
-func chunkFiles(files []string, chunks int) [][]string {
-	if chunks < 1 {
-		chunks = 1
-	}
-	if chunks > len(files) {
-		chunks = len(files)
-	}
-	out := make([][]string, 0, chunks)
-	for i := 0; i < chunks; i++ {
-		lo := i * len(files) / chunks
-		hi := (i + 1) * len(files) / chunks
-		out = append(out, files[lo:hi])
-	}
-	return out
+	return fmt.Errorf("golangci-lint fmt: %w", runErr)
 }
 
 func changeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {

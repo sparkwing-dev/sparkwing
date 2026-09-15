@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 
@@ -1061,37 +1060,5 @@ func TestScopedStepsStayOnTheCommitWhenItStagesNoFileOfTheirKind(t *testing.T) {
 	}
 	if scope != "0 staged Go file(s)" {
 		t.Errorf("scope = %q, want the staged change; this fixture has no origin/main to fall back to", scope)
-	}
-}
-
-func TestFormattersJudgeEveryChunkOfAWideChange(t *testing.T) {
-	root := gateFixtureRepo(t)
-	for i := range formatterWorkers(runtime.NumCPU()) * 3 {
-		writeGoFile(t, filepath.Join(root, "internal", fmt.Sprintf("clean%02d.go", i)),
-			fmt.Sprintf("package internal\n\nfunc Clean%02d() int { return %d }\n", i, i))
-	}
-	writeGoFile(t, filepath.Join(root, "internal", "zlast.go"),
-		"package internal\nfunc  Last( )  int { return 9 }\n")
-	gitAddAll(t, root)
-
-	err := runFormatters(context.Background())
-	if err == nil {
-		t.Fatal("the formatters passed a file they have to rewrite")
-	}
-	if !strings.Contains(err.Error(), "zlast.go") {
-		t.Errorf("a file in the last chunk went unreported: %v", err)
-	}
-}
-
-func TestChunkFilesKeepsEveryFileExactlyOnce(t *testing.T) {
-	files := []string{"a", "b", "c", "d", "e", "f", "g"}
-	for _, chunks := range []int{1, 2, 3, 7, 11} {
-		var flat []string
-		for _, chunk := range chunkFiles(files, chunks) {
-			flat = append(flat, chunk...)
-		}
-		if !slices.Equal(flat, files) {
-			t.Errorf("chunkFiles(%d) = %v, want the same files in the same order", chunks, flat)
-		}
 	}
 }
