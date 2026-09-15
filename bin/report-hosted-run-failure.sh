@@ -9,7 +9,7 @@ fi
 handle="$1"
 sparkwing_binary="$2"
 if [ ! -s "$handle" ]; then
-  echo "canonical run handle was not published; the failure happened before Sparkwing accepted the run" >&2
+  echo "no run handle is available; cannot locate stored diagnostics" >&2
   exit 0
 fi
 

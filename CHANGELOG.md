@@ -45,8 +45,8 @@ unlock.
   committing an unreachable bump.
 - **checks:** The broad gate declares a 40-minute execution deadline so its
   post-test race and Postgres fanout does not hit the generic 30-minute
-  dispatcher watchdog. Failed hosted canonical runs print their stored status
-  and last 500 log lines before runner cleanup.
+  dispatcher watchdog. Failed hosted canonical runs get two minutes to print
+  their stored status and last 500 log lines before runner cleanup.
 
 ## [v0.52.5] - 2026-09-15
 ### Changed

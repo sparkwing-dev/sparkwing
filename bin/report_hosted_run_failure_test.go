@@ -13,7 +13,7 @@ func TestReportHostedRunFailureAllowsAMissingHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing handle diagnostics failed: %v\n%s", err, output)
 	}
-	if !strings.Contains(string(output), "run handle was not published") {
+	if !strings.Contains(string(output), "no run handle is available; cannot locate stored diagnostics") {
 		t.Fatalf("missing handle diagnostics = %q", output)
 	}
 }

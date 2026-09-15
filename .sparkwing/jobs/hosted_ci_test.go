@@ -168,7 +168,7 @@ func TestCanonicalWorkflowPrintsStoredDiagnosticsAfterFailure(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	requireWorkflowText(t, body,
 		`--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`,
-		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true",
+		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true\n        timeout-minutes: 2",
 		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"`,
 	)
 	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 2 {

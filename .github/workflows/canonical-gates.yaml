@@ -184,6 +184,7 @@ jobs:
       - name: Print failed canonical run diagnostics
         if: ${{ failure() }}
         continue-on-error: true
+        timeout-minutes: 2
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: |
