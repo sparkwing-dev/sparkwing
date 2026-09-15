@@ -3030,6 +3030,10 @@ Git revision, and complete plan snapshot. Sparkwing compiles and runs an
 immutable detached snapshot of that revision. A missing source checkout or
 changed identity fails the retry before compilation.
 
+A retry is not weighed against the pipeline's risk labels the way a launch is:
+it re-queues the source run's own declarations, so a retry of a run whose step
+declares a Risk is queued with no allow behind it.
+
 Pick a rerun scope explicitly:
   --failed   reuse cached/passed nodes from the source run;
              re-execute only the failed or unreached subset.

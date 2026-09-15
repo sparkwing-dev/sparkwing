@@ -274,6 +274,11 @@ arguments it launched with, and `crons show` prints them. A locked schedule
 hands the consumer its pinned binary, which the consumer executes instead of
 compiling the checkout, with the checkout as the working directory.
 
+A schedule whose pipeline declares a risk is refused at the fire, before the
+run is persisted: a schedule carries no allow, and the labels are weighed
+against the pinned binary when the schedule is locked and against the checkout
+when it is not. Run a risk-labeled pipeline from a terminal with `--sw-allow`.
+
 Run the tick by hand on a platform sparkwing has no timer for, from that
 machine's own scheduler, once a minute:
 

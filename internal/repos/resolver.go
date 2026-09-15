@@ -11,15 +11,12 @@ import (
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
 
 var ErrAmbiguous = errors.New("repos: pipeline name is ambiguous across registered repos")
-
-type describeOutput struct {
-	Name string `json:"name"`
-}
 
 type resolver struct {
 	mu    sync.Mutex
@@ -82,7 +79,11 @@ func (r *resolver) build() error {
 	return nil
 }
 
-func PipelineNamesForRepo(absPath string) ([]string, error) {
+// DescribeRepo builds the pipeline binary a repository declares and returns
+// the schemas that build emits: each pipeline's name, arguments, and the risk
+// labels its steps declare. A caller that needs only the names, and one that
+// has to weigh what a pipeline declares, read the same build.
+func DescribeRepo(absPath string) ([]sparkwing.DescribePipeline, error) {
 	sparkwingDir := filepath.Join(absPath, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
@@ -102,7 +103,15 @@ func PipelineNamesForRepo(absPath string) ([]string, error) {
 		return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
 	}
 	defer func() { _ = lease.Release() }()
-	return describePipelineNames(lease.Path(), absPath)
+	return describePipelines(lease.Path(), absPath)
+}
+
+func PipelineNamesForRepo(absPath string) ([]string, error) {
+	schemas, err := DescribeRepo(absPath)
+	if err != nil {
+		return nil, err
+	}
+	return pipelineNames(schemas), nil
 }
 
 func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
@@ -123,18 +132,18 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 		return nil, false
 	}
 	defer func() { _ = lease.Release() }()
-	got, err := describePipelineNames(lease.Path(), absPath)
+	got, err := describePipelines(lease.Path(), absPath)
 	if err != nil {
 		return nil, false
 	}
-	return got, true
+	return pipelineNames(got), true
 }
 
 func PipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	return pipelineNamesIfBuilt(absPath)
 }
 
-func describePipelineNames(binPath, workDir string) ([]string, error) {
+func describePipelines(binPath, workDir string) ([]sparkwing.DescribePipeline, error) {
 	cmd := exec.Command(binPath, "--describe")
 	cmd.Dir = workDir
 	cmd.Stderr = os.Stderr
@@ -142,17 +151,21 @@ func describePipelineNames(binPath, workDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("describe %s: %w", binPath, err)
 	}
-	var schemas []describeOutput
+	var schemas []sparkwing.DescribePipeline
 	if err := json.Unmarshal(out, &schemas); err != nil {
 		return nil, fmt.Errorf("parse describe output from %s: %w", binPath, err)
 	}
+	return schemas, nil
+}
+
+func pipelineNames(schemas []sparkwing.DescribePipeline) []string {
 	names := make([]string, 0, len(schemas))
 	for _, s := range schemas {
 		if s.Name != "" {
 			names = append(names, s.Name)
 		}
 	}
-	return names, nil
+	return names
 }
 
 func ResolveRepoForPipelineCached(name string) (string, error) {
