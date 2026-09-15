@@ -33,6 +33,18 @@ func meterAt(t *testing.T, cfg egress.Config, stamp string) (*egress.Meter, *tim
 	return m, &clock
 }
 
+func flushUsages(t *testing.T, m *egress.Meter) []egress.Usage {
+	t.Helper()
+	var flushed []egress.Usage
+	if err := m.Flush(func(usages []egress.Usage) error {
+		flushed = append(flushed, usages...)
+		return nil
+	}); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	return flushed
+}
+
 func TestUnbudgetedMeterCountsAndRefusesNothing(t *testing.T) {
 	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 5000)
@@ -248,20 +260,20 @@ func TestServeKeepsTheStreamControlsAHandlerAsksFor(t *testing.T) {
 	}
 }
 
-func TestDirtyReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
+func TestFlushReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
 	m, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 1000}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 400)
 	m.Record("bob", egress.ClassLog, 100)
-	dirty := m.Dirty()
+	dirty := flushUsages(t, m)
 	if len(dirty) != 2 || dirty[0].Principal != "alice" || dirty[0].Bytes != 400 || dirty[0].Month != "2026-09" {
-		t.Fatalf("Dirty = %+v, want alice at 400 and bob at 100 for 2026-09", dirty)
+		t.Fatalf("Flush = %+v, want alice at 400 and bob at 100 for 2026-09", dirty)
 	}
-	if again := m.Dirty(); len(again) != 0 {
-		t.Fatalf("Dirty with nothing moved = %+v, want empty", again)
+	if again := flushUsages(t, m); len(again) != 0 {
+		t.Fatalf("Flush with nothing moved = %+v, want empty", again)
 	}
 	m.Record("alice", egress.ClassArtifact, 1)
-	if moved := m.Dirty(); len(moved) != 1 || moved[0].Principal != "alice" || moved[0].Bytes != 401 {
-		t.Fatalf("Dirty after one more byte = %+v, want alice at 401", moved)
+	if moved := flushUsages(t, m); len(moved) != 1 || moved[0].Principal != "alice" || moved[0].Bytes != 401 {
+		t.Fatalf("Flush after one more byte = %+v, want alice at 401", moved)
 	}
 
 	restarted, _ := meterAt(t, egress.Config{PerPrincipalMonthlyBytes: 1000}, "2026-09-13T11:00:00Z")
@@ -275,6 +287,51 @@ func TestDirtyReportsMovedTotalsOnceAndRestoreResumesThem(t *testing.T) {
 	}
 	if len(state.Top) != 1 || state.Top[0].Principal != "alice" || state.Top[0].MonthBytes != 401 {
 		t.Fatalf("top consumers after Restore = %+v, want alice at 401", state.Top)
+	}
+}
+
+func TestFlushRetriesUsageAfterPersistenceFails(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+	m.Record("alice", egress.ClassArtifact, 400)
+	wantErr := errors.New("persistence failed")
+	if err := m.Flush(func(usages []egress.Usage) error {
+		if len(usages) != 1 || usages[0].Principal != "alice" || usages[0].Bytes != 400 {
+			t.Fatalf("first attempt = %+v, want alice at 400", usages)
+		}
+		return wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("Flush error = %v, want %v", err, wantErr)
+	}
+	if retried := flushUsages(t, m); len(retried) != 1 || retried[0].Bytes != 400 {
+		t.Fatalf("retry = %+v, want the unacknowledged 400 bytes", retried)
+	}
+	if again := flushUsages(t, m); len(again) != 0 {
+		t.Fatalf("flush after acknowledgement = %+v, want empty", again)
+	}
+}
+
+func TestFlushDoesNotAcknowledgeBytesRecordedDuringPersistence(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+	m.Record("alice", egress.ClassArtifact, 100)
+	persisting := make(chan struct{})
+	recorded := make(chan struct{})
+	go func() {
+		<-persisting
+		m.Record("alice", egress.ClassArtifact, 50)
+		close(recorded)
+	}()
+	if err := m.Flush(func(usages []egress.Usage) error {
+		close(persisting)
+		<-recorded
+		if len(usages) != 1 || usages[0].Bytes != 100 {
+			t.Fatalf("first flush = %+v, want alice at 100", usages)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if next := flushUsages(t, m); len(next) != 1 || next[0].Bytes != 150 {
+		t.Fatalf("next flush = %+v, want the newer 150-byte total", next)
 	}
 }
 
@@ -493,9 +550,16 @@ func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
 	*clock = at(t, "2026-10-01T00:00:01Z")
 	m.Record("alice", egress.ClassArtifact, 5)
 
-	dirty := m.Dirty()
+	wantErr := errors.New("persistence failed")
+	var dirty []egress.Usage
+	if err := m.Flush(func(usages []egress.Usage) error {
+		dirty = append(dirty, usages...)
+		return wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("Flush error = %v, want %v", err, wantErr)
+	}
 	if len(dirty) != 2 {
-		t.Fatalf("Dirty = %+v, want the closing September row and the October one", dirty)
+		t.Fatalf("failed flush = %+v, want the closing September row and the October one", dirty)
 	}
 	if dirty[0].Month != "2026-09" || dirty[0].Bytes != 400 {
 		t.Fatalf("first usage = %+v, want September at 400", dirty[0])
@@ -503,8 +567,36 @@ func TestAMonthsClosingBytesSurviveTheRoll(t *testing.T) {
 	if dirty[1].Month != "2026-10" || dirty[1].Bytes != 5 {
 		t.Fatalf("second usage = %+v, want October at 5", dirty[1])
 	}
-	if again := m.Dirty(); len(again) != 0 {
-		t.Fatalf("Dirty again = %+v, want empty", again)
+	if state := m.State(); state.Pending != 1 {
+		t.Fatalf("pending after failed flush = %d, want the closing month retained", state.Pending)
+	}
+	if retried := flushUsages(t, m); len(retried) != 2 {
+		t.Fatalf("retry = %+v, want both month totals", retried)
+	}
+	if again := flushUsages(t, m); len(again) != 0 {
+		t.Fatalf("flush after acknowledgement = %+v, want empty", again)
+	}
+}
+
+func TestFlushKeepsAMonthRolledDuringPersistence(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{}, "2026-09-30T23:59:59Z")
+	m.WithPersistence()
+	m.Record("alice", egress.ClassArtifact, 400)
+	if err := m.Flush(func(usages []egress.Usage) error {
+		if len(usages) != 1 || usages[0].Month != "2026-09" || usages[0].Bytes != 400 {
+			t.Fatalf("first flush = %+v, want September at 400", usages)
+		}
+		*clock = at(t, "2026-10-01T00:00:01Z")
+		m.Record("alice", egress.ClassArtifact, 5)
+		return nil
+	}); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	next := flushUsages(t, m)
+	if len(next) != 2 || next[0].Month != "2026-09" || next[0].Bytes != 400 ||
+		next[1].Month != "2026-10" || next[1].Bytes != 5 {
+		t.Fatalf("next flush = %+v, want the closing September total and current October total", next)
 	}
 }
 
@@ -553,8 +645,8 @@ func TestAnUndrainedMeterParksNothingAcrossManyMonths(t *testing.T) {
 	if state.Pending != 0 {
 		t.Fatalf("an undrained meter parked %d usages across 36 month rolls, want 0", state.Pending)
 	}
-	if got := m.Dirty(); len(got) != 20 {
-		t.Fatalf("Dirty = %d usages, want only the live month's 20", len(got))
+	if got := flushUsages(t, m); len(got) != 20 {
+		t.Fatalf("Flush = %d usages, want only the live month's 20", len(got))
 	}
 }
 
@@ -569,8 +661,8 @@ func TestADrainedMeterParksClosingMonthsAndCapsTheBacklog(t *testing.T) {
 	if state := m.State(); state.Pending != 1 {
 		t.Fatalf("Pending = %d, want January parked for the next drain", state.Pending)
 	}
-	if got := m.Dirty(); len(got) != 2 || got[0].Month != "2026-01" {
-		t.Fatalf("Dirty = %+v, want January then February", got)
+	if got := flushUsages(t, m); len(got) != 2 || got[0].Month != "2026-01" {
+		t.Fatalf("Flush = %+v, want January then February", got)
 	}
 	if state := m.State(); state.Pending != 0 {
 		t.Fatalf("Pending after a drain = %d, want 0", state.Pending)

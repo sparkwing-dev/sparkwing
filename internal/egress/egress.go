@@ -24,10 +24,10 @@
 // service sets only the daily alarm and leaves refusals to the services
 // that know who is asking.
 //
-// Counting is in memory. [Meter.Dirty] hands a caller the principals
-// whose totals have moved since the last call so a service with a store
-// can persist them on a timer, and [Meter.Restore] loads them back at
-// startup; nothing here writes one row per response.
+// Counting is in memory. [Meter.Flush] hands moved totals to a caller's
+// persistence operation and acknowledges them only after that operation
+// succeeds. [Meter.Restore] loads them back at startup; nothing here
+// writes one row per response.
 package egress
 
 import (
@@ -188,7 +188,7 @@ type Config struct {
 	// refusal tells the operator which one to raise. The zero value uses
 	// the unprefixed names.
 	Flags FlagNames
-	// Persisted marks a meter whose owner drains it with [Meter.Dirty].
+	// Persisted marks a meter whose owner drains it with [Meter.Flush].
 	// Only such a meter parks a month's closing totals; see
 	// [Meter.WithPersistence], which sets the same thing after the fact.
 	Persisted bool
@@ -271,6 +271,11 @@ type principalCounters struct {
 	dirty      bool
 }
 
+type pendingUsage struct {
+	id uint64
+	Usage
+}
+
 func (st *principalCounters) idle() bool {
 	return st.monthBytes == 0 && st.dayBytes == 0 &&
 		st.streams == 0 && st.downloads == 0 && !st.dirty
@@ -306,7 +311,8 @@ type Meter struct {
 	// the roll and the flush that would have persisted it. Only a meter
 	// whose owner drains it parks anything; see [Meter.WithPersistence].
 	persists       bool
-	pending        []Usage
+	pending        []pendingUsage
+	nextPendingID  uint64
 	pendingDropped uint64
 	pendingWarned  bool
 	month          string
@@ -342,7 +348,7 @@ func (m *Meter) WithLogger(l *slog.Logger) *Meter {
 }
 
 // WithPersistence marks this meter as one whose owner drains it with
-// [Meter.Dirty] and persists what comes out. Only such a meter parks a
+// [Meter.Flush] and persists what comes out. Only such a meter parks a
 // month's closing totals for the next drain; a meter nobody drains would
 // otherwise accumulate one entry per principal per month roll forever.
 func (m *Meter) WithPersistence() *Meter {
@@ -516,26 +522,29 @@ func (m *Meter) Open(principal string, slot Slot) (func(), error) {
 	}, nil
 }
 
-// Dirty returns the usages whose byte totals have moved since the last
-// call and clears the marks. A service with a store persists them on a
-// timer; one without calls nothing and keeps counting in memory. A month
-// that rolled between two calls yields its closing total first, so the
-// last bytes of a month are persisted under that month.
-func (m *Meter) Dirty() []Usage {
+// Flush gives persist the usages whose byte totals moved and acknowledges
+// only the exact snapshot that persist commits. A failed persistence keeps
+// every usage eligible for the next flush, while bytes recorded during a
+// successful persistence remain eligible as a newer total.
+func (m *Meter) Flush(persist func([]Usage) error) error {
 	if m == nil {
 		return nil
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := m.pending
-	m.pending = nil
-	m.pendingWarned = false
+	pending := append([]pendingUsage(nil), m.pending...)
+	out := make([]Usage, 0, len(pending)+len(m.principals))
+	for _, usage := range pending {
+		out = append(out, usage.Usage)
+	}
 	for name, st := range m.principals {
 		if !st.dirty {
 			continue
 		}
-		st.dirty = false
 		out = append(out, Usage{Principal: name, Month: st.month, Bytes: st.monthBytes})
+	}
+	m.mu.Unlock()
+	if len(out) == 0 {
+		return nil
 	}
 	slices.SortFunc(out, func(a, b Usage) int {
 		if c := compareStrings(a.Month, b.Month); c != 0 {
@@ -543,7 +552,39 @@ func (m *Meter) Dirty() []Usage {
 		}
 		return compareStrings(a.Principal, b.Principal)
 	})
-	return out
+	if err := persist(append([]Usage(nil), out...)); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, usage := range out {
+		st := m.principals[usage.Principal]
+		if st != nil && st.dirty && st.month == usage.Month && st.monthBytes == usage.Bytes {
+			st.dirty = false
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	acknowledged := make(map[uint64]struct{}, len(pending))
+	for _, usage := range pending {
+		acknowledged[usage.id] = struct{}{}
+	}
+	kept := m.pending[:0]
+	removed := false
+	for _, usage := range m.pending {
+		if _, ok := acknowledged[usage.id]; ok {
+			removed = true
+		} else {
+			kept = append(kept, usage)
+		}
+	}
+	m.pending = kept
+	if removed {
+		m.pendingWarned = false
+	}
+	return nil
 }
 
 func compareStrings(a, b string) int {
@@ -744,7 +785,8 @@ func (m *Meter) park(u Usage) {
 				"pending", len(m.pending), "limit", MaxPendingUsages)
 		}
 	}
-	m.pending = append(m.pending, u)
+	m.nextPendingID++
+	m.pending = append(m.pending, pendingUsage{id: m.nextPendingID, Usage: u})
 }
 
 func (m *Meter) evictIdle(now time.Time) {

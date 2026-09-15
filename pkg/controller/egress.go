@@ -224,16 +224,21 @@ func (s *Server) sweepEgressUsage(ctx context.Context) {
 }
 
 func (s *Server) flushEgressUsage(ctx context.Context) {
-	dirty := s.egress.Dirty()
-	if len(dirty) == 0 {
-		return
-	}
-	rows := make([]store.EgressUsage, 0, len(dirty))
-	for _, u := range dirty {
-		rows = append(rows, store.EgressUsage{Principal: u.Principal, Month: u.Month, Bytes: u.Bytes})
-	}
-	if err := s.store.RecordEgressUsage(ctx, rows); err != nil {
-		s.logger.Warn("egress usage flush failed", "err", err, "principals", len(rows))
+	principals := 0
+	err := s.egress.Flush(func(usages []egress.Usage) error {
+		principals = len(usages)
+		rows := make([]store.EgressUsage, 0, len(usages))
+		for _, usage := range usages {
+			rows = append(rows, store.EgressUsage{
+				Principal: usage.Principal,
+				Month:     usage.Month,
+				Bytes:     usage.Bytes,
+			})
+		}
+		return s.store.RecordEgressUsage(ctx, rows)
+	})
+	if err != nil {
+		s.logger.Warn("egress usage flush failed", "err", err, "principals", principals)
 	}
 }
 

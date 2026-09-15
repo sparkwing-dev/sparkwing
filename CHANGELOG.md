@@ -30,6 +30,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Egress usage remains eligible for the next persistence sweep
+  when a database write fails, so a restart cannot restore an older total and
+  reopen a spent monthly budget.
 - **store + controller:** Credit rate tables and their scalar settings now
   validate and commit in one transaction. Operator updates serialize the rate
   authority check through `Store.SetOperatorCreditSettings`, while the existing

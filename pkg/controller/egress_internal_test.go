@@ -59,6 +59,28 @@ func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 	}
 }
 
+func TestFailedEgressFlushRetainsUsageForTheNextSweep(t *testing.T) {
+	cfg := egress.Config{PerPrincipalMonthlyBytes: 300}
+	s, st := egressServer(t, cfg)
+	s.egress.Record("alice", egress.ClassArtifact, 100)
+	s.flushEgressUsage(t.Context())
+	s.egress.Record("alice", egress.ClassArtifact, 400)
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	s.flushEgressUsage(cancelled)
+	s.flushEgressUsage(t.Context())
+
+	restarted := New(st, nil).WithEgressMeter(egress.New(cfg))
+	restarted.loadEgressUsage(t.Context())
+	if got := restarted.egress.State().GlobalMonthBytes; got != 500 {
+		t.Fatalf("restarted usage = %d bytes, want 500", got)
+	}
+	if err := restarted.egress.Check("alice"); err == nil {
+		t.Fatal("restarted meter admitted a principal past its persisted budget")
+	}
+}
+
 func TestEgressHooksAreInertWithoutAMeter(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
