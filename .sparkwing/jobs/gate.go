@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 
@@ -20,6 +21,11 @@ import (
 )
 
 type Gate struct{ sparkwing.Base }
+
+// safety: store changes add race and Postgres suites after the full test chain.
+// Forty minutes bounds that workload while leaving the hosted 45-minute job
+// time to cancel children and publish diagnostics.
+const gateRunTimeout = 40 * time.Minute
 
 func (Gate) ShortHelp() string {
 	return "Broad verification on demand and in hosted CI: Go gates, frontend checks, source-policy sweeps, contract gates, and docs sync"
@@ -37,7 +43,7 @@ func (Gate) Examples() []sparkwing.Example {
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(gateCoreReservation(runtime.NumCPU())))
-	sparkwing.Job(plan, rc.Pipeline, p)
+	sparkwing.Job(plan, rc.Pipeline, p).Timeout(gateRunTimeout)
 	return nil
 }
 

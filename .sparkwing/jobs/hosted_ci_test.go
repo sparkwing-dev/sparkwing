@@ -3,8 +3,12 @@ package jobs
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	yaml "go.yaml.in/yaml/v3"
 )
 
 func readHostedCIFile(t *testing.T, rel string) string {
@@ -138,6 +142,37 @@ func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	}
 	if strings.Contains(body, "npm --prefix web run lint") {
 		t.Fatal("hosted workflow bypasses the canonical frontend-lint step")
+	}
+}
+
+func TestCanonicalWorkflowLeavesRoomAroundTheGateDeadline(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	minutesNode := mappingValue(mappingValue(mappingValue(&doc, "jobs"), "gate"), "timeout-minutes")
+	if minutesNode == nil {
+		t.Fatal("canonical gate job declares no workflow timeout")
+	}
+	minutes, err := strconv.Atoi(minutesNode.Value)
+	if err != nil {
+		t.Fatalf("canonical gate timeout-minutes = %q: %v", minutesNode.Value, err)
+	}
+	if room := time.Duration(minutes)*time.Minute - gateRunTimeout; room < 5*time.Minute {
+		t.Fatalf("canonical workflow leaves %s around the %s gate deadline, want at least 5m for setup and cleanup", room, gateRunTimeout)
+	}
+}
+
+func TestCanonicalWorkflowPrintsStoredDiagnosticsAfterFailure(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	requireWorkflowText(t, body,
+		`--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`,
+		"- name: Print failed canonical run diagnostics\n        if: ${{ failure() }}\n        continue-on-error: true",
+		`bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"`,
+	)
+	if got := strings.Count(body, `--sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"`); got != 2 {
+		t.Fatalf("canonical run-handle publication count = %d, want gate and pre-release", got)
 	}
 }
 

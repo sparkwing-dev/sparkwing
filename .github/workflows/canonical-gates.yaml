@@ -39,7 +39,9 @@ jobs:
 
       - name: Copy the immutable release verifier
         if: inputs.release_tag != ''
-        run: cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"
+        run: |
+          cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"
+          cp bin/report-hosted-run-failure.sh "$RUNNER_TEMP/report-hosted-run-failure.sh"
 
       - name: Copy the v0.37.2 test repair
         if: inputs.release_tag == 'v0.37.2'
@@ -152,7 +154,7 @@ jobs:
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
         run: |
-          "$RUNNER_TEMP/sparkwing" run gate
+          "$RUNNER_TEMP/sparkwing" run gate --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"
           if [ "${{ inputs.release_tag }}" = v0.37.2 ]; then
             git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
             git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
@@ -167,7 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
-          "$RUNNER_TEMP/sparkwing" run pre-release
+          "$RUNNER_TEMP/sparkwing" run pre-release --sw-run-handle-file "$RUNNER_TEMP/canonical-run.json"
           if [ -n "$RELEASE_TAG" ]; then
             if [ "$RELEASE_TAG" = v0.37.2 ]; then
               git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
@@ -178,6 +180,18 @@ jobs:
           else
             bash bin/check-hosted-gate-clean.sh "$target_sha"
           fi
+
+      - name: Print failed canonical run diagnostics
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+        run: |
+          reporter="bin/report-hosted-run-failure.sh"
+          if [ -f "$RUNNER_TEMP/report-hosted-run-failure.sh" ]; then
+            reporter="$RUNNER_TEMP/report-hosted-run-failure.sh"
+          fi
+          bash "$reporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing"
 
       - name: Upload dashboard browser failure artifacts
         if: ${{ failure() && matrix.gate == 'gate' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}

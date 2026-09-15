@@ -80,8 +80,14 @@ file. Other syntax and workflow checks remain active.
   `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt` measured
   0.38 s, `goimports` 10.9 s and `gofmt` 0.09 s, so a Go file costs about
   0.11 s. `gate`
-  and `pre-release` are the heavier classes: they carry no budget and run
-  asynchronously, on demand and in hosted CI. Measured on this 16-core Linux
+  and `pre-release` are the heavier classes: they carry no performance budget
+  and run asynchronously, on demand and in hosted CI. The broad gate declares
+  a 40-minute execution deadline, which gives the dispatcher 41 minutes with
+  its drain margin inside the hosted job's 45 minutes. This is a liveness
+  boundary for the long test and change-sensitive post-test fanout, not a claim
+  that every gate completes in 40 minutes. A failed hosted canonical run prints
+  its stored status and the last 500 log lines from the run handle. Measured on
+  this 16-core Linux
   host with a warm cache, the release cut's three members cost 9 s (build),
   92 s (the full linter over both modules) and 81 s (`go test -short`), so the
   class costs about 95 s of its 5 minutes; the same suite without `-short`

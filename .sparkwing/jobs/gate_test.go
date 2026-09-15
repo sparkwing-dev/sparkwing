@@ -42,6 +42,13 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	if hints == nil || hints.Cores != wantCores {
 		t.Fatalf("reserved cores = %#v, want %v", hints, wantCores)
 	}
+	nodes := plan.Nodes()
+	if len(nodes) != 1 {
+		t.Fatalf("gate plan nodes = %d, want one", len(nodes))
+	}
+	if got := nodes[0].TimeoutDuration(); got != gateRunTimeout {
+		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
+	}
 	for _, tc := range []struct {
 		cpus  int
 		cores float64
