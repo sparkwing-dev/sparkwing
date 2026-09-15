@@ -302,18 +302,54 @@ func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error) 
 	return scanComputeLimits(rows)
 }
 
-// SetComputeLimit sets one guard. A value of zero removes the ceiling.
-func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error {
+// ErrInvalidComputeLimitSetting reports a refused compute settings update.
+var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
+
+func validateComputeLimit(name string, value int64) error {
 	if !ValidComputeLimit(name) {
-		return fmt.Errorf("compute limits: unknown guard %q", name)
+		return fmt.Errorf("%w: unknown guard %q", ErrInvalidComputeLimitSetting, name)
 	}
 	if value < 0 {
-		return errors.New("compute limits: a guard must not be negative")
+		return fmt.Errorf("%w: %s must not be negative", ErrInvalidComputeLimitSetting, name)
 	}
 	if most, bounded := computeLimitCeilings[name]; bounded && value > most {
-		return fmt.Errorf("compute limits: %s must not exceed %d", name, most)
+		return fmt.Errorf("%w: %s must not exceed %d", ErrInvalidComputeLimitSetting, name, most)
 	}
-	return s.setCreditSetting(ctx, computeLimitKey(name), value)
+	return nil
+}
+
+// SetComputeLimits validates and writes every named guard in one transaction.
+// A value of zero removes that ceiling.
+func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error) {
+	if len(updates) == 0 {
+		return ComputeLimits{}, fmt.Errorf("%w: name at least one guard", ErrInvalidComputeLimitSetting)
+	}
+	for name, value := range updates {
+		if err := validateComputeLimit(name, value); err != nil {
+			return ComputeLimits{}, err
+		}
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return ComputeLimits{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	for name, value := range updates {
+		if err := setCreditSettingTx(ctx, tx, computeLimitKey(name), formatCreditSetting(value)); err != nil {
+			return ComputeLimits{}, err
+		}
+	}
+	out, err := computeLimitsTx(ctx, tx)
+	if err != nil {
+		return ComputeLimits{}, err
+	}
+	return out, tx.Commit()
+}
+
+// SetComputeLimit sets one guard. A value of zero removes the ceiling.
+func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error {
+	_, err := s.SetComputeLimits(ctx, map[string]int64{name: value})
+	return err
 }
 
 func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err error) {

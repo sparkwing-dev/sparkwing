@@ -296,6 +296,11 @@ func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 // that setting still bills a four-core node correctly. Charges already written
 // keep the class and rate they were charged at.
 func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (err error) {
+	_, err = s.SetCreditSettings(ctx, CreditSettingsUpdate{RateTable: &table})
+	return err
+}
+
+func setCreditRateTableTx(ctx context.Context, tx *storeTx, table CreditRateTable) error {
 	if err := table.Validate(); err != nil {
 		return err
 	}
@@ -304,11 +309,6 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 	if err != nil {
 		return fmt.Errorf("credits: encode the rate table: %w", err)
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
 	if err := setCreditSettingTx(ctx, tx, metaKeyCreditRateTable, string(encoded)); err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func (s *Store) SetCreditRateTable(ctx context.Context, table CreditRateTable) (
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // safety: the class is resolved from the cpu and memory the scheduler sizes the

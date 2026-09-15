@@ -702,6 +702,22 @@ func TestCreditSettings_RefusesAWriteWhoseOtherFieldIsBad(t *testing.T) {
 	}
 }
 
+func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table":    map[string]int64{"2": 999_999, "4": 20_000},
+		"grace_seconds": -1,
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("mixed write = %d, want 400", status)
+	}
+	_, view := creditSettings(t, f, http.MethodGet, nil)
+	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 6 {
+		t.Fatalf("the good half of a refused write changed prices: %+v", view)
+	}
+}
+
 func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
 	f := newCreditsFixture(t, false)
 

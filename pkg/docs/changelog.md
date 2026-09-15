@@ -52,6 +52,12 @@ unlock.
 
 ### Fixed
 
+- **store + controller:** Credit rate tables and their scalar settings now
+  validate and commit in one `Store.SetCreditSettings` transaction. Compute
+  guard batches do the same through `Store.SetComputeLimits`. A rejected field
+  or database write leaves every setting unchanged, and both operations return
+  the complete settings snapshot after a successful commit.
+
 - **checks:** accept GitHub's supported publication queue with the pinned
   actionlint version while retaining explicit serialization contract checks.
 

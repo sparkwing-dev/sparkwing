@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -104,6 +105,33 @@ func TestComputeLimits_ShowAndSet(t *testing.T) {
 	if status, _ := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.readonly,
 		map[string]any{"limits": map[string]int64{store.ComputeLimitGlobalRunners: 1}}); status != http.StatusForbidden {
 		t.Fatalf("a reader setting a guard = %d, want 403", status)
+	}
+}
+
+func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	for range 20 {
+		status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+			map[string]any{"limits": map[string]int64{
+				store.ComputeLimitGlobalRunners:          7,
+				store.ComputeLimitRunnerScaleStepCredits: math.MaxInt64,
+			}})
+		if status != http.StatusBadRequest {
+			t.Fatalf("mixed write = %d: %s", status, body)
+		}
+	}
+	status, body := creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	if status != http.StatusOK {
+		t.Fatalf("show = %d: %s", status, body)
+	}
+	var view struct {
+		Limits map[string]int64 `json:"limits"`
+	}
+	if err := json.Unmarshal(body, &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := view.Limits[store.ComputeLimitGlobalRunners]; got != 0 {
+		t.Fatalf("the good half of a refused write set the global runner cap to %d", got)
 	}
 }
 

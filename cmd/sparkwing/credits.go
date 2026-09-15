@@ -68,6 +68,21 @@ type creditStateResp struct {
 	CreditsPerDollar  int64  `json:"credits_per_dollar"`
 }
 
+func (s creditStateResp) settings() creditSettingsResp {
+	return creditSettingsResp{
+		RateMicroPerSecond:        s.RateMicroPerSecond,
+		RateTable:                 s.RateTable,
+		RateTableSet:              s.RateTableSet,
+		WarmCPUClassCores:         s.WarmCPUClassCores,
+		GraceSeconds:              s.GraceSeconds,
+		MaxChargeSeconds:          s.MaxChargeSeconds,
+		StorageRateMicroPerGBDay:  s.StorageRateMicroPerGBDay,
+		StorageFreeAllowanceBytes: s.StorageFreeAllowanceBytes,
+		MicroPerCredit:            s.MicroPerCredit,
+		CreditsPerDollar:          s.CreditsPerDollar,
+	}
+}
+
 func runCreditsShow(args []string) error {
 	fs := flag.NewFlagSet(cmdCreditsShow.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
@@ -102,24 +117,17 @@ func runCreditsShow(args []string) error {
 
 func renderCreditState(w io.Writer, state creditStateResp) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	settings := state.settings()
 	fmt.Fprintf(tw, "BALANCE\t%s credits\n", store.FormatCredits(state.BalanceMicro))
 	fmt.Fprintf(tw, "GRANTED\t%s credits\n", store.FormatCredits(state.GrantedMicro))
 	if state.ReversedMicro != 0 {
 		fmt.Fprintf(tw, "REVERSED\t%s credits\n", store.FormatCredits(state.ReversedMicro))
 	}
 	fmt.Fprintf(tw, "CHARGED\t%s credits\n", store.FormatCredits(state.ChargedMicro))
-	fmt.Fprintf(tw, "RATE\t%s credits per cloud runner second\n",
-		creditsPerUnit(state.RateMicroPerSecond, state.MicroPerCredit))
-	for _, entry := range state.RateTable {
-		fmt.Fprintf(tw, "  %d-CORE\t%s credits per second (%d micro)\n",
-			entry.Cores, creditsPerUnit(entry.MicroPerSecond, state.MicroPerCredit), entry.MicroPerSecond)
-	}
-	fmt.Fprint(tw, rateTableOrigin(state.RateTableSet))
-	fmt.Fprint(tw, warmClassLine(state.WarmCPUClassCores))
+	writeCreditRateSettings(tw, settings, false)
 	fmt.Fprintf(tw, "BURN (%s)\t%s credits\n",
 		burnWindowLabel(state.BurnWindowSeconds), store.FormatCredits(state.BurnMicro))
-	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", state.GraceSeconds)
-	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", state.MaxChargeSeconds)
+	writeCreditRuntimeSettings(tw, settings)
 	if state.StorageChargedMicro != 0 {
 		fmt.Fprintf(tw, "STORAGE CHARGED\t%s credits\n", store.FormatCredits(state.StorageChargedMicro))
 	}
@@ -327,19 +335,32 @@ func creditSettingsExchange(prof *profile.Profile, body map[string]any) ([]byte,
 
 func renderCreditSettings(w io.Writer, view creditSettingsResp) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "RATE\t%s credits per cloud runner second (%d micro)\n",
-		creditsPerUnit(view.RateMicroPerSecond, view.MicroPerCredit), view.RateMicroPerSecond)
+	writeCreditRateSettings(tw, view, true)
+	writeCreditRuntimeSettings(tw, view)
+	fmt.Fprint(tw, storageRateLine(view.StorageRateMicroPerGBDay,
+		view.StorageFreeAllowanceBytes, view.MicroPerCredit))
+	return tw.Flush()
+}
+
+func writeCreditRateSettings(tw *tabwriter.Writer, view creditSettingsResp, showMicro bool) {
+	if showMicro {
+		fmt.Fprintf(tw, "RATE\t%s credits per cloud runner second (%d micro)\n",
+			creditsPerUnit(view.RateMicroPerSecond, view.MicroPerCredit), view.RateMicroPerSecond)
+	} else {
+		fmt.Fprintf(tw, "RATE\t%s credits per cloud runner second\n",
+			creditsPerUnit(view.RateMicroPerSecond, view.MicroPerCredit))
+	}
 	for _, entry := range view.RateTable {
 		fmt.Fprintf(tw, "  %d-CORE\t%s credits per second (%d micro)\n",
 			entry.Cores, creditsPerUnit(entry.MicroPerSecond, view.MicroPerCredit), entry.MicroPerSecond)
 	}
 	fmt.Fprint(tw, rateTableOrigin(view.RateTableSet))
 	fmt.Fprint(tw, warmClassLine(view.WarmCPUClassCores))
+}
+
+func writeCreditRuntimeSettings(tw *tabwriter.Writer, view creditSettingsResp) {
 	fmt.Fprintf(tw, "GRACE\t%ds past a node's claim reservation\n", view.GraceSeconds)
 	fmt.Fprintf(tw, "CHARGE CAP\t%ds billed by any one charge\n", view.MaxChargeSeconds)
-	fmt.Fprint(tw, storageRateLine(view.StorageRateMicroPerGBDay,
-		view.StorageFreeAllowanceBytes, view.MicroPerCredit))
-	return tw.Flush()
 }
 
 // safety: a zero rate is the installation that bills no storage at all, which

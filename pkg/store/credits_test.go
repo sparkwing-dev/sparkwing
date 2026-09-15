@@ -924,6 +924,32 @@ func TestSetCreditSettingsWritesEveryNamedValueOrNone(t *testing.T) {
 	}
 }
 
+func TestSetCreditSettingsRollsBackWhenTheRateTableWriteFails(t *testing.T) {
+	s := storetest.OpenSQLite(t)
+	ctx := context.Background()
+	if _, err := s.DB().Exec(`CREATE TRIGGER refuse_rate_table BEFORE INSERT ON sparkwing_meta
+WHEN NEW.key = 'credit_rate_table' BEGIN SELECT RAISE(ABORT, 'rate table refused'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	grace := int64(0)
+	table := store.CreditRateTable{
+		{Cores: 2, MicroPerSecond: 999_999},
+		{Cores: 4, MicroPerSecond: 20_000},
+	}
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		RateTable: &table, GraceSeconds: &grace,
+	}); err == nil {
+		t.Fatal("the rejected rate table write succeeded")
+	}
+	settings, err := s.CreditSettings(ctx)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if settings.RateTableSet || settings.GraceSeconds != store.DefaultCreditGraceSeconds {
+		t.Fatalf("the failed transaction changed settings: %+v", settings)
+	}
+}
+
 // safety: the claim consumes the whole balance, so every later heartbeat reads
 // a spent ledger and only the grace period decides when the node stops.
 func exhaustedReservedNode(t *testing.T, s *store.Store, runID string, grace int64) (
