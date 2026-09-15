@@ -27,8 +27,11 @@ func TestDescribeModuleFailureLeadsWithTheFailingTest(t *testing.T) {
 	if !strings.Contains(lines[0], "TestServeNativeLifecyclePreservesRunningArtifactAndOptions") {
 		t.Fatalf("the failing test is not on the first line, where the bounded summary keeps it: %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "FAIL\tgithub.com/acme/x/cmd/acme") {
-		t.Fatalf("the failing package is not named next: %q", lines[1])
+	if reason, command := strings.Index(got, "want 1 artifact, got 0"), strings.Index(got, "command failed"); reason < 0 || reason > command {
+		t.Fatalf("the test reason must precede the generated command: reason=%d command=%d\n%s", reason, command, got)
+	}
+	if !strings.Contains(lines[2], "FAIL\tgithub.com/acme/x/cmd/acme") {
+		t.Fatalf("the failing package is not named after the reason: %q", lines[2])
 	}
 }
 
@@ -42,7 +45,7 @@ func TestFailedTestNamesSkipsSubtests(t *testing.T) {
 		ExitCode: 1,
 	}
 
-	got := failedTestNames(err)
+	got := failedTestSummaries(err)
 
 	if len(got) != 2 {
 		t.Fatalf("got %q, want the top-level test and the package", got)
@@ -61,7 +64,7 @@ func TestFailedTestNamesAreBounded(t *testing.T) {
 	}
 	err := &sparkwing.ExecError{Stdout: strings.Join(lines, "\n"), ExitCode: 1}
 
-	got := failedTestNames(err)
+	got := failedTestSummaries(err)
 
 	if len(got) != maxNamedTestFailures+1 {
 		t.Fatalf("got %d names, want %d plus the cut marker", len(got), maxNamedTestFailures)

@@ -52,6 +52,15 @@ unlock.
 
 ### Fixed
 
+- **store:** Concurrent SQLite cold starts read the schema version and
+  requirements under one write transaction. An opener can no longer reject a
+  valid migration after another opener advances the schema between those
+  reads.
+
+- **checks:** Failed Go test summaries keep the first reported reason beside
+  each failed test. Long generated commands no longer push the reason past the
+  hosted runner's summary limit.
+
 - **checks:** accept GitHub's supported publication queue with the pinned
   actionlint version while retaining explicit serialization contract checks.
 

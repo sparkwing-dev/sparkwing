@@ -44,16 +44,11 @@ func legacyFleetStage(version int, listed []SchemaRequirement) (int, bool, error
 	return version, true, nil
 }
 
-func bridgeLegacyFleetSQLite(ctx context.Context, s *Store, version int, listed []SchemaRequirement) error {
+func bridgeLegacyFleetSQLite(ctx context.Context, tx *storeTx, version int, listed []SchemaRequirement) error {
 	stage, found, err := legacyFleetStage(version, listed)
 	if err != nil || !found {
 		return err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin unpublished Fleet schema repair: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	if err := validateLegacyFleetShape(ctx, tx, stage); err != nil {
 		return err
 	}
@@ -74,9 +69,6 @@ func bridgeLegacyFleetSQLite(ctx context.Context, s *Store, version int, listed 
 		if _, err := tx.ExecContext(ctx, nodesOrderBackfillSQLite); err != nil {
 			return fmt.Errorf("repair wave2 node order backfill: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit unpublished Fleet schema repair: %w", err)
 	}
 	return nil
 }
