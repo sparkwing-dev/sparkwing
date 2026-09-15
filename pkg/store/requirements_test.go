@@ -148,7 +148,7 @@ func TestRequirements_ConcurrentColdStartLeavesOneRowEach(t *testing.T) {
 	}
 	target := storetest.New(t)
 
-	const openers = 8
+	const openers = 64
 	errs := make([]error, openers)
 	var wg sync.WaitGroup
 	for i := range openers {

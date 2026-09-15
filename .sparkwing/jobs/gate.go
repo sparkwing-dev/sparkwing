@@ -654,33 +654,43 @@ func forEachGoModule(ctx context.Context, label, cmd, home string) error {
 
 const maxNamedTestFailures = 25
 
-// safety: the summary is bounded from its head, so the names go first or a
-// hosted runner keeps nothing but the module that failed.
+// safety: the summary is bounded from its head, so the test failures go first
+// or a hosted runner keeps nothing but the module that failed.
 func describeModuleFailure(dir string, err error) string {
-	named := failedTestNames(err)
+	named := failedTestSummaries(err)
 	if len(named) == 0 {
 		return fmt.Sprintf("%s: %v", dir, err)
 	}
 	return fmt.Sprintf("%s: %s\n%v", dir, strings.Join(named, "\n"), err)
 }
 
-func failedTestNames(err error) []string {
+func failedTestSummaries(err error) []string {
 	var execErr *sparkwing.ExecError
 	if !errors.As(err, &execErr) {
 		return nil
 	}
 	var out []string
+	named := 0
 	truncated := false
+	wantReason := false
 	for _, line := range strings.Split(execErr.Stdout+"\n"+execErr.Stderr, "\n") {
 		line = strings.TrimRight(line, "\r")
-		if !strings.HasPrefix(line, "--- FAIL: ") && !strings.HasPrefix(line, "FAIL\t") {
+		isTest := strings.HasPrefix(line, "--- FAIL: ")
+		isPackage := strings.HasPrefix(line, "FAIL\t")
+		if !isTest && !isPackage {
+			if wantReason && strings.HasPrefix(line, "    ") && !strings.Contains(line, "--- FAIL: ") {
+				out = append(out, line)
+				wantReason = false
+			}
 			continue
 		}
-		if len(out) == maxNamedTestFailures {
+		if named == maxNamedTestFailures {
 			truncated = true
 			break
 		}
 		out = append(out, line)
+		named++
+		wantReason = isTest
 	}
 	if truncated {
 		out = append(out, fmt.Sprintf("… more than %d failures; read the run log for the rest", maxNamedTestFailures))

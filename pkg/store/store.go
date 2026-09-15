@@ -1660,24 +1660,35 @@ func IsProtocolErr(err error) bool {
 }
 
 func (s *Store) migrateSQLite(ctx context.Context) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin migration inspection: %w", err)
+	}
+	defer rollbackOrLog(tx)
+
 	var current int
-	if err := s.queryRow(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`,
 	).Scan(&current); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	listed, err := listRequirements(ctx, storeExecer{s: s})
+	listed, err := listRequirements(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("read schema requirements: %w", err)
 	}
 	if skew := requirementSkew(current, listed); skew != nil {
 		return skew
 	}
+	if current <= expectedSchemaVersion {
+		if err := bridgeLegacyFleetSQLite(ctx, tx, current, listed); err != nil {
+			return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration inspection: %w", err)
+	}
 	if current > expectedSchemaVersion {
 		return nil
-	}
-	if err := bridgeLegacyFleetSQLite(ctx, s, current, listed); err != nil {
-		return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
 	}
 	if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
 		if err := s.backfillRequirementsSQLite(ctx, backfill); err != nil {
