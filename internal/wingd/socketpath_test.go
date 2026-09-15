@@ -57,6 +57,11 @@ func bindPlaceholderSocket(t *testing.T, home string) string {
 	if err != nil {
 		t.Fatalf("socket path for %s: %v", home, err)
 	}
+	return writeSocketPlaceholder(t, sock)
+}
+
+func writeSocketPlaceholder(t *testing.T, sock string) string {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatalf("make socket dir: %v", err)
 	}

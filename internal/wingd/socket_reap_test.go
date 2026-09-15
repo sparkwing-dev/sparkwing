@@ -10,12 +10,33 @@ import (
 	"time"
 )
 
+// safety: peer discovery scans the shared base, so a private short parent
+// keeps unrelated daemon sweeps away from a test's dead socket placeholder.
+func reaperSocket(t *testing.T) string {
+	t.Helper()
+	return writeSocketPlaceholder(t, socketPathIn(shortSocketBase(t), t.TempDir()))
+}
+
+func TestReaperSocketFixtureIsOutsidePeerDiscovery(t *testing.T) {
+	sock := reaperSocket(t)
+	pattern := filepath.Join(socketBaseDir(), socketDirPrefix()+"*")
+	matched, err := filepath.Match(pattern, filepath.Dir(sock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched {
+		t.Fatalf("reaper fixture %q is visible to peer discovery %q", sock, pattern)
+	}
+	if err := ValidateSocketPath(sock); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A takeover binds a fresh socket at the path a predecessor left dead, which
 // is the window a sweep that classified the path dead by dialing it can
 // unlink out from under the successor.
 func TestReapSocketDir_KeepsASocketReboundAfterTheDeadDial(t *testing.T) {
-	home := t.TempDir()
-	sock := bindPlaceholderSocket(t, home)
+	sock := reaperSocket(t)
 
 	if _, dead := socketStatus(sock); !dead {
 		t.Fatal("placeholder socket was not classified dead")
@@ -43,8 +64,7 @@ func TestReapSocketDir_KeepsASocketReboundAfterTheDeadDial(t *testing.T) {
 }
 
 func TestReapSocketDir_StillClearsASocketNothingServes(t *testing.T) {
-	home := t.TempDir()
-	sock := bindPlaceholderSocket(t, home)
+	sock := reaperSocket(t)
 
 	reapSocketDir(sock)
 
@@ -57,8 +77,7 @@ func TestReapSocketDir_StillClearsASocketNothingServes(t *testing.T) {
 // liveness check of its own, so a daemon serving it lost it to any sweep that
 // found the admission socket dead.
 func TestReapSocketDir_KeepsALiveAPISocket(t *testing.T) {
-	home := t.TempDir()
-	sock := bindPlaceholderSocket(t, home)
+	sock := reaperSocket(t)
 	api := APISocketBeside(sock)
 
 	ln, err := net.Listen("unix", api)
@@ -83,7 +102,7 @@ func TestReapSocketDir_KeepsALiveAPISocket(t *testing.T) {
 }
 
 func TestSocketStillDead_TreatsAVanishedSocketAsAlive(t *testing.T) {
-	sock := bindPlaceholderSocket(t, t.TempDir())
+	sock := reaperSocket(t)
 	before, err := os.Lstat(sock)
 	if err != nil {
 		t.Fatal(err)
