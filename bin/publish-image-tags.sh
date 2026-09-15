@@ -11,6 +11,12 @@ FORCE_RETAG="${FORCE_RETAG:-false}"
 DIGEST_DIR="${DIGEST_DIR:-scanned-image-digests}"
 OUTPUT="${OUTPUT:-image-digests/image-digests.json}"
 IMAGE_PREFIX="${IMAGE_PREFIX:-ghcr.io/sparkwing-dev}"
+LATEST="${LATEST:?LATEST must be the serialized published-version decision}"
+case "$LATEST" in true|false) ;; *) echo "LATEST must be true or false" >&2; exit 2 ;; esac
+if [[ "$TAG" == *-* && "$LATEST" == true ]]; then
+  echo "a prerelease cannot become latest" >&2
+  exit 2
+fi
 
 binaries=(
   sparkwing-controller
@@ -74,7 +80,7 @@ fi
 for i in "${!binaries[@]}"; do
   image="${IMAGE_PREFIX}/${binaries[$i]}"
   tag_args=(--tag "${image}:${TAG}")
-  if [[ "$TAG" != *-* ]]; then
+  if [ "$LATEST" = true ]; then
     tag_args+=(--tag "${image}:latest")
   fi
   docker buildx imagetools create \

@@ -14,6 +14,27 @@ launcher when testing isolated tool state.
 
 ## Checks
 
+### Release build and publication
+
+The hosted release builds the dashboard once and shares it with six target
+jobs. Each target compiles its supported commands in one Go cache; all 28
+binary outputs remain available. Linux image packaging copies those same
+executables through the Dockerfiles' `release` stage. The default Dockerfile
+target still builds from source.
+
+One final job assembles image manifests, signs the assets, and publishes the
+complete release. Publication is serialized across tags; builds remain
+parallel. Only a stable version above every published stable release may
+become GitHub Latest or move the image `latest` tags. Failed release-list
+lookups stop publication. Manual rebuilds use the selected tag's source and
+the current workflow's publication tools and image recipes.
+
+The five-minute target includes runner queueing and publication. It has not
+yet been measured for this workflow; local fixtures establish its contracts,
+not hosted latency.
+
+### Check tiers
+
 - **The three tiers:** `pre-commit` judges the staged change against this
   repo's source policy and nothing else; the git pre-commit hook runs it.
   `pre-push` is the fast tier the git pre-push hook runs: the scoped

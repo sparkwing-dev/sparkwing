@@ -29,8 +29,22 @@ func run(args []string) error {
 	dist := fs.String("dist", "dist", "release asset directory")
 	verify := fs.Bool("verify", false, "verify existing signatures")
 	public := fs.Bool("public-key", false, "print the public key derived from the signing seed")
+	latest := fs.String("latest-tag", "", "report whether this tag outranks the published stable releases")
+	releases := fs.String("releases", "", "paginated release JSON from gh api --paginate --slurp")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *latest != "" {
+		body, err := publishedReleasePages(*releases)
+		if err != nil {
+			return err
+		}
+		eligible, err := latestPublishedRelease(*latest, body)
+		if err != nil {
+			return err
+		}
+		fmt.Println(eligible)
+		return nil
 	}
 	privateKey, err := releaseauth.PrivateKey(os.Getenv("SPARKWING_RELEASE_SIGNING_KEY"))
 	if err != nil {

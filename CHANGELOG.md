@@ -22,6 +22,11 @@ unlock.
 
 ### Changed
 
+- **release:** build each platform's binaries together, share one dashboard
+  build, and package the released Linux executables into images. Older stable
+  releases published later no longer replace a higher published version as
+  GitHub Latest or image `latest`.
+
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.3, so a fresh scaffold compiles against that release.
 
 
