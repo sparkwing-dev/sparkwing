@@ -71,7 +71,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran.txt")
 
 	connected := offlineConnectedEnv(t, fixtureHome, toolPath, sparkwingHome, marker)
-	if out, tidyErr := offlineRunGo(goBin, sparkwingDir, connected, "mod", "tidy"); tidyErr != nil {
+	if out, tidyErr := offlineRunTool(goBin, sparkwingDir, connected, "mod", "tidy"); tidyErr != nil {
 		t.Fatalf("resolving the fixture's modules: %v\n%s", tidyErr, out)
 	}
 
@@ -317,8 +317,8 @@ func offlineRunCLI(cli, dir string, env []string, args ...string) (string, error
 	return string(out), err
 }
 
-func offlineRunGo(goBin, dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command(goBin, args...)
+func offlineRunTool(tool, dir string, env []string, args ...string) (string, error) {
+	cmd := exec.Command(tool, args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

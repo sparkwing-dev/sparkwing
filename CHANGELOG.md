@@ -20,6 +20,27 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.3, so a fresh scaffold compiles against that release.
+
+- **checks:** The three check classes carry enforced time budgets: `pre-commit`
+  3 seconds, `pre-push` 10 seconds, and the release cut 5 minutes. Each tier's
+  job times its own steps and fails when the class overruns, naming the slowest
+  step and its cost; above 25 changed Go files, what one core formats inside
+  three seconds, it reports the same figures and passes, because those steps
+  cost per file. `pre-push` repeats nothing
+  `pre-commit` already ran: it keeps the changelog, OpenAPI and API-snapshot
+  gates and adds `go build`, `go vet` and the fast linter subset over the
+  packages the push touches, and it no longer re-runs the formatters, the
+  comment, sleep and regex sweeps, the docs mirror or home resolution. The
+  `release` pipeline runs build, the full linter and the fast test class before
+  it tags. A test whose own runtime passes 200 ms guards itself with
+  `testing.Short`, so the fast class stays fast; `gate` still runs the suite
+  without `-short`. No test suite runs in a hook tier: the fast test class
+  belongs to the release cut.
+
+## [v0.52.3] - 2026-09-15
 ### Added
 
 - **controller + chart:** `--limits-profile` (chart `controller.limitsProfile`)
@@ -89,21 +110,6 @@ unlock.
 
 ### Changed
 
-- **checks:** The three check classes carry enforced time budgets: `pre-commit`
-  3 seconds, `pre-push` 10 seconds, and the release cut 5 minutes. Each tier's
-  job times its own steps and fails when the class overruns, naming the slowest
-  step and its cost; above 25 changed Go files, what one core formats inside
-  three seconds, it reports the same figures and passes, because those steps
-  cost per file. `pre-push` repeats nothing
-  `pre-commit` already ran: it keeps the changelog, OpenAPI and API-snapshot
-  gates and adds `go build`, `go vet` and the fast linter subset over the
-  packages the push touches, and it no longer re-runs the formatters, the
-  comment, sleep and regex sweeps, the docs mirror or home resolution. The
-  `release` pipeline runs build, the full linter and the fast test class before
-  it tags. A test whose own runtime passes 200 ms guards itself with
-  `testing.Short`, so the fast class stays fast; `gate` still runs the suite
-  without `-short`. No test suite runs in a hook tier: the fast test class
-  belongs to the release cut.
 - **k8s runner:** A Job for a cpu class above the warm one is placed on the
   band of machines its class belongs to. The 4-core and 8-core classes select
   nodes labeled `sparkwing.dev/cpu-band: small` and tolerate the matching
@@ -119,6 +125,7 @@ unlock.
   concurrency is the number of machines the pool's limit allows, one Job to
   each, and nothing queues behind it, so a Job past that count fails after the
   five-minute unschedulable wait rather than waiting for a machine to free.
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.2, so a fresh scaffold compiles against that release.
 
 - **release:** The hosted release workflow runs no check on a tagged commit. It
   resolves the tag to a commit, builds the binaries and images, signs them,
@@ -152,6 +159,24 @@ unlock.
   so two runner processes on one host are two runners rather than one polling
   twice.
 
+- **cli:** A queued run of a pipeline whose step declares a `Risk` is refused
+  rather than dispatched. `sparkwing run <pipeline> --sw-detached` returned
+  before admission and the trigger carries no allow, so the resident consumer
+  ran the risk-labeled step authorized by nothing. The gate now sits where the
+  run is persisted and weighs what the run will execute: a launch naming
+  `--sw-ref` is weighed at that ref, and its worktree is discarded on refusal.
+  A cron schedule queues through the same submission, so a scheduled run of a
+  risk-declaring pipeline is refused too, naming the schedule, and an armed
+  schedule is weighed against the binary it pinned rather than a checkout that
+  has moved since. The refusal carries the message the foreground gate prints,
+  naming the step, its labels and `--sw-allow`, and says that a queued run
+  carries neither an allow nor a dry run. `sparkwing runs retry` is not weighed
+  yet: it re-queues the source run's own declarations, so a retry of a
+  risk-declaring run is still queued without an allow. A pipeline that declares
+  no risk queues as before, and the submission reads the declarations from the
+  build it already made to resolve the pipeline, so weighing them costs it no
+  second hash of the tree.
+
 ### Removed
 
 - **pkg/controller (Breaking):** `RecommendedClaimsPerMinute` and
@@ -162,7 +187,7 @@ unlock.
   budget from `controller.CompliantClaimPollsPerMinute` instead, which reports
   what an empty-queue poll cadence costs, and remember that an awarded claim
   spends no budget. See
-  [the migration guide](docs/migrations/_unreleased.md#the-claim-budget-recommendation-helpers-are-removed).
+  [the migration guide](docs/migrations/v0.52.3.md#the-claim-budget-recommendation-helpers-are-removed).
 
 ## [v0.52.1] - 2026-09-14
 ### Fixed

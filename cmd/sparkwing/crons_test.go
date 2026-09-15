@@ -547,13 +547,24 @@ func cronsRealLauncher(t *testing.T) (cronLauncher, *store.Store) {
 	return cronLauncher{store: st, paths: paths}, st
 }
 
+// safety: the launcher weighs what the checkout declares before it queues a
+// run, so a launch test needs a checkout that answers --describe. The stub the
+// detached-submit tests use does, and declares no risk.
+func cronsBuildableRepo(t *testing.T) string {
+	t.Helper()
+	repo := cronsTestRepo(t, cronsMinutelyRepo)
+	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), "module submitfixture\n\ngo 1.22\n")
+	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "main.go"), submitFixtureSource)
+	return repo
+}
+
 func TestCronLaunchReportsAConsumerThatWillNotStart(t *testing.T) {
 	launcher, st := cronsRealLauncher(t)
 	prior := cronsEnsureConsumer
 	cronsEnsureConsumer = func(string) error { return errors.New("consumer did not take the queue lock") }
 	t.Cleanup(func() { cronsEnsureConsumer = prior })
 
-	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsTestRepo(t, cronsMinutelyRepo), Pipeline: "every-minute"}
+	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsBuildableRepo(t), Pipeline: "every-minute"}
 	runID, err := launcher.Launch(context.Background(), sched, time.Now())
 	if err == nil {
 		t.Fatal("a launch with no consumer to run it reported success")
@@ -582,7 +593,7 @@ func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
 	t.Cleanup(func() { cronsEnsureConsumer = prior })
 
 	ctx := context.Background()
-	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsTestRepo(t, cronsMinutelyRepo), Pipeline: "every-minute"}
+	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsBuildableRepo(t), Pipeline: "every-minute"}
 	runID, err := launcher.Launch(ctx, sched, time.Now())
 	if err != nil {
 		t.Fatalf("Launch: %v", err)

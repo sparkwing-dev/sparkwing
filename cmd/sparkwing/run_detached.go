@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const SubmitRequestIDKey = "_SPARKWING_SUBMIT_REQUEST_ID"
@@ -60,7 +61,7 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 	}
 
 	//nolint:contextcheck // The repo registry read predates a context-aware API.
-	repoDir, err := resolveSubmitRepo(pipelineName, wf.changeDir)
+	repoDir, declared, err := resolveSubmitRepo(pipelineName, wf.changeDir)
 	if err != nil {
 		return err
 	}
@@ -106,9 +107,16 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 	}()
 
 	result, err := persistSubmission(ctx, st, paths, submission{
-		Pipeline:       pipelineName,
-		Args:           collectPipelineArgs(passthrough),
-		RepoDir:        repoDir,
+		Pipeline: pipelineName,
+		Args:     collectPipelineArgs(passthrough),
+		RepoDir:  repoDir,
+		Gate: riskGate{
+			Surface:   detachedPath,
+			Pipeline:  pipelineName,
+			Flags:     wf,
+			SubmitDir: repoDir,
+			Declared:  declared,
+		}.check,
 		Ref:            strings.TrimSpace(wf.ref),
 		Priority:       priority,
 		IdempotencyKey: strings.TrimSpace(wf.idempotencyKey),
@@ -201,9 +209,18 @@ type submission struct {
 	// execs this file instead of compiling the checkout.
 	PinnedBinary string
 	PinnedDigest string
+
+	// safety: weighed against what the run will execute, which is the ref
+	// worktree when the submission names a ref and the pinned binary when it
+	// carries one, so a risk either declares cannot be queued past it. Every
+	// caller sets one.
+	Gate func(repoDir, pinnedBinary string) error
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
+	if sub.Gate == nil {
+		return submitResult{}, errors.New("persist submission: the submission carries no risk gate")
+	}
 	var rev orchestrator.Commit
 	if sub.Ref != "" {
 		resolved, rerr := orchestrator.ResolveRefCommit(ctx, sub.RepoDir, sub.Ref, slog.Default())
@@ -243,6 +260,10 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		}
 		worktree = built
 		repoDir = built
+	}
+	if err := sub.Gate(repoDir, sub.PinnedBinary); err != nil {
+		discardRefWorktree(ctx, paths, worktree)
+		return submitResult{}, err
 	}
 	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ(), slog.Default()); err != nil {
 		discardRefWorktree(ctx, paths, worktree)
@@ -481,46 +502,49 @@ func submitPaths(home string) (orchestrator.Paths, error) {
 	return orchestrator.DefaultPaths()
 }
 
-func resolveSubmitRepo(pipeline, changeDir string) (string, error) {
+// safety: naming the checkout costs a build of the pipeline, so the schemas
+// that build emits travel back with it and the caller weighs the same build
+// rather than making a second one.
+func resolveSubmitRepo(pipeline, changeDir string) (string, []sparkwing.DescribePipeline, error) {
 	start := changeDir
 	if start == "" {
 		start = mustGetwd()
 	}
-	if dir, ok := localRepoDeclaring(start, pipeline); ok {
-		return dir, nil
+	if dir, declared, ok := localRepoDeclaring(start, pipeline); ok {
+		return dir, declared, nil
 	}
 
 	path, err := repos.ResolveRepoForPipelineCached(pipeline)
 	if err == nil {
-		return path, nil
+		return path, nil, nil
 	}
 	if errors.Is(err, repos.ErrNotFound) {
-		return "", fmt.Errorf(
+		return "", nil, fmt.Errorf(
 			"run --sw-detached: no project here or in the repo registry declares a pipeline named %q.\n"+
 				"Run it from the checkout that defines it, pass -C <path> to point at that checkout, "+
 				"or register it with `sparkwing configure xrepo add <path>`.\n"+
 				"A registered checkout whose pipeline binary has never been built is not searched; "+
 				"run `sparkwing pipeline list` there once first", pipeline)
 	}
-	return "", fmt.Errorf("run --sw-detached: resolve %q: %w", pipeline, err)
+	return "", nil, fmt.Errorf("run --sw-detached: resolve %q: %w", pipeline, err)
 }
 
-func localRepoDeclaring(start, pipeline string) (string, bool) {
+func localRepoDeclaring(start, pipeline string) (string, []sparkwing.DescribePipeline, bool) {
 	sparkwingDir, err := findSparkwingDirFrom(start)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
 	repoDir := filepath.Dir(sparkwingDir)
-	names, err := repos.PipelineNamesForRepo(repoDir)
+	declared, err := repos.DescribeRepo(repoDir)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
-	for _, n := range names {
-		if n == pipeline {
-			return repoDir, true
+	for _, s := range declared {
+		if s.Name == pipeline {
+			return repoDir, declared, true
 		}
 	}
-	return "", false
+	return "", nil, false
 }
 
 // foregroundOnlyReasons says, per flag, why a detached run cannot honor it.
@@ -559,6 +583,48 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-fleet", wf.fleet, "enrolled helpers execute under the lifetime of the coordinating foreground process, " +
 			"which a detached run does not have; run it in the foreground with `sparkwing run --sw-fleet`"},
 	}
+}
+
+// safety: the consumer executes a queued run with no operator attached, and
+// the trigger carries no allow, so a declared risk has to refuse before the
+// run is persisted or it reaches the consumer authorized by nothing.
+type riskGate struct {
+	Surface  string
+	Pipeline string
+	Flags    runFlags
+
+	// safety: a checkout whose declarations the caller already read, so the
+	// gate weighs that build instead of making a second one.
+	SubmitDir string
+	Declared  []sparkwing.DescribePipeline
+}
+
+func (g riskGate) check(execDir, pinnedBinary string) error {
+	sparkwingDir := filepath.Join(execDir, ".sparkwing")
+	declared := g.Declared
+	switch {
+	case pinnedBinary != "":
+		raw, err := runDescribeBinary(context.Background(), sparkwingDir, pinnedBinary)
+		if err != nil {
+			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
+		}
+		if err := json.Unmarshal(raw, &declared); err != nil {
+			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
+		}
+	case declared == nil || execDir != g.SubmitDir:
+		var err error
+		declared, err = repos.DescribeRepo(execDir)
+		if err != nil {
+			return fmt.Errorf("%s: read what %s declares: %w", g.Surface, g.Pipeline, err)
+		}
+	}
+	if err := enforceRiskGate(g.Pipeline, risksIn(declared, g.Pipeline), g.Flags); err != nil {
+		return fmt.Errorf("%s: %w\n"+
+			"A queued run carries neither an allow nor a dry run, so a pipeline that declares a risk "+
+			"runs in the foreground",
+			g.Surface, err)
+	}
+	return nil
 }
 
 func refuseForegroundOnlyFlags(wf runFlags) error {

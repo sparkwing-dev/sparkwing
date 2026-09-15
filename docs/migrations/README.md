@@ -14,6 +14,7 @@ Format conventions live in [../changelog-style.md](../changelog-style.md).
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.52.3](v0.52.3.md) | 2026-09-15 | `RecommendedClaimsPerMinute` and `RecommendedClaimsPerMinuteForSlots` are gone. |
 | [v0.50.5](v0.50.5.md) | 2026-09-14 | The gitcache refreshes a mirror when a clone reads its refs, and no longer polls every mirror on a timer; The credit settings routes drop `billing_cpu_ceiling_cores`. |
 | [v0.50.4](v0.50.4.md) | 2026-09-14 | Metered runner seconds are priced by cpu class from the GitHub ladder; `agent.yaml` no longer accepts `name` or `coordinators` and `sparkwing fleet agents enroll` is gone. |
 | [v0.50.2](v0.50.2.md) | 2026-09-14 | `sparkwing-runner agent` refuses to start when `agent.yaml` sets `name` or `coordinators`, which selects enrolled mode. |
