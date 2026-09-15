@@ -19,8 +19,8 @@ launcher when testing isolated tool state.
   `pre-push` is the fast tier the git pre-push hook runs: the scoped
   formatting, comment and sleep policy over the whole push, the docs mirror,
   the changelog, OpenAPI and API-snapshot gates, home resolution, and `go
-  build`, `go vet`, the fast linter subset and `go test -short` over the
-  packages the push touches, up to eight of them. Everything
+  build`, `go vet` and the fast linter subset over the packages the push
+  touches, up to eight of them. Everything
   else is `gate` (the broad check) and `pre-release` (the release boundary),
   which `sparkwing run <name>` runs on demand and which hosted CI runs on every
   pull request and every push to main; no git hook fires either.
@@ -47,7 +47,7 @@ launcher when testing isolated tool state.
   week, and `sparkwing runs timeline --run <id> --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
   by repo before reading a per-pipeline figure as this one's.
-- **The fast test class:** the fast tiers run `go test -short`. A test whose
+- **The fast test class:** the release cut runs `go test -short`. A test whose
   own runtime passes 200 ms guards itself with
   `if testing.Short() { t.Skip("slow: ...") }` naming what costs the time, so a
   new slow test is either cheap enough for the fast class or says why it is
@@ -90,10 +90,13 @@ launcher when testing isolated tool state.
   `--no-verify`, and it loses the fast-forward race whenever a co-maintainer
   lands first. Hosted CI runs `gate` and `pre-release` on every pull request
   and every push to main, so a landing pays for them there. What the push tier
-  keeps of the four is the packages the change touches: `go build` and `go
-  vet`, the fast linter subset (the whole-tree linters minus the type-and-SSA
-  family, which costs minutes), and `go test -short`. Above eight packages it
-  names the count and leaves the whole-tree forms to `gate`.
+  keeps of the four is the packages the change touches: `go build`, `go vet`,
+  and the fast linter subset, the whole-tree linters minus the type-and-SSA
+  family, which costs minutes. Above eight packages it names the count and
+  leaves the whole-tree forms to `gate`. The fast test class stays out of this
+  tier: the short suite of `pkg/store` alone measured 53 s, five times the
+  tier's whole budget, because several hundred of its tests each cost between
+  50 and 200 ms in fixture setup.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is

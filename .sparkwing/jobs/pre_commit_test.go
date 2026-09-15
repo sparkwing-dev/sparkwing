@@ -104,7 +104,6 @@ func TestGateStillRunsEveryStepTheHookTiersAlsoRun(t *testing.T) {
 		"build-touched": "build",
 		"vet-touched":   "vet",
 		"lint-touched":  "lint",
-		"test-touched":  "test",
 	}
 	for tier, ids := range map[string][]string{
 		"pre-commit": stepIDs(t, &PreCommit{}),

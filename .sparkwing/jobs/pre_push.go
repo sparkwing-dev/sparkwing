@@ -5,21 +5,19 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // PrePush is the fast tier at the push boundary: the source-policy steps the
 // commit tier scopes to one commit, judged here over the whole push, the
-// contract gates a single commit cannot answer, and a compile, a fast lint and
-// the fast test class over the packages the push touches. Everything that
-// races or tests a whole module without -short is Gate, which runs on demand
-// and in hosted CI.
+// contract gates a single commit cannot answer, and a compile, a vet and a
+// fast lint of the packages the push touches. Everything that races, lints or
+// tests a whole module is Gate, which runs on demand and in hosted CI.
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Fast gate for the push boundary: scoped source policy, contract gates, and a compile, lint and short test of the touched packages"
+	return "Fast gate for the push boundary: scoped source policy, contract gates, and a compile, vet and fast lint of the touched packages"
 }
 
 func (PrePush) Help() string {
@@ -32,10 +30,8 @@ func (PrePush) Help() string {
 		"(bin/check-api-spec.sh), the public API surface matching the .apidiff/ snapshot " +
 		"(bin/check-api-snapshot.sh), no product file that resolves the sparkwing home itself instead of " +
 		"through internal/paths.DefaultPaths, `go build` and `go vet` over the packages holding the " +
-		"changed Go files, the fast linter subset over those same packages, and `go test -short` over them, " +
-		"which is the fast test class: a test whose own runtime passes 200 ms guards itself with " +
-		"testing.Short. The tier is budgeted at ten seconds and fails when its steps overrun it, naming " +
-		"the slowest. Every scoped step reads the commits being pushed, the range " +
+		"changed Go files, and the fast linter subset over those same packages. The tier is budgeted at " +
+		"ten seconds and fails when its steps overrun it, naming the slowest. Every scoped step reads the commits being pushed, the range " +
 		"origin/main..HEAD, and never the index, so whatever is staged cannot narrow what the push is " +
 		"judged against. go vet, the full test suite, golangci-lint, the race gate, " +
 		"the Postgres suite and the dashboard suites run in `gate`, which hosted CI runs on every pull " +
@@ -76,7 +72,6 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	budget.step(w, "build-touched", runBuildTouched)
 	budget.step(w, "vet-touched", runVetTouched)
 	budget.step(w, "lint-touched", runFastLintTouched)
-	budget.step(w, "test-touched", runShortTestsTouched)
 	budget.verdict(w)
 	return nil, nil
 }
@@ -161,24 +156,6 @@ func runFastLintTouched(ctx context.Context) error {
 			return fastLintCommand(prePushCores(runtime.NumCPU()), pkgs)
 		})
 }
-
-// safety: a suite reaches the operator's home, the admission socket and the
-// dispatcher's service URLs unless the scrub every other product suite uses
-// travels with it.
-func runShortTestsTouched(ctx context.Context) error {
-	return withProductTestHome(func(home string) error {
-		return overTouchedPackages(ctx, "test-touched", "test", "Go file(s)", existingGoFiles,
-			func(_ string, pkgs []string) string {
-				args := fmt.Sprintf("-short -timeout %s %s", prePushTestTimeout, strings.Join(pkgs, " "))
-				return productTestScript(goCommandAt(prePushCores(runtime.NumCPU()), "test", args), home)
-			})
-	})
-}
-
-// perf: a test the fast class runs is a test that answers in milliseconds, so
-// a package still running after a minute is hung rather than slow, and the
-// push boundary is the wrong place to wait for go test's ten-minute default.
-const prePushTestTimeout = time.Minute
 
 func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]string) []string) error {
 	return overTouchedPackages(ctx, verb+"-touched", "compile", noun, keep,

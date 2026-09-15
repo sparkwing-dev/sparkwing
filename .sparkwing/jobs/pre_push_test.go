@@ -16,7 +16,7 @@ func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
 	want := []string{
 		"api-snapshot", "api-spec", "budget", "build-touched", "changelog", "comments",
 		"docs-mirror", "formatters", "gofmt", "home-resolution", "lint-touched",
-		"test-sleeps", "test-touched", "vet-touched",
+		"test-sleeps", "vet-touched",
 	}
 	if got := stepIDs(t, &PrePush{}); !slices.Equal(got, want) {
 		t.Fatalf("pre-push steps = %v, want %v", got, want)
