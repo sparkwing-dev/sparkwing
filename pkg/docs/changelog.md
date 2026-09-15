@@ -22,6 +22,14 @@ unlock.
 
 ### Changed
 
+- **checks:** The three check classes carry enforced time budgets: `pre-commit`
+  3 seconds, `pre-push` 10 seconds, and the release cut 5 minutes. Each tier's
+  job times its own steps and fails when the class overruns, naming the slowest
+  step and its cost. `pre-push` adds the fast linter subset and `go test -short`
+  over the packages the push touches, and the `release` pipeline runs build, the
+  full linter and the fast test class before it tags. A test whose own runtime
+  passes 200 ms guards itself with `testing.Short`, so the fast class stays
+  fast; `gate` still runs the suite without `-short`.
 - **release:** The hosted release workflow runs no check on a tagged commit. It
   resolves the tag to a commit, builds the binaries and images, signs them,
   publishes them, and creates the GitHub release, so `git tag vX.Y.Z && git push

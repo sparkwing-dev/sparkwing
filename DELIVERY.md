@@ -19,7 +19,8 @@ launcher when testing isolated tool state.
   `pre-push` is the fast tier the git pre-push hook runs: the scoped
   formatting, comment and sleep policy over the whole push, the docs mirror,
   the changelog, OpenAPI and API-snapshot gates, home resolution, and `go
-  build` over the packages the push touches, up to eight of them. Everything
+  build`, `go vet`, the fast linter subset and `go test -short` over the
+  packages the push touches, up to eight of them. Everything
   else is `gate` (the broad check) and `pre-release` (the release boundary),
   which `sparkwing run <name>` runs on demand and which hosted CI runs on every
   pull request and every push to main; no git hook fires either.
@@ -28,6 +29,30 @@ launcher when testing isolated tool state.
   proves nothing. A hook script names its pipeline, so a checkout whose hooks
   were installed when the pre-push hook ran `gate` keeps running `gate` until
   `sparkwing pipeline hooks install` rewrites them.
+- **The three check classes and their budgets:** `pre-commit` is the source
+  policy at 3 seconds, `pre-push` the fast tier at 10 seconds, and the release
+  cut, the `release-cut-checks` job the `release` pipeline runs before it tags,
+  5 minutes for build, the full linter and the fast test class in parallel.
+  Each of those jobs times its own steps and fails when the class overruns,
+  naming the slowest step and its cost, so a class cannot regrow unnoticed. The
+  budget judges the span the job's own steps cover, not the admission wait or
+  the 2.5 s the pipeline binary takes to recompile after a Go change. `gate`
+  and `pre-release` are the heavier classes: they carry no budget and run
+  asynchronously, on demand and in hosted CI. Measured on this 16-core Linux
+  host with a warm cache, the release cut's three members cost 9 s (build),
+  92 s (the full linter over both modules) and 81 s (`go test -short`), so the
+  class costs about 95 s of its 5 minutes; the same suite without `-short`
+  costs 289 s, which is what the fast class removes. `sparkwing runs stats
+  --pipeline pre-commit --since 7d` reports what a class has cost over the
+  week, and `sparkwing runs timeline --run <id> --steps` breaks one run into
+  its steps; the runs store is shared across repositories, so filter the runs
+  by repo before reading a per-pipeline figure as this one's.
+- **The fast test class:** the fast tiers run `go test -short`. A test whose
+  own runtime passes 200 ms guards itself with
+  `if testing.Short() { t.Skip("slow: ...") }` naming what costs the time, so a
+  new slow test is either cheap enough for the fast class or says why it is
+  not. `gate` runs the suite without `-short`, which is where every guarded
+  test is still judged.
 - **What the two hooks cost:** measured on this 16-core Linux host beside one
   other agent's suite. A change to a Go file invalidates the cached
   `.sparkwing/` pipeline binary, because that module replaces the SDK with the
@@ -57,17 +82,18 @@ launcher when testing isolated tool state.
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. A variable that injector gains and the scrub does not
   handle fails a contract test in the pipeline module.
-- **Why vet, test and lint are in neither hook:** the house standard puts them
-  in the pre-commit chain, and this repo runs them in `gate` on purpose. The
-  broad tier takes 12 to 24 minutes through the shared admission daemon (the
-  Postgres suite 401 s, the race tests 401 s, the full unit suite 315 s, lint
-  117 s), a hook that long is a hook everyone passes `--no-verify`, and it
-  loses the fast-forward race whenever a co-maintainer lands first. Hosted CI
-  runs `gate` and `pre-release` on every pull request and every push to main,
-  so a landing pays for them there. What the push tier keeps of the four is
-  `go build` over the packages the change touches, which measured 0.55 s on a
-  one-package change; above eight packages it names the count and leaves the
-  compile to `gate`.
+- **Why the whole-tree vet, test and lint are in neither hook:** the house
+  standard puts them in the pre-commit chain, and this repo runs them in `gate`
+  on purpose. The broad tier takes 12 to 24 minutes through the shared
+  admission daemon (the Postgres suite 401 s, the race tests 401 s, the full
+  unit suite 315 s, lint 117 s), a hook that long is a hook everyone passes
+  `--no-verify`, and it loses the fast-forward race whenever a co-maintainer
+  lands first. Hosted CI runs `gate` and `pre-release` on every pull request
+  and every push to main, so a landing pays for them there. What the push tier
+  keeps of the four is the packages the change touches: `go build` and `go
+  vet`, the fast linter subset (the whole-tree linters minus the type-and-SSA
+  family, which costs minutes), and `go test -short`. Above eight packages it
+  names the count and leaves the whole-tree forms to `gate`.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
