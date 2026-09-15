@@ -62,6 +62,7 @@ type publishImageTagsCase struct {
 	name       string
 	tag        string
 	force      bool
+	latest     bool
 	published  map[string]string
 	inspectErr map[string]string
 	drift      map[string]string
@@ -88,6 +89,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 		{
 			name:       "absent tags are published",
 			tag:        "v1.2.3",
+			latest:     true,
 			wantCreate: true,
 			wantLatest: true,
 		},
@@ -99,6 +101,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 		{
 			name:       "a tag already on the scanned digest is republished",
 			tag:        "v1.2.3",
+			latest:     true,
 			published:  map[string]string{"sparkwing-runner": scannedDigest("sparkwing-runner")},
 			wantCreate: true,
 			wantLatest: true,
@@ -106,6 +109,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 		{
 			name:      "a moved tag refuses before any tag is created",
 			tag:       "v1.2.3",
+			latest:    true,
 			published: map[string]string{"sparkwing-runner": otherDigest("sparkwing-runner")},
 			wantFail:  true,
 			wantStderr: []string{
@@ -116,6 +120,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 		{
 			name:       "an unreadable registry answer fails closed",
 			tag:        "v1.2.3",
+			latest:     true,
 			inspectErr: map[string]string{"sparkwing-cache": "ERROR: 429 Too Many Requests"},
 			wantFail:   true,
 			wantStderr: []string{
@@ -126,6 +131,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 		{
 			name:       "force_retag moves a published tag",
 			tag:        "v1.2.3",
+			latest:     true,
 			force:      true,
 			published:  map[string]string{"sparkwing-runner": otherDigest("sparkwing-runner")},
 			wantCreate: true,
@@ -134,6 +140,7 @@ func TestPublishImageTagsGuardsPublishedDigests(t *testing.T) {
 		{
 			name:       "a tag that lands on other bytes fails the step",
 			tag:        "v1.2.3",
+			latest:     true,
 			drift:      map[string]string{"sparkwing-logs": otherDigest("sparkwing-logs")},
 			wantFail:   true,
 			wantStderr: []string{"resolves to", "after the retag"},
@@ -229,6 +236,7 @@ func runPublishImageTags(t *testing.T, script, work, state string, tc publishIma
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"STUB_STATE="+state,
 		"TAG="+tc.tag,
+		"LATEST="+fmt.Sprint(tc.latest),
 		"FORCE_RETAG="+fmt.Sprint(tc.force),
 		"DIGEST_DIR="+digestDir,
 		"OUTPUT="+filepath.Join(work, "out", "image-digests.json"),

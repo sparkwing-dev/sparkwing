@@ -57,100 +57,152 @@ jobs:
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
 
-  build:
+  dashboard:
     needs: validate-tag
-    strategy:
-      fail-fast: false
-      matrix:
-        binary:
-          - sparkwing
-          - sparkwing-cache
-          - sparkwing-controller
-          - sparkwing-runner
-          - sparkwing-logs
-          - sparkwing-web
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - { binary: sparkwing-cache, goos: windows }
-          - { binary: sparkwing-controller, goos: windows }
-          - { binary: sparkwing-logs, goos: windows }
-          - { binary: sparkwing-web, goos: windows }
-    runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build dashboard once
+        run: bash bin/build-web.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-dashboard
+          path: internal/web/next-out
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
+  build:
+    needs: [validate-tag, dashboard]
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26.6"
           cache-dependency-path: go.sum
-
-      - name: Cache Go build cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: ~/.cache/go-build
-          key: gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('**/go.sum', '**/*.go') }}
-          restore-keys: |
-            gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-
-
-      - name: Setup Node (binaries that embed the dashboard)
-        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+          name: release-dashboard
+          path: internal/web/next-out
+      - name: Checkout publication tools
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build dashboard + populate next-out
-        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
-        run: bash bin/build-web.sh
-
-      - name: Build ${{ matrix.binary }} for ${{ matrix.goos }}/${{ matrix.goarch }}
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-tools
+      - name: Select publication tools
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "RELEASE_TOOLS=$GITHUB_WORKSPACE/.release-tools" >>"$GITHUB_ENV"
+          else
+            echo "RELEASE_TOOLS=$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
+          fi
+      - name: Build target binaries
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-          BIN: ${{ matrix.binary }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
-          out="dist/${BIN}-${GOOS}-${GOARCH}${ext}"
-          echo "==> $out"
-          go build \
-            -trimpath \
-            -ldflags="-s -w -X main.Version=${TAG}" \
-            -o "$out" "./cmd/${BIN}"
-          if [ "$GOOS" = "darwin" ]; then
-            codesign --force --sign - "$out"
-          fi
-          ls -la "$out"
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        run: bash "$RELEASE_TOOLS/bin/build-release-target.sh"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: bin-${{ matrix.binary }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/${{ matrix.binary }}-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: bin-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Apply current image recipe
+        if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images) && github.event_name == 'workflow_dispatch'
+        run: |
+          cp .release-tools/.dockerignore .dockerignore
+          cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner build/
+          cp .release-tools/bin/build-release-images.sh bin/
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images)
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images)
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package release executables as images
+        if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images)
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          SOURCE_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          SPARKWING_IMAGE_REFRESH: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash bin/build-release-images.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images)
+        with:
+          name: image-platform-${{ matrix.goarch }}
+          path: image-platform-digests/*
           retention-days: 1
           if-no-files-found: error
 
-  prepare-binaries:
-    name: Assemble release binaries
-    needs: build
+  release:
+    needs: [validate-tag, build]
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.6"
+          cache-dependency-path: go.sum
+      - name: Checkout publication tools
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-tools
+      - name: Select publication tools
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "RELEASE_TOOLS=$GITHUB_WORKSPACE/.release-tools" >>"$GITHUB_ENV"
+          else
+            echo "RELEASE_TOOLS=$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
+          fi
       - name: Download all binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: bin-*
           path: dist
           merge-multiple: true
-
       - name: Ad-hoc-sign macOS binaries (rcodesign)
         working-directory: dist
         run: |
@@ -175,37 +227,69 @@ jobs:
           done
           rm -rf rcodesign.tar.gz apple-codesign-*
 
-      - name: Upload release binaries
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Select Latest from published versions
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          eligible="$(GOWORK=off go -C "$RELEASE_TOOLS" run ./cmd/verify-release --latest-tag "$TAG")"
+          echo "eligible=$eligible" >>"$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
         with:
-          name: release-binaries
-          path: dist/sparkwing-*
-          retention-days: 1
-          if-no-files-found: error
+          pattern: image-platform-*
+          path: image-platform-digests
+          merge-multiple: true
 
-  release:
-    needs: [validate-tag, prepare-binaries, publish-images]
-    if: ${{ always() && needs.prepare-binaries.result == 'success' && (needs.publish-images.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_images == false && needs.publish-images.result == 'skipped')) }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
+
+      - name: Log in to GHCR
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
-          persist-credentials: false
-          ref: ${{ needs.validate-tag.outputs.source_sha }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.6"
-          cache-dependency-path: go.sum
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
 
-      - name: Download release binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-binaries
-          path: dist
+      - name: Assemble multi-architecture image digests
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
+        run: bash "$RELEASE_TOOLS/bin/assemble-image-digests.sh"
+      - name: Sign image digests
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          binaries=(
+            sparkwing-controller
+            sparkwing-runner
+            sparkwing-cache
+            sparkwing-logs
+            sparkwing-web
+          )
+          for binary in "${binaries[@]}"; do
+            digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            cosign sign --yes "ghcr.io/sparkwing-dev/${binary}@${digest}"
+          done
 
+      - name: Publish image tags
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          LATEST: ${{ steps.latest.outputs.eligible }}
+          FORCE_RETAG: ${{ inputs.force_retag || false }}
+        run: bash "$RELEASE_TOOLS/bin/publish-image-tags.sh"
+
+      - name: Stage published image manifest
+        if: github.event_name != 'workflow_dispatch' || inputs.publish_images
+        run: cp image-digests/image-digests.json dist/
       - name: Compute SHA256SUMS
         working-directory: dist
         run: |
@@ -222,29 +306,11 @@ jobs:
           SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          go run ./cmd/verify-release --dist dist
-          go run ./cmd/verify-release --dist dist --verify
+          GOWORK=off go -C "$RELEASE_TOOLS" run ./cmd/verify-release --dist "$GITHUB_WORKSPACE/dist"
+          GOWORK=off go -C "$RELEASE_TOOLS" run ./cmd/verify-release --dist "$GITHUB_WORKSPACE/dist" --verify
           test -f dist/SHA256SUMS.sig
           test -f dist/install.sh.sig
           ls dist/sparkwing-*.sig >/dev/null
-
-      - name: Download published image digests
-        if: ${{ needs.publish-images.result == 'success' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-image-digests
-          path: dist
-
-      - name: Sign published image digests
-        if: ${{ needs.publish-images.result == 'success' }}
-        env:
-          SPARKWING_UPDATE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
-          SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          go run ./cmd/sign-manifest -in dist/image-digests.json -out dist/image-digests.json.sig
-          go run ./cmd/verify-release --dist dist --verify
-          test -f dist/image-digests.json.sig
 
       # The changelog section is the release notes when the tag has one. A tag
       # cut by hand from any commit may not, so the annotated message and then a
@@ -271,6 +337,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
+          LATEST: ${{ steps.latest.outputs.eligible }}
         run: |
           set -euo pipefail
           tag="$TAG"
@@ -303,167 +370,6 @@ jobs:
           gh release upload "$tag" dist/*
           asset_count="$(gh release view "$tag" --json assets --jq '.assets | length')"
           test "$asset_count" -eq "$(find dist -type f | wc -l | tr -d ' ')"
-          gh release edit "$tag" --draft=false
+          gh release edit "$tag" --draft=false --latest="$LATEST"
           draft_created=false
           gh release view "$tag"
-
-  build-images:
-    name: Build container images
-    needs: validate-tag
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_images }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        binary:
-          - sparkwing-controller
-          - sparkwing-runner
-          - sparkwing-cache
-          - sparkwing-logs
-          - sparkwing-web
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.validate-tag.outputs.source_sha }}
-
-      - name: Checkout current image recipe
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .release-tools
-
-      - name: Apply current image recipe
-        if: github.event_name == 'workflow_dispatch'
-        run: cp .release-tools/.dockerignore .dockerignore && cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner build/
-
-      - name: Setup Node (dashboard image)
-        if: matrix.binary == 'sparkwing-web'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build dashboard for image
-        if: matrix.binary == 'sparkwing-web'
-        run: bash bin/build-web.sh
-
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Compute image metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/sparkwing-dev/${{ matrix.binary }}
-          tags: |
-            type=raw,value=${{ inputs.tag || github.ref_name }}
-            type=raw,value=latest,enable=${{ !contains(inputs.tag || github.ref_name, '-') }}
-
-      - name: Build and push image
-        id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          file: ${{ matrix.binary == 'sparkwing-runner' && 'build/Dockerfile.runner' || 'build/Dockerfile.binary' }}
-          platforms: linux/amd64,linux/arm64
-          outputs: type=image,name=ghcr.io/sparkwing-dev/${{ matrix.binary }},push-by-digest=true,name-canonical=true,push=true
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            BINARY=${{ matrix.binary }}
-            SPARKWING_VERSION=${{ inputs.tag || github.ref_name }}
-            SPARKWING_IMAGE_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
-          cache-from: type=gha,scope=${{ matrix.binary }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
-
-      - name: Export image digest
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          BINARY: ${{ matrix.binary }}
-        run: |
-          set -euo pipefail
-          mkdir -p scanned-image-digests
-          printf '%s\n' "$DIGEST" >"scanned-image-digests/$BINARY"
-
-      - name: Upload image digest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: scanned-image-${{ matrix.binary }}
-          path: scanned-image-digests/${{ matrix.binary }}
-          retention-days: 1
-          if-no-files-found: error
-
-  publish-images:
-    name: Publish container images
-    needs: [build-images, prepare-binaries]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-      packages: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: scanned-image-*
-          path: scanned-image-digests
-          merge-multiple: true
-
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-
-      - name: Sign image digests
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -euo pipefail
-          binaries=(
-            sparkwing-controller
-            sparkwing-runner
-            sparkwing-cache
-            sparkwing-logs
-            sparkwing-web
-          )
-          for binary in "${binaries[@]}"; do
-            digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            cosign sign --yes "ghcr.io/sparkwing-dev/${binary}@${digest}"
-          done
-
-      - name: Publish image tags
-        env:
-          TAG: ${{ inputs.tag || github.ref_name }}
-          FORCE_RETAG: ${{ inputs.force_retag || false }}
-        run: bash bin/publish-image-tags.sh
-
-      - name: Upload published image digests
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-image-digests
-          path: image-digests/image-digests.json
-          retention-days: 1
-          if-no-files-found: error

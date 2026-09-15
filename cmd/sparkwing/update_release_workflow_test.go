@@ -51,10 +51,6 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const dockerfileSelection = "file: ${{ matrix.binary == 'sparkwing-runner' && 'build/Dockerfile.runner' || 'build/Dockerfile.binary' }}"
-	if !strings.Contains(string(body), dockerfileSelection) {
-		t.Fatalf("release workflow does not select the dedicated runner Dockerfile:\nwant %s", dockerfileSelection)
-	}
 	runnerDockerfile, err := os.ReadFile("../../build/Dockerfile.runner")
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +61,7 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	const alpineImage = "alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
 	for _, required := range []string{
 		"FROM --platform=$BUILDPLATFORM " + goImage + " AS build",
-		"FROM " + alpineImage,
+		"FROM " + alpineImage + " AS runtime",
 		"ARG SPARKWING_IMAGE_REFRESH=local",
 		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client procps-ng",
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
@@ -86,29 +82,6 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflowPublishesWindowsRunnerAssets(t *testing.T) {
-	t.Parallel()
-
-	body, err := os.ReadFile("../../.github/workflows/release.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	workflow := string(body)
-	if !strings.Contains(workflow, "goos: [linux, darwin, windows]") ||
-		!strings.Contains(workflow, "goarch: [amd64, arm64]") {
-		t.Fatal("release build matrix lost a Windows or architecture axis")
-	}
-	if strings.Contains(workflow, "{ binary: sparkwing-runner, goos: windows }") {
-		t.Fatal("release build matrix still excludes Windows sparkwing-runner assets")
-	}
-	for _, binary := range []string{"sparkwing-cache", "sparkwing-controller", "sparkwing-logs", "sparkwing-web"} {
-		exclusion := "{ binary: " + binary + ", goos: windows }"
-		if !strings.Contains(workflow, exclusion) {
-			t.Errorf("release build matrix lost the intentional %s exclusion", binary)
-		}
-	}
-}
-
 func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
 	t.Parallel()
 
@@ -116,7 +89,7 @@ func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), `SPARKWING_IMAGE_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}`) {
+	if !strings.Contains(string(body), `SPARKWING_IMAGE_REFRESH: ${{ github.run_id }}-${{ github.run_attempt }}`) {
 		t.Error("release workflow does not refresh Alpine packages for each image build attempt")
 	}
 
