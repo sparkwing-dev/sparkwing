@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -68,14 +69,165 @@ func (podSpawnFailParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type podSpawnPipe struct{ sparkwing.Base }
 
 func (podSpawnPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "parent", podSpawnParent{})
+	group := sparkwing.NewConcurrencyGroup("pod-spawn", sparkwing.ConcurrencyLimit{Capacity: 1})
+	sparkwing.Job(plan, "parent", podSpawnParent{}).Concurrency(group)
 	return nil
+}
+
+func hostedRunNodeFixture(
+	t *testing.T,
+	pipeline, runID, nodeID string,
+	triggerCreated chan<- struct{},
+) (*store.Store, string, string, store.NodeClaimFence) {
+	t.Helper()
+	registerPodSpawnPipes()
+	podSpawnSeen.reset()
+	isolateCheckout(t)
+	isolateProfiles(t)
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	if err := orchestrator.PathsAt(home).EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := store.WithCreatingPrincipal(context.Background(), "tenant-a")
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: pipeline, Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	rawPool, pool, err := st.CreateTokenWith(ctx, "cloud-pool", store.TokenKindRunner,
+		[]string{
+			controller.ScopeNodesClaim,
+			controller.ScopeRunsState,
+			controller.ScopeSecretsRead,
+			controller.ScopeLogsWrite,
+		}, 0, time.Now(), store.TokenOptions{Metered: true})
+	if err != nil || rawPool == "" {
+		t.Fatalf("create pool token: %v", err)
+	}
+	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "hosted-routes", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := st.FinalizeExecutorClaimRound(ctx, runID, nodeID, store.DispatchHosted,
+		&store.HostedClaimSpec{
+			Binding: store.ExecutionCredentialBinding{
+				RunID: runID, RootNodeID: nodeID,
+				DelegatedPrincipal: pool.Principal, DelegatedTokenPrefix: pool.Prefix,
+			},
+			Scopes: []string{
+				controller.ScopeNodesClaim,
+				controller.ScopeRunsState,
+				controller.ScopeSecretsRead,
+				controller.ScopeLogsWrite,
+			},
+			TTL: time.Hour, Lifetime: time.Hour,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := controller.New(st, quiet).EnableAuthFromStore().Handler()
+	if triggerCreated != nil {
+		next := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers" {
+				triggerCreated <- struct{}{}
+			}
+		})
+	}
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	fence := store.NodeClaimFence{
+		Claimant: store.ClaimIdentity{Principal: pool.Principal, TokenPrefix: pool.Prefix},
+		HolderID: result.Hosted.Node.ClaimedBy, ClaimGeneration: result.Hosted.Node.ClaimGeneration,
+	}
+	return st, srv.URL, result.Hosted.RawBearer, fence
+}
+
+func TestRunNodeOnce_BoundCredentialCompletesDynamicAndConcurrencyRoutes(t *testing.T) {
+	st, controllerURL, token, fence := hostedRunNodeFixture(t, "pod-spawn", "run-pod-spawn-bound", "parent", nil)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := store.WithNodeClaimFence(context.Background(), fence)
+	res, err := orchestrator.RunNodeOnce(ctx, controllerURL, "", "run-pod-spawn-bound", "parent",
+		fence.HolderID, token, &captureLogger{}, quiet, nil)
+	if err != nil {
+		t.Fatalf("RunNodeOnce: %v", err)
+	}
+	if res.Outcome != sparkwing.Success {
+		t.Fatalf("outcome = %q (err=%v), want success", res.Outcome, res.Err)
+	}
+	child, err := st.GetNode(context.Background(), "run-pod-spawn-bound", "parent/scan")
+	if err != nil || child.Outcome != string(sparkwing.Success) {
+		t.Fatalf("bound dynamic child = %+v, %v", child, err)
+	}
+}
+
+func TestRunNodeOnce_BoundCredentialCreatesAndReadsDirectChildRun(t *testing.T) {
+	register("bound-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] { return boundAwaitPipe{} })
+	triggerCreated := make(chan struct{}, 1)
+	st, controllerURL, token, fence := hostedRunNodeFixture(
+		t, "bound-await-parent", "run-bound-await", "parent", triggerCreated)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithTimeout(store.WithNodeClaimFence(context.Background(), fence), 10*time.Second)
+	defer cancel()
+	childFinished := make(chan error, 1)
+	go func() {
+		select {
+		case <-triggerCreated:
+		case <-ctx.Done():
+			childFinished <- ctx.Err()
+			return
+		}
+		childID, err := st.FindSpawnedChildTriggerID(ctx, "run-bound-await", "parent", "bound-await-child")
+		if err != nil {
+			childFinished <- err
+			return
+		}
+		finished := time.Now()
+		childFinished <- st.CreateRun(context.Background(), store.Run{
+			ID: childID, Pipeline: "bound-await-child", Status: "success",
+			StartedAt: finished, FinishedAt: &finished,
+		})
+	}()
+
+	res, err := orchestrator.RunNodeOnce(ctx, controllerURL, "", "run-bound-await", "parent",
+		fence.HolderID, token, &captureLogger{}, quiet, nil)
+	if err != nil {
+		t.Fatalf("RunNodeOnce: %v", err)
+	}
+	if childErr := <-childFinished; childErr != nil {
+		t.Fatalf("finish child: %v", childErr)
+	}
+	if res.Outcome != sparkwing.Success {
+		t.Fatalf("outcome = %q (err=%v), want success", res.Outcome, res.Err)
+	}
 }
 
 type podSpawnFailPipe struct{ sparkwing.Base }
 
 func (podSpawnFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "parent", podSpawnFailParent{})
+	return nil
+}
+
+type boundAwaitPipe struct{ sparkwing.Base }
+
+func (boundAwaitPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "parent", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "bound-await-child", "",
+			sparkwing.WithFreshTimeout(5*time.Second))
+		return err
+	})
 	return nil
 }
 

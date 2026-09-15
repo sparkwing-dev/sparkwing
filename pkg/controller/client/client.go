@@ -1389,11 +1389,7 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 
 // FinalizeNodeReady atomically awards the best pending offer or transfers an
 // unclaimed node to the coordinator's local or cloud fallback.
-func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
-	return c.FinalizeNodeReadyWithPolicy(ctx, runID, nodeID, "")
-}
-
-func (c *Client) FinalizeNodeReadyWithPolicy(
+func (c *Client) FinalizeNodeReady(
 	ctx context.Context,
 	runID, nodeID string,
 	policy store.NodeDispatchPolicy,

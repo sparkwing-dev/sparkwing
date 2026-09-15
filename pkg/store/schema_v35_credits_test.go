@@ -48,6 +48,7 @@ func downgradeCreditsToV34(t *testing.T, db *sql.DB) {
 		`DROP INDEX IF EXISTS idx_nodes_credit_window`,
 		`DROP INDEX IF EXISTS idx_nodes_credit_active`,
 		`DROP INDEX IF EXISTS idx_nodes_credit_principal`,
+		`DROP INDEX IF EXISTS idx_nodes_credit_quota_principal`,
 		`DROP TABLE credit_charges`,
 		`DROP TABLE credit_grants`,
 		`ALTER TABLE tokens DROP COLUMN metered`,

@@ -1338,6 +1338,17 @@ func (s *Store) reserveNodeCreditsTx(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
+	quotaPrincipal, err := runPrincipalTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if quotaPrincipal == "" {
+		quotaPrincipal = claimant.Principal
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET claim_quota_principal = ? WHERE run_id = ? AND node_id = ?`,
+		quotaPrincipal, runID, nodeID); err != nil {
+		return err
+	}
 	table, err := creditRateTableTx(ctx, tx)
 	if err != nil {
 		return err
@@ -1369,7 +1380,7 @@ func (s *Store) reserveNodeCreditsTx(
 		return err
 	}
 	if limits.Any() {
-		if err := s.enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+		if err := s.enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, quotaPrincipal, runID, now); err != nil {
 			return err
 		}
 	}

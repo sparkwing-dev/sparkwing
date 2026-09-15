@@ -101,8 +101,12 @@ const runnerCapTTL = time.Minute
 const computeGuardIndexes = `
 CREATE INDEX IF NOT EXISTS idx_nodes_credit_active ON nodes(credit_charged_through);
 CREATE INDEX IF NOT EXISTS idx_nodes_credit_principal ON nodes(claim_principal, credit_charged_through);
+CREATE INDEX IF NOT EXISTS idx_nodes_credit_quota_principal ON nodes(claim_quota_principal, credit_charged_through);
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_principal_created ON runs(created_principal, created_at);`
+
+const claimQuotaPrincipalIndex = `CREATE INDEX IF NOT EXISTS idx_nodes_credit_quota_principal
+    ON nodes(claim_quota_principal, credit_charged_through)`
 
 // safety: the column sweep that supplies created_at stops running a few versions in,
 // so a database carried past those versions before it joined the sweep reaches this
@@ -118,6 +122,7 @@ var computeGuardRunsCols = map[string]string{
 // in. This step carries every column it indexes rather than assuming an earlier one did.
 var computeGuardNodesCols = map[string]string{
 	"claim_principal":        "TEXT NOT NULL DEFAULT ''",
+	"claim_quota_principal":  "TEXT NOT NULL DEFAULT ''",
 	"credit_charged_through": "INTEGER NOT NULL DEFAULT 0",
 }
 
@@ -371,8 +376,8 @@ func computeLimitsTx(ctx context.Context, tx *storeTx) (_ ComputeLimits, err err
 // principal, and reports whether the count reached the alarm.
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error) {
 	out := ComputeUsage{ByPrincipal: map[string]int64{}}
-	rows, err := s.query(ctx, `SELECT claim_principal, COUNT(*) FROM nodes
-	  WHERE credit_charged_through > 0 GROUP BY claim_principal`)
+	rows, err := s.query(ctx, `SELECT COALESCE(NULLIF(claim_quota_principal, ''), claim_principal), COUNT(*) FROM nodes
+	  WHERE credit_charged_through > 0 GROUP BY COALESCE(NULLIF(claim_quota_principal, ''), claim_principal)`)
 	if err != nil {
 		return ComputeUsage{}, err
 	}
@@ -416,7 +421,7 @@ func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, er
 // lock the reservation already holds, so two runners polling at once cannot
 // both read a count below the cap and both claim against it.
 func (s *Store) enforceClaimComputeLimitsTx(
-	ctx context.Context, tx *storeTx, limits ComputeLimits, claimant ClaimIdentity, runID string, now time.Time,
+	ctx context.Context, tx *storeTx, limits ComputeLimits, claimant ClaimIdentity, quotaPrincipal, runID string, now time.Time,
 ) error {
 	if limits.GlobalRunners > 0 {
 		var total int64
@@ -432,20 +437,24 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		}
 	}
 	if limits.ConcurrentRunners > 0 {
+		if quotaPrincipal == "" {
+			quotaPrincipal = claimant.Principal
+		}
 		derived, err := s.runnerCap(ctx, tx, limits, now)
 		if err != nil {
-			return runnerCapReadRefusal(err, limits, claimant.Principal)
+			return runnerCapReadRefusal(err, limits, quotaPrincipal)
 		}
 		var held int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0 AND claim_principal = ?`,
-			claimant.Principal).Scan(&held); err != nil {
+			`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0
+		       AND COALESCE(NULLIF(claim_quota_principal, ''), claim_principal) = ?`,
+			quotaPrincipal).Scan(&held); err != nil {
 			return err
 		}
 		if held >= derived.Cap {
 			return &ComputeLimitError{
 				Limit: ComputeLimitConcurrentRunners, Cap: derived.Cap,
-				Observed: held, Scope: "principal " + claimant.Principal, Principal: claimant.Principal,
+				Observed: held, Scope: "principal " + quotaPrincipal, Principal: quotaPrincipal,
 			}
 		}
 	}
@@ -457,7 +466,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		if elapsed > limits.RunSeconds {
 			return &ComputeLimitError{
 				Limit: ComputeLimitRunSeconds, Cap: limits.RunSeconds,
-				Observed: elapsed, Scope: "run " + runID, Principal: claimant.Principal,
+				Observed: elapsed, Scope: "run " + runID, Principal: quotaPrincipal,
 			}
 		}
 	}

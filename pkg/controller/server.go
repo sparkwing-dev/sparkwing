@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -534,6 +535,46 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 		}
 		runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
 		hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
+		if binding, bound := executionBindingFromContext(r.Context()); bound {
+			if !hasNodeIdentity || hasTriggerIdentity || !store.ExecutionCredentialAllowsNode(*binding, runID, nodeID) {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "credential_bound", Principal: p.label(),
+					Message: "execution credential does not own node " + runID + "/" + nodeID,
+				})
+				return
+			}
+			fence, fenceErr := nodeClaimFenceFromRequest(r)
+			if fenceErr != nil || fence.HolderID != binding.HolderID || fence.ClaimGeneration != binding.ClaimGeneration {
+				writeError(w, http.StatusConflict, store.ErrLockHeld)
+				return
+			}
+			live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !live {
+				writeError(w, http.StatusConflict, store.ErrLockHeld)
+				return
+			}
+			owned, err := s.store.ExecutionCredentialOwnsNode(r.Context(), *binding, runID, nodeID, time.Now())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !owned {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "credential_bound", Principal: p.label(),
+					Message: "execution credential does not own node " + runID + "/" + nodeID,
+				})
+				return
+			}
+			r = r.WithContext(store.WithExecutionCredentialFence(r.Context(), store.ExecutionCredentialFence{
+				Binding: *binding, Fence: fence,
+			}))
+			next.ServeHTTP(w, r)
+			return
+		}
 		if hasNodeIdentity && hasTriggerIdentity {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code: "claim_required", Principal: p.label(),
@@ -593,6 +634,16 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) executionNodeMember(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, bound := executionBindingFromContext(r.Context()); !bound {
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.claimedBy(next).ServeHTTP(w, r)
+	})
+}
+
 func claimIdentityShape(r *http.Request) (node, trigger bool) {
 	for _, name := range []string{
 		store.ClaimHolderHeader,
@@ -628,6 +679,40 @@ func (s *Server) claimedRun(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) claimedRunOrExecution(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		binding, bound := executionBindingFromContext(r.Context())
+		if !bound {
+			r, ok := s.triggerClaimRequest(w, r, r.PathValue("id"))
+			if ok {
+				next.ServeHTTP(w, r)
+			}
+			return
+		}
+		if r.PathValue("id") != binding.RunID {
+			writeError(w, http.StatusForbidden, store.ErrLockHeld)
+			return
+		}
+		fence, err := nodeClaimFenceFromRequest(r)
+		if err != nil || fence.HolderID != binding.HolderID || fence.ClaimGeneration != binding.ClaimGeneration {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		}
+		live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !live {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(store.WithExecutionCredentialFence(r.Context(), store.ExecutionCredentialFence{
+			Binding: *binding, Fence: fence,
+		})))
+	})
+}
+
 func (s *Server) claimedRunHeartbeat(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r, ok := s.runClaimRequest(w, r, r.PathValue("id"))
@@ -643,6 +728,9 @@ func (s *Server) claimedRunAccess(next http.Handler) http.Handler {
 
 // safety: ownership is a live claim on one of the run's nodes or on the trigger the run came from.
 func (s *Server) ownsRun(ctx context.Context, runID string, claimant store.ClaimIdentity) (bool, error) {
+	if binding, bound := executionBindingFromContext(ctx); bound {
+		return s.executionCredentialAllowsRun(ctx, *binding, runID)
+	}
 	held, err := s.store.PrincipalHoldsRunClaim(ctx, runID, claimant, time.Now())
 	if err != nil || held {
 		return held, err
@@ -662,6 +750,22 @@ func (s *Server) readableTrigger(next http.Handler) http.Handler {
 func (s *Server) runMember(readerScope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
+		if ok && p.executionBinding != nil {
+			allowed, err := s.executionCredentialAllowsRead(r, *p.executionBinding)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !allowed {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "credential_bound", Principal: p.label(),
+					Message: "execution credential cannot read this run resource",
+				})
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !ok || p.HasScope(ScopeAdmin) || (readerScope != "" && p.HasScope(readerScope)) {
 			next.ServeHTTP(w, r)
 			return
@@ -693,6 +797,57 @@ func (s *Server) runMember(readerScope string, next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) executionCredentialAllowsRun(
+	ctx context.Context,
+	binding store.ExecutionCredentialBinding,
+	runID string,
+) (bool, error) {
+	live, err := s.store.ExecutionCredentialBindingIsLive(ctx, binding, time.Now())
+	if err != nil || !live {
+		return false, err
+	}
+	if runID == binding.RunID {
+		return true, nil
+	}
+	trigger, err := s.store.GetTrigger(ctx, runID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return trigger.ParentRunID == binding.RunID && trigger.ParentNodeID == binding.RootNodeID, nil
+}
+
+func (s *Server) executionCredentialAllowsRead(r *http.Request, binding store.ExecutionCredentialBinding) (bool, error) {
+	runID := r.PathValue("id")
+	allowed, err := s.executionCredentialAllowsRun(r.Context(), binding, runID)
+	if err != nil || !allowed {
+		return allowed, err
+	}
+	if runID != binding.RunID {
+		return true, nil
+	}
+	nodeID := r.PathValue("nodeID")
+	if nodeID == "" {
+		if strings.HasSuffix(r.URL.Path, "/nodes") || strings.HasSuffix(r.URL.Path, "/steps") {
+			return false, nil
+		}
+		return true, nil
+	}
+	if store.ExecutionCredentialAllowsNode(binding, runID, nodeID) {
+		return s.store.ExecutionCredentialOwnsNode(r.Context(), binding, runID, nodeID, time.Now())
+	}
+	if !strings.HasSuffix(r.URL.Path, "/output") {
+		return false, nil
+	}
+	root, err := s.store.GetNode(r.Context(), binding.RunID, binding.RootNodeID)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(root.Deps, nodeID), nil
+}
+
 // safety: a profile outlives the run that writes it, so a write needs a live claim
 // on a run of that pipeline: a node claim for a runner executing one node, or the
 // run's trigger claim for the orchestrator, which records the wait before the first
@@ -705,6 +860,26 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 			return
 		}
 		pipeline := r.PathValue("name")
+		if binding, bound := executionBindingFromContext(r.Context()); bound {
+			run, err := s.store.GetRun(r.Context(), binding.RunID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !live || pipeline != run.Pipeline {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "credential_bound", Message: "execution credential cannot update this pipeline profile",
+				})
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		held, err := s.store.PrincipalHoldsProfileClaim(r.Context(), pipeline, claimIdentity(r), time.Now())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
@@ -829,7 +1004,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
 	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRunOrExecution(http.HandlerFunc(s.handleCreateNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeDeps))))
@@ -845,13 +1020,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
-	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
+	mux.Handle("POST /api/v1/triggers", requireScopeOrExecutionCredential(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
 	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
 	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.heartbeatBudgeted(s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat)))))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
-	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
+	mux.Handle("GET /api/v1/triggers/spawned-child", requireScopeOrExecutionCredential(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
@@ -915,7 +1090,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleHeartbeatSlot))))
 	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleReleaseSlot))))
 	mux.Handle("GET /api/v1/concurrency/{key}/holder", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryHolder, http.HandlerFunc(s.handleObserveSlot))))
-	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState)))
+	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScopeOrExecutionCredential(ScopeRunsRead, http.HandlerFunc(s.handleConcurrencyState)))
 	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
 	mux.Handle("GET /api/v1/concurrency/{key}/notify", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify)))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))))
@@ -941,7 +1116,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNamedNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, s.executionNodeMember(http.HandlerFunc(s.handleValidateNodeLogClaim))))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))

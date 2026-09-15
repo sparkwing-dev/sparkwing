@@ -295,6 +295,45 @@ func TestExecutorClaimOfferDeadlineUsesPriorityAndRecoversLostWinnerResponse(t *
 	}
 }
 
+func TestEmptyPolicyHostedFallbackAwardsLiveOfferBeforeHostedClaim(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	offerer := enrollOfferExecutor(t, s, "offerer", 20, 20, "linux")
+	enrollOfferPriorityTarget(t, s)
+	seedExecutorNode(t, s, "run", 1, "linux")
+	if got := executorOffer(t, s, offerer, "offerer", "holder-offer", "reservation-offer", "run", "work", 0); !got.Pending {
+		t.Fatalf("offer = %+v, want pending", got)
+	}
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`),
+		time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	pool := meteredClaimant(t, s, "hosted-pool")
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "offer-payment", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.ListTokens("", true)
+	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work", "", hostedSpec("run", "work", pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Hosted != nil || result.Revoked || result.Pending {
+		t.Fatalf("finalize = %+v, want executor offer", result)
+	}
+	node, err := s.GetNode(ctx, "run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.ClaimedBy != "holder-offer" {
+		t.Fatalf("winner = %q, want live offer", node.ClaimedBy)
+	}
+	after, _ := s.ListTokens("", true)
+	if len(after) != len(before) {
+		t.Fatalf("offer winner minted %d hosted credential(s)", len(after)-len(before))
+	}
+}
+
 func TestExecutorClaimOfferFinalizationReresolvesNarrowedEnrollment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")

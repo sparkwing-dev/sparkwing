@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -37,14 +38,20 @@ type NodeClaimFence struct {
 }
 
 type (
-	nodeClaimFenceKey          struct{}
-	executionAttemptOrdinalKey struct{}
-	triggerClaimFenceKey       struct{}
+	nodeClaimFenceKey           struct{}
+	executionCredentialFenceKey struct{}
+	executionAttemptOrdinalKey  struct{}
+	triggerClaimFenceKey        struct{}
 )
 
 type TriggerClaimFence struct {
 	Claimant        ClaimIdentity
 	ClaimGeneration int64
+}
+
+type ExecutionCredentialFence struct {
+	Binding ExecutionCredentialBinding
+	Fence   NodeClaimFence
 }
 
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context {
@@ -53,6 +60,15 @@ func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Conte
 
 func NodeClaimFenceFromContext(ctx context.Context) (NodeClaimFence, bool) {
 	fence, ok := ctx.Value(nodeClaimFenceKey{}).(NodeClaimFence)
+	return fence, ok
+}
+
+func WithExecutionCredentialFence(ctx context.Context, fence ExecutionCredentialFence) context.Context {
+	return context.WithValue(ctx, executionCredentialFenceKey{}, fence)
+}
+
+func ExecutionCredentialFenceFromContext(ctx context.Context) (ExecutionCredentialFence, bool) {
+	fence, ok := ctx.Value(executionCredentialFenceKey{}).(ExecutionCredentialFence)
 	return fence, ok
 }
 
@@ -76,13 +92,54 @@ func TriggerClaimFenceFromContext(ctx context.Context) (TriggerClaimFence, bool)
 
 func hasClaimFence(ctx context.Context) bool {
 	_, node := NodeClaimFenceFromContext(ctx)
+	_, execution := ExecutionCredentialFenceFromContext(ctx)
 	_, trigger := TriggerClaimFenceFromContext(ctx)
-	return node || trigger
+	return node || execution || trigger
 }
 
 func WithoutClaimFences(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, nodeClaimFenceKey{}, struct{}{})
+	ctx = context.WithValue(ctx, executionCredentialFenceKey{}, struct{}{})
 	return context.WithValue(ctx, triggerClaimFenceKey{}, struct{}{})
+}
+
+func ExecutionCredentialAllowsNode(binding ExecutionCredentialBinding, runID, nodeID string) bool {
+	return runID == binding.RunID &&
+		(nodeID == binding.RootNodeID || strings.HasPrefix(nodeID, binding.RootNodeID+"/"))
+}
+
+func (s *Store) ExecutionCredentialBindingIsLive(ctx context.Context, binding ExecutionCredentialBinding, now time.Time) (bool, error) {
+	fence := NodeClaimFence{
+		Claimant: ClaimIdentity{Principal: binding.DelegatedPrincipal, TokenPrefix: binding.DelegatedTokenPrefix},
+		HolderID: binding.HolderID, ClaimGeneration: binding.ClaimGeneration,
+	}
+	return s.NodeClaimFenceIsLive(ctx, binding.RunID, binding.RootNodeID, fence, now)
+}
+
+// ExecutionCredentialOwnsNode reports whether nodeID is the bound root or a
+// node created under that execution. Dynamic children inherit the root's
+// exact claim attribution when they are inserted; a pre-existing node that
+// merely shares the root's textual prefix does not.
+func (s *Store) ExecutionCredentialOwnsNode(ctx context.Context, binding ExecutionCredentialBinding, runID, nodeID string, now time.Time) (bool, error) {
+	if !ExecutionCredentialAllowsNode(binding, runID, nodeID) {
+		return false, nil
+	}
+	var owned int
+	err := s.queryRow(ctx, `SELECT 1 FROM nodes child
+	WHERE child.run_id = ? AND child.node_id = ?
+	  AND child.claimed_by = ? AND child.claim_principal = ? AND child.claim_token_prefix = ?
+	  AND child.claim_generation = ?
+	  AND EXISTS (SELECT 1 FROM nodes root
+	      WHERE root.run_id = ? AND root.node_id = ? AND root.claimed_by = ?
+	        AND root.claim_principal = ? AND root.claim_token_prefix = ?
+	        AND root.claim_generation = ? AND `+nodeClaimLiveSQL("root.")+`)`,
+		runID, nodeID, binding.HolderID, binding.DelegatedPrincipal, binding.DelegatedTokenPrefix,
+		binding.ClaimGeneration, binding.RunID, binding.RootNodeID, binding.HolderID,
+		binding.DelegatedPrincipal, binding.DelegatedTokenPrefix, binding.ClaimGeneration, now.UnixNano()).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error) {
@@ -165,6 +222,12 @@ func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runI
 }
 
 func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
+	if execution, ok := ExecutionCredentialFenceFromContext(ctx); ok {
+		if !ExecutionCredentialAllowsNode(execution.Binding, runID, nodeID) {
+			return ErrLockHeld
+		}
+		return s.assertExecutionCredentialNodeFenceTx(ctx, tx, execution, runID, nodeID)
+	}
 	fence, ok := NodeClaimFenceFromContext(ctx)
 	var held int
 	var err error
@@ -194,6 +257,47 @@ func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runI
 	return nil
 }
 
+func (s *Store) assertExecutionCredentialNodeFenceTx(ctx context.Context, tx *storeTx, execution ExecutionCredentialFence, runID, nodeID string) error {
+	if err := s.assertExecutionCredentialFenceTx(ctx, tx, execution); err != nil {
+		return err
+	}
+	binding := execution.Binding
+	var owned int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
+	WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+	  AND claim_principal = ? AND claim_token_prefix = ? AND claim_generation = ?`+s.forUpdate(),
+		runID, nodeID, binding.HolderID, binding.DelegatedPrincipal,
+		binding.DelegatedTokenPrefix, binding.ClaimGeneration).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrLockHeld
+	}
+	return err
+}
+
+func (s *Store) assertExecutionCredentialFenceTx(ctx context.Context, tx *storeTx, execution ExecutionCredentialFence) error {
+	binding := execution.Binding
+	fence := execution.Fence
+	var held int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
+	WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+	  AND claim_principal = ? AND claim_token_prefix = ?
+	  AND claim_generation = ? AND `+nodeClaimLiveSQL("")+s.forUpdate(),
+		binding.RunID, binding.RootNodeID, binding.HolderID,
+		binding.DelegatedPrincipal, binding.DelegatedTokenPrefix,
+		binding.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrLockHeld
+	}
+	if err != nil {
+		return err
+	}
+	if fence.HolderID != binding.HolderID || fence.ClaimGeneration != binding.ClaimGeneration ||
+		fence.Claimant.Principal != binding.DelegatedPrincipal || fence.Claimant.TokenPrefix != binding.DelegatedTokenPrefix {
+		return ErrLockHeld
+	}
+	return nil
+}
+
 func (s *Store) execNodeMutation(ctx context.Context, runID, nodeID, query string, args ...any) (rowsAffected, bool, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -209,6 +313,9 @@ func (s *Store) execNodeMutation(ctx context.Context, runID, nodeID, query strin
 	}
 	fenced := false
 	if _, ok := NodeClaimFenceFromContext(ctx); ok {
+		fenced = true
+	}
+	if _, ok := ExecutionCredentialFenceFromContext(ctx); ok {
 		fenced = true
 	}
 	if _, ok := TriggerClaimFenceFromContext(ctx); ok {

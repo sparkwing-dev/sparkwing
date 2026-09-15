@@ -31,6 +31,7 @@ func TestSchemaV40_UpgradeFromAStoreMissingTheIndexedColumns(t *testing.T) {
 		`DROP INDEX IF EXISTS idx_nodes_credit_active`,
 		`DROP INDEX IF EXISTS idx_nodes_credit_window`,
 		`DROP INDEX IF EXISTS idx_nodes_credit_principal`,
+		`DROP INDEX IF EXISTS idx_nodes_credit_quota_principal`,
 		`DROP INDEX IF EXISTS idx_runs_created`,
 		`DROP INDEX IF EXISTS idx_runs_principal_created`,
 		`ALTER TABLE nodes DROP COLUMN claim_principal`,

@@ -154,6 +154,13 @@ func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, nam
 		sec, err := s.store.GetSecretForRepo(name, repo)
 		return sec, reportSecretRead(w, sec, err)
 	}
+	if binding, bound := executionBindingFromContext(r.Context()); bound && runID != binding.RunID {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "credential_bound", Principal: p.label(),
+			Message: "execution credential may read secrets only for its bound run",
+		})
+		return nil, false
+	}
 	repo, refused := s.repoForClaimingReader(r, runID)
 	if refused != "" {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{

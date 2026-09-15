@@ -43,10 +43,12 @@ const PrefixLen = 12
 const mintAttempts = 5
 
 var executionCredentialCols = map[string]string{
-	"execution_run_id":       "TEXT NOT NULL DEFAULT ''",
-	"execution_root_node_id": "TEXT NOT NULL DEFAULT ''",
-	"delegated_principal":    "TEXT NOT NULL DEFAULT ''",
-	"delegated_token_prefix": "TEXT NOT NULL DEFAULT ''",
+	"execution_run_id":           "TEXT NOT NULL DEFAULT ''",
+	"execution_root_node_id":     "TEXT NOT NULL DEFAULT ''",
+	"delegated_principal":        "TEXT NOT NULL DEFAULT ''",
+	"delegated_token_prefix":     "TEXT NOT NULL DEFAULT ''",
+	"execution_holder_id":        "TEXT NOT NULL DEFAULT ''",
+	"execution_claim_generation": "INTEGER NOT NULL DEFAULT 0",
 }
 
 // Bearer rejection reasons. ErrNoTokenCandidates and ErrUnknownToken
@@ -85,6 +87,8 @@ type ExecutionCredentialBinding struct {
 	RootNodeID           string
 	DelegatedPrincipal   string
 	DelegatedTokenPrefix string
+	HolderID             string
+	ClaimGeneration      int64
 }
 
 // TokenOptions carries the fields a mint sets beyond the required ones.
@@ -278,20 +282,23 @@ func insertTokenRow(
 	binding := ExecutionCredentialBinding{}
 	if opts.ExecutionBinding != nil {
 		binding = *opts.ExecutionBinding
-		if binding.RunID == "" || binding.RootNodeID == "" || binding.DelegatedPrincipal == "" || binding.DelegatedTokenPrefix == "" {
-			return nil, errors.New("tokens: execution binding requires run, root node, delegated principal, and delegated token prefix")
+		if binding.RunID == "" || binding.RootNodeID == "" || binding.DelegatedPrincipal == "" ||
+			binding.DelegatedTokenPrefix == "" || binding.HolderID == "" || binding.ClaimGeneration < 1 {
+			return nil, errors.New("tokens: execution binding requires run, root node, delegated claim identity, holder, and generation")
 		}
 	}
 	if _, err := e.ExecContext(ctx, `
         INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at, metered,
-                            execution_run_id, execution_root_node_id, delegated_principal, delegated_token_prefix)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            execution_run_id, execution_root_node_id, delegated_principal, delegated_token_prefix,
+                            execution_holder_id, execution_claim_generation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
 		hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
 		now.UTC().Unix(),
 		expiresUnix(expires),
 		metered,
 		binding.RunID, binding.RootNodeID, binding.DelegatedPrincipal, binding.DelegatedTokenPrefix,
+		binding.HolderID, binding.ClaimGeneration,
 	); err != nil {
 		return nil, fmt.Errorf("tokens: insert: %w", err)
 	}
@@ -366,7 +373,8 @@ const selectTokensByPrefixSQL = `
                created_at, expires_at, last_used_at, revoked_at,
                COALESCE(replaced_by, ''), metered,
                COALESCE(execution_run_id, ''), COALESCE(execution_root_node_id, ''),
-               COALESCE(delegated_principal, ''), COALESCE(delegated_token_prefix, '')
+               COALESCE(delegated_principal, ''), COALESCE(delegated_token_prefix, ''),
+               COALESCE(execution_holder_id, ''), COALESCE(execution_claim_generation, 0)
           FROM tokens
          WHERE prefix = ?`
 
@@ -402,6 +410,7 @@ func scanTokenRows(rows *sql.Rows) ([]Token, error) {
 			&t.ReplacedBy, &metered,
 			&execution.RunID, &execution.RootNodeID,
 			&execution.DelegatedPrincipal, &execution.DelegatedTokenPrefix,
+			&execution.HolderID, &execution.ClaimGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -467,7 +476,8 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
                created_at, expires_at, last_used_at, revoked_at,
                COALESCE(replaced_by, ''), metered,
                COALESCE(execution_run_id, ''), COALESCE(execution_root_node_id, ''),
-               COALESCE(delegated_principal, ''), COALESCE(delegated_token_prefix, '')
+               COALESCE(delegated_principal, ''), COALESCE(delegated_token_prefix, ''),
+               COALESCE(execution_holder_id, ''), COALESCE(execution_claim_generation, 0)
           FROM tokens
     `
 	args := []any{}

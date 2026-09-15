@@ -95,9 +95,10 @@ const DispatchHosted NodeDispatchPolicy = "hosted"
 var ErrHostedExecutionUnavailable = errors.New("hosted execution is not configured")
 
 type HostedClaimSpec struct {
-	Binding ExecutionCredentialBinding
-	Scopes  []string
-	TTL     time.Duration
+	Binding  ExecutionCredentialBinding
+	Scopes   []string
+	TTL      time.Duration
+	Lifetime time.Duration
 }
 
 type HostedNodeClaim struct {
@@ -1264,6 +1265,14 @@ func (s *Store) finalizeExecutorClaimRoundAt(
 	if policy == DispatchHosted && hosted == nil {
 		return ExecutorClaimRoundResult{}, ErrHostedExecutionUnavailable
 	}
+	if hosted != nil {
+		if hosted.TTL <= 0 || hosted.Lifetime <= 0 {
+			return ExecutorClaimRoundResult{}, errors.New("hosted execution credential requires a positive TTL and lifetime")
+		}
+		if hosted.TTL > hosted.Lifetime {
+			return ExecutorClaimRoundResult{}, errors.New("hosted execution credential TTL exceeds its declared lifetime")
+		}
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return ExecutorClaimRoundResult{}, err
@@ -1385,16 +1394,6 @@ func (s *Store) awardHostedNodeTx(
 	if len(delegates) != 1 || delegates[0].Principal != binding.DelegatedPrincipal || !delegates[0].IsValid(now) || !delegates[0].Metered {
 		return nil, errors.New("hosted claim requires one live metered delegated token")
 	}
-	raw, err := mintRaw(TokenPrefixRunner)
-	if err != nil {
-		return nil, err
-	}
-	principal := "hosted:" + raw[:PrefixLen]
-	tok, err := insertTokenRow(ctx, tx, raw, principal, TokenKindRunner, spec.Scopes, spec.TTL, now,
-		TokenOptions{ExecutionBinding: &binding})
-	if err != nil {
-		return nil, err
-	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -1404,6 +1403,13 @@ func (s *Store) awardHostedNodeTx(
 		readyClause = " AND ready_at IS NOT NULL"
 	}
 	holderID := "hosted:" + runID + ":" + nodeID
+	var priorGeneration int64
+	if err := tx.QueryRowContext(ctx, `SELECT claim_generation FROM nodes WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID).Scan(&priorGeneration); err != nil {
+		return nil, err
+	}
+	binding.HolderID = holderID
+	binding.ClaimGeneration = priorGeneration + 1
 	claimant := ClaimIdentity{Principal: binding.DelegatedPrincipal, TokenPrefix: binding.DelegatedTokenPrefix}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
    SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
@@ -1430,6 +1436,16 @@ func (s *Store) awardHostedNodeTx(
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return nil, err
+	}
+	raw, err := mintRaw(TokenPrefixRunner)
+	if err != nil {
+		return nil, err
+	}
+	principal := "hosted:" + raw[:PrefixLen]
+	tok, err := insertTokenRow(ctx, tx, raw, principal, TokenKindRunner, spec.Scopes, spec.TTL, now,
+		TokenOptions{ExecutionBinding: &binding})
+	if err != nil {
 		return nil, err
 	}
 	n := &nodeRecord{}

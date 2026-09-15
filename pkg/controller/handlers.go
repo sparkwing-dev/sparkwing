@@ -809,6 +809,24 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
+	if binding, bound := executionBindingFromContext(r.Context()); bound {
+		if body.ParentRunID != binding.RunID || body.ParentNodeID != binding.RootNodeID {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:    "credential_bound",
+				Message: "execution credential may create only a direct child of its bound node",
+			})
+			return
+		}
+		live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !live {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		}
+	}
 
 	if body.ParentRunID != "" {
 		ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), body.ParentRunID)
@@ -1122,6 +1140,29 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, fmt.Errorf("parent_run_id, parent_node_id, pipeline are all required"))
 		return
 	}
+	if binding, bound := executionBindingFromContext(r.Context()); bound {
+		allowedParent := parentRunID == binding.RunID
+		if !allowedParent {
+			run, err := s.store.GetRun(r.Context(), binding.RunID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			allowedParent = run.RetryOf != "" && parentRunID == run.RetryOf
+		}
+		live, err := s.store.ExecutionCredentialBindingIsLive(r.Context(), *binding, time.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !live || !allowedParent || parentNodeID != binding.RootNodeID {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:    "credential_bound",
+				Message: "execution credential cannot inspect this child lineage",
+			})
+			return
+		}
+	}
 	id, err := s.store.FindSpawnedChildTriggerID(r.Context(), parentRunID, parentNodeID, pipeline)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1152,6 +1193,12 @@ type claimSpecificTriggerReq struct {
 }
 
 func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
+	if _, bound := executionBindingFromContext(r.Context()); bound {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "credential_bound", Message: "execution credentials cannot claim trigger work",
+		})
+		return
+	}
 	var body claimSpecificTriggerReq
 	if err := decodeOptionalJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1215,6 +1262,12 @@ type claimTriggerReq struct {
 }
 
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
+	if _, bound := executionBindingFromContext(r.Context()); bound {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "credential_bound", Message: "execution credentials cannot claim trigger work",
+		})
+		return
+	}
 	var body claimTriggerReq
 	if err := decodeOptionalJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1528,6 +1581,12 @@ func (s *Server) placementContext(ctx context.Context, claimer presenceKey) cont
 }
 
 func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
+	if _, bound := executionBindingFromContext(r.Context()); bound {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "credential_bound", Message: "execution credentials cannot claim queue work",
+		})
+		return
+	}
 	var body claimNodeReq
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1653,6 +1712,12 @@ type claimNamedNodeReq struct {
 }
 
 func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
+	if _, bound := executionBindingFromContext(r.Context()); bound {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "credential_bound", Message: "execution credentials cannot claim another node",
+		})
+		return
+	}
 	var body claimNamedNodeReq
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1896,6 +1961,12 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) {
+	if _, bound := executionBindingFromContext(r.Context()); bound {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "credential_bound", Message: "execution credentials cannot prepare queue work",
+		})
+		return
+	}
 	var body claimNodeReq
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -2030,6 +2101,16 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	claimCtx := store.WithNodeClaimFence(r.Context(), fence)
+	if binding, bound := executionBindingFromContext(r.Context()); bound {
+		if runID != binding.RunID || nodeID != binding.RootNodeID ||
+			fence.HolderID != binding.HolderID || fence.ClaimGeneration != binding.ClaimGeneration {
+			writeError(w, http.StatusForbidden, store.ErrLockHeld)
+			return
+		}
+		claimCtx = store.WithExecutionCredentialFence(claimCtx, store.ExecutionCredentialFence{
+			Binding: *binding, Fence: fence,
+		})
+	}
 	if err := s.store.HeartbeatNodeClaim(claimCtx, runID, nodeID, fence.Claimant, body.HolderID, lease); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)

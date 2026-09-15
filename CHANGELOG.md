@@ -25,7 +25,10 @@ unlock.
 - **store + controller (Breaking):** Hosted-node finalization can reserve the
   controller-owned execution path with a bound, delegated credential and the
   named `hosted` dispatch policy. Schema 48 adds the credential binding that
-  prevents older controllers from authenticating it as an ordinary runner.
+  prevents older controllers from authenticating it as an ordinary runner and
+  records each active claim's run-owner quota identity. `Client.FinalizeNodeReady`
+  now takes the dispatch policy directly; the HTTP endpoint still accepts an
+  empty request body from an older client.
   See the [migration guide](docs/migrations/_unreleased.md#bound-hosted-execution-credentials).
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.5, so a fresh scaffold
   compiles against that release.

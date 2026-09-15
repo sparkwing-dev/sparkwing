@@ -554,12 +554,20 @@ type ExecutionAttemptFinish struct {
 	ExecutorKind string
 }
 func ExecutionAttemptOrdinalFromContext(ctx context.Context) (int, bool)
+func ExecutionCredentialAllowsNode(binding ExecutionCredentialBinding, runID, nodeID string) bool
 type ExecutionCredentialBinding struct {
 	RunID                string
 	RootNodeID           string
 	DelegatedPrincipal   string
 	DelegatedTokenPrefix string
+	HolderID             string
+	ClaimGeneration      int64
 }
+type ExecutionCredentialFence struct {
+	Binding ExecutionCredentialBinding
+	Fence   NodeClaimFence
+}
+func ExecutionCredentialFenceFromContext(ctx context.Context) (ExecutionCredentialFence, bool)
 type ExecutionStart struct {
 	HolderID        string
 	MembershipID    string
@@ -690,9 +698,10 @@ type GitHubWebhookBinding struct {
 	UpdatedAt time.Time
 }
 type HostedClaimSpec struct {
-	Binding ExecutionCredentialBinding
-	Scopes  []string
-	TTL     time.Duration
+	Binding  ExecutionCredentialBinding
+	Scopes   []string
+	TTL      time.Duration
+	Lifetime time.Duration
 }
 type HostedNodeClaim struct {
 	Node      *Node
@@ -1289,6 +1298,8 @@ func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Executor) error
+func (s *Store) ExecutionCredentialBindingIsLive(ctx context.Context, binding ExecutionCredentialBinding, now time.Time) (bool, error)
+func (s *Store) ExecutionCredentialOwnsNode(ctx context.Context, binding ExecutionCredentialBinding, runID, nodeID string, now time.Time) (bool, error)
 func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentity, name string) (Executor, error)
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
@@ -1634,6 +1645,7 @@ const WaiterStillWaiting WaiterStatus = "still_waiting"
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
+func WithExecutionCredentialFence(ctx context.Context, fence ExecutionCredentialFence) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context

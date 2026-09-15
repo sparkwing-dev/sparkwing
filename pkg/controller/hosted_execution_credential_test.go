@@ -25,7 +25,7 @@ func TestFinalizeNodeReadyPolicyIsStrictAndUnwired(t *testing.T) {
 	}
 	seedRunNode(t, f.store, trigger.ID, "build")
 	held := store.WithTriggerClaimFence(context.Background(), store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
-	if _, err := c.FinalizeNodeReadyWithPolicy(held, trigger.ID, "build", store.DispatchHosted); err == nil ||
+	if _, err := c.FinalizeNodeReady(held, trigger.ID, "build", store.DispatchHosted); err == nil ||
 		!strings.Contains(err.Error(), "503") {
 		t.Fatalf("hosted policy without dispatcher = %v, want 503", err)
 	}
@@ -51,6 +51,22 @@ func TestFinalizeNodeReadyPolicyIsStrictAndUnwired(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown policy status = %d, want 400", resp.StatusCode)
 	}
+
+	legacyReq, err := http.NewRequest(http.MethodPost,
+		f.url+"/api/v1/runs/"+trigger.ID+"/nodes/build/finalize-ready", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyReq.Header.Set("Authorization", "Bearer "+raw)
+	legacyReq.Header.Set(store.TriggerGenerationHeader, "1")
+	legacyResp, err := http.DefaultClient.Do(legacyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = legacyResp.Body.Close()
+	if legacyResp.StatusCode != http.StatusOK {
+		t.Fatalf("legacy empty finalize body status = %d, want 200", legacyResp.StatusCode)
+	}
 }
 
 func TestHostedExecutionCredentialDelegatesClaimAndRejectsOtherResources(t *testing.T) {
@@ -63,8 +79,21 @@ func TestHostedExecutionCredentialDelegatesClaimAndRejectsOtherResources(t *test
 	if err := st.CreateRun(ctx, store.Run{ID: "bound-run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "bound-run", NodeID: "build", Status: "pending"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "bound-run", NodeID: "build", Status: "pending", Deps: []string{"source"},
+	}); err != nil {
 		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "bound-run", NodeID: "source", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "bound-run", "source", "success", "", []byte(`{"artifact":"ok"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, nodeID := range []string{"deploy", "build/static"} {
+		if err := st.CreateNode(ctx, store.Node{RunID: "bound-run", NodeID: nodeID, Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := st.CreateRun(ctx, store.Run{ID: "other-run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
@@ -82,8 +111,12 @@ func TestHostedExecutionCredentialDelegatesClaimAndRejectsOtherResources(t *test
 			RunID: "bound-run", RootNodeID: "build",
 			DelegatedPrincipal: pool.Principal, DelegatedTokenPrefix: pool.Prefix,
 		},
-		Scopes: []string{controller.ScopeNodesClaim, controller.ScopeRunsState},
-		TTL:    time.Hour,
+		Scopes: []string{
+			controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
+			controller.ScopeRunsState, controller.ScopeLogsWrite,
+		},
+		TTL:      time.Hour,
+		Lifetime: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +128,12 @@ func TestHostedExecutionCredentialDelegatesClaimAndRejectsOtherResources(t *test
 	if _, err := bound.GetRunForExecution(ctx, "bound-run"); err != nil {
 		t.Fatalf("read bound run through delegated claim: %v", err)
 	}
+	if output, err := bound.GetNodeOutput(ctx, "bound-run", "source"); err != nil || string(output) != `{"artifact":"ok"}` {
+		t.Fatalf("read declared dependency output = %s, %v", output, err)
+	}
+	if _, err := bound.GetNode(ctx, "bound-run", "source"); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Errorf("read dependency metadata = %v, want 403", err)
+	}
 	fenceCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
 		HolderID: result.Hosted.Node.ClaimedBy, ClaimGeneration: result.Hosted.Node.ClaimGeneration,
 		MembershipID: result.Hosted.Node.ClaimMembershipID, ReservationID: result.Hosted.Node.ReservationID,
@@ -102,13 +141,33 @@ func TestHostedExecutionCredentialDelegatesClaimAndRejectsOtherResources(t *test
 	if err := bound.StartNode(fenceCtx, "bound-run", "build"); err != nil {
 		t.Fatalf("start bound node through delegated claim: %v", err)
 	}
+	for _, nodeID := range []string{"deploy", "build/static"} {
+		if err := bound.StartNode(fenceCtx, "bound-run", nodeID); err == nil || !strings.Contains(err.Error(), "403") {
+			t.Errorf("start unowned node %q = %v, want 403", nodeID, err)
+		}
+	}
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "other-lineage", Pipeline: "demo", Status: "pending", CreatedAt: time.Now(),
+		ParentRunID: "bound-run", ParentNodeID: "deploy",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "other-lineage", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bound.GetRunForExecution(ctx, "other-lineage"); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Errorf("read child of sibling node = %v, want 403", err)
+	}
 
-	for _, path := range []string{"/api/v1/runs/other-run", "/api/v1/nodes/claim", "/api/v1/tokens"} {
+	for _, path := range []string{
+		"/api/v1/runs/other-run", "/api/v1/nodes/claim", "/api/v1/triggers/claim",
+		"/api/v1/triggers/unrelated/claim", "/api/v1/tokens",
+	} {
 		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if path == "/api/v1/nodes/claim" {
+		if strings.HasSuffix(path, "/claim") {
 			req.Method = http.MethodPost
 		}
 		req.Header.Set("Authorization", "Bearer "+result.Hosted.RawBearer)
@@ -120,6 +179,23 @@ func TestHostedExecutionCredentialDelegatesClaimAndRejectsOtherResources(t *test
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s status = %d, want 403", path, resp.StatusCode)
 		}
+	}
+	logValidation, err := http.NewRequest(http.MethodPost,
+		srv.URL+"/api/v1/runs/other-run/nodes/build/claim/validate", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logValidation.Header.Set("Authorization", "Bearer "+result.Hosted.RawBearer)
+	logValidation.Header.Set(store.ClaimHolderHeader, result.Hosted.Node.ClaimedBy)
+	logValidation.Header.Set(store.ClaimGenerationHeader, "1")
+	logValidation.Header.Set(store.AttemptOrdinalHeader, "1")
+	resp, err := http.DefaultClient.Do(logValidation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("unrelated log validation status = %d, want 403", resp.StatusCode)
 	}
 
 	tok, err := st.LookupToken(result.Hosted.RawBearer, time.Now())

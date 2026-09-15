@@ -99,7 +99,7 @@ func routeScope(handler ast.Expr) (string, bool) {
 	default:
 		return "", false
 	}
-	if name != "requireScope" {
+	if name != "requireScope" && name != "requireScopeOrExecutionCredential" {
 		return "", false
 	}
 	scope, ok := call.Args[0].(*ast.Ident)

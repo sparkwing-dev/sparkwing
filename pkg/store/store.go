@@ -559,6 +559,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- to; '' when the controller served the claim unauthenticated.
     -- Display only: two tokens may carry the same principal name.
     claim_principal  TEXT NOT NULL DEFAULT '',
+    claim_quota_principal TEXT NOT NULL DEFAULT '',
     -- claim_token_prefix: the claiming token's prefix segment. Unique
     -- per token, so this is what the ownership predicates match on.
     claim_token_prefix TEXT NOT NULL DEFAULT '',
@@ -944,7 +945,9 @@ CREATE TABLE IF NOT EXISTS tokens (
     execution_run_id       TEXT NOT NULL DEFAULT '',
     execution_root_node_id TEXT NOT NULL DEFAULT '',
     delegated_principal    TEXT NOT NULL DEFAULT '',
-    delegated_token_prefix TEXT NOT NULL DEFAULT ''
+    delegated_token_prefix TEXT NOT NULL DEFAULT '',
+    execution_holder_id    TEXT NOT NULL DEFAULT '',
+    execution_claim_generation INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 
@@ -1980,7 +1983,19 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 47:
 		return applyStorageAllowanceMigrationSQLite(ctx, tx)
 	case 48:
-		return ensureColumnsSQLite(ctx, tx, "tokens", executionCredentialCols)
+		if err := ensureColumnsSQLite(ctx, tx, "tokens", executionCredentialCols); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", map[string]string{
+			"claim_quota_principal": "TEXT NOT NULL DEFAULT ''",
+		}); err != nil {
+			return err
+		}
+		if err := backfillClaimQuotaPrincipals(ctx, tx); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, claimQuotaPrincipalIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2321,10 +2336,31 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 47:
 		return applyStorageAllowanceMigrationPostgres(ctx, tx)
 	case 48:
-		return addColumnsTx(ctx, tx, "tokens", executionCredentialCols)
+		if err := addColumnsTx(ctx, tx, "tokens", executionCredentialCols); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "nodes", map[string]string{
+			"claim_quota_principal": "TEXT NOT NULL DEFAULT ''",
+		}); err != nil {
+			return err
+		}
+		if err := backfillClaimQuotaPrincipals(ctx, tx); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, claimQuotaPrincipalIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+func backfillClaimQuotaPrincipals(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx, `UPDATE nodes
+	SET claim_quota_principal = COALESCE(
+	    NULLIF((SELECT created_principal FROM runs WHERE runs.id = nodes.run_id), ''),
+	    claim_principal)
+	WHERE claim_quota_principal = '' AND credit_charged_through > 0`)
+	return err
 }
 
 func applyExecutionPolicyMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -2502,6 +2538,7 @@ var columnMigrations = []columnSpec{
 		"ready_at":               "INTEGER",
 		"claimed_by":             "TEXT",
 		"claim_principal":        "TEXT NOT NULL DEFAULT ''",
+		"claim_quota_principal":  "TEXT NOT NULL DEFAULT ''",
 		"claim_token_prefix":     "TEXT NOT NULL DEFAULT ''",
 		"lease_expires_at":       "INTEGER",
 		"needs_labels":           "BLOB",
@@ -4067,7 +4104,14 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
+	if execution, ok := ExecutionCredentialFenceFromContext(ctx); ok {
+		if !ExecutionCredentialAllowsNode(execution.Binding, n.RunID, n.NodeID) || n.NodeID == execution.Binding.RootNodeID {
+			return ErrLockHeld
+		}
+		if err := s.assertExecutionCredentialFenceTx(ctx, tx, execution); err != nil {
+			return err
+		}
+	} else if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
 		return err
 	}
 	// safety: this transaction takes the compute-guard key alone; a later edit
@@ -4160,6 +4204,28 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
 		n.RunID)
 	if err != nil {
 		return err
+	}
+	if execution, ok := ExecutionCredentialFenceFromContext(ctx); ok {
+		_, err = tx.ExecContext(ctx, `UPDATE nodes AS child SET
+		claimed_by = root.claimed_by,
+		claim_principal = root.claim_principal,
+		claim_token_prefix = root.claim_token_prefix,
+		claim_quota_principal = root.claim_quota_principal,
+		lease_expires_at = root.lease_expires_at,
+		coordinator_id = root.coordinator_id,
+		claim_generation = root.claim_generation,
+		executor_kind = root.executor_kind,
+		executor_id = root.executor_id,
+		executor_location = root.executor_location,
+		reservation_id = root.reservation_id,
+		claim_membership_id = root.claim_membership_id
+	FROM nodes AS root
+	WHERE child.run_id = ? AND child.node_id = ?
+	  AND root.run_id = ? AND root.node_id = ?`,
+			n.RunID, n.NodeID, execution.Binding.RunID, execution.Binding.RootNodeID)
+		if err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -5596,6 +5662,17 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 			return err
 		}
 		updated, err = res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if execution, ok := ExecutionCredentialFenceFromContext(ctx); ok {
+			_, err = tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ?
+			  WHERE run_id = ? AND node_id != ?
+			    AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?
+			    AND claim_generation = ? AND `+nodeNotDone,
+				expires, runID, execution.Binding.RootNodeID, holderID, claimant.Principal,
+				claimant.TokenPrefix, fence.ClaimGeneration)
+		}
 		return err
 	})
 	if err != nil {

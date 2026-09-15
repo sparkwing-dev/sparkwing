@@ -217,7 +217,7 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 	if err := c.MarkNodeReady(held, trigger.ID, "build"); err != nil {
 		t.Fatalf("MarkNodeReady holding the trigger claim: %v", err)
 	}
-	if _, err := c.FinalizeNodeReady(held, trigger.ID, "build"); err != nil {
+	if _, err := c.FinalizeNodeReady(held, trigger.ID, "build", ""); err != nil {
 		t.Fatalf("FinalizeNodeReady holding the trigger claim: %v", err)
 	}
 	if _, err := c.RevokeNodeReady(held, trigger.ID, "build"); err != nil {

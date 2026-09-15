@@ -43,7 +43,7 @@ type coordinator interface {
 	TouchNodeHeartbeat(context.Context, string, string) error
 	GetNode(context.Context, string, string) (*store.Node, error)
 	RevokeNodeReady(context.Context, string, string) (bool, error)
-	FinalizeNodeReady(context.Context, string, string) (store.ExecutorClaimRoundResult, error)
+	FinalizeNodeReady(context.Context, string, string, store.NodeDispatchPolicy) (store.ExecutorClaimRoundResult, error)
 }
 
 func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logger) *Runner {
@@ -136,7 +136,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				continue
 			}
 			if !claimedSeen && time.Now().After(waitDeadline) {
-				resolution, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
+				resolution, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID, "")
 				if rerr != nil {
 					r.logger.Warn("warmpool: offer finalization failed",
 						"run_id", req.RunID, "node_id", req.NodeID, "err", rerr)

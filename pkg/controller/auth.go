@@ -495,13 +495,6 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			a.writeAuthFailure(w, err)
 			return
 		}
-		if !executionCredentialAllowsRequest(p.executionBinding, r) {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "credential_bound", Principal: p.label(),
-				Message: "execution credential is bound to another controller resource",
-			})
-			return
-		}
 		observeRequestPrincipal(p.Kind)
 		ctx := contextWithPrincipal(r.Context(), p)
 		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
@@ -580,6 +573,16 @@ func requireScope(scope string, next http.Handler, alternatives ...string) http.
 	})
 }
 
+func requireScopeOrExecutionCredential(scope string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, bound := executionBindingFromContext(r.Context()); bound {
+			next.ServeHTTP(w, r)
+			return
+		}
+		requireScope(scope, next).ServeHTTP(w, r)
+	})
+}
+
 func claimIdentity(r *http.Request) store.ClaimIdentity {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
@@ -600,22 +603,12 @@ func cloneExecutionBinding(binding *store.ExecutionCredentialBinding) *store.Exe
 	return &copy
 }
 
-func executionCredentialAllowsRequest(binding *store.ExecutionCredentialBinding, r *http.Request) bool {
-	if binding == nil {
-		return true
+func executionBindingFromContext(ctx context.Context) (*store.ExecutionCredentialBinding, bool) {
+	p, ok := PrincipalFromContext(ctx)
+	if !ok || p.executionBinding == nil {
+		return nil, false
 	}
-	switch r.URL.Path {
-	case "/api/v1/auth/whoami", "/api/v1/services":
-		return true
-	}
-	runPrefix := "/api/v1/runs/" + binding.RunID
-	if r.URL.Path == runPrefix || strings.HasPrefix(r.URL.Path, runPrefix+"/") {
-		return true
-	}
-	if strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") && r.URL.Query().Get("run") == binding.RunID {
-		return true
-	}
-	return false
+	return p.executionBinding, true
 }
 
 func (p *Principal) label() string {

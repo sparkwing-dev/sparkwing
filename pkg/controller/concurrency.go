@@ -365,6 +365,39 @@ func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if binding, bound := executionBindingFromContext(r.Context()); bound {
+		filtered := &store.ConcurrencyState{
+			Key: st.Key, Capacity: st.Capacity, EffectiveCapacity: st.EffectiveCapacity,
+		}
+		for _, holder := range st.Holders {
+			allowed, err := s.executionCredentialAllowsRun(r.Context(), *binding, holder.RunID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if allowed {
+				filtered.Holders = append(filtered.Holders, holder)
+				filtered.UsedCost += holder.Cost
+			}
+		}
+		for _, waiter := range st.Waiters {
+			allowed, err := s.executionCredentialAllowsRun(r.Context(), *binding, waiter.RunID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if allowed {
+				filtered.Waiters = append(filtered.Waiters, waiter)
+			}
+		}
+		if len(filtered.Holders) == 0 && len(filtered.Waiters) == 0 {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "credential_bound", Message: "execution credential cannot inspect this concurrency key",
+			})
+			return
+		}
+		st = filtered
+	}
 	resp := stateResp{
 		Key: st.Key, Capacity: st.Capacity,
 		EffectiveCapacity: st.EffectiveCapacity, UsedCost: st.UsedCost,
