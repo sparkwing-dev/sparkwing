@@ -16,11 +16,12 @@ launcher when testing isolated tool state.
 
 - **The three tiers:** `pre-commit` judges the staged change against this
   repo's source policy and nothing else; the git pre-commit hook runs it.
-  `pre-push` is the fast tier the git pre-push hook runs: the scoped
-  formatting, comment and sleep policy over the whole push, the docs mirror,
-  the changelog, OpenAPI and API-snapshot gates, home resolution, and `go
-  build`, `go vet` and the fast linter subset over the packages the push
-  touches, up to eight of them. Everything
+  `pre-push` is the fast tier the git pre-push hook runs, and it repeats
+  nothing the commit tier already ran: the changelog, OpenAPI and API-snapshot
+  gates, and `go build`, `go vet` and the fast linter subset over the packages
+  the push touches, up to eight of them. The tiers shift left, so a push whose
+  commits skipped the commit hook is judged by `gate` rather than a second
+  time here. Everything
   else is `gate` (the broad check) and `pre-release` (the release boundary),
   which `sparkwing run <name>` runs on demand and which hosted CI runs on every
   pull request and every push to main; no git hook fires either.

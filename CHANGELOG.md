@@ -93,12 +93,16 @@ unlock.
   3 seconds, `pre-push` 10 seconds, and the release cut 5 minutes. Each tier's
   job times its own steps and fails when the class overruns, naming the slowest
   step and its cost; above 50 changed Go files it reports the same figures and
-  passes, because those steps cost per file. `pre-push` adds the fast linter subset over the packages
-  the push touches, and the `release` pipeline runs build, the full linter and
-  the fast test class before it tags. A test whose own runtime passes 200 ms
-  guards itself with `testing.Short`, so the fast class stays fast; `gate`
-  still runs the suite without `-short`. No test suite runs in a hook tier: the
-  fast test class belongs to the release cut.
+  passes, because those steps cost per file. `pre-push` repeats nothing
+  `pre-commit` already ran: it keeps the changelog, OpenAPI and API-snapshot
+  gates and adds `go build`, `go vet` and the fast linter subset over the
+  packages the push touches, and it no longer re-runs the formatters, the
+  comment, sleep and regex sweeps, the docs mirror or home resolution. The
+  `release` pipeline runs build, the full linter and the fast test class before
+  it tags. A test whose own runtime passes 200 ms guards itself with
+  `testing.Short`, so the fast class stays fast; `gate` still runs the suite
+  without `-short`. No test suite runs in a hook tier: the fast test class
+  belongs to the release cut.
 - **k8s runner:** A Job for a cpu class above the warm one is placed on the
   band of machines its class belongs to. The 4-core and 8-core classes select
   nodes labeled `sparkwing.dev/cpu-band: small` and tolerate the matching

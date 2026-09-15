@@ -9,33 +9,30 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PrePush is the fast tier at the push boundary: the source-policy steps the
-// commit tier scopes to one commit, judged here over the whole push, the
-// contract gates a single commit cannot answer, and a compile, a vet and a
-// fast lint of the packages the push touches. Everything that races, lints or
-// tests a whole module is Gate, which runs on demand and in hosted CI.
+// PrePush is the fast tier at the push boundary, and it repeats nothing the
+// commit tier already ran: the contract gates a single commit cannot answer,
+// and a compile, a vet and a fast lint of the packages the whole push touches.
+// Everything that races, lints or tests a whole module is Gate, which runs on
+// demand and in hosted CI.
 type PrePush struct{ sparkwing.Base }
 
 func (PrePush) ShortHelp() string {
-	return "Fast gate for the push boundary: scoped source policy, contract gates, and a compile, vet and fast lint of the touched packages"
+	return "Fast gate for the push boundary: contract gates, and a compile, vet and fast lint of the touched packages"
 }
 
 func (PrePush) Help() string {
-	return "Judges the push against the checks that answer in seconds: gofmt and the configured formatters " +
-		"(gofumpt + goimports) over the changed Go files, no disallowed comments (only GoDoc on exported APIs " +
-		"and // hack:/safety:/bug:/perf: tags), no test that sleeps or waits on the wall clock over that " +
-		"same scope, an embedded pkg/docs/ mirror that matches docs/ and " +
-		"CHANGELOG.md, a CHANGELOG.md entry for every covered surface the push changes " +
-		"(bin/check-changelog.sh), api/openapi.yaml agreeing with the controller's route table " +
-		"(bin/check-api-spec.sh), the public API surface matching the .apidiff/ snapshot " +
-		"(bin/check-api-snapshot.sh), no product file that resolves the sparkwing home itself instead of " +
-		"through internal/paths.DefaultPaths, `go build` and `go vet` over the packages holding the " +
-		"changed Go files, and the fast linter subset over those same packages. The tier is budgeted at " +
-		"ten seconds and fails when its steps overrun it, naming the slowest. Every scoped step reads the commits being pushed, the range " +
-		"origin/main..HEAD, and never the index, so whatever is staged cannot narrow what the push is " +
-		"judged against. go vet, the full test suite, golangci-lint, the race gate, " +
-		"the Postgres suite and the dashboard suites run in `gate`, which hosted CI runs on every pull " +
-		"request and every push to main."
+	return "Judges the push against what the whole change since origin/main can answer and one commit cannot: " +
+		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
+		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
+		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
+		"fast linter subset over the packages holding the changed Go files, up to eight of them. It repeats " +
+		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
+		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
+		"judged by `gate`. Every step reads the commits being pushed, the range origin/main..HEAD, and never " +
+		"the index, so whatever is staged cannot narrow what the push is judged against. The tier is budgeted " +
+		"at ten seconds and fails when its steps overrun it, naming the slowest. The full test suite, " +
+		"golangci-lint over every module, the race gate, the Postgres suite and the dashboard suites run in " +
+		"`gate`, which hosted CI runs on every pull request and every push to main."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
@@ -60,12 +57,6 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)
-	budget.step(w, "gofmt", runGofmtOverThePush)
-	budget.step(w, "formatters", runFormattersOverThePush)
-	budget.step(w, "comments", checkCommentsOverThePush)
-	budget.step(w, "test-sleeps", checkTestSleepsOverThePush)
-	budget.step(w, "docs-mirror", checkDocsMirror)
-	budget.step(w, "home-resolution", checkHomeResolution)
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
 	budget.step(w, "api-snapshot", checkAPISnapshot)
@@ -74,30 +65,6 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	budget.step(w, "lint-touched", runFastLintTouched)
 	budget.verdict(w)
 	return nil, nil
-}
-
-func runGofmtOverThePush(ctx context.Context) error {
-	return gofmtOverScope(ctx, pushRangeScope)
-}
-
-func runFormattersOverThePush(ctx context.Context) error {
-	return formattersOverScope(ctx, pushRangeScope)
-}
-
-func checkCommentsOverThePush(ctx context.Context) error {
-	return runScopedChecker(ctx, "comments", pushRangeCommentCommand)
-}
-
-func checkTestSleepsOverThePush(ctx context.Context) error {
-	return runScopedChecker(ctx, "test-sleeps", pushRangeSleepCommand)
-}
-
-func pushRangeCommentCommand(ctx context.Context) (command, scope string, err error) {
-	return pushRangeCheckerCommand(ctx, "commentcheck", "Go file", existingGoFiles)
-}
-
-func pushRangeSleepCommand(ctx context.Context) (command, scope string, err error) {
-	return pushRangeCheckerCommand(ctx, "sleepcheck", "test file", existingGoTestFiles)
 }
 
 func checkChangelogRequired(ctx context.Context) error {

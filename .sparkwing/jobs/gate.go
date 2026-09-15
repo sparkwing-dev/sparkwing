@@ -219,19 +219,6 @@ func pushRangeScope(ctx context.Context, noun string, keep func([]string) []stri
 		len(files), noun, gateBaselineRef, base), nil
 }
 
-func pushRangeCheckerCommand(ctx context.Context, tool, noun string, keep func([]string) []string) (command, scope string, err error) {
-	_, scope, err = pushRangeScope(ctx, noun, keep)
-	if err != nil {
-		return "", "", err
-	}
-	base, err := resolveGateBase(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	return fmt.Sprintf("go run ./internal/%s -base %s .", tool, base),
-		fmt.Sprintf("%s, plus every untracked %s", scope, noun), nil
-}
-
 var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
 
 var homeDirJoin = regexp.MustCompile(`filepath\.Join\([^,)]*[Hh]ome[^,)]*,\s*"\.sparkwing"`)

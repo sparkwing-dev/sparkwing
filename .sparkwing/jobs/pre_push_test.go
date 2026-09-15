@@ -14,9 +14,8 @@ import (
 
 func TestPrePushRunsTheFastStepsAndNothingElse(t *testing.T) {
 	want := []string{
-		"api-snapshot", "api-spec", "budget", "build-touched", "changelog", "comments",
-		"docs-mirror", "formatters", "gofmt", "home-resolution", "lint-touched",
-		"test-sleeps", "vet-touched",
+		"api-snapshot", "api-spec", "budget", "build-touched", "changelog",
+		"lint-touched", "vet-touched",
 	}
 	if got := stepIDs(t, &PrePush{}); !slices.Equal(got, want) {
 		t.Fatalf("pre-push steps = %v, want %v", got, want)
@@ -186,39 +185,14 @@ func TestVetTouchedJudgesTheTestFilesBuildNeverReads(t *testing.T) {
 	}
 }
 
-func TestTheHookTiersAndTheGateRunTheSameCheckers(t *testing.T) {
-	root := gateFixtureRepo(t)
-	gitCommitAll(t, root, "clean base")
-	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
-	ctx := context.Background()
-
-	for _, tc := range []struct {
-		checker string
-		hook    func(context.Context) (string, string, error)
-		gate    func(context.Context) (string, string, error)
-	}{
-		{"comments", pushRangeCommentCommand, commentCheckCommand},
-		{"test-sleeps", pushRangeSleepCommand, sleepCheckCommand},
-	} {
-		hookCmd, _, err := tc.hook(ctx)
-		if err != nil {
-			t.Fatal(err)
+func TestThePushTierRepeatsNothingTheCommitTierAlreadyRan(t *testing.T) {
+	commit := stepIDs(t, &PreCommit{})
+	for _, id := range stepIDs(t, &PrePush{}) {
+		if id == budgetStepID {
+			continue
 		}
-		gateCmd, _, err := tc.gate(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if tool(hookCmd) != tool(gateCmd) {
-			t.Errorf("%s runs %q at the push and %q in the gate: a shared step name that runs a different check is how a tier stops judging what it claims to",
-				tc.checker, tool(hookCmd), tool(gateCmd))
+		if slices.Contains(commit, id) {
+			t.Errorf("pre-push runs %q, which pre-commit already ran over the same files: the tiers shift left, and a push pays only for what the whole change since main can answer", id)
 		}
 	}
-}
-
-func tool(command string) string {
-	fields := strings.Fields(command)
-	if len(fields) < 3 {
-		return command
-	}
-	return strings.Join(fields[:3], " ")
 }
