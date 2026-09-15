@@ -895,11 +895,63 @@ func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error
 // refused, as is a rate outside one micro-credit to MaxCreditRateMicro, a
 // scalar rate beside a rate table, a negative grace period, and a charge cap
 // outside MinCreditMaxChargeSeconds to MaxCreditMaxChargeSeconds. Every
-// refusal is an ErrInvalidCreditSetting.
+// refusal is an ErrInvalidCreditSetting. Programmatic callers may update the
+// scalar after storing a table; operator surfaces use
+// [Store.SetOperatorCreditSettings] to keep the table authoritative.
 func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error) {
-	var out CreditSettings
+	writes, err := creditSettingsWrites(up)
+	if err != nil {
+		return CreditSettings{}, err
+	}
+	tx, err := s.beginCreditSettingsTx(ctx)
+	if err != nil {
+		return CreditSettings{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	out, err := writeCreditSettingsTx(ctx, tx, writes)
+	if err != nil {
+		return CreditSettings{}, err
+	}
+	return out, tx.Commit()
+}
+
+// SetOperatorCreditSettings applies an operator's settings update and keeps a
+// stored rate table authoritative. A scalar rate may win before the first
+// table is stored; after that, the operator must update the table. The
+// authority check and every write share one serialized transaction.
+func (s *Store) SetOperatorCreditSettings(
+	ctx context.Context, up CreditSettingsUpdate,
+) (_ CreditSettings, err error) {
+	writes, err := creditSettingsWrites(up)
+	if err != nil {
+		return CreditSettings{}, err
+	}
+	tx, err := s.beginCreditSettingsTx(ctx)
+	if err != nil {
+		return CreditSettings{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if up.RateMicroPerSecond != nil && up.RateTable == nil {
+		raw, err := creditSettingRawTx(ctx, tx, metaKeyCreditRateTable)
+		if err != nil {
+			return CreditSettings{}, err
+		}
+		if raw != "" {
+			return CreditSettings{}, fmt.Errorf(
+				"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
+				ErrInvalidCreditSetting)
+		}
+	}
+	out, err := writeCreditSettingsTx(ctx, tx, writes)
+	if err != nil {
+		return CreditSettings{}, err
+	}
+	return out, tx.Commit()
+}
+
+func creditSettingsWrites(up CreditSettingsUpdate) (map[string]string, error) {
 	if err := up.validate(); err != nil {
-		return out, err
+		return nil, err
 	}
 	scalars := up.byKey()
 	writes := make(map[string]string, len(scalars)+2)
@@ -908,14 +960,34 @@ func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) 
 	}
 	if up.RateTable != nil {
 		if err := addCreditRateTableWrites(writes, *up.RateTable); err != nil {
-			return out, err
+			return nil, err
 		}
 	}
+	return writes, nil
+}
+
+// safety: SQLite's immediate transaction already serializes writers. The
+// Postgres advisory lock gives its read-committed transaction the same single
+// settings writer before an operator checks which rate representation owns the
+// price.
+func (s *Store) beginCreditSettingsTx(ctx context.Context) (*storeTx, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return out, err
+		return nil, err
 	}
-	defer rollbackUnlessDone(tx, &err)
+	if s.dialect == DialectPostgres {
+		if _, err := tx.ExecContext(ctx,
+			`SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/credit-settings"); err != nil {
+			rollbackOrLog(tx)
+			return nil, err
+		}
+	}
+	return tx, nil
+}
+
+func writeCreditSettingsTx(
+	ctx context.Context, tx *storeTx, writes map[string]string,
+) (CreditSettings, error) {
 	keys := make([]string, 0, len(writes))
 	for key := range writes {
 		keys = append(keys, key)
@@ -926,14 +998,10 @@ func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) 
 	for _, key := range keys {
 		if _, err := tx.ExecContext(ctx, upsertCreditSettingSQL,
 			key, writes[key], time.Now().UnixNano()); err != nil {
-			return out, err
+			return CreditSettings{}, err
 		}
 	}
-	out, err = creditSettingsTx(ctx, tx)
-	if err != nil {
-		return out, err
-	}
-	return out, tx.Commit()
+	return creditSettingsTx(ctx, tx)
 }
 
 // ErrInvalidCreditSetting is the class of every refusal SetCreditSettings
@@ -1137,11 +1205,6 @@ func parseCreditSetting(raw string, fallback int64) int64 {
 		return fallback
 	}
 	return v
-}
-
-func (s *Store) setCreditSetting(ctx context.Context, key string, v int64) error {
-	_, err := s.exec(ctx, upsertCreditSettingSQL, key, formatCreditSetting(v), time.Now().UnixNano())
-	return err
 }
 
 func setCreditSettingTx(ctx context.Context, tx *storeTx, key, value string) error {

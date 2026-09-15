@@ -1432,6 +1432,9 @@ func (s *Store) SetNodeArtifactManifestCharged(
 ) (err error)
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
+func (s *Store) SetOperatorCreditSettings(
+	ctx context.Context, up CreditSettingsUpdate,
+) (_ CreditSettings, err error)
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error

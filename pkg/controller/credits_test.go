@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -718,6 +719,65 @@ func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testi
 	}
 }
 
+func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
+	f := newCreditsFixture(t, false)
+
+	status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
+		"rate_table":    map[string]int64{"2": 999_999, "4": 20_000},
+		"grace_seconds": nil,
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("mixed write = %d, want 400", status)
+	}
+	_, view := creditSettings(t, f, http.MethodGet, nil)
+	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 6 {
+		t.Fatalf("the good half of a refused write changed prices: %+v", view)
+	}
+}
+
+func TestCreditSettings_ConcurrentTableAndScalarKeepASerialResult(t *testing.T) {
+	const scalarWrites = 8
+	for attempt := range 10 {
+		f := newCreditsFixture(t, false)
+		start := make(chan struct{})
+		statuses := make([]int, scalarWrites+1)
+		var wg sync.WaitGroup
+		wg.Add(len(statuses))
+		go func() {
+			defer wg.Done()
+			<-start
+			statuses[0], _ = creditsRequest(t, http.MethodPut,
+				f.url+"/api/v1/credits/settings", f.admin,
+				map[string]any{"rate_table": map[string]int64{"4": 20_000}})
+		}()
+		for i := 1; i < len(statuses); i++ {
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				statuses[i], _ = creditsRequest(t, http.MethodPut,
+					f.url+"/api/v1/credits/settings", f.admin,
+					map[string]any{"rate_micro_per_second": 99_000})
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		_, view := creditSettings(t, f, http.MethodGet, nil)
+		if statuses[0] != http.StatusOK {
+			t.Fatalf("attempt %d statuses = %v", attempt, statuses)
+		}
+		for _, status := range statuses[1:] {
+			if status != http.StatusOK && status != http.StatusBadRequest {
+				t.Fatalf("attempt %d statuses = %v", attempt, statuses)
+			}
+		}
+		if !view.RateTableSet || view.rateFor(4) != 20_000 {
+			t.Fatalf("attempt %d produced a non-serial result: statuses=%v settings=%+v",
+				attempt, statuses, view)
+		}
+	}
+}
+
 func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
 	f := newCreditsFixture(t, false)
 
@@ -794,6 +854,7 @@ func TestCreditSettings_RefusesARateTableTheLedgerCannotPrice(t *testing.T) {
 
 	for name, body := range map[string]map[string]any{
 		"no class":   {"rate_table": []map[string]any{}},
+		"null table": {"rate_table": nil},
 		"zero cores": {"rate_table": []map[string]any{{"cores": 0, "micro_per_second": 1}}},
 		"zero rate":  {"rate_table": []map[string]any{{"cores": 2, "micro_per_second": 0}}},
 		"a class twice": {"rate_table": []map[string]any{

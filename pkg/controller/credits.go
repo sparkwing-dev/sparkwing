@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +86,25 @@ func (r setCreditSettingsReq) update() store.CreditSettingsUpdate {
 	return out
 }
 
+func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error {
+	type wire setCreditSettingsReq
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode((*wire)(r)); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for name, value := range fields {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s must not be null", name)
+		}
+	}
+	return nil
+}
+
 // safety: operators write the table both ways, so a body may name it as a list
 // of entries or as an object keyed by cores.
 type creditRateTableIn struct {
@@ -92,6 +112,9 @@ type creditRateTableIn struct {
 }
 
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("rate_table must be a list or object, not null")
+	}
 	var list []creditRateJSON
 	if err := json.Unmarshal(raw, &list); err == nil {
 		t.table = make(store.CreditRateTable, 0, len(list))
@@ -203,11 +226,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.refuseDerivedRateWrite(r, body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	settings, err := s.store.SetCreditSettings(r.Context(), body.update())
+	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			writeError(w, http.StatusBadRequest, err)
@@ -223,30 +242,6 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
 		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
-}
-
-// safety: with a table stored the scalar is the four-core entry under another
-// name, so writing it alone would move one class without saying so; the caller
-// is told to write the table instead.
-func (s *Server) refuseDerivedRateWrite(r *http.Request, body setCreditSettingsReq) error {
-	if body.RateMicroPerSecond == nil {
-		return nil
-	}
-	if body.RateTable != nil {
-		return fmt.Errorf(
-			"%w: rate_micro_per_second is the four-core entry of the rate table; name one or the other",
-			store.ErrInvalidCreditSetting)
-	}
-	set, err := s.store.CreditRateTableSet(r.Context())
-	if err != nil {
-		return err
-	}
-	if !set {
-		return nil
-	}
-	return fmt.Errorf(
-		"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
-		store.ErrInvalidCreditSetting)
 }
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {

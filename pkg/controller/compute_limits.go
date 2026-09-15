@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -45,6 +47,36 @@ type computeUsageJSON struct {
 
 type setComputeLimitsReq struct {
 	Limits map[string]int64 `json:"limits"`
+}
+
+func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error {
+	type wire setComputeLimitsReq
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode((*wire)(r)); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	limits, present := fields["limits"]
+	if !present {
+		return nil
+	}
+	if bytes.Equal(bytes.TrimSpace(limits), []byte("null")) {
+		return errors.New("limits must be an object, not null")
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(limits, &values); err != nil {
+		return err
+	}
+	for name, value := range values {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("%s must not be null", name)
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request) {

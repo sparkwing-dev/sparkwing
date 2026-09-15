@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -947,6 +948,43 @@ WHEN NEW.key = 'credit_rate_table' BEGIN SELECT RAISE(ABORT, 'rate table refused
 	}
 	if settings.RateTableSet || settings.GraceSeconds != store.DefaultCreditGraceSeconds {
 		t.Fatalf("the failed transaction changed settings: %+v", settings)
+	}
+}
+
+func TestSetOperatorCreditSettingsSerializesRateAuthority(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	start := make(chan struct{})
+	table := store.CreditRateTable{{Cores: 4, MicroPerSecond: 20_000}}
+	scalar := int64(99_000)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		errs[0] = s.SetCreditRateTable(ctx, table)
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_, errs[1] = s.SetOperatorCreditSettings(ctx,
+			store.CreditSettingsUpdate{RateMicroPerSecond: &scalar})
+	}()
+	close(start)
+	wg.Wait()
+	if errs[0] != nil {
+		t.Fatalf("set table: %v", errs[0])
+	}
+	if errs[1] != nil && !errors.Is(errs[1], store.ErrInvalidCreditSetting) {
+		t.Fatalf("set scalar: %v", errs[1])
+	}
+	settings, err := s.CreditSettings(ctx)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if !settings.RateTableSet || settings.RateMicroPerSecond != 20_000 {
+		t.Fatalf("concurrent operator writes produced %+v", settings)
 	}
 }
 

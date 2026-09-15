@@ -53,9 +53,11 @@ unlock.
 ### Fixed
 
 - **store + controller:** Credit rate tables and their scalar settings now
-  validate and commit in one `Store.SetCreditSettings` transaction. Compute
-  guard batches do the same through `Store.SetComputeLimits`. A rejected field
-  or database write leaves every setting unchanged, and both operations return
+  validate and commit in one transaction. Operator updates serialize the rate
+  authority check through `Store.SetOperatorCreditSettings`, while the existing
+  programmatic scalar setter keeps its behavior. Compute guard batches commit
+  through `Store.SetComputeLimits`. A rejected field, explicit JSON null or
+  database write leaves every setting unchanged, and each operation returns
   the complete settings snapshot after a successful commit.
 
 - **checks:** accept GitHub's supported publication queue with the pinned

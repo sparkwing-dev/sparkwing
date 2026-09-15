@@ -135,6 +135,35 @@ func TestComputeLimits_RefusesBadSiblingWithoutChangingGuards(t *testing.T) {
 	}
 }
 
+func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 7)
+
+	status, body := creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		map[string]any{"limits": map[string]any{store.ComputeLimitGlobalRunners: nil}})
+	if status != http.StatusBadRequest {
+		t.Fatalf("null write = %d: %s", status, body)
+	}
+	status, body = creditsRequest(t, http.MethodPut, f.url+"/api/v1/compute-limits", f.admin,
+		map[string]any{"limits": nil})
+	if status != http.StatusBadRequest {
+		t.Fatalf("null limits = %d: %s", status, body)
+	}
+	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/compute-limits", f.readonly, nil)
+	if status != http.StatusOK {
+		t.Fatalf("show = %d: %s", status, body)
+	}
+	var view struct {
+		Limits map[string]int64 `json:"limits"`
+	}
+	if err := json.Unmarshal(body, &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := view.Limits[store.ComputeLimitGlobalRunners]; got != 7 {
+		t.Fatalf("explicit null reset the global runner cap to %d", got)
+	}
+}
+
 func TestComputeLimits_ClaimRefusedByTheRunnerGuard(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
