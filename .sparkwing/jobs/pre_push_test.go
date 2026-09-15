@@ -66,31 +66,45 @@ func TestPrePushAdmitsAheadOfTheBroadGate(t *testing.T) {
 			prepush.PriorityValue(), gate.PriorityValue())
 	}
 	hints := prepush.ResourceHints()
-	if hints == nil || hints.Cores != float64(prePushCores(runtime.NumCPU())) {
-		t.Fatalf("pre-push reserved cores = %#v, want the %v its compiles are bounded to",
-			hints, float64(prePushCores(runtime.NumCPU())))
+	if hints == nil || hints.Cores != float64(prePushReservationCores(runtime.NumCPU())) {
+		t.Fatalf("pre-push reserved cores = %#v, want %v for its three concurrent compiler tasks",
+			hints, float64(prePushReservationCores(runtime.NumCPU())))
 	}
 }
 
-// TestPrePushFitsBesideAGateOnEveryMachine judges the reservation at fixed core
-// counts rather than at this machine's, so a runner smaller than the author's
-// box reaches the same verdict.
-func TestPrePushFitsBesideAGateOnEveryMachine(t *testing.T) {
-	for _, cpuCount := range []int{1, 2, 4, 8, 14, 64} {
-		reserved := float64(prePushCores(cpuCount))
-		if reserved > gateCoreReservation(cpuCount) {
-			t.Errorf("on %d cores pre-push reserves %v, more than the gate's %v, so the fast tier no longer fits beside a running gate",
-				cpuCount, reserved, gateCoreReservation(cpuCount))
+// TestPrePushAccountsForItsConcurrentCompilersOnEveryMachine judges fixed core
+// counts so a small runner and the author's box reach the same verdict.
+func TestPrePushAccountsForItsConcurrentCompilersOnEveryMachine(t *testing.T) {
+	for _, tc := range []struct {
+		cpus    int
+		reserve int
+		task    int
+	}{
+		{cpus: 1, reserve: 1, task: 1},
+		{cpus: 2, reserve: 2, task: 1},
+		{cpus: 4, reserve: 4, task: 1},
+		{cpus: 8, reserve: 8, task: 2},
+		{cpus: 14, reserve: 9, task: 3},
+		{cpus: 64, reserve: 9, task: 3},
+	} {
+		if got := prePushReservationCores(tc.cpus); got != tc.reserve {
+			t.Errorf("on %d cores pre-push reserves %d, want %d for three concurrent compiler tasks", tc.cpus, got, tc.reserve)
 		}
-		if reserved < 1 {
-			t.Errorf("on %d cores pre-push reserves %v, which schedules nothing", cpuCount, reserved)
+		if got := prePushTaskCores(tc.cpus); got != tc.task {
+			t.Errorf("on %d cores each compiler task gets %d cores, want %d", tc.cpus, got, tc.task)
 		}
-		if reserved > prePushCoreCap {
-			t.Errorf("on %d cores pre-push reserves %v, past the %d its compiles need", cpuCount, reserved, prePushCoreCap)
+		want := fmt.Sprintf("GOMAXPROCS=%d", tc.task)
+		if got := goCommandAt(prePushTaskCores(tc.cpus), "build", "./x"); !strings.Contains(got, want) {
+			t.Errorf("on %d cores the touched compile command = %q, want %s", tc.cpus, got, want)
 		}
-		want := fmt.Sprintf("GOMAXPROCS=%d", prePushCores(cpuCount))
-		if got := goCommandAt(prePushCores(cpuCount), "build", "./x"); !strings.Contains(got, want) {
-			t.Errorf("on %d cores the touched compile is not bounded to the reservation: %q, want %s", cpuCount, got, want)
+	}
+}
+
+func TestFastLintBoundsGoAndLinterParallelismTogether(t *testing.T) {
+	got := fastLintCommand(3, []string{"./internal/x"})
+	for _, want := range []string{"GOMAXPROCS=3", " -j 3 "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("fast lint command = %q, want %q", got, want)
 		}
 	}
 }
