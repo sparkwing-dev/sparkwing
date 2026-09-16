@@ -153,8 +153,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 	startedAt := now.UnixNano()
 	paidThrough := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
-	// safety: the claim reserves funds, while this exact fenced attempt starts
-	// consuming them. The duplicate path above returns before moving the window.
+	// safety: only the first exact fenced attempt may move the reservation to
+	// its execution boundary; a replay must preserve the original boundary.
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
 	   SET attempts_consumed = ?,
 	       credit_charged_through = CASE

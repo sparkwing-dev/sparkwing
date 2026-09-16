@@ -612,8 +612,10 @@ the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
 `SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`.
 `run-node` sends that fence on every state write and log append. The claim is
 what the controller's node-mutation fence admits, and on a metered token it is
-what reserves the minute the run bills. The plain `--trigger-runner k8s` path
-takes the same claim, because it builds the same Job.
+what reserves a minute for concurrent spend safety. Billing begins when the
+fenced pod acknowledges its exact execution attempt immediately before the
+node body runs. The plain `--trigger-runner k8s` path takes the same claim,
+because it builds the same Job.
 
 The route awards an unlabelled node the queue has already opened to any
 `nodes.claim` token. A node the queue has not opened, and a node that declares

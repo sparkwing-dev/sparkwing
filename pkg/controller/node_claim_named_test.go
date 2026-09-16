@@ -178,7 +178,7 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 		t.Fatalf("charges after the claim = %+v, want one reservation", charges)
 	}
 
-	rewindNamedChargeWindow(t, f.store, "run-1", "build", time.Now().Add(-90*time.Second))
+	setNodeChargeWindow(t, f.store, "run-1", "build", time.Now().Add(-90*time.Second))
 	fenced := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
@@ -235,17 +235,6 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 				t.Fatalf("charges = %+v, want the reservation and its complete refund", charges)
 			}
 		})
-	}
-}
-
-func rewindNamedChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
-	t.Helper()
-	if _, err := st.DB().Exec(
-		`UPDATE nodes SET credit_charged_through = ?,
-		 execution_started_at = COALESCE(execution_started_at, ?)
-		 WHERE run_id = ? AND node_id = ?`,
-		at.UnixNano(), at.Add(-store.CreditClaimFloorSeconds*time.Second).UnixNano(), runID, nodeID); err != nil {
-		t.Fatalf("rewind the charge window: %v", err)
 	}
 }
 

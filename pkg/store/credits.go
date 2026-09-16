@@ -1441,16 +1441,28 @@ func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPre
 func (s *Store) chargeNode(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time, final bool,
 ) (_ CreditChargeResult, err error) {
-	var out CreditChargeResult
 	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return CreditChargeResult{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	out, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, final)
 	if err != nil {
 		return out, err
 	}
-	defer rollbackUnlessDone(tx, &err)
+	if err := tx.Commit(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
 
+func (s *Store) chargeNodeTx(
+	ctx context.Context, tx *storeTx, runID, nodeID, tokenPrefix string, now time.Time, final bool,
+) (CreditChargeResult, error) {
+	var out CreditChargeResult
 	var anchor, class int64
 	var startedAt sql.NullInt64
-	err = tx.QueryRowContext(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT credit_charged_through, credit_cpu_class, execution_started_at FROM nodes
 		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
 		runID, nodeID).Scan(&anchor, &class, &startedAt)
@@ -1514,7 +1526,7 @@ func (s *Store) chargeNode(
 		}
 	}
 	if final && anchor == 0 {
-		return out, tx.Commit()
+		return out, nil
 	}
 
 	balance, err := creditBalanceTx(ctx, tx)
@@ -1523,16 +1535,13 @@ func (s *Store) chargeNode(
 	}
 	out.BalanceMicro = balance
 	if !startedAt.Valid && !final {
-		return out, tx.Commit()
+		return out, nil
 	}
 	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
 		Balance: balance, NowNS: nowNS, Grace: grace,
 		RunID: runID, NodeID: nodeID, Anchor: anchor,
 	})
 	if err != nil {
-		return out, err
-	}
-	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.ExhaustedFor = exhaustedFor
@@ -1914,15 +1923,15 @@ func (s *Store) CancelNodeForComputeLimit(
 func (s *Store) cancelMeteredNode(
 	ctx context.Context, runID, nodeID, tokenPrefix, reason, message string, now time.Time,
 ) (err error) {
-	if _, err := s.FinalizeNodeCredits(ctx, runID, nodeID, tokenPrefix, now); err != nil {
-		return err
-	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
+	if _, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, true); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
