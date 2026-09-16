@@ -129,6 +129,27 @@ test("serial polling waits for one response and drops a cancelled response", asy
   assert.deepEqual(published, ["first"]);
 });
 
+test("serial polling retries after a rejected response", async () => {
+  let attempts = 0;
+  let recovered!: (value: string) => void;
+  const published = new Promise<string>((resolve) => {
+    recovered = resolve;
+  });
+  const stop = startSerialPolling({
+    load: async () => {
+      attempts++;
+      if (attempts === 1) throw new SyntaxError("truncated JSON");
+      return "recovered";
+    },
+    publish: recovered,
+    intervalMS: 0,
+  });
+
+  assert.equal(await published, "recovered");
+  stop();
+  assert.equal(attempts, 2);
+});
+
 test("node summary separates reservations, exact totals, and command samples", () => {
   const node: Node = {
     id: "build",

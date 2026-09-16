@@ -1,4 +1,10 @@
-import type { Node, NodeMetrics, QueueResource, QueueState } from "./api";
+import type {
+  MetricPoint,
+  Node,
+  NodeMetrics,
+  QueueResource,
+  QueueState,
+} from "./api";
 
 export interface HostPressureDimension {
   capacity: number;
@@ -30,7 +36,7 @@ export interface NodeResourceSummary {
 
 const hostPressureWindowMS = 5 * 60 * 1000;
 
-export interface SerialPollingOptions<T> {
+interface SerialPollingOptions<T> {
   load: () => Promise<T>;
   publish: (value: T) => void;
   intervalMS: number | null;
@@ -56,10 +62,14 @@ export function startSerialPolling<T>({
       schedule();
       return;
     }
-    const value = await load();
-    if (stopped) return;
-    publish(value);
-    schedule();
+    try {
+      const value = await load();
+      if (!stopped) publish(value);
+    } catch {
+      // A failed decode drops one sample so the next poll can recover live updates.
+    } finally {
+      schedule();
+    }
   };
 
   void poll();
@@ -67,6 +77,10 @@ export function startSerialPolling<T>({
     stopped = true;
     if (timer !== undefined) clearTimeout(timer);
   };
+}
+
+export function isCommandMetricPoint(point: MetricPoint): boolean {
+  return (point.cpu_time_nanos ?? 0) > 0;
 }
 
 function hostDimension(resource: QueueResource | undefined): HostPressureDimension | null {
@@ -118,12 +132,8 @@ export function summarizeNodeResources(
   metrics: NodeMetrics | null,
 ): NodeResourceSummary {
   const points = metrics?.points ?? [];
-  const samplerPoints = points.filter(
-    (point) => (point.cpu_time_nanos ?? 0) <= 0,
-  );
-  const commandPoints = points.filter(
-    (point) => (point.cpu_time_nanos ?? 0) > 0,
-  );
+  const samplerPoints = points.filter((point) => !isCommandMetricPoint(point));
+  const commandPoints = points.filter(isCommandMetricPoint);
   const exactWall = Math.max(node.process_wall_nanos ?? 0, 0);
   const exactCPU = Math.max(node.cpu_nanos ?? 0, 0);
   return {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { type Node, type NodeMetrics, getNodeMetrics } from "@/lib/api";
 import {
+  isCommandMetricPoint,
   startSerialPolling,
   summarizeNodeResources,
 } from "@/lib/resourceObservability";
@@ -98,7 +99,7 @@ export default function ResourceChart({
 
   const summary = summarizeNodeResources(node, metrics);
   const samplerPoints = metrics.points.filter(
-    (point) => (point.cpu_time_nanos ?? 0) <= 0,
+    (point) => !isCommandMetricPoint(point),
   );
   const startTime = samplerPoints[0]
     ? new Date(samplerPoints[0].ts).getTime()
