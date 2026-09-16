@@ -1418,6 +1418,7 @@ type CreditChargeResult struct {
 	// ForgivenSeconds is the gap the charge cap refused to bill, which is
 	// non-zero only after the controller or the heartbeat loop stalled.
 	ForgivenSeconds int64
+	settledAt       time.Time
 }
 
 // ChargeNodeCredits bills the seconds this node has run since its previous
@@ -1498,6 +1499,7 @@ func (s *Store) chargeNodeTx(
 	if startedAt.Valid && nowNS < startedAt.Int64 {
 		nowNS = startedAt.Int64
 	}
+	out.settledAt = time.Unix(0, nowNS)
 	rate := chargeRate(table, class)
 	through := anchor
 	if !startedAt.Valid {
@@ -1936,9 +1938,11 @@ func (s *Store) cancelMeteredNode(
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if _, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, true); err != nil {
+	settlement, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, true)
+	if err != nil {
 		return err
 	}
+	stoppedAt := settlement.settledAt.UnixNano()
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
    SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
@@ -1947,7 +1951,7 @@ func (s *Store) cancelMeteredNode(
        ready_at = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-		message, reason, now.UnixNano(), runID, nodeID); err != nil {
+		message, reason, stoppedAt, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -1958,7 +1962,7 @@ func (s *Store) cancelMeteredNode(
    SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
        failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
  WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		now.UnixNano(), reason, runID, nodeID); err != nil {
+		stoppedAt, reason, runID, nodeID); err != nil {
 		return err
 	}
 	return tx.Commit()

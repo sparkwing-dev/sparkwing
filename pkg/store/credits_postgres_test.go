@@ -72,6 +72,19 @@ func TestPostgresCancellationKeepsReservationUntilExecutionStartIsFenced(t *test
 	if net < 0 {
 		t.Fatalf("settled charge = %d, want cancellation to mint no credits", net)
 	}
+	var nodeStarted, nodeFinished, attemptStarted, attemptFinished int64
+	if err := s.DB().QueryRowContext(ctx, `
+SELECT n.execution_started_at, n.finished_at, a.started_at, a.finished_at
+  FROM nodes n
+  JOIN node_execution_attempts a ON a.run_id = n.run_id AND a.node_id = n.node_id
+ WHERE n.run_id = $1 AND n.node_id = $2`, n.RunID, n.NodeID).Scan(
+		&nodeStarted, &nodeFinished, &attemptStarted, &attemptFinished); err != nil {
+		t.Fatal(err)
+	}
+	if nodeFinished < nodeStarted || attemptFinished < attemptStarted {
+		t.Fatalf("finish preceded execution start: node %d < %d, attempt %d < %d",
+			nodeFinished, nodeStarted, attemptFinished, attemptStarted)
+	}
 }
 
 func waitForPostgresEligibilityWaiter(ctx context.Context, s *store.Store) error {
