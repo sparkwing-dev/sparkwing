@@ -28,9 +28,9 @@ unlock.
   packages while each remains at `GOMAXPROCS=1`, and the gate declares the
   resulting 2.5-core workload. Other CPU classes retain their existing graph
   and Go parallelism.
-- **observability:** Step lifecycle, annotation, and summary writes that fail
-  emit one bounded, secret-masked diagnostic policy with run, node, and step
-  identity. Execution outcomes remain separate from failures to record them.
+- **observability:** Failed writes of step state, annotations, or summaries
+  emit bounded, secret-masked warnings with run, node, and applicable step
+  identity. Execution outcomes remain unchanged.
 
 - **admission:** Queue waits now print one machine-first stream: running
   pipelines and their charges, queued count and place, request provenance,
