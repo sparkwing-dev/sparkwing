@@ -292,6 +292,85 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 	}
 }
 
+func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, s, "runner:shared-pool")
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCredit, "pay_attribution", "admin"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	create := func(principal, runID string) {
+		t.Helper()
+		created := store.WithCreatingPrincipal(ctx, principal)
+		if err := s.CreateRun(created, store.Run{
+			ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+		if err := s.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatalf("create node %s: %v", runID, err)
+		}
+	}
+	create("tenant-a", "run-a")
+	create("tenant-b", "run-b")
+
+	claimedAt := time.Now()
+	if _, err := s.ClaimNamedNode(ctx, pool, "run-a", "build", "pod-a", time.Minute,
+		store.NamedClaimOptions{}); err != nil {
+		t.Fatalf("claim tenant A: %v", err)
+	}
+	if res, err := s.FinalizeNodeCredits(ctx, "run-a", "build", pool.TokenPrefix,
+		claimedAt.Add(5*time.Second)); err != nil || res.Charge == nil || res.Charge.Kind != store.CreditChargeRefund {
+		t.Fatalf("finalize tenant A = %+v, %v; want a refund", res.Charge, err)
+	}
+	if res, err := s.FinalizeNodeCredits(ctx, "run-a", "build", pool.TokenPrefix,
+		claimedAt.Add(5*time.Second)); err != nil || res.Charge != nil {
+		t.Fatalf("repeat finalize tenant A = %+v, %v; want no charge", res.Charge, err)
+	}
+
+	if _, err := s.ClaimNamedNode(ctx, pool, "run-b", "build", "pod-b", time.Minute,
+		store.NamedClaimOptions{}); err != nil {
+		t.Fatalf("claim tenant B: %v", err)
+	}
+	usageStart := time.Now()
+	rewindChargeWindow(t, s, "run-b", "build", usageStart)
+	usageAt := usageStart.Add(10 * time.Second)
+	if res, err := s.ChargeNodeCredits(ctx, "run-b", "build", pool.TokenPrefix, usageAt); err != nil ||
+		res.Charge == nil || res.Charge.Kind != store.CreditChargeUsage {
+		t.Fatalf("charge tenant B = %+v, %v; want usage", res.Charge, err)
+	}
+	if res, err := s.ChargeNodeCredits(ctx, "run-b", "build", pool.TokenPrefix, usageAt); err != nil ||
+		res.Charge != nil {
+		t.Fatalf("repeat charge tenant B = %+v, %v; want no charge", res.Charge, err)
+	}
+
+	for _, runID := range []string{"run-a", "run-b"} {
+		if err := s.DeleteRun(ctx, runID); err != nil {
+			t.Fatalf("delete %s: %v", runID, err)
+		}
+	}
+	charges, err := s.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatalf("list charges: %v", err)
+	}
+	if len(charges) != 4 {
+		t.Fatalf("charges = %+v, want two reservations, one refund and one usage charge", charges)
+	}
+	for _, charge := range charges {
+		want := "tenant-a"
+		if charge.RunID == "run-b" {
+			want = "tenant-b"
+		}
+		if charge.Principal != want {
+			t.Errorf("%s/%s principal = %q, want %q", charge.RunID, charge.Kind, charge.Principal, want)
+		}
+		if charge.Principal == pool.Principal {
+			t.Errorf("%s/%s attributed to runner pool %q", charge.RunID, charge.Kind, pool.Principal)
+		}
+	}
+}
+
 // A node still inside the minute its claim reserved is charged nothing more,
 // because that minute is already paid for.
 func TestChargeNodeCreditsDoesNotDoubleChargeTheReservedMinute(t *testing.T) {
