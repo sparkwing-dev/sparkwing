@@ -88,22 +88,22 @@ func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 			i++
 		case strings.HasPrefix(tok, "--name="):
 			parsed.pipeline = strings.TrimPrefix(tok, "--name=")
-		case tok == "--sw-start-at":
+		case tok == "--start-at":
 			if i+1 >= len(args) {
 				return parsed, false, errors.New("plan: --start-at expects a value")
 			}
 			parsed.startAt = args[i+1]
 			i++
-		case strings.HasPrefix(tok, "--sw-start-at="):
-			parsed.startAt = strings.TrimPrefix(tok, "--sw-start-at=")
-		case tok == "--sw-stop-at":
+		case strings.HasPrefix(tok, "--start-at="):
+			parsed.startAt = strings.TrimPrefix(tok, "--start-at=")
+		case tok == "--stop-at":
 			if i+1 >= len(args) {
 				return parsed, false, errors.New("plan: --stop-at expects a value")
 			}
 			parsed.stopAt = args[i+1]
 			i++
-		case strings.HasPrefix(tok, "--sw-stop-at="):
-			parsed.stopAt = strings.TrimPrefix(tok, "--sw-stop-at=")
+		case strings.HasPrefix(tok, "--stop-at="):
+			parsed.stopAt = strings.TrimPrefix(tok, "--stop-at=")
 		default:
 			parsed.passthrough = append(parsed.passthrough, tok)
 		}

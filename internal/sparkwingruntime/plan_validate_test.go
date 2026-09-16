@@ -56,6 +56,21 @@ func TestValidateStepRange_KnownIDsOK(t *testing.T) {
 	}
 }
 
+func TestValidateStepRange_UnknownStopNamesRuntimeFlag(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("step-range-validate-stop",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })
+	reg, _ := sparkwing.Lookup("step-range-validate-stop")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "step-range-validate-stop"})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	got := sparkwingruntime.ValidateStepRange(plan, "", "compilee")
+	if got == nil || !strings.Contains(got.Error(), `--sw-stop-at "compilee"`) {
+		t.Fatalf("stop error = %v, want runtime-facing --sw-stop-at", got)
+	}
+}
+
 func TestValidateStepRange_EmptyBoundsNoOp(t *testing.T) {
 	sparkwing.Register[sparkwing.NoInputs]("step-range-validate-empty",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })

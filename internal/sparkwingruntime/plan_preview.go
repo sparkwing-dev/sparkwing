@@ -72,7 +72,7 @@ func PreviewPlan(plan *sparkwing.Plan, pipeline string, resolvedArgs map[string]
 	if plan == nil {
 		return nil, fmt.Errorf("PreviewPlan: plan is nil")
 	}
-	if err := ValidateStepRange(plan, opts.StartAt, opts.StopAt); err != nil {
+	if err := validateStepRange(plan, opts.StartAt, opts.StopAt, "--start-at", "--stop-at"); err != nil {
 		return nil, err
 	}
 	out := &PlanPreview{

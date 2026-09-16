@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -53,6 +55,74 @@ func TestRunLocal_StartAtSkipsUpstreamSteps(t *testing.T) {
 	if !stepRangeFlags.b.Load() || !stepRangeFlags.c.Load() {
 		t.Errorf("compile + publish should run; got compile=%v publish=%v",
 			stepRangeFlags.b.Load(), stepRangeFlags.c.Load())
+	}
+}
+
+func TestStepRange_PreviewMatchesPersistedExecution(t *testing.T) {
+	const pipeline = "orch-step-range-preview-parity"
+	register(pipeline, func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
+	reg, _ := sparkwing.Lookup(pipeline)
+	plan, err := reg.Invoke(t.Context(), nil, sparkwing.RunContext{Pipeline: pipeline})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	preview, err := sparkwingruntime.PreviewPlan(plan, pipeline, nil, sparkwingruntime.PreviewOptions{
+		StartAt: "compile",
+		StopAt:  "compile",
+	})
+	if err != nil {
+		t.Fatalf("PreviewPlan: %v", err)
+	}
+	wantPreview := map[string]struct {
+		decision string
+		reason   string
+	}{
+		"fetch":   {decision: "would_skip", reason: "range_skip"},
+		"compile": {decision: "would_run"},
+		"publish": {decision: "would_skip", reason: "range_skip"},
+	}
+	for _, step := range preview.Nodes[0].Work.Steps {
+		want := wantPreview[step.ID]
+		if step.Decision != want.decision || step.SkipReason != want.reason {
+			t.Errorf("preview %s = %s/%s, want %s/%s", step.ID, step.Decision, step.SkipReason, want.decision, want.reason)
+		}
+		delete(wantPreview, step.ID)
+	}
+	if len(wantPreview) != 0 {
+		t.Fatalf("missing preview steps: %v", wantPreview)
+	}
+
+	stepRangeFlags = stepRangeRanFlags{}
+	paths := newPaths(t)
+	result, err := orchestrator.RunLocal(t.Context(), paths, orchestrator.Options{
+		Pipeline: pipeline,
+		StartAt:  "compile",
+		StopAt:   "compile",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Status != "success" || stepRangeFlags.a.Load() || !stepRangeFlags.b.Load() || stepRangeFlags.c.Load() {
+		t.Fatalf("execution status=%s fetch=%v compile=%v publish=%v", result.Status, stepRangeFlags.a.Load(), stepRangeFlags.b.Load(), stepRangeFlags.c.Load())
+	}
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = state.Close() }()
+	steps, err := state.ListNodeSteps(t.Context(), result.RunID)
+	if err != nil {
+		t.Fatalf("ListNodeSteps: %v", err)
+	}
+	wantStatus := map[string]string{"fetch": store.StepSkipped, "compile": store.StepPassed, "publish": store.StepSkipped}
+	for _, step := range steps {
+		if want := wantStatus[step.StepID]; step.Status != want {
+			t.Errorf("stored %s status = %s, want %s", step.StepID, step.Status, want)
+		}
+		delete(wantStatus, step.StepID)
+	}
+	if len(wantStatus) != 0 {
+		t.Fatalf("missing stored steps: %v", wantStatus)
 	}
 }
 

@@ -184,7 +184,7 @@ func TestPreviewPlan_UnknownStartAtSuggestsNearMatch(t *testing.T) {
 	if previewExecCounter.Load() != 0 {
 		t.Fatalf("step body executed during failed preview (counter = %d)", previewExecCounter.Load())
 	}
-	for _, want := range []string{"--sw-start-at", `"install-argocd"`, `did you mean "install-argocd"`} {
+	for _, want := range []string{"--start-at", `"install-argocd"`, `did you mean "install-argocd"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q\nfull: %s", want, err.Error())
 		}
@@ -211,13 +211,28 @@ func TestPreviewPlan_UnknownStartAtFarMissListsAvailable(t *testing.T) {
 	if previewExecCounter.Load() != 0 {
 		t.Fatalf("step body executed during failed preview (counter = %d)", previewExecCounter.Load())
 	}
-	for _, want := range []string{"--sw-start-at", `"completely-unrelated-name"`, "install-argocd", "install-karpenter"} {
+	for _, want := range []string{"--start-at", `"completely-unrelated-name"`, "install-argocd", "install-karpenter"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q\nfull: %s", want, err.Error())
 		}
 	}
 	if strings.Contains(err.Error(), "did you mean") {
 		t.Errorf("far-miss should not include a Levenshtein suggestion; got: %s", err.Error())
+	}
+}
+
+func TestPreviewPlan_UnknownStopAtNamesPlanFlag(t *testing.T) {
+	sparkwing.Register[sparkwing.NoInputs]("preview-stop-miss",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return previewRangeValidatePipe{} })
+	reg, _ := sparkwing.Lookup("preview-stop-miss")
+	plan, err := reg.Invoke(context.Background(), nil, sparkwing.RunContext{Pipeline: "preview-stop-miss"})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	_, err = sparkwingruntime.PreviewPlan(plan, "preview-stop-miss", nil, sparkwingruntime.PreviewOptions{StopAt: "install-karpenterr"})
+	if err == nil || !strings.Contains(err.Error(), `--stop-at "install-karpenterr"`) {
+		t.Fatalf("stop error = %v, want plan-facing --stop-at", err)
 	}
 }
 

@@ -46,6 +46,10 @@ unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing pipeline plan --start-at` and `--stop-at` now apply the
+  documented WorkStep range to preview decisions and reject unknown step names
+  with plan-facing flag errors, matching focused execution.
+
 - **release:** `cmd/verify-release --verify` uses the public trust roots shipped
   with Sparkwing and no longer requires the private release signing key.
 

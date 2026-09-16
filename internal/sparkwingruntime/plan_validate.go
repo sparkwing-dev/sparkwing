@@ -9,6 +9,10 @@ import (
 )
 
 func ValidateStepRange(p *sparkwing.Plan, startAt, stopAt string) error {
+	return validateStepRange(p, startAt, stopAt, "--sw-start-at", "--sw-stop-at")
+}
+
+func validateStepRange(p *sparkwing.Plan, startAt, stopAt, startFlag, stopFlag string) error {
 	if p == nil || (startAt == "" && stopAt == "") {
 		return nil
 	}
@@ -16,7 +20,7 @@ func ValidateStepRange(p *sparkwing.Plan, startAt, stopAt string) error {
 	if startAt != "" {
 		if _, ok := known[startAt]; !ok {
 			return fmt.Errorf("%s", unknownRefMessage(
-				fmt.Sprintf("--sw-start-at %q", startAt),
+				fmt.Sprintf("%s %q", startFlag, startAt),
 				"step",
 				startAt,
 				known,
@@ -26,7 +30,7 @@ func ValidateStepRange(p *sparkwing.Plan, startAt, stopAt string) error {
 	if stopAt != "" {
 		if _, ok := known[stopAt]; !ok {
 			return fmt.Errorf("%s", unknownRefMessage(
-				fmt.Sprintf("--sw-stop-at %q", stopAt),
+				fmt.Sprintf("%s %q", stopFlag, stopAt),
 				"step",
 				stopAt,
 				known,
