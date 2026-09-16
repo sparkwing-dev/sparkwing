@@ -4612,8 +4612,8 @@ func ValidateStepTerminalStatus(status string) error {
 }
 
 // NodeStep is one row from the node_steps table: per-step runtime
-// state for the inner-Work DAG. Status moves running -> passed/failed
-// once; skipped is terminal at insert.
+// state for the inner-Work DAG. Status moves from running to passed, failed, or
+// cancelled once; skipped is terminal at insert.
 type NodeStep struct {
 	RunID       string     `json:"run_id,omitempty"`
 	NodeID      string     `json:"node_id"`
@@ -4651,10 +4651,10 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 	return tx.Commit()
 }
 
-// FinishNodeStep transitions a running step to passed/failed/cancelled and
-// stamps finished_at. Caller passes StepPassed, StepFailed, or StepCancelled.
-// Creates the row if missing so the rare reorder where step_end
-// lands before step_start still records terminal state.
+// FinishNodeStep transitions a running step to passed, failed, or cancelled and
+// stamps finished_at. Skipped steps use SkipNodeStep because they never enter
+// the running state. Creates the row if missing so the rare reorder where
+// step_end lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	if err := ValidateStepTerminalStatus(status); err != nil {
 		return err
