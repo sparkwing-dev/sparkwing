@@ -99,6 +99,7 @@ func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {
 		code                  int
 	}{
 		{"current", "v0.49.0", "", &clean, revision, "current", 0},
+		{"release commit pseudo-version", "v0.0.0-20260916172407-926a5e82d62d", "", &clean, revision, "current", 0},
 		{"behind", "v0.48.0", "", &clean, revision, "update_available", 1},
 		{"ahead", "v0.50.0", "", &clean, revision, "ahead", 0},
 		{"explicit target", "v0.49.0", "v0.50.0", &clean, revision, "update_available", 1},
@@ -310,7 +311,7 @@ func TestUnifiedUpdateReceiptUsesInstalledArtifactAndReinstallsLocalSameLabel(t 
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("receipt polluted by progress: %v %q", err, out)
 	}
-	if !called || result.Kind != "update" || result.Status != "updated" || result.After.Version != "" || result.ResolvedRelease != "v0.49.0" || result.After.Path != path || result.After.Revision != "" {
+	if !called || result.Kind != "update" || result.Status != "updated" || result.After.Version != "v0.49.0" || result.ResolvedRelease != "v0.49.0" || result.After.Path != path || result.After.Revision != "" {
 		t.Fatalf("false update receipt: %+v", result)
 	}
 	updateReadInstalled = func() updateIdentity {
@@ -384,6 +385,29 @@ func TestInstalledArtifactIdentityReadsMetadataWithoutExecuting(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("artifact was executed for metadata")
+	}
+}
+
+func TestReconcilePublishedVersionUsesArtifactCommit(t *testing.T) {
+	isolateUpdateTests(t)
+	revision := strings.Repeat("a", 40)
+	clean := false
+	updateLookupRevision = func(context.Context, string) (string, error) {
+		return revision, nil
+	}
+	identity := updateIdentity{
+		Version:  "v0.0.0-20260916172407-926a5e82d62d",
+		Revision: revision,
+		Dirty:    &clean,
+	}
+	got, ok := reconcilePublishedVersion(context.Background(), identity, "v0.52.8")
+	if !ok || got.Version != "v0.52.8" || got.Revision != revision {
+		t.Fatalf("reconciled identity = %+v, ok=%v", got, ok)
+	}
+
+	clean = true
+	if _, ok := reconcilePublishedVersion(context.Background(), identity, "v0.52.8"); ok {
+		t.Fatal("dirty artifact was treated as a published release")
 	}
 }
 

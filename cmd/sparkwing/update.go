@@ -144,6 +144,13 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 		return result, fmt.Errorf("update refused: %s", hold.Error)
 	}
 	verified, local, provenanceReason := installedReleaseProvenance(ctx, identity)
+	if !verified {
+		if reconciled, ok := reconcilePublishedVersion(ctx, identity, resolved); ok {
+			identity = reconciled
+			current = identity.Version
+			verified, local, provenanceReason = true, false, ""
+		}
+	}
 	if resolved == current && verified {
 		result.Status = "current"
 		result.After = result.Before
@@ -177,6 +184,9 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 	}
 	result.Status = "updated"
 	result.After = installedArtifactIdentity(installed.path)
+	if installed.version != "" {
+		result.After.Version = installed.version
+	}
 	result.ResolvedRelease = resolved
 	result.Digest = installed.digest
 	reportOtherInstalls(os.Stderr, currentBin)

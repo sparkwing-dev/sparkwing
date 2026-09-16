@@ -200,6 +200,21 @@ func installedReleaseProvenance(ctx context.Context, identity updateIdentity) (v
 	return true, false, ""
 }
 
+func reconcilePublishedVersion(ctx context.Context, identity updateIdentity, releaseVersion string) (updateIdentity, bool) {
+	if (identity.Version != "" && !pseudoVersionRE.MatchString(identity.Version)) ||
+		!validUpdateVersion(releaseVersion) ||
+		!validUpdateRevision(identity.Revision) ||
+		identity.Dirty == nil || *identity.Dirty {
+		return identity, false
+	}
+	revision, err := updateLookupRevision(ctx, releaseVersion)
+	if err != nil || revision != identity.Revision {
+		return identity, false
+	}
+	identity.Version = releaseVersion
+	return identity, true
+}
+
 func resolveUpdateVersion(ctx context.Context, requested string, check bool) (string, error) {
 	version := requested
 	if version == "" {
@@ -381,13 +396,17 @@ func gatherUpdateCheckForIdentity(target, requested string, force, overrideHold 
 			report.BlockedReason = fmt.Sprintf("operator CLI version hold %s prevents this target", hold.Value)
 		}
 	}
-	current := report.Installed.Version
-	if !semver.IsValid(current) {
-		report.Reason = "installed version is unknown or cannot be compared"
-		return report
-	}
+	reconciled := false
 	if target == "cli" {
-		verified, local, reason := installedReleaseProvenance(ctx, report.Installed)
+		if identity, ok := reconcilePublishedVersion(ctx, report.Installed, version); ok {
+			report.Installed = identity
+			reconciled = true
+		}
+		current := report.Installed.Version
+		verified, local, reason := true, false, ""
+		if !reconciled {
+			verified, local, reason = installedReleaseProvenance(ctx, report.Installed)
+		}
 		report.localBuild = local
 		if !local && report.BlockedReason == "" && classifyDowngrade(current, version) == downgradeNeedsForce && !force {
 			report.BlockedReason = "CLI downgrade requires --force"
@@ -396,6 +415,11 @@ func gatherUpdateCheckForIdentity(target, requested string, force, overrideHold 
 			report.Reason = reason
 			return report
 		}
+	}
+	current := report.Installed.Version
+	if !semver.IsValid(current) {
+		report.Reason = "installed version is unknown or cannot be compared"
+		return report
 	}
 	switch semver.Compare(current, version) {
 	case -1:
