@@ -18,5 +18,5 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		status = 1
 	}
-	os.Exit(status) //nolint:forbidigo // TestMain owns cleanup, leak checking, and the package exit code.
+	os.Exit(status)
 }
