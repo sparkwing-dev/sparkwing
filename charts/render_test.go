@@ -25,8 +25,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.13" {
-		t.Fatalf("full chart version = %q, want 0.1.13", chart.Version)
+	if chart.Version != "0.2.0" {
+		t.Fatalf("full chart version = %q, want 0.2.0", chart.Version)
 	}
 }
 
