@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const repositoryRoot = join(__dirname, "..", "..", "..");
+const prebuiltFixtureEnvironment = "AUTHENTICATED_DASHBOARD_FIXTURE";
 
 type StartedFixture = {
   origin: string;
@@ -42,7 +43,7 @@ async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
 async function run(
   command: string,
   args: string[],
-  timeoutMs: number,
+  timeoutMs?: number,
 ): Promise<void> {
   const child = spawn(command, args, {
     cwd: repositoryRoot,
@@ -54,19 +55,25 @@ async function run(
       stderr += String(chunk);
     });
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    let outcome: { code: number | null; signal: NodeJS.Signals | null } | "timeout";
+    let outcome:
+      { code: number | null; signal: NodeJS.Signals | null } | "timeout";
     try {
-      outcome = await Promise.race([
-        new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-          (resolve, reject) => {
-            child.once("error", reject);
-            child.once("close", (code, signal) => resolve({ code, signal }));
-          },
-        ),
-        new Promise<"timeout">((resolve) => {
-          timeout = setTimeout(() => resolve("timeout"), timeoutMs);
-        }),
-      ]);
+      const completed = new Promise<{
+        code: number | null;
+        signal: NodeJS.Signals | null;
+      }>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, signal) => resolve({ code, signal }));
+      });
+      outcome =
+        timeoutMs !== undefined
+          ? await Promise.race([
+              completed,
+              new Promise<"timeout">((resolve) => {
+                timeout = setTimeout(() => resolve("timeout"), timeoutMs);
+              }),
+            ])
+          : await completed;
     } finally {
       if (timeout) clearTimeout(timeout);
     }
@@ -80,6 +87,34 @@ async function run(
     }
   } catch (error) {
     await stop(child);
+    throw error;
+  }
+}
+
+export async function prepareAuthenticatedDashboardFixture(): Promise<
+  () => Promise<void>
+> {
+  const temporary = await mkdtemp(
+    join(tmpdir(), "sparkwing-auth-browser-suite-"),
+  );
+  const binary = join(
+    temporary,
+    process.platform === "win32" ? "browser-fixture.exe" : "browser-fixture",
+  );
+  const previous = process.env[prebuiltFixtureEnvironment];
+  try {
+    await run("go", ["build", "-o", binary, "./internal/web/browserfixture"]);
+    process.env[prebuiltFixtureEnvironment] = binary;
+    return async () => {
+      if (previous === undefined) {
+        delete process.env[prebuiltFixtureEnvironment];
+      } else {
+        process.env[prebuiltFixtureEnvironment] = previous;
+      }
+      await rm(temporary, { recursive: true, force: true });
+    };
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true });
     throw error;
   }
 }
@@ -127,30 +162,37 @@ export async function startAuthenticatedDashboard(
   const temporary = await mkdtemp(
     join(options.temporaryParent ?? tmpdir(), "sparkwing-auth-browser-"),
   );
-  const binary = join(
+  let binary = join(
     temporary,
     process.platform === "win32" ? "browser-fixture.exe" : "browser-fixture",
   );
   let child: ChildProcessWithoutNullStreams | undefined;
   try {
-    await run(
-      options.buildCommand ?? "go",
-      options.buildArgs ?? [
-        "build",
-        "-o",
-        binary,
-        "./internal/web/browserfixture",
-      ],
-      options.buildTimeoutMs ?? 60_000,
-    );
+    if (
+      options.buildCommand ||
+      options.buildArgs ||
+      options.buildTimeoutMs !== undefined
+    ) {
+      await run(
+        options.buildCommand ?? "go",
+        options.buildArgs ?? [
+          "build",
+          "-o",
+          binary,
+          "./internal/web/browserfixture",
+        ],
+        options.buildTimeoutMs ?? 60_000,
+      );
+    } else {
+      const prebuilt = process.env[prebuiltFixtureEnvironment];
+      if (!prebuilt) {
+        throw new Error("authenticated dashboard fixture was not prebuilt");
+      }
+      binary = prebuilt;
+    }
     const fixture = spawn(
       binary,
-      [
-        "--fixture-home",
-        join(temporary, "fixture-home"),
-        "--web-out",
-        output,
-      ],
+      ["--fixture-home", join(temporary, "fixture-home"), "--web-out", output],
       {
         cwd: repositoryRoot,
         env: {
