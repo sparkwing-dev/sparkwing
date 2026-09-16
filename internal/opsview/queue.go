@@ -110,8 +110,8 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error 
 	for _, r := range qs.Resources {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), externalCell(r),
-			fmtAmount(r.Key, resourceAvailable(r)))
+			fmtHeadroomCell(r.Key, r.Reserved), ExternalAmount(r),
+			fmtAmount(r.Key, ResourceAvailable(r)))
 	}
 	if c := qs.Container; c != nil {
 		fmt.Fprintf(w, "container\t%.3f\t%.3f\t%d\t%d\n",
@@ -220,8 +220,8 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	for _, r := range qs.Resources {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), externalCell(r),
-			fmtAmount(r.Key, resourceAvailable(r)))
+			fmtHeadroomCell(r.Key, r.Reserved), ExternalAmount(r),
+			fmtAmount(r.Key, ResourceAvailable(r)))
 	}
 	_ = tw.Flush()
 	if line := resourceLegend(qs); line != "" {
@@ -384,7 +384,10 @@ func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.
 	return holders
 }
 
-func resourceAvailable(r wingwire.ResourceState) float64 {
+// ResourceAvailable returns the grantable amount the machine view displays for
+// one resource row, including compatibility with daemons that predate explicit
+// headroom fields.
+func ResourceAvailable(r wingwire.ResourceState) float64 {
 	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0 || r.ExternalSource != "") {
 		return r.Available
 	}
@@ -449,14 +452,22 @@ func fmtHeadroomCell(key string, v float64) string {
 	return fmtAmount(key, v)
 }
 
-func externalCell(r wingwire.ResourceState) string {
+// ExternalAmount formats the queue view's external-load cell without turning a
+// legacy unknown or an unreadable measurement into a measured zero.
+func ExternalAmount(r wingwire.ResourceState) string {
 	if !isHostResource(r.Key) {
 		return "-"
 	}
-	if r.ExternalSource == wingwire.ExternalUnmeasured {
+	switch r.ExternalSource {
+	case "":
+		return "unknown"
+	case wingwire.ExternalUnmeasured:
 		return "unmeasured"
+	case wingwire.ExternalUnattributed:
+		return fmtAmount(r.Key, r.External) + " (unattributed)"
+	default:
+		return fmtAmount(r.Key, r.External)
 	}
-	return fmtAmount(r.Key, r.External)
 }
 
 func ExternalUnmeasuredNote(qs wingwire.QueueState) string {

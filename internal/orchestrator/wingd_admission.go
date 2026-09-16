@@ -640,12 +640,21 @@ func (r *queueWaitReporter) emitUpdate(ctx context.Context) {
 	queryCtx, cancel := context.WithTimeout(ctx, queueSnapshotTimeout)
 	qs, err := r.snapshot(queryCtx)
 	cancel()
-	if err != nil && ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return
 	}
 	available := err == nil
-	if available && !queueWaitHasRequest(r.requestID, qs) {
-		return
+	if available {
+		waiter, ok := queueWaitCurrent(r.requestID, qs)
+		if !ok {
+			return
+		}
+		q.Position = waiter.Position
+		q.QueueLength = len(qs.Waiters)
+		q.BlockingReason = waiter.BlockingReason
+		if len(waiter.WaitingOn) > 0 {
+			q.Key = waiter.WaitingOn[0]
+		}
 	}
 	signature := queueWaitMaterialSignature(r.requestID, q, qs, available)
 	if r.reported && signature == r.lastSignature {
@@ -812,24 +821,19 @@ func queueWaitResourceState(qs wingwire.QueueState, waitingOn []string) string {
 		if key == "memory" {
 			amount = func(value float64) string { return formatQueueBytes(int64(value)) }
 		}
-		external := amount(resource.External) + " external"
-		if resource.ExternalSource == wingwire.ExternalUnmeasured {
-			external = "external unmeasured"
+		externalAmount := opsview.ExternalAmount(resource)
+		external := externalAmount + " external"
+		switch externalAmount {
+		case "unknown", "unmeasured":
+			external = "external " + externalAmount
+		default:
+			if value, found := strings.CutSuffix(externalAmount, " (unattributed)"); found {
+				external = value + " external (unattributed)"
+			}
 		}
-		return fmt.Sprintf("%s free, %s held, %s", amount(queueWaitAvailable(resource)), amount(resource.Held), external)
+		return fmt.Sprintf("%s free, %s held, %s", amount(opsview.ResourceAvailable(resource)), amount(resource.Held), external)
 	}
 	return ""
-}
-
-func queueWaitAvailable(resource wingwire.ResourceState) float64 {
-	if resource.Available > 0 || resource.Reserved > 0 || resource.External > 0 || resource.ExternalSource != "" {
-		return resource.Available
-	}
-	free := resource.Capacity - resource.Held
-	if free < 0 {
-		return 0
-	}
-	return free
 }
 
 func queueWaitBlockingDimensions(requestID string, q wingwire.Queued, qs wingwire.QueueState) []string {
@@ -846,13 +850,13 @@ func queueWaitBlockingDimensions(requestID string, q wingwire.Queued, qs wingwir
 	return nil
 }
 
-func queueWaitHasRequest(requestID string, qs wingwire.QueueState) bool {
+func queueWaitCurrent(requestID string, qs wingwire.QueueState) (wingwire.Waiter, bool) {
 	for _, waiter := range qs.Waiters {
 		if waiter.ParticipantID == requestID || (waiter.ParticipantID == "" && waiter.RunID == requestID) {
-			return true
+			return waiter, true
 		}
 	}
-	return false
+	return wingwire.Waiter{}, false
 }
 
 // safety: only a key this request claimed can mean exhausted capacity. Every

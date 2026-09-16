@@ -31,7 +31,7 @@ func TestFormatQueueWaitLeadsWithMachineState(t *testing.T) {
 		"waiting", "waiting", wingwire.Queued{Position: 1, QueueLength: 1}, qs, true, 0,
 	)
 	want := "admission: 2 running (pre-push 5.2 cores, docs-build 1.4 cores), 1 queued; " +
-		"you are next -- needs 8.0 cores (pinned); 1.1 free, 6.6 held, 7.3 external; expected clear ~1m40s"
+		"you are next -- needs 8.0 cores (pinned); 1.1 free, 6.6 held, 7.30 external; expected clear ~1m40s"
 	if got != want {
 		t.Fatalf("queue line:\n got: %s\nwant: %s", got, want)
 	}
@@ -122,7 +122,7 @@ func TestQueueWaitReporterCancellationStopsSnapshotOutput(t *testing.T) {
 		snapshot: func(ctx context.Context) (wingwire.QueueState, error) {
 			close(started)
 			<-ctx.Done()
-			return wingwire.QueueState{}, ctx.Err()
+			return wingwire.QueueState{Waiters: []wingwire.Waiter{{RunID: "waiting", Position: 1}}}, nil
 		},
 	}
 	stop := reporter.startHeartbeat(context.Background())
@@ -147,6 +147,35 @@ func TestQueueWaitReporterDoesNotReportAWaiterThatAlreadyLeft(t *testing.T) {
 	reporter.emitUpdate(context.Background())
 	if out.Len() != 0 {
 		t.Fatalf("reporter emitted stale queue state after grant or cancellation: %s", out.String())
+	}
+}
+
+func TestQueueWaitReporterUsesOneCurrentSnapshot(t *testing.T) {
+	var out strings.Builder
+	reporter := &queueWaitReporter{
+		la: &LocalAdmission{Out: &out}, requestID: "waiting", displayID: "waiting",
+		request: wingwire.AdmissionRequest{RunID: "waiting", Resources: wingwire.HostResources{Cores: 2}},
+		seen:    true, since: time.Now(), latest: wingwire.Queued{Position: 3, QueueLength: 5},
+		snapshot: func(context.Context) (wingwire.QueueState, error) {
+			return wingwire.QueueState{
+				Waiters: []wingwire.Waiter{
+					{RunID: "waiting", Position: 1, WaitingOn: []string{"cores"}},
+					{RunID: "other", Position: 2},
+				},
+			}, nil
+		},
+	}
+	reporter.emitUpdate(context.Background())
+	got := out.String()
+	for _, want := range []string{"2 queued", "you are next"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("current snapshot omitted %q: %s", want, got)
+		}
+	}
+	for _, stale := range []string{"5 queued", "position 3 of 5"} {
+		if strings.Contains(got, stale) {
+			t.Fatalf("mixed stale callback data %q into current snapshot: %s", stale, got)
+		}
 	}
 }
 

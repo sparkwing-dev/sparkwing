@@ -15,7 +15,7 @@ import (
 func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 	qs := wingwire.QueueState{
 		Resources: []wingwire.ResourceState{
-			{Key: "cores", Capacity: 10, Held: 0, Reserved: 2, External: 4.07, Available: 3.93},
+			{Key: "cores", Capacity: 10, Held: 0, Reserved: 2, External: 4.07, ExternalSource: wingwire.ExternalMeasured, Available: 3.93},
 		},
 		Holders: []wingwire.Holder{{RunID: "run-a", Resources: wingwire.HostResources{Cores: 1}}},
 		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Resources: wingwire.HostResources{Cores: 5}}},
@@ -38,6 +38,25 @@ func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 	if got := cap - held - reserved - external; math.Abs(got-available) > 1e-9 {
 		t.Fatalf("row does not reconcile: %v - %v - %v - %v = %v, printed available %v",
 			cap, held, reserved, external, got, available)
+	}
+}
+
+func TestExternalAmountDistinguishesUnknownAndUnattributed(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, want string
+		external           float64
+	}{
+		{name: "legacy unknown", want: "unknown"},
+		{name: "unmeasured", source: wingwire.ExternalUnmeasured, want: "unmeasured"},
+		{name: "measured", source: wingwire.ExternalMeasured, external: 1.25, want: "1.25"},
+		{name: "unattributed", source: wingwire.ExternalUnattributed, external: 1.25, want: "1.25 (unattributed)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := opsview.ExternalAmount(wingwire.ResourceState{Key: "cores", External: tc.external, ExternalSource: tc.source})
+			if got != tc.want {
+				t.Fatalf("ExternalAmount() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
