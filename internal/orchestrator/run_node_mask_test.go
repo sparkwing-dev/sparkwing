@@ -37,14 +37,22 @@ func (podMaskPipe) Plan(_ context.Context, plan *sparkwing.Plan, in podMaskInput
 type podProgressPipe struct{ sparkwing.Base }
 
 var (
-	podProgressContext        chan context.Context
-	podProgressTriggerContext chan context.Context
+	podProgressContext      chan context.Context
+	podProgressTriggerCheck chan func() error
 )
 
 func (podProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "parent", func(ctx context.Context) error {
 		podProgressContext <- ctx
-		podProgressTriggerContext <- ctx
+		podProgressTriggerCheck <- func() error {
+			if !orchestrator.ProgressTimeoutPausedForTest(ctx) {
+				return errors.New("progress timeout was not paused during trigger enqueue")
+			}
+			if orchestrator.ExpireProgressTimeoutForTest(ctx) {
+				return errors.New("progress timeout fired during trigger enqueue")
+			}
+			return nil
+		}
 		if _, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "pod-progress-child", ""); err != nil {
 			return err
 		}
@@ -82,7 +90,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	isolateProfiles(t)
 	isolateCheckout(t)
 	podProgressContext = make(chan context.Context, 1)
-	podProgressTriggerContext = make(chan context.Context, 1)
+	podProgressTriggerCheck = make(chan func() error, 1)
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -127,14 +135,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	triggerPauseCheck := make(chan error, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/triggers" {
-			progressCtx := <-podProgressTriggerContext
-			if !orchestrator.ProgressTimeoutPausedForTest(progressCtx) {
-				triggerPauseCheck <- errors.New("progress timeout was not paused during trigger enqueue")
-			} else if orchestrator.ExpireProgressTimeoutForTest(progressCtx) {
-				triggerPauseCheck <- errors.New("progress timeout fired during trigger enqueue")
-			} else {
-				triggerPauseCheck <- nil
-			}
+			triggerPauseCheck <- (<-podProgressTriggerCheck)()
 		}
 		handler.ServeHTTP(w, r)
 	}))
