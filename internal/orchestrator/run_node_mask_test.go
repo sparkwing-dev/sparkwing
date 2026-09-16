@@ -86,10 +86,6 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	}
 	defer func() { _ = st.Close() }()
 
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(controller.New(st, quiet).Handler())
-	defer srv.Close()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	const (
@@ -104,6 +100,25 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
+	raw, token, err := st.CreateToken("pool", store.TokenKindRunner, []string{
+		controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsState, controller.ScopeNodesClaim,
+	}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	identity := store.ClaimIdentity{Principal: "pool", TokenPrefix: token.Prefix}
+	claimed, err := st.ClaimNamedNode(ctx, identity, runID, nodeID, "pod:"+runID+":"+nodeID,
+		time.Minute, store.NamedClaimOptions{})
+	if err != nil {
+		t.Fatalf("claim node: %v", err)
+	}
+	fence := store.NodeClaimFence{
+		Claimant: identity, HolderID: claimed.ClaimedBy, MembershipID: claimed.ClaimMembershipID,
+		ReservationID: claimed.ClaimReservationID, ClaimGeneration: claimed.ClaimGeneration,
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().Handler())
+	defer srv.Close()
 
 	childFinished := make(chan error, 1)
 	go func() {
@@ -149,7 +164,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	}()
 
 	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
-		"pod:"+runID+":"+nodeID, "", &captureLogger{}, quiet, nil)
+		claimed.ClaimedBy, raw, &captureLogger{}, quiet, nil, orchestrator.ClaimedNodeFence(fence))
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v", err)
 	}
@@ -159,7 +174,9 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 			t.Fatal(childErr)
 		}
 	case <-ctx.Done():
-		t.Fatal("delegated child synchronization did not finish")
+		triggers, _ := st.ListTriggers(context.Background(), store.TriggerFilter{})
+		t.Fatalf("delegated child synchronization did not finish (outcome=%s err=%v triggers=%+v)",
+			res.Outcome, res.Err, triggers)
 	}
 	if res.Outcome != sparkwing.Failed {
 		t.Fatalf("outcome = %q (err=%v), want no-progress failure after child completion", res.Outcome, res.Err)

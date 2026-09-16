@@ -806,6 +806,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 		body.Git.RepoURL = validated
 	}
+	if !s.authorizeTriggerParent(w, r, body.ParentRunID, body.ParentNodeID) {
+		return
+	}
 
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""

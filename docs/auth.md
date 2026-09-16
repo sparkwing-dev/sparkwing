@@ -378,6 +378,14 @@ generation. A trigger's id is the id of the run it creates, so trigger-driven
 node mutations carry that exact generation and are accepted only while the
 same token holds the live claim for that run. A stale generation gets `409`.
 
+`POST /api/v1/triggers` requires more than `runs.write` when it names
+`parent_run_id`. A node-spawned child carries the exact live claim for
+`parent_run_id` and `parent_node_id`; a trigger-spawned child carries the exact
+live trigger generation for `parent_run_id`. Another principal, another token
+with the same principal name, a stale generation, a different parent node, or
+no claim cannot attach lineage or inherit repository provenance. `admin`
+retains its operator override.
+
 `GET /api/v1/runs/{id}` accepts `runs.read` or a live `nodes.claim` or
 `triggers.claim` owner of that run. `GET /api/v1/triggers/{id}` likewise
 accepts `triggers.read` or either live claim. Claim-scoped access expires with
