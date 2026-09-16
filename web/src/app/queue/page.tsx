@@ -29,6 +29,11 @@ import {
   queueRowID,
   resourceAvailable,
 } from "@/lib/queue";
+import {
+  appendHostPressureSample,
+  type HostPressureSample,
+} from "@/lib/resourceObservability";
+import HostPressureChart from "@/components/HostPressureChart";
 import Tooltip from "@/components/Tooltip";
 
 const POLL_MS = 3000;
@@ -37,11 +42,19 @@ export default function QueuePage() {
   const [qs, setQs] = useState<QueueState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pulse, setPulse] = useState(false);
+  const [pressureHistory, setPressureHistory] = useState<
+    HostPressureSample[]
+  >([]);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async () => {
     const next = await getQueue();
     setQs(next);
+    if (next) {
+      setPressureHistory((current) =>
+        appendHostPressureSample(current, next, Date.now()),
+      );
+    }
     setLoaded(true);
     setPulse(true);
     if (pulseTimer.current) clearTimeout(pulseTimer.current);
@@ -71,7 +84,7 @@ export default function QueuePage() {
       ) : !qs || !hasDaemon(qs) ? (
         <EmptyState />
       ) : (
-        <QueueBody qs={qs} />
+        <QueueBody qs={qs} pressureHistory={pressureHistory} />
       )}
     </div>
   );
@@ -137,7 +150,13 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
   );
 }
 
-function QueueBody({ qs }: { qs: QueueState }) {
+function QueueBody({
+  qs,
+  pressureHistory,
+}: {
+  qs: QueueState;
+  pressureHistory: HostPressureSample[];
+}) {
   const waiters = qs.waiters ?? [];
   const groups = groupHolders(queueLifecycleHolders(qs.holders ?? [], waiters));
   const connections = queueLifecycleConnections(qs.holders ?? []);
@@ -145,6 +164,10 @@ function QueueBody({ qs }: { qs: QueueState }) {
   const drifts = driftNotes(qs);
   return (
     <div className="flex flex-col gap-6">
+      <HostPressureChart
+        samples={pressureHistory}
+        ignoreExternal={qs.ignore_external}
+      />
       <ResourcesSection qs={qs} pressure={pressure} />
       <HoldersSection groups={groups} />
       {connections.length > 0 && (

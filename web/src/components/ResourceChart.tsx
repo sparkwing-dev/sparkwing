@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { type NodeMetrics, getNodeMetrics } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { type Node, type NodeMetrics, getNodeMetrics } from "@/lib/api";
+import { summarizeNodeResources } from "@/lib/resourceObservability";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -32,31 +33,38 @@ function fmtElapsed(ms: number): string {
   return `${Math.floor(sec / 60)}m${sec % 60 ? `${sec % 60}s` : ""}`;
 }
 
+function formatDurationNanos(nanos: number): string {
+  const seconds = nanos / 1_000_000_000;
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+  if (seconds < 10) return `${seconds.toFixed(2)}s`;
+  return `${seconds.toFixed(1)}s`;
+}
+
 const tooltipStyle = {
   contentStyle: {
-    background: "#1a1b26",
-    border: "1px solid #2a2b3a",
-    borderRadius: 6,
+    background: "var(--chart-tooltip)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-control)",
     fontSize: 11,
   },
-  labelStyle: { color: "#888" },
+  labelStyle: { color: "var(--muted)" },
 };
 
 export default function ResourceChart({
   runID,
-  nodeID,
+  node,
   isRunning,
 }: {
   runID: string;
-  nodeID: string;
+  node: Node;
   isRunning?: boolean;
 }) {
   const [metrics, setMetrics] = useState<NodeMetrics | null>(null);
 
   const refresh = useCallback(async () => {
-    const data = await getNodeMetrics(runID, nodeID);
+    const data = await getNodeMetrics(runID, node.id);
     setMetrics(data);
-  }, [runID, nodeID]);
+  }, [runID, node.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,10 +72,10 @@ export default function ResourceChart({
       if (!cancelled) void refresh();
     });
     if (isRunning) {
-      const i = setInterval(refresh, 5_000);
+      const interval = setInterval(refresh, 5_000);
       return () => {
         cancelled = true;
-        clearInterval(i);
+        clearInterval(interval);
       };
     }
     return () => {
@@ -75,142 +83,216 @@ export default function ResourceChart({
     };
   }, [refresh, isRunning]);
 
-  if (!metrics || metrics.points.length < 2) return null;
+  if (!metrics) {
+    return (
+      <div className="text-xs text-[var(--muted)]">
+        Loading resource evidence…
+      </div>
+    );
+  }
 
-  const startTime = new Date(metrics.points[0].ts).getTime();
-  const data = metrics.points.map((p) => ({
-    elapsed: new Date(p.ts).getTime() - startTime,
-    cpu: p.cpu_millicores,
-    mem: p.memory_bytes,
+  const summary = summarizeNodeResources(node, metrics);
+  if (summary.cacheHit) {
+    return (
+      <div className="rounded-[var(--radius-control)] border border-[var(--chart-cache)] bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--chart-cache)]">
+        Cache hit. Sparkwing reused this node&apos;s prior result, so the job
+        body did not execute and consumed no new job resources.
+      </div>
+    );
+  }
+
+  const startTime = metrics.points[0]
+    ? new Date(metrics.points[0].ts).getTime()
+    : 0;
+  const data = metrics.points.map((point) => ({
+    elapsed: new Date(point.ts).getTime() - startTime,
+    cpu: point.cpu_millicores,
+    mem: point.memory_bytes,
   }));
+  const hasSummary =
+    summary.requestedCPUMillicores > 0 ||
+    summary.requestedMemoryBytes > 0 ||
+    summary.exactCPUTimeNanos > 0 ||
+    summary.exactMaxRSSBytes > 0 ||
+    summary.commandCPUTimeNanos > 0 ||
+    summary.sampleCount > 0;
 
-  const peakCPU = Math.max(...data.map((d) => d.cpu));
-  const peakMem = Math.max(...data.map((d) => d.mem));
-  const avgCPU = Math.round(data.reduce((s, d) => s + d.cpu, 0) / data.length);
-  const avgMem = Math.round(data.reduce((s, d) => s + d.mem, 0) / data.length);
+  if (!hasSummary) {
+    return (
+      <div className="text-xs text-[var(--muted)]">
+        {isRunning
+          ? "Waiting for the first resource reading."
+          : "No resource evidence was recorded for this node."}
+      </div>
+    );
+  }
+
+  const measuredCPUTime =
+    summary.exactCPUTimeNanos || summary.commandCPUTimeNanos;
+  const measuredMemory =
+    summary.exactMaxRSSBytes || summary.sampledPeakMemoryBytes;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-4 text-[10px] text-[var(--muted)]">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--muted)]">
         <span className="font-bold uppercase tracking-wider text-[var(--foreground)]">
-          Resource Usage
+          Resource evidence
         </span>
-        <span>
-          Peak CPU:{" "}
-          <span className="text-indigo-400 font-mono">
-            {formatCPU(peakCPU)}
+        {summary.requestedCPUMillicores > 0 && (
+          <span>
+            Reserved CPU:{" "}
+            <span className="font-mono text-[var(--chart-cpu-reserved)]">
+              {formatCPU(summary.requestedCPUMillicores)}
+            </span>
           </span>
-        </span>
-        <span>
-          Avg CPU:{" "}
-          <span className="text-indigo-400 font-mono">{formatCPU(avgCPU)}</span>
-        </span>
-        <span>
-          Peak Mem:{" "}
-          <span className="text-emerald-400 font-mono">
-            {formatBytes(peakMem)}
+        )}
+        {summary.sampledPeakCPUMillicores > 0 && (
+          <span>
+            Sample peak CPU:{" "}
+            <span className="font-mono text-[var(--chart-cpu)]">
+              {formatCPU(summary.sampledPeakCPUMillicores)}
+            </span>
           </span>
-        </span>
-        <span>
-          Avg Mem:{" "}
-          <span className="text-emerald-400 font-mono">
-            {formatBytes(avgMem)}
+        )}
+        {summary.exactMeanCPUMillicores > 0 && (
+          <span>
+            Process mean CPU:{" "}
+            <span className="font-mono text-[var(--chart-cpu)]">
+              {formatCPU(summary.exactMeanCPUMillicores)}
+            </span>
           </span>
-        </span>
+        )}
+        {measuredCPUTime > 0 && (
+          <span>
+            {summary.exactCPUTimeNanos > 0
+              ? "Process CPU time"
+              : "Command CPU time"}
+            :{" "}
+            <span className="font-mono text-[var(--chart-cpu)]">
+              {formatDurationNanos(measuredCPUTime)}
+            </span>
+          </span>
+        )}
+        {summary.requestedMemoryBytes > 0 && (
+          <span>
+            Reserved memory:{" "}
+            <span className="font-mono text-[var(--chart-memory-reserved)]">
+              {formatBytes(summary.requestedMemoryBytes)}
+            </span>
+          </span>
+        )}
+        {measuredMemory > 0 && (
+          <span>
+            {summary.exactMaxRSSBytes > 0
+              ? "Process max RSS"
+              : "Sample peak memory"}
+            :{" "}
+            <span className="font-mono text-[var(--chart-memory)]">
+              {formatBytes(measuredMemory)}
+            </span>
+          </span>
+        )}
+        {summary.sampleCount > 0 && (
+          <span className="font-mono">
+            {summary.sampleCount} reading{summary.sampleCount === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <div className="text-[10px] text-[var(--muted)] mb-1 font-bold uppercase tracking-wider">
-            CPU
-          </div>
-          <div className="bg-[#0d1117] rounded border border-[var(--border)]">
-            <ResponsiveContainer width="100%" height={120}>
-              <AreaChart data={data}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="rgba(255,255,255,0.06)"
-                />
-                <XAxis
-                  dataKey="elapsed"
-                  tickFormatter={fmtElapsed}
-                  tick={{ fontSize: 9, fill: "#555" }}
-                />
-                <YAxis
-                  tickFormatter={formatCPU}
-                  tick={{ fontSize: 9, fill: "#555" }}
-                  width={40}
-                />
-                <Tooltip
-                  {...tooltipStyle}
-                  labelFormatter={(v) => fmtElapsed(v as number)}
-                  formatter={(v) => formatCPU(Number(v))}
-                />
-                {metrics.cpu_limit_millicores && (
-                  <ReferenceLine
-                    y={metrics.cpu_limit_millicores}
-                    stroke="rgba(129,140,248,0.5)"
-                    strokeDasharray="4 3"
-                  />
-                )}
-                <Area
-                  type="monotone"
-                  dataKey="cpu"
-                  stroke="#818cf8"
-                  fill="#818cf8"
-                  fillOpacity={0.15}
-                  strokeWidth={1.5}
-                  dot={{ r: 1.5, fill: "#818cf8" }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+      {data.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ResourceArea
+            title="CPU"
+            data={data}
+            dataKey="cpu"
+            color="var(--chart-cpu)"
+            formatter={formatCPU}
+            reserved={summary.requestedCPUMillicores}
+            reservedColor="var(--chart-cpu-reserved)"
+          />
+          <ResourceArea
+            title="Memory"
+            data={data}
+            dataKey="mem"
+            color="var(--chart-memory)"
+            formatter={formatBytes}
+            reserved={summary.requestedMemoryBytes}
+            reservedColor="var(--chart-memory-reserved)"
+          />
         </div>
-        <div>
-          <div className="text-[10px] text-[var(--muted)] mb-1 font-bold uppercase tracking-wider">
-            Memory
-          </div>
-          <div className="bg-[#0d1117] rounded border border-[var(--border)]">
-            <ResponsiveContainer width="100%" height={120}>
-              <AreaChart data={data}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="rgba(255,255,255,0.06)"
-                />
-                <XAxis
-                  dataKey="elapsed"
-                  tickFormatter={fmtElapsed}
-                  tick={{ fontSize: 9, fill: "#555" }}
-                />
-                <YAxis
-                  tickFormatter={formatBytes}
-                  tick={{ fontSize: 9, fill: "#555" }}
-                  width={40}
-                />
-                <Tooltip
-                  {...tooltipStyle}
-                  labelFormatter={(v) => fmtElapsed(v as number)}
-                  formatter={(v) => formatBytes(Number(v))}
-                />
-                {metrics.memory_limit_bytes && (
-                  <ReferenceLine
-                    y={metrics.memory_limit_bytes}
-                    stroke="rgba(52,211,153,0.5)"
-                    strokeDasharray="4 3"
-                  />
-                )}
-                <Area
-                  type="monotone"
-                  dataKey="mem"
-                  stroke="#34d399"
-                  fill="#34d399"
-                  fillOpacity={0.15}
-                  strokeWidth={1.5}
-                  dot={{ r: 1.5, fill: "#34d399" }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+      )}
+      {summary.sampleCount === 1 && (
+        <div className="text-[10px] text-[var(--muted)]">
+          One reading was retained; the exact process totals above remain usable
+          even when the node finishes inside one sampling interval.
         </div>
+      )}
+    </div>
+  );
+}
+
+function ResourceArea({
+  title,
+  data,
+  dataKey,
+  color,
+  formatter,
+  reserved,
+  reservedColor,
+}: {
+  title: string;
+  data: { elapsed: number; cpu: number; mem: number }[];
+  dataKey: "cpu" | "mem";
+  color: string;
+  formatter: (value: number) => string;
+  reserved: number;
+  reservedColor: string;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+        {title}
+      </div>
+      <div className="rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--chart-surface)]">
+        <ResponsiveContainer width="100%" height={120}>
+          <AreaChart data={data}>
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="var(--chart-grid)"
+            />
+            <XAxis
+              dataKey="elapsed"
+              tickFormatter={fmtElapsed}
+              tick={{ fontSize: 9, fill: "var(--chart-tick)" }}
+            />
+            <YAxis
+              tickFormatter={formatter}
+              tick={{ fontSize: 9, fill: "var(--chart-tick)" }}
+              width={40}
+            />
+            <Tooltip
+              {...tooltipStyle}
+              labelFormatter={(value) => fmtElapsed(value as number)}
+              formatter={(value) => formatter(Number(value))}
+            />
+            {reserved > 0 && (
+              <ReferenceLine
+                y={reserved}
+                stroke={reservedColor}
+                strokeDasharray="4 3"
+                label={{ value: "reserved", fill: reservedColor, fontSize: 9 }}
+              />
+            )}
+            <Area
+              type="monotone"
+              dataKey={dataKey}
+              stroke={color}
+              fill={color}
+              fillOpacity={0.15}
+              strokeWidth={1.5}
+              dot={{ r: 1.5, fill: color }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

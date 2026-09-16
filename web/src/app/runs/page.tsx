@@ -3803,7 +3803,7 @@ function AllNodesResources({
               <div className="border-t border-[var(--border)] p-2">
                 <ResourceChart
                   runID={run.id}
-                  nodeID={n.id}
+                  node={n}
                   isRunning={isRunning}
                 />
               </div>

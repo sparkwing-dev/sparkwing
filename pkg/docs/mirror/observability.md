@@ -266,15 +266,22 @@ The dashboard shows failure information where a run's detail is:
 - **Runs page**: a failure-reason badge on each failed node, both in the
   node list and in the selected-node panel, with the exit code when one
   was recorded.
-- **Resources**: a collapsible CPU/memory chart per node on the run
-  detail, with peak and average in the header; it refreshes while the
+- **Resources**: a collapsible CPU/memory view per node on the run detail. It
+  separates the admission reservation, interval samples, exact process totals,
+  and command totals instead of treating them as one measurement. A cached node
+  says that its body did not execute. Exact totals remain visible for short
+  nodes that finish before a second sampler tick. The samples refresh while the
   node is running.
 
 It also shows what admission is doing with the machine:
 
 - **Queue page**: the live admission queue -- every resource with its
   headroom, every holder, every lease connected without holding resources,
-  and every waiter in order with its ETA. Mirrors `sparkwing queue`.
+  and every waiter in order with its ETA. A five-minute chart, accumulated
+  while the page is open, separates Sparkwing job reservations, the host
+  reserve, measured external applications, and total capacity. An external
+  sensor gap remains a gap rather than becoming zero. Mirrors `sparkwing
+  queue`.
 - **Fleet section**: registered executors with their configured policy, observed
   liveness and headroom, and current slot and run activity in separate panels.
   Legacy executors inferred from recent activity stay visible without invented

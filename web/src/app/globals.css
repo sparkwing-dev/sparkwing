@@ -12,6 +12,20 @@
   --danger: #ef4444;
   --warning: #f59e0b;
   --muted: #94a3b8;
+  --chart-surface: #0d1117;
+  --chart-tooltip: #1a1b26;
+  --chart-grid: rgba(255, 255, 255, 0.06);
+  --chart-tick: #64748b;
+  --chart-cpu: #818cf8;
+  --chart-cpu-reserved: #a78bfa;
+  --chart-memory: #34d399;
+  --chart-memory-reserved: #5eead4;
+  --chart-external: #f59e0b;
+  --chart-host-reserve: #64748b;
+  --chart-capacity: #e2e8f0;
+  --chart-cache: #67e8f9;
+  --radius-panel: 0.5rem;
+  --radius-control: 0.375rem;
 }
 
 @theme inline {

@@ -202,6 +202,11 @@ export interface Node {
   modifiers?: NodeModifiers;
   work?: NodeWork;
   spawned_pipelines?: SpawnedPipelineRef[];
+  requested_cores?: number;
+  requested_memory_bytes?: number;
+  cpu_nanos?: number;
+  max_rss_bytes?: number;
+  process_wall_nanos?: number;
 }
 
 export interface ExecutionAttempt {
@@ -678,12 +683,11 @@ export interface MetricPoint {
   ts: string;
   cpu_millicores: number;
   memory_bytes: number;
+  cpu_time_nanos?: number;
 }
 
 export interface NodeMetrics {
   points: MetricPoint[];
-  memory_limit_bytes?: number;
-  cpu_limit_millicores?: number;
 }
 
 export async function getNodeMetrics(
