@@ -82,80 +82,43 @@ func (l *observationLog) Fatal() error                 { return l.fatalErr }
 func (l *observationLog) Drops() (int, string)         { return l.drops, l.dropReason }
 
 func TestNodeLogObserverPersistsEachRecordFamily(t *testing.T) {
-	tests := []struct {
-		name string
-		rec  sparkwing.LogRecord
-		want *observationCall
-	}{
-		{
-			"step start",
-			sparkwing.LogRecord{Event: sparkwing.EventStepStart, Msg: "compile"},
-			&observationCall{operation: "start", step: "compile"},
-		},
-		{
-			"step failed",
-			sparkwing.LogRecord{Event: sparkwing.EventStepEnd, Msg: "compile", Attrs: map[string]any{"outcome": string(sparkwing.Failed)}},
-			&observationCall{operation: "finish", step: "compile", status: store.StepFailed},
-		},
-		{
-			"step cancelled",
-			sparkwing.LogRecord{Event: sparkwing.EventStepEnd, Msg: "compile", Attrs: map[string]any{"outcome": string(sparkwing.Cancelled)}},
-			&observationCall{operation: "finish", step: "compile", status: store.StepCancelled},
-		},
-		{
-			"step skipped",
-			sparkwing.LogRecord{Event: sparkwing.EventStepSkipped, Msg: "compile"},
-			&observationCall{operation: "skip", step: "compile"},
-		},
-		{
-			"node annotation",
-			sparkwing.LogRecord{Event: sparkwing.EventNodeAnnotation, Msg: "deployed"},
-			&observationCall{operation: "annotate-node", value: "deployed"},
-		},
-		{
-			"step annotation attrs",
-			sparkwing.LogRecord{Event: sparkwing.EventNodeAnnotation, Step: "publish", Attrs: map[string]any{"message": "ready"}},
-			&observationCall{operation: "annotate-step", step: "publish", value: "ready"},
-		},
-		{"empty annotation", sparkwing.LogRecord{Event: sparkwing.EventNodeAnnotation}, nil},
-		{
-			"node summary",
-			sparkwing.LogRecord{Event: sparkwing.EventNodeSummary, Msg: "# result"},
-			&observationCall{operation: "summarize-node", value: "# result"},
-		},
-		{
-			"step summary attrs",
-			sparkwing.LogRecord{Event: sparkwing.EventNodeSummary, Step: "publish", Attrs: map[string]any{"markdown": "# ready"}},
-			&observationCall{operation: "summarize-step", step: "publish", value: "# ready"},
-		},
-		{
-			"empty summary clears",
-			sparkwing.LogRecord{Event: sparkwing.EventNodeSummary},
-			&observationCall{operation: "summarize-node"},
-		},
+	state := &observationState{}
+	inner := &observationLog{}
+	log := wrapNodeLogWithStateObservations(t.Context(), inner, state, "run", "node")
+	records := []sparkwing.LogRecord{
+		{Event: sparkwing.EventStepStart, Msg: "compile"},
+		{Event: sparkwing.EventStepEnd, Msg: "compile", Attrs: map[string]any{"outcome": string(sparkwing.Failed)}},
+		{Event: sparkwing.EventStepEnd, Msg: "compile", Attrs: map[string]any{"outcome": string(sparkwing.Cancelled)}},
+		{Event: sparkwing.EventStepSkipped, Msg: "compile"},
+		{Event: sparkwing.EventNodeAnnotation, Msg: "deployed"},
+		{Event: sparkwing.EventNodeAnnotation, Step: "publish", Attrs: map[string]any{"message": "ready"}},
+		{Event: sparkwing.EventNodeAnnotation},
+		{Event: sparkwing.EventNodeSummary, Msg: "# result"},
+		{Event: sparkwing.EventNodeSummary, Step: "publish", Attrs: map[string]any{"markdown": "# ready"}},
+		{Event: sparkwing.EventNodeSummary},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			state := &observationState{}
-			inner := &observationLog{}
-			log := wrapNodeLogWithStateObservations(t.Context(), inner, state, "run", "node")
-			log.Emit(tc.rec)
-			if len(inner.records) != 1 || !reflect.DeepEqual(inner.records[0], tc.rec) {
-				t.Fatalf("forwarded records = %+v, want original %+v", inner.records, tc.rec)
-			}
-			if tc.want == nil {
-				if len(state.calls) != 0 {
-					t.Fatalf("state calls = %+v, want none", state.calls)
-				}
-				return
-			}
-			if len(state.calls) != 1 || state.calls[0] != *tc.want {
-				t.Fatalf("state calls = %+v, want %+v", state.calls, *tc.want)
-			}
-			if state.runID != "run" || state.nodeID != "node" || state.ctxErr != nil {
-				t.Fatalf("state identity = %q/%q, context error %v", state.runID, state.nodeID, state.ctxErr)
-			}
-		})
+	for _, rec := range records {
+		log.Emit(rec)
+	}
+	want := []observationCall{
+		{operation: "start", step: "compile"},
+		{operation: "finish", step: "compile", status: store.StepFailed},
+		{operation: "finish", step: "compile", status: store.StepCancelled},
+		{operation: "skip", step: "compile"},
+		{operation: "annotate-node", value: "deployed"},
+		{operation: "annotate-step", step: "publish", value: "ready"},
+		{operation: "summarize-node", value: "# result"},
+		{operation: "summarize-step", step: "publish", value: "# ready"},
+		{operation: "summarize-node"},
+	}
+	if !reflect.DeepEqual(inner.records, records) {
+		t.Fatalf("forwarded records = %+v, want originals %+v", inner.records, records)
+	}
+	if !reflect.DeepEqual(state.calls, want) {
+		t.Fatalf("state calls = %+v, want %+v", state.calls, want)
+	}
+	if state.runID != "run" || state.nodeID != "node" || state.ctxErr != nil {
+		t.Fatalf("state identity = %q/%q, context error %v", state.runID, state.nodeID, state.ctxErr)
 	}
 }
 
