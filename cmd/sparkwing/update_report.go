@@ -75,6 +75,10 @@ func installedReleaseIdentity(installed installedRelease, version, targetRevisio
 	if reconciled, ok := reconcilePublishedVersionAtRevision(identity, version, targetRevision); ok {
 		return reconciled
 	}
+	if targetRevision != "" &&
+		(identity.Version != "" || identity.Revision != "" || identity.Dirty != nil) {
+		return identity
+	}
 	if installed.version == version && isSHA256Digest(installed.digest) {
 		identity.Version = version
 	}

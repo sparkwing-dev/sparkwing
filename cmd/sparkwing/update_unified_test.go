@@ -388,42 +388,64 @@ func TestInstalledArtifactIdentityReadsMetadataWithoutExecuting(t *testing.T) {
 	}
 }
 
-func TestReconcilePublishedVersionUsesArtifactCommit(t *testing.T) {
+func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 	isolateUpdateTests(t)
 	revision := strings.Repeat("a", 40)
 	clean := false
+	pseudo := "v0.0.0-20260916172407-926a5e82d62d"
+	updateFetchLatest = func(context.Context) (string, error) { return "v0.52.8", nil }
 	updateLookupRevision = func(context.Context, string) (string, error) {
 		return revision, nil
 	}
-	identity := updateIdentity{
-		Version:  "v0.0.0-20260916172407-926a5e82d62d",
-		Revision: revision,
-		Dirty:    &clean,
+	updateReadInstalled = func() updateIdentity {
+		return updateIdentity{
+			Version: pseudo, Revision: strings.Repeat("b", 40), Dirty: &clean,
+			Path: filepath.Join(os.Getenv("HOME"), "installed"),
+		}
 	}
-	got, ok := reconcilePublishedVersion(context.Background(), identity, "v0.52.8")
-	if !ok || got.Version != "v0.52.8" || got.Revision != revision {
-		t.Fatalf("reconciled identity = %+v, ok=%v", got, ok)
+	path := filepath.Join(t.TempDir(), "installed-candidate")
+	updateDownloadInstall = func(version, _ string) (installedRelease, error) {
+		if err := os.WriteFile(path, []byte("verified release"), 0o700); err != nil {
+			return installedRelease{}, err
+		}
+		return installedRelease{path: path, version: version, digest: strings.Repeat("a", 64)}, nil
+	}
+	var commandError error
+	out := captureStdout(t, func() {
+		commandError = runUpdate([]string{"--cli"})
+	})
+	if commandError != nil {
+		t.Fatal(commandError)
+	}
+	var receipt updateReceipt
+	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+		t.Fatalf("update receipt: %v %q", err, out)
+	}
+	if receipt.Before.Version != pseudo || receipt.After.Version != "v0.52.8" {
+		t.Fatalf("update receipt identities = before %q after %q", receipt.Before.Version, receipt.After.Version)
 	}
 
-	clean = true
-	if _, ok := reconcilePublishedVersion(context.Background(), identity, "v0.52.8"); ok {
-		t.Fatal("dirty artifact was treated as a published release")
+	updateReadInstalled = func() updateIdentity {
+		return updateIdentity{
+			Version: pseudo, Revision: revision, Dirty: &clean,
+			Path: filepath.Join(os.Getenv("HOME"), "installed"),
+		}
 	}
-}
-
-func TestInstalledReleaseIdentityRequiresVerifiedDigest(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sparkwing")
-	valid := installedReleaseIdentity(installedRelease{
-		path: path, version: "v0.52.8", digest: strings.Repeat("a", 64),
-	}, "v0.52.8", "")
-	if valid.Version != "v0.52.8" {
-		t.Fatalf("verified release identity = %+v", valid)
+	updateDownloadInstall = func(string, string) (installedRelease, error) {
+		t.Fatal("current pseudo-version was reinstalled")
+		return installedRelease{}, errors.New("unreachable")
 	}
-	unknown := installedReleaseIdentity(installedRelease{
-		path: path, version: "v0.52.8", digest: "fixture-sha256",
-	}, "v0.52.8", "")
-	if unknown.Version != "" {
-		t.Fatalf("unverified release identity = %+v", unknown)
+	out = captureStdout(t, func() {
+		commandError = runUpdate([]string{"--cli"})
+	})
+	if commandError != nil {
+		t.Fatal(commandError)
+	}
+	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+		t.Fatalf("current receipt: %v %q", err, out)
+	}
+	if receipt.Status != "current" || receipt.After.Version != "v0.52.8" {
+		t.Fatalf("current receipt = %+v", receipt)
 	}
 }
 
