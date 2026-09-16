@@ -1418,7 +1418,11 @@ type CreditChargeResult struct {
 	// ForgivenSeconds is the gap the charge cap refused to bill, which is
 	// non-zero only after the controller or the heartbeat loop stalled.
 	ForgivenSeconds int64
-	settledAt       time.Time
+}
+
+type creditChargeTxResult struct {
+	CreditChargeResult
+	settledAt time.Time
 }
 
 // ChargeNodeCredits bills the seconds this node has run since its previous
@@ -1449,18 +1453,18 @@ func (s *Store) chargeNode(
 	defer rollbackUnlessDone(tx, &err)
 	out, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, final)
 	if err != nil {
-		return out, err
+		return out.CreditChargeResult, err
 	}
 	if err := tx.Commit(); err != nil {
-		return out, err
+		return out.CreditChargeResult, err
 	}
-	return out, nil
+	return out.CreditChargeResult, nil
 }
 
 func (s *Store) chargeNodeTx(
 	ctx context.Context, tx *storeTx, runID, nodeID, tokenPrefix string, now time.Time, final bool,
-) (CreditChargeResult, error) {
-	var out CreditChargeResult
+) (creditChargeTxResult, error) {
+	var out creditChargeTxResult
 	var anchor, class int64
 	var startedAt sql.NullInt64
 	err := tx.QueryRowContext(ctx,
