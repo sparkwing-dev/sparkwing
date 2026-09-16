@@ -93,6 +93,9 @@ runner:
     # to remote agents first, then sends eligible overflow to Kubernetes.
     # k8s sends every node to Kubernetes.
     kind: inprocess
+    # Static capabilities common to every Job created by the k8s backend.
+    # Empty keeps labeled work on agents.
+    labels: []
 
   # Mount the runner pod's ServiceAccount token. The runner reaches the
   # controller over HTTP and needs no API access, so this stays false.

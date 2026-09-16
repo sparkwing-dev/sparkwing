@@ -19,7 +19,6 @@ type Config struct {
 
 	ClaimWaitTimeout  time.Duration
 	HeartbeatInterval time.Duration
-	FallbackLabels    []string
 
 	// UnmatchableGrace is how long a node whose labels this dispatcher's
 	// fallback cannot advertise waits for a runner that can before it fails.
@@ -28,10 +27,11 @@ type Config struct {
 }
 
 type Runner struct {
-	ctrl     coordinator
-	fallback runner.Runner
-	cfg      Config
-	logger   *slog.Logger
+	ctrl           coordinator
+	fallback       runner.Runner
+	fallbackLabels []string
+	cfg            Config
+	logger         *slog.Logger
 }
 
 type coordinator interface {
@@ -62,8 +62,13 @@ func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logg
 	if logger == nil {
 		logger = slog.Default()
 	}
-	cfg.FallbackLabels = append([]string(nil), cfg.FallbackLabels...)
-	return &Runner{ctrl: ctrl, fallback: fallback, cfg: cfg, logger: logger}
+	var fallbackLabels []string
+	if advertised, ok := fallback.(runner.LabelAdvertiser); ok {
+		fallbackLabels = advertised.AdvertisedLabels()
+	}
+	return &Runner{
+		ctrl: ctrl, fallback: fallback, fallbackLabels: append([]string(nil), fallbackLabels...), cfg: cfg, logger: logger,
+	}
 }
 
 var _ runner.Runner = (*Runner)(nil)
@@ -115,7 +120,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			// safety: a labeled node may fall back only when the fallback explicitly
 			// advertises every label. Most callers configure none.
-			if !sparkwingruntime.MatchLabels(n.NeedsLabels, r.cfg.FallbackLabels) {
+			if !sparkwingruntime.MatchLabels(n.NeedsLabels, r.fallbackLabels) {
 				now := time.Now()
 				if unmatchableSince.IsZero() {
 					unmatchableSince = now
@@ -127,7 +132,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					r.logger.Warn("warmpool: labeled node unclaimed",
 						"run_id", req.RunID, "node_id", req.NodeID,
 						"needs_labels", n.NeedsLabels,
-						"fallback_labels", r.cfg.FallbackLabels,
+						"fallback_labels", r.fallbackLabels,
 						"cpu_class_cores", n.CreditCPUClassCores,
 						"hint", "this dispatcher's fallback advertises none of these labels, so it waits "+
 							"for a runner that does")
@@ -194,13 +199,13 @@ type UnmatchableEvent struct {
 func (r *Runner) failUnmatchable(ctx context.Context, req runner.Request, n *store.Node) runner.Result {
 	msg := fmt.Sprintf(
 		"no runner advertises the labels %v within %s, and this dispatcher's fallback advertises %v",
-		n.NeedsLabels, r.cfg.UnmatchableGrace, r.cfg.FallbackLabels)
+		n.NeedsLabels, r.cfg.UnmatchableGrace, r.fallbackLabels)
 	if n.CreditCPUClassCores > 0 {
 		msg += fmt.Sprintf("; the node is billed at the %d-core class, which the warm pool does not serve",
 			n.CreditCPUClassCores)
 	}
 	payload, err := json.Marshal(UnmatchableEvent{
-		NeedsLabels: n.NeedsLabels, FallbackLabels: r.cfg.FallbackLabels,
+		NeedsLabels: n.NeedsLabels, FallbackLabels: r.fallbackLabels,
 		CPUClassCores: n.CreditCPUClassCores,
 		GraceSeconds:  r.cfg.UnmatchableGrace.Seconds(), Detail: msg,
 	})

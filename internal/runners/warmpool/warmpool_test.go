@@ -24,7 +24,8 @@ import (
 )
 
 type fallbackRunner struct {
-	calls atomic.Int64
+	calls  atomic.Int64
+	labels []string
 }
 
 func quietTestLogger() *slog.Logger {
@@ -34,6 +35,10 @@ func quietTestLogger() *slog.Logger {
 func (f *fallbackRunner) RunNode(context.Context, runner.Request) runner.Result {
 	f.calls.Add(1)
 	return runner.Result{Outcome: sparkwing.Success}
+}
+
+func (f *fallbackRunner) AdvertisedLabels() []string {
+	return append([]string(nil), f.labels...)
 }
 
 func newWarmPoolFixture(
@@ -153,11 +158,10 @@ func TestRunnerFallsBackForLabelsItAdvertises(t *testing.T) {
 	}
 	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"location=coordinator", "gpu"}, nil)
 	defer cleanup()
-	fallback := &fallbackRunner{}
+	fallback := &fallbackRunner{labels: []string{"gpu", "location=coordinator", "local"}}
 	r := New(ctrl, fallback, Config{
 		PollInterval:     5 * time.Millisecond,
 		ClaimWaitTimeout: 20 * time.Millisecond,
-		FallbackLabels:   []string{"gpu", "location=coordinator", "local"},
 	}, quietTestLogger())
 
 	result := r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
@@ -503,7 +507,7 @@ func TestNewDefaultsTheUnmatchableGrace(t *testing.T) {
 
 // A node no runner advertises and no fallback may take fails once its grace
 // runs out, and says which labels and which class it failed on.
-func TestRunnerFailsAnUnmatchableNodeAfterItsGrace(t *testing.T) {
+func TestRunnerDoesNotRouteRequiredLabelsToUnlabelledFallback(t *testing.T) {
 	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"os=windows", "gpu"}, nil)
 	defer cleanup()
 	fallback := &fallbackRunner{}

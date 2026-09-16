@@ -42,7 +42,9 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "run-1", NodeID: "build", Status: "pending", NeedsLabels: []string{"cluster"},
+	}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
 	// safety: production runs the dispatcher and its Kubernetes fallback on one
@@ -86,6 +88,7 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 	})
 	fallback := New(kcli, client.NewWithToken(srv.URL, nil, poolToken), Config{
 		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		Labels:       []string{"cluster"},
 		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
 	}, quiet)
 	warm := warmpool.New(client.NewWithToken(srv.URL, nil, poolToken), fallback, warmpool.Config{
@@ -121,5 +124,8 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 	}
 	if env[ClaimGenerationEnv] != strconv.FormatInt(n.ClaimGeneration, 10) {
 		t.Fatalf("%s = %q, want generation %d", ClaimGenerationEnv, env[ClaimGenerationEnv], n.ClaimGeneration)
+	}
+	if env["SPARKWING_RUNNER_LABELS"] != "cluster" {
+		t.Fatalf("SPARKWING_RUNNER_LABELS = %q, want the capability that admitted fallback", env["SPARKWING_RUNNER_LABELS"])
 	}
 }

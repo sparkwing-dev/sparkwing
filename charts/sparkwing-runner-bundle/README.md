@@ -131,6 +131,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
 | `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
+| `runner.triggerRunner.labels` | Static capabilities every trigger-spawned Kubernetes Job advertises. | `[]` |
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at startup. Empty warms the SDK at the runner image's version. | `[]` |
@@ -170,7 +171,10 @@ over outbound HTTP(S); they need no inbound route, and Tailscale is optional.
 Labels and advertised capacity keep incompatible or saturated machines from
 claiming work. An offline or saturated pool therefore sends unlabeled work to
 Kubernetes after a short internal claim window. A labeled node stays queued
-for a matching agent because the fallback Job does not advertise agent labels.
+for a matching agent by default. Set `runner.triggerRunner.labels` only to
+capabilities every spawned Job can honor; matching labeled work may then use
+the fallback. These labels are separate from `runner.labels`, which describes
+the outer pool process and may name a different architecture.
 
 Warm mode reuses the runner image, pull policy, namespace, service account,
 and cache configuration already present in this chart. It grants the runner

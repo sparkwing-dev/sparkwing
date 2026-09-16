@@ -36,7 +36,7 @@ import (
 
 func jobEnv(t *testing.T, cfg Config) map[string]string {
 	t.Helper()
-	r := &Runner{cfg: cfg}
+	r := New(nil, nil, cfg, nil)
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
 		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{})
 	containers := job.Spec.Template.Spec.Containers
@@ -48,6 +48,48 @@ func jobEnv(t *testing.T, cfg Config) map[string]string {
 		out[e.Name] = e.Value
 	}
 	return out
+}
+
+func TestRunnerLabelsOwnNormalizedFallbackCapabilities(t *testing.T) {
+	configured := []string{" cluster ", "", "cluster", "kubernetes"}
+	r := New(nil, nil, Config{Labels: configured}, nil)
+	configured[0] = "arch=arm64"
+
+	if got, want := r.AdvertisedLabels(), []string{"cluster", "kubernetes"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("AdvertisedLabels() = %v, want %v", got, want)
+	}
+	got := r.AdvertisedLabels()
+	got[0] = "mutated"
+	if reread := r.AdvertisedLabels(); !reflect.DeepEqual(reread, []string{"cluster", "kubernetes"}) {
+		t.Fatalf("AdvertisedLabels() shared mutable storage: %v", reread)
+	}
+}
+
+func TestBuildJob_ReportsTheCapabilitiesUsedForFallbackEligibility(t *testing.T) {
+	env := jobEnv(t, Config{Image: "img", Labels: []string{" cluster ", "", "cluster", "kubernetes"}})
+	if got := env["SPARKWING_RUNNER_TYPE"]; got != "kubernetes" {
+		t.Fatalf("SPARKWING_RUNNER_TYPE = %q, want kubernetes", got)
+	}
+	if got := env["SPARKWING_RUNNER_NAME"]; got != "job-name" {
+		t.Fatalf("SPARKWING_RUNNER_NAME = %q, want job-name", got)
+	}
+	if got := env["SPARKWING_RUNNER_LABELS"]; got != "cluster,kubernetes" {
+		t.Fatalf("SPARKWING_RUNNER_LABELS = %q, want cluster,kubernetes", got)
+	}
+	if strings.Contains(env["SPARKWING_RUNNER_LABELS"], "arch=") {
+		t.Fatalf("SPARKWING_RUNNER_LABELS = %q, inherited an architecture the Job placement did not promise", env["SPARKWING_RUNNER_LABELS"])
+	}
+}
+
+func TestBuildJob_DefaultsToNoFallbackCapabilities(t *testing.T) {
+	r := New(nil, nil, Config{Image: "img"}, nil)
+	if labels := r.AdvertisedLabels(); len(labels) != 0 {
+		t.Fatalf("AdvertisedLabels() = %v, want none", labels)
+	}
+	env := jobEnv(t, Config{Image: "img"})
+	if _, ok := env["SPARKWING_RUNNER_LABELS"]; ok {
+		t.Fatalf("SPARKWING_RUNNER_LABELS = %q, want the empty default omitted", env["SPARKWING_RUNNER_LABELS"])
+	}
 }
 
 func TestBuildJob_StampsArtifactStoreURLWhenSet(t *testing.T) {

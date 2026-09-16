@@ -509,3 +509,4 @@ sparkwing-runner-bundle:
     alsoClaimTriggers: true
     triggerRunner:
       kind: inprocess
+      labels: []

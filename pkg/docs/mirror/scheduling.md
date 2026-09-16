@@ -294,8 +294,13 @@ After the offer window, an unclaimed unlabeled node is
 atomically removed from the agent queue and sent to the configured Kubernetes
 runner. A claim that wins that handoff owns the node, so the Kubernetes
 fallback cannot execute it a second time. Labeled nodes never use this
-fallback because Kubernetes Jobs do not advertise the agent labels; they wait
-for a compatible agent and remain subject to the normal queue timeout.
+fallback by default because Kubernetes Jobs advertise no capabilities. Set
+`runner.triggerRunner.labels` to capabilities every spawned Job can honor; a
+labeled node uses fallback only when those labels satisfy all of its
+requirements. The fallback does not inherit `runner.labels`, because those
+describe the outer pool process and may include architecture or hardware the
+spawned Job does not have. Each Job reports the same configured labels through
+its runtime runner metadata.
 
 In the runner-bundle chart, set `runner.triggerRunner.kind: warm` and
 `runner.automountServiceAccountToken: true`. In the full chart, prefix both

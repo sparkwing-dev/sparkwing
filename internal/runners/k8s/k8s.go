@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -33,6 +34,9 @@ type Config struct {
 	Namespace string
 
 	Image string
+
+	// Labels are static capabilities every Job this runner creates can honor.
+	Labels []string
 
 	ImagePullSecret string
 
@@ -104,6 +108,7 @@ func New(kcli kubernetes.Interface, ctrl *client.Client, cfg Config, logger *slo
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cfg.Labels = sparkwingruntime.NormalizeLabels(cfg.Labels)
 	return &Runner{
 		client:        kcli,
 		ctrl:          ctrl,
@@ -113,7 +118,14 @@ func New(kcli kubernetes.Interface, ctrl *client.Client, cfg Config, logger *slo
 	}
 }
 
-var _ runner.Runner = (*Runner)(nil)
+var (
+	_ runner.Runner          = (*Runner)(nil)
+	_ runner.LabelAdvertiser = (*Runner)(nil)
+)
+
+func (r *Runner) AdvertisedLabels() []string {
+	return append([]string(nil), r.cfg.Labels...)
+}
 
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
@@ -590,6 +602,11 @@ func (r *Runner) buildJob(
 		{Name: "HOME", Value: "/tmp"},
 		{Name: "GOCACHE", Value: "/tmp/go-build"},
 		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
+		{Name: "SPARKWING_RUNNER_NAME", Value: name},
+		{Name: "SPARKWING_RUNNER_TYPE", Value: "kubernetes"},
+	}
+	if len(r.cfg.Labels) > 0 {
+		env = append(env, corev1.EnvVar{Name: "SPARKWING_RUNNER_LABELS", Value: strings.Join(r.cfg.Labels, ",")})
 	}
 	if r.cfg.LogsURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: r.cfg.LogsURL})

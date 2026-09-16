@@ -25,8 +25,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.12" {
-		t.Fatalf("full chart version = %q, want 0.1.12", chart.Version)
+	if chart.Version != "0.1.13" {
+		t.Fatalf("full chart version = %q, want 0.1.13", chart.Version)
 	}
 }
 
@@ -975,6 +975,8 @@ func TestRunnerWarmTriggerRunnerUsesRemoteCapacityBeforeKubernetes(t *testing.T)
 	}
 	args := runnerContainer(t, renderRunnerInNamespace(t, "capacity",
 		"runner.triggerRunner.kind=warm",
+		"runner.triggerRunner.labels={cluster,kubernetes}",
+		"runner.labels={cluster,arch=arm64}",
 		"runner.automountServiceAccountToken=true",
 		"runner.image.repository=registry.example/sparkwing-runner",
 		"runner.image.tag=remote",
@@ -991,6 +993,14 @@ func TestRunnerWarmTriggerRunnerUsesRemoteCapacityBeforeKubernetes(t *testing.T)
 		"--trigger-runner-sa=remote-fallback",
 		"--trigger-runner-image-pull-policy=Always",
 		"--trigger-artifact-store=http://sparkwing-sparkwing-runner-bundle-cache.capacity.svc.cluster.local",
+		"--trigger-runner-label=cluster",
+		"--trigger-runner-label=kubernetes",
+	}
+	if !containsArg(args, "--label=arch=arm64") {
+		t.Fatalf("warm runner args = %v, want the outer pool architecture label", args)
+	}
+	if containsArg(args, "--trigger-runner-label=arch=arm64") {
+		t.Fatalf("warm runner args = %v, copied an outer architecture label to a differently placed Job", args)
 	}
 	for _, arg := range want {
 		if !containsArg(args, arg) {

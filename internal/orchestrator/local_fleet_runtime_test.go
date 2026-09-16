@@ -233,11 +233,18 @@ func TestForegroundFleetAuthorityRequiresBodyAttestationThenFallsBackToCoordinat
 	}
 }
 
-type fleetFallbackCounter struct{ calls atomic.Int64 }
+type fleetFallbackCounter struct {
+	calls  atomic.Int64
+	labels []string
+}
 
 func (r *fleetFallbackCounter) RunNode(context.Context, runner.Request) runner.Result {
 	r.calls.Add(1)
 	return runner.Result{Outcome: sparkwing.Success}
+}
+
+func (r *fleetFallbackCounter) AdvertisedLabels() []string {
+	return append([]string(nil), r.labels...)
 }
 
 func TestForegroundFleetHelperOnlyNodeStaysSealedPendingWithoutCoordinatorFallback(t *testing.T) {
@@ -266,10 +273,9 @@ func TestForegroundFleetHelperOnlyNodeStaysSealedPendingWithoutCoordinatorFallba
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fallback := &fleetFallbackCounter{}
+	fallback := &fleetFallbackCounter{labels: []string{"local", "location=coordinator"}}
 	warm := warmpool.New(localStoreFleetCoordinator{store: st}, fallback, warmpool.Config{
 		PollInterval: time.Millisecond, ClaimWaitTimeout: 10 * time.Millisecond,
-		FallbackLabels: []string{"local", "location=coordinator"},
 	}, nil)
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan runner.Result, 1)
