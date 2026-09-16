@@ -839,17 +839,18 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "wingd-q-a")
 
-	var outB strings.Builder
+	outB := &syncBuffer{}
 	runB := make(chan *Result, 1)
 	go func() {
 		res, _ := Run(context.Background(), backends, Options{
 			Pipeline:  "wingd-e2e-hold",
 			RunID:     "wingd-q-b",
-			Admission: testWingdAdmission(home, &outB),
+			Admission: testWingdAdmission(home, outB),
 		})
 		runB <- res
 	}()
 	awaitWaiter(t, home, "wingd-q-b")
+	awaitOutContains(t, outB, "admission:")
 
 	if node, err := st.GetNode(context.Background(), "wingd-q-b", "hold"); err == nil && node.Status != "pending" {
 		t.Fatalf("queued run's node status = %q, want pending while waiting for admission", node.Status)
