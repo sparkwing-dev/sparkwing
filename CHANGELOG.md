@@ -22,6 +22,10 @@ unlock.
 
 ### Changed
 
+- **observability:** Step lifecycle writes that fail now emit a bounded,
+  secret-masked diagnostic with run, node, and step identity. Execution outcomes
+  remain separate from failures to record them.
+
 - **admission:** Queue waits now print one machine-first stream: running
   pipelines and their charges, queued count and place, request provenance,
   free/held/external capacity, and the expected clear time when known. Reports

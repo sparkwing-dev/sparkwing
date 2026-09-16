@@ -23,9 +23,10 @@ func wrapNodeLogWithStepState(ctx context.Context, inner NodeLog, state StateBac
 			if stepID == "" {
 				return
 			}
+			var err error
 			switch event {
 			case sparkwing.EventStepStart:
-				_ = state.StartNodeStep(ctx, runID, nodeID, stepID)
+				err = state.StartNodeStep(ctx, runID, nodeID, stepID)
 			case sparkwing.EventStepEnd:
 				status := store.StepPassed
 				switch outcome {
@@ -34,9 +35,20 @@ func wrapNodeLogWithStepState(ctx context.Context, inner NodeLog, state StateBac
 				case string(sparkwing.Cancelled):
 					status = store.StepCancelled
 				}
-				_ = state.FinishNodeStep(ctx, runID, nodeID, stepID, status)
+				err = state.FinishNodeStep(ctx, runID, nodeID, stepID, status)
 			case sparkwing.EventStepSkipped:
-				_ = state.SkipNodeStep(ctx, runID, nodeID, stepID)
+				err = state.SkipNodeStep(ctx, runID, nodeID, stepID)
+			}
+			if err != nil {
+				// safety: recording failure must not replace the outcome of work that already happened.
+				inner.Emit(sparkwing.LogRecord{
+					Level: "warn", Event: "state_write_failed", JobID: nodeID, Step: stepID,
+					Msg: "step state write failed",
+					Attrs: map[string]any{
+						"run_id": runID, "operation": event,
+						"error": boundedFailureText(ctx, runID, nodeID, err),
+					},
+				})
 			}
 		},
 	}

@@ -3,6 +3,19 @@
 Sparkwing tracks run health, failure reasons, and resource usage so you
 can debug failures fast and right-size containers.
 
+## Step-state recording failures
+
+The node log emits a `state_write_failed` warning when a step start, finish,
+or skip cannot be written to the state backend. The record names the node and
+step, with `run_id`, `operation`, and a bounded, secret-masked `error` in its
+attributes. Inspect these warnings when stored step state disagrees with the
+execution log.
+
+The original lifecycle event and work outcome remain unchanged because the
+write records work that already happened. The warning does not repair the
+missing state. It uses the underlying log path, so loss of that log path can
+also prevent delivery of this diagnostic.
+
 ## Assisted-offer lifecycle
 
 Enrolled-executor arbitration writes transition events to the run stream. The
