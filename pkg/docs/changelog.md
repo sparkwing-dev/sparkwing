@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.8] - 2026-09-16
 ### Changed
 
 - **dashboard:** The Queue page graphs five minutes of live CPU and memory
