@@ -100,6 +100,13 @@ func (r *NodeExecutor) executeCoordinated(ctx context.Context, req runner.Reques
 func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (context.Context, error) {
 	startAt := os.Getenv("SPARKWING_START_AT")
 	stopAt := os.Getenv("SPARKWING_STOP_AT")
+	// safety: a step window belongs to this node's Work. Commands its body
+	// starts have their own step namespace unless they set a new window.
+	for _, name := range []string{"SPARKWING_START_AT", "SPARKWING_STOP_AT"} {
+		if err := os.Unsetenv(name); err != nil {
+			return ctx, fmt.Errorf("consume %s: %w", name, err)
+		}
+	}
 	if startAt != "" || stopAt != "" {
 		if err := sparkwingruntime.ValidateStepRange(plan, startAt, stopAt); err != nil {
 			return ctx, err

@@ -133,8 +133,10 @@ file. Other syntax and workflow checks remain active.
   every URL. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
-  only under the gate. A variable that injector gains and the scrub does not
-  handle fails a contract test in the pipeline module.
+  only under the gate. The node consumes its WorkStep window before the body
+  starts, so a nested Sparkwing command selects its own steps. A variable that
+  injector gains and the scrub does not handle fails a contract test in the
+  pipeline module.
 - **Why the whole-tree vet, test and lint are in neither hook:** the house
   standard puts them in the pre-commit chain, and this repo runs them in `gate`
   on purpose. The broad tier takes 12 to 24 minutes through the shared

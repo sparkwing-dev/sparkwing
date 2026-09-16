@@ -535,8 +535,8 @@ var productTestKept = map[string]string{
 	"SPARKWING_RUNNER_NAME":   "reports which runner executed the node",
 	"SPARKWING_RUNNER_TYPE":   "reports which runner executed the node",
 	"SPARKWING_RUNNER_LABELS": "reports what the local runner advertises",
-	"SPARKWING_START_AT":      "records the window the run already chose",
-	"SPARKWING_STOP_AT":       "records the window the run already chose",
+	"SPARKWING_START_AT":      "is consumed before the node's Work body starts",
+	"SPARKWING_STOP_AT":       "is consumed before the node's Work body starts",
 }
 
 // safety: the pipeline module cannot import internal/orchestrator, so this
