@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **dashboard:** Keep the pre-authentication CSRF token stable across login-page
+  reloads, so another tab or refresh cannot invalidate a submitted login form.
+
 ## [v0.52.8] - 2026-09-16
 ### Changed
 

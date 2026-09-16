@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -10,6 +11,72 @@ import (
 	"testing"
 	"time"
 )
+
+func TestLoginFormSurvivesAnotherLoginPageLoad(t *testing.T) {
+	t.Parallel()
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/bootstrap-needed":
+			_, _ = w.Write([]byte(`{"needed":false}`))
+		case "/api/v1/auth/login":
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+
+	first := httptest.NewRequest(http.MethodGet, "https://dashboard.example/login", nil)
+	firstResponse := httptest.NewRecorder()
+	handler.ServeHTTP(firstResponse, first)
+	firstBody, err := io.ReadAll(firstResponse.Result().Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstResponse.Result().Body.Close()
+	firstCSRF := loginFormCSRF(t, firstBody)
+	firstCookie := firstResponse.Result().Cookies()[0]
+
+	second := httptest.NewRequest(http.MethodGet, "https://dashboard.example/login", nil)
+	second.AddCookie(firstCookie)
+	secondResponse := httptest.NewRecorder()
+	handler.ServeHTTP(secondResponse, second)
+	secondCookie := secondResponse.Result().Cookies()[0]
+
+	form := url.Values{
+		"username":   {"invalid-user"},
+		"password":   {"invalid-password"},
+		"csrf_token": {firstCSRF},
+	}
+	post := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "https://dashboard.example")
+	post.AddCookie(secondCookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("login with an earlier form after another page load = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func loginFormCSRF(t *testing.T, body []byte) string {
+	t.Helper()
+	const marker = `name="csrf_token" value="`
+	start := strings.Index(string(body), marker)
+	if start < 0 {
+		t.Fatal("login form has no CSRF field")
+	}
+	valueStart := start + len(marker)
+	valueEnd := strings.IndexByte(string(body[valueStart:]), '"')
+	if valueEnd < 0 {
+		t.Fatal("login form CSRF field has no closing quote")
+	}
+	return string(body[valueStart : valueStart+valueEnd])
+}
 
 func TestSafeNext(t *testing.T) {
 	cases := []struct {

@@ -108,7 +108,7 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 			clearSessionCookies(w, cookiesSecure(opts))
 		}
 		data.Bootstrap = controllerBootstrapNeeded(r.Context(), controllerURL)
-		renderLoginPage(w, data, http.StatusOK, cookiesSecure(opts))
+		renderLoginPage(w, r, data, http.StatusOK, cookiesSecure(opts))
 	}
 }
 
@@ -127,7 +127,7 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
 			data := loginPageData{Error: "Invalid username or password.", Next: next}
-			renderLoginPage(w, data, http.StatusUnauthorized, cookiesSecure(opts))
+			renderLoginPage(w, r, data, http.StatusUnauthorized, cookiesSecure(opts))
 			return
 		}
 
@@ -154,7 +154,7 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 				data.Bootstrap = false
 				data.Error = "Bootstrap closed -- sign in with the existing admin credentials."
 			}
-			renderLoginPage(w, data, http.StatusBadRequest, cookiesSecure(opts))
+			renderLoginPage(w, r, data, http.StatusBadRequest, cookiesSecure(opts))
 			return
 		}
 
@@ -164,7 +164,7 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 				Next:  next,
 				Error: "Admin created, but auto-login failed. Sign in with the credentials you just set.",
 			}
-			renderLoginPage(w, data, http.StatusOK, cookiesSecure(opts))
+			renderLoginPage(w, r, data, http.StatusOK, cookiesSecure(opts))
 			return
 		}
 		setSessionCookies(w, sess, cookiesSecure(opts))
@@ -294,11 +294,18 @@ func safeNext(next string) string {
 	return next
 }
 
-func renderLoginPage(w http.ResponseWriter, data loginPageData, status int, secure bool) {
-	token, err := newCSRFToken()
-	if err != nil {
-		http.Error(w, "could not create login form", http.StatusInternalServerError)
-		return
+func renderLoginPage(w http.ResponseWriter, r *http.Request, data loginPageData, status int, secure bool) {
+	token := ""
+	if cookie, err := r.Cookie(csrfCookieName); err == nil {
+		token = cookie.Value
+	}
+	if token == "" {
+		var err error
+		token, err = newCSRFToken()
+		if err != nil {
+			http.Error(w, "could not create login form", http.StatusInternalServerError)
+			return
+		}
 	}
 	data.CSRFToken = token
 	setCSRFCookie(w, token, secure)
