@@ -1,9 +1,12 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,12 +99,17 @@ func (*auditFailingChildState) GetRun(context.Context, string) (*store.Run, erro
 }
 
 func TestChildAwaitOwnerKeepsAuditWritesBestEffort(t *testing.T) {
+	var logs bytes.Buffer
+	diagnostics := podChildAwaitDiagnostics{
+		logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+	}
 	config := childAwaitConfig{
 		state:       &auditFailingChildState{},
 		parentRunID: "parent",
 		masker:      secrets.NewMasker(),
+		diagnostics: diagnostics,
 		pollFactory: func() (childAwaitPollPolicy, error) {
-			return &retryChildAwaitPoll{}, nil
+			return &retryChildAwaitPoll{diagnostics: diagnostics}, nil
 		},
 	}
 	ctx := sparkwingruntime.WithNode(context.Background(), "parent-node")
@@ -112,6 +120,51 @@ func TestChildAwaitOwnerKeepsAuditWritesBestEffort(t *testing.T) {
 	}
 	if resolved.RunID != "child" {
 		t.Fatalf("resolved run = %q, want child", resolved.RunID)
+	}
+	got := logs.String()
+	if count := strings.Count(got, `"msg":"child run audit event append failed"`); count != 2 {
+		t.Fatalf("audit warning count = %d, want start and finish\n%s", count, got)
+	}
+	for _, field := range []string{
+		`"write":"child_run_start"`, `"write":"child_run_finish"`,
+		`"run_id":"parent"`, `"node":"parent-node"`, `"err":"audit unavailable"`,
+	} {
+		if !strings.Contains(got, field) {
+			t.Errorf("audit warnings missing %s\n%s", field, got)
+		}
+	}
+}
+
+func TestPodChildAwaitPollLogsFirstFailureWithIdentity(t *testing.T) {
+	var logs bytes.Buffer
+	diagnostics := podChildAwaitDiagnostics{
+		logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+	}
+	policy := &retryChildAwaitPoll{
+		diagnostics: diagnostics,
+		runID:       "parent",
+		nodeID:      "parent-node",
+	}
+	pollErr := errors.New("controller unavailable")
+
+	if err := policy.failure(t.Context(), "child", "deploy", pollErr, true); err != nil {
+		t.Fatalf("first retryable failure became terminal: %v", err)
+	}
+	if err := policy.failure(t.Context(), "child", "deploy", pollErr, false); err != nil {
+		t.Fatalf("later retryable failure became terminal: %v", err)
+	}
+
+	got := logs.String()
+	if count := strings.Count(got, `"msg":"child run status poll failed; retrying"`); count != 1 {
+		t.Fatalf("poll warning count = %d, want one\n%s", count, got)
+	}
+	for _, field := range []string{
+		`"run_id":"parent"`, `"node":"parent-node"`,
+		`"child_run_id":"child"`, `"pipeline":"deploy"`, `"err":"controller unavailable"`,
+	} {
+		if !strings.Contains(got, field) {
+			t.Errorf("poll warning missing %s\n%s", field, got)
+		}
 	}
 }
 

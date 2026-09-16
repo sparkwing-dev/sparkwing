@@ -212,22 +212,20 @@ func RunNodeOnce(
 				"run_id", runID, "node", node, "err", err)
 		}))
 
-	warnChildAwait := func(_ context.Context, format string, args ...any) {
-		logger.Warn(fmt.Sprintf(format, args...))
-	}
-	infoChildAwait := func(_ context.Context, format string, args ...any) {
-		logger.Info(fmt.Sprintf(format, args...))
-	}
+	childDiagnostics := podChildAwaitDiagnostics{logger: logger}
 	childAwait := childAwaitConfig{
 		state:       stateClient,
 		concurrency: backends.Concurrency,
 		parentRunID: runID,
 		retryOf:     run.RetryOf,
 		masker:      masker,
-		infof:       infoChildAwait,
-		warnf:       warnChildAwait,
+		diagnostics: childDiagnostics,
 		pollFactory: func() (childAwaitPollPolicy, error) {
-			return &retryChildAwaitPoll{warnf: warnChildAwait}, nil
+			return &retryChildAwaitPoll{
+				diagnostics: childDiagnostics,
+				runID:       runID,
+				nodeID:      nodeID,
+			}, nil
 		},
 	}
 	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(childAwait.await))

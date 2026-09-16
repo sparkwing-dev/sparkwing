@@ -1720,8 +1720,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				}
 				return &wedgeChildAwaitPoll{guard: guard}, nil
 			},
-			infof: sparkwing.Info,
-			warnf: sparkwing.Warn,
+			diagnostics: localChildAwaitDiagnostics{},
 		}
 		return config.await(ctx, req)
 	})
