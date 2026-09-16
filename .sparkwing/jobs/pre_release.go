@@ -133,30 +133,34 @@ func addPreReleaseChecks(work *sparkwing.Work, checks []preReleaseCheck) {
 
 func preReleaseChecks() []preReleaseCheck {
 	return []preReleaseCheck{
-		{id: "no-replace", run: checkPreReleaseNoReplace},
-		{id: "no-go-work", run: checkPreReleaseNoGoWork},
+		{id: "no-replace", run: checkNoReplaceDirectivesInCommittedGoMods},
+		{id: "no-go-work", run: checkNoCommittedGoWorkFiles},
 		{id: "module-tidy", run: checkPreReleaseModuleTidy},
 		{id: "sparkwing-pin", run: checkPreReleaseSparkwingPin},
-		{id: "version-freshness", run: checkPreReleaseVersionFreshness},
-		{id: "pre-v1-policy", run: checkPreReleasePreV1Policy},
+		{id: "version-freshness", run: func(ctx context.Context) error {
+			return CheckVersionsFreshness(ctx, sparkwing.WorkDir())
+		}},
+		{id: "pre-v1-policy", run: func(ctx context.Context) error {
+			return CheckPreV1Policy(ctx, sparkwing.WorkDir())
+		}},
 		{id: "gofmt", run: checkPreReleaseGofmt},
-		{id: "lint", run: checkPreReleaseLint},
-		{id: "race", run: checkPreReleaseRace},
+		{id: "lint", run: runGolangciLint},
+		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
 		{id: "store-postgres", run: checkPreReleaseStorePostgres},
-		{id: "chaos", run: checkPreReleaseChaos},
-		{id: "release-vulnerability", run: checkPreReleaseVulnerability},
-		{id: "shell-portability", run: checkPreReleaseShellPortability},
-		{id: "hosted-mutation-guard", run: checkPreReleaseHostedMutation},
-		{id: "vulnerability-script", run: checkPreReleaseVulnerabilityScript},
-		{id: "changelog-script", run: checkPreReleaseChangelogScript},
-		{id: "installer-report", run: checkPreReleaseInstallerReport},
-		{id: "service-installer", run: checkPreReleaseServiceInstaller},
-		{id: "release-installer", run: checkPreReleaseReleaseInstaller},
+		{id: "chaos", run: preReleaseShell("go test -count=1 -run TestChaos_CI ./internal/chaos")},
+		{id: "release-vulnerability", run: runReleaseBinaryVulnerabilityScan},
+		{id: "shell-portability", run: preReleaseShell("bash bin/check-shell-test.sh")},
+		{id: "hosted-mutation-guard", run: preReleaseShell("bash bin/check-hosted-gate-clean-test.sh")},
+		{id: "vulnerability-script", run: preReleaseShell("bash bin/check-release-binary-vulnerabilities-test.sh")},
+		{id: "changelog-script", run: preReleaseShell("bash bin/check-changelog-test.sh")},
+		{id: "installer-report", run: preReleaseShell("bash bin/install-test.sh")},
+		{id: "service-installer", run: preReleaseShell("bash bin/service-install-test.sh")},
+		{id: "release-installer", run: preReleaseShell("bash bin/release-install-test.sh")},
 		{id: "install-to-green", run: checkPreReleaseInstallToGreen},
-		{id: "shellcheck", run: checkPreReleaseShellcheck},
-		{id: "terraform", run: checkPreReleaseTerraform},
-		{id: "markdownlint", run: checkPreReleaseMarkdownlint},
-		{id: "actionlint", run: checkPreReleaseActionlint},
+		{id: "shellcheck", run: preReleaseShell("bash bin/check-shell.sh")},
+		{id: "terraform", run: preReleaseShell("bash bin/check-terraform-test.sh && bash bin/check-terraform.sh")},
+		{id: "markdownlint", run: runMarkdownlint},
+		{id: "actionlint", run: runActionlint},
 		{id: "doc-examples", run: checkPreReleaseDocExamples},
 		{id: "cli-reference", run: checkPreReleaseCLIReference},
 		{id: "config-reference", run: checkPreReleaseConfigReference},
@@ -167,29 +171,12 @@ func preReleaseChecks() []preReleaseCheck {
 	}
 }
 
-func checkPreReleaseNoReplace(ctx context.Context) error {
-	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "no-replace check: passed")
-	return nil
-}
-
-func checkPreReleaseNoGoWork(ctx context.Context) error {
-	if err := checkNoCommittedGoWorkFiles(ctx); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "no-go.work check: passed")
-	return nil
-}
-
 func checkPreReleaseModuleTidy(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx,
 		`go -C .sparkwing mod tidy 2>/dev/null || true; git diff --quiet -- .sparkwing/go.mod .sparkwing/go.sum`,
 	).Run(); err != nil {
 		return errors.New("go mod tidy drift: run `go -C .sparkwing mod tidy` and commit the result")
 	}
-	sparkwing.Info(ctx, "go mod tidy: no drift")
 	return nil
 }
 
@@ -204,44 +191,11 @@ func checkPreReleaseSparkwingPin(ctx context.Context) error {
 	return nil
 }
 
-func checkPreReleaseVersionFreshness(ctx context.Context) error {
-	if err := CheckVersionsFreshness(ctx, sparkwing.WorkDir()); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "version freshness: passed")
-	return nil
-}
-
-func checkPreReleasePreV1Policy(ctx context.Context) error {
-	if err := CheckPreV1Policy(ctx, sparkwing.WorkDir()); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "pre-v1 policy: passed")
-	return nil
-}
-
 func checkPreReleaseGofmt(ctx context.Context) error {
 	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
 		MustBeEmpty("gofmt reported unformatted files"); err != nil {
 		return fmt.Errorf("gofmt: %w", err)
 	}
-	sparkwing.Info(ctx, "gofmt: passed")
-	return nil
-}
-
-func checkPreReleaseLint(ctx context.Context) error {
-	if err := runGolangciLint(ctx); err != nil {
-		return err
-	}
-	sparkwing.Info(ctx, "golangci-lint: passed")
-	return nil
-}
-
-func checkPreReleaseRace(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "go -C .sparkwing test -race ./...").Run(); err != nil {
-		return fmt.Errorf("go test -race: %w", err)
-	}
-	sparkwing.Info(ctx, "go test -race: passed")
 	return nil
 }
 
@@ -251,52 +205,7 @@ func checkPreReleaseStorePostgres(ctx context.Context) error {
 	if err := (&StorePostgres{}).run(storeContext); err != nil {
 		return fmt.Errorf("store postgres suite: %w", err)
 	}
-	sparkwing.Info(ctx, "store postgres suite: passed against postgres")
 	return nil
-}
-
-func checkPreReleaseChaos(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {
-		return fmt.Errorf("chaos gate: %w", err)
-	}
-	sparkwing.Info(ctx, "chaos gate: admission invariants held under fault injection")
-	return nil
-}
-
-func checkPreReleaseVulnerability(ctx context.Context) error {
-	if err := runReleaseBinaryVulnerabilityScan(ctx); err != nil {
-		return fmt.Errorf("release binary vulnerability scan: %w", err)
-	}
-	sparkwing.Info(ctx, "release binary vulnerability scan: passed")
-	return nil
-}
-
-func checkPreReleaseShellPortability(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/check-shell-test.sh", "shellcheck script portability", "passed")
-}
-
-func checkPreReleaseHostedMutation(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/check-hosted-gate-clean-test.sh", "hosted gate mutation guard", "passed")
-}
-
-func checkPreReleaseVulnerabilityScript(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/check-release-binary-vulnerabilities-test.sh", "release binary vulnerability scanner", "passed")
-}
-
-func checkPreReleaseChangelogScript(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/check-changelog-test.sh", "changelog script portability", "passed")
-}
-
-func checkPreReleaseInstallerReport(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/install-test.sh", "installer report", "passed")
-}
-
-func checkPreReleaseServiceInstaller(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/service-install-test.sh", "service installer config guard", "passed")
-}
-
-func checkPreReleaseReleaseInstaller(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/release-install-test.sh", "public installer release verification", "passed")
 }
 
 func checkPreReleaseInstallToGreen(ctx context.Context) error {
@@ -312,37 +221,12 @@ func checkPreReleaseInstallToGreen(ctx context.Context) error {
 	return nil
 }
 
-func checkPreReleaseShellcheck(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/check-shell.sh", "shellcheck", "passed")
-}
-
-func checkPreReleaseTerraform(ctx context.Context) error {
-	return runPreReleaseCommand(ctx, "bash bin/check-terraform-test.sh && bash bin/check-terraform.sh", "terraform", "validation and both engine plans passed")
-}
-
-func checkPreReleaseMarkdownlint(ctx context.Context) error {
-	if err := runMarkdownlint(ctx); err != nil {
-		return fmt.Errorf("markdownlint: %w", err)
-	}
-	sparkwing.Info(ctx, "markdownlint: passed")
-	return nil
-}
-
-func checkPreReleaseActionlint(ctx context.Context) error {
-	if err := runActionlint(ctx); err != nil {
-		return fmt.Errorf("actionlint: %w", err)
-	}
-	sparkwing.Info(ctx, "actionlint: passed")
-	return nil
-}
-
 func checkPreReleaseDocExamples(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		return fmt.Errorf("doc-examples: %w", err)
 	}
-	sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
 	return nil
 }
 
@@ -366,7 +250,6 @@ func checkPreReleaseCLIReference(ctx context.Context) error {
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		return errors.New("cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
 	}
-	sparkwing.Info(ctx, "cli-reference: matches source")
 	return nil
 }
 
@@ -376,7 +259,6 @@ func checkPreReleaseConfigReference(ctx context.Context) error {
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		return errors.New("config-reference: stale -- run `bash bin/gen-config-docs.sh`")
 	}
-	sparkwing.Info(ctx, "config-reference: matches source")
 	return nil
 }
 
@@ -400,7 +282,6 @@ func checkPreReleaseSDKReference(ctx context.Context) error {
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		return errors.New("sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
 	}
-	sparkwing.Info(ctx, "sdk-reference: matches source")
 	return nil
 }
 
@@ -410,7 +291,6 @@ func checkPreReleaseAPIReference(ctx context.Context) error {
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		return errors.New("api-reference: stale -- run `bash bin/gen-api-docs.sh`")
 	}
-	sparkwing.Info(ctx, "api-reference: matches source")
 	return nil
 }
 
@@ -418,7 +298,6 @@ func checkPreReleaseOpenAPI(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Run(); err != nil {
 		return errors.New("openapi: stale -- run `bash bin/gen-api-docs.sh`")
 	}
-	sparkwing.Info(ctx, "openapi: matches source")
 	return nil
 }
 
@@ -426,16 +305,14 @@ func checkPreReleaseAPISnapshot(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
 		return errors.New("api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
 	}
-	sparkwing.Info(ctx, "api-snapshot: no drift")
 	return nil
 }
 
-func runPreReleaseCommand(ctx context.Context, command, label, success string) error {
-	if _, err := sparkwing.Bash(ctx, command).Run(); err != nil {
-		return fmt.Errorf("%s: %w", label, err)
+func preReleaseShell(command string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		_, err := sparkwing.Bash(ctx, command).Run()
+		return err
 	}
-	sparkwing.Info(ctx, "%s: %s", label, success)
-	return nil
 }
 
 func committedGoMods(jobContext context.Context) ([]string, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -70,11 +71,52 @@ func TestPreReleaseFailuresDoNotSuppressLaterChecks(t *testing.T) {
 		check("later-success", nil),
 	})
 
-	_, err := sparkwing.RunWork(context.Background(), work)
+	log := &preReleaseRecordLog{}
+	ctx := context.WithValue(context.Background(), sparkwing.RuntimePlumbing.Keys.Logger, log)
+	ctx = context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.Node, "pre-release")
+	_, err := sparkwing.RunWork(ctx, work)
 	if err == nil || !strings.Contains(err.Error(), "first failed") {
 		t.Fatalf("RunWork error = %v, want failed parent naming first failure", err)
 	}
 	if want := []string{"first-failure", "second-failure", "later-success"}; !slices.Equal(ran, want) {
 		t.Fatalf("checks run = %v, want %v", ran, want)
 	}
+	got := map[string]sparkwing.LogRecord{}
+	for _, record := range log.snapshot() {
+		if record.Event == sparkwing.EventStepEnd {
+			got[record.Msg] = record
+		}
+	}
+	for id, cause := range map[string]string{
+		"first-failure":  "first failed",
+		"second-failure": "second failed",
+	} {
+		record := got[id]
+		errorText, _ := record.Attrs["error"].(string)
+		if record.Attrs["outcome"] != "failed" || !strings.Contains(errorText, cause) {
+			t.Fatalf("%s terminal record = %+v, want its failed outcome and cause", id, record)
+		}
+	}
+	if record := got["later-success"]; record.Attrs["outcome"] != "success" {
+		t.Fatalf("later-success terminal record = %+v, want success", record)
+	}
+}
+
+type preReleaseRecordLog struct {
+	mu      sync.Mutex
+	records []sparkwing.LogRecord
+}
+
+func (log *preReleaseRecordLog) Log(_, _ string) {}
+
+func (log *preReleaseRecordLog) Emit(record sparkwing.LogRecord) {
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	log.records = append(log.records, record)
+}
+
+func (log *preReleaseRecordLog) snapshot() []sparkwing.LogRecord {
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	return slices.Clone(log.records)
 }
