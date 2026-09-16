@@ -38,9 +38,6 @@ func downgradeBoundExecutionToV47(t *testing.T, db *sql.DB) {
 	if _, err := db.Exec(`DELETE FROM sparkwing_requirements WHERE name = 'bound-execution-credentials'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DELETE FROM sparkwing_requirements WHERE name = 'bound-child-output-grants'`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := db.Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 48`); err != nil {
 		t.Fatal(err)
 	}
@@ -62,19 +59,33 @@ func seedActiveLegacyClaim(t *testing.T, st *store.Store, bind string) {
 	}
 }
 
-func assertLegacyClaimBackfilled(t *testing.T, db *sql.DB) {
+func assertBoundExecutionV48(t *testing.T, st *store.Store) {
 	t.Helper()
 	var quotaPrincipal string
-	if err := db.QueryRow(`SELECT claim_quota_principal FROM nodes
+	if err := st.DB().QueryRow(`SELECT claim_quota_principal FROM nodes
 		WHERE run_id = 'legacy-run' AND node_id = 'build'`).Scan(&quotaPrincipal); err != nil {
 		t.Fatal(err)
 	}
 	if quotaPrincipal != "tenant-a" {
 		t.Fatalf("claim quota principal = %q, want tenant-a", quotaPrincipal)
 	}
+	ctx := context.Background()
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "child", Pipeline: "demo", Status: "pending", CreatedAt: time.Now(),
+		ParentRunID: "legacy-run", ParentNodeID: "build", RequestedOutputNodeID: "artifact",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := st.GetTrigger(ctx, "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trigger.RequestedOutputNodeID != "artifact" {
+		t.Fatalf("requested output = %q, want artifact", trigger.RequestedOutputNodeID)
+	}
 }
 
-func TestSchemaV48BackfillsActiveClaimQuotaOwnerSQLite(t *testing.T) {
+func TestSchemaV48UpgradesBoundExecutionSQLite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v47.db")
 	st, err := store.Open(path)
 	if err != nil {
@@ -91,10 +102,10 @@ func TestSchemaV48BackfillsActiveClaimQuotaOwnerSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = up.Close() }()
-	assertLegacyClaimBackfilled(t, up.DB())
+	assertBoundExecutionV48(t, up)
 }
 
-func TestSchemaV48BackfillsActiveClaimQuotaOwnerPostgres(t *testing.T) {
+func TestSchemaV48UpgradesBoundExecutionPostgres(t *testing.T) {
 	dsn := pgTestSchemaDSN(t)
 	ctx := context.Background()
 	st, err := store.OpenPostgres(ctx, dsn)
@@ -112,5 +123,5 @@ func TestSchemaV48BackfillsActiveClaimQuotaOwnerPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = up.Close() }()
-	assertLegacyClaimBackfilled(t, up.DB())
+	assertBoundExecutionV48(t, up)
 }

@@ -1070,7 +1070,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 49
+const expectedSchemaVersion = 48
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1843,7 +1843,6 @@ var migrationRequirements = map[int][]string{
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
 	48: {"bound-execution-credentials"},
-	49: {"bound-child-output-grants"},
 }
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
@@ -1988,6 +1987,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		if err := ensureColumnsSQLite(ctx, tx, "tokens", executionCredentialCols); err != nil {
 			return err
 		}
+		if err := ensureColumnsSQLite(ctx, tx, "triggers", map[string]string{
+			"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
+		}); err != nil {
+			return err
+		}
 		if err := ensureColumnsSQLite(ctx, tx, "nodes", map[string]string{
 			"claim_quota_principal": "TEXT NOT NULL DEFAULT ''",
 		}); err != nil {
@@ -1998,10 +2002,6 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		}
 		_, err := tx.ExecContext(ctx, claimQuotaPrincipalIndex)
 		return err
-	case 49:
-		return ensureColumnsSQLite(ctx, tx, "triggers", map[string]string{
-			"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
-		})
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2345,6 +2345,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		if err := addColumnsTx(ctx, tx, "tokens", executionCredentialCols); err != nil {
 			return err
 		}
+		if err := addColumnsTx(ctx, tx, "triggers", map[string]string{
+			"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
+		}); err != nil {
+			return err
+		}
 		if err := addColumnsTx(ctx, tx, "nodes", map[string]string{
 			"claim_quota_principal": "TEXT NOT NULL DEFAULT ''",
 		}); err != nil {
@@ -2355,10 +2360,6 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, claimQuotaPrincipalIndex)
 		return err
-	case 49:
-		return addColumnsTx(ctx, tx, "triggers", map[string]string{
-			"requested_output_node_id": "TEXT NOT NULL DEFAULT ''",
-		})
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

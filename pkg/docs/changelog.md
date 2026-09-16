@@ -26,8 +26,8 @@ unlock.
   controller-owned execution path with a bound, delegated credential and the
   named `hosted` dispatch policy. Schema 48 adds the credential binding that
   prevents older controllers from authenticating it as an ordinary runner and
-  records each active claim's run-owner quota identity. Schema 49 records the
-  one child output a `RunAndAwait` caller may read. `Client.FinalizeNodeReady`
+  records each active claim's run-owner quota identity and the one child output
+  a `RunAndAwait` caller may read. `Client.FinalizeNodeReady`
   now takes the dispatch policy directly, and `Client.EnqueueTriggerForAwait`
   records that requested child output. The HTTP finalization endpoint still
   accepts an empty request body from an older client.
