@@ -57,8 +57,8 @@ func TestParsePipelinePlanArgs_RejectsRuntimeRangeSpellings(t *testing.T) {
 	for flag, replacement := range tests {
 		t.Run(flag, func(t *testing.T) {
 			_, _, err := parsePipelinePlanArgs([]string{"--name", "gate", flag})
-			if err == nil || !strings.Contains(err.Error(), replacement) {
-				t.Fatalf("parse error = %v, want replacement %s", err, replacement)
+			if err == nil || !strings.Contains(err.Error(), replacement) || !strings.Contains(err.Error(), "migration-guide/v0.53.0#pipeline-plan-range-flags") {
+				t.Fatalf("parse error = %v, want replacement %s and migration guide", err, replacement)
 			}
 		})
 	}

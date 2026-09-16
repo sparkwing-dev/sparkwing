@@ -22,6 +22,12 @@ unlock.
 
 ### Changed
 
+- **cli (Breaking):** `sparkwing pipeline plan` now uses its documented
+  `--start-at` and `--stop-at` flags; the accidentally accepted `--sw-*`
+  spellings are removed. See the [migration guide](docs/migrations/_unreleased.md#pipeline-plan-range-flags)
+  for the mechanical replacement. Preview decisions and unknown-step errors
+  now match focused execution.
+
 - **checks:** `pre-release` records each release check as a sequential native
   WorkStep, so retained hosted timing artifacts show the check-level critical
   path. Every check still runs after an earlier failure; step state and logs
@@ -45,10 +51,6 @@ unlock.
   identity. Execution outcomes remain unchanged.
 
 ### Fixed
-
-- **cli:** `sparkwing pipeline plan --start-at` and `--stop-at` now apply the
-  documented WorkStep range to preview decisions and reject unknown step names
-  with plan-facing flag errors, matching focused execution.
 
 - **release:** `cmd/verify-release --verify` uses the public trust roots shipped
   with Sparkwing and no longer requires the private release signing key.

@@ -60,6 +60,8 @@ type pipelinePlanArgs struct {
 	passthrough []string
 }
 
+const planRangeMigrationGuide = "https://sparkwing.dev/docs/migration-guide/v0.53.0#pipeline-plan-range-flags"
+
 func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 	var parsed pipelinePlanArgs
 	for i := 0; i < len(args); i++ {
@@ -105,9 +107,9 @@ func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 		case strings.HasPrefix(tok, "--stop-at="):
 			parsed.stopAt = strings.TrimPrefix(tok, "--stop-at=")
 		case tok == "--sw-start-at" || strings.HasPrefix(tok, "--sw-start-at="):
-			return parsed, false, errors.New("plan: --sw-start-at is not supported; use --start-at")
+			return parsed, false, fmt.Errorf("plan: --sw-start-at is not supported; use --start-at; see %s", planRangeMigrationGuide)
 		case tok == "--sw-stop-at" || strings.HasPrefix(tok, "--sw-stop-at="):
-			return parsed, false, errors.New("plan: --sw-stop-at is not supported; use --stop-at")
+			return parsed, false, fmt.Errorf("plan: --sw-stop-at is not supported; use --stop-at; see %s", planRangeMigrationGuide)
 		default:
 			parsed.passthrough = append(parsed.passthrough, tok)
 		}
