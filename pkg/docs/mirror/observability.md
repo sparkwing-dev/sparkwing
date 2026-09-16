@@ -11,10 +11,10 @@ step, with `run_id`, `operation`, and a bounded, secret-masked `error` in its
 attributes. Inspect these warnings when stored step state disagrees with the
 execution log.
 
-The original lifecycle event and work outcome remain unchanged because the
-write records work that already happened. The warning does not repair the
-missing state. It uses the underlying log path, so loss of that log path can
-also prevent delivery of this diagnostic.
+The original lifecycle event and work outcome remain unchanged because step
+state records execution rather than governing it. The warning does not repair
+the missing state. It uses the underlying log path, so loss of that log path
+can also prevent delivery of this diagnostic.
 
 ## Assisted-offer lifecycle
 

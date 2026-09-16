@@ -40,7 +40,7 @@ func wrapNodeLogWithStepState(ctx context.Context, inner NodeLog, state StateBac
 				err = state.SkipNodeStep(ctx, runID, nodeID, stepID)
 			}
 			if err != nil {
-				// safety: recording failure must not replace the outcome of work that already happened.
+				// safety: observational step state must not determine the work's execution outcome.
 				inner.Emit(sparkwing.LogRecord{
 					Level: "warn", Event: "state_write_failed", JobID: nodeID, Step: stepID,
 					Msg: "step state write failed",
