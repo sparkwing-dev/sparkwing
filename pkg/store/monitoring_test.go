@@ -104,20 +104,24 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	for _, run := range []struct {
-		id, pipeline, outcome string
+		id, pipeline string
+		outcomes     []string
 	}{
-		{id: "cached-run", pipeline: "alpha", outcome: "cached"},
-		{id: "mixed-run", pipeline: "alpha", outcome: "success"},
-		{id: "other-run", pipeline: "beta", outcome: "cached"},
+		{id: "cached-run", pipeline: "alpha", outcomes: []string{"cached", "satisfied"}},
+		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"cached", "success"}},
+		{id: "other-run", pipeline: "beta", outcomes: []string{"cached"}},
 	} {
 		if err := st.CreateRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: "work", Status: "pending"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := st.FinishNode(ctx, run.id, "work", run.outcome, "", nil); err != nil {
-			t.Fatal(err)
+		for _, outcome := range run.outcomes {
+			nodeID := "work-" + outcome
+			if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.FinishNode(ctx, run.id, nodeID, outcome, "", nil); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := st.FinishRun(ctx, run.id, "success", ""); err != nil {
 			t.Fatal(err)
