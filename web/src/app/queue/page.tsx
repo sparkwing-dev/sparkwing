@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   type QueueHolder,
@@ -31,6 +31,7 @@ import {
 } from "@/lib/queue";
 import {
   appendHostPressureSample,
+  startSerialPolling,
   type HostPressureSample,
 } from "@/lib/resourceObservability";
 import HostPressureChart from "@/components/HostPressureChart";
@@ -47,34 +48,29 @@ export default function QueuePage() {
   >([]);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refresh = useCallback(async () => {
-    const next = await getQueue();
-    setQs(next);
-    if (next) {
-      setPressureHistory((current) =>
-        appendHostPressureSample(current, next, Date.now()),
-      );
-    }
-    setLoaded(true);
-    setPulse(true);
-    if (pulseTimer.current) clearTimeout(pulseTimer.current);
-    pulseTimer.current = setTimeout(() => setPulse(false), 600);
-  }, []);
-
   useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void refresh();
+    const stop = startSerialPolling({
+      load: getQueue,
+      publish: (next) => {
+        setQs(next);
+        if (next) {
+          setPressureHistory((current) =>
+            appendHostPressureSample(current, next, Date.now()),
+          );
+        }
+        setLoaded(true);
+        setPulse(true);
+        if (pulseTimer.current) clearTimeout(pulseTimer.current);
+        pulseTimer.current = setTimeout(() => setPulse(false), 600);
+      },
+      intervalMS: POLL_MS,
+      active: () => !document.hidden,
     });
-    const i = window.setInterval(() => {
-      if (!document.hidden) refresh();
-    }, POLL_MS);
     return () => {
-      cancelled = true;
-      window.clearInterval(i);
+      stop();
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
     };
-  }, [refresh]);
+  }, []);
 
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-5xl mx-auto w-full">

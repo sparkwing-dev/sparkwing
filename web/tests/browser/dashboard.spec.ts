@@ -251,6 +251,12 @@ type MockAPIOptions = {
   unauthorized?: boolean;
   failPath?: string;
   onDetail?: (route: Route, runID: string) => Promise<boolean>;
+  onNodeMetrics?: (
+    route: Route,
+    runID: string,
+    nodeID: string,
+  ) => Promise<boolean>;
+  nodeMetrics?: Record<string, Record<string, unknown>>;
   onEventStream?: (route: Route) => Promise<void>;
   onLogStream?: (route: Route) => Promise<void>;
   onRequest?: (route: Route) => void;
@@ -384,6 +390,22 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     if (request.method() === "GET" && path.endsWith("/paused")) {
       await route.fulfill({ json: [] });
+      return;
+    }
+    const metricsMatch = path.match(
+      /^\/api\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/metrics$/,
+    );
+    if (request.method() === "GET" && metricsMatch) {
+      const [, runID, nodeID] = metricsMatch;
+      if (
+        options.onNodeMetrics &&
+        (await options.onNodeMetrics(route, runID, nodeID))
+      ) {
+        return;
+      }
+      await route.fulfill({
+        json: options.nodeMetrics?.[runID]?.[nodeID] ?? { points: [] },
+      });
       return;
     }
     const detailMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
@@ -641,6 +663,159 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   await expect(
     page.getByText("PREAMBLE stays outside the tests step", { exact: true }),
   ).toBeVisible();
+});
+
+test("keeps interval, command, and process resource evidence distinct", async ({
+  page,
+}) => {
+  const detail = {
+    ...finishedDetail,
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      requested_cores: 2.5,
+      requested_memory_bytes: 4 * 2 ** 30,
+      cpu_nanos: 3_000_000_000,
+      process_wall_nanos: 2_000_000_000,
+      max_rss_bytes: 900 * 2 ** 20,
+    })),
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+    nodeMetrics: {
+      [finishedRun.id]: {
+        verify: {
+          points: [
+            {
+              ts: "2026-08-27T18:00:02Z",
+              cpu_millicores: 750,
+              memory_bytes: 500 * 2 ** 20,
+            },
+            {
+              ts: "2026-08-27T18:00:03Z",
+              cpu_millicores: 2200,
+              memory_bytes: 800 * 2 ** 20,
+              cpu_time_nanos: 1_250_000_000,
+            },
+          ],
+        },
+      },
+    },
+  });
+  await page.goto(
+    `/runs?run=${finishedRun.id}&node=verify&tab=resources`,
+  );
+  await page.getByRole("button", { name: "Resources", exact: true }).click();
+
+  await expect(page.getByText("Resource evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Interval peak CPU:\s*750m/)).toBeVisible();
+  await expect(
+    page.getByText(/Command peak average CPU:\s*2\.2 CPU/),
+  ).toBeVisible();
+  await expect(page.getByText(/Process CPU time:\s*3\.00s/)).toBeVisible();
+  await expect(page.getByText(/Command CPU time:\s*1\.25s/)).toBeVisible();
+  await expect(page.getByText(/Interval peak memory:\s*500Mi/)).toBeVisible();
+  await expect(page.getByText(/Process max RSS:\s*900Mi/)).toBeVisible();
+  await expect(page.getByText(/Command max RSS:\s*800Mi/)).toBeVisible();
+  await expect(page.getByText("1 interval reading", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 command report", { exact: true })).toBeVisible();
+});
+
+test("names a cache hit without requesting execution metrics", async ({ page }) => {
+  let metricRequests = 0;
+  const detail = {
+    ...finishedDetail,
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      outcome: "cached",
+      duration_ms: 0,
+    })),
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+    onNodeMetrics: async () => {
+      metricRequests++;
+      return false;
+    },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}&node=verify`);
+  await page.getByRole("button", { name: "Resources", exact: true }).click();
+
+  await expect(page.getByText(/Cache hit\. Sparkwing reused/)).toBeVisible();
+  expect(metricRequests).toBe(0);
+});
+
+test("ignores an older node metrics response after switching runs", async ({
+  page,
+}) => {
+  const newerRun = {
+    ...finishedRun,
+    id: "run-20260827-newer",
+    pipeline: "pre-commit",
+  };
+  const newerDetail = { ...finishedDetail, run: newerRun };
+  const olderStarted = deferred();
+  const olderRelease = deferred();
+  const olderDelivered = deferred();
+  await installMockAPI(page, {
+    runs: [finishedRun, newerRun],
+    details: {
+      [finishedRun.id]: finishedDetail,
+      [newerRun.id]: newerDetail,
+    },
+    onNodeMetrics: async (route, runID) => {
+      if (runID === finishedRun.id) {
+        olderStarted.resolve();
+        await olderRelease.promise;
+        await route.fulfill({
+          json: {
+            points: [
+              {
+                ts: "2026-08-27T18:00:02Z",
+                cpu_millicores: 111,
+                memory_bytes: 111 * 2 ** 20,
+              },
+            ],
+          },
+        });
+        olderDelivered.resolve();
+        return true;
+      }
+      await route.fulfill({
+        json: {
+          points: [
+            {
+              ts: "2026-08-27T18:00:02Z",
+              cpu_millicores: 2200,
+              memory_bytes: 700 * 2 ** 20,
+            },
+          ],
+        },
+      });
+      return true;
+    },
+  });
+  await page.goto("/runs");
+  await page.locator(`[data-run-id="${finishedRun.id}"]`).click();
+  await page.getByRole("button", { name: "Resources", exact: true }).click();
+  await page.locator('[data-resource-node-id="verify"]').click();
+  await olderStarted.promise;
+
+  await page.locator(`[data-run-id="${newerRun.id}"]`).click();
+  await page.locator('[data-resource-node-id="verify"]').click();
+  await expect(page.getByText(/Interval peak CPU:\s*2\.2 CPU/)).toBeVisible();
+  olderRelease.resolve();
+  await olderDelivered.promise;
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+
+  await expect(page.getByText(/Interval peak CPU:\s*2\.2 CPU/)).toBeVisible();
+  await expect(page.getByText(/Interval peak CPU:\s*111m/)).toHaveCount(0);
 });
 
 test("shows an empty DAG canvas with the error for a run that never planned", async ({

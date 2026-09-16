@@ -24,9 +24,9 @@ unlock.
 
 - **dashboard:** The Queue page graphs five minutes of live CPU and memory
   pressure as Sparkwing job reservations, host reserve, external applications,
-  and capacity. Run resource panels compare requested resources with sampled
-  and exact process evidence, retain useful summaries for short nodes, and name
-  cache hits without inventing execution usage.
+  and capacity. Run resource panels keep interval samples, command reports, and
+  exact process evidence separate, retain useful summaries for short nodes, and
+  name cache hits without inventing execution usage.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.7, so a fresh scaffold compiles against that release.
 

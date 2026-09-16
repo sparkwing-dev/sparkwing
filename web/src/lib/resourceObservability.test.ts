@@ -4,6 +4,7 @@ import type { Node, QueueState } from "./api";
 import {
   appendHostPressureSample,
   hostPressureSample,
+  startSerialPolling,
   summarizeNodeResources,
 } from "./resourceObservability";
 
@@ -36,13 +37,12 @@ test("host pressure preserves measured external load and host reserve", () => {
 
   assert.deepEqual(sample, {
     at: 123,
-    cpu: { capacity: 16, held: 6, reserved: 2, external: 3, available: 5 },
+    cpu: { capacity: 16, held: 6, reserved: 2, external: 3 },
     memory: {
       capacity: 32 * 2 ** 30,
       held: 8 * 2 ** 30,
       reserved: 4 * 2 ** 30,
       external: 6 * 2 ** 30,
-      available: 14 * 2 ** 30,
     },
   });
 });
@@ -91,6 +91,44 @@ test("host pressure history drops samples outside five minutes", () => {
   );
 });
 
+test("serial polling waits for one response and drops a cancelled response", async () => {
+  let resolveFirst!: (value: string) => void;
+  let resolveSecond!: (value: string) => void;
+  const first = new Promise<string>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const second = new Promise<string>((resolve) => {
+    resolveSecond = resolve;
+  });
+  let secondStarted!: () => void;
+  const secondLoad = new Promise<void>((resolve) => {
+    secondStarted = resolve;
+  });
+  let loads = 0;
+  const published: string[] = [];
+  const stop = startSerialPolling({
+    load: () => {
+      loads++;
+      if (loads === 2) secondStarted();
+      return loads === 1 ? first : second;
+    },
+    publish: (value) => published.push(value),
+    intervalMS: 0,
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(loads, 1);
+  resolveFirst("first");
+  await secondLoad;
+  assert.equal(loads, 2);
+  assert.deepEqual(published, ["first"]);
+
+  stop();
+  resolveSecond("stale");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(published, ["first"]);
+});
+
 test("node summary separates reservations, exact totals, and command samples", () => {
   const node: Node = {
     id: "build",
@@ -121,10 +159,12 @@ test("node summary separates reservations, exact totals, and command samples", (
   });
 
   assert.deepEqual(summary, {
-    cacheHit: false,
-    sampleCount: 2,
-    sampledPeakCPUMillicores: 2200,
-    sampledPeakMemoryBytes: 800 << 20,
+    samplerCount: 1,
+    commandCount: 1,
+    sampledPeakCPUMillicores: 750,
+    sampledPeakMemoryBytes: 500 << 20,
+    commandPeakCPUMillicores: 2200,
+    commandPeakMemoryBytes: 800 << 20,
     requestedCPUMillicores: 2500,
     requestedMemoryBytes: 4 * 2 ** 30,
     exactCPUTimeNanos: 3_000_000_000,
@@ -132,23 +172,4 @@ test("node summary separates reservations, exact totals, and command samples", (
     exactMaxRSSBytes: 900 << 20,
     commandCPUTimeNanos: 1_250_000_000,
   });
-});
-
-test("cached nodes remain explicit without inventing resource use", () => {
-  const summary = summarizeNodeResources(
-    {
-      id: "build",
-      status: "done",
-      outcome: "cached",
-      deps: [],
-      duration_ms: 0,
-      requested_cores: 4,
-    },
-    { points: [] },
-  );
-
-  assert.equal(summary.cacheHit, true);
-  assert.equal(summary.sampleCount, 0);
-  assert.equal(summary.exactCPUTimeNanos, 0);
-  assert.equal(summary.requestedCPUMillicores, 4000);
 });

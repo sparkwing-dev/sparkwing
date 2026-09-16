@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { type Node, type NodeMetrics, getNodeMetrics } from "@/lib/api";
-import { summarizeNodeResources } from "@/lib/resourceObservability";
+import {
+  startSerialPolling,
+  summarizeNodeResources,
+} from "@/lib/resourceObservability";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -59,29 +62,31 @@ export default function ResourceChart({
   node: Node;
   isRunning?: boolean;
 }) {
-  const [metrics, setMetrics] = useState<NodeMetrics | null>(null);
-
-  const refresh = useCallback(async () => {
-    const data = await getNodeMetrics(runID, node.id);
-    setMetrics(data);
-  }, [runID, node.id]);
+  const identity = `${runID}\n${node.id}`;
+  const cacheHit = node.outcome === "cached";
+  const [snapshot, setSnapshot] = useState<{
+    identity: string;
+    metrics: NodeMetrics;
+  } | null>(null);
+  const metrics = snapshot?.identity === identity ? snapshot.metrics : null;
 
   useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void refresh();
+    if (cacheHit) return;
+    return startSerialPolling({
+      load: () => getNodeMetrics(runID, node.id),
+      publish: (next) => setSnapshot({ identity, metrics: next }),
+      intervalMS: isRunning ? 5_000 : null,
     });
-    if (isRunning) {
-      const interval = setInterval(refresh, 5_000);
-      return () => {
-        cancelled = true;
-        clearInterval(interval);
-      };
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh, isRunning]);
+  }, [cacheHit, identity, isRunning, node.id, runID]);
+
+  if (cacheHit) {
+    return (
+      <div className="rounded-[var(--radius-control)] border border-[var(--chart-cache)] bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--chart-cache)]">
+        Cache hit. Sparkwing reused this node&apos;s prior result, so the job
+        body did not execute and consumed no new job resources.
+      </div>
+    );
+  }
 
   if (!metrics) {
     return (
@@ -92,19 +97,13 @@ export default function ResourceChart({
   }
 
   const summary = summarizeNodeResources(node, metrics);
-  if (summary.cacheHit) {
-    return (
-      <div className="rounded-[var(--radius-control)] border border-[var(--chart-cache)] bg-[var(--surface-raised)] px-3 py-2 text-xs text-[var(--chart-cache)]">
-        Cache hit. Sparkwing reused this node&apos;s prior result, so the job
-        body did not execute and consumed no new job resources.
-      </div>
-    );
-  }
-
-  const startTime = metrics.points[0]
-    ? new Date(metrics.points[0].ts).getTime()
+  const samplerPoints = metrics.points.filter(
+    (point) => (point.cpu_time_nanos ?? 0) <= 0,
+  );
+  const startTime = samplerPoints[0]
+    ? new Date(samplerPoints[0].ts).getTime()
     : 0;
-  const data = metrics.points.map((point) => ({
+  const data = samplerPoints.map((point) => ({
     elapsed: new Date(point.ts).getTime() - startTime,
     cpu: point.cpu_millicores,
     mem: point.memory_bytes,
@@ -115,7 +114,8 @@ export default function ResourceChart({
     summary.exactCPUTimeNanos > 0 ||
     summary.exactMaxRSSBytes > 0 ||
     summary.commandCPUTimeNanos > 0 ||
-    summary.sampleCount > 0;
+    summary.samplerCount > 0 ||
+    summary.commandCount > 0;
 
   if (!hasSummary) {
     return (
@@ -126,11 +126,6 @@ export default function ResourceChart({
       </div>
     );
   }
-
-  const measuredCPUTime =
-    summary.exactCPUTimeNanos || summary.commandCPUTimeNanos;
-  const measuredMemory =
-    summary.exactMaxRSSBytes || summary.sampledPeakMemoryBytes;
 
   return (
     <div className="space-y-3">
@@ -148,9 +143,17 @@ export default function ResourceChart({
         )}
         {summary.sampledPeakCPUMillicores > 0 && (
           <span>
-            Sample peak CPU:{" "}
+            Interval peak CPU:{" "}
             <span className="font-mono text-[var(--chart-cpu)]">
               {formatCPU(summary.sampledPeakCPUMillicores)}
+            </span>
+          </span>
+        )}
+        {summary.commandPeakCPUMillicores > 0 && (
+          <span>
+            Command peak average CPU:{" "}
+            <span className="font-mono text-[var(--chart-cpu)]">
+              {formatCPU(summary.commandPeakCPUMillicores)}
             </span>
           </span>
         )}
@@ -162,14 +165,19 @@ export default function ResourceChart({
             </span>
           </span>
         )}
-        {measuredCPUTime > 0 && (
+        {summary.exactCPUTimeNanos > 0 && (
           <span>
-            {summary.exactCPUTimeNanos > 0
-              ? "Process CPU time"
-              : "Command CPU time"}
-            :{" "}
+            Process CPU time:{" "}
             <span className="font-mono text-[var(--chart-cpu)]">
-              {formatDurationNanos(measuredCPUTime)}
+              {formatDurationNanos(summary.exactCPUTimeNanos)}
+            </span>
+          </span>
+        )}
+        {summary.commandCPUTimeNanos > 0 && (
+          <span>
+            Command CPU time:{" "}
+            <span className="font-mono text-[var(--chart-cpu)]">
+              {formatDurationNanos(summary.commandCPUTimeNanos)}
             </span>
           </span>
         )}
@@ -181,20 +189,40 @@ export default function ResourceChart({
             </span>
           </span>
         )}
-        {measuredMemory > 0 && (
+        {summary.sampledPeakMemoryBytes > 0 && (
           <span>
-            {summary.exactMaxRSSBytes > 0
-              ? "Process max RSS"
-              : "Sample peak memory"}
-            :{" "}
+            Interval peak memory:{" "}
             <span className="font-mono text-[var(--chart-memory)]">
-              {formatBytes(measuredMemory)}
+              {formatBytes(summary.sampledPeakMemoryBytes)}
             </span>
           </span>
         )}
-        {summary.sampleCount > 0 && (
+        {summary.exactMaxRSSBytes > 0 && (
+          <span>
+            Process max RSS:{" "}
+            <span className="font-mono text-[var(--chart-memory)]">
+              {formatBytes(summary.exactMaxRSSBytes)}
+            </span>
+          </span>
+        )}
+        {summary.commandPeakMemoryBytes > 0 && (
+          <span>
+            Command max RSS:{" "}
+            <span className="font-mono text-[var(--chart-memory)]">
+              {formatBytes(summary.commandPeakMemoryBytes)}
+            </span>
+          </span>
+        )}
+        {summary.samplerCount > 0 && (
           <span className="font-mono">
-            {summary.sampleCount} reading{summary.sampleCount === 1 ? "" : "s"}
+            {summary.samplerCount} interval reading
+            {summary.samplerCount === 1 ? "" : "s"}
+          </span>
+        )}
+        {summary.commandCount > 0 && (
+          <span className="font-mono">
+            {summary.commandCount} command report
+            {summary.commandCount === 1 ? "" : "s"}
           </span>
         )}
       </div>
@@ -220,10 +248,10 @@ export default function ResourceChart({
           />
         </div>
       )}
-      {summary.sampleCount === 1 && (
+      {summary.samplerCount === 1 && (
         <div className="text-[10px] text-[var(--muted)]">
-          One reading was retained; the exact process totals above remain usable
-          even when the node finishes inside one sampling interval.
+          One interval reading was retained. The exact process totals above
+          remain usable when the node finishes inside one sampling interval.
         </div>
       )}
     </div>

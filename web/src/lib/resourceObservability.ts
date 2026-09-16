@@ -1,12 +1,10 @@
 import type { Node, NodeMetrics, QueueResource, QueueState } from "./api";
-import { resourceAvailable } from "./queue";
 
 export interface HostPressureDimension {
   capacity: number;
   held: number;
   reserved: number;
   external: number | null;
-  available: number;
 }
 
 export interface HostPressureSample {
@@ -16,10 +14,12 @@ export interface HostPressureSample {
 }
 
 export interface NodeResourceSummary {
-  cacheHit: boolean;
-  sampleCount: number;
+  samplerCount: number;
+  commandCount: number;
   sampledPeakCPUMillicores: number;
   sampledPeakMemoryBytes: number;
+  commandPeakCPUMillicores: number;
+  commandPeakMemoryBytes: number;
   requestedCPUMillicores: number;
   requestedMemoryBytes: number;
   exactCPUTimeNanos: number;
@@ -29,6 +29,45 @@ export interface NodeResourceSummary {
 }
 
 const hostPressureWindowMS = 5 * 60 * 1000;
+
+export interface SerialPollingOptions<T> {
+  load: () => Promise<T>;
+  publish: (value: T) => void;
+  intervalMS: number | null;
+  active?: () => boolean;
+}
+
+export function startSerialPolling<T>({
+  load,
+  publish,
+  intervalMS,
+  active,
+}: SerialPollingOptions<T>): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const schedule = () => {
+    if (intervalMS === null || stopped) return;
+    timer = setTimeout(poll, intervalMS);
+  };
+  const poll = async () => {
+    if (stopped) return;
+    if (active && !active()) {
+      schedule();
+      return;
+    }
+    const value = await load();
+    if (stopped) return;
+    publish(value);
+    schedule();
+  };
+
+  void poll();
+  return () => {
+    stopped = true;
+    if (timer !== undefined) clearTimeout(timer);
+  };
+}
 
 function hostDimension(resource: QueueResource | undefined): HostPressureDimension | null {
   if (!resource) return null;
@@ -43,7 +82,6 @@ function hostDimension(resource: QueueResource | undefined): HostPressureDimensi
     held,
     reserved,
     external,
-    available: resourceAvailable(resource),
   };
 }
 
@@ -80,18 +118,32 @@ export function summarizeNodeResources(
   metrics: NodeMetrics | null,
 ): NodeResourceSummary {
   const points = metrics?.points ?? [];
+  const samplerPoints = points.filter(
+    (point) => (point.cpu_time_nanos ?? 0) <= 0,
+  );
+  const commandPoints = points.filter(
+    (point) => (point.cpu_time_nanos ?? 0) > 0,
+  );
   const exactWall = Math.max(node.process_wall_nanos ?? 0, 0);
   const exactCPU = Math.max(node.cpu_nanos ?? 0, 0);
   return {
-    cacheHit: node.outcome === "cached",
-    sampleCount: points.length,
+    samplerCount: samplerPoints.length,
+    commandCount: commandPoints.length,
     sampledPeakCPUMillicores: Math.max(
       0,
-      ...points.map((point) => point.cpu_millicores),
+      ...samplerPoints.map((point) => point.cpu_millicores),
     ),
     sampledPeakMemoryBytes: Math.max(
       0,
-      ...points.map((point) => point.memory_bytes),
+      ...samplerPoints.map((point) => point.memory_bytes),
+    ),
+    commandPeakCPUMillicores: Math.max(
+      0,
+      ...commandPoints.map((point) => point.cpu_millicores),
+    ),
+    commandPeakMemoryBytes: Math.max(
+      0,
+      ...commandPoints.map((point) => point.memory_bytes),
     ),
     requestedCPUMillicores: Math.max(
       Math.round((node.requested_cores ?? 0) * 1000),
@@ -102,7 +154,7 @@ export function summarizeNodeResources(
     exactMeanCPUMillicores:
       exactWall > 0 ? Math.round((exactCPU / exactWall) * 1000) : 0,
     exactMaxRSSBytes: Math.max(node.max_rss_bytes ?? 0, 0),
-    commandCPUTimeNanos: points.reduce(
+    commandCPUTimeNanos: commandPoints.reduce(
       (total, point) => total + Math.max(point.cpu_time_nanos ?? 0, 0),
       0,
     ),
