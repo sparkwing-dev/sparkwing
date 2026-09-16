@@ -104,6 +104,10 @@ func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 			i++
 		case strings.HasPrefix(tok, "--stop-at="):
 			parsed.stopAt = strings.TrimPrefix(tok, "--stop-at=")
+		case tok == "--sw-start-at" || strings.HasPrefix(tok, "--sw-start-at="):
+			return parsed, false, errors.New("plan: --sw-start-at is not supported; use --start-at")
+		case tok == "--sw-stop-at" || strings.HasPrefix(tok, "--sw-stop-at="):
+			return parsed, false, errors.New("plan: --sw-stop-at is not supported; use --stop-at")
 		default:
 			parsed.passthrough = append(parsed.passthrough, tok)
 		}

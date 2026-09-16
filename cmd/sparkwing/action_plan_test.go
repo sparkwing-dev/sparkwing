@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -26,11 +27,6 @@ func TestParsePipelinePlanArgs_OwnsDocumentedRangeFlags(t *testing.T) {
 			wantStop:        "lint",
 			wantPassthrough: []string{"--region", "west"},
 		},
-		{
-			name:            "runtime spellings are pipeline arguments",
-			args:            []string{"--name", "gate", "--sw-start-at", "test", "--sw-stop-at=lint"},
-			wantPassthrough: []string{"--sw-start-at", "test", "--sw-stop-at=lint"},
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -46,6 +42,23 @@ func TestParsePipelinePlanArgs_OwnsDocumentedRangeFlags(t *testing.T) {
 			}
 			if !slices.Equal(got.passthrough, test.wantPassthrough) {
 				t.Fatalf("passthrough = %v, want %v", got.passthrough, test.wantPassthrough)
+			}
+		})
+	}
+}
+
+func TestParsePipelinePlanArgs_RejectsRuntimeRangeSpellings(t *testing.T) {
+	tests := map[string]string{
+		"--sw-start-at":      "--start-at",
+		"--sw-start-at=test": "--start-at",
+		"--sw-stop-at":       "--stop-at",
+		"--sw-stop-at=test":  "--stop-at",
+	}
+	for flag, replacement := range tests {
+		t.Run(flag, func(t *testing.T) {
+			_, _, err := parsePipelinePlanArgs([]string{"--name", "gate", flag})
+			if err == nil || !strings.Contains(err.Error(), replacement) {
+				t.Fatalf("parse error = %v, want replacement %s", err, replacement)
 			}
 		})
 	}
