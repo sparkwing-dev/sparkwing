@@ -1462,16 +1462,18 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 
-	var principal string
 	var anchor, class int64
 	err = tx.QueryRowContext(ctx,
-		`SELECT n.credit_charged_through, n.credit_cpu_class, r.created_principal
-		   FROM nodes n JOIN runs r ON r.id = n.run_id
-		  WHERE n.run_id = ? AND n.node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class, &principal)
+		`SELECT credit_charged_through, credit_cpu_class FROM nodes
+		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
+		runID, nodeID).Scan(&anchor, &class)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, notFound("node", runID+"/"+nodeID)
 	}
+	if err != nil {
+		return out, err
+	}
+	principal, err := runPrincipalTx(ctx, tx, runID)
 	if err != nil {
 		return out, err
 	}
