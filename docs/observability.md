@@ -391,16 +391,16 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
 
 `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
-comes from the credit ledger rather than from a request handler. A claim
-reserves a minute up front and a finish refunds the part the node did not use,
-so the series counts a reservation as the node consumes it rather than all at
-once: the figure only ever grows, which is what a counter has to do. A node the
-credit-exhaustion sweep cancels settles there. A node whose lease expires keeps
-every second its reservation charged, because the requeue writes no refund, and
-it books the unconsumed part at once rather than over the minute: the cloud
-series overstates real runner time by up to one reservation per lease expiry. A
-node whose run fails with no finish reaching the controller keeps the same
-seconds, and the reserved minute enters the total as the clock passes it.
+comes from the credit ledger rather than from a request handler. A metered claim
+reserves a minute up front for concurrent spend safety. The reservation remains
+fully refundable until the live claim records its exact execution attempt, so
+queueing, Kubernetes provisioning, image pulls and runner startup add no cloud
+seconds. A finish or expired claim before execution returns the complete
+reservation. After execution starts, the series counts the reservation as the
+node consumes it and a finish refunds the unused part. The figure only grows,
+which is what a counter has to do. A node the credit-exhaustion sweep cancels
+settles there. A started node whose lease expires keeps its remaining
+reservation charged when the controller cannot establish a later stop instant.
 
 The `local` series counts what this controller process settled for an unmetered
 credential, read from the claiming credential recorded on the node, and it

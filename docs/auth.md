@@ -35,15 +35,18 @@ runner. When the balance cannot cover the reservation,
 the node stays ready, the run records a `credits_blocked` event, and the runner
 keeps polling.
 
-Every heartbeat from a metered token charges the seconds since that node's
-previous charge, and the finish charges the tail the last heartbeat missed and
-refunds whatever is left of the reservation. A node that runs for four seconds
-therefore pays for four seconds. Two bounds apply. No single charge bills more
-than the charge cap (30 seconds by default), so a controller outage or a
-stalled heartbeat loop does not bill the gap it left behind. A node that is
-requeued -- its lease reaped, its runner lost, or its attempt reset for a retry
--- releases its charge window, so the next attempt starts a fresh reservation
-and the idle time between attempts is never billed.
+The live claim's fenced execution acknowledgement starts billing immediately
+before the node body runs. Claiming, queueing, provisioning, image pulls and
+runner startup do not consume the reservation. A heartbeat after execution
+starts charges the seconds since the previous charge, and the finish charges
+the tail the last heartbeat missed and refunds whatever is left. A finish or
+expired claim before execution refunds the complete reservation, so a node
+that runs for four seconds pays for four seconds. Two bounds apply. No single
+charge bills more than the charge cap (30 seconds by default), so a controller
+outage or a stalled heartbeat loop does not bill the gap it left behind. A
+node that is requeued -- its lease reaped, its runner lost, or its attempt
+reset for a retry -- releases its charge window, so the next attempt starts a
+fresh reservation and the idle time between attempts is never billed.
 
 Once the balance reaches zero the node keeps running for the grace period. The
 first heartbeat after that window fails the node with the failure reason

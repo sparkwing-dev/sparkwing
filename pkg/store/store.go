@@ -5780,7 +5780,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id FROM nodes
+		`SELECT run_id, node_id, execution_started_at, credit_charged_through FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
@@ -5788,13 +5788,19 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, err
 	}
 	var pairs [][2]string
+	var unstarted [][2]string
 	for rows.Next() {
 		var rid, nid string
-		if err := rows.Scan(&rid, &nid); err != nil {
+		var started sql.NullInt64
+		var chargeWindow int64
+		if err := rows.Scan(&rid, &nid, &started, &chargeWindow); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
+		if !started.Valid && chargeWindow != 0 {
+			unstarted = append(unstarted, [2]string{rid, nid})
+		}
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -5802,6 +5808,16 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	}
 	if len(pairs) == 0 {
 		return nil, nil
+	}
+	if len(unstarted) > 0 {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return nil, err
+		}
+		for _, pair := range unstarted {
+			if _, err := refundUnstartedReservationTx(ctx, tx, pair[0], pair[1], now); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',

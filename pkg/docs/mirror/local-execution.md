@@ -612,8 +612,10 @@ the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,
 `SPARKWING_NODE_CLAIM_RESERVATION`, and `SPARKWING_NODE_CLAIM_LEASE_SECONDS`.
 `run-node` sends that fence on every state write and log append. The claim is
 what the controller's node-mutation fence admits, and on a metered token it is
-what reserves the minute the run bills. The plain `--trigger-runner k8s` path
-takes the same claim, because it builds the same Job.
+what reserves a minute for concurrent spend safety. Billing begins when the
+fenced pod acknowledges its exact execution attempt immediately before the
+node body runs. The plain `--trigger-runner k8s` path takes the same claim,
+because it builds the same Job.
 
 The route awards an unlabelled node the queue has already opened to any
 `nodes.claim` token. A node the queue has not opened, and a node that declares
@@ -626,7 +628,7 @@ node another claim holds and a node of a run that has finished.
 The pod is the only renewer: it extends the lease every five seconds from the
 moment its process starts, and the dispatcher renews nothing, so a pod that
 never runs releases the node when the ten-minute lease lapses rather than
-holding a billed claim for as long as the dispatcher watches an
+holding a reservation for as long as the dispatcher watches an
 `ImagePullBackOff`. The same ten minutes is the cost of a dispatcher that dies
 mid-node: nothing releases a claim, so the node waits out the lease before the
 reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten

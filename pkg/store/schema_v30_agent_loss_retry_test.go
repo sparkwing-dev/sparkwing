@@ -383,7 +383,11 @@ func TestSchemaV30PreStartLossSchedulesWithoutConsumingBudgetAndHonorsAvailabili
 	ctx := context.Background()
 	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-prestart", 0)
-	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
+	identity := meteredClaimant(t, s, "runner")
+	granted := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_prestart", "admin"); err != nil {
+		t.Fatal(err)
+	}
 	claimRetryNode(t, s, "run-prestart", identity, "agent:a:1")
 	forceExpireNodeClaim(t, s, "run-prestart", "build")
 
@@ -393,6 +397,11 @@ func TestSchemaV30PreStartLossSchedulesWithoutConsumingBudgetAndHonorsAvailabili
 	}
 	if len(recovered) != 1 || recovered[0].RetryRunID == "" || recovered[0].Started || recovered[0].Invocations != 0 {
 		t.Fatalf("recovery = %+v", recovered)
+	}
+	if balance, err := s.CreditBalanceMicro(ctx); err != nil {
+		t.Fatal(err)
+	} else if balance != granted {
+		t.Fatalf("balance = %d, want the unstarted reservation %d restored", balance, granted)
 	}
 	if _, err := s.ClaimNextTrigger(ctx, time.Minute); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("future trigger claim = %v, want ErrNotFound", err)

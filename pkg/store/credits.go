@@ -749,9 +749,9 @@ type CreditLedgerTotals struct {
 	StorageMicro int64
 	// SettledSeconds is the runner seconds the ledger has finished charging
 	// for: every charge row less the part of an open reservation a finish
-	// would still refund. A reservation therefore enters this total as the
-	// node consumes it rather than all at once, so the figure only ever
-	// grows and a caller may export it as a counter.
+	// would still refund. A reservation enters this total after execution
+	// starts and as the node consumes it, so the figure only ever grows and a
+	// caller may export it as a counter.
 	SettledSeconds int64
 }
 
@@ -803,11 +803,12 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	// clock lets a second controller or an NTP step pull the figure backwards.
 	var refundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
-                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
-                                         ELSE 0 END), 0)
-                   FROM nodes WHERE credit_charged_through != 0`,
-	).Scan(&refundable); err != nil {
+		`SELECT COALESCE(SUM(CASE WHEN execution_started_at IS NULL THEN ?
+	                                         WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
+	                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
+	                                         ELSE 0 END), 0)
+	                   FROM nodes WHERE credit_charged_through != 0`,
+		int64(CreditClaimFloorSeconds)).Scan(&refundable); err != nil {
 		return out, err
 	}
 	out.SettledSeconds = charged - refundable
@@ -1419,6 +1420,11 @@ type CreditChargeResult struct {
 	ForgivenSeconds int64
 }
 
+type creditChargeTxResult struct {
+	CreditChargeResult
+	settledAt time.Time
+}
+
 // ChargeNodeCredits bills the seconds this node has run since its previous
 // charge and reports whether the balance can still pay for it. Charging is
 // idempotent within a second: a second call in the same second advances
@@ -1440,12 +1446,37 @@ func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPre
 func (s *Store) chargeNode(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time, final bool,
 ) (_ CreditChargeResult, err error) {
-	var out CreditChargeResult
 	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return CreditChargeResult{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	out, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, final)
+	if err != nil {
+		return out.CreditChargeResult, err
+	}
+	if err := tx.Commit(); err != nil {
+		return out.CreditChargeResult, err
+	}
+	return out.CreditChargeResult, nil
+}
+
+func (s *Store) chargeNodeTx(
+	ctx context.Context, tx *storeTx, runID, nodeID, tokenPrefix string, now time.Time, final bool,
+) (creditChargeTxResult, error) {
+	var out creditChargeTxResult
+	var anchor, class int64
+	var startedAt sql.NullInt64
+	err := tx.QueryRowContext(ctx,
+		`SELECT credit_charged_through, credit_cpu_class, execution_started_at FROM nodes
+		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
+		runID, nodeID).Scan(&anchor, &class, &startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, notFound("node", runID+"/"+nodeID)
+	}
 	if err != nil {
 		return out, err
 	}
-	defer rollbackUnlessDone(tx, &err)
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return out, err
 	}
@@ -1461,40 +1492,43 @@ func (s *Store) chargeNode(
 	if err != nil {
 		return out, err
 	}
-
-	var anchor, class int64
-	err = tx.QueryRowContext(ctx,
-		`SELECT credit_charged_through, credit_cpu_class FROM nodes
-		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class)
-	if errors.Is(err, sql.ErrNoRows) {
-		return out, notFound("node", runID+"/"+nodeID)
-	}
-	if err != nil {
-		return out, err
-	}
 	principal, err := runPrincipalTx(ctx, tx, runID)
 	if err != nil {
 		return out, err
 	}
 
 	nowNS := now.UnixNano()
+	// safety: cancellation can wait on transaction locks while a fenced attempt
+	// starts. A stale caller timestamp must not refund time before that boundary.
+	if startedAt.Valid && nowNS < startedAt.Int64 {
+		nowNS = startedAt.Int64
+	}
+	out.settledAt = time.Unix(0, nowNS)
 	rate := chargeRate(table, class)
-	refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
-	if err != nil {
-		return out, err
+	through := anchor
+	if !startedAt.Valid {
+		if final && anchor != 0 {
+			out.Charge, err = refundUnstartedReservationTx(ctx, tx, runID, nodeID, nowNS)
+			if err != nil {
+				return out, err
+			}
+			through = 0
+		}
+	} else {
+		refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
+		if err != nil {
+			return out, err
+		}
+		out.Charge, out.ForgivenSeconds, through, err = settleChargeWindow(
+			ctx, tx, chargeWindow{
+				RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
+				Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
+				MaxCharge: maxCharge, Final: final,
+			})
+		if err != nil {
+			return out, err
+		}
 	}
-	charge, forgiven, through, err := settleChargeWindow(
-		ctx, tx, chargeWindow{
-			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
-			Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
-			MaxCharge: maxCharge, Final: final,
-		})
-	if err != nil {
-		return out, err
-	}
-	out.Charge = charge
-	out.ForgivenSeconds = forgiven
 	if through != anchor {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
@@ -1503,7 +1537,7 @@ func (s *Store) chargeNode(
 		}
 	}
 	if final && anchor == 0 {
-		return out, tx.Commit()
+		return out, nil
 	}
 
 	balance, err := creditBalanceTx(ctx, tx)
@@ -1511,14 +1545,14 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 	out.BalanceMicro = balance
+	if !startedAt.Valid && !final {
+		return out, nil
+	}
 	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
 		Balance: balance, NowNS: nowNS, Grace: grace,
 		RunID: runID, NodeID: nodeID, Anchor: anchor,
 	})
 	if err != nil {
-		return out, err
-	}
-	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.ExhaustedFor = exhaustedFor
@@ -1560,6 +1594,32 @@ func refundRateTx(
 	return reserved, nil
 }
 
+func refundUnstartedReservationTx(
+	ctx context.Context, tx *storeTx, runID, nodeID string, nowNS int64,
+) (*CreditCharge, error) {
+	// safety: use the reservation's stored terms so a later rate-table change
+	// cannot return more or less than the claim took.
+	var tokenPrefix, principal string
+	var seconds, amount, class, rate int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second
+		  FROM credit_charges
+		 WHERE run_id = ? AND node_id = ? AND kind = ?
+		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
+		runID, nodeID, CreditChargeReservation).Scan(
+		&tokenPrefix, &principal, &seconds, &amount, &class, &rate)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return insertCreditChargeTx(ctx, tx, chargeWindow{
+		RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
+		NowNS: nowNS, Rate: rate, Class: class,
+	}, CreditChargeRefund, -seconds, -amount)
+}
+
 // safety: a node claimed before the rate table carries no class, so it keeps
 // billing at the four-core price the single rate setting holds and an upgrade
 // leaves work in flight at the price it started on.
@@ -1581,7 +1641,6 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 		}
 		return nil, 0, w.NowNS, nil
 	}
-
 	if w.NowNS <= w.Anchor {
 		if !w.Final {
 			return nil, 0, w.Anchor, nil
@@ -1875,9 +1934,6 @@ func (s *Store) CancelNodeForComputeLimit(
 func (s *Store) cancelMeteredNode(
 	ctx context.Context, runID, nodeID, tokenPrefix, reason, message string, now time.Time,
 ) (err error) {
-	if _, err := s.FinalizeNodeCredits(ctx, runID, nodeID, tokenPrefix, now); err != nil {
-		return err
-	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -1886,6 +1942,11 @@ func (s *Store) cancelMeteredNode(
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
+	settlement, err := s.chargeNodeTx(ctx, tx, runID, nodeID, tokenPrefix, now, true)
+	if err != nil {
+		return err
+	}
+	stoppedAt := settlement.settledAt.UnixNano()
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes
    SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
@@ -1894,7 +1955,7 @@ func (s *Store) cancelMeteredNode(
        ready_at = NULL, offer_started_at = NULL, reservation_id = '',
        credit_charged_through = 0
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
-		message, reason, now.UnixNano(), runID, nodeID); err != nil {
+		message, reason, stoppedAt, runID, nodeID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -1905,7 +1966,7 @@ func (s *Store) cancelMeteredNode(
    SET finished_at = COALESCE(finished_at, ?), outcome = CASE WHEN finished_at IS NULL THEN 'failed' ELSE outcome END,
        failure_reason = CASE WHEN finished_at IS NULL THEN ? ELSE failure_reason END
  WHERE run_id = ? AND node_id = ? AND finished_at IS NULL`,
-		now.UnixNano(), reason, runID, nodeID); err != nil {
+		stoppedAt, reason, runID, nodeID); err != nil {
 		return err
 	}
 	return tx.Commit()

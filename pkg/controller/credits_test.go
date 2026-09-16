@@ -125,8 +125,10 @@ func creditsRequestWithHeader(
 func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
 	t.Helper()
 	if _, err := st.DB().Exec(
-		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-		at.UnixNano(), runID, nodeID); err != nil {
+		`UPDATE nodes SET credit_charged_through = ?,
+		 execution_started_at = COALESCE(execution_started_at, ?)
+		 WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), at.Add(-store.CreditClaimFloorSeconds*time.Second).UnixNano(), runID, nodeID); err != nil {
 		t.Fatalf("rewind the charge window: %v", err)
 	}
 }
@@ -246,8 +248,8 @@ func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
 		t.Fatalf("claim on a funded ledger: %v", err)
 	}
 
-	// safety: the claim anchors the charge window, so rewinding it makes the
-	// next heartbeat cover a known interval.
+	// safety: moving the execution charge window makes the next heartbeat cover
+	// a known interval without waiting on the clock.
 	setNodeChargeWindow(t, f.store, "run-paid", "build", time.Now().Add(-30*time.Second))
 
 	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
