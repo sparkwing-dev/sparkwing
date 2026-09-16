@@ -19,7 +19,8 @@ func TestReportQueuedUsesCanonicalNodeID(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	la := &LocalAdmission{Out: io.Discard}
+	delegate := &admitFailSink{}
+	la := &LocalAdmission{Out: io.Discard, Delegate: delegate}
 	backends := LocalBackends(PathsAt(t.TempDir()), st, nil)
 
 	for _, tc := range []struct {
@@ -34,13 +35,29 @@ func TestReportQueuedUsesCanonicalNodeID(t *testing.T) {
 			if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
 				t.Fatalf("CreateRun: %v", err)
 			}
-			la.reportQueued(ctx, backends, runID, tc.participant, tc.requestID, tc.requestID, wingwire.Queued{Position: 1, QueueLength: 2})
+			la.reportQueued(ctx, backends, runID, tc.participant, tc.requestID, tc.requestID,
+				wingwire.Queued{Position: 1, QueueLength: 2}, "fixture admission wait")
 			events, err := st.ListEventsAfter(ctx, runID, 0, 10)
 			if err != nil {
 				t.Fatalf("ListEventsAfter: %v", err)
 			}
 			if len(events) != 1 || events[0].NodeID != tc.want {
 				t.Fatalf("events = %+v, want one event with node_id %q", events, tc.want)
+			}
+			if got := string(events[0].Payload); got != `{"position":1,"queue_length":2,"request_id":"`+tc.requestID+`","display_id":"`+tc.requestID+`"}` {
+				t.Fatalf("event payload = %s", got)
+			}
+			records := delegate.snapshot()
+			record := records[len(records)-1]
+			if record.Event != "admission_wait" || record.Msg != "fixture admission wait" {
+				t.Fatalf("delegate record = %+v", record)
+			}
+			for key, want := range map[string]any{
+				"position": 1, "queue_length": 2, "request_id": tc.requestID, "display_id": tc.requestID,
+			} {
+				if got := record.Attrs[key]; got != want {
+					t.Errorf("delegate attr %s = %#v, want %#v", key, got, want)
+				}
 			}
 		})
 	}

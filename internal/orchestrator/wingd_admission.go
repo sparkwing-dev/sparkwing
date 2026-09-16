@@ -11,10 +11,12 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -480,8 +482,13 @@ func (la *LocalAdmission) acquireBlocking(
 	if displayID == "" {
 		displayID = runID
 	}
-	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID, nodeID: participant, displayID: displayID}
-	reporter.requestID = req.RunID
+	reporter := &queueWaitReporter{
+		la: la, backends: backends, runID: runID, nodeID: participant,
+		displayID: displayID, requestID: req.RunID, request: req,
+		snapshot: func(queryCtx context.Context) (wingwire.QueueState, error) {
+			return wingdclient.Query(queryCtx, la.clientOptions())
+		},
+	}
 	stopHeartbeat := reporter.startHeartbeat(acquireCtx)
 	lease, err := cl.Acquire(acquireCtx, req, reporter.onQueued)
 	stopHeartbeat()
@@ -531,28 +538,39 @@ func (la *LocalAdmission) acquireBlocking(
 
 type queueWaitReporter struct {
 	la        *LocalAdmission
-	ctx       context.Context
 	backends  Backends
 	runID     string
 	nodeID    string
 	requestID string
 	displayID string
+	request   wingwire.AdmissionRequest
+	snapshot  func(context.Context) (wingwire.QueueState, error)
 
-	mu     sync.Mutex
-	latest wingwire.Queued
-	seen   bool
-	since  time.Time
+	mu      sync.Mutex
+	latest  wingwire.Queued
+	seen    bool
+	since   time.Time
+	changed chan struct{}
+
+	reported      bool
+	lastSignature string
 }
 
 func (r *queueWaitReporter) onQueued(q wingwire.Queued) {
 	r.mu.Lock()
-	if !r.seen {
+	first := !r.seen
+	if first {
 		r.seen = true
 		r.since = time.Now()
 	}
 	r.latest = q
 	r.mu.Unlock()
-	r.la.reportQueued(r.ctx, r.backends, r.runID, r.nodeID, r.requestID, r.displayID, q)
+	if first {
+		select {
+		case r.changed <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (r *queueWaitReporter) waited() bool {
@@ -562,25 +580,54 @@ func (r *queueWaitReporter) waited() bool {
 }
 
 func (r *queueWaitReporter) startHeartbeat(ctx context.Context) (stop func()) {
-	done := make(chan struct{})
+	r.changed = make(chan struct{}, 1)
+	reportCtx, cancel := context.WithCancel(ctx)
+	var finished sync.WaitGroup
+	finished.Add(1)
 	go func() {
-		t := time.NewTicker(r.la.heartbeatInterval())
-		defer t.Stop()
+		defer finished.Done()
+		var timer *time.Timer
+		defer func() {
+			if timer != nil {
+				timer.Stop()
+			}
+		}()
+		var ticks <-chan time.Time
+		reportIndex := 0
 		for {
 			select {
-			case <-ctx.Done():
+			case <-reportCtx.Done():
 				return
-			case <-done:
-				return
-			case <-t.C:
-				r.emitHeartbeat()
+			case <-r.changed:
+				r.emitUpdate(reportCtx)
+				if timer == nil {
+					timer = time.NewTimer(queueWaitReportDelay(r.la.heartbeatInterval(), reportIndex))
+					ticks = timer.C
+				}
+			case <-ticks:
+				r.emitUpdate(reportCtx)
+				reportIndex++
+				timer.Reset(queueWaitReportDelay(r.la.heartbeatInterval(), reportIndex))
 			}
 		}
 	}()
-	return func() { close(done) }
+	return func() {
+		cancel()
+		finished.Wait()
+	}
 }
 
-func (r *queueWaitReporter) emitHeartbeat() {
+func queueWaitReportDelay(base time.Duration, reportIndex int) time.Duration {
+	multipliers := [...]int{1, 1, 2, 6, 10}
+	if reportIndex >= len(multipliers) {
+		return 10 * base
+	}
+	return time.Duration(multipliers[reportIndex]) * base
+}
+
+const queueSnapshotTimeout = 2 * time.Second
+
+func (r *queueWaitReporter) emitUpdate(ctx context.Context) {
 	r.mu.Lock()
 	if !r.seen {
 		r.mu.Unlock()
@@ -589,14 +636,37 @@ func (r *queueWaitReporter) emitHeartbeat() {
 	q := r.latest
 	waited := time.Since(r.since)
 	r.mu.Unlock()
-	r.la.reportStillQueued(r.displayID, q, waited)
+
+	queryCtx, cancel := context.WithTimeout(ctx, queueSnapshotTimeout)
+	qs, err := r.snapshot(queryCtx)
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	available := err == nil
+	if available {
+		waiter, ok := queueWaitCurrent(r.requestID, qs)
+		if !ok {
+			return
+		}
+		q.Position = waiter.Position
+		q.QueueLength = len(qs.Waiters)
+		q.BlockingReason = waiter.BlockingReason
+		if len(waiter.WaitingOn) > 0 {
+			q.Key = waiter.WaitingOn[0]
+		}
+	}
+	signature := queueWaitMaterialSignature(r.requestID, q, qs, available)
+	if r.reported && signature == r.lastSignature {
+		return
+	}
+	r.reported = true
+	r.lastSignature = signature
+	msg := formatQueueWait(r.request, r.requestID, r.displayID, q, qs, available, waited)
+	r.la.reportQueued(ctx, r.backends, r.runID, r.nodeID, r.requestID, r.displayID, q, msg)
 }
 
-func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, nodeID, requestID, displayID string, q wingwire.Queued) {
-	ahead, noun, reason := queuePositionParts(q)
-	msg := fmt.Sprintf(
-		"queued for local admission: position %d of %d (%d %s ahead); participant %s%s; run `sparkwing queue` to see the full queue",
-		q.Position, q.QueueLength, ahead, noun, displayID, reason)
+func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, nodeID, requestID, displayID string, q wingwire.Queued, msg string) {
 	fmt.Fprintln(la.out(), msg)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q,"display_id":%q}`, q.Position, q.QueueLength, requestID, displayID)
 	appendAdmissionEvent(ctx, backends, runID, nodeID, "admission_wait", payload)
@@ -627,26 +697,157 @@ func appendAdmissionEvent(ctx context.Context, backends Backends, runID, partici
 	noteEvent(ctx, backends.State, runID, participantID, kind, payload)
 }
 
-func (la *LocalAdmission) reportStillQueued(displayID string, q wingwire.Queued, waited time.Duration) {
-	ahead, noun, reason := queuePositionParts(q)
-	fmt.Fprintf(la.out(),
-		"still queued for local admission after %s: participant %s; position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
-		waited.Round(time.Second), displayID, q.Position, q.QueueLength, ahead, noun, reason)
+func queueWaitMaterialSignature(requestID string, q wingwire.Queued, qs wingwire.QueueState, available bool) string {
+	parts := []string{fmt.Sprintf("state=%t", available), fmt.Sprintf("position=%d/%d", q.Position, q.QueueLength)}
+	if !available {
+		return strings.Join(append(parts, "blocking="+q.Key), "|")
+	}
+	for _, h := range opsview.RunningHolders(qs) {
+		identity := h.ParticipantID
+		if identity == "" {
+			identity = h.RunID
+		}
+		parts = append(parts, fmt.Sprintf("holder=%s:%s:%g:%d", identity, queueWaitHolderName(h), h.Resources.Cores, h.Resources.MemoryBytes))
+	}
+	sort.Strings(parts[2:])
+	waitingOn := queueWaitBlockingDimensions(requestID, q, qs)
+	clearKnown := qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0
+	parts = append(parts, "blocking="+strings.Join(waitingOn, ","), fmt.Sprintf("clear=%t", clearKnown))
+	return strings.Join(parts, "|")
 }
 
-func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
-	ahead = q.Position - 1
-	if ahead < 0 {
-		ahead = 0
+func formatQueueWait(req wingwire.AdmissionRequest, requestID, displayID string, q wingwire.Queued, qs wingwire.QueueState, available bool, waited time.Duration) string {
+	place := "you are next"
+	if q.Position > 1 {
+		place = fmt.Sprintf("position %d of %d", q.Position, q.QueueLength)
 	}
-	noun = "participants"
-	if ahead == 1 {
-		noun = "participant"
+	if !available {
+		return fmt.Sprintf("admission: machine state unavailable, %d queued; %s -- %s; participant %s; run `sparkwing queue` to inspect the current queue",
+			q.QueueLength, place, queueWaitNeed(req), displayID)
 	}
-	if q.BlockingReason != "" {
-		reason = "; " + q.BlockingReason
+	holders := opsview.RunningHolders(qs)
+	running := fmt.Sprintf("%d running", len(holders))
+	if len(holders) > 0 {
+		items := make([]string, 0, len(holders))
+		for _, h := range holders {
+			charge := formatQueueHostResources(h.Resources)
+			if h.Parent != "" {
+				charge = "attached"
+			}
+			items = append(items, queueWaitHolderName(h)+" "+charge)
+		}
+		running += " (" + strings.Join(items, ", ") + ")"
 	}
-	return ahead, noun, reason
+	pieces := []string{fmt.Sprintf("admission: %s, %d queued; %s -- %s", running, len(qs.Waiters), place, queueWaitNeed(req))}
+	if resources := queueWaitResourceState(qs, queueWaitBlockingDimensions(requestID, q, qs)); resources != "" {
+		pieces = append(pieces, resources)
+	}
+	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
+		pieces = append(pieces, "expected clear ~"+fmtAdmissionDur(*qs.ExpectedClearMS))
+	}
+	if waited >= time.Second {
+		pieces = append(pieces, "waited "+waited.Round(time.Second).String())
+	}
+	return strings.Join(pieces, "; ")
+}
+
+func queueWaitHolderName(h wingwire.Holder) string {
+	if h.Pipeline != "" {
+		return h.Pipeline
+	}
+	if h.DisplayRunID != "" {
+		return h.DisplayRunID
+	}
+	return h.RunID
+}
+
+func queueWaitNeed(req wingwire.AdmissionRequest) string {
+	resources := formatQueueHostResources(req.Resources)
+	if resources == "no host resources" && len(req.Semaphores) > 0 {
+		names := make([]string, 0, len(req.Semaphores))
+		for _, claim := range req.Semaphores {
+			names = append(names, claim.Name)
+		}
+		sort.Strings(names)
+		resources = strings.Join(names, "+") + " slot"
+	}
+	need := "needs " + resources
+	if req.CostSource != "" {
+		source := string(req.CostSource)
+		if req.CostSource == wingwire.CostSourcePin {
+			source = "pinned"
+		}
+		need += " (" + source + ")"
+	}
+	return need
+}
+
+func formatQueueHostResources(resources wingwire.HostResources) string {
+	parts := make([]string, 0, 2)
+	if resources.Cores > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f cores", resources.Cores))
+	}
+	if resources.MemoryBytes > 0 {
+		parts = append(parts, formatQueueBytes(resources.MemoryBytes))
+	}
+	if len(parts) == 0 {
+		return "no host resources"
+	}
+	return strings.Join(parts, "/")
+}
+
+func formatQueueBytes(bytes int64) string {
+	const gib = int64(1024 * 1024 * 1024)
+	const mib = int64(1024 * 1024)
+	if bytes >= gib {
+		return fmt.Sprintf("%.1f GiB", float64(bytes)/float64(gib))
+	}
+	return fmt.Sprintf("%.1f MiB", float64(bytes)/float64(mib))
+}
+
+func queueWaitResourceState(qs wingwire.QueueState, waitingOn []string) string {
+	key := "cores"
+	for _, dimension := range waitingOn {
+		if dimension == "cores" || dimension == "memory" {
+			key = dimension
+			break
+		}
+	}
+	for _, resource := range qs.Resources {
+		if resource.Key != key {
+			continue
+		}
+		amount := func(value float64) string { return fmt.Sprintf("%.1f", value) }
+		if key == "memory" {
+			amount = func(value float64) string { return formatQueueBytes(int64(value)) }
+		}
+		external := "external " + opsview.ExternalAmount(resource)
+		return fmt.Sprintf("%s free, %s held, %s", amount(opsview.ResourceAvailable(resource)), amount(resource.Held), external)
+	}
+	return ""
+}
+
+func queueWaitBlockingDimensions(requestID string, q wingwire.Queued, qs wingwire.QueueState) []string {
+	for _, waiter := range qs.Waiters {
+		if waiter.ParticipantID == requestID || (waiter.ParticipantID == "" && waiter.RunID == requestID) {
+			out := append([]string(nil), waiter.WaitingOn...)
+			sort.Strings(out)
+			return out
+		}
+	}
+	if q.Key != "" {
+		return []string{q.Key}
+	}
+	return nil
+}
+
+func queueWaitCurrent(requestID string, qs wingwire.QueueState) (wingwire.Waiter, bool) {
+	for _, waiter := range qs.Waiters {
+		if waiter.ParticipantID == requestID || (waiter.ParticipantID == "" && waiter.RunID == requestID) {
+			return waiter, true
+		}
+	}
+	return wingwire.Waiter{}, false
 }
 
 // safety: only a key this request claimed can mean exhausted capacity. Every

@@ -22,6 +22,13 @@ unlock.
 
 ### Changed
 
+- **admission:** Queue waits now print one machine-first stream: running
+  pipelines and their charges, queued count and place, request provenance,
+  free/held/external capacity, and the expected clear time when known. Reports
+  suppress CPU and ETA wiggles, update only for holder, position, blocking
+  dimension, or estimate-availability changes, and back off from 30 seconds to
+  five minutes while preserving the existing structured admission fields.
+
 - **checks:** Hosted canonical runs retain structured timing and resource
   evidence for 30 days, including successful runs, without uploading raw logs
   or invocation arguments.

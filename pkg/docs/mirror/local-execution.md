@@ -1148,13 +1148,16 @@ The process connects when it needs admission. Explicit run resources and
 plan-level `.Concurrency()` groups are admitted at run start and held by
 the open connection for the run's lifetime. Unpinned host CPU and memory
 are admitted per node as the DAG dispatches, so a fast early node can run
-while a later heavy node waits for capacity. While work waits it prints a
-single queue-position line on stderr (`queued for local admission:
-position 2 of 3 ...`) and Ctrl-C cancels the wait cleanly. When a run
-process dies -- crash, kill, or power event -- the kernel closes the
-connection and the daemon releases the lease immediately, finalizes the
-orphaned run record, and admits the next waiter. There are no heartbeats,
-leases to tune, or polling loops. Nested runs never double-charge the
+while a later heavy node waits for capacity. A wait first prints the machine
+state: running pipelines and their charges, queued count and the run's place,
+its requested capacity and source, free/held/external capacity, and expected
+clear time when the daemon can estimate one. Reporting checks back off through
+30 seconds, one minute, two minutes, and five minutes, and print again only
+when a holder, position, blocking dimension, or estimate availability changes.
+Ctrl-C cancels the wait cleanly. When a run process dies -- crash, kill, or
+power event -- the kernel closes the connection and the daemon releases the
+lease immediately, finalizes the orphaned run record, and admits the next
+waiter. There are no lease heartbeats to tune. Nested runs never double-charge the
 host: a parent passes its active lease to children it spawns (via
 `RunAndAwait` or a step that shells out to `sparkwing run`), and each
 child attaches to the parent's lease instead of re-admitting.
