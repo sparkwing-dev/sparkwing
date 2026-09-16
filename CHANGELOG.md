@@ -100,7 +100,9 @@ unlock.
 - **checks:** The broad gate declares a 40-minute execution deadline so its
   post-test race and Postgres fanout does not hit the generic 30-minute
   dispatcher watchdog. Failed hosted canonical runs get two minutes to print
-  their stored status and last 500 log lines before runner cleanup.
+  their stored status and last 500 log lines before runner cleanup. Race runs
+  start `pkg/store` first when selected. On four-core hosts, the PostgreSQL
+  suite starts when the full Go suite finishes while the race suite continues.
 - **runner:** A foreground run's handle-file path stops at its own process.
   Local and remote node children no longer hand that path to nested Sparkwing
   commands, which otherwise refuse because the parent already created it.

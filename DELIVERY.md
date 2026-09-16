@@ -98,11 +98,14 @@ file. Other syntax and workflow checks remain active.
   two minutes to print its stored status and the last 500 log lines from the
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
-  build. The race command can run two package binaries while each keeps
-  `GOMAXPROCS=1`; lint and the conditional PostgreSQL suite wait for both Go
-  suites. Machines with one to three or more than four logical CPUs retain
-  their existing schedule and Go parallelism. The 40-minute boundary remains
-  a liveness limit rather than a completion guarantee. That publication path
+  build. The race command starts `pkg/store` first when selected and can run
+  two package binaries while each keeps `GOMAXPROCS=1`. Lint waits for both Go
+  suites. The conditional PostgreSQL suite waits for the full Go suite, then
+  uses its released one-core slot while the race suite continues. The
+  store-first race order applies on every host; machines with one to three or
+  more than four logical CPUs retain their existing dependency schedule and
+  Go parallelism. The 40-minute boundary remains a liveness limit rather than
+  a completion guarantee. That publication path
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
   output. Measured on this 16-core Linux

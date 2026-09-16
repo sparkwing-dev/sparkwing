@@ -51,6 +51,17 @@ func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
 	}
 }
 
+func TestRacePackageOrderStartsStoreInTheFirstWave(t *testing.T) {
+	packages := []string{"./internal/orchestrator", "./pkg/controller", "./pkg/controller/client", "./pkg/store"}
+	want := []string{"./pkg/store", "./internal/orchestrator", "./pkg/controller", "./pkg/controller/client"}
+	if got := racePackageOrder(packages); !reflect.DeepEqual(got, want) {
+		t.Fatalf("racePackageOrder = %v, want %v", got, want)
+	}
+	if !reflect.DeepEqual(packages, []string{"./internal/orchestrator", "./pkg/controller", "./pkg/controller/client", "./pkg/store"}) {
+		t.Fatalf("racePackageOrder mutated its input: %v", packages)
+	}
+}
+
 func TestRaceTouchedPassesWhenNoGoFileChanged(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")

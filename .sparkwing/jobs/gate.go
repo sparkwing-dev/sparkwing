@@ -94,7 +94,7 @@ func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep,
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
 	testStep := sparkwing.Step(w, "test", runTest).Needs(buildStep)
 	var raceDep sparkwing.WorkDep = testStep
-	tailDeps := []sparkwing.WorkDep{testStep}
+	lintDeps := []sparkwing.WorkDep{testStep}
 	// perf: four-core hosted runners otherwise spend the full test and touched
 	// race durations serially and cross the gate's liveness deadline.
 	if cpuCount == 4 {
@@ -102,10 +102,11 @@ func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep,
 	}
 	raceStep := sparkwing.Step(w, "race-touched", runRaceTouched).Needs(raceDep)
 	if cpuCount == 4 {
-		tailDeps = append(tailDeps, raceStep)
+		lintDeps = append(lintDeps, raceStep)
 	}
-	sparkwing.Step(w, "lint", runGolangciLint).Needs(tailDeps...)
-	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(tailDeps...)
+	sparkwing.Step(w, "lint", runGolangciLint).Needs(lintDeps...)
+	// perf: after test releases its Go slot, Postgres can use it while race keeps its two-slot bound.
+	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "tracked-binaries", checkTrackedBinaries)
