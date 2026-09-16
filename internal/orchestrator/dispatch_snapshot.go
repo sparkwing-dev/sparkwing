@@ -195,6 +195,7 @@ var envDenyExact = map[string]bool{
 	"SPARKWING_CONTROLLER_URL":           true,
 	"SPARKWING_LOGS_URL":                 true,
 	"SPARKWING_RUN_HANDLE_FILE":          true,
+	"SPARKWING_ONLY":                     true,
 	"SPARKWING_CACHE_TOKEN":              true,
 	remoteExecutionCapabilityEnv:         true,
 	remoteExecutionCapabilityInputEnv:    true,

@@ -264,6 +264,7 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_CONTROLLER_URL":           true,
 	"SPARKWING_LOGS_URL":                 true,
 	"SPARKWING_RUN_HANDLE_FILE":          true,
+	"SPARKWING_ONLY":                     true,
 	ArtifactStoreEnvVar:                  true,
 	"SPARKWING_CACHE_TOKEN":              true,
 	remoteExecutionCapabilityEnv:         true,
