@@ -66,7 +66,7 @@ Profiles can supply default values for any declared arg. The pipeline still owns
 # ~/.config/sparkwing/profiles.yaml
 profiles:
   prod:
-    controller: https://api-sparkwing.rangz.dev
+    controller: https://api.sparkwing.dev
     token: swu_...
     default-args:
       target: prod                     # `--profile prod` -> --target=prod implied
