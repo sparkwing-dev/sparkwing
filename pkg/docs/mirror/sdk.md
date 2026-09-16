@@ -342,8 +342,9 @@ transitions, `Info` / `Warn` / `Error`, command starts, and complete output
 lines from `Exec(...).Run()`. The timer covers the action and its `Verify`
 postcondition. It starts fresh for each retry.
 
-Node admission, hooks, retry backoff, delegated child execution, and tool-slot
-admission do not consume the inactivity budget. Cached nodes do not start it.
+Node admission, hooks, retry backoff, delegated child submission or execution,
+and tool-slot admission do not consume the inactivity budget. Cached nodes do
+not start it.
 Captured commands are silent after their command-start record, so a long
 `Capture`, `String`, `Lines`, `JSON`, or `MustBeEmpty` call can exceed the
 budget even while its subprocess is healthy. Use streaming `Run`, report

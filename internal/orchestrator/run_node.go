@@ -217,6 +217,8 @@ func RunNodeOnce(
 	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
 		func(innerCtx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
 			currentNode := sparkwing.NodeFromContext(innerCtx)
+			resumeProgressTimeout := pauseProgressTimeout(innerCtx)
+			defer resumeProgressTimeout()
 
 			var childRetryOf string
 			if run.RetryOf != "" && currentNode != "" {
@@ -272,8 +274,6 @@ func RunNodeOnce(
 						"run_id", runID, "node", currentNode, "err", evErr)
 				}
 			}
-			resumeProgressTimeout := pauseProgressTimeout(innerCtx)
-			defer resumeProgressTimeout()
 			pollCtx := innerCtx
 			parentCtx := nodeParentContextFromContext(innerCtx)
 			if req.Timeout > 0 {

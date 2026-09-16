@@ -1702,6 +1702,8 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			return nil, err
 		}
 		currentNode := sparkwing.NodeFromContext(ctx)
+		resumeProgressTimeout := pauseProgressTimeout(ctx)
+		defer resumeProgressTimeout()
 
 		var childRetryOf string
 		if s.retryOf != "" && currentNode != "" {
@@ -1767,8 +1769,6 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 
-		resumeProgressTimeout := pauseProgressTimeout(ctx)
-		defer resumeProgressTimeout()
 		pollCtx := ctx
 		parentCtx := nodeParentContextFromContext(ctx)
 		if req.Timeout > 0 {

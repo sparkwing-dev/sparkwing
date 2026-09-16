@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -35,11 +36,15 @@ func (podMaskPipe) Plan(_ context.Context, plan *sparkwing.Plan, in podMaskInput
 
 type podProgressPipe struct{ sparkwing.Base }
 
-var podProgressContext chan context.Context
+var (
+	podProgressContext        chan context.Context
+	podProgressTriggerContext chan context.Context
+)
 
 func (podProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "parent", func(ctx context.Context) error {
 		podProgressContext <- ctx
+		podProgressTriggerContext <- ctx
 		if _, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "pod-progress-child", ""); err != nil {
 			return err
 		}
@@ -77,6 +82,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	isolateProfiles(t)
 	isolateCheckout(t)
 	podProgressContext = make(chan context.Context, 1)
+	podProgressTriggerContext = make(chan context.Context, 1)
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -117,7 +123,21 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 		ReservationID: claimed.ClaimReservationID, ClaimGeneration: claimed.ClaimGeneration,
 	}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().Handler())
+	handler := controller.New(st, quiet).EnableAuthFromStore().Handler()
+	triggerPauseCheck := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/triggers" {
+			progressCtx := <-podProgressTriggerContext
+			if !orchestrator.ProgressTimeoutPausedForTest(progressCtx) {
+				triggerPauseCheck <- errors.New("progress timeout was not paused during trigger enqueue")
+			} else if orchestrator.ExpireProgressTimeoutForTest(progressCtx) {
+				triggerPauseCheck <- errors.New("progress timeout fired during trigger enqueue")
+			} else {
+				triggerPauseCheck <- nil
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	defer srv.Close()
 
 	childFinished := make(chan error, 1)
@@ -167,6 +187,9 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 		claimed.ClaimedBy, raw, &captureLogger{}, quiet, nil, orchestrator.ClaimedNodeFence(fence))
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v", err)
+	}
+	if pauseErr := <-triggerPauseCheck; pauseErr != nil {
+		t.Fatal(pauseErr)
 	}
 	select {
 	case childErr := <-childFinished:

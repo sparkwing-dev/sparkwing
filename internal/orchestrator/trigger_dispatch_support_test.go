@@ -5,11 +5,47 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+type progressCheckingTriggerState struct {
+	StateBackend
+	paused  bool
+	expired bool
+}
+
+func (s *progressCheckingTriggerState) EnqueueTrigger(
+	ctx context.Context, _ string, _ map[string]string, _, _, _, _, _, _, _ string,
+) (string, error) {
+	s.paused = ProgressTimeoutPausedForTest(ctx)
+	s.expired = ExpireProgressTimeoutForTest(ctx)
+	return "", errors.New("stop after observing trigger enqueue")
+}
+
+func TestRunAndAwaitPausesProgressTimeoutBeforeLocalTriggerEnqueue(t *testing.T) {
+	state := &progressCheckingTriggerState{}
+	dispatch := &dispatchState{backends: Backends{State: state}, runID: "parent"}
+	ctx, _, cancel := newProgressTimeoutContext(context.Background(), time.Hour)
+	defer cancel()
+
+	_, err := dispatch.pipelineAwaiter().Await(ctx, sparkwing.AwaitRequest{Pipeline: "child"})
+	if err == nil {
+		t.Fatal("RunAndAwait passed despite the trigger enqueue failure")
+	}
+	if !state.paused {
+		t.Fatal("progress timeout was not paused during local trigger enqueue")
+	}
+	if state.expired {
+		t.Fatal("progress timeout fired during local trigger enqueue")
+	}
+	if !ExpireProgressTimeoutForTest(ctx) {
+		t.Fatal("progress timeout did not resume after trigger enqueue returned")
+	}
+}
 
 // TestRunAndAwaitRefusesAnObjectStoreStateBackend pins the refusal a spawning
 // node gets under Mode 2. The object-store backend enqueues a trigger and has
