@@ -55,6 +55,9 @@ unlock.
 
 ### Fixed
 
+- **release:** `cmd/verify-release --verify` uses the public trust roots shipped
+  with Sparkwing and no longer requires the private release signing key.
+
 - **runner:** Canceled parallel WorkSteps now cross controller and loopback
   process boundaries as the store's existing `cancelled` terminal state, so a
   failed parent run cannot leave a completed sibling reported as running.
