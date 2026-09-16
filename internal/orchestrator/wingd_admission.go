@@ -821,16 +821,7 @@ func queueWaitResourceState(qs wingwire.QueueState, waitingOn []string) string {
 		if key == "memory" {
 			amount = func(value float64) string { return formatQueueBytes(int64(value)) }
 		}
-		externalAmount := opsview.ExternalAmount(resource)
-		external := externalAmount + " external"
-		switch externalAmount {
-		case "unknown", "unmeasured":
-			external = "external " + externalAmount
-		default:
-			if value, found := strings.CutSuffix(externalAmount, " (unattributed)"); found {
-				external = value + " external (unattributed)"
-			}
-		}
+		external := "external " + opsview.ExternalAmount(resource)
 		return fmt.Sprintf("%s free, %s held, %s", amount(opsview.ResourceAvailable(resource)), amount(resource.Held), external)
 	}
 	return ""

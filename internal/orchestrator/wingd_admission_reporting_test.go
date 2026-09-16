@@ -31,7 +31,7 @@ func TestFormatQueueWaitLeadsWithMachineState(t *testing.T) {
 		"waiting", "waiting", wingwire.Queued{Position: 1, QueueLength: 1}, qs, true, 0,
 	)
 	want := "admission: 2 running (pre-push 5.2 cores, docs-build 1.4 cores), 1 queued; " +
-		"you are next -- needs 8.0 cores (pinned); 1.1 free, 6.6 held, 7.30 external; expected clear ~1m40s"
+		"you are next -- needs 8.0 cores (pinned); 1.1 free, 6.6 held, external 7.30; expected clear ~1m40s"
 	if got != want {
 		t.Fatalf("queue line:\n got: %s\nwant: %s", got, want)
 	}
@@ -51,7 +51,7 @@ func TestFormatQueueWaitShowsOnlyDeeperPositions(t *testing.T) {
 	)
 	for _, want := range []string{
 		"0 running, 5 queued", "position 3 of 5", "needs 2.0 GiB (measured)",
-		"2.0 GiB free, 8.0 GiB held, 4.0 GiB external", "waited 1m30s",
+		"2.0 GiB free, 8.0 GiB held, external 4.0 GiB", "waited 1m30s",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("queue line omitted %q: %s", want, got)
