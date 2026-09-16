@@ -693,6 +693,12 @@ func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
 func JoinProfileKey(repo, pipeline string) string
 func KnownRequirements() []string
+type LegacyAgentClaim struct {
+	RunID     string
+	Status    string
+	ClaimedBy string
+	LastSeen  time.Time
+}
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
 	ReapStalePendingRuns:          (*Store).reapStalePendingRuns,
@@ -1055,6 +1061,15 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+type RunTrend struct {
+	RunID      string
+	Pipeline   string
+	Status     string
+	CreatedAt  time.Time
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	Cached     bool
+}
 type RunnerCap struct {
 	Cap int64
 
@@ -1329,6 +1344,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int6
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
 func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error)
+func (s *Store) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
@@ -1339,6 +1355,7 @@ func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error)
 func (s *Store) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
 func (s *Store) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
 func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error)
+func (s *Store) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error)
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (s *Store) ListSecrets() ([]Secret, error)
 func (s *Store) ListSpawnedChildrenByRun(ctx context.Context, runID string) ([]SpawnedChild, error)

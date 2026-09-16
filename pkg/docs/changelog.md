@@ -38,6 +38,10 @@ unlock.
 
 ### Fixed
 
+- **controller:** Agent and run-trend reads now use the store's dialect-aware
+  query boundary, so the monitoring endpoints work with PostgreSQL. Internal
+  failures include the operation and request route in controller logs while
+  HTTP responses remain generic.
 - **controller:** Egress usage remains eligible for the next persistence sweep
   when a database write fails, so a restart cannot restore an older total and
   reopen a spent monthly budget.
