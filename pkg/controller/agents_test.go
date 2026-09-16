@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,39 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestAgentsLogsInternalStoreFailure(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.DB().Exec(`DROP TABLE nodes`); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	srv := httptest.NewServer(controller.New(st, logger).Handler())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/v1/agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError || string(body) != "{\"error\":\"internal server error\"}\n" {
+		t.Fatalf("response = %d %s", resp.StatusCode, body)
+	}
+	if got := logs.String(); !strings.Contains(got, "list registered agents") ||
+		!strings.Contains(got, "no such table: nodes") ||
+		!strings.Contains(got, `"method":"GET"`) ||
+		!strings.Contains(got, `"path":"/api/v1/agents"`) {
+		t.Fatalf("internal error log = %s", got)
+	}
+}
 
 func TestAgents_DerivedFromClaims(t *testing.T) {
 	dir := t.TempDir()

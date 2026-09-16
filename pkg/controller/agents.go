@@ -207,39 +207,25 @@ func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	registered, err := s.registeredAgents(r.Context(), time.Now())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "list registered agents", err)
 		return
 	}
 	windowStart := time.Now().Add(-1 * time.Hour)
-
-	rows, err := s.store.DB().QueryContext(r.Context(), `
-SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
-  FROM nodes
-	 WHERE claimed_by IS NOT NULL AND claimed_by != ''
-	   AND claim_executor = ''
-   AND (lease_expires_at IS NOT NULL AND lease_expires_at >= ?)
-`, windowStart.UnixNano())
+	claims, err := s.store.ListLegacyAgentClaims(r.Context(), windowStart)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "list legacy agent claims", err)
 		return
 	}
-	defer func() { _ = rows.Close() }()
 
 	type holderInfo struct {
-		holder, name, kind string
-		lastSeenNs         int64
-		activeRuns         map[string]struct{}
+		name, kind string
+		lastSeenNs int64
+		activeRuns map[string]struct{}
 	}
 	byHolder := map[string]*holderInfo{}
 
-	for rows.Next() {
-		var runID, nodeID, status, claimedBy string
-		var startedNs, leaseExpNs int64
-		if err := rows.Scan(&runID, &nodeID, &status, &claimedBy, &startedNs, &leaseExpNs); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		parts := strings.SplitN(claimedBy, ":", 3)
+	for _, claim := range claims {
+		parts := strings.SplitN(claim.ClaimedBy, ":", 3)
 		if len(parts) < 2 {
 			continue
 		}
@@ -258,16 +244,15 @@ SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(le
 		h, ok := byHolder[key]
 		if !ok {
 			h = &holderInfo{
-				holder:     claimedBy,
 				name:       name,
 				kind:       kind,
 				activeRuns: map[string]struct{}{},
 			}
 			byHolder[key] = h
 		}
-		h.lastSeenNs = max(h.lastSeenNs, startedNs, leaseExpNs)
-		if status != "done" {
-			h.activeRuns[runID] = struct{}{}
+		h.lastSeenNs = max(h.lastSeenNs, claim.LastSeen.UnixNano())
+		if claim.Status != "done" {
+			h.activeRuns[claim.RunID] = struct{}{}
 		}
 	}
 

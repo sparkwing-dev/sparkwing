@@ -1316,6 +1316,11 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	s.logger.Error(operation, "method", r.Method, "path", r.URL.Path, "err", err)
+	writeError(w, http.StatusInternalServerError, err)
+}
+
 type executionAdmissionErrorBody struct {
 	Error          string          `json:"error"`
 	Code           string          `json:"code"`

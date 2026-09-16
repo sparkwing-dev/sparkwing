@@ -256,7 +256,7 @@ func TestTrends_PipelineFilter(t *testing.T) {
 	}
 }
 
-func TestTrendsRejectsCachedQueryFailures(t *testing.T) {
+func TestTrendsRejectsStoreQueryFailures(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
@@ -270,17 +270,24 @@ func TestTrendsRejectsCachedQueryFailures(t *testing.T) {
 			if err := st.CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "example", Status: "success", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.DB().ExecContext(t.Context(), "ALTER TABLE nodes RENAME TO original_nodes"); err != nil {
-				t.Fatal(err)
-			}
-			var query string
+			var queries []string
 			switch failure {
+			case "query":
+				queries = []string{`ALTER TABLE nodes RENAME TO original_nodes`}
 			case "scan":
-				query = `CREATE VIEW nodes AS SELECT 'run' AS run_id, NULL AS outcome`
+				queries = []string{
+					`ALTER TABLE runs RENAME TO original_runs`,
+					`CREATE VIEW runs AS
+SELECT id, pipeline, status, created_at, started_at, 'not-an-integer' AS finished_at
+  FROM original_runs`,
+				}
 			case "iteration":
-				query = `CREATE VIEW nodes AS SELECT 'run' AS run_id, 'cached' AS outcome UNION ALL SELECT 'run', abs(-9223372036854775808)`
+				queries = []string{
+					`ALTER TABLE nodes RENAME TO original_nodes`,
+					`CREATE VIEW nodes AS SELECT 'run' AS run_id, 'cached' AS outcome UNION ALL SELECT 'run', abs(-9223372036854775808)`,
+				}
 			}
-			if query != "" {
+			for _, query := range queries {
 				if _, err := st.DB().ExecContext(t.Context(), query); err != nil {
 					t.Fatal(err)
 				}

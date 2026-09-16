@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"sort"
@@ -46,84 +45,10 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	}
 	bucketNs := int64(bucketDur)
 
-	query := `
-SELECT id, pipeline, status, created_at, started_at, finished_at
-  FROM runs
- WHERE started_at >= ?
-`
-	args := []any{cutoff.UnixNano()}
-	if pipeline != "" {
-		query += " AND pipeline = ?"
-		args = append(args, pipeline)
-	}
-	query += " ORDER BY started_at ASC"
-
-	rows, err := s.store.DB().QueryContext(r.Context(), query, args...)
+	runs, err := s.store.ListRunTrends(r.Context(), cutoff, pipeline)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "list run trends", err)
 		return
-	}
-	defer func() { _ = rows.Close() }()
-
-	type runRow struct {
-		id, pipeline, status string
-		createdNs, startedNs int64
-		finishedNs           *int64
-	}
-	var runs []runRow
-	for rows.Next() {
-		var rr runRow
-		var fin *int64
-		if err := rows.Scan(&rr.id, &rr.pipeline, &rr.status, &rr.createdNs, &rr.startedNs, &fin); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		rr.finishedNs = fin
-		runs = append(runs, rr)
-	}
-
-	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	cachedIDs := map[string]bool{}
-	if len(runs) > 0 {
-		cq := `SELECT run_id, outcome FROM nodes WHERE run_id IN (` + placeholders(len(runs)) + `)`
-		cargs := make([]any, 0, len(runs))
-		for _, rr := range runs {
-			cargs = append(cargs, rr.id)
-		}
-		nrows, err := s.store.DB().QueryContext(r.Context(), cq, cargs...)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		byRun := map[string][]string{}
-		for nrows.Next() {
-			var runID, outcome string
-			if err := nrows.Scan(&runID, &outcome); err != nil {
-				writeError(w, http.StatusInternalServerError, errors.Join(err, nrows.Close()))
-				return
-			}
-			byRun[runID] = append(byRun[runID], outcome)
-		}
-		if err := errors.Join(nrows.Err(), nrows.Close()); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		for id, outcomes := range byRun {
-			allCached := len(outcomes) > 0
-			for _, o := range outcomes {
-				if o != "cached" && o != "satisfied" {
-					allCached = false
-					break
-				}
-			}
-			if allCached {
-				cachedIDs[id] = true
-			}
-		}
 	}
 
 	type bucket struct {
@@ -134,7 +59,8 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 	}
 	buckets := map[int64]*bucket{}
 	for _, rr := range runs {
-		b := rr.startedNs - (rr.startedNs % bucketNs)
+		startedNs := rr.StartedAt.UnixNano()
+		b := startedNs - (startedNs % bucketNs)
 		bkt, ok := buckets[b]
 		if !ok {
 			bkt = &bucket{}
@@ -142,19 +68,20 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 		}
 		bkt.total++
 		switch {
-		case cachedIDs[rr.id]:
+		case rr.Cached:
 			bkt.cached++
-		case rr.status == "success":
+		case rr.Status == "success":
 			bkt.passed++
-		case rr.status == "failed":
+		case rr.Status == "failed":
 			bkt.failed++
 		}
-		if rr.finishedNs != nil {
-			durMs := (*rr.finishedNs - rr.startedNs) / 1_000_000
+		if rr.FinishedAt != nil {
+			durMs := rr.FinishedAt.Sub(rr.StartedAt).Milliseconds()
 			bkt.durationsMs = append(bkt.durationsMs, durMs)
 		}
-		if rr.createdNs > 0 && rr.createdNs <= rr.startedNs {
-			bkt.waitSumNs += rr.startedNs - rr.createdNs
+		createdNs := rr.CreatedAt.UnixNano()
+		if createdNs > 0 && createdNs <= startedNs {
+			bkt.waitSumNs += startedNs - createdNs
 			bkt.waitCount++
 		}
 	}
@@ -204,18 +131,4 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-func placeholders(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	out := make([]byte, 0, 2*n-1)
-	for i := range n {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = append(out, '?')
-	}
-	return string(out)
 }
