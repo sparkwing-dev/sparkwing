@@ -509,3 +509,10 @@ sparkwing-runner-bundle:
     alsoClaimTriggers: true
     triggerRunner:
       kind: inprocess
+
+  cache:
+    # The cache-only bearer Secret. This must not reference the same key as
+    # controller.tokenSecret because pipeline code receives cache access.
+    tokenSecret:
+      name: ""
+      key: token

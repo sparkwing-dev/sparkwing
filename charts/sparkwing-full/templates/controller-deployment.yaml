@@ -202,7 +202,7 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- $bundle := index .Values "sparkwing-runner-bundle" }}
-            {{- $bundleToken := index $bundle "controller" "tokenSecret" }}
+            {{- $bundleToken := index $bundle "cache" "tokenSecret" }}
             {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") (index $bundleToken "name") (index $bundleToken "key") }}
             - name: SPARKWING_CACHE_TOKEN
               valueFrom:

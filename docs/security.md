@@ -797,6 +797,13 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   the next restart. Unmount the Secret (clear
   `controller.bootstrapAdminToken.name`) before revoking, or mint a
   replacement admin token first so the table still holds a live one.
+- **Separate the cache bearer from controller authority.** Configure
+  `cache.tokenSecret` for `sparkwing-runner-bundle`, nested under that key in
+  `sparkwing-full`. The runner and controller use it only for cache requests,
+  and the cache server reads it as `SPARKWING_API_TOKEN`. The chart rejects the
+  exact same Secret key in `cache.tokenSecret` and `controller.tokenSecret`.
+  This guard proves only that the references differ; operators must put
+  different values in them. Pipeline code still receives shared cache access.
 - **Point the logs service at a controller.** Without `--controller`
   (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
   anything that reaches its Service can read, forge, and delete every

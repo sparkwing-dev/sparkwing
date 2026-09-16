@@ -25,21 +25,27 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.12" {
-		t.Fatalf("full chart version = %q, want 0.1.12", chart.Version)
+	if chart.Version != "0.1.13" {
+		t.Fatalf("full chart version = %q, want 0.1.13", chart.Version)
 	}
 }
 
-func tokenSecretDefault(chart string) string {
+func tokenSecretDefaults(chart string) []string {
 	if strings.Contains(chart, "sparkwing-full") {
-		return "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token"
+		return []string{
+			"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-controller-token",
+			"sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token",
+		}
 	}
-	return "controller.tokenSecret.name=sparkwing-token"
+	return []string{
+		"controller.tokenSecret.name=sparkwing-controller-token",
+		"cache.tokenSecret.name=sparkwing-cache-token",
+	}
 }
 
 func helmArgs(chart, release string, sets []string, extra ...string) []string {
 	args := append([]string{"template", release, chart}, extra...)
-	for _, s := range append([]string{tokenSecretDefault(chart)}, sets...) {
+	for _, s := range append(tokenSecretDefaults(chart), sets...) {
 		args = append(args, "--set", s)
 	}
 	return args
@@ -1631,12 +1637,12 @@ func TestConfiguredSecretRefsAreRequired(t *testing.T) {
 		t.Fatalf("configured runner token Secret is optional:\n%s", runner)
 	}
 	cache := renderCache(t,
-		"controller.tokenSecret.name=sparkwing-token",
+		"cache.tokenSecret.name=sparkwing-cache-token",
 		"cache.sshKeySecret.name=sparkwing-ssh")
 	if strings.Contains(cache, "optional: true") {
 		t.Fatalf("configured cache Secret is optional:\n%s", cache)
 	}
-	for _, name := range []string{"sparkwing-token", "sparkwing-ssh"} {
+	for _, name := range []string{"sparkwing-cache-token", "sparkwing-ssh"} {
 		if !strings.Contains(cache, "name: \""+name+"\"") && !strings.Contains(cache, "secretName: \""+name+"\"") {
 			t.Errorf("cache did not render required Secret %q:\n%s", name, cache)
 		}
@@ -1667,6 +1673,21 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 				"sparkwing-runner-bundle.controller.tokenSecret.key=",
 			},
 			want: "controller.tokenSecret.key is required",
+		},
+		{
+			name:  "runner cache token",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"cache.tokenSecret.name=sparkwing-cache", "cache.tokenSecret.key="},
+			want:  "cache.tokenSecret.key is required",
+		},
+		{
+			name:  "full chart runner cache token",
+			chart: "./sparkwing-full",
+			sets: []string{
+				"sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache",
+				"sparkwing-runner-bundle.cache.tokenSecret.key=",
+			},
+			want: "cache.tokenSecret.key is required",
 		},
 		{
 			name:  "controller webhook",
@@ -2080,21 +2101,27 @@ func envSecretRef(t *testing.T, rendered, envName string) renderedSecretKeyRef {
 	return renderedSecretKeyRef{}
 }
 
-func TestRunnerAndCacheShareOneCacheTokenSecret(t *testing.T) {
+func TestRunnerAndCacheUseTheCacheTokenWithoutSharingTheControllerToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	sets := []string{
-		"controller.tokenSecret.name=sparkwing-token",
+		"controller.tokenSecret.name=sparkwing-controller-token",
 		"controller.tokenSecret.key=bearer",
+		"cache.tokenSecret.name=sparkwing-cache-token",
+		"cache.tokenSecret.key=cache-bearer",
 	}
+	agent := envSecretRef(t, renderRunner(t, sets...), "SPARKWING_AGENT_TOKEN")
 	runner := envSecretRef(t, renderRunner(t, sets...), "SPARKWING_CACHE_TOKEN")
 	cache := envSecretRef(t, renderCache(t, sets...), "SPARKWING_API_TOKEN")
 	if runner != cache {
 		t.Fatalf("runner SPARKWING_CACHE_TOKEN = %+v, cache SPARKWING_API_TOKEN = %+v; want one source", runner, cache)
 	}
-	if runner.Name != "sparkwing-token" || runner.Key != "bearer" {
-		t.Errorf("token source = %+v, want the configured Secret and key", runner)
+	if runner.Name != "sparkwing-cache-token" || runner.Key != "cache-bearer" {
+		t.Errorf("cache token source = %+v, want the configured cache Secret and key", runner)
+	}
+	if agent.Name != "sparkwing-controller-token" || agent.Key != "bearer" || agent == runner {
+		t.Errorf("controller token source = %+v, cache token source = %+v, want distinct references", agent, runner)
 	}
 }
 
@@ -2104,9 +2131,9 @@ func TestFullChartVendorsTheRunnerCacheToken(t *testing.T) {
 	}
 	rendered := helmRenderInNamespace(t, "./sparkwing-full",
 		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	if ref := envSecretRef(t, rendered, "SPARKWING_CACHE_TOKEN"); ref.Name != "sparkwing-token" {
-		t.Errorf("SPARKWING_CACHE_TOKEN source = %+v, want the release token Secret", ref)
+		"sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache")
+	if ref := envSecretRef(t, rendered, "SPARKWING_CACHE_TOKEN"); ref.Name != "sparkwing-cache" {
+		t.Errorf("SPARKWING_CACHE_TOKEN source = %+v, want the cache Secret", ref)
 	}
 }
 
@@ -2114,8 +2141,8 @@ func TestCacheWithoutATokenSecretFailsAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "controller.tokenSecret.name=")
-	for _, want := range []string{"controller.tokenSecret.name", "cache.allowUnauthenticated=true"} {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.tokenSecret.name=")
+	for _, want := range []string{"cache.tokenSecret.name", "cache.allowUnauthenticated=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render error does not name %q:\n%s", want, out)
 		}
@@ -2126,7 +2153,7 @@ func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	rendered := renderCache(t, "controller.tokenSecret.name=",
+	rendered := renderCache(t, "cache.tokenSecret.name=",
 		"cache.allowUnauthenticated=true", "logs.allowUnauthenticated=true")
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want --allow-unauthenticated", args)
@@ -2134,6 +2161,23 @@ func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
 	if args := runnerContainer(t, renderCache(t)).Args; containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want no unauthenticated opt-in by default", args)
 	}
+}
+
+func TestCacheAndControllerRejectTheSameSecretKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+		"controller.tokenSecret.name=shared", "controller.tokenSecret.key=bearer",
+		"cache.tokenSecret.name=shared", "cache.tokenSecret.key=bearer")
+	for _, want := range []string{"cache.tokenSecret", "controller.tokenSecret", "same Secret key"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render error does not name %q:\n%s", want, out)
+		}
+	}
+	helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"controller.tokenSecret.name=shared", "controller.tokenSecret.key=controller",
+		"cache.tokenSecret.name=shared", "cache.tokenSecret.key=cache")
 }
 
 type renderedNetworkPolicy struct {
@@ -2331,7 +2375,7 @@ func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
 		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
 			"cache.service.type="+serviceType, "cache.allowUnauthenticated=true")
-		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "controller.tokenSecret.name"} {
+		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "cache.tokenSecret.name"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s render error does not name %q:\n%s", serviceType, want, out)
 			}
@@ -2348,8 +2392,8 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
-		"sparkwing-runner-bundle.controller.tokenSecret.key=bearer")
+	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache",
+		"sparkwing-runner-bundle.cache.tokenSecret.key=cache-bearer")
 	for _, env := range controller.Env {
 		if env.Name != "SPARKWING_CACHE_TOKEN" {
 			continue
@@ -2358,8 +2402,8 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 			t.Fatalf("SPARKWING_CACHE_TOKEN is not a secretKeyRef: %+v", env)
 		}
 		ref := *env.ValueFrom.SecretKeyRef
-		if ref.Name != "sparkwing-token" || ref.Key != "bearer" {
-			t.Errorf("controller cache token = %+v, want the release token Secret", ref)
+		if ref.Name != "sparkwing-cache" || ref.Key != "cache-bearer" {
+			t.Errorf("controller cache token = %+v, want the cache Secret", ref)
 		}
 		return
 	}
@@ -2370,7 +2414,7 @@ func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
+	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache")
 	env := map[string]string{}
 	var tokenRef *renderedSecretKeyRef
 	for _, e := range controller.Env {
@@ -2392,7 +2436,7 @@ func TestControllerCacheURLOverrideWins(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
+	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache",
 		"controller.cache.url=http://cache.elsewhere:8090")
 	for _, e := range controller.Env {
 		if e.Name == "SPARKWING_CACHE_URL" && e.Value != "http://cache.elsewhere:8090" {

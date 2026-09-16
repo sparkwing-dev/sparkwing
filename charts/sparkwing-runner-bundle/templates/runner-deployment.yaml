@@ -161,13 +161,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
-            {{- if .Values.cache.enabled }}
+            {{- end }}
+            {{- if and .Values.cache.enabled .Values.cache.tokenSecret.name .Values.cache.tokenSecret.key }}
             - name: SPARKWING_CACHE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.controller.tokenSecret.name | quote }}
-                  key: {{ .Values.controller.tokenSecret.key | quote }}
-            {{- end }}
+                  name: {{ .Values.cache.tokenSecret.name | quote }}
+                  key: {{ .Values.cache.tokenSecret.key | quote }}
             {{- end }}
             {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
             {{- . | nindent 12 }}

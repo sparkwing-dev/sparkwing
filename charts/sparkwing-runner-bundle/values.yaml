@@ -192,11 +192,21 @@ cache:
   enabled: true
 
   # Serve the cache's blob and sync endpoints to anyone who can reach
-  # the Service. false (the default) requires controller.tokenSecret so
-  # the cache and the runner share one bearer; true passes
+  # the Service. false (the default) requires cache.tokenSecret so
+  # the cache and its clients share one cache-only bearer; true passes
   # --allow-unauthenticated to the cache and is only appropriate on a
   # bootstrap install, before the Secret exists.
   allowUnauthenticated: false
+
+  # Bearer shared only by cache clients and sparkwing-cache. Keep it
+  # distinct from controller.tokenSecret: compiled pipeline and node
+  # processes can read this credential when they access the cache, but it
+  # must carry no authority at the controller.
+  tokenSecret:
+    # Name of the existing Secret holding the cache bearer.
+    name: ""
+    # Key inside that Secret.
+    key: token
 
   # RWO PVC -- replicas: 1 is the only safe value.
   replicas: 1

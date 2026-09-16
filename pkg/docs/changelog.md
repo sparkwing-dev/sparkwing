@@ -22,6 +22,11 @@ unlock.
 
 ### Changed
 
+- **helm (Breaking):** `sparkwing-runner-bundle` requires a distinct
+  `cache.tokenSecret` for authenticated cache clients and the cache server.
+  The cache bearer no longer falls back to `controller.tokenSecret`, and the
+  authenticated controller rejects it. See the [migration guide](docs/migrations/_unreleased.md#cache-only-runner-credential).
+
 - **store + controller (Breaking):** Hosted-node finalization can reserve the
   controller-owned execution path with a bound, delegated credential and the
   named `hosted` dispatch policy. Schema 48 adds the credential binding that

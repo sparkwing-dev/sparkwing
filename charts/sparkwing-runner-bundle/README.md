@@ -37,10 +37,11 @@ read-only render is:
 
 ```bash
 helm template runners ./charts/sparkwing-runner-bundle \
-  --set controller.tokenSecret.name=sparkwing-token
+  --set controller.tokenSecret.name=sparkwing-controller-token \
+  --set cache.tokenSecret.name=sparkwing-cache-token
 ```
 
-`charts/render_test.go` injects that same value, so what it exercises is what
+`charts/render_test.go` injects those same values, so what it exercises is what
 this renders.
 
 ## Topology
@@ -92,16 +93,19 @@ logs:
 # 1. Create the namespace.
 kubectl create namespace sparkwing
 
-# 2. Create the agent bearer-token Secret.
-kubectl -n sparkwing create secret generic sparkwing-token \
+# 2. Create separate controller and cache bearer Secrets.
+kubectl -n sparkwing create secret generic sparkwing-controller-token \
     --from-literal=token=<your-token>
+kubectl -n sparkwing create secret generic sparkwing-cache-token \
+    --from-literal=token=<a-distinct-random-value>
 
 # 3. Install the chart.
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing \
     -f compatible-images.yaml \
     --set controller.url=https://app.sparkwing.dev \
-    --set controller.tokenSecret.name=sparkwing-token \
+    --set controller.tokenSecret.name=sparkwing-controller-token \
+    --set cache.tokenSecret.name=sparkwing-cache-token \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
@@ -138,6 +142,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.goCache.persistence.size` | Go cache PVC size. | `20Gi` |
 | `runner.goCache.persistence.accessModes` | Access modes on that claim. Needs `ReadWriteMany` above one replica. | `[ReadWriteMany]` |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
+| `cache.tokenSecret.name` | Existing Secret holding the cache-only bearer. | `""` |
+| `cache.tokenSecret.key` | Key inside the cache Secret. | `token` |
 | `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 | `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
@@ -195,12 +201,14 @@ the exception and keeps an `admin` token. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. The same Secret becomes the runner's
+receive a second service bearer. `cache.tokenSecret` becomes the runner's
 `SPARKWING_CACHE_TOKEN` and the cache's `SPARKWING_API_TOKEN`, so both sides of
-the binary and dependency cache share one bearer. Once a Secret name is
-configured, its key and the Secret itself are required.
+the binary and dependency cache share one cache-only bearer. It must not
+reference the same Secret key as `controller.tokenSecret`: pipeline code can
+read the cache bearer, and an authenticated controller must reject it. Once a
+Secret name is configured, its key and the Secret itself are required.
 
-A cache-enabled install without that Secret fails at render time. Set
+A cache-enabled install without `cache.tokenSecret` fails at render time. Set
 `cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
 to anything that can reach the Service, which is appropriate only on a
 bootstrap install, before the Secret exists.

@@ -102,8 +102,12 @@ compiles the triggering branch and runs its binary with the runner's
 `SPARKWING_AGENT_TOKEN` in the environment
 (`internal/cluster/trigger_loop.go`), which is the runner's own credential
 rather than a per-node capability, and none of the child-environment filtering
-above applies to it. `sparkwing cluster runners add` never sets that flag, so a
-desktop enrolled by the installer does not take that path.
+above applies to it. When the pool carries `SPARKWING_CACHE_TOKEN`, the child
+also inherits that shared cache bearer. It does not authenticate to an
+auth-enabled controller, but it still reaches every repository and artifact in
+the shared cache. Separating it from the controller bearer is not process
+containment or tenant isolation. `sparkwing cluster runners add` never sets
+that flag, so a desktop enrolled by the installer does not take that path.
 
 **The contribution cap.** A runner's `--contribution` value caps the headroom it
 advertises when it claims (`internal/cluster/headroom.go`), so it bounds how

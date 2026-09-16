@@ -377,6 +377,15 @@ the caller, so requests to those endpoints without a valid bearer get 401
 wherever they come from. Runners and the controller read the token from
 `SPARKWING_CACHE_TOKEN`.
 
+The runner-bundle chart reads that value from `cache.tokenSecret`; the cache
+server reads the same Secret as `SPARKWING_API_TOKEN`. This cache-only random
+credential is separate from `controller.tokenSecret` and is not entered in the
+controller's token store, so presenting it to an authenticated controller
+route returns 401.
+When the pool carries this credential, the trigger-compiled Plan and node
+processes still inherit the shared cache bearer. Separate caches or a scoped
+cache proxy remain necessary for tenant isolation.
+
 `POST /git/register` accepts a `name` of 1-64 alphanumeric, dash, underscore,
 or dot characters, and refuses to repoint a name that is already registered to
 a different repository unless the request carries the token. Registering the
@@ -405,7 +414,7 @@ different release; both default to this release's own pods. Override
 `app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
 other labels. Add peers through `networkPolicy.extraIngress` for an
 out-of-cluster runner pool. The chart refuses to render a non-`ClusterIP`
-`cache.service.type` unless `controller.tokenSecret.name` is set and
+`cache.service.type` unless `cache.tokenSecret.name` is set and
 `cache.allowUnauthenticated` is false, so a published cache always demands a
 bearer.
 

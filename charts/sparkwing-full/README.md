@@ -34,10 +34,11 @@ minimal read-only render is:
 
 ```bash
 helm template sparkwing ./charts/sparkwing-full \
-  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token
+  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-controller-token \
+  --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token
 ```
 
-`charts/render_test.go` injects that same value, so what it exercises is what
+`charts/render_test.go` injects those same values, so what it exercises is what
 this renders. The sub-chart is vendored in the repository, so this works in a
 fresh clone with no `helm dependency update` first.
 
@@ -113,6 +114,11 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # Deleting a run from the dashboard needs `admin` on the web token AND
 # on the signed-in account; leave it off to keep deletion on the CLI.
 # Mint the two separately so neither carries the other's reach.
+
+# Cache-only bearer. This is random data, not a controller-minted token.
+# It may exist before the first install.
+#   kubectl -n sparkwing create secret generic sparkwing-cache-token \
+#       --from-literal=token=<a-distinct-random-value>
 ```
 
 ## Install from source
@@ -196,7 +202,8 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.dashboardURL=https://sparkwing.example.com \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set web.tokenSecret.name=sparkwing-token \
-    --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
+    --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-controller-token \
+    --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
     --set web.requireLogin=true \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
@@ -289,7 +296,8 @@ for the full schema; a few commonly overridden keys:
 | --- | --- | --- |
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
-| `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret, shared by the runner and the cache. | `""` |
+| `sparkwing-runner-bundle.controller.tokenSecret.name` | Controller bearer Secret used by the runner. | `""` |
+| `sparkwing-runner-bundle.cache.tokenSecret.name` | Distinct cache-only bearer Secret used by cache clients and server. | `""` |
 | `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.logs.allowUnauthenticated` | Serve every run's logs without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
@@ -350,10 +358,13 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    A configured Secret name requires a non-empty key; the chart rejects
    incomplete pairs. Web, runner, and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
-   `sparkwing-runner-bundle.controller.tokenSecret` is also what the cache
-   reads as `SPARKWING_API_TOKEN`, the runner as `SPARKWING_CACHE_TOKEN`, and
-   the logs service as the signal to resolve callers against the controller;
-   a cache-enabled install without it fails at render time unless
+   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as
+   `SPARKWING_API_TOKEN`, and what the runner and controller read as
+   `SPARKWING_CACHE_TOKEN`. It cannot reference the same Secret key as
+   `controller.tokenSecret`. The logs service continues to use
+   `controller.tokenSecret` as the signal to resolve callers against the
+   controller. A cache-enabled install without `cache.tokenSecret` fails at
+   render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
    logs-enabled one unless
    `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap
@@ -504,7 +515,8 @@ helm uninstall sparkwing --namespace sparkwing
 ```
 
 PVCs survive (see Storage). Secrets you pre-created
-(`sparkwing-webhook`, `sparkwing-secrets-key`, `sparkwing-token`)
+(`sparkwing-webhook`, `sparkwing-secrets-key`, `sparkwing-token`,
+`sparkwing-controller-token`, `sparkwing-cache-token`)
 also survive -- the chart references them but doesn't own them.
 Delete manually if you want a fully clean slate.
 
