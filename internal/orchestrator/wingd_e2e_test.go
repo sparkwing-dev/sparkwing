@@ -866,7 +866,7 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 			t.Fatal("run did not finish after release")
 		}
 	}
-	if !strings.Contains(outB.String(), "queued for local admission") {
+	if !strings.Contains(outB.String(), "admission:") {
 		t.Fatalf("queued run out = %q, want a queue-position line", outB.String())
 	}
 	if got := gate.peak.Load(); got != 1 {
@@ -1277,7 +1277,7 @@ func (b *syncBuffer) count(sub string) int {
 	return strings.Count(b.buf.String(), sub)
 }
 
-func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
+func TestWingd_QueuedRunReportsMachineStateAndAnnouncesAdmission(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
@@ -1313,14 +1313,11 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 	}()
 	awaitWaiter(t, home, "wingd-hb-b")
 
-	deadline := time.Now().Add(wingdTestWait)
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for outB.count("still queued for local admission after") < 2 {
-		if time.Now().After(deadline) {
-			t.Fatalf("queued run never re-emitted its wait status; out = %q", outB.String())
+	awaitOutContains(t, outB, "admission:")
+	for _, want := range []string{"1 running", "wingd-e2e-hold", "you are next", "free", "held", "external"} {
+		if !strings.Contains(outB.String(), want) {
+			t.Fatalf("machine-first wait line omitted %q: %q", want, outB.String())
 		}
-		waitForWingdPoll(poll)
 	}
 
 	close(gate.release)
@@ -1336,8 +1333,8 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 	}
 
 	out := outB.String()
-	if !strings.Contains(out, "queued for local admission: position") {
-		t.Fatalf("missing the initial queue-position line: %q", out)
+	if !strings.Contains(out, "admission:") {
+		t.Fatalf("missing the initial machine-state line: %q", out)
 	}
 	if !strings.Contains(out, "admitted; starting run") {
 		t.Fatalf("admitted line must print unconditionally after any wait: %q", out)
@@ -1378,7 +1375,7 @@ func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
 	}()
 	awaitWaiter(t, home, "wingd-delegate-b")
 
-	awaitOutContains(t, outB, "queued for local admission")
+	awaitOutContains(t, outB, "admission:")
 	del.awaitEvent(t, "admission_wait")
 
 	close(gate.release)

@@ -189,7 +189,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 }
 
 func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) error {
-	holders := queueLifecycleHolders(qs)
+	holders := RunningHolders(qs)
 	connections := queueLifecycleConnections(qs)
 	clear := ""
 	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
@@ -348,7 +348,10 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	return nil
 }
 
-func queueLifecycleHolders(qs wingwire.QueueState) []wingwire.Holder {
+// RunningHolders returns the resource-holding rows the machine view presents as
+// active work. Connected orchestration leases and parents waiting on child
+// admission remain visible through their own queue lifecycle.
+func RunningHolders(qs wingwire.QueueState) []wingwire.Holder {
 	return queueLifecycleRows(qs, false)
 }
 
