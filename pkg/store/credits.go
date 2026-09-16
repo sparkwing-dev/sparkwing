@@ -749,9 +749,9 @@ type CreditLedgerTotals struct {
 	StorageMicro int64
 	// SettledSeconds is the runner seconds the ledger has finished charging
 	// for: every charge row less the part of an open reservation a finish
-	// would still refund. A reservation therefore enters this total as the
-	// node consumes it rather than all at once, so the figure only ever
-	// grows and a caller may export it as a counter.
+	// would still refund. A reservation enters this total after execution
+	// starts and as the node consumes it, so the figure only ever grows and a
+	// caller may export it as a counter.
 	SettledSeconds int64
 }
 
@@ -803,11 +803,12 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	// clock lets a second controller or an NTP step pull the figure backwards.
 	var refundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
-                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
-                                         ELSE 0 END), 0)
-                   FROM nodes WHERE credit_charged_through != 0`,
-	).Scan(&refundable); err != nil {
+		`SELECT COALESCE(SUM(CASE WHEN execution_started_at IS NULL THEN ?
+	                                         WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
+	                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
+	                                         ELSE 0 END), 0)
+	                   FROM nodes WHERE credit_charged_through != 0`,
+		int64(CreditClaimFloorSeconds)).Scan(&refundable); err != nil {
 		return out, err
 	}
 	out.SettledSeconds = charged - refundable
@@ -1446,6 +1447,19 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+
+	var anchor, class int64
+	var startedAt sql.NullInt64
+	err = tx.QueryRowContext(ctx,
+		`SELECT credit_charged_through, credit_cpu_class, execution_started_at FROM nodes
+		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
+		runID, nodeID).Scan(&anchor, &class, &startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, notFound("node", runID+"/"+nodeID)
+	}
+	if err != nil {
+		return out, err
+	}
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return out, err
 	}
@@ -1461,18 +1475,6 @@ func (s *Store) chargeNode(
 	if err != nil {
 		return out, err
 	}
-
-	var anchor, class int64
-	err = tx.QueryRowContext(ctx,
-		`SELECT credit_charged_through, credit_cpu_class FROM nodes
-		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class)
-	if errors.Is(err, sql.ErrNoRows) {
-		return out, notFound("node", runID+"/"+nodeID)
-	}
-	if err != nil {
-		return out, err
-	}
 	principal, err := runPrincipalTx(ctx, tx, runID)
 	if err != nil {
 		return out, err
@@ -1480,21 +1482,30 @@ func (s *Store) chargeNode(
 
 	nowNS := now.UnixNano()
 	rate := chargeRate(table, class)
-	refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
-	if err != nil {
-		return out, err
+	through := anchor
+	if !startedAt.Valid {
+		if final && anchor != 0 {
+			out.Charge, err = refundUnstartedReservationTx(ctx, tx, runID, nodeID, nowNS)
+			if err != nil {
+				return out, err
+			}
+			through = 0
+		}
+	} else {
+		refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
+		if err != nil {
+			return out, err
+		}
+		out.Charge, out.ForgivenSeconds, through, err = settleChargeWindow(
+			ctx, tx, chargeWindow{
+				RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
+				Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
+				MaxCharge: maxCharge, Final: final,
+			})
+		if err != nil {
+			return out, err
+		}
 	}
-	charge, forgiven, through, err := settleChargeWindow(
-		ctx, tx, chargeWindow{
-			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
-			Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
-			MaxCharge: maxCharge, Final: final,
-		})
-	if err != nil {
-		return out, err
-	}
-	out.Charge = charge
-	out.ForgivenSeconds = forgiven
 	if through != anchor {
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
@@ -1511,6 +1522,9 @@ func (s *Store) chargeNode(
 		return out, err
 	}
 	out.BalanceMicro = balance
+	if !startedAt.Valid && !final {
+		return out, tx.Commit()
+	}
 	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
 		Balance: balance, NowNS: nowNS, Grace: grace,
 		RunID: runID, NodeID: nodeID, Anchor: anchor,
@@ -1560,6 +1574,32 @@ func refundRateTx(
 	return reserved, nil
 }
 
+func refundUnstartedReservationTx(
+	ctx context.Context, tx *storeTx, runID, nodeID string, nowNS int64,
+) (*CreditCharge, error) {
+	// safety: use the reservation's stored terms so a later rate-table change
+	// cannot return more or less than the claim took.
+	var tokenPrefix, principal string
+	var seconds, amount, class, rate int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second
+		  FROM credit_charges
+		 WHERE run_id = ? AND node_id = ? AND kind = ?
+		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
+		runID, nodeID, CreditChargeReservation).Scan(
+		&tokenPrefix, &principal, &seconds, &amount, &class, &rate)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return insertCreditChargeTx(ctx, tx, chargeWindow{
+		RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
+		NowNS: nowNS, Rate: rate, Class: class,
+	}, CreditChargeRefund, -seconds, -amount)
+}
+
 // safety: a node claimed before the rate table carries no class, so it keeps
 // billing at the four-core price the single rate setting holds and an upgrade
 // leaves work in flight at the price it started on.
@@ -1581,7 +1621,6 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 		}
 		return nil, 0, w.NowNS, nil
 	}
-
 	if w.NowNS <= w.Anchor {
 		if !w.Final {
 			return nil, 0, w.Anchor, nil

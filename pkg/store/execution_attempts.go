@@ -151,10 +151,19 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		kind, executorName, executor, location, holder, reservation, now.UnixNano()); err != nil {
 		return err
 	}
+	startedAt := now.UnixNano()
+	paidThrough := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
+	// safety: the claim reserves funds, while this exact fenced attempt starts
+	// consuming them. The duplicate path above returns before moving the window.
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
-   SET attempts_consumed = ?, execution_started_at = COALESCE(execution_started_at, ?)
- WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempts_consumed = ?`,
-		start.AttemptOrdinal, now.UnixNano(), runID, nodeID, generation, consumed)
+	   SET attempts_consumed = ?,
+	       credit_charged_through = CASE
+	           WHEN execution_started_at IS NULL AND credit_charged_through != 0 THEN ?
+	           ELSE credit_charged_through
+	       END,
+	       execution_started_at = COALESCE(execution_started_at, ?)
+	 WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempts_consumed = ?`,
+		start.AttemptOrdinal, paidThrough, startedAt, runID, nodeID, generation, consumed)
 	if err != nil {
 		return err
 	}

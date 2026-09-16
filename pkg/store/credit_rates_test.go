@@ -371,9 +371,11 @@ func TestAnEarlyFinishRefundsAtTheRateTheClaimReserved(t *testing.T) {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-early", "build", 8)
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-early", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+	n, err := s.ClaimNamedNode(ctx, claimant, "run-early", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
+	acknowledgeClaimedExecution(t, s, claimant, n)
 
 	doubled := githubRateTable()
 	for i := range doubled {

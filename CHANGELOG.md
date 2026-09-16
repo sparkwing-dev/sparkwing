@@ -24,6 +24,14 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.7, so a fresh scaffold compiles against that release.
 
+### Fixed
+
+- **controller:** Metered runner claims still reserve one minute for concurrent
+  spend safety, but billing now begins at the exact claim-bound execution
+  acknowledgement. Queueing, Kubernetes provisioning, image pulls and runner
+  startup consume no credits. A finish or expired claim before execution
+  refunds the complete reservation.
+
 ## [v0.52.7] - 2026-09-16
 ### Changed
 

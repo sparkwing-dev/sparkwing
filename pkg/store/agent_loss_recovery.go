@@ -127,6 +127,7 @@ type expiredAgentNode struct {
 	membershipID, reservationID                           string
 	requiredCoordinatorID, requiredLocation               string
 	started                                               bool
+	chargeWindowOpen                                      bool
 	invocations                                           int
 }
 
@@ -152,7 +153,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 
 	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, coordinator_id, executor_kind, claim_worker_id, executor_id, executor_location,
 	       claim_membership_id, reservation_id, required_coordinator_id, required_executor_location,
-	       execution_started_at, attempts_consumed
+	       execution_started_at, attempts_consumed, credit_charged_through
  FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdate(), now.UnixNano())
@@ -164,13 +165,15 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	for rows.Next() {
 		var item expiredAgentNode
 		var started sql.NullInt64
+		var chargeWindow int64
 		if err := rows.Scan(&item.runID, &item.nodeID, &item.coordinatorID, &item.executorKind,
 			&item.executorName, &item.executorID, &item.executorLocation, &item.membershipID, &item.reservationID,
-			&item.requiredCoordinatorID, &item.requiredLocation, &started, &item.invocations); err != nil {
+			&item.requiredCoordinatorID, &item.requiredLocation, &started, &item.invocations, &chargeWindow); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		item.started = started.Valid
+		item.chargeWindowOpen = chargeWindow != 0
 		if _, ok := byRun[item.runID]; !ok {
 			runOrder = append(runOrder, item.runID)
 		}
@@ -182,10 +185,27 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		return nil, err
 	}
 
+	needsLedger := false
+	for _, items := range byRun {
+		for _, item := range items {
+			needsLedger = needsLedger || (!item.started && item.chargeWindowOpen)
+		}
+	}
+	if needsLedger {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
+
 	var recovered []AgentLossRecovery
 	for _, runID := range runOrder {
 		items := byRun[runID]
 		for _, item := range items {
+			if !item.started && item.chargeWindowOpen {
+				if _, err := refundUnstartedReservationTx(ctx, tx, item.runID, item.nodeID, now.UnixNano()); err != nil {
+					return nil, err
+				}
+			}
 			var avoidUntil any
 			if item.executorID != "" {
 				avoidUntil = now.Add(agentLossAvoidWindow).UnixNano()

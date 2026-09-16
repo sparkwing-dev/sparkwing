@@ -195,11 +195,56 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	}
 }
 
+func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) {
+	for _, outcome := range []string{"failed", "cancelled"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := newNamedClaimFixture(t, store.TokenOptions{Metered: true})
+			f.readyNode(t, "run-1", "build")
+			ctx := context.Background()
+			granted := int64(100 * store.MicroCreditsPerCredit)
+			if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+				granted, "pay_"+outcome, "admin"); err != nil {
+				t.Fatalf("GrantCredits: %v", err)
+			}
+			c := client.NewWithToken(f.url, nil, f.token)
+			n, err := c.ClaimNodeByID(ctx, "run-1", "build", "k8s-job:sw-1", time.Minute, false)
+			if err != nil {
+				t.Fatalf("ClaimNodeByID: %v", err)
+			}
+			fenced := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+				HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+				ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+			})
+			if err := c.FinishNode(fenced, "run-1", "build", outcome, outcome+" before start", nil); err != nil {
+				t.Fatalf("FinishNode: %v", err)
+			}
+
+			balance, err := f.store.CreditBalanceMicro(ctx)
+			if err != nil {
+				t.Fatalf("CreditBalanceMicro: %v", err)
+			}
+			if balance != granted {
+				t.Fatalf("balance = %d, want the full grant %d restored", balance, granted)
+			}
+			charges, err := f.store.ListCreditCharges(ctx, 10)
+			if err != nil {
+				t.Fatalf("ListCreditCharges: %v", err)
+			}
+			if len(charges) != 2 || charges[0].Kind != store.CreditChargeRefund ||
+				charges[0].Seconds != -int64(store.CreditClaimFloorSeconds) {
+				t.Fatalf("charges = %+v, want the reservation and its complete refund", charges)
+			}
+		})
+	}
+}
+
 func rewindNamedChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
 	t.Helper()
 	if _, err := st.DB().Exec(
-		`UPDATE nodes SET credit_charged_through = ? WHERE run_id = ? AND node_id = ?`,
-		at.UnixNano(), runID, nodeID); err != nil {
+		`UPDATE nodes SET credit_charged_through = ?,
+		 execution_started_at = COALESCE(execution_started_at, ?)
+		 WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), at.Add(-store.CreditClaimFloorSeconds*time.Second).UnixNano(), runID, nodeID); err != nil {
 		t.Fatalf("rewind the charge window: %v", err)
 	}
 }
