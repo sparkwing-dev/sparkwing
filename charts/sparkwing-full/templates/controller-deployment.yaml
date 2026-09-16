@@ -197,13 +197,14 @@ spec:
             - name: SPARKWING_DASHBOARD_URL
               value: {{ .Values.controller.dashboardURL | quote }}
             {{- end }}
-            {{- with (include "sparkwing-full.controller.cacheURL" .) }}
+            {{- $cacheURL := include "sparkwing-full.controller.cacheURL" . }}
+            {{- with $cacheURL }}
             - name: SPARKWING_CACHE_URL
               value: {{ . | quote }}
             {{- end }}
             {{- $bundle := index .Values "sparkwing-runner-bundle" }}
             {{- $bundleToken := index $bundle "cache" "tokenSecret" }}
-            {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") (index $bundleToken "name") (index $bundleToken "key") }}
+            {{- if and $cacheURL (index $bundleToken "name") (index $bundleToken "key") }}
             - name: SPARKWING_CACHE_TOKEN
               valueFrom:
                 secretKeyRef:

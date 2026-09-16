@@ -31,9 +31,10 @@ controller binaries before opening their shared runs store with this version.
   the runner and controller cache-client bearer, and the cache server bearer.
 - **After:** `controller.tokenSecret` supplies only controller authority.
   `cache.tokenSecret` supplies `SPARKWING_CACHE_TOKEN` to cache clients and
-  `SPARKWING_API_TOKEN` to the cache server. The chart refuses an authenticated
-  cache with no cache Secret and refuses the exact same Secret key for both
-  roles.
+  `SPARKWING_API_TOKEN` to the cache server. This includes runner and controller
+  clients pointed at an external cache while the bundled cache is disabled.
+  The chart refuses an authenticated cache with no cache Secret and refuses the
+  exact same Secret key for both roles.
 - **Migration:** Create a cache credential that is not a Sparkwing controller
   token. Store it in an existing Kubernetes Secret, then set
   `cache.tokenSecret.name` and, when needed, `cache.tokenSecret.key`. For

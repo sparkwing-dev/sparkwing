@@ -309,6 +309,11 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.runner.goCache.warmModules` | Modules downloaded into `GOMODCACHE` at runner startup. | `[]` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
+An explicit `controller.cache.url` also reads
+`sparkwing-runner-bundle.cache.tokenSecret`, including when the bundled cache
+or the whole runner bundle is disabled. The chart leaves both cache variables
+unset when neither a bundled nor an external cache is configured.
+
 The automatic controller URL follows the chart's default resource names. If
 you set top-level `nameOverride` or `fullnameOverride`, also set
 `sparkwing-runner-bundle.controller.url` to the resulting controller Service;

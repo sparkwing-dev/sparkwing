@@ -216,7 +216,7 @@ These are set on every runner pod:
 | `SPARKWING_NODE_ID` | The node being executed |
 | `SPARKWING_HOME` | State / cache / logs root |
 | `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller + logs calls; assisted job-body children receive a scoped loopback capability instead |
-| `SPARKWING_CACHE_TOKEN` | Cache-only bearer for source, binary, dependency, and artifact access; an authenticated controller rejects it |
+| `SPARKWING_CACHE_TOKEN` | When cache access is configured, the cache-only bearer for source, binary, dependency, and artifact access; an authenticated controller rejects it |
 
 ### Environment variables set on a local node process
 

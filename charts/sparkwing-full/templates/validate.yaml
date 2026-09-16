@@ -2,6 +2,15 @@
 {{- fail "sparkwing-full: controller.replicas above 1 corrupts the controller's local SQLite state DB, and its egress meter counts per process, so a second replica both doubles a per-principal monthly budget and splits the daily alarm below its threshold. Keep controller.replicas at 1; HA controller is a paid feature" -}}
 {{- end -}}
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
+{{- $bundleCacheToken := index $bundle "cache" "tokenSecret" -}}
+{{- $bundleControllerToken := index $bundle "controller" "tokenSecret" -}}
+{{- $controllerCacheURL := include "sparkwing-full.controller.cacheURL" . -}}
+{{- if and (index $bundleCacheToken "name") (not (index $bundleCacheToken "key")) -}}
+{{- fail "sparkwing-full: sparkwing-runner-bundle.cache.tokenSecret.key is required when its name is set" -}}
+{{- end -}}
+{{- if and $controllerCacheURL (index $bundleCacheToken "name") (index $bundleControllerToken "name") (eq (index $bundleCacheToken "name") (index $bundleControllerToken "name")) (eq (index $bundleCacheToken "key") (index $bundleControllerToken "key")) -}}
+{{- fail "sparkwing-full: sparkwing-runner-bundle.cache.tokenSecret and controller.tokenSecret must not reference the same Secret key when the controller uses that cache" -}}
+{{- end -}}
 {{- if and (index $bundle "enabled") (or .Values.nameOverride .Values.fullnameOverride) (not (index $bundle "controller" "url")) -}}
 {{- fail "sparkwing-full: nameOverride/fullnameOverride changes the controller Service name; set sparkwing-runner-bundle.controller.url explicitly" -}}
 {{- end -}}

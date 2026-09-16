@@ -223,8 +223,10 @@ setting to turn back off with the token upgrade.
 Trigger claiming always needs a gitcache because it clones and compiles the
 repository before creating a run. If `cache.enabled=false` while
 `runner.alsoClaimTriggers=true`, add a non-empty `SPARKWING_GITCACHE_URL` to
-`runner.extraEnv`; the chart rejects the incomplete combination at render
-time. A node-only pool can instead set `runner.alsoClaimTriggers=false`.
+`runner.extraEnv`; the chart supplies that client with `cache.tokenSecret` and
+rejects reusing the controller Secret key. The chart rejects an incomplete
+combination at render time. A node-only pool can instead set
+`runner.alsoClaimTriggers=false`.
 
 The chart does NOT create the Secret -- bring your own. This means
 rotating the token is `kubectl create secret ... --dry-run=client -o

@@ -202,6 +202,19 @@ the one address every client uses.
 {{- end -}}
 {{- end }}
 
+{{/* Keep an unused cache credential out of pipeline processes when no cache URL exists. */}}
+{{- define "sparkwing-runner-bundle.runnerExternalGitcache" -}}
+{{- $external := false -}}
+{{- range .Values.runner.extraEnv -}}
+{{- if eq (default "" .name) "SPARKWING_GITCACHE_URL" -}}
+{{- if or (and (hasKey . "value") (not (empty .value))) (and (hasKey . "valueFrom") (not (empty .valueFrom))) -}}
+{{- $external = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $external -}}true{{- end -}}
+{{- end }}
+
 {{/*
 Render runner --label flags. Each entry in .Values.runner.labels
 becomes a separate --label=<value> arg. Done in a helper so the

@@ -196,7 +196,8 @@ controller:
     # /api/v1/gitcache/. Empty = auto-generate to point at the bundled
     # sparkwing-runner-bundle's cache Service; if that sub-chart or its
     # cache is disabled, the controller runs without a cache URL and
-    # the proxy routes answer 404.
+    # the proxy routes answer 404. An explicit external URL receives
+    # sparkwing-runner-bundle.cache.tokenSecret when that is configured.
     url: ""
 
   # Secrets-store encryption key. When set, the controller encrypts

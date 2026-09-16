@@ -162,7 +162,8 @@ spec:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
             {{- end }}
-            {{- if and .Values.cache.enabled .Values.cache.tokenSecret.name .Values.cache.tokenSecret.key }}
+            {{- $externalGitcache := include "sparkwing-runner-bundle.runnerExternalGitcache" . }}
+            {{- if and (or .Values.cache.enabled $externalGitcache) .Values.cache.tokenSecret.name .Values.cache.tokenSecret.key }}
             - name: SPARKWING_CACHE_TOKEN
               valueFrom:
                 secretKeyRef:

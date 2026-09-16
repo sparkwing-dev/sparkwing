@@ -1386,6 +1386,9 @@ func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 			t.Errorf("runner args carry %q with no cache deployed", arg)
 		}
 	}
+	if _, exists := env["SPARKWING_CACHE_TOKEN"]; exists {
+		t.Error("runner received a cache credential with no bundled or external cache")
+	}
 }
 
 func TestTriggerClaimingWithoutGitcacheFailsAtRender(t *testing.T) {
@@ -1408,6 +1411,9 @@ func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
 		"runner.extraEnv[0].value=https://gitcache.example.com")
 	if got := runnerEnv(t, rendered)["SPARKWING_GITCACHE_URL"]; got != "https://gitcache.example.com" {
 		t.Errorf("SPARKWING_GITCACHE_URL = %q, want external gitcache URL", got)
+	}
+	if ref := envSecretRef(t, rendered, "SPARKWING_CACHE_TOKEN"); ref.Name != "sparkwing-cache-token" {
+		t.Errorf("external gitcache token source = %+v, want the cache Secret", ref)
 	}
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--also-claim-triggers") {
 		t.Errorf("runner args = %v, want trigger claiming preserved", args)
@@ -2158,6 +2164,9 @@ func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want --allow-unauthenticated", args)
 	}
+	if _, exists := runnerEnv(t, rendered)["SPARKWING_API_TOKEN"]; exists {
+		t.Error("unauthenticated cache received a token with no cache Secret configured")
+	}
 	if args := runnerContainer(t, renderCache(t)).Args; containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want no unauthenticated opt-in by default", args)
 	}
@@ -2178,6 +2187,15 @@ func TestCacheAndControllerRejectTheSameSecretKey(t *testing.T) {
 	helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
 		"controller.tokenSecret.name=shared", "controller.tokenSecret.key=controller",
 		"cache.tokenSecret.name=shared", "cache.tokenSecret.key=cache")
+	external := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+		"cache.enabled=false",
+		"runner.extraEnv[0].name=SPARKWING_GITCACHE_URL",
+		"runner.extraEnv[0].value=https://cache.example.com",
+		"controller.tokenSecret.name=shared", "controller.tokenSecret.key=bearer",
+		"cache.tokenSecret.name=shared", "cache.tokenSecret.key=bearer")
+	if !strings.Contains(external, "same Secret key") {
+		t.Fatalf("external cache accepted the controller token as its bearer:\n%s", external)
+	}
 }
 
 type renderedNetworkPolicy struct {
@@ -2445,14 +2463,46 @@ func TestControllerCacheURLOverrideWins(t *testing.T) {
 	}
 }
 
+func TestControllerExternalCacheCarriesTheTokenWithNoBundledCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	controller := renderController(t,
+		"sparkwing-runner-bundle.enabled=false",
+		"controller.cache.url=https://cache.example.com")
+	for _, env := range controller.Env {
+		if env.Name == "SPARKWING_CACHE_TOKEN" && env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+			if ref := env.ValueFrom.SecretKeyRef; ref.Name != "sparkwing-cache-token" || ref.Key != "token" {
+				t.Fatalf("external cache token = %+v, want the configured cache Secret", ref)
+			}
+			return
+		}
+	}
+	t.Fatal("controller external cache URL has no cache token")
+}
+
+func TestControllerExternalCacheRejectsTheRunnerToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
+	}
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"sparkwing-runner-bundle.enabled=false",
+		"controller.cache.url=https://cache.example.com",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=shared",
+		"sparkwing-runner-bundle.cache.tokenSecret.name=shared")
+	if !strings.Contains(out, "same Secret key") {
+		t.Fatalf("controller external cache accepted its controller token as the cache bearer:\n%s", out)
+	}
+}
+
 func TestControllerHasNoCacheURLWhenNoCacheIsDeployed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	controller := renderController(t, "sparkwing-runner-bundle.enabled=false")
 	for _, e := range controller.Env {
-		if e.Name == "SPARKWING_CACHE_URL" {
-			t.Errorf("rendered SPARKWING_CACHE_URL=%q with no cache deployed", e.Value)
+		if e.Name == "SPARKWING_CACHE_URL" || e.Name == "SPARKWING_CACHE_TOKEN" {
+			t.Errorf("rendered %s with no cache configured", e.Name)
 		}
 	}
 }
