@@ -22,6 +22,13 @@ unlock.
 
 ### Changed
 
+- **runner + charts:** Warm Kubernetes fallback can advertise explicit static
+  capabilities through repeatable `--trigger-runner-label` flags or
+  `runner.triggerRunner.labels`. The same normalized labels control fallback
+  eligibility and appear in each spawned Job's runtime metadata. The empty
+  default keeps labeled work agent-only, and outer pool labels are never
+  inherited.
+
 - **checks:** On exactly four logical CPUs, the broad gate overlaps its full Go
   suite with touched-package race tests after the build, then runs lint and the
   conditional PostgreSQL suite after both finish. Race tests can overlap two

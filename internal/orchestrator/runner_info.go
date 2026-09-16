@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -51,14 +52,9 @@ func podRunnerInfo() *sparkwing.RunnerInfo {
 	if typ == "" {
 		typ = "kubernetes"
 	}
-	labels := make([]string, 0)
+	var labels []string
 	if labelsRaw != "" {
-		for _, l := range strings.Split(labelsRaw, ",") {
-			l = strings.TrimSpace(l)
-			if l != "" {
-				labels = append(labels, l)
-			}
-		}
+		labels = sparkwingruntime.NormalizeLabels(strings.Split(labelsRaw, ","))
 	}
 	return &sparkwing.RunnerInfo{Name: name, Type: typ, Labels: labels}
 }

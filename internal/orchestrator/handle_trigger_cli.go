@@ -42,6 +42,8 @@ func runHandleTriggerCLI(args []string) error {
 	k8sJobDeadline := fs.String("k8s-job-deadline", os.Getenv("SPARKWING_K8S_JOB_DEADLINE"),
 		"wall-clock bound on one runner Job as a Go duration (6h, 90m); Kubernetes kills a pod that outlives it, and a node's own .Timeout() outranks it (empty = 6h; env: SPARKWING_K8S_JOB_DEADLINE)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
+	var k8sLabels stringSliceFlag
+	fs.Var(&k8sLabels, "runner-label", "static capability every runner Job advertises (repeatable)")
 	k8sNodeSelector := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR")))
 	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
 	k8sTolerations := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_TOLERATION")))
@@ -100,6 +102,7 @@ func runHandleTriggerCLI(args []string) error {
 			ArtifactStoreURL:           *artifactStoreURL,
 			GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
 			AgentToken:                 *token,
+			Labels:                     k8sLabels,
 			NodeSelector:               nodeSelector,
 			Tolerations:                tolerations,
 			DependencyProxyURL:         *dependencyProxy,
@@ -135,6 +138,7 @@ func runHandleTriggerCLI(args []string) error {
 				ArtifactStoreURL:           *artifactStoreURL,
 				GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
 				AgentToken:                 *token,
+				Labels:                     k8sLabels,
 				NodeSelector:               nodeSelector,
 				Tolerations:                tolerations,
 				DependencyProxyURL:         *dependencyProxy,

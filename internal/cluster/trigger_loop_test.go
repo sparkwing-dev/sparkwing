@@ -45,6 +45,9 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		K8sLogsURL:    "http://logs:4344",
 		Kubeconfig:    "/tmp/kubeconfig",
 		ArtifactStore: "http://cache:4344",
+		K8sLabels: []string{
+			"cluster",
+		},
 		K8sNodeSelector: []string{
 			"sparkwing.io/node-pool=runner",
 		},
@@ -66,6 +69,7 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		"--artifact-store", "http://cache:4344",
 		"--image-pull-policy", "Always",
 		"--dependency-proxy", "http://cache:80",
+		"--runner-label", "cluster",
 		"--runner-node-selector", "sparkwing.io/node-pool=runner",
 		"--runner-toleration", "sparkwing.io/node-pool=runner:NoSchedule",
 	}

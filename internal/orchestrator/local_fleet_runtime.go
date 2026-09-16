@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -53,20 +54,13 @@ func (f *localFleetRuntime) start(runID string, opts *Options, fallback runner.R
 	labels := fleetCoordinatorLabels(f.config.Local.Capabilities)
 	local := &limitedFleetRunner{runner: fallback, slots: make(chan struct{}, f.config.Local.MaxConcurrent), labels: labels}
 	coordinator := localStoreFleetCoordinator{store: f.store}
-	return authority, warmpool.New(coordinator, local, warmpool.Config{FallbackLabels: labels}, logger), nil
+	return authority, warmpool.New(coordinator, local, warmpool.Config{}, logger), nil
 }
 
 func fleetCoordinatorLabels(capabilities []string) []string {
-	labels := make([]string, 0, len(capabilities)+2)
-	seen := make(map[string]struct{}, len(capabilities)+2)
-	for _, label := range append(append([]string(nil), capabilities...), "local", "location=coordinator") {
-		if _, ok := seen[label]; ok {
-			continue
-		}
-		seen[label] = struct{}{}
-		labels = append(labels, label)
-	}
-	return labels
+	return sparkwingruntime.NormalizeLabels(
+		append(append([]string(nil), capabilities...), "local", "location=coordinator"),
+	)
 }
 
 type limitedFleetRunner struct {

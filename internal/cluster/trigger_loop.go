@@ -38,6 +38,7 @@ type TriggerLoopOptions struct {
 	K8sLogsURL      string
 	Kubeconfig      string
 	ArtifactStore   string
+	K8sLabels       []string
 	K8sNodeSelector []string
 	K8sTolerations  []string
 
@@ -321,6 +322,9 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 		args = append(args, "--dependency-proxy", opts.DependencyProxy)
 	} else {
 		args = append(args, "--dependency-proxy", "off")
+	}
+	for _, val := range opts.K8sLabels {
+		appendFlag("--runner-label", val)
 	}
 	for _, val := range opts.K8sNodeSelector {
 		appendFlag("--runner-node-selector", val)

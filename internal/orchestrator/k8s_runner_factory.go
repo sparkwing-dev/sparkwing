@@ -30,6 +30,7 @@ type K8sRunnerFactoryConfig struct {
 	// can compile a pipeline the image does not carry.
 	GitcacheURL  string
 	AgentToken   string
+	Labels       []string
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
 
@@ -104,6 +105,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		DependencyProxyURL: k8srunner.ResolveDependencyProxy(cfg.DependencyProxyURL, cfg.DependencyProxyFallbackURL),
 		ImagePullPolicy:    pullPolicy,
 		AgentToken:         cfg.AgentToken,
+		Labels:             cfg.Labels,
 		NodeSelector:       cfg.NodeSelector,
 		Tolerations:        cfg.Tolerations,
 		CPURequest:         "100m",

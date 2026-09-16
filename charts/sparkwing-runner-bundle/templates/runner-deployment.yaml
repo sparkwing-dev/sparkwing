@@ -114,6 +114,9 @@ spec:
             - {{ printf "--trigger-runner-image=%s" $runnerImage | quote }}
             - {{ printf "--trigger-runner-sa=%s" (include "sparkwing-runner-bundle.serviceAccountName" .) | quote }}
             - {{ printf "--trigger-runner-image-pull-policy=%s" .Values.runner.image.pullPolicy | quote }}
+            {{- range .Values.runner.triggerRunner.labels }}
+            - {{ printf "--trigger-runner-label=%s" . | quote }}
+            {{- end }}
             {{- if .Values.cache.enabled }}
             - {{ printf "--trigger-artifact-store=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
             {{- end }}

@@ -43,7 +43,9 @@ chart exposes them through `runner.triggerRunner.kind`, while `inprocess`
 remains the default. The chart supplies the named runner ServiceAccount,
 namespace-scoped Job and pod-read permissions, and requires
 `runner.automountServiceAccountToken=true` so the trigger worker can call the
-Kubernetes API. The spawned Jobs mount no ServiceAccount token.
+Kubernetes API. `runner.triggerRunner.labels` declares static capabilities
+common to every spawned Job; it is empty by default and separate from the
+outer pool's `runner.labels`. The spawned Jobs mount no ServiceAccount token.
 
 A Job for a cpu class above the warm one selects and tolerates a
 `sparkwing.dev/cpu-band` band, `small` for 4 and 8 cores and `large` for 16 and

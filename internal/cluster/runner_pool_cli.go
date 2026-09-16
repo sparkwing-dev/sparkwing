@@ -325,6 +325,9 @@ func runRunnerCLI(args []string, version string) error {
 	triggerRunnerPullPolicy := fs.String("trigger-runner-image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
 		"imagePullPolicy for trigger-spawned runner Jobs: Always | IfNotPresent | Never "+
 			"(default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
+	var triggerRunnerLabels multiFlag
+	fs.Var(&triggerRunnerLabels, "trigger-runner-label",
+		"static capability every trigger-spawned runner Job advertises (repeatable)")
 	var triggerRunnerNodeSelector multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
 	fs.Var(&triggerRunnerNodeSelector, "trigger-runner-node-selector",
 		"node selector for trigger-spawned runner Jobs, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
@@ -420,6 +423,7 @@ func runRunnerCLI(args []string, version string) error {
 				K8sLogsURL:      firstNonEmpty(*triggerRunnerLogsURL, *logsURL),
 				Kubeconfig:      *triggerRunnerKubeconfig,
 				ArtifactStore:   *triggerArtifactStore,
+				K8sLabels:       triggerRunnerLabels,
 				K8sNodeSelector: triggerRunnerNodeSelector,
 				K8sTolerations:  triggerRunnerTolerations,
 

@@ -598,9 +598,12 @@ Kubernetes Job with the chart's existing image, namespace, service account,
 pull policy, and cache settings. The Job runs `sparkwing-runner run-node`, the
 executable the runner image installs. A concurrent agent claim defeats
 revocation, so fallback cannot double-execute the node. Labeled nodes stay
-agent-only because the fallback Job does not advertise labels. Saturated or
-offline agents therefore spill generic work to Kubernetes without weakening
-placement requirements.
+agent-only by default. `runner.triggerRunner.labels` may name static
+capabilities every fallback Job can honor; a labeled node then falls back only
+when those labels satisfy all of its requirements. These labels do not inherit
+the outer pool's `runner.labels`, and the Job reports the configured set as its
+runtime runner metadata. Saturated or offline agents therefore spill eligible
+work to Kubernetes without weakening placement requirements.
 
 Before it creates the Job the dispatcher claims that one node for itself with
 its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands
@@ -640,6 +643,9 @@ The full-chart path is
 `sparkwing-runner-bundle.runner.automountServiceAccountToken: true`. The
 default remains `inprocess` and renders an empty Role. Warm mode adds only the
 Job lifecycle and pod-read permissions the Kubernetes fallback calls.
+`sparkwing-runner-bundle.runner.triggerRunner.labels` declares fallback Job
+capabilities; a manually launched trigger worker repeats
+`--trigger-runner-label` for the same values.
 For a manually launched runner, `SPARKWING_RUNNER_SA` supplies the service
 account used by `--runner k8s`, `--trigger-runner k8s`, and warm fallback Jobs;
 the matching command-line flags take precedence.
