@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	gobuildinfo "debug/buildinfo"
 	"encoding/json"
 	"errors"
@@ -67,6 +68,29 @@ func installedArtifactIdentity(path string) updateIdentity {
 		return identity
 	}
 	return artifactIdentityFromFile(file, path)
+}
+
+func installedReleaseIdentity(installed installedRelease, version, targetRevision string) updateIdentity {
+	identity := installedArtifactIdentity(installed.path)
+	if reconciled, ok := reconcilePublishedVersionAtRevision(identity, version, targetRevision); ok {
+		return reconciled
+	}
+	if installed.version == version && isSHA256Digest(installed.digest) {
+		identity.Version = version
+	}
+	return identity
+}
+
+func isSHA256Digest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func artifactIdentityFromFile(file *os.File, path string) updateIdentity {
@@ -201,14 +225,32 @@ func installedReleaseProvenance(ctx context.Context, identity updateIdentity) (v
 }
 
 func reconcilePublishedVersion(ctx context.Context, identity updateIdentity, releaseVersion string) (updateIdentity, bool) {
-	if (identity.Version != "" && !pseudoVersionRE.MatchString(identity.Version)) ||
+	revision, err := publishedVersionRevision(ctx, identity, releaseVersion)
+	if err != nil {
+		return identity, false
+	}
+	return reconcilePublishedVersionAtRevision(identity, releaseVersion, revision)
+}
+
+func publishedVersionRevision(ctx context.Context, identity updateIdentity, releaseVersion string) (string, error) {
+	if identity.Version == "" || !pseudoVersionRE.MatchString(identity.Version) ||
 		!validUpdateVersion(releaseVersion) ||
 		!validUpdateRevision(identity.Revision) ||
 		identity.Dirty == nil || *identity.Dirty {
-		return identity, false
+		return "", errors.New("artifact is not a clean Go pseudo-version")
 	}
 	revision, err := updateLookupRevision(ctx, releaseVersion)
-	if err != nil || revision != identity.Revision {
+	if err != nil {
+		return "", err
+	}
+	return revision, nil
+}
+
+func reconcilePublishedVersionAtRevision(identity updateIdentity, releaseVersion, revision string) (updateIdentity, bool) {
+	if identity.Version == "" || !pseudoVersionRE.MatchString(identity.Version) ||
+		!validUpdateVersion(releaseVersion) ||
+		!validUpdateRevision(identity.Revision) ||
+		identity.Dirty == nil || *identity.Dirty || identity.Revision != revision {
 		return identity, false
 	}
 	identity.Version = releaseVersion

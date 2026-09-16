@@ -311,7 +311,7 @@ func TestUnifiedUpdateReceiptUsesInstalledArtifactAndReinstallsLocalSameLabel(t 
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("receipt polluted by progress: %v %q", err, out)
 	}
-	if !called || result.Kind != "update" || result.Status != "updated" || result.After.Version != "v0.49.0" || result.ResolvedRelease != "v0.49.0" || result.After.Path != path || result.After.Revision != "" {
+	if !called || result.Kind != "update" || result.Status != "updated" || result.After.Version != "" || result.ResolvedRelease != "v0.49.0" || result.After.Path != path || result.After.Revision != "" {
 		t.Fatalf("false update receipt: %+v", result)
 	}
 	updateReadInstalled = func() updateIdentity {
@@ -408,6 +408,22 @@ func TestReconcilePublishedVersionUsesArtifactCommit(t *testing.T) {
 	clean = true
 	if _, ok := reconcilePublishedVersion(context.Background(), identity, "v0.52.8"); ok {
 		t.Fatal("dirty artifact was treated as a published release")
+	}
+}
+
+func TestInstalledReleaseIdentityRequiresVerifiedDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sparkwing")
+	valid := installedReleaseIdentity(installedRelease{
+		path: path, version: "v0.52.8", digest: strings.Repeat("a", 64),
+	}, "v0.52.8", "")
+	if valid.Version != "v0.52.8" {
+		t.Fatalf("verified release identity = %+v", valid)
+	}
+	unknown := installedReleaseIdentity(installedRelease{
+		path: path, version: "v0.52.8", digest: "fixture-sha256",
+	}, "v0.52.8", "")
+	if unknown.Version != "" {
+		t.Fatalf("unverified release identity = %+v", unknown)
 	}
 }
 
