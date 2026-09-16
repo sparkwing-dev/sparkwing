@@ -52,6 +52,10 @@ unlock.
 
 ### Fixed
 
+- **controller:** Child trigger submissions now bind parent lineage and
+  inherited repository provenance to the exact live parent node or trigger
+  claim. A `runs.write` token without that claim cannot name another run as its
+  parent; `admin` keeps its operator override.
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an
   explicitly supplied nested selection.
