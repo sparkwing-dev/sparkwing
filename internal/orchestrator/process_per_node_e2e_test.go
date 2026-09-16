@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -343,7 +344,20 @@ func waitForPID(t *testing.T, dir, name string, timeout time.Duration) int {
 	}
 }
 
-func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {
+type processPerNodeFixturePaths struct {
+	onDisk string
+	mod    string
+	bin    string
+	host   string
+}
+
+// safety: only generated source and executable bytes are shared. Every test
+// still supplies its own home, state backend, profiles, probes, and run IDs.
+var processPerNodeFixtureOnce sync.Once
+
+var processPerNodeFixture processPerNodeFixturePaths
+
+func sharedProcessPerNodeFixture(t *testing.T) processPerNodeFixturePaths {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("builds a pipeline binary; run without -short")
@@ -354,31 +368,52 @@ func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
-	repoRoot := repoRootDir(t)
+	processPerNodeFixtureOnce.Do(func() {
+		repoRoot := repoRootDir(t)
+		onDisk, err := os.MkdirTemp("", "sparkwing-process-per-node-")
+		if err != nil {
+			t.Fatalf("create process-per-node fixture root: %v", err)
+		}
+		processPerNodeFixture.onDisk = onDisk
+		processPerNodeFixture.mod = filepath.Join(onDisk, "pipeline")
+		if err := os.MkdirAll(processPerNodeFixture.mod, 0o755); err != nil {
+			t.Fatalf("create process-per-node module: %v", err)
+		}
+		writeMod(t, filepath.Join(processPerNodeFixture.mod, "go.mod"), ""+
+			"module procpernode\n\ngo 1.26.0\n\n"+
+			"require github.com/sparkwing-dev/sparkwing v0.0.0\n\n"+
+			"replace github.com/sparkwing-dev/sparkwing => "+repoRoot+"\n")
+		writeMod(t, filepath.Join(processPerNodeFixture.mod, "jobs", "jobs.go"), procPerNodeJobs)
+		writeMod(t, filepath.Join(processPerNodeFixture.mod, "main.go"), procPerNodeMain)
 
-	mod = t.TempDir()
-	writeMod(t, filepath.Join(mod, "go.mod"), ""+
-		"module procpernode\n\ngo 1.26.0\n\n"+
-		"require github.com/sparkwing-dev/sparkwing v0.0.0\n\n"+
-		"replace github.com/sparkwing-dev/sparkwing => "+repoRoot+"\n")
-	writeMod(t, filepath.Join(mod, "jobs", "jobs.go"), procPerNodeJobs)
-	writeMod(t, filepath.Join(mod, "main.go"), procPerNodeMain)
+		buildEnv := append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local")
+		runGo(t, processPerNodeFixture.mod, buildEnv, "mod", "tidy")
+		processPerNodeFixture.bin = filepath.Join(onDisk, "procpernode")
+		runGo(t, processPerNodeFixture.mod, buildEnv, "build", "-o", processPerNodeFixture.bin, ".")
 
-	buildEnv := append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local")
-	runGo(t, mod, buildEnv, "mod", "tidy")
-	bin = filepath.Join(mod, "procpernode")
-	runGo(t, mod, buildEnv, "build", "-o", bin, ".")
-	return mod, bin
+		processPerNodeFixture.host = filepath.Join(onDisk, "sparkwing")
+		hostEnv := append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
+		runGo(t, repoRoot, hostEnv, "build", "-o", processPerNodeFixture.host, "./cmd/sparkwing")
+	})
+	return processPerNodeFixture
+}
+
+func cleanupProcessPerNodeFixture() error {
+	if processPerNodeFixture.onDisk == "" {
+		return nil
+	}
+	return os.RemoveAll(processPerNodeFixture.onDisk)
+}
+
+func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {
+	t.Helper()
+	fixture := sharedProcessPerNodeFixture(t)
+	return fixture.mod, fixture.bin
 }
 
 func wingdHostBin(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "sparkwing")
-	root := repoRootDir(t)
-
-	env := append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
-	runGo(t, root, env, "build", "-o", bin, "./cmd/sparkwing")
-	return bin
+	return sharedProcessPerNodeFixture(t).host
 }
 
 func readPID(t *testing.T, dir, name string) int {
