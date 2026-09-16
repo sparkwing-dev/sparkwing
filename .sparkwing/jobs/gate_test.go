@@ -53,7 +53,7 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	for _, tc := range []struct {
 		cpus  int
 		cores float64
-	}{{1, 1}, {2, 1}, {3, 1}, {4, 2}, {8, 2.5}, {16, 4.5}, {32, 8.5}} {
+	}{{1, 1}, {2, 1}, {3, 1}, {4, 2.5}, {8, 2.5}, {16, 4.5}, {32, 8.5}} {
 		if got := gateCoreReservation(tc.cpus); got != tc.cores {
 			t.Errorf("gateCoreReservation(%d) = %v, want %v", tc.cpus, got, tc.cores)
 		}

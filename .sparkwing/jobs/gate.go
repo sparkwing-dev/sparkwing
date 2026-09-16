@@ -48,7 +48,7 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 }
 
 // perf: admission charges sustained CPU. The four-core schedule overlaps the
-// two long Go suites and needs two cores; larger hosts use the p95 measured on
+// two long Go suites and needs 2.5 cores; larger hosts use the p95 measured on
 // a 16-core Linux host over 20 uncontended runs (3.9 cores, maximum 4.4). A pin
 // also survives a plan edit resetting the profile's plan hash.
 func gateCoreReservation(cpuCount int) float64 {
@@ -56,7 +56,7 @@ func gateCoreReservation(cpuCount int) float64 {
 		return 1
 	}
 	if cpuCount == 4 {
-		return 2
+		return 2.5
 	}
 	return float64(cpuCount)/4 + 0.5
 }

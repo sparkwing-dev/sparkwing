@@ -26,7 +26,7 @@ unlock.
   suite with touched-package race tests after the build, then runs lint and the
   conditional PostgreSQL suite after both finish. Race tests can overlap two
   packages while each remains at `GOMAXPROCS=1`, and the gate declares the
-  resulting two-core workload. Other CPU classes retain their existing graph
+  resulting 2.5-core workload. Other CPU classes retain their existing graph
   and Go parallelism.
 
 - **admission:** Queue waits now print one machine-first stream: running

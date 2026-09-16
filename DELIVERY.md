@@ -96,7 +96,7 @@ file. Other syntax and workflow checks remain active.
   boundary for the long test and change-sensitive post-test fanout, not a claim
   that every gate completes in 40 minutes. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
-  run handle. On exactly four logical CPUs, the gate reserves two cores and
+  run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
   build. The race command can run two package binaries while each keeps
   `GOMAXPROCS=1`; lint and the conditional PostgreSQL suite wait for both Go

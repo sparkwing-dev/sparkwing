@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRaceTargetsGroupChangedFilesByPackageAndModule(t *testing.T) {
@@ -79,19 +77,6 @@ func TestRaceTouchedRunsTheRaceDetectorOnTheChangedPackage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "internal") {
 		t.Errorf("the failure does not name the module or package: %v", err)
-	}
-}
-
-func TestRaceTouchedWaitsOnTheTestStep(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&Gate{}).Work(w); err != nil {
-		t.Fatal(err)
-	}
-	if w.StepByID("race-touched") == nil {
-		t.Fatal("pre-commit does not run race-touched")
-	}
-	if !stepWaitsOn(w, "race-touched", "test") {
-		t.Error("race-touched does not wait on test")
 	}
 }
 

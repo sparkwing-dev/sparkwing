@@ -55,8 +55,8 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 }
 
 func raceGoCommand(cpuCount int, args string) string {
-	// perf: package overlap removes serialization without letting either test
-	// binary exceed the one core available beside the full suite.
+	// perf: four-core runners can overlap two package processes while each Go
+	// runtime retains the existing GOMAXPROCS=1 bound.
 	if cpuCount == 4 {
 		return goCommandWithLimits(1, 2, "test", args)
 	}
