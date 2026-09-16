@@ -320,7 +320,7 @@ func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID strin
 // ClaimLease is the lease the dispatcher takes on a node it executes through a
 // Job, and the lease the pod renews once it starts. The dispatcher never
 // renews it: a pod that never runs must let its claim lapse rather than hold a
-// billed claim for as long as the dispatcher watches an ImagePullBackOff.
+// reservation for as long as the dispatcher watches an ImagePullBackOff.
 const ClaimLease = store.MaxLeaseDuration
 
 // DefaultJobActiveDeadline bounds a fallback Job whose node declared no

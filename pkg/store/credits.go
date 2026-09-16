@@ -1493,6 +1493,11 @@ func (s *Store) chargeNodeTx(
 	}
 
 	nowNS := now.UnixNano()
+	// safety: cancellation can wait on transaction locks while a fenced attempt
+	// starts. A stale caller timestamp must not refund time before that boundary.
+	if startedAt.Valid && nowNS < startedAt.Int64 {
+		nowNS = startedAt.Int64
+	}
 	rate := chargeRate(table, class)
 	through := anchor
 	if !startedAt.Valid {

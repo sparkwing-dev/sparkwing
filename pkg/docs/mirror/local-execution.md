@@ -628,7 +628,7 @@ node another claim holds and a node of a run that has finished.
 The pod is the only renewer: it extends the lease every five seconds from the
 moment its process starts, and the dispatcher renews nothing, so a pod that
 never runs releases the node when the ten-minute lease lapses rather than
-holding a billed claim for as long as the dispatcher watches an
+holding a reservation for as long as the dispatcher watches an
 `ImagePullBackOff`. The same ten minutes is the cost of a dispatcher that dies
 mid-node: nothing releases a claim, so the node waits out the lease before the
 reaper requeues it. Each Job also carries an `activeDeadlineSeconds`, ten

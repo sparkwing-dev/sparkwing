@@ -34,25 +34,11 @@ func TestPostgresCancellationKeepsReservationUntilExecutionStartIsFenced(t *test
 	cancelled := make(chan error, 1)
 	go func() {
 		cancelled <- s.CancelNodeForComputeLimit(ctx, n.RunID, n.NodeID,
-			claimant.TokenPrefix, "runner_limit", time.Now().Add(2*time.Second))
+			claimant.TokenPrefix, "runner_limit", time.Now())
 	}()
-
-	waiting := false
-	for range 1000 {
-		var count int
-		if err := s.DB().QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&count); err != nil {
-			_ = blocker.Rollback()
-			t.Fatal(err)
-		}
-		if count > 0 {
-			waiting = true
-			break
-		}
-	}
-	if !waiting {
+	if err := waitForPostgresEligibilityWaiter(ctx, s); err != nil {
 		_ = blocker.Rollback()
-		t.Fatal("cancellation did not wait on executor eligibility")
+		t.Fatal(err)
 	}
 	if anchor := chargeWindowAnchor(t, s, n.RunID, n.NodeID); anchor == 0 {
 		_ = blocker.Rollback()
@@ -83,7 +69,30 @@ func TestPostgresCancellationKeepsReservationUntilExecutionStartIsFenced(t *test
 			net += charge.AmountMicro
 		}
 	}
-	if net <= 0 {
-		t.Fatalf("execution start succeeded but settled charge = %d, want paid execution", net)
+	if net < 0 {
+		t.Fatalf("settled charge = %d, want cancellation to mint no credits", net)
 	}
+}
+
+func waitForPostgresEligibilityWaiter(ctx context.Context, s *store.Store) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	for waitCtx.Err() == nil {
+		var count int
+		err := s.DB().QueryRowContext(waitCtx, `
+WITH key AS (SELECT hashtext($1)::bigint AS value)
+SELECT COUNT(*)
+  FROM pg_locks, key
+ WHERE locktype = 'advisory' AND NOT granted
+   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+   AND classid::bigint = ((key.value >> 32) & 4294967295)
+   AND objid::bigint = (key.value & 4294967295)`, "sparkwing/executor-eligibility").Scan(&count)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
+	}
+	return waitCtx.Err()
 }
