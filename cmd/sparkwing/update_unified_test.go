@@ -474,6 +474,9 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 }
 
 func TestReleaseStyleBuildKeepsRuntimeTagDistinctFromGoPseudoVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds a release-style CLI artifact")
+	}
 	dir := t.TempDir()
 	repo, err := os.Getwd()
 	if err != nil {
