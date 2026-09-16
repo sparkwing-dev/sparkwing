@@ -45,6 +45,10 @@ unlock.
 
 ### Fixed
 
+- **runner:** Canceled parallel WorkSteps now cross controller and loopback
+  process boundaries as the store's existing `cancelled` terminal state, so a
+  failed parent run cannot leave a completed sibling reported as running.
+
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an
   explicitly supplied nested selection.

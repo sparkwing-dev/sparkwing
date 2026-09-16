@@ -1597,6 +1597,7 @@ func ValidCreditGrantKind(kind string) bool
 func ValidStoragePrincipal(name string) bool
 func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
+func ValidateStepTerminalStatus(status string) error
 const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"
 const WaiterLeaderFinished WaiterStatus = "leader_finished"

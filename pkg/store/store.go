@@ -4600,6 +4600,17 @@ const (
 	StepSkipped   = "skipped"
 )
 
+// ValidateStepTerminalStatus accepts the outcomes a finished WorkStep can
+// persist. StepSkipped has its own transition because it never starts.
+func ValidateStepTerminalStatus(status string) error {
+	switch status {
+	case StepPassed, StepFailed, StepCancelled:
+		return nil
+	default:
+		return fmt.Errorf("step status %q: expected passed, failed, or cancelled", status)
+	}
+}
+
 // NodeStep is one row from the node_steps table: per-step runtime
 // state for the inner-Work DAG. Status moves running -> passed/failed
 // once; skipped is terminal at insert.
@@ -4645,6 +4656,9 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 // Creates the row if missing so the rare reorder where step_end
 // lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
+	if err := ValidateStepTerminalStatus(status); err != nil {
+		return err
+	}
 	now := time.Now().UnixNano()
 	tx, err := s.beginTx(ctx)
 	if err != nil {

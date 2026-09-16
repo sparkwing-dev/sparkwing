@@ -369,7 +369,7 @@ func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string
 		http.StatusNoContent, nil)
 }
 
-// FinishNodeStep POSTs the terminal status (passed | failed) and
+// FinishNodeStep POSTs the terminal status (passed | failed | cancelled) and
 // finished_at stamp for one step.
 func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/finish",

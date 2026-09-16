@@ -304,6 +304,52 @@ func TestProcessPerNode_NestedRunKeepsParentControlsPrivate(t *testing.T) {
 	}
 }
 
+func TestProcessPerNode_FailFastPersistsCancelledStepAndStopsBody(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds and runs the process-per-node fixture")
+	}
+	mod, bin := buildProcPerNodeBinary(t)
+	home := t.TempDir()
+	stopHomeDaemon(t, home)
+	probe := t.TempDir()
+	cmd := exec.Command(bin, "failfast")
+	cmd.Dir = mod
+	cmd.Env = append(nestedParentTestEnv(),
+		"SPARKWING_HOME="+home,
+		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
+		"SPARKWING_LOG_FORMAT=json",
+		"PROC_PROBE_DIR="+probe,
+	)
+	if output, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("fail-fast fixture passed:\n%s", output)
+	}
+
+	slowPID := readPID(t, probe, "failfast-slow")
+	if processAlive(slowPID) {
+		t.Fatalf("cancelled step process %d survived the parent run", slowPID)
+	}
+	st, err := store.Open(orchestrator.PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	runs, err := st.ListRuns(context.Background(), store.RunFilter{Pipelines: []string{"failfast"}})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("failfast runs = %+v, %v", runs, err)
+	}
+	steps, err := st.ListNodeSteps(context.Background(), runs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := make(map[string]string, len(steps))
+	for _, step := range steps {
+		statuses[step.StepID] = step.Status
+	}
+	if statuses["reject"] != store.StepFailed || statuses["slow"] != store.StepCancelled {
+		t.Fatalf("persisted step statuses = %v, want reject failed and slow cancelled", statuses)
+	}
+}
+
 func nestedParentTestEnv() []string {
 	env := make([]string, 0, len(os.Environ()))
 	for _, item := range os.Environ() {
@@ -616,6 +662,31 @@ func (p *Spawnproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+var failFastStarted = make(chan struct{})
+
+type FailFastJob struct{ sparkwing.Base }
+
+func (j *FailFastJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "slow", func(ctx context.Context) error {
+		StampPID("failfast-slow")
+		close(failFastStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	sparkwing.Step(w, "reject", func(context.Context) error {
+		<-failFastStarted
+		return fmt.Errorf("rejected")
+	})
+	return nil, nil
+}
+
+type Failfast struct{ sparkwing.Base }
+
+func (p *Failfast) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "gate", &FailFastJob{})
+	return nil
+}
+
 type NestedChildJob struct {
 	sparkwing.Base
 	Probe string
@@ -776,6 +847,7 @@ func init() {
 	sparkwing.Register("bounceproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Bounceproof{} })
 	sparkwing.Register("nestedchild", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Nestedchild{} })
 	sparkwing.Register("nestedparent", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Nestedparent{} })
+	sparkwing.Register("failfast", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Failfast{} })
 }
 `
 
