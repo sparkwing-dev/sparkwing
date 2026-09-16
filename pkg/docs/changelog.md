@@ -22,11 +22,25 @@ unlock.
 
 ### Changed
 
+- **runner + charts:** Warm Kubernetes fallback can advertise explicit static
+  capabilities through repeatable `--trigger-runner-label` flags or
+  `runner.triggerRunner.labels`. The same normalized labels control fallback
+  eligibility and appear in each spawned Job's runtime metadata. The empty
+  default keeps labeled work agent-only, and outer pool labels are never
+  inherited.
+
+- **checks:** Race tests start `pkg/store` first when selected. On exactly
+  four logical CPUs, the PostgreSQL suite starts after the ordinary Go suite
+  while race tests continue. Lint waits for both Go suites.
+
 - **observability:** Failed writes of step state, annotations, or summaries
   emit bounded, secret-masked warnings with run, node, and applicable step
   identity. Execution outcomes remain unchanged.
 
 ### Fixed
+
+- **release:** `cmd/verify-release --verify` uses the public trust roots shipped
+  with Sparkwing and no longer requires the private release signing key.
 
 - **runner:** Canceled parallel WorkSteps now cross controller and loopback
   process boundaries as the store's existing `cancelled` terminal state, so a
@@ -43,12 +57,6 @@ unlock.
 
 ## [v0.52.6] - 2026-09-16
 ### Changed
-- **runner + charts:** Warm Kubernetes fallback can advertise explicit static
-  capabilities through repeatable `--trigger-runner-label` flags or
-  `runner.triggerRunner.labels`. The same normalized labels control fallback
-  eligibility and appear in each spawned Job's runtime metadata. The empty
-  default keeps labeled work agent-only, and outer pool labels are never
-  inherited.
 
 - **checks:** On exactly four logical CPUs, the broad gate overlaps its full Go
   suite with touched-package race tests after the build, then runs lint and the
@@ -80,20 +88,6 @@ unlock.
 
 ### Fixed
 
-- **release:** `cmd/verify-release --verify` uses the public trust roots shipped
-  with Sparkwing and no longer requires the private release signing key.
-
-- **runner:** Canceled parallel WorkSteps now cross controller and loopback
-  process boundaries as the store's existing `cancelled` terminal state, so a
-  failed parent run cannot leave a completed sibling reported as running.
-
-- **controller:** Runner reservations, usage charges and refunds retain the
-  run owner's principal in credit history after the run is deleted. Shared
-  runner pools no longer erase tenant attribution from new ledger rows.
-- **controller:** Child trigger submissions now bind parent lineage and
-  inherited repository provenance to the exact live parent node or trigger
-  claim. A `runs.write` token without that claim cannot name another run as its
-  parent; `admin` keeps its operator override.
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an
   explicitly supplied nested selection.
@@ -120,9 +114,7 @@ unlock.
 - **checks:** The broad gate declares a 40-minute execution deadline so its
   post-test race and Postgres fanout does not hit the generic 30-minute
   dispatcher watchdog. Failed hosted canonical runs get two minutes to print
-  their stored status and last 500 log lines before runner cleanup. Race runs
-  start `pkg/store` first when selected. On four-core hosts, the PostgreSQL
-  suite starts when the full Go suite finishes while the race suite continues.
+  their stored status and last 500 log lines before runner cleanup.
 - **runner:** A foreground run's handle-file path stops at its own process.
   Local and remote node children no longer hand that path to nested Sparkwing
   commands, which otherwise refuse because the parent already created it.
