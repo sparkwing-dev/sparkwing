@@ -2146,8 +2146,8 @@ func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
 		return
 	}
-	if body.Status != store.StepPassed && body.Status != store.StepFailed {
-		writeError(w, http.StatusBadRequest, errors.New("status must be passed or failed"))
+	if err := store.ValidateStepTerminalStatus(body.Status); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := s.store.FinishNodeStep(r.Context(), runID, nodeID, body.StepID, body.Status); err != nil {

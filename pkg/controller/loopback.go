@@ -729,8 +729,8 @@ func (l *Loopback) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, errors.New("step_id is required"))
 		return
 	}
-	if body.Status != store.StepPassed && body.Status != store.StepFailed {
-		writeError(w, http.StatusBadRequest, errors.New("status must be passed or failed"))
+	if err := store.ValidateStepTerminalStatus(body.Status); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := l.state.FinishNodeStep(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), body.StepID, body.Status); err != nil {

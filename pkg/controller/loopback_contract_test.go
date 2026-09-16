@@ -273,6 +273,12 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 	if err := c.FinishNodeStep(ctx, runID, "produce", "run", store.StepPassed); err != nil {
 		t.Fatalf("FinishNodeStep: %v", err)
 	}
+	if err := c.StartNodeStep(ctx, runID, "produce", "cancelled"); err != nil {
+		t.Fatalf("StartNodeStep(cancelled): %v", err)
+	}
+	if err := c.FinishNodeStep(ctx, runID, "produce", "cancelled", store.StepCancelled); err != nil {
+		t.Fatalf("FinishNodeStep(cancelled): %v", err)
+	}
 	if err := c.SkipNodeStep(ctx, runID, "produce", "skipped"); err != nil {
 		t.Fatalf("SkipNodeStep: %v", err)
 	}
@@ -280,8 +286,15 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)
 	}
-	if len(steps) == 0 {
-		t.Error("ListNodeSteps returned nothing after two step writes")
+	if len(steps) != 3 {
+		t.Fatalf("ListNodeSteps returned %d rows after passed, cancelled, and skipped writes", len(steps))
+	}
+	statuses := make(map[string]string, len(steps))
+	for _, step := range steps {
+		statuses[step.StepID] = step.Status
+	}
+	if statuses["run"] != store.StepPassed || statuses["cancelled"] != store.StepCancelled || statuses["skipped"] != store.StepSkipped {
+		t.Fatalf("step statuses = %v", statuses)
 	}
 
 	if err := c.FinishNodeWithReason(ctx, runID, "produce", "success", "",

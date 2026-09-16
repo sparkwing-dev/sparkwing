@@ -28,6 +28,9 @@ unlock.
   packages while each remains at `GOMAXPROCS=1`, and the gate declares the
   resulting 2.5-core workload. Other CPU classes retain their existing graph
   and Go parallelism.
+- **observability:** Step lifecycle, annotation, and summary writes that fail
+  emit one bounded, secret-masked diagnostic policy with run, node, and step
+  identity. Execution outcomes remain separate from failures to record them.
 
 - **admission:** Queue waits now print one machine-first stream: running
   pipelines and their charges, queued count and place, request provenance,
@@ -51,6 +54,10 @@ unlock.
   compiler-cache temperature, so the target remains observational.
 
 ### Fixed
+
+- **runner:** Canceled parallel WorkSteps now cross controller and loopback
+  process boundaries as the store's existing `cancelled` terminal state, so a
+  failed parent run cannot leave a completed sibling reported as running.
 
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an

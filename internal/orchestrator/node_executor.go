@@ -231,9 +231,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		return nil, err
 	}
 
-	nlog = wrapNodeLogWithAnnotations(ctx, nlog, r.backends.State, runID, node.ID())
-	nlog = wrapNodeLogWithSummary(ctx, nlog, r.backends.State, runID, node.ID())
-	nlog = wrapNodeLogWithStepState(ctx, nlog, r.backends.State, runID, node.ID())
+	nlog = wrapNodeLogWithStateObservations(ctx, nlog, r.backends.State, runID, node.ID())
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 	defer func() { _ = nlog.Close() }()
 
