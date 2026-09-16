@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.6, so a fresh scaffold compiles against that release.
+
 - **runner + charts:** Warm Kubernetes fallback can advertise explicit static
   capabilities through repeatable `--trigger-runner-label` flags or
   `runner.triggerRunner.labels`. The same normalized labels control fallback
