@@ -45,6 +45,14 @@ func run(args []string) error {
 		fmt.Println(eligible)
 		return nil
 	}
+	// safety: verification is public, so its path must never require the signing seed.
+	if *verify && !*public {
+		publicKeys, err := releaseauth.PublicKeys()
+		if err != nil {
+			return err
+		}
+		return process(*dist, nil, publicKeys, true)
+	}
 	privateKey, err := releaseauth.PrivateKey(os.Getenv("SPARKWING_RELEASE_SIGNING_KEY"))
 	if err != nil {
 		return err
@@ -57,7 +65,7 @@ func run(args []string) error {
 		fmt.Println(base64.StdEncoding.EncodeToString(publicKey))
 		return nil
 	}
-	return process(*dist, privateKey, publicKey, *verify)
+	return process(*dist, privateKey, nil, false)
 }
 
 const (
@@ -65,7 +73,7 @@ const (
 	installerAsset    = "install.sh"
 )
 
-func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey, verify bool) error {
+func process(dist string, privateKey ed25519.PrivateKey, publicKeys []ed25519.PublicKey, verify bool) error {
 	if err := validateReleaseAssets(dist); err != nil {
 		return err
 	}
@@ -106,8 +114,15 @@ func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.Publi
 			if err != nil {
 				return err
 			}
-			if err := releaseauth.Verify(publicKey, body, signature); err != nil {
-				return fmt.Errorf("verify %s: %w", filepath.Base(path), err)
+			verified := false
+			for _, publicKey := range publicKeys {
+				if releaseauth.Verify(publicKey, body, signature) == nil {
+					verified = true
+					break
+				}
+			}
+			if !verified {
+				return fmt.Errorf("verify %s: release signature is invalid", filepath.Base(path))
 			}
 			continue
 		}

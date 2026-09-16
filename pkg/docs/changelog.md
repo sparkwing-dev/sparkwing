@@ -74,6 +74,20 @@ unlock.
 
 ### Fixed
 
+- **release:** `cmd/verify-release --verify` uses the public trust roots shipped
+  with Sparkwing and no longer requires the private release signing key.
+
+- **runner:** Canceled parallel WorkSteps now cross controller and loopback
+  process boundaries as the store's existing `cancelled` terminal state, so a
+  failed parent run cannot leave a completed sibling reported as running.
+
+- **controller:** Runner reservations, usage charges and refunds retain the
+  run owner's principal in credit history after the run is deleted. Shared
+  runner pools no longer erase tenant attribution from new ledger rows.
+- **controller:** Child trigger submissions now bind parent lineage and
+  inherited repository provenance to the exact live parent node or trigger
+  claim. A `runs.write` token without that claim cannot name another run as its
+  parent; `admin` keeps its operator override.
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an
   explicitly supplied nested selection.
