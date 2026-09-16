@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -44,6 +47,71 @@ func TestRunAndAwaitPausesProgressTimeoutBeforeLocalTriggerEnqueue(t *testing.T)
 	}
 	if !ExpireProgressTimeoutForTest(ctx) {
 		t.Fatal("progress timeout did not resume after trigger enqueue returned")
+	}
+}
+
+func TestChildAwaitOwnerPausesBeforePreparingTriggerEnvironment(t *testing.T) {
+	state := &progressCheckingTriggerState{}
+	ctx, _, cancel := newProgressTimeoutContext(context.Background(), time.Hour)
+	defer cancel()
+	preparedWhilePaused := false
+	config := childAwaitConfig{
+		state:       state,
+		parentRunID: "parent",
+		masker:      secrets.NewMasker(),
+		triggerEnv: func(ctx context.Context) map[string]string {
+			preparedWhilePaused = ProgressTimeoutPausedForTest(ctx)
+			return nil
+		},
+	}
+
+	_, err := config.await(ctx, sparkwing.AwaitRequest{Pipeline: "child"})
+	if err == nil {
+		t.Fatal("child await passed despite the trigger enqueue failure")
+	}
+	if !preparedWhilePaused {
+		t.Fatal("trigger environment was prepared before the progress timeout paused")
+	}
+	if !ExpireProgressTimeoutForTest(ctx) {
+		t.Fatal("progress timeout did not resume after child setup returned")
+	}
+}
+
+type auditFailingChildState struct {
+	StateBackend
+}
+
+func (*auditFailingChildState) EnqueueTrigger(
+	context.Context, string, map[string]string, string, string, string, string, string, string, string,
+) (string, error) {
+	return "child", nil
+}
+
+func (*auditFailingChildState) AppendEvent(context.Context, string, string, string, []byte) error {
+	return errors.New("audit unavailable")
+}
+
+func (*auditFailingChildState) GetRun(context.Context, string) (*store.Run, error) {
+	return &store.Run{ID: "child", Status: "success"}, nil
+}
+
+func TestChildAwaitOwnerKeepsAuditWritesBestEffort(t *testing.T) {
+	config := childAwaitConfig{
+		state:       &auditFailingChildState{},
+		parentRunID: "parent",
+		masker:      secrets.NewMasker(),
+		pollFactory: func() (childAwaitPollPolicy, error) {
+			return &retryChildAwaitPoll{}, nil
+		},
+	}
+	ctx := sparkwingruntime.WithNode(context.Background(), "parent-node")
+
+	resolved, err := config.await(ctx, sparkwing.AwaitRequest{Pipeline: "child"})
+	if err != nil {
+		t.Fatalf("audit failure changed child outcome: %v", err)
+	}
+	if resolved.RunID != "child" {
+		t.Fatalf("resolved run = %q, want child", resolved.RunID)
 	}
 }
 

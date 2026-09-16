@@ -22,6 +22,10 @@ unlock.
 
 ### Changed
 
+- **orchestrator:** Local and pod `RunAndAwait` execution now share one private
+  child lifecycle, polling, timeout and terminal-result owner while retaining
+  their existing admission, store-error, claim and authentication adapters.
+
 - **checks:** `pre-release` records each release check as a sequential native
   WorkStep, so retained hosted timing artifacts show the check-level critical
   path. Every check still runs after an earlier failure; step state and logs

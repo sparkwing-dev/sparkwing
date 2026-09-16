@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -214,224 +212,25 @@ func RunNodeOnce(
 				"run_id", runID, "node", node, "err", err)
 		}))
 
-	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
-		func(innerCtx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
-			currentNode := sparkwing.NodeFromContext(innerCtx)
-			resumeProgressTimeout := pauseProgressTimeout(innerCtx)
-			defer resumeProgressTimeout()
-
-			var childRetryOf string
-			if run.RetryOf != "" && currentNode != "" {
-				if id, ferr := stateClient.FindSpawnedChildTriggerID(innerCtx, run.RetryOf, currentNode, req.Pipeline); ferr != nil {
-					logger.Warn("find prior spawned child for retry chain",
-						"run_id", runID, "node", currentNode, "err", ferr)
-				} else {
-					childRetryOf = id
-				}
-			}
-
-			childRunID, err := stateClient.EnqueueTriggerWithEnv(innerCtx,
-				req.Pipeline, req.Args, runID, currentNode, childRetryOf,
-				"await-pipeline", "", req.Repo, req.Branch, nil)
-			if err != nil {
-				return nil, fmt.Errorf("enqueue trigger: %w", err)
-			}
-			startedAt := time.Now()
-			emitChildFinish := func(status, errMsg string) {
-				if currentNode == "" {
-					return
-				}
-				attrs := map[string]any{
-					"child_run_id": childRunID,
-					"pipeline":     req.Pipeline,
-					"status":       status,
-					"duration_ms":  time.Since(startedAt).Milliseconds(),
-				}
-				if errMsg != "" {
-					attrs["error"] = errMsg
-				}
-				payload, _ := json.Marshal(attrs)
-				payload = maskEventPayload(masker, payload)
-				if evErr := stateClient.AppendEvent(context.WithoutCancel(innerCtx), runID, currentNode,
-					"child_run_finish", payload); evErr != nil {
-					logger.Warn("child_run_finish audit event append failed",
-						"run_id", runID, "node", currentNode, "err", evErr)
-				}
-			}
-
-			if currentNode != "" {
-				payload, _ := json.Marshal(map[string]any{
-					"child_run_id":    childRunID,
-					"pipeline":        req.Pipeline,
-					"node_id":         req.NodeID,
-					"args":            req.Args,
-					"timeout_seconds": int64(req.Timeout.Seconds()),
-				})
-				payload = maskEventPayload(masker, payload)
-				if evErr := stateClient.AppendEvent(innerCtx, runID, currentNode,
-					"child_run_start", payload); evErr != nil {
-					logger.Warn("child_run_start audit event append failed",
-						"run_id", runID, "node", currentNode, "err", evErr)
-				}
-			}
-			pollCtx := innerCtx
-			parentCtx := nodeParentContextFromContext(innerCtx)
-			if req.Timeout > 0 {
-				var cancel context.CancelFunc
-				pollCtx, cancel = context.WithTimeout(innerCtx, req.Timeout)
-				defer cancel()
-			}
-			timeoutPausedForAdmission := false
-			timeoutAdjustedForAdmission := false
-			var admissionStatusErr error
-			nodeTimeout := nodeTimeoutControllerFromContext(innerCtx)
-			var admissionMu sync.Mutex
-			updateTimeoutForAdmission := func(statusCtx context.Context) bool {
-				if req.Timeout > 0 || nodeTimeout == nil || nodeTimeoutDurationFromContext(innerCtx) <= 0 {
-					return false
-				}
-				if statusCtx.Err() != nil {
-					return false
-				}
-				admission, statusErr := childPlanAdmissionStatusForRun(statusCtx, stateClient, backends.Concurrency, childRunID)
-				admissionMu.Lock()
-				defer admissionMu.Unlock()
-				if timeoutAdjustedForAdmission {
-					return false
-				}
-				if statusErr != nil {
-					if timeoutPausedForAdmission {
-						admissionStatusErr = statusErr
-					}
-					return false
-				}
-				switch admission.Status {
-				case childPlanAdmissionQueued:
-					if timeoutPausedForAdmission {
-						return true
-					}
-					if nodeTimeout.pauseAt(admission.QueuedAt) {
-						timeoutPausedForAdmission = true
-						logger.Info("child run queued for plan admission; pausing parent node timeout until admission",
-							"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
-						return true
-					}
-				case childPlanAdmissionAdmitted:
-					if timeoutPausedForAdmission {
-						if nodeTimeout.resumeAt(admission.AdmittedAt) {
-							timeoutPausedForAdmission = false
-							timeoutAdjustedForAdmission = true
-							logger.Info("child run left plan admission; parent node timeout resumed",
-								"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
-							return true
-						}
-						return false
-					}
-					if admission.QueuedAt.IsZero() || admission.AdmittedAt.IsZero() {
-						return false
-					}
-					if nodeTimeout.accountCompletedAdmission(admission.QueuedAt, admission.AdmittedAt) {
-						timeoutAdjustedForAdmission = true
-						logger.Info("child run completed plan admission; parent node timeout adjusted",
-							"run_id", runID, "node", currentNode, "child_run_id", childRunID, "pipeline", req.Pipeline)
-						return true
-					}
-				}
-				return false
-			}
-			admissionPauseActive := func() bool {
-				admissionMu.Lock()
-				defer admissionMu.Unlock()
-				return timeoutPausedForAdmission
-			}
-			currentAdmissionStatusErr := func() error {
-				admissionMu.Lock()
-				defer admissionMu.Unlock()
-				return admissionStatusErr
-			}
-			admissionDeadlineHandled := func() bool {
-				inspectCtx, cancel := context.WithTimeout(parentCtx, childAdmissionInspectorTimeout)
-				defer cancel()
-				return updateTimeoutForAdmission(inspectCtx)
-			}
-			if nodeTimeout != nil && req.Timeout == 0 {
-				clearInspector := nodeTimeout.setDeadlineInspector(admissionDeadlineHandled)
-				defer clearInspector()
-			}
-			awaitObs := childAwaitObserver{startedAt: startedAt}
-			awaitTimeout := func(cause error) error {
-				awaitObs.admissionOff = admissionPauseActive()
-				return fmt.Errorf("waiting for child %s: %w (%s)", childRunID, cause, awaitObs.evidence())
-			}
-			for {
-				updateTimeoutForAdmission(parentCtx)
-				if statusErr := currentAdmissionStatusErr(); statusErr != nil {
-					emitChildFinish("failed", statusErr.Error())
-					return nil, fmt.Errorf("child %s plan admission status: %w", childRunID, statusErr)
-				}
-				run, err := stateClient.GetRun(pollCtx, childRunID)
-				if err != nil {
-					// safety: ErrNotFound is a healthy answer -- the child's runs
-					// row appears only once a consumer claims it, so a queued or
-					// still-compiling child must not read as a store fault.
-					if errors.Is(err, store.ErrNotFound) {
-						awaitObs.observeMissing()
-					} else {
-						awaitObs.observeError(err)
-						if awaitObs.firstError() {
-							logger.Warn("child run status poll failed; retrying",
-								"run_id", runID, "node", currentNode, "child_run_id", childRunID,
-								"pipeline", req.Pipeline, "err", err)
-						}
-					}
-				} else {
-					awaitObs.observeStatus(run.Status)
-					switch run.Status {
-					case "success":
-						updateTimeoutForAdmission(parentCtx)
-						if err := pollCtx.Err(); err != nil {
-							timeoutErr := awaitTimeout(err)
-							emitChildFinish("timeout", timeoutErr.Error())
-							return nil, timeoutErr
-						}
-						if deadline, ok := pollCtx.Deadline(); ok && time.Now().After(deadline) {
-							timeoutErr := awaitTimeout(context.DeadlineExceeded)
-							emitChildFinish("timeout", timeoutErr.Error())
-							return nil, timeoutErr
-						}
-						emitChildFinish("success", "")
-						if req.NodeID == "" {
-							return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
-						}
-						data, oerr := stateClient.GetNodeOutput(pollCtx, childRunID, req.NodeID)
-						if oerr != nil {
-							return nil, fmt.Errorf("get child %s/%s output: %w", childRunID, req.NodeID, oerr)
-						}
-						return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: data}, nil
-					case "failed":
-						emitChildFinish("failed", run.Error)
-						return nil, fmt.Errorf("child run %s failed: %s", childRunID, run.Error)
-					case "cancelled":
-						emitChildFinish("cancelled", "")
-						return nil, fmt.Errorf("child run %s was cancelled", childRunID)
-					}
-				}
-				updateTimeoutForAdmission(parentCtx)
-				if statusErr := currentAdmissionStatusErr(); statusErr != nil {
-					emitChildFinish("failed", statusErr.Error())
-					return nil, fmt.Errorf("child %s plan admission status: %w", childRunID, statusErr)
-				}
-				select {
-				case <-pollCtx.Done():
-					updateTimeoutForAdmission(parentCtx)
-					timeoutErr := awaitTimeout(pollCtx.Err())
-					emitChildFinish("timeout", timeoutErr.Error())
-					return nil, timeoutErr
-				case <-time.After(childAwaitPollInterval(pollCtx, admissionPauseActive())):
-				}
-			}
+	warnChildAwait := func(_ context.Context, format string, args ...any) {
+		logger.Warn(fmt.Sprintf(format, args...))
+	}
+	infoChildAwait := func(_ context.Context, format string, args ...any) {
+		logger.Info(fmt.Sprintf(format, args...))
+	}
+	childAwait := childAwaitConfig{
+		state:       stateClient,
+		concurrency: backends.Concurrency,
+		parentRunID: runID,
+		retryOf:     run.RetryOf,
+		masker:      masker,
+		infof:       infoChildAwait,
+		warnf:       warnChildAwait,
+		pollFactory: func() (childAwaitPollPolicy, error) {
+			return &retryChildAwaitPoll{warnf: warnChildAwait}, nil
 		},
-	))
+	}
+	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(childAwait.await))
 
 	node := plan.Job(nodeID)
 	var generatorErr error
