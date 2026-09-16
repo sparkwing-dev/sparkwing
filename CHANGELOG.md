@@ -26,6 +26,7 @@ unlock.
   WorkStep, so retained hosted timing artifacts show the check-level critical
   path. Every check still runs after an earlier failure; step state and logs
   retain each failure while the parent reports the first one.
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.6, so a fresh scaffold compiles against that release.
 
 - **runner + charts:** Warm Kubernetes fallback can advertise explicit static
   capabilities through repeatable `--trigger-runner-label` flags or
