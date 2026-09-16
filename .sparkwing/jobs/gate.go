@@ -47,13 +47,16 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 	return nil
 }
 
-// perf: admission charges sustained CPU, measured on a 16-core Linux host over
-// 20 uncontended runs at p95 3.9 cores, maximum 4.4. Half the machine was
-// double that, so a second gate never fit. A pin also survives an edit to this
-// file, which resets the plan hash and would otherwise re-charge a cold start.
+// perf: admission charges sustained CPU. The four-core schedule overlaps the
+// two long Go suites and needs two cores; larger hosts use the p95 measured on
+// a 16-core Linux host over 20 uncontended runs (3.9 cores, maximum 4.4). A pin
+// also survives a plan edit resetting the profile's plan hash.
 func gateCoreReservation(cpuCount int) float64 {
 	if cpuCount < 4 {
 		return 1
+	}
+	if cpuCount == 4 {
+		return 2
 	}
 	return float64(cpuCount)/4 + 0.5
 }
@@ -72,19 +75,37 @@ func boundedGoCommand(cpuCount int, verb, args string) string {
 }
 
 func goCommandAt(parallelism int, verb, args string) string {
-	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", parallelism, verb, parallelism, args)
+	return goCommandWithLimits(parallelism, parallelism, verb, args)
+}
+
+func goCommandWithLimits(gomaxprocs, packageParallelism int, verb, args string) string {
+	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", gomaxprocs, verb, packageParallelism, args)
 }
 
 func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return p.workForCPU(w, runtime.NumCPU())
+}
+
+func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
 	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
 	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
 	testStep := sparkwing.Step(w, "test", runTest).Needs(buildStep)
-	sparkwing.Step(w, "lint", runGolangciLint).Needs(testStep)
-	sparkwing.Step(w, "race-touched", runRaceTouched).Needs(testStep)
-	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(testStep)
+	var raceDep sparkwing.WorkDep = testStep
+	tailDeps := []sparkwing.WorkDep{testStep}
+	// perf: four-core hosted runners otherwise spend the full test and touched
+	// race durations serially and cross the gate's liveness deadline.
+	if cpuCount == 4 {
+		raceDep = buildStep
+	}
+	raceStep := sparkwing.Step(w, "race-touched", runRaceTouched).Needs(raceDep)
+	if cpuCount == 4 {
+		tailDeps = append(tailDeps, raceStep)
+	}
+	sparkwing.Step(w, "lint", runGolangciLint).Needs(tailDeps...)
+	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(tailDeps...)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "tracked-binaries", checkTrackedBinaries)

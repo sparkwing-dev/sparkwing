@@ -22,6 +22,13 @@ unlock.
 
 ### Changed
 
+- **checks:** On exactly four logical CPUs, the broad gate overlaps its full Go
+  suite with touched-package race tests after the build, then runs lint and the
+  conditional PostgreSQL suite after both finish. Race tests can overlap two
+  packages while each remains at `GOMAXPROCS=1`, and the gate declares the
+  resulting two-core workload. Other CPU classes retain their existing graph
+  and Go parallelism.
+
 - **admission:** Queue waits now print one machine-first stream: running
   pipelines and their charges, queued count and place, request provenance,
   free/held/external capacity, and the expected clear time when known. Reports

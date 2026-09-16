@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -52,17 +53,20 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	for _, tc := range []struct {
 		cpus  int
 		cores float64
-	}{{1, 1}, {2, 1}, {3, 1}, {4, 1.5}, {8, 2.5}, {16, 4.5}, {32, 8.5}} {
+	}{{1, 1}, {2, 1}, {3, 1}, {4, 2}, {8, 2.5}, {16, 4.5}, {32, 8.5}} {
 		if got := gateCoreReservation(tc.cpus); got != tc.cores {
 			t.Errorf("gateCoreReservation(%d) = %v, want %v", tc.cpus, got, tc.cores)
 		}
 	}
 	// safety: two gates must fit under the daemon's DefaultHeadroomFraction,
 	// which a reservation near half the box prevented.
-	for _, cpus := range []int{4, 8, 16, 32} {
+	for _, cpus := range []int{8, 16, 32} {
 		if got, machine := gateCoreReservation(cpus), float64(cpus); 2*got > 0.8*machine {
 			t.Errorf("reservation %v on %d cores leaves no room for a second gate", got, cpus)
 		}
+	}
+	if got, machine := gateCoreReservation(4), float64(4); got > 0.8*machine {
+		t.Errorf("reservation %v on four cores consumes the machine's admission headroom", got)
 	}
 	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
 		if got := goStepParallelism(tc.cpus); got != tc.parallelism {
@@ -71,6 +75,38 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	}
 	if got := boundedGoCommand(14, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
 		t.Fatalf("bounded command = %q", got)
+	}
+}
+
+func TestGateOverlapsTestAndRaceOnlyOnFourCPUs(t *testing.T) {
+	for _, cpus := range []int{3, 8} {
+		w := sparkwing.NewWork()
+		if _, err := (&Gate{}).workForCPU(w, cpus); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.StepByID("race-touched").DepIDs(); !slices.Equal(got, []string{"test"}) {
+			t.Errorf("race dependencies on %d CPUs = %v, want [test]", cpus, got)
+		}
+		for _, id := range []string{"lint", "store-postgres"} {
+			if got := w.StepByID(id).DepIDs(); !slices.Equal(got, []string{"test"}) {
+				t.Errorf("%s dependencies on %d CPUs = %v, want [test]", id, cpus, got)
+			}
+		}
+	}
+
+	w := sparkwing.NewWork()
+	if _, err := (&Gate{}).workForCPU(w, 4); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"test", "race-touched"} {
+		if got := w.StepByID(id).DepIDs(); !slices.Equal(got, []string{"build"}) {
+			t.Errorf("%s dependencies on four CPUs = %v, want [build]", id, got)
+		}
+	}
+	for _, id := range []string{"lint", "store-postgres"} {
+		if got := w.StepByID(id).DepIDs(); !slices.Equal(got, []string{"test", "race-touched"}) {
+			t.Errorf("%s dependencies on four CPUs = %v, want [test race-touched]", id, got)
+		}
 	}
 }
 

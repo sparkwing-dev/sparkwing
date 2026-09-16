@@ -37,6 +37,22 @@ func TestRaceTargetsAreEmptyWhenNothingChanged(t *testing.T) {
 	}
 }
 
+func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
+	const args = "-race -count=1 ./internal/orchestrator ./pkg/store"
+	for _, tc := range []struct {
+		cpus int
+		want string
+	}{
+		{3, "GOMAXPROCS=1 go test -p 1 " + args},
+		{4, "GOMAXPROCS=1 go test -p 2 " + args},
+		{8, "GOMAXPROCS=3 go test -p 3 " + args},
+	} {
+		if got := raceGoCommand(tc.cpus, args); got != tc.want {
+			t.Errorf("race command on %d CPUs = %q, want %q", tc.cpus, got, tc.want)
+		}
+	}
+}
+
 func TestRaceTouchedPassesWhenNoGoFileChanged(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")

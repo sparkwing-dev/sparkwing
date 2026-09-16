@@ -96,7 +96,14 @@ file. Other syntax and workflow checks remain active.
   boundary for the long test and change-sensitive post-test fanout, not a claim
   that every gate completes in 40 minutes. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
-  run handle. That publication path stops at the parent runner rather than
+  run handle. On exactly four logical CPUs, the gate reserves two cores and
+  starts the full Go suite and touched-package race suite together after the
+  build. The race command can run two package binaries while each keeps
+  `GOMAXPROCS=1`; lint and the conditional PostgreSQL suite wait for both Go
+  suites. Machines with one to three or more than four logical CPUs retain
+  their existing schedule and Go parallelism. The 40-minute boundary remains
+  a liveness limit rather than a completion guarantee. That publication path
+  stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
   output. Measured on this 16-core Linux
   host with a warm cache, the release cut's three members cost 9 s (build),
