@@ -162,3 +162,17 @@ func TestChildEnv_DropsAnInheritedAPISocket(t *testing.T) {
 		t.Fatalf("%s = %q, want the inherited socket dropped", wingwire.APISocketEnv, got)
 	}
 }
+
+func TestChildEnv_DropsTheParentRunSelectionFromNodeProcesses(t *testing.T) {
+	env := childEnv(context.Background(), []string{
+		"PATH=/usr/bin",
+		"SPARKWING_ONLY=outer",
+	}, testConfig(), runner.Request{RunID: "run-1", NodeID: "outer"})
+
+	if got, ok := lastValue(env, "SPARKWING_ONLY"); ok {
+		t.Fatalf("SPARKWING_ONLY = %q, want the parent run selection consumed before the node process", got)
+	}
+	if got, ok := lastValue(env, "PATH"); !ok || got != "/usr/bin" {
+		t.Fatalf("PATH = %q (found %v), want unrelated environment preserved", got, ok)
+	}
+}

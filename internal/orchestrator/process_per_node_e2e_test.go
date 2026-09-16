@@ -187,12 +187,13 @@ func TestProcessPerNode_NestedRunKeepsParentControlsPrivate(t *testing.T) {
 	probe := t.TempDir()
 	handle := filepath.Join(t.TempDir(), "parent-run.json")
 	nestedHandle := filepath.Join(t.TempDir(), "nested-run.json")
-	runEnv := append(os.Environ(),
+	runEnv := append(nestedParentTestEnv(),
 		"SPARKWING_HOME="+home,
 		"SPARKWING_WINGD_BIN="+hostBin,
 		"SPARKWING_LOG_FORMAT=json",
 		"PROC_PROBE_DIR="+probe,
 		"SPARKWING_RUN_HANDLE_FILE="+handle,
+		"SPARKWING_ONLY=outer",
 		"NESTED_RUN_HANDLE_FILE="+nestedHandle,
 	)
 
@@ -248,25 +249,39 @@ func TestProcessPerNode_NestedRunKeepsParentControlsPrivate(t *testing.T) {
 	for _, testCase := range []struct {
 		name                string
 		nestedStartAt       string
+		nestedOnly          string
+		parentOnly          bool
 		wantPrepareExecuted bool
+		wantOtherExecuted   bool
 	}{
-		{name: "implicit child runs its own range", wantPrepareExecuted: true},
-		{name: "explicit child range is preserved", nestedStartAt: "selected"},
+		{name: "implicit child runs its own range", wantPrepareExecuted: true, wantOtherExecuted: true},
+		{name: "explicit child range is preserved", nestedStartAt: "selected", wantOtherExecuted: true},
+		{name: "parent job selection stays private", parentOnly: true, wantPrepareExecuted: true, wantOtherExecuted: true},
+		{name: "explicit child job selection is preserved", parentOnly: true, nestedOnly: "inner", wantPrepareExecuted: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			home := t.TempDir()
 			stopHomeDaemon(t, home)
 			probe := t.TempDir()
-			env := append(os.Environ(),
+			env := append(nestedParentTestEnv(),
 				"SPARKWING_HOME="+home,
 				"SPARKWING_WINGD_BIN="+hostBin,
 				"SPARKWING_LOG_FORMAT=json",
 				"PROC_PROBE_DIR="+probe,
-				"SPARKWING_START_AT=launch-child",
-				"SPARKWING_STOP_AT=launch-child",
 			)
+			if testCase.parentOnly {
+				env = append(env, "SPARKWING_ONLY=outer")
+			} else {
+				env = append(env,
+					"SPARKWING_START_AT=launch-child",
+					"SPARKWING_STOP_AT=launch-child",
+				)
+			}
 			if testCase.nestedStartAt != "" {
 				env = append(env, "NESTED_START_AT="+testCase.nestedStartAt)
+			}
+			if testCase.nestedOnly != "" {
+				env = append(env, "NESTED_ONLY="+testCase.nestedOnly)
 			}
 
 			runBin(t, mod, env, bin, "nestedparent")
@@ -278,8 +293,28 @@ func TestProcessPerNode_NestedRunKeepsParentControlsPrivate(t *testing.T) {
 			if !testCase.wantPrepareExecuted && !os.IsNotExist(prepareErr) {
 				t.Fatalf("explicit child selection ran prepare; stat error = %v", prepareErr)
 			}
+			_, otherErr := os.Stat(filepath.Join(probe, "nested-other.pid"))
+			if testCase.wantOtherExecuted && otherErr != nil {
+				t.Fatalf("implicit nested selection skipped the sibling job: %v", otherErr)
+			}
+			if !testCase.wantOtherExecuted && !os.IsNotExist(otherErr) {
+				t.Fatalf("explicit nested job selection ran its sibling; stat error = %v", otherErr)
+			}
 		})
 	}
+}
+
+func nestedParentTestEnv() []string {
+	env := make([]string, 0, len(os.Environ()))
+	for _, item := range os.Environ() {
+		if strings.HasPrefix(item, "SPARKWING_ONLY=") ||
+			strings.HasPrefix(item, "SPARKWING_START_AT=") ||
+			strings.HasPrefix(item, "SPARKWING_STOP_AT=") {
+			continue
+		}
+		env = append(env, item)
+	}
+	return env
 }
 
 func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
@@ -581,15 +616,22 @@ func (p *Spawnproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-type NestedChildJob struct{ sparkwing.Base }
+type NestedChildJob struct {
+	sparkwing.Base
+	Probe string
+}
 
 func (j *NestedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	probe := j.Probe
+	if probe == "" {
+		probe = "nested-child"
+	}
 	prepare := sparkwing.Step(w, "prepare", func(context.Context) error {
-		StampPID("nested-child-prepare")
+		StampPID(probe + "-prepare")
 		return nil
 	})
 	selected := sparkwing.Step(w, "selected", func(context.Context) error {
-		StampPID("nested-child")
+		StampPID(probe)
 		return nil
 	}).Needs(prepare)
 	return selected, nil
@@ -598,12 +640,14 @@ func (j *NestedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type Nestedchild struct{ sparkwing.Base }
 
 func (p *Nestedchild) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "inner", &NestedChildJob{})
+	sparkwing.Job(plan, "inner", &NestedChildJob{Probe: "nested-child"})
+	sparkwing.Job(plan, "other", &NestedChildJob{Probe: "nested-other"})
 	return nil
 }
 
 func nestedRunEnv(handle string) []string {
 	startAt := os.Getenv("NESTED_START_AT")
+	only := os.Getenv("NESTED_ONLY")
 	env := make([]string, 0, len(os.Environ())+3)
 	for _, item := range os.Environ() {
 		if strings.HasPrefix(item, "SPARKWING_RUN_HANDLE_FILE=") {
@@ -613,6 +657,9 @@ func nestedRunEnv(handle string) []string {
 			strings.HasPrefix(item, "SPARKWING_STOP_AT=")) {
 			continue
 		}
+		if only != "" && strings.HasPrefix(item, "SPARKWING_ONLY=") {
+			continue
+		}
 		env = append(env, item)
 	}
 	if handle != "" {
@@ -620,6 +667,9 @@ func nestedRunEnv(handle string) []string {
 	}
 	if startAt != "" {
 		env = append(env, "SPARKWING_START_AT="+startAt, "SPARKWING_STOP_AT="+startAt)
+	}
+	if only != "" {
+		env = append(env, "SPARKWING_ONLY="+only)
 	}
 	return env
 }

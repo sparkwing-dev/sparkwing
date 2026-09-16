@@ -45,6 +45,9 @@ unlock.
 
 ### Fixed
 
+- **runner:** A foreground run's `--only` selection stops at its node-process
+  boundary, so nested Sparkwing commands use their own job names and retain an
+  explicitly supplied nested selection.
 - **controller:** Agent and run-trend reads now use the store's dialect-aware
   query boundary, so the monitoring endpoints work with PostgreSQL. Internal
   failures include the operation and request route in controller logs while
