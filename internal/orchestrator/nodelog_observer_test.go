@@ -128,7 +128,9 @@ func TestNodeLogObserverReportsBoundedFailuresBeforeTheOriginalRecord(t *testing
 		name, message, step string
 		rec                 sparkwing.LogRecord
 	}{
-		{"step", "step state write failed", "compile", sparkwing.LogRecord{Event: sparkwing.EventStepStart, Msg: "compile"}},
+		{"step start", "step state write failed", "compile", sparkwing.LogRecord{Event: sparkwing.EventStepStart, Msg: "compile"}},
+		{"step finish", "step state write failed", "compile", sparkwing.LogRecord{Event: sparkwing.EventStepEnd, Msg: "compile", Attrs: map[string]any{"outcome": string(sparkwing.Cancelled)}}},
+		{"step skip", "step state write failed", "compile", sparkwing.LogRecord{Event: sparkwing.EventStepSkipped, Msg: "compile"}},
 		{"annotation", "annotation state write failed", "", sparkwing.LogRecord{Event: sparkwing.EventNodeAnnotation, Msg: "note"}},
 		{"summary", "summary state write failed", "publish", sparkwing.LogRecord{Event: sparkwing.EventNodeSummary, Step: "publish", Msg: "# result"}},
 	}
