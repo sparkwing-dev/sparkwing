@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"debug/buildinfo"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -425,6 +426,29 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 		t.Fatalf("update receipt identities = before %q after %q", receipt.Before.Version, receipt.After.Version)
 	}
 
+	mismatchedPath, _ := buildUpdateArtifact(t, "v9.8.7")
+	updateReadInstalled = func() updateIdentity {
+		return updateIdentity{
+			Version: pseudo, Revision: strings.Repeat("b", 40), Dirty: &clean,
+			Path: filepath.Join(os.Getenv("HOME"), "installed"),
+		}
+	}
+	updateDownloadInstall = func(version, _ string) (installedRelease, error) {
+		return installedRelease{path: mismatchedPath, version: version, digest: strings.Repeat("a", 64)}, nil
+	}
+	out = captureStdout(t, func() {
+		commandError = runUpdate([]string{"--cli"})
+	})
+	if commandError != nil {
+		t.Fatal(commandError)
+	}
+	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
+		t.Fatalf("mismatched receipt: %v %q", err, out)
+	}
+	if receipt.After.Version == "v0.52.8" {
+		t.Fatalf("mismatched artifact was labeled as the release: %+v", receipt.After)
+	}
+
 	updateReadInstalled = func() updateIdentity {
 		return updateIdentity{
 			Version: pseudo, Revision: revision, Dirty: &clean,
@@ -446,6 +470,49 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 	}
 	if receipt.Status != "current" || receipt.After.Version != "v0.52.8" {
 		t.Fatalf("current receipt = %+v", receipt)
+	}
+}
+
+func TestReleaseStyleBuildKeepsRuntimeTagDistinctFromGoPseudoVersion(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Clean(filepath.Join(repo, "..", ".."))
+	goMod := "module fixture\n\ngo 1.26.6\n\nrequire github.com/sparkwing-dev/sparkwing v0.0.0-20260916172407-926a5e82d62d\n\nreplace github.com/sparkwing-dev/sparkwing => " + root + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sums, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.sum"), sums, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "sparkwing")
+	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w -X main.Version=v0.52.8", "-o", path, "github.com/sparkwing-dev/sparkwing/cmd/sparkwing")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("release-style build: %v %s", err, out)
+	}
+	versionOut, err := exec.Command(path, "version", "-o", "plain", "--offline").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(versionOut) != "v0.52.8\n" {
+		t.Fatalf("runtime version = %q", versionOut)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	info, err := buildinfo.Read(f)
+	if err != nil || !pseudoVersionRE.MatchString(info.Main.Version) {
+		t.Fatalf("Go build metadata = %q, %v; want a pseudo-version", info.Main.Version, err)
 	}
 }
 
