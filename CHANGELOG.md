@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.6] - 2026-09-16
 ### Changed
 
 - **checks:** On exactly four logical CPUs, the broad gate overlaps its full Go
