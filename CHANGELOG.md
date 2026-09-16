@@ -26,6 +26,10 @@ unlock.
   evidence for 30 days, including successful runs, without uploading raw logs
   or invocation arguments.
 
+- **checks:** Process-per-node tests reuse one immutable pipeline and host-CLI
+  fixture per package run while keeping each test's home, state and probes
+  isolated. The focused group measured 65% faster normally and 62% faster
+  under the race detector, with about 75% less CPU in both modes.
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.5, so a fresh scaffold
   compiles against that release.
 - **checks:** `pre-push` now enforces a one-minute hard limit while run timings
