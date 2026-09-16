@@ -51,8 +51,9 @@ unlock.
 ### Fixed
 
 - **orchestrator:** `RunAndAwait` pauses the parent node's no-progress timer
-  before child trigger creation, so controller latency cannot expire the
-  parent while it delegates work. The timer resumes when the await returns.
+  before child trigger creation, so child submission and awaiting do not
+  consume the no-progress inactivity budget. The timer resumes when the await
+  returns; the node's overall `Timeout` remains active.
 
 - **release:** `cmd/verify-release --verify` uses the public trust roots shipped
   with Sparkwing and no longer requires the private release signing key.
