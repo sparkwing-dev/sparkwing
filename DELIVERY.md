@@ -44,6 +44,11 @@ wait are not established by this artifact. A missing handle produces an explicit
 unavailable record. Export/upload failures warn without changing the check verdict;
 an absent artifact is missing evidence, not a successful export.
 
+Pre-release records each check as a sequential WorkStep. A failed check does
+not suppress later checks; the parent reports the first failure, while the run
+logs and step states retain every individual failure. The canonical timing
+artifact retains those step outcomes and durations but excludes their error text.
+
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.
 Its config ignores only that exact diagnostic in `release.yaml`. The workflow
 contract tests require the publication job's shared group, `queue: max`, and

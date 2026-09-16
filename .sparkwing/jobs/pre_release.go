@@ -106,167 +106,248 @@ func (PreRelease) Examples() []sparkwing.Example {
 }
 
 func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
-	sparkwing.Job(plan, runContext.Pipeline, preRelease.run)
+	sparkwing.Job(plan, runContext.Pipeline, preRelease)
 	return nil
 }
 
-func (preRelease *PreRelease) run(jobContext context.Context) error {
-	var failures []string
+type preReleaseCheck struct {
+	id  string
+	run func(context.Context) error
+}
 
-	if err := checkNoReplaceDirectivesInCommittedGoMods(jobContext); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(jobContext, "no-replace check: passed")
+func (preRelease *PreRelease) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	addPreReleaseChecks(work, preReleaseChecks())
+	return nil, nil
+}
+
+func addPreReleaseChecks(work *sparkwing.Work, checks []preReleaseCheck) {
+	var previous *sparkwing.WorkStep
+	for _, check := range checks {
+		step := sparkwing.Step(work, check.id, check.run).ContinueOnError()
+		if previous != nil {
+			step.Needs(previous)
+		}
+		previous = step
 	}
+}
 
-	if err := checkNoCommittedGoWorkFiles(jobContext); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(jobContext, "no-go.work check: passed")
+func preReleaseChecks() []preReleaseCheck {
+	return []preReleaseCheck{
+		{id: "no-replace", run: checkPreReleaseNoReplace},
+		{id: "no-go-work", run: checkPreReleaseNoGoWork},
+		{id: "module-tidy", run: checkPreReleaseModuleTidy},
+		{id: "sparkwing-pin", run: checkPreReleaseSparkwingPin},
+		{id: "version-freshness", run: checkPreReleaseVersionFreshness},
+		{id: "pre-v1-policy", run: checkPreReleasePreV1Policy},
+		{id: "gofmt", run: checkPreReleaseGofmt},
+		{id: "lint", run: checkPreReleaseLint},
+		{id: "race", run: checkPreReleaseRace},
+		{id: "store-postgres", run: checkPreReleaseStorePostgres},
+		{id: "chaos", run: checkPreReleaseChaos},
+		{id: "release-vulnerability", run: checkPreReleaseVulnerability},
+		{id: "shell-portability", run: checkPreReleaseShellPortability},
+		{id: "hosted-mutation-guard", run: checkPreReleaseHostedMutation},
+		{id: "vulnerability-script", run: checkPreReleaseVulnerabilityScript},
+		{id: "changelog-script", run: checkPreReleaseChangelogScript},
+		{id: "installer-report", run: checkPreReleaseInstallerReport},
+		{id: "service-installer", run: checkPreReleaseServiceInstaller},
+		{id: "release-installer", run: checkPreReleaseReleaseInstaller},
+		{id: "install-to-green", run: checkPreReleaseInstallToGreen},
+		{id: "shellcheck", run: checkPreReleaseShellcheck},
+		{id: "terraform", run: checkPreReleaseTerraform},
+		{id: "markdownlint", run: checkPreReleaseMarkdownlint},
+		{id: "actionlint", run: checkPreReleaseActionlint},
+		{id: "doc-examples", run: checkPreReleaseDocExamples},
+		{id: "cli-reference", run: checkPreReleaseCLIReference},
+		{id: "config-reference", run: checkPreReleaseConfigReference},
+		{id: "sdk-reference", run: checkPreReleaseSDKReference},
+		{id: "api-reference", run: checkPreReleaseAPIReference},
+		{id: "openapi", run: checkPreReleaseOpenAPI},
+		{id: "api-snapshot", run: checkPreReleaseAPISnapshot},
 	}
+}
 
-	if _, err := sparkwing.Bash(jobContext,
+func checkPreReleaseNoReplace(ctx context.Context) error {
+	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "no-replace check: passed")
+	return nil
+}
+
+func checkPreReleaseNoGoWork(ctx context.Context) error {
+	if err := checkNoCommittedGoWorkFiles(ctx); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "no-go.work check: passed")
+	return nil
+}
+
+func checkPreReleaseModuleTidy(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx,
 		`go -C .sparkwing mod tidy 2>/dev/null || true; git diff --quiet -- .sparkwing/go.mod .sparkwing/go.sum`,
 	).Run(); err != nil {
-		failures = append(failures, "go mod tidy drift: run `go -C .sparkwing mod tidy` and commit the result")
-	} else {
-		sparkwing.Info(jobContext, "go mod tidy: no drift")
+		return errors.New("go mod tidy drift: run `go -C .sparkwing mod tidy` and commit the result")
 	}
+	sparkwing.Info(ctx, "go mod tidy: no drift")
+	return nil
+}
 
-	if bumpedTo, err := autoBumpSparkwingPinIfStale(jobContext, sparkwing.WorkDir()); err != nil {
-		failures = append(failures, fmt.Sprintf("auto-bump sparkwing pin: %v", err))
-	} else if bumpedTo != "" {
-		sparkwing.Info(jobContext, "sparkwing pin: auto-bumped to %s (commit added to push)", bumpedTo)
-	}
-
-	if err := CheckVersionsFreshness(jobContext, sparkwing.WorkDir()); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(jobContext, "version freshness: passed")
-	}
-
-	if err := CheckPreV1Policy(jobContext, sparkwing.WorkDir()); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(jobContext, "pre-v1 policy: passed")
-	}
-
-	if err := sparkwing.Bash(jobContext, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
-		MustBeEmpty("gofmt reported unformatted files"); err != nil {
-		failures = append(failures, fmt.Sprintf("gofmt: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "gofmt: passed")
-	}
-
-	if err := runGolangciLint(jobContext); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		sparkwing.Info(jobContext, "golangci-lint: passed")
-	}
-
-	if _, err := sparkwing.Bash(jobContext, "go -C .sparkwing test -race ./...").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("go test -race: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "go test -race: passed")
-	}
-
-	storeContext, cancelStore := context.WithTimeout(jobContext, storePostgresPrePushTimeout)
-	err := (&StorePostgres{}).run(storeContext)
-	cancelStore()
+func checkPreReleaseSparkwingPin(ctx context.Context) error {
+	bumpedTo, err := autoBumpSparkwingPinIfStale(ctx, sparkwing.WorkDir())
 	if err != nil {
-		failures = append(failures, fmt.Sprintf("store postgres suite: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "store postgres suite: passed against postgres")
+		return fmt.Errorf("auto-bump sparkwing pin: %w", err)
 	}
+	if bumpedTo != "" {
+		sparkwing.Info(ctx, "sparkwing pin: auto-bumped to %s (commit added to push)", bumpedTo)
+	}
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("chaos gate: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "chaos gate: admission invariants held under fault injection")
+func checkPreReleaseVersionFreshness(ctx context.Context) error {
+	if err := CheckVersionsFreshness(ctx, sparkwing.WorkDir()); err != nil {
+		return err
 	}
+	sparkwing.Info(ctx, "version freshness: passed")
+	return nil
+}
 
-	if err := runReleaseBinaryVulnerabilityScan(jobContext); err != nil {
-		failures = append(failures, fmt.Sprintf("release binary vulnerability scan: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "release binary vulnerability scan: passed")
+func checkPreReleasePreV1Policy(ctx context.Context) error {
+	if err := CheckPreV1Policy(ctx, sparkwing.WorkDir()); err != nil {
+		return err
 	}
+	sparkwing.Info(ctx, "pre-v1 policy: passed")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("shellcheck script portability: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "shellcheck script portability: passed")
+func checkPreReleaseGofmt(ctx context.Context) error {
+	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
+		MustBeEmpty("gofmt reported unformatted files"); err != nil {
+		return fmt.Errorf("gofmt: %w", err)
 	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-hosted-gate-clean-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("hosted gate mutation guard: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "hosted gate mutation guard: passed")
-	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-release-binary-vulnerabilities-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("release binary vulnerability scanner: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "release binary vulnerability scanner: passed")
-	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-changelog-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("changelog script portability: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "changelog script portability: passed")
-	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/install-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("installer report: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "installer report: passed")
-	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/service-install-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("service installer config guard: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "service installer config guard: passed")
-	}
-	if _, err := sparkwing.Bash(jobContext, "bash bin/release-install-test.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("public installer release verification: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "public installer release verification: passed")
-	}
-	if record, measured, err := measureInstallToGreen(jobContext); err != nil {
-		failures = append(failures, fmt.Sprintf("install-to-green harness: %v", err))
-	} else if measured {
-		sparkwing.Info(jobContext, "install-to-green: %s", record)
-	} else {
-		sparkwing.Warn(jobContext, "install-to-green: no measurement taken: %s", record)
-	}
+	sparkwing.Info(ctx, "gofmt: passed")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "shellcheck: passed")
+func checkPreReleaseLint(ctx context.Context) error {
+	if err := runGolangciLint(ctx); err != nil {
+		return err
 	}
+	sparkwing.Info(ctx, "golangci-lint: passed")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-terraform-test.sh && bash bin/check-terraform.sh").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("terraform: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "terraform: validation and both engine plans passed")
+func checkPreReleaseRace(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "go -C .sparkwing test -race ./...").Run(); err != nil {
+		return fmt.Errorf("go test -race: %w", err)
 	}
+	sparkwing.Info(ctx, "go test -race: passed")
+	return nil
+}
 
-	if err := runMarkdownlint(jobContext); err != nil {
-		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "markdownlint: passed")
+func checkPreReleaseStorePostgres(ctx context.Context) error {
+	storeContext, cancelStore := context.WithTimeout(ctx, storePostgresPrePushTimeout)
+	defer cancelStore()
+	if err := (&StorePostgres{}).run(storeContext); err != nil {
+		return fmt.Errorf("store postgres suite: %w", err)
 	}
+	sparkwing.Info(ctx, "store postgres suite: passed against postgres")
+	return nil
+}
 
-	if err := runActionlint(jobContext); err != nil {
-		failures = append(failures, fmt.Sprintf("actionlint: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "actionlint: passed")
+func checkPreReleaseChaos(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {
+		return fmt.Errorf("chaos gate: %w", err)
 	}
+	sparkwing.Info(ctx, "chaos gate: admission invariants held under fault injection")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext,
+func checkPreReleaseVulnerability(ctx context.Context) error {
+	if err := runReleaseBinaryVulnerabilityScan(ctx); err != nil {
+		return fmt.Errorf("release binary vulnerability scan: %w", err)
+	}
+	sparkwing.Info(ctx, "release binary vulnerability scan: passed")
+	return nil
+}
+
+func checkPreReleaseShellPortability(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/check-shell-test.sh", "shellcheck script portability", "passed")
+}
+
+func checkPreReleaseHostedMutation(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/check-hosted-gate-clean-test.sh", "hosted gate mutation guard", "passed")
+}
+
+func checkPreReleaseVulnerabilityScript(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/check-release-binary-vulnerabilities-test.sh", "release binary vulnerability scanner", "passed")
+}
+
+func checkPreReleaseChangelogScript(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/check-changelog-test.sh", "changelog script portability", "passed")
+}
+
+func checkPreReleaseInstallerReport(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/install-test.sh", "installer report", "passed")
+}
+
+func checkPreReleaseServiceInstaller(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/service-install-test.sh", "service installer config guard", "passed")
+}
+
+func checkPreReleaseReleaseInstaller(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/release-install-test.sh", "public installer release verification", "passed")
+}
+
+func checkPreReleaseInstallToGreen(ctx context.Context) error {
+	record, measured, err := measureInstallToGreen(ctx)
+	if err != nil {
+		return fmt.Errorf("install-to-green harness: %w", err)
+	}
+	if measured {
+		sparkwing.Info(ctx, "install-to-green: %s", record)
+	} else {
+		sparkwing.Warn(ctx, "install-to-green: no measurement taken: %s", record)
+	}
+	return nil
+}
+
+func checkPreReleaseShellcheck(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/check-shell.sh", "shellcheck", "passed")
+}
+
+func checkPreReleaseTerraform(ctx context.Context) error {
+	return runPreReleaseCommand(ctx, "bash bin/check-terraform-test.sh && bash bin/check-terraform.sh", "terraform", "validation and both engine plans passed")
+}
+
+func checkPreReleaseMarkdownlint(ctx context.Context) error {
+	if err := runMarkdownlint(ctx); err != nil {
+		return fmt.Errorf("markdownlint: %w", err)
+	}
+	sparkwing.Info(ctx, "markdownlint: passed")
+	return nil
+}
+
+func checkPreReleaseActionlint(ctx context.Context) error {
+	if err := runActionlint(ctx); err != nil {
+		return fmt.Errorf("actionlint: %w", err)
+	}
+	sparkwing.Info(ctx, "actionlint: passed")
+	return nil
+}
+
+func checkPreReleaseDocExamples(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("doc-examples: %v", err))
-	} else {
-		sparkwing.Info(jobContext, "doc-examples: no SDK-API drift")
+		return fmt.Errorf("doc-examples: %w", err)
 	}
+	sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext,
+func checkPreReleaseCLIReference(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" &&
 		TMP="$(mktemp -d)" &&
 		trap 'rm -rf "$TMP"' EXIT &&
@@ -283,20 +364,24 @@ func (preRelease *PreRelease) run(jobContext context.Context) error {
 		done;
 		exit "$fail"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		failures = append(failures, "cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
-	} else {
-		sparkwing.Info(jobContext, "cli-reference: matches source")
+		return errors.New("cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
 	}
+	sparkwing.Info(ctx, "cli-reference: matches source")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext,
+func checkPreReleaseConfigReference(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/configref "$ROOT" | diff -u docs/config-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		failures = append(failures, "config-reference: stale -- run `bash bin/gen-config-docs.sh`")
-	} else {
-		sparkwing.Info(jobContext, "config-reference: matches source")
+		return errors.New("config-reference: stale -- run `bash bin/gen-config-docs.sh`")
 	}
+	sparkwing.Info(ctx, "config-reference: matches source")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext,
+func checkPreReleaseSDKReference(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" &&
 		TMP="$(mktemp -d)" &&
 		trap 'rm -rf "$TMP"' EXIT &&
@@ -313,34 +398,43 @@ func (preRelease *PreRelease) run(jobContext context.Context) error {
 		done;
 		exit "$fail"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		failures = append(failures, "sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
-	} else {
-		sparkwing.Info(jobContext, "sdk-reference: matches source")
+		return errors.New("sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
 	}
+	sparkwing.Info(ctx, "sdk-reference: matches source")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext,
+func checkPreReleaseAPIReference(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx,
 		`cd "$ROOT" && go run ./internal/apiref "$ROOT" | diff -u docs/api-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
-		failures = append(failures, "api-reference: stale -- run `bash bin/gen-api-docs.sh`")
-	} else {
-		sparkwing.Info(jobContext, "api-reference: matches source")
+		return errors.New("api-reference: stale -- run `bash bin/gen-api-docs.sh`")
 	}
+	sparkwing.Info(ctx, "api-reference: matches source")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-api-spec.sh").Run(); err != nil {
-		failures = append(failures, "openapi: stale -- run `bash bin/gen-api-docs.sh`")
-	} else {
-		sparkwing.Info(jobContext, "openapi: matches source")
+func checkPreReleaseOpenAPI(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Run(); err != nil {
+		return errors.New("openapi: stale -- run `bash bin/gen-api-docs.sh`")
 	}
+	sparkwing.Info(ctx, "openapi: matches source")
+	return nil
+}
 
-	if _, err := sparkwing.Bash(jobContext, "bash bin/check-api-snapshot.sh").Run(); err != nil {
-		failures = append(failures, "api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
-	} else {
-		sparkwing.Info(jobContext, "api-snapshot: no drift")
+func checkPreReleaseAPISnapshot(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+		return errors.New("api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
 	}
+	sparkwing.Info(ctx, "api-snapshot: no drift")
+	return nil
+}
 
-	if len(failures) > 0 {
-		return fmt.Errorf("%d pre-push check(s) failed:\n  - %s", len(failures), strings.Join(failures, "\n  - "))
+func runPreReleaseCommand(ctx context.Context, command, label, success string) error {
+	if _, err := sparkwing.Bash(ctx, command).Run(); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
 	}
+	sparkwing.Info(ctx, "%s: %s", label, success)
 	return nil
 }
 

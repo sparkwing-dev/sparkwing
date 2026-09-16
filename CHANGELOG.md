@@ -22,6 +22,11 @@ unlock.
 
 ### Changed
 
+- **checks:** `pre-release` records each release check as a sequential native
+  WorkStep, so retained hosted timing artifacts show the check-level critical
+  path. Every check still runs after an earlier failure; step state and logs
+  retain each failure while the parent reports the first one.
+
 - **runner + charts:** Warm Kubernetes fallback can advertise explicit static
   capabilities through repeatable `--trigger-runner-label` flags or
   `runner.triggerRunner.labels`. The same normalized labels control fallback

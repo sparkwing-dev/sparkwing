@@ -19,7 +19,7 @@ func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
 			if err := os.WriteFile(handle, []byte(`{"run_id":"run-proof"}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			fixture := `{"run":{"id":"run-proof","status":"` + outcome + `","git_sha":"abc","invocation":{"args":"PRIVATE_SENTINEL"}},"log_path":"PRIVATE_SENTINEL","nodes":[{"id":"gate","status":"` + outcome + `","cpu_nanos":123,"max_rss_bytes":456,"error":"PRIVATE_SENTINEL","steps":[{"step_id":"test","status":"` + outcome + `","started_at":"2026-09-15T00:00:00Z","error":"PRIVATE_SENTINEL"}]}]}`
+			fixture := `{"run":{"id":"run-proof","status":"` + outcome + `","git_sha":"abc","invocation":{"args":"PRIVATE_SENTINEL"}},"log_path":"PRIVATE_SENTINEL","nodes":[{"id":"pre-release","status":"` + outcome + `","cpu_nanos":123,"max_rss_bytes":456,"error":"PRIVATE_SENTINEL","steps":[{"step_id":"lint","status":"passed","started_at":"2026-09-15T00:00:00Z"},{"step_id":"store-postgres","status":"` + outcome + `","started_at":"2026-09-15T00:00:01Z","error":"PRIVATE_SENTINEL"}]}]}`
 			stub := "#!/bin/sh\ncat <<'JSON'\n" + fixture + "\nJSON\n"
 			if outcome != "success" {
 				stub += "case \" $* \" in *' --exit-zero '*) exit 0;; *) exit 1;; esac\n"
@@ -44,6 +44,7 @@ func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
 				Nodes        []struct {
 					CPU   int64 `json:"cpu_nanos"`
 					Steps []struct {
+						ID         string  `json:"step_id"`
 						Status     string  `json:"status"`
 						FinishedAt *string `json:"finished_at"`
 					} `json:"steps"`
@@ -55,7 +56,10 @@ func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
 			if result.Availability != "available" || result.Run.Status != outcome || len(result.Nodes) != 1 {
 				t.Fatalf("lost run outcome: %s", data)
 			}
-			if result.Nodes[0].CPU != 123 || len(result.Nodes[0].Steps) != 1 || result.Nodes[0].Steps[0].Status != outcome || result.Nodes[0].Steps[0].FinishedAt != nil {
+			if result.Nodes[0].CPU != 123 || len(result.Nodes[0].Steps) != 2 ||
+				result.Nodes[0].Steps[0].ID != "lint" || result.Nodes[0].Steps[0].Status != "passed" ||
+				result.Nodes[0].Steps[1].ID != "store-postgres" || result.Nodes[0].Steps[1].Status != outcome ||
+				result.Nodes[0].Steps[1].FinishedAt != nil {
 				t.Fatalf("lost measurements or invented completion: %s", data)
 			}
 		})
