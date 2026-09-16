@@ -59,6 +59,9 @@ unlock.
   process boundaries as the store's existing `cancelled` terminal state, so a
   failed parent run cannot leave a completed sibling reported as running.
 
+- **controller:** Runner reservations, usage charges and refunds retain the
+  run owner's principal in credit history after the run is deleted. Shared
+  runner pools no longer erase tenant attribution from new ledger rows.
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an
   explicitly supplied nested selection.

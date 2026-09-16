@@ -181,7 +181,8 @@ const creditChargesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_charges (
     kind         TEXT NOT NULL DEFAULT 'usage',
     seconds      INTEGER NOT NULL,
     amount_micro INTEGER NOT NULL,
-    -- principal: the team a storage row billed; empty on a runner charge.
+    -- principal: the team whose storage or runner work this row billed;
+    -- empty on legacy and unowned work.
     principal    TEXT NOT NULL DEFAULT '',
     -- storage_bytes: retained bytes above the free allowance a storage row
     -- billed; 0 on every other kind.
@@ -382,8 +383,8 @@ type CreditCharge struct {
 	RunID       string
 	NodeID      string
 	TokenPrefix string
-	// Principal names the team a storage row billed, and is empty on every
-	// row that billed runner time.
+	// Principal names the team whose storage or runner work this row billed.
+	// It is empty on legacy and unowned work.
 	Principal   string
 	Kind        string
 	Seconds     int64
@@ -1364,6 +1365,10 @@ func (s *Store) reserveNodeCreditsTx(
 		unpriced.RunID, unpriced.NodeID = runID, nodeID
 		return unpriced
 	}
+	principal, err := runPrincipalTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
 		return err
@@ -1378,7 +1383,7 @@ func (s *Store) reserveNodeCreditsTx(
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
-		id, runID, nodeID, claimant.TokenPrefix, CreditChargeReservation,
+		id, runID, nodeID, claimant.TokenPrefix, principal, CreditChargeReservation,
 		int64(CreditClaimFloorSeconds), required, class.Cores, class.MicroPerSecond,
 		now.UnixNano()); err != nil {
 		return fmt.Errorf("credits: reserve: %w", err)
@@ -1392,9 +1397,9 @@ func (s *Store) reserveNodeCreditsTx(
 }
 
 const insertCreditChargeSQL = `
-        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro,
+        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, principal, kind, seconds, amount_micro,
                 cpu_class, rate_micro_per_second, charged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreditChargeResult is what one charge did to the ledger.
 type CreditChargeResult struct {
@@ -1468,6 +1473,10 @@ func (s *Store) chargeNode(
 	if err != nil {
 		return out, err
 	}
+	principal, err := runPrincipalTx(ctx, tx, runID)
+	if err != nil {
+		return out, err
+	}
 
 	nowNS := now.UnixNano()
 	rate := chargeRate(table, class)
@@ -1477,7 +1486,7 @@ func (s *Store) chargeNode(
 	}
 	charge, forgiven, through, err := settleChargeWindow(
 		ctx, tx, chargeWindow{
-			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix,
+			RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
 			Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
 			MaxCharge: maxCharge, Final: final,
 		})
@@ -1518,10 +1527,10 @@ func (s *Store) chargeNode(
 }
 
 type chargeWindow struct {
-	RunID, NodeID, TokenPrefix         string
-	Anchor, NowNS                      int64
-	Rate, RefundRate, Class, MaxCharge int64
-	Final                              bool
+	RunID, NodeID, TokenPrefix, Principal string
+	Anchor, NowNS                         int64
+	Rate, RefundRate, Class, MaxCharge    int64
+	Final                                 bool
 }
 
 // safety: the tail of a reservation is returned at the price it was taken at,
@@ -1622,13 +1631,13 @@ func insertCreditChargeTx(
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
-		id, w.RunID, w.NodeID, w.TokenPrefix, kind, seconds, amount,
+		id, w.RunID, w.NodeID, w.TokenPrefix, w.Principal, kind, seconds, amount,
 		w.Class, w.Rate, w.NowNS); err != nil {
 		return nil, fmt.Errorf("credits: insert charge: %w", err)
 	}
 	return &CreditCharge{
 		ID: id, RunID: w.RunID, NodeID: w.NodeID, TokenPrefix: w.TokenPrefix,
-		Kind: kind, Seconds: seconds, AmountMicro: amount,
+		Principal: w.Principal, Kind: kind, Seconds: seconds, AmountMicro: amount,
 		CPUClassCores: w.Class, RateMicroPerSecond: w.Rate,
 		ChargedAt: time.Unix(0, w.NowNS).UTC(),
 	}, nil

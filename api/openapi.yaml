@@ -4806,7 +4806,7 @@ components:
         run_id: {type: string}
         node_id: {type: string}
         token_prefix: {type: string}
-        principal: {type: string, description: "The team a storage charge billed; empty on a charge that billed runner time."}
+        principal: {type: string, description: "The team whose storage or runner work this charge billed; empty on legacy or unowned work."}
         kind: {type: string, description: "reservation, usage, refund, or storage; a refund carries negative seconds and amount."}
         seconds: {type: integer, format: int64}
         amount_micro: {type: integer, format: int64}
