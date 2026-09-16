@@ -35,6 +35,15 @@ not hosted latency.
 
 ### Check tiers
 
+Canonical hosted jobs retain a `canonical-timings` JSON artifact for 30 days
+on success and failure. It contains run and step timestamps, outcomes, available
+node CPU/memory measurements, and source/workflow identity. It excludes raw
+logs, invocation arguments, errors and local paths. Missing measurements remain
+null. Pipeline compilation, hosted setup, cache temperature and exact admission
+wait are not established by this artifact. A missing handle produces an explicit
+unavailable record. Export/upload failures warn without changing the check verdict;
+an absent artifact is missing evidence, not a successful export.
+
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.
 Its config ignores only that exact diagnostic in `release.yaml`. The workflow
 contract tests require the publication job's shared group, `queue: max`, and

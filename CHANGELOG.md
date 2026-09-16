@@ -22,6 +22,10 @@ unlock.
 
 ### Changed
 
+- **checks:** Hosted canonical runs retain structured timing and resource
+  evidence for 30 days, including successful runs, without uploading raw logs
+  or invocation arguments.
+
 - **scaffold:** `const FallbackSDKVersion` pins v0.52.5, so a fresh scaffold
   compiles against that release.
 - **checks:** `pre-push` now enforces a one-minute hard limit while run timings

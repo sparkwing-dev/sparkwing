@@ -42,6 +42,7 @@ jobs:
         run: |
           cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"
           cp bin/report-hosted-run-failure.sh "$RUNNER_TEMP/report-hosted-run-failure.sh"
+          cp bin/export-hosted-run-timings.sh "$RUNNER_TEMP/export-hosted-run-timings.sh"
 
       - name: Copy the v0.37.2 test repair
         if: inputs.release_tag == 'v0.37.2'
@@ -180,6 +181,29 @@ jobs:
           else
             bash bin/check-hosted-gate-clean.sh "$target_sha"
           fi
+
+      - name: Export canonical run timings
+        if: ${{ always() }}
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+        run: |
+          exporter="bin/export-hosted-run-timings.sh"
+          if [ -f "$RUNNER_TEMP/export-hosted-run-timings.sh" ]; then
+            exporter="$RUNNER_TEMP/export-hosted-run-timings.sh"
+          fi
+          bash "$exporter" "$RUNNER_TEMP/canonical-run.json" "$RUNNER_TEMP/sparkwing" "$RUNNER_TEMP/canonical-timings.json"
+
+      - name: Retain canonical run timings
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: canonical-timings-${{ matrix.gate }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/canonical-timings.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Print failed canonical run diagnostics
         if: ${{ failure() }}
