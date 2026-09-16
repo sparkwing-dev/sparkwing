@@ -168,6 +168,46 @@ func TestPodChildAwaitPollLogsFirstFailureWithIdentity(t *testing.T) {
 	}
 }
 
+type childAwaitRecordLogger struct {
+	records []sparkwing.LogRecord
+}
+
+func (l *childAwaitRecordLogger) Log(level, message string) {
+	l.Emit(sparkwing.LogRecord{Level: level, Msg: message})
+}
+
+func (l *childAwaitRecordLogger) Emit(record sparkwing.LogRecord) {
+	l.records = append(l.records, record)
+}
+
+func TestLocalChildAwaitDiagnosticsRetainsExecutionEnvelope(t *testing.T) {
+	log := &childAwaitRecordLogger{}
+	ctx := sparkwingruntime.WithLogger(t.Context(), log)
+	ctx = sparkwingruntime.WithNode(ctx, "parent-node")
+	ctx = sparkwing.WithStep(ctx, "deploy")
+	diagnostics := localChildAwaitDiagnostics{}
+
+	diagnostics.info(ctx, "child run admitted", "child_run_id", "child")
+	diagnostics.warn(ctx, "child poll failed", errors.New("store unavailable"),
+		"child_run_id", "child", "pipeline", "release")
+
+	if len(log.records) != 2 {
+		t.Fatalf("records = %d, want info and warning", len(log.records))
+	}
+	for _, record := range log.records {
+		if record.TS.IsZero() || record.JobID != "parent-node" || record.Step != "deploy" {
+			t.Errorf("record envelope = %+v, want timestamp and parent-node/deploy", record)
+		}
+		if record.Attrs["child_run_id"] != "child" {
+			t.Errorf("record attrs = %v, want child identity", record.Attrs)
+		}
+	}
+	warning := log.records[1]
+	if warning.Level != "warn" || warning.Attrs["pipeline"] != "release" || warning.Attrs["error"] != "store unavailable" {
+		t.Fatalf("warning = %+v, want structured pipeline and error", warning)
+	}
+}
+
 // TestRunAndAwaitRefusesAnObjectStoreStateBackend pins the refusal a spawning
 // node gets under Mode 2. The object-store backend enqueues a trigger and has
 // no claim path, so awaiting the child would wait on a run nothing starts.

@@ -1731,13 +1731,6 @@ func childAwaitBounded(ctx context.Context, requestTimeout time.Duration) bool {
 	return requestTimeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
 }
 
-func repoSuffix(repo string) string {
-	if repo == "" {
-		return ""
-	}
-	return " repo=" + repo
-}
-
 func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
 	return newPipelineRefResolver(s.backends.State, s.runID,
 		func(ctx context.Context, _ string, err error) {

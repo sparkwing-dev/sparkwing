@@ -323,7 +323,7 @@ func (c childAwaitConfig) await(ctx context.Context, req sparkwing.AwaitRequest)
 			c.info(ctx, "still waiting on child run",
 				"run_id", c.parentRunID, "node", currentNode,
 				"child_run_id", childRunID, "pipeline", req.Pipeline,
-				"status", lastStatus, "elapsed", time.Since(startedAt).Round(time.Second))
+				"status", lastStatus, "elapsed_ms", time.Since(startedAt).Milliseconds())
 		case <-time.After(childAwaitPollInterval(pollCtx, admissionPauseActive())):
 		}
 	}
@@ -344,17 +344,13 @@ func (c childAwaitConfig) warn(ctx context.Context, message string, err error, a
 type localChildAwaitDiagnostics struct{}
 
 func (localChildAwaitDiagnostics) info(ctx context.Context, message string, attrs ...any) {
-	sparkwing.LoggerFromContext(ctx).Emit(sparkwing.LogRecord{
-		Level: "info", Msg: message, Attrs: childAwaitAttrs(attrs),
-	})
+	sparkwing.LoggerFromContext(ctx).Emit(childAwaitLogRecord(ctx, "info", message, childAwaitAttrs(attrs)))
 }
 
 func (localChildAwaitDiagnostics) warn(ctx context.Context, message string, err error, attrs ...any) {
 	fields := childAwaitAttrs(attrs)
 	fields["error"] = err.Error()
-	sparkwing.LoggerFromContext(ctx).Emit(sparkwing.LogRecord{
-		Level: "warn", Msg: message, Attrs: fields,
-	})
+	sparkwing.LoggerFromContext(ctx).Emit(childAwaitLogRecord(ctx, "warn", message, fields))
 }
 
 func (localChildAwaitDiagnostics) appendEvent(
@@ -393,6 +389,17 @@ func childAwaitAttrs(attrs []any) map[string]any {
 		}
 	}
 	return fields
+}
+
+func childAwaitLogRecord(ctx context.Context, level, message string, attrs map[string]any) sparkwing.LogRecord {
+	return sparkwing.LogRecord{
+		TS:    time.Now(),
+		Level: level,
+		JobID: sparkwing.NodeFromContext(ctx),
+		Step:  sparkwing.StepFromContext(ctx),
+		Msg:   message,
+		Attrs: attrs,
+	}
 }
 
 type wedgeChildAwaitPoll struct {
