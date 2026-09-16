@@ -527,69 +527,10 @@ func (s *Server) runClaimRequest(w http.ResponseWriter, r *http.Request, runID s
 // safety: a live claim, not scope alone, decides who may write a node.
 func (s *Server) claimedBy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := PrincipalFromContext(r.Context())
-		if !ok || p.HasScope(ScopeAdmin) {
-			next.ServeHTTP(w, r)
-			return
+		validated, ok := s.nodeTargetWriteRequest(w, r, r.PathValue("id"), r.PathValue("nodeID"))
+		if ok {
+			next.ServeHTTP(w, validated)
 		}
-		runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-		hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
-		if hasNodeIdentity && hasTriggerIdentity {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "claim_required", Principal: p.label(),
-				Message: "node " + runID + "/" + nodeID + " requires one exact claim identity",
-			})
-			return
-		}
-		if hasNodeIdentity {
-			fence, fenceErr := nodeClaimFenceFromRequest(r)
-			if fenceErr != nil {
-				writeAuthError(w, http.StatusForbidden, authErrorBody{
-					Code: "claim_required", Principal: p.label(),
-					Message: "node " + runID + "/" + nodeID + " requires its exact claim fence",
-				})
-				return
-			}
-			held, err := s.store.NodeClaimFenceIsLive(r.Context(), runID, nodeID, fence, time.Now())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-			if !held {
-				writeError(w, http.StatusConflict, store.ErrLockHeld)
-				return
-			}
-			r = r.WithContext(store.WithNodeClaimFence(r.Context(), fence))
-			next.ServeHTTP(w, r)
-			return
-		}
-		if !hasTriggerIdentity {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "claim_required", Principal: p.label(),
-				Message: "node " + runID + "/" + nodeID + " requires its exact claim fence",
-			})
-			return
-		}
-		generation, err := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
-		if err != nil || generation < 1 {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "claim_required", Principal: p.label(),
-				Message: "node " + runID + "/" + nodeID + " requires its exact claim fence",
-			})
-			return
-		}
-		triggerFence := store.TriggerClaimFence{Claimant: claimIdentity(r), ClaimGeneration: generation}
-		held, err := s.store.TriggerClaimFenceIsLive(r.Context(), runID, triggerFence.Claimant, generation, time.Now())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if !held {
-			writeError(w, http.StatusConflict, store.ErrLockHeld)
-			return
-		}
-		r = r.WithContext(store.WithTriggerClaimFence(r.Context(), triggerFence))
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -605,52 +546,67 @@ func claimIdentityShape(r *http.Request) (node, trigger bool) {
 	return node, r.Header.Get(store.TriggerGenerationHeader) != ""
 }
 
-func (s *Server) authorizeTriggerParent(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
-	if runID == "" {
-		return true
-	}
+func (s *Server) nodeTargetWriteRequest(
+	w http.ResponseWriter, r *http.Request, runID, nodeID string,
+) (*http.Request, bool) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.HasScope(ScopeAdmin) {
-		return true
+		return r, true
 	}
 	claimRequired := func() bool {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code: "claim_required", Principal: p.label(),
-			Message: "parent lineage requires one exact live parent claim",
+			Message: "node " + runID + "/" + nodeID + " requires one exact live claim",
 		})
 		return false
 	}
 	nodeClaim, triggerClaim := claimIdentityShape(r)
 	if nodeClaim == triggerClaim || (nodeClaim && nodeID == "") {
-		return claimRequired()
+		return r, claimRequired()
 	}
-	var (
-		held bool
-		err  error
-	)
 	if nodeClaim {
 		fence, fenceErr := nodeClaimFenceFromRequest(r)
 		if fenceErr != nil {
-			return claimRequired()
+			return r, claimRequired()
 		}
-		held, err = s.store.NodeClaimFenceIsLive(r.Context(), runID, nodeID, fence, time.Now())
-	} else {
-		generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
-		if parseErr != nil || generation < 1 {
-			return claimRequired()
+		held, err := s.store.NodeClaimFenceIsLive(r.Context(), runID, nodeID, fence, time.Now())
+		if err != nil {
+			s.writeInternalError(w, r, "validate node claim",
+				fmt.Errorf("node %s/%s: %w", runID, nodeID, err))
+			return r, false
 		}
-		held, err = s.store.TriggerClaimFenceIsLive(
-			r.Context(), runID, claimIdentity(r), generation, time.Now())
+		if !held {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return r, false
+		}
+		return r.WithContext(store.WithNodeClaimFence(r.Context(), fence)), true
 	}
+	generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
+	if parseErr != nil || generation < 1 {
+		return r, claimRequired()
+	}
+	triggerFence := store.TriggerClaimFence{Claimant: claimIdentity(r), ClaimGeneration: generation}
+	held, err := s.store.TriggerClaimFenceIsLive(
+		r.Context(), runID, triggerFence.Claimant, generation, time.Now())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return false
+		s.writeInternalError(w, r, "validate trigger claim", fmt.Errorf("run %s: %w", runID, err))
+		return r, false
 	}
 	if !held {
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return false
+		return r, false
 	}
-	return true
+	return r.WithContext(store.WithTriggerClaimFence(r.Context(), triggerFence)), true
+}
+
+func (s *Server) authorizeTriggerParent(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
+	if runID == "" {
+		return true
+	}
+	// safety: the validated fence belongs to the parent. Attaching it to the
+	// request would make the new child's store writes answer to the wrong row.
+	_, ok := s.nodeTargetWriteRequest(w, r, runID, nodeID)
+	return ok
 }
 
 func nodeClaimFenceFromRequest(r *http.Request) (store.NodeClaimFence, error) {
