@@ -27,6 +27,8 @@ unlock.
 - **update:** Release binaries whose Go build metadata carries a commit
   pseudo-version now reconcile that commit with the published tag. Update
   checks and receipts report the release version instead of the pseudo-version.
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.8, so a fresh scaffold
+  compiles against the latest release.
 
 ## [v0.52.8] - 2026-09-16
 ### Changed
