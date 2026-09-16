@@ -85,7 +85,7 @@ func TestFailedCommandCleansNestedGroupsBeforeReturningStatus(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("soakguard did not bound failed-command cleanup")
 	}
-	assertSessionEmpty(t, session)
+	assertSessionHasNoLiveProcesses(t, session)
 }
 
 func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
@@ -126,7 +126,7 @@ func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
 	case <-time.After(7 * time.Second):
 		t.Fatal("soakguard did not bound signal cleanup")
 	}
-	assertSessionEmpty(t, session)
+	assertSessionHasNoLiveProcesses(t, session)
 }
 
 func waitForSoakguardMarker(t *testing.T, path string) {
@@ -153,15 +153,15 @@ func waitForSoakguardMarker(t *testing.T, path string) {
 	}
 }
 
-func assertSessionEmpty(t *testing.T, session int) {
+func assertSessionHasNoLiveProcesses(t *testing.T, session int) {
 	t.Helper()
 	processes, err := procgroup.ListSessions()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, process := range processes {
-		if process.Session == session {
-			t.Fatalf("session %d retained pid %d in group %d", session, process.PID, process.Group)
+		if process.Session == session && !process.Terminated() {
+			t.Fatalf("session %d retained live pid %d in group %d", session, process.PID, process.Group)
 		}
 	}
 }

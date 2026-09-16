@@ -47,11 +47,11 @@ func TestNativeProcessTableMatchesTheIdentityLookup(t *testing.T) {
 }
 
 func TestNativeProcessTableReportsTerminatedChildren(t *testing.T) {
-	if got := darwinProcessState(5); !processTerminated(got) {
+	if got := darwinProcessState(5); !(Info{State: got}).Terminated() {
 		t.Fatalf("zombie state = %q, want a state the terminated check accepts", got)
 	}
 	for _, live := range []int8{1, 2, 3, 4} {
-		if got := darwinProcessState(live); processTerminated(got) {
+		if got := darwinProcessState(live); (Info{State: got}).Terminated() {
 			t.Fatalf("live state %d = %q, want a state the terminated check rejects", live, got)
 		}
 	}

@@ -124,7 +124,7 @@ func waitForProcessGone(t *testing.T, pid int) {
 		}
 		// safety: the owner that would reap it is dead, so a killed descendant
 		// lingers as a zombie until init collects it.
-		if state, readErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); readErr == nil && processTerminated(statField(string(state))) {
+		if state, readErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); readErr == nil && (Info{State: statField(string(state))}).Terminated() {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)

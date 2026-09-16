@@ -58,7 +58,7 @@ func TestParseProcStatLeavesTheSessionUnreadWhenUnwanted(t *testing.T) {
 	if process.Session != 0 {
 		t.Fatalf("session = %d, want it unread", process.Session)
 	}
-	if !processTerminated(process.State) {
+	if !process.Terminated() {
 		t.Fatalf("state %q, want one the terminated check accepts", process.State)
 	}
 }

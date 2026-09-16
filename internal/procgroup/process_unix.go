@@ -158,7 +158,7 @@ func descendantsEmptyInTable(processes []Info, leader int, session bool) bool {
 		if session {
 			owner = process.Session
 		}
-		if owner == leader && process.PID != leader && !processTerminated(process.State) {
+		if owner == leader && process.PID != leader && !process.Terminated() {
 			return false
 		}
 	}

@@ -25,6 +25,19 @@ const (
 	procgroupOwnedPID = "SPARKWING_PROCGROUP_OWNED_PID"
 )
 
+func TestInfoTerminatedClassifiesKernelStates(t *testing.T) {
+	for _, state := range []string{"Z", "X", "x"} {
+		if !(Info{State: state}).Terminated() {
+			t.Errorf("state %q is not classified as terminated", state)
+		}
+	}
+	for _, state := range []string{"", "S", "R", "D"} {
+		if (Info{State: state}).Terminated() {
+			t.Errorf("state %q is classified as terminated", state)
+		}
+	}
+}
+
 func TestGroupHelperProcess(t *testing.T) {
 	switch os.Getenv(helperMode) {
 	case "descendant":

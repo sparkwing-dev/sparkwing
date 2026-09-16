@@ -42,6 +42,19 @@ type Info struct {
 	Birth string
 }
 
+// Terminated reports whether the kernel has finished executing the process.
+func (p Info) Terminated() bool {
+	if p.State == "" {
+		return false
+	}
+	switch p.State[0] {
+	case 'Z', 'X', 'x':
+		return true
+	default:
+		return false
+	}
+}
+
 type SessionIdentity struct {
 	LeaderPID  int
 	SessionID  int
@@ -230,7 +243,7 @@ func inspectSessionTable(processes []Info, identity SessionIdentity) (bool, erro
 		}
 	}
 	for _, process := range processes {
-		if process.Session != identity.SessionID || processTerminated(process.State) {
+		if process.Session != identity.SessionID || process.Terminated() {
 			continue
 		}
 		if leaderReused && process.PID == identity.LeaderPID {
@@ -242,18 +255,6 @@ func inspectSessionTable(processes []Info, identity SessionIdentity) (bool, erro
 		return false, nil
 	}
 	return true, nil
-}
-
-func processTerminated(state string) bool {
-	if state == "" {
-		return false
-	}
-	switch state[0] {
-	case 'Z', 'X', 'x':
-		return true
-	default:
-		return false
-	}
 }
 
 func Start(cmd *exec.Cmd) (*Group, error) {
