@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.9] - 2026-09-16
 ### Fixed
 
 - **dashboard:** Keep the pre-authentication CSRF token stable across login-page
