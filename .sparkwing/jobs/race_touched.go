@@ -36,7 +36,7 @@ func runRaceTouched(ctx context.Context) error {
 func raceModules(ctx context.Context, targets map[string][]string, testRoot, home string) error {
 	var failures []string
 	for _, module := range mapKeys(targets) {
-		pkgs := targets[module]
+		pkgs := racePackageOrder(targets[module])
 		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
 		// safety: go test's default 10-minute budget is per package binary and
 		// pkg/store under the race detector outlives it on a one-core hosted
@@ -52,6 +52,20 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 	}
 	return fmt.Errorf("go test -race failed in %d module(s):\n  - %s",
 		len(failures), strings.Join(failures, "\n  - "))
+}
+
+func racePackageOrder(packages []string) []string {
+	ordered := append([]string(nil), packages...)
+	// perf: pkg/store is the longest race target, so it enters the first bounded parallel wave.
+	for i, pkg := range ordered {
+		if pkg != "./pkg/store" {
+			continue
+		}
+		copy(ordered[1:i+1], ordered[:i])
+		ordered[0] = pkg
+		break
+	}
+	return ordered
 }
 
 func raceGoCommand(cpuCount int, args string) string {

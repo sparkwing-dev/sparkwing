@@ -103,10 +103,11 @@ func TestGateOverlapsTestAndRaceOnlyOnFourCPUs(t *testing.T) {
 			t.Errorf("%s dependencies on four CPUs = %v, want [build]", id, got)
 		}
 	}
-	for _, id := range []string{"lint", "store-postgres"} {
-		if got := w.StepByID(id).DepIDs(); !slices.Equal(got, []string{"test", "race-touched"}) {
-			t.Errorf("%s dependencies on four CPUs = %v, want [test race-touched]", id, got)
-		}
+	if got := w.StepByID("lint").DepIDs(); !slices.Equal(got, []string{"test", "race-touched"}) {
+		t.Errorf("lint dependencies on four CPUs = %v, want [test race-touched]", got)
+	}
+	if got := w.StepByID("store-postgres").DepIDs(); !slices.Equal(got, []string{"test"}) {
+		t.Errorf("store-postgres dependencies on four CPUs = %v, want [test]", got)
 	}
 }
 
