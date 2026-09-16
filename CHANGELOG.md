@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.52.7] - 2026-09-16
 ### Changed
 
 - **orchestrator:** Local and pod `RunAndAwait` execution now share one private
