@@ -22,15 +22,34 @@ unlock.
 
 ### Changed
 
+- **observability:** Failed writes of step state, annotations, or summaries
+  emit bounded, secret-masked warnings with run, node, and applicable step
+  identity. Execution outcomes remain unchanged.
+
+### Fixed
+
+- **runner:** Canceled parallel WorkSteps now cross controller and loopback
+  process boundaries as the store's existing `cancelled` terminal state, so a
+  failed parent run cannot leave a completed sibling reported as running.
+
+- **controller:** Runner reservations, usage charges and refunds retain the
+  run owner's principal in credit history after the run is deleted. Shared
+  runner pools no longer erase tenant attribution from new ledger rows.
+
+- **controller:** Child trigger submissions now bind parent lineage and
+  inherited repository provenance to the exact live parent node or trigger
+  claim. A `runs.write` token without that claim cannot name another run as its
+  parent; `admin` keeps its operator override.
+
+## [v0.52.6] - 2026-09-16
+### Changed
+
 - **checks:** On exactly four logical CPUs, the broad gate overlaps its full Go
   suite with touched-package race tests after the build, then runs lint and the
   conditional PostgreSQL suite after both finish. Race tests can overlap two
   packages while each remains at `GOMAXPROCS=1`, and the gate declares the
   resulting 2.5-core workload. Other CPU classes retain their existing graph
   and Go parallelism.
-- **observability:** Failed writes of step state, annotations, or summaries
-  emit bounded, secret-masked warnings with run, node, and applicable step
-  identity. Execution outcomes remain unchanged.
 
 - **admission:** Queue waits now print one machine-first stream: running
   pipelines and their charges, queued count and place, request provenance,
@@ -55,17 +74,6 @@ unlock.
 
 ### Fixed
 
-- **runner:** Canceled parallel WorkSteps now cross controller and loopback
-  process boundaries as the store's existing `cancelled` terminal state, so a
-  failed parent run cannot leave a completed sibling reported as running.
-
-- **controller:** Runner reservations, usage charges and refunds retain the
-  run owner's principal in credit history after the run is deleted. Shared
-  runner pools no longer erase tenant attribution from new ledger rows.
-- **controller:** Child trigger submissions now bind parent lineage and
-  inherited repository provenance to the exact live parent node or trigger
-  claim. A `runs.write` token without that claim cannot name another run as its
-  parent; `admin` keeps its operator override.
 - **runner:** A foreground run's `--only` selection stops at its node-process
   boundary, so nested Sparkwing commands use their own job names and retain an
   explicitly supplied nested selection.
