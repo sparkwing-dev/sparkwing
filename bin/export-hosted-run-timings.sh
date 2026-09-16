@@ -18,7 +18,7 @@ if [ ! -s "$handle" ]; then
   exit 0
 fi
 run_id="$(jq -er '.run_id | select(type == "string" and length > 0)' "$handle")"
-if ! "$sparkwing_binary" runs status --run "$run_id" -o json >"$scratch/status.json"; then
+if ! "$sparkwing_binary" runs status --run "$run_id" --exit-zero -o json >"$scratch/status.json"; then
   jq -n --arg run_id "$run_id" \
     '{format_version: 1, availability: "unavailable", reason: "status_query_failed", run_id: $run_id}' >"$output"
   exit 1

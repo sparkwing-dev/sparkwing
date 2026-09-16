@@ -10,7 +10,7 @@ import (
 )
 
 func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
-	for _, outcome := range []string{"success", "failed", "running"} {
+	for _, outcome := range []string{"success", "failed", "cancelled", "running"} {
 		t.Run(outcome, func(t *testing.T) {
 			dir := t.TempDir()
 			handle := filepath.Join(dir, "handle.json")
@@ -20,7 +20,11 @@ func TestHostedTimingExportPreservesOutcomesWithoutPrivateFields(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixture := `{"run":{"id":"run-proof","status":"` + outcome + `","git_sha":"abc","invocation":{"args":"PRIVATE_SENTINEL"}},"log_path":"PRIVATE_SENTINEL","nodes":[{"id":"gate","status":"` + outcome + `","cpu_nanos":123,"max_rss_bytes":456,"error":"PRIVATE_SENTINEL","steps":[{"step_id":"test","status":"` + outcome + `","started_at":"2026-09-15T00:00:00Z","error":"PRIVATE_SENTINEL"}]}]}`
-			if err := os.WriteFile(binary, []byte("#!/bin/sh\ncat <<'JSON'\n"+fixture+"\nJSON\n"), 0o700); err != nil {
+			stub := "#!/bin/sh\ncat <<'JSON'\n" + fixture + "\nJSON\n"
+			if outcome != "success" {
+				stub += "case \" $* \" in *' --exit-zero '*) exit 0;; *) exit 1;; esac\n"
+			}
+			if err := os.WriteFile(binary, []byte(stub), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.Command("bash", "../../bin/export-hosted-run-timings.sh", handle, binary, output)
