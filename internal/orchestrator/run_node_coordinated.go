@@ -113,7 +113,7 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 		}
 		ctx = sparkwingruntime.WithStepRange(ctx, startAt, stopAt)
 	}
-	if os.Getenv("SPARKWING_DRY_RUN") == "1" {
+	if dryRunFromEnv() {
 		ctx = sparkwingruntime.WithDryRun(ctx)
 	}
 	return ctx, nil

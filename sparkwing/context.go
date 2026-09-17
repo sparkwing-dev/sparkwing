@@ -29,6 +29,18 @@ type RunContext struct {
 
 	// StartedAt is set when the orchestrator begins the run.
 	StartedAt time.Time
+
+	// NoCache reports that this run was asked to ignore cached per-node
+	// results; cache writes still happen. Plan code reads the signal here
+	// because the orchestrator installs it on the context only after the
+	// plan is built.
+	NoCache bool
+
+	// DryRun reports that this run was asked to describe its work rather
+	// than apply it. A step body reads the same answer from [IsDryRun];
+	// this field is what a Plan reads, which runs before the orchestrator
+	// installs the mode on the context.
+	DryRun bool
 }
 
 // TriggerInfo describes the trigger that started the run.

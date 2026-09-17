@@ -222,6 +222,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		Git:       gitOpt,
 		Trigger:   trigger,
 		StartedAt: time.Now(),
+		NoCache:   opts.NoCache,
+		DryRun:    opts.DryRun,
 	}
 	sparkwing.SetGit(gitOpt)
 

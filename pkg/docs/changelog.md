@@ -19,6 +19,14 @@ unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `RunContext` carries `NoCache` and `DryRun`, so a `Plan` can see the run
+  modes the operator asked for. A step body still reads the mode from
+  `sparkwing.IsDryRun`; a plan runs before either mode reaches the context, so these
+  fields are the only view it has. Plan code that decides what a run covers can now
+  fail closed on a forced uncached run instead of reading a private environment
+  variable.
 
 ## [v0.52.9] - 2026-09-16
 ### Fixed

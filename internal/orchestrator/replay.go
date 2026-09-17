@@ -91,6 +91,8 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:   sparkwing.TriggerInfo{Source: "replay"},
 		StartedAt: run.StartedAt,
+		NoCache:   noCacheFromEnv(),
+		DryRun:    dryRunFromEnv(),
 	}
 
 	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default())

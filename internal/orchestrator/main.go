@@ -139,9 +139,9 @@ func Main() {
 		StartAt:                   os.Getenv("SPARKWING_START_AT"),
 		StopAt:                    os.Getenv("SPARKWING_STOP_AT"),
 		Only:                      os.Getenv("SPARKWING_ONLY"),
-		NoCache:                   os.Getenv("SPARKWING_NO_CACHE") == "1",
+		NoCache:                   noCacheFromEnv(),
 		Priority:                  os.Getenv(PriorityEnv),
-		DryRun:                    os.Getenv("SPARKWING_DRY_RUN") == "1",
+		DryRun:                    dryRunFromEnv(),
 		LocalOnly:                 os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		Fleet:                     os.Getenv("SPARKWING_FLEET") == "1",
 		FleetConfigPath:           os.Getenv("SPARKWING_FLEET_CONFIG"),
@@ -444,6 +444,8 @@ func printPipelinePlan(pipeline string, rest []string) error {
 	rc := sparkwing.RunContext{
 		Pipeline: pipeline,
 		RunID:    "explain",
+		NoCache:  noCacheFromEnv(),
+		DryRun:   dryRunFromEnv(),
 	}
 	plan, err := reg.Invoke(context.Background(), argsMap, rc)
 	if err != nil {

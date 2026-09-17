@@ -23,6 +23,8 @@ func printPipelineRuntimePlan(pipeline string, rest []string) error {
 	rc := sparkwing.RunContext{
 		Pipeline: pipeline,
 		RunID:    "plan",
+		NoCache:  noCacheFromEnv(),
+		DryRun:   dryRunFromEnv(),
 	}
 	plan, err := reg.Invoke(context.Background(), argsMap, rc)
 	if err != nil {

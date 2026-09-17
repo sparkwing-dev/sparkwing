@@ -1,6 +1,15 @@
 package orchestrator
 
-import "context"
+import (
+	"context"
+	"os"
+)
+
+const envNoCache = "SPARKWING_NO_CACHE"
+
+func noCacheFromEnv() bool {
+	return os.Getenv(envNoCache) == "1"
+}
 
 type noCacheKey struct{}
 

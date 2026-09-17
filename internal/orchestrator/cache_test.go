@@ -128,8 +128,20 @@ func (hookOrderingPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 	return nil
 }
 
+type runModeReportingPipe struct{ sparkwing.Base }
+
+var planSawNoCache, planSawDryRun atomic.Bool
+
+func (runModeReportingPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	planSawNoCache.Store(rc.NoCache)
+	planSawDryRun.Store(rc.DryRun)
+	sparkwing.Job(plan, "noop", func(context.Context) error { return nil })
+	return nil
+}
+
 func init() {
 	register("cache-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cachedPipe{} })
+	register("run-mode-reporting", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &runModeReportingPipe{} })
 	register("hooks-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &hooksPipe{} })
 	register("hooks-before-fails", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &beforeFails{} })
 	register("hooks-after-on-failure", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &afterFiresOnFailure{} })
@@ -333,4 +345,27 @@ func countCacheRows(t *testing.T, st *store.Store) int {
 		t.Fatalf("CountConcurrencyCache: %v", err)
 	}
 	return n
+}
+
+func TestRunModes_ReachThePlanThatDecidesWhatTheRunCovers(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		planSawNoCache.Store(!want)
+		planSawDryRun.Store(!want)
+		res, err := orchestrator.RunLocal(context.Background(), newPaths(t),
+			orchestrator.Options{Pipeline: "run-mode-reporting", NoCache: want, DryRun: want})
+		if err != nil {
+			t.Fatalf("RunLocal(NoCache=%v, DryRun=%v): %v", want, want, err)
+		}
+		if res.Status != "success" {
+			t.Fatalf("status = %q, want success", res.Status)
+		}
+		if got := planSawNoCache.Load(); got != want {
+			t.Fatalf("plan read NoCache = %v, want %v: the orchestrator installs the same signal on "+
+				"the context only after the plan is built, so RunContext is the plan's only view of it", got, want)
+		}
+		if got := planSawDryRun.Load(); got != want {
+			t.Fatalf("plan read DryRun = %v, want %v: IsDryRun answers a step body, and a plan runs "+
+				"before the mode reaches the context, so RunContext is the plan's only view of it", got, want)
+		}
+	}
 }
