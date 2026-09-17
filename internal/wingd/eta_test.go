@@ -150,3 +150,72 @@ func TestQueueBlockingReason_FillsArrivalOrderWait(t *testing.T) {
 		t.Fatalf("queueBlockingReason = %q, want first waiter to remain unexplained by arrival order", got)
 	}
 }
+
+func TestSimulateAdmissionETA_AgreesWithTheLedgerUnderAHeadroomSqueeze(t *testing.T) {
+	ledger, err := admission.New(admission.Config{TotalMemoryBytes: 8 << 30})
+	if err != nil {
+		t.Fatalf("new ledger: %v", err)
+	}
+	holder := grantMemory(t, ledger, "holder", 5<<30)
+	queueMemory(t, ledger, "heavy", 6<<30)
+	grantMemory(t, ledger, "backfill", 1<<30)
+	if _, err := ledger.SetHeadroom(0, 4<<30); err != nil {
+		t.Fatalf("squeeze headroom: %v", err)
+	}
+	if _, err := ledger.Release(holder, "holder"); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+
+	snap := ledger.Snapshot()
+	if len(snap.Waiters) != 1 || snap.Waiters[0].BackfillCount != 1 {
+		t.Fatalf("waiters = %+v, want heavy alone and protected after one backfill", snap.Waiters)
+	}
+	snap.Waiters = append(snap.Waiters, admission.WaiterState{
+		RequestID:   "small",
+		Admit:       snap.AdmitSeq + 1,
+		MemoryBytes: 64 << 20,
+	})
+	var qs wingwire.QueueState
+	for _, lease := range snap.Leases {
+		qs.Holders = append(qs.Holders, wingwire.Holder{RunID: lease.RequestID, ExpectedDurationMS: 10_000})
+	}
+	for _, waiter := range snap.Waiters {
+		qs.Waiters = append(qs.Waiters, wingwire.Waiter{RunID: waiter.RequestID, ExpectedDurationMS: 1_000})
+	}
+
+	starts, _ := simulateAdmissionETA(&qs, snap)
+	decision, _, err := ledger.Submit(admission.Request{ID: "small", MemoryBytes: 64 << 20})
+	if err != nil {
+		t.Fatalf("submit small: %v", err)
+	}
+	if decision.Kind != admission.DecisionGranted {
+		t.Fatalf("ledger answered small with %s, want %s", decision.Kind, admission.DecisionGranted)
+	}
+	if starts[1] != 0 {
+		t.Fatalf("estimated start for small = %v, want 0: the ledger admits it now, so an estimate "+
+			"promising a wait describes a queue this daemon does not have", starts[1])
+	}
+}
+
+func grantMemory(t *testing.T, ledger *admission.Ledger, id string, bytes uint64) admission.LeaseID {
+	t.Helper()
+	decision, _, err := ledger.Submit(admission.Request{ID: id, MemoryBytes: bytes})
+	if err != nil {
+		t.Fatalf("submit %q: %v", id, err)
+	}
+	if decision.Kind != admission.DecisionGranted {
+		t.Fatalf("submit %q = %s, want %s", id, decision.Kind, admission.DecisionGranted)
+	}
+	return decision.Lease.ID
+}
+
+func queueMemory(t *testing.T, ledger *admission.Ledger, id string, bytes uint64) {
+	t.Helper()
+	decision, _, err := ledger.Submit(admission.Request{ID: id, MemoryBytes: bytes})
+	if err != nil {
+		t.Fatalf("submit %q: %v", id, err)
+	}
+	if decision.Kind != admission.DecisionQueued {
+		t.Fatalf("submit %q = %s, want %s", id, decision.Kind, admission.DecisionQueued)
+	}
+}

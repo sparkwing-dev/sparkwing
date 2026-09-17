@@ -28,6 +28,7 @@ type etaRun struct {
 
 type etaSimulation struct {
 	totalCores int64
+	totalMem   uint64
 	capCores   int64
 	capMem     uint64
 	lastCap    map[string]uint64
@@ -38,6 +39,7 @@ type etaSimulation struct {
 func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]float64, float64) {
 	sim := etaSimulation{
 		totalCores: snap.TotalMilliCores,
+		totalMem:   snap.TotalMemoryBytes,
 		capCores:   min64(snap.TotalMilliCores, snap.HeadroomMilliCores),
 		capMem:     minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes),
 		lastCap:    map[string]uint64{},
@@ -346,43 +348,62 @@ func (s *etaSimulation) starvedByYounger(run *etaRun, resource string) bool {
 }
 
 func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, used, older, capacity uint64, ok bool) {
+	limits, ok := s.resourceCapacity(run, resource)
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	capacity = limits.now
+	demand, _ = etaResourceCost(run, resource)
 	switch resource {
 	case "cores":
-		demand, capacity, ok = nonnegativeInt64(run.cores), nonnegativeInt64(s.capCores), true
 		for _, holder := range s.active {
 			used = saturatingAddUint64(used, nonnegativeInt64(holder.cores))
 			if holder.admit <= run.admit {
 				older = saturatingAddUint64(older, nonnegativeInt64(holder.cores))
 			}
 		}
-		return demand, used, older, capacity, ok
 	case "memory":
-		demand, capacity, ok = run.mem, s.capMem, true
 		for _, holder := range s.active {
 			used = saturatingAddUint64(used, holder.mem)
 			if holder.admit <= run.admit {
 				older = saturatingAddUint64(older, holder.mem)
 			}
 		}
-		return demand, used, older, capacity, ok
+	default:
+		key := resource[len("semaphore:"):]
+		claim, _ := etaClaimFor(run, key)
+		used, _ = s.semaphoreBudget(key, claim.capacity)
+		for _, holder := range s.active {
+			if holder.admit > run.admit {
+				continue
+			}
+			if held, has := etaClaimFor(holder, key); has {
+				older = saturatingAddUint64(older, held.cost)
+			}
+		}
+	}
+	return demand, used, older, capacity, true
+}
+
+type etaCapacityLimits struct {
+	now       uint64
+	recovered uint64
+}
+
+func (s *etaSimulation) resourceCapacity(run *etaRun, resource string) (etaCapacityLimits, bool) {
+	switch resource {
+	case "cores":
+		return etaCapacityLimits{now: nonnegativeInt64(s.capCores), recovered: nonnegativeInt64(s.totalCores)}, true
+	case "memory":
+		return etaCapacityLimits{now: s.capMem, recovered: s.totalMem}, true
 	}
 	key := resource[len("semaphore:"):]
 	claim, found := etaClaimFor(run, key)
 	if !found || claim.policy == admission.PolicyCancelOthers {
-		return 0, 0, 0, 0, false
+		return etaCapacityLimits{}, false
 	}
-	demand = claim.cost
-	used, capacity = s.semaphoreBudget(key, claim.capacity)
-	ok = true
-	for _, holder := range s.active {
-		if holder.admit > run.admit {
-			continue
-		}
-		if held, has := etaClaimFor(holder, key); has {
-			older = saturatingAddUint64(older, held.cost)
-		}
-	}
-	return demand, used, older, capacity, ok
+	_, effective := s.semaphoreBudget(key, claim.capacity)
+	return etaCapacityLimits{now: effective, recovered: effective}, true
 }
 
 func etaFitsCost(used, cost, capacity uint64) bool {
@@ -405,7 +426,8 @@ func (s *etaSimulation) violatesReservation(candidate *etaRun, protected []*etaR
 			if !ok || candidateCost == 0 {
 				continue
 			}
-			demand, _, _, capacity, ok := s.resourceBudget(waiter, resource)
+			demand, _ := etaResourceCost(waiter, resource)
+			limits, ok := s.resourceCapacity(waiter, resource)
 			if !ok {
 				continue
 			}
@@ -417,7 +439,9 @@ func (s *etaSimulation) violatesReservation(candidate *etaRun, protected []*etaR
 				cost, _ := etaResourceCost(holder, resource)
 				surviving = saturatingAddUint64(surviving, cost)
 			}
-			if !etaFitsCost(surviving, demand, capacity) || !etaFitsCost(saturatingAddUint64(surviving, demand), candidateCost, capacity) {
+			// safety: this mirrors the ledger's own reservation rule, which judges a squeezed head
+			// against the capacity the host recovers to rather than what it offers now
+			if !etaFitsCost(saturatingAddUint64(surviving, demand), candidateCost, limits.recovered) {
 				return true
 			}
 		}
