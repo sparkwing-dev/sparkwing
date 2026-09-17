@@ -475,8 +475,6 @@ func specBelongsToRun(s spec, runID string) bool {
 	return s.id == runID || s.ownerID == runID
 }
 
-// overrideForSpec resolves the participant's own override ahead of its
-// run's, so re-ranking a run never overwrites a rank set on one node.
 func (l *Ledger) overrideForSpec(s spec) (int, bool) {
 	if p, ok := l.priorityOverrides[s.id]; ok {
 		return p, true
@@ -495,10 +493,8 @@ func (l *Ledger) applyPriorityOverride(s *spec) {
 	}
 }
 
-// pruneOverrides forgets the rank of a run that has nothing left in the
-// ledger, so an override cannot outlive its run and re-rank a later run
-// that reuses the id.
 func (l *Ledger) pruneOverrides() {
+	// safety: an override outliving its run re-ranks a later run that reuses the id
 	for runID := range l.priorityOverrides {
 		if l.runPresent(runID) {
 			continue
