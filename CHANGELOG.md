@@ -19,6 +19,8 @@ unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.53.0] - 2026-09-17
 ### Added
 
 - **sdk:** `RunContext` carries `NoCache` and `DryRun`, so a `Plan` can see the run
