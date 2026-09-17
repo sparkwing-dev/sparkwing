@@ -475,8 +475,6 @@ func specBelongsToRun(s spec, runID string) bool {
 	return s.id == runID || s.ownerID == runID
 }
 
-// overrideForSpec resolves the participant's own override ahead of its
-// run's, so re-ranking a run never overwrites a rank set on one node.
 func (l *Ledger) overrideForSpec(s spec) (int, bool) {
 	if p, ok := l.priorityOverrides[s.id]; ok {
 		return p, true
@@ -495,10 +493,8 @@ func (l *Ledger) applyPriorityOverride(s *spec) {
 	}
 }
 
-// pruneOverrides forgets the rank of a run that has nothing left in the
-// ledger, so an override cannot outlive its run and re-rank a later run
-// that reuses the id.
 func (l *Ledger) pruneOverrides() {
+	// safety: an override outliving its run re-ranks a later run that reuses the id
 	for runID := range l.priorityOverrides {
 		if l.runPresent(runID) {
 			continue
@@ -658,7 +654,8 @@ func (l *Ledger) violatesReservation(candidate spec, protected []*waiter) bool {
 			if !ok || candidateCost == 0 {
 				continue
 			}
-			demand, _, _, capacity, ok := l.resourceBudget(w.spec, r)
+			demand, _ := specResourceCost(w.spec, r)
+			limits, ok := l.resourceCapacity(w.spec, r)
 			if !ok {
 				continue
 			}
@@ -670,7 +667,9 @@ func (l *Ledger) violatesReservation(candidate spec, protected []*waiter) bool {
 				cost, _ := leaseResourceCost(le, r)
 				surviving += cost
 			}
-			if !fitsCost(surviving, demand, capacity) || !fitsCost(surviving+demand, candidateCost, capacity) {
+			// safety: a head squeezed out by host pressure regains its fit when the pressure lifts, so
+			// the reservation is judged against the capacity the host recovers to, not what it offers now
+			if !fitsCost(surviving+demand, candidateCost, limits.recovered) {
 				return true
 			}
 		}
@@ -783,33 +782,29 @@ func (l *Ledger) starvedByYounger(w spec, r resource) bool {
 }
 
 func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, capacity int64, ok bool) {
+	limits, ok := l.resourceCapacity(w, r)
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	capacity = limits.now
+	demand, _ = specResourceCost(w, r)
 	switch r {
 	case resourceCores:
-		capacity = min(l.totalMilliCores, l.headroomMilliCores)
 		used = l.usedMilliCores
 		for _, le := range l.leases {
 			if le.admit <= w.admit {
 				usedOlder += le.milliCores
 			}
 		}
-		return w.milliCores, used, usedOlder, capacity, true
 	case resourceMemory:
-		capacity = int64(min(l.totalMemory, l.headroomMemory))
 		used = int64(l.usedMemory)
 		for _, le := range l.leases {
 			if le.admit <= w.admit {
 				usedOlder += int64(le.memory)
 			}
 		}
-		return int64(w.memory), used, usedOlder, capacity, true
 	default:
-		key := semKeyOf(r)
-		c, found := w.claim(key)
-		if !found || c.policy == PolicyCancelOthers {
-			return 0, 0, 0, 0, false
-		}
-		capacity = int64(l.semEffectiveCapacity(key, c.capacity))
-		if sem := l.sems[key]; sem != nil {
+		if sem := l.sems[semKeyOf(r)]; sem != nil {
 			for _, h := range sem.holds {
 				if h.superseded {
 					continue
@@ -820,7 +815,29 @@ func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, ca
 				}
 			}
 		}
-		return int64(c.cost), used, usedOlder, capacity, true
+	}
+	return demand, used, usedOlder, capacity, true
+}
+
+type capacityLimits struct {
+	now       int64
+	recovered int64
+}
+
+func (l *Ledger) resourceCapacity(w spec, r resource) (capacityLimits, bool) {
+	switch r {
+	case resourceCores:
+		return capacityLimits{now: min(l.totalMilliCores, l.headroomMilliCores), recovered: l.totalMilliCores}, true
+	case resourceMemory:
+		return capacityLimits{now: int64(min(l.totalMemory, l.headroomMemory)), recovered: int64(l.totalMemory)}, true
+	default:
+		key := semKeyOf(r)
+		c, found := w.claim(key)
+		if !found || c.policy == PolicyCancelOthers {
+			return capacityLimits{}, false
+		}
+		effective := int64(l.semEffectiveCapacity(key, c.capacity))
+		return capacityLimits{now: effective, recovered: effective}, true
 	}
 }
 

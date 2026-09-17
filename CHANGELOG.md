@@ -19,6 +19,14 @@ unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** A queue head held back by CPU or memory the daemon does not schedule
+  no longer stalls every other run on the host. The reservation that keeps a passed-over
+  head from being starved is judged against the capacity the host recovers to rather
+  than the capacity left after an external squeeze, so work that fits what is free is
+  admitted while the head keeps its place in line. Queue estimates read the same rule,
+  and no longer promise a wait for a run that starts immediately.
 
 ## [v0.52.9] - 2026-09-16
 ### Fixed

@@ -305,3 +305,53 @@ func TestCancelWaiterPreservesProtectedHeadAdmission(t *testing.T) {
 		t.Fatalf("promoted %q, want protected heavy head", events[1].RequestID)
 	}
 }
+
+func TestWeighted_HeadroomSqueezeKeepsReservationInsideTotalCapacity(t *testing.T) {
+	l := testLedger(t, 0, 8<<30)
+	holder := mustGrant(t, l, Request{ID: "holder", MemoryBytes: 5 << 30})
+	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
+
+	backfill, events := submit(t, l, Request{ID: "backfill", MemoryBytes: 1 << 30})
+	if backfill.Kind != DecisionGranted {
+		t.Fatalf("backfill = %+v, want granted past the non-fitting heavy head", backfill)
+	}
+	wantKinds(t, events, EventBackfilled, EventGranted)
+	if events[0].RequestID != "heavy" || events[0].BypassedBy != "backfill" || events[0].BackfillCount != 1 {
+		t.Fatalf("backfill event = %+v, want heavy bypassed once and so protected", events[0])
+	}
+
+	if _, err := l.SetHeadroom(0, 4<<30); err != nil {
+		t.Fatalf("squeeze headroom: %v", err)
+	}
+	mustRelease(t, l, holder.ID, "holder")
+
+	if snap := l.Snapshot(); len(snap.Leases) != 1 {
+		t.Fatalf("leases = %+v, want the backfill still held so the host is not idle", snap.Leases)
+	}
+	small, _ := submit(t, l, Request{ID: "small", MemoryBytes: 64 << 20})
+	if small.Kind != DecisionGranted {
+		t.Fatalf("small = %+v, want granted: 1GiB of the 4GiB headroom is held, and heavy still fits "+
+			"beside both once the squeeze lifts, so reserving for heavy costs it nothing to admit", small)
+	}
+}
+
+func TestWeighted_ReservationCountsYoungerHoldersAgainstTheProtectedHead(t *testing.T) {
+	l := testLedger(t, 0, 8<<30)
+	mustGrant(t, l, Request{ID: "older", MemoryBytes: 4 << 30})
+	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 5 << 30})
+
+	young, events := submit(t, l, Request{ID: "young", MemoryBytes: 2 << 30})
+	if young.Kind != DecisionGranted {
+		t.Fatalf("young = %+v, want granted past the non-fitting heavy head", young)
+	}
+	wantKinds(t, events, EventBackfilled, EventGranted)
+	if events[0].RequestID != "heavy" || events[0].BypassedBy != "young" || events[0].BackfillCount != 1 {
+		t.Fatalf("backfill event = %+v, want heavy bypassed once and so protected", events[0])
+	}
+
+	candidate, _ := submit(t, l, Request{ID: "candidate", MemoryBytes: 2 << 30})
+	if candidate.Kind != DecisionQueued {
+		t.Fatalf("candidate = %+v, want queued: young outlives the older holder, so 2GiB held plus "+
+			"heavy's 5GiB plus another 2GiB overruns the 8GiB the host can offer heavy", candidate)
+	}
+}
