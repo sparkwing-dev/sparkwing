@@ -151,6 +151,8 @@ func RunNodeOnce(
 			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:   sparkwing.TriggerInfo{Source: run.TriggerSource},
 		StartedAt: run.StartedAt,
+		NoCache:   noCacheFromEnv(),
+		DryRun:    dryRunFromEnv(),
 	}
 	sparkwing.SetGit(rc.Git)
 
@@ -341,11 +343,10 @@ func runNodeCLI(args []string) error {
 		return errors.New("--controller (or " + wingwire.APISocketEnv + ") + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
 	}
 
-	// safety: SIGTERM still ends the node by its default action; bounce,
-	// cancellation, and pod termination rely on the supervisor rather than the
-	// killed node to record the outcome. The forwarder only reaps the step
-	// sessions first: the SDK isolates each one, so no group kill aimed at the
-	// node reaches them.
+	// safety: the supervisor records a killed node's outcome, not the node, so
+	// SIGTERM keeping its default action is intended. The forwarder reaps only the
+	// step sessions, which the SDK isolates, so no group kill aimed at the node
+	// reaches them.
 	procgroup.ForwardTerminationToOwned()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
