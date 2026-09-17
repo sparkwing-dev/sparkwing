@@ -28,6 +28,11 @@ unlock.
   fail closed on a forced uncached run instead of reading a private environment
   variable.
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.52.9, so a fresh scaffold compiles
+  against the latest release.
+
 ### Fixed
 
 - **admission:** A queue head held back by CPU or memory the daemon does not schedule

@@ -612,6 +612,10 @@ type RunContext struct {
 	Trigger TriggerInfo
 
 	StartedAt time.Time
+
+	NoCache bool
+
+	DryRun bool
 }
 func RunWork(ctx context.Context, w *Work) (any, error)
 func Runner(ctx context.Context) *RunnerInfo
