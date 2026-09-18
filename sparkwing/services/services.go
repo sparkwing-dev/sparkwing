@@ -24,6 +24,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -40,6 +42,10 @@ var ErrDockerUnavailable = docker.ErrDockerUnavailable
 
 // DefaultReadyTimeout is used when a Service leaves ReadyTimeout zero.
 const DefaultReadyTimeout = 30 * time.Second
+
+// AutoPort asks WithServices to publish a service on a free host port chosen by
+// the operating system, rather than on a port the caller names.
+const AutoPort = -1
 
 const readyPollInterval = 500 * time.Millisecond
 
@@ -59,10 +65,16 @@ type Service struct {
 	Name string
 
 	// Port is the container port the service listens on. When set, it is
-	// published to 127.0.0.1:<Port> so a host process (the test) reaches
-	// it at localhost:<Port> on every platform incl. Docker Desktop.
+	// published to 127.0.0.1 so a host process (the test) reaches it on
+	// every platform incl. Docker Desktop.
 	// When zero, the container uses host networking (Linux only).
 	Port int
+
+	// HostPort is the host port Port is published on. Zero publishes Port
+	// itself. AutoPort asks the operating system for a free one, which
+	// [WithServicesAddrs] reports back; a fixed port cannot be shared by two
+	// runs on one machine, so concurrent callers pass AutoPort.
+	HostPort int
 
 	// Env is the set of environment variables to pass to the container.
 	Env map[string]string
@@ -85,10 +97,37 @@ type Service struct {
 // caller cannot act on them usefully.
 //
 // If services is empty, fn runs once with no docker interaction.
+//
+// A service published on [AutoPort] needs the port it was given, which this
+// signature cannot carry; call [WithServicesAddrs] instead.
 func WithServices(ctx context.Context, services []Service, fn func(context.Context) error) error {
-	planguard.Guard(ctx, "services.WithServices")
-	if len(services) == 0 {
+	return withServices(ctx, "services.WithServices", services, func(ctx context.Context, _ []Addr) error {
 		return fn(ctx)
+	})
+}
+
+// Addr is where one service ended up, in the order the services were given.
+type Addr struct {
+	// Name is the container name, which WithServicesAddrs derives when the
+	// caller leaves [Service.Name] empty.
+	Name string
+
+	// HostPort is the port on 127.0.0.1 the service is published on, or zero
+	// for a service using host networking.
+	HostPort int
+}
+
+// WithServicesAddrs is [WithServices] that also hands fn where each service was
+// published, one Addr per service in the order given. A service asking for
+// [AutoPort] reads its port here, which is the only place it is reported.
+func WithServicesAddrs(ctx context.Context, services []Service, fn func(context.Context, []Addr) error) error {
+	return withServices(ctx, "services.WithServicesAddrs", services, fn)
+}
+
+func withServices(ctx context.Context, guard string, services []Service, fn func(context.Context, []Addr) error) error {
+	planguard.Guard(ctx, guard)
+	if len(services) == 0 {
+		return fn(ctx, nil)
 	}
 
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -105,6 +144,17 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 			}
 			resolved[i].Name = deriveName(resolved[i].Image) + "-" + suffix
 		}
+	}
+
+	release, err := resolveHostPorts(resolved)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	addrs := make([]Addr, len(resolved))
+	for i := range resolved {
+		addrs[i] = Addr{Name: resolved[i].Name, HostPort: publishedPort(resolved[i])}
 	}
 
 	started := make([]string, 0, len(resolved))
@@ -124,7 +174,7 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 		args := []string{"run", "-d", "--name", svc.Name}
 		if svc.Port > 0 {
 			// hack: bind to 127.0.0.1 so Docker Desktop (macOS/Windows) containers are reachable from the host.
-			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", svc.Port, svc.Port))
+			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", publishedPort(*svc), svc.Port))
 		} else {
 			// hack: no port declared; host networking only works on Linux.
 			args = append(args, "--network=host")
@@ -146,8 +196,56 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 		}
 	}
 
+	// safety: the probe listeners are closed before fn runs, so a service that
+	// failed to bind its port surfaces to fn rather than to the next caller.
+	release()
+
 	// safety: fn is the last statement so a panic unwinds through defer cleanup without re-wrapping the stack.
-	return fn(ctx)
+	return fn(ctx, addrs)
+}
+
+func publishedPort(svc Service) int {
+	if svc.Port <= 0 {
+		return 0
+	}
+	if svc.HostPort != 0 {
+		return svc.HostPort
+	}
+	return svc.Port
+}
+
+// safety: each probe listener stays open until every port is chosen, so two
+// services in one call cannot be handed the same port.
+func resolveHostPorts(services []Service) (func(), error) {
+	var probes []io.Closer
+	release := func() {
+		for _, probe := range probes {
+			_ = probe.Close()
+		}
+		probes = nil
+	}
+	for i := range services {
+		if services[i].HostPort != AutoPort {
+			continue
+		}
+		if services[i].Port <= 0 {
+			release()
+			return nil, fmt.Errorf("services: %s asks for a host port without declaring a container Port", services[i].Name)
+		}
+		probe, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		if err != nil {
+			release()
+			return nil, fmt.Errorf("services: reserve a host port for %s: %w", services[i].Name, err)
+		}
+		probes = append(probes, probe)
+		addr, ok := probe.Addr().(*net.TCPAddr)
+		if !ok {
+			release()
+			return nil, fmt.Errorf("services: reserve a host port for %s: listener reported %T", services[i].Name, probe.Addr())
+		}
+		services[i].HostPort = addr.Port
+	}
+	return release, nil
 }
 
 func waitReady(ctx context.Context, svc *Service) error {
