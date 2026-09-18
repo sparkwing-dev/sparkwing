@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -31,9 +32,21 @@ type TaggedRun struct {
 // opened read-only. A store this binary did not read is absent from the set
 // and named in [StandaloneStores.Notes].
 type StandaloneStores struct {
-	open  []openStandalone
-	notes []string
+	open   []openStandalone
+	notes  []string
+	failed bool
 }
+
+func (s *StandaloneStores) noteOnce(note string) {
+	if slices.Contains(s.notes, note) {
+		return
+	}
+	s.notes = append(s.notes, note)
+}
+
+// Failed reports whether a store stopped answering mid-read, so a caller can say its
+// result is short rather than whole.
+func (s *StandaloneStores) Failed() bool { return s != nil && s.failed }
 
 type openStandalone struct {
 	label string
@@ -185,7 +198,8 @@ func (s *StandaloneStores) ListRuns(ctx context.Context, filter store.RunFilter)
 	for _, o := range s.open {
 		runs, err := o.st.ListRuns(ctx, filter)
 		if err != nil {
-			s.notes = append(s.notes, fmt.Sprintf("standalone store %s cannot be read by this sparkwing", o.label))
+			s.noteOnce(fmt.Sprintf("standalone store %s cannot be read by this sparkwing", o.label))
+			s.failed = true
 			continue
 		}
 		for _, r := range runs {
@@ -193,6 +207,28 @@ func (s *StandaloneStores) ListRuns(ctx context.Context, filter store.RunFilter)
 		}
 	}
 	return out
+}
+
+// Contributed reports whether any standalone store bears on a listing's count: one
+// holding a matching run, or one this binary could not read. An open store matching
+// nothing leaves the shared store's count exact.
+func (s *StandaloneStores) Contributed(ctx context.Context, filter store.RunFilter) bool {
+	if s == nil {
+		return false
+	}
+	if len(s.notes) > 0 {
+		return true
+	}
+	counted := filter
+	counted.Limit = 0
+	counted.AfterStartedAt, counted.AfterID = 0, ""
+	for _, o := range s.open {
+		n, err := o.st.CountRuns(ctx, counted)
+		if err != nil || n > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Find returns the first standalone store holding runID together with its
@@ -263,11 +299,13 @@ func MergeTaggedRuns(rows []TaggedRun) []TaggedRun {
 			out[i] = r
 		}
 	}
+	// safety: this order is the one the store returns and the cursor predicate assumes;
+	// a walk resuming after the last merged row would otherwise land inside a tie group.
 	sort.SliceStable(out, func(i, j int) bool {
 		if !out[i].StartedAt.Equal(out[j].StartedAt) {
 			return out[i].StartedAt.After(out[j].StartedAt)
 		}
-		return out[i].ID < out[j].ID
+		return out[i].ID > out[j].ID
 	})
 	return out
 }

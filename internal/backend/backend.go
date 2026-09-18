@@ -41,3 +41,13 @@ type ReadOpts struct {
 	Lines string
 	Grep  string
 }
+
+// RunFilterVersionFor is the run-list capability b can honestly announce. A backend
+// that filters runs it fetched itself ignores the cursor, so announcing it would leave
+// a caller paging a listing that hands back the same rows forever.
+func RunFilterVersionFor(b Backend) string {
+	if _, ok := b.(*StoreBackend); ok {
+		return store.RunFilterVersion
+	}
+	return "1"
+}

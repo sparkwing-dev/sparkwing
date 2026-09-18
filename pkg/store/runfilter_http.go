@@ -8,9 +8,30 @@ import (
 	"time"
 )
 
-// MaxRunListLimit is the largest number of runs a list query may ask
-// for. Higher values are clamped rather than rejected.
+// MaxRunListLimit is the largest page of runs a list query may ask for. A
+// larger ask is clamped rather than rejected.
 const MaxRunListLimit = 1000
+
+const maxRunListFetch = MaxRunListLimit + 1
+
+// RunFilterVersion is what a controller reports for the run-list filters it understands.
+// A "1" controller ignores the cursor silently rather than refusing it, so a caller that
+// needs the cursor checks this before trusting a page.
+const RunFilterVersion = "2"
+
+// SupportsRunIdentityFilters reports whether a controller announcing version
+// serves the branch, SHA and repo filters natively.
+func SupportsRunIdentityFilters(version string) bool { return runFilterVersion(version) >= 1 }
+
+func SupportsRunCursor(version string) bool { return runFilterVersion(version) >= 2 }
+
+func runFilterVersion(version string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(version))
+	if err != nil {
+		return 0
+	}
+	return n
+}
 
 // ParseRunFilter accepts the public run-list query parameters. Unknown
 // parameters are ignored.
@@ -40,10 +61,16 @@ func ParseRunFilter(q url.Values) RunFilter {
 			f.Since = time.Now().Add(-d)
 		}
 	}
+	if v := q.Get("after_id"); v != "" {
+		n, err := strconv.ParseInt(q.Get("after_started_at"), 10, 64)
+		if err == nil {
+			f.AfterStartedAt, f.AfterID = n, v
+		}
+	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			// safety: an unbounded limit materializes every run row, plan and args blobs included.
-			f.Limit = min(n, MaxRunListLimit)
+			f.Limit = min(n, maxRunListFetch)
 		}
 	}
 	return f
@@ -52,6 +79,13 @@ func ParseRunFilter(q url.Values) RunFilter {
 // ParseRunFilterValidated rejects invalid public query values.
 func ParseRunFilterValidated(q url.Values) (RunFilter, error) {
 	f := ParseRunFilter(q)
+	// safety: a cursor half-read would silently serve the first page again, which
+	// reads to the caller as a result set that never advances.
+	id, instant := q.Get("after_id"), q.Get("after_started_at")
+	if (id != "" || instant != "") && !f.HasCursor() {
+		return RunFilter{}, fmt.Errorf(
+			"a cursor needs both after_id and a numeric after_started_at, got after_id=%q after_started_at=%q", id, instant)
+	}
 	for _, prefix := range f.GitSHAPrefixes {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
 		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {

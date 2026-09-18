@@ -35,8 +35,11 @@ func TestRunsListJSONIsNDJSON(t *testing.T) {
 	out := seedRunsAndList(t, 6)
 
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("runs list -o json emitted %d lines for 6 runs:\n%s", len(lines), out)
+	if len(lines) != 7 {
+		t.Fatalf("runs list -o json emitted %d lines for 6 runs and a page record:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[6], `"kind":"page"`) {
+		t.Fatalf("last line is not the page record: %s", lines[6])
 	}
 	head := strings.Join(lines[:5], "\n") + "\n"
 	five := decodeNDJSON[map[string]any](t, head)

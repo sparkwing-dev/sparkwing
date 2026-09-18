@@ -564,7 +564,7 @@ func runJobs(args []string) error {
 		return runTriggers(args[1:])
 	case "list":
 		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
-		limit := fs.Int("limit", 20, "maximum runs to show")
+		limit := fs.Int("limit", 20, "runs per page")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
 		since := lookbackDuration(fs, "since", 0, "only runs newer than this (1h, 24h, 7d, and similar durations)")
@@ -578,6 +578,7 @@ func runJobs(args []string) error {
 		startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
 		finishedAfter := fs.String("finished-after", "", "only runs whose FinishedAt >= this (excludes still-running)")
 		finishedBefore := fs.String("finished-before", "", "only runs whose FinishedAt <= this (excludes still-running)")
+		cursor := fs.String("cursor", "", "continue after next_cursor with the same filters")
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
@@ -594,6 +595,13 @@ func runJobs(args []string) error {
 		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs list")
 		if err != nil {
 			return err
+		}
+		if *limit == 0 {
+			return fmt.Errorf("runs list: --limit 0 is not a page size; page with --cursor instead, " +
+				"following next_cursor until truncated is false")
+		}
+		if *limit < 0 {
+			return fmt.Errorf("runs list: --limit must be greater than zero, got %d", *limit)
 		}
 
 		pipelineInc, pipelineExc := orchestrator.SplitExcludes(*pipelines)
@@ -653,6 +661,7 @@ func runJobs(args []string) error {
 			JSON:       resolvedFormat == "json",
 			Quiet:      *quiet,
 			Filter:     compiled,
+			Cursor:     *cursor,
 			ByPipeline: *byPipeline,
 			Pivot: orchestrator.PivotOpts{
 				SparklineLen: *sparkline,
