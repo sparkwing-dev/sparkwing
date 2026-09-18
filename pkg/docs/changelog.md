@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** `services.Service` carries `HostPort`, and `services.WithServicesAddrs`
+  hands its function where each service was published. `HostPort: services.AutoPort`
+  asks the operating system for a free port and reports it back; a `Service` could
+  previously only be published on a port the caller named, so two runs on one machine
+  collided and every caller that needed a free one wrote its own allocator.
+
+
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.54.0, so a fresh scaffold compiles against that release.
