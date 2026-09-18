@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// Runs sharing an instant are the case a started_at-only cursor gets wrong: it
-// either serves them twice or skips the whole group. The id tiebreaker is what
-// makes a walk across pages count each run once.
 func TestListRuns_CursorWalksRunsSharingAnInstantExactlyOnce(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
@@ -62,8 +59,6 @@ func TestListRuns_CursorWalksRunsSharingAnInstantExactlyOnce(t *testing.T) {
 	}
 }
 
-// CountRuns answers for the filter, not for the page, which is what makes a
-// page record able to say "1000 of 428000" rather than only "1000".
 func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
@@ -105,8 +100,6 @@ func TestCountRuns_IgnoresLimitAndHonoursTheCursor(t *testing.T) {
 	}
 }
 
-// The epoch case is not theoretical: a run that never started carries a zero
-// instant, and a walk reaching the oldest rows resumes inside that group.
 func TestListRuns_CursorResumesAfterARunAtTheEpoch(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
@@ -147,9 +140,6 @@ func TestListRuns_CursorResumesAfterARunAtTheEpoch(t *testing.T) {
 	}
 }
 
-// A walk must reach the never-started runs at the tail of a listing. They are
-// the group a deep walk resumes into, and a cursor that cannot address them
-// ends the walk early while reporting nothing wrong.
 func TestListRuns_CursorWalksPastNeverStartedRuns(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {

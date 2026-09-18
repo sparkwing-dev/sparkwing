@@ -26,8 +26,6 @@ func seedStandaloneRuns(t *testing.T, path string, n int) {
 	seedRuns(t, path, "run-standalone", n, time.Now().Add(-48*time.Hour))
 }
 
-// safety: runs are written newest-last, so the listing's newest-first order is
-// the reverse of the seeding order.
 func seedRuns(t *testing.T, path, prefix string, n int, base time.Time) {
 	t.Helper()
 	st, err := store.Open(path)
@@ -54,8 +52,6 @@ type listing struct {
 	summary PipelinePivotSummary
 }
 
-// safety: every test reads a listing through this, so none of them has to agree
-// separately about which line is which.
 func decodeListing(t *testing.T, raw string) listing {
 	t.Helper()
 	var out listing
@@ -115,8 +111,6 @@ func newSeededProfile(t *testing.T, runs int) *profile.Profile {
 	return &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: dbPath}}
 }
 
-// Paging must reach every run exactly once. A cursor that repeated or skipped a
-// row would make a count over several pages quietly wrong.
 func TestListJobs_CursorWalksEveryRunExactlyOnce(t *testing.T) {
 	p := newSeededProfile(t, 25)
 
@@ -146,10 +140,6 @@ func TestListJobs_CursorWalksEveryRunExactlyOnce(t *testing.T) {
 	}
 }
 
-// A window whose rows the client filters all reject must still advance. The
-// resume point follows the last run examined, not the last one kept; following
-// the last kept run would hand back the cursor it was given and never
-// terminate.
 func TestRunsPager_WindowAdvancesThroughAFullyFilteredWindow(t *testing.T) {
 	pager := newRunsPager(3, CompiledFilter{})
 	raw := make([]TaggedRun, 0, pager.budget)
@@ -180,14 +170,11 @@ func TestRunsPager_WindowAdvancesThroughAFullyFilteredWindow(t *testing.T) {
 }
 
 func TestParseRunsCursor(t *testing.T) {
-	// safety: a two-field value is the shape before the window anchor was added;
-	// taking it would re-derive the window from the clock and drop rows.
 	for _, raw := range []string{"", "not-a-cursor", "abc:run-1:0", "123", "1:run-1", "42::7"} {
 		if _, err := parseRunsCursor(raw); err == nil {
 			t.Errorf("parseRunsCursor(%q) succeeded, want a refusal", raw)
 		}
 	}
-	// safety: a run id may carry a colon, so the numeric fields are read from the ends.
 	got, err := parseRunsCursor("1750000000000000000:run:with:colons:99")
 	if err != nil {
 		t.Fatalf("parseRunsCursor: %v", err)
@@ -198,7 +185,6 @@ func TestParseRunsCursor(t *testing.T) {
 	}
 }
 
-// A page size above the ceiling is served at the ceiling, whatever was asked.
 func TestEffectiveRunsPageLimit_NeverExceedsTheCeiling(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -219,9 +205,6 @@ func TestEffectiveRunsPageLimit_NeverExceedsTheCeiling(t *testing.T) {
 	}
 }
 
-// total is the population the filters admit. Read on a later page it must not
-// shrink to "what is left", or a caller paging a rollup divides by a moving
-// number.
 func TestListJobs_TotalIsThePopulationOnEveryPage(t *testing.T) {
 	p := newSeededProfile(t, 25)
 
@@ -252,7 +235,6 @@ func TestListJobs_StandaloneRunsAreCountedAndRolledUp(t *testing.T) {
 		return decodeListing(t, buf.String())
 	}
 
-	// safety: the listing shows both stores, so a count of one of them is not its total.
 	if page := list(ListOpts{Limit: 3}).page; page.Total != nil {
 		t.Errorf("total = %d while the listing merges a standalone store the counter cannot see", *page.Total)
 	}
@@ -276,8 +258,6 @@ func standaloneDB(t *testing.T, root string) string {
 	return filepath.Join(dir, "state.db")
 }
 
-// hack: every request answers with the same newest page, the way a store that does
-// not understand the cursor parameters does.
 type cursorBlindLister struct {
 	page  []*store.Run
 	calls int
@@ -288,9 +268,6 @@ func (c *cursorBlindLister) ListRuns(context.Context, store.RunFilter) ([]*store
 	return c.page, nil
 }
 
-// A walk over a store that ignores the cursor must stop and say why. Without
-// the stop it never ends; without the reason a rollup reports capped totals as
-// if they covered everything.
 func TestForEachRunPage_StopsAndReportsWhenTheCursorIsIgnored(t *testing.T) {
 	pager := newRunsPager(3, CompiledFilter{})
 	page := make([]*store.Run, 0, pager.budget)
@@ -326,9 +303,6 @@ func TestForEachRunPage_StopsAndReportsWhenTheCursorIsIgnored(t *testing.T) {
 	}
 }
 
-// A merged walk resumes from the last row of its own ordering, so that ordering
-// must match the one the cursor predicate assumes. Runs sharing an instant are
-// where the two can disagree without anything else noticing.
 func TestListJobs_MergedWalkCountsTiedRunsOnce(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -346,8 +320,6 @@ func TestListJobs_MergedWalkCountsTiedRunsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// safety: one tie group wider than a page, with ids interleaved across the two
-	// stores, so the walk resumes inside it more than once.
 	const tied = store.MaxRunListLimit + 8
 	for i := range tied {
 		st := shared
@@ -381,9 +353,6 @@ func TestListJobs_MergedWalkCountsTiedRunsOnce(t *testing.T) {
 	}
 }
 
-// A --since walk must hold the window it started with. The bound is a lower
-// one and the walk runs newest-first, so a bound that follows the clock moves
-// into the rows still ahead of the walk and drops them unread.
 func TestRunsCursor_CarriesTheSinceAnchorAcrossPages(t *testing.T) {
 	since := time.Now().Add(-30 * 24 * time.Hour)
 	run := &store.Run{ID: "run-anchor", StartedAt: time.Now().Add(-time.Hour)}
@@ -415,10 +384,6 @@ func TestRunsCursor_CarriesTheSinceAnchorAcrossPages(t *testing.T) {
 	}
 }
 
-// A standalone store that holds nothing the filters admit leaves the shared
-// store's own count exact, so the page still carries a total. Omitting it
-// because such a store merely exists costs every listing on that machine its
-// count, forever.
 func TestListJobs_AnEmptyStandaloneStoreLeavesTheCountExact(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -454,9 +419,6 @@ func TestListJobs_AnEmptyStandaloneStoreLeavesTheCountExact(t *testing.T) {
 	}
 }
 
-// A rollup whose walk lost a store must say its totals are short. Reporting
-// them complete over a population it dropped is the defect this listing exists
-// to remove, one store further in.
 func TestStandaloneStores_ADroppedStoreIsReportedNotSwallowed(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -485,7 +447,6 @@ func TestStandaloneStores_ADroppedStoreIsReportedNotSwallowed(t *testing.T) {
 		t.Fatal("a healthy store reported itself failed")
 	}
 
-	// hack: truncating the file under the open handle is how a store stops answering.
 	if err := os.WriteFile(dbPath, []byte("not a database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -500,9 +461,6 @@ func TestStandaloneStores_ADroppedStoreIsReportedNotSwallowed(t *testing.T) {
 	}
 }
 
-// The page record is what a caller reads instead of guessing the ceiling: how
-// many rows it got, the page size actually served, whether more remain, and the
-// population where that can be counted exactly.
 func TestListJobs_PageRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

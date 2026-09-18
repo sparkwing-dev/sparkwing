@@ -42,10 +42,9 @@ type ReadOpts struct {
 	Grep  string
 }
 
-// RunFilterVersionFor is the run-list capability b can honestly announce. A
-// backend reading a store serves the cursor; one filtering runs it fetched
-// itself does not, and announcing otherwise leaves a caller paging a listing
-// that hands back the same rows forever.
+// RunFilterVersionFor is the run-list capability b can honestly announce. A backend
+// that filters runs it fetched itself ignores the cursor, so announcing it would leave
+// a caller paging a listing that hands back the same rows forever.
 func RunFilterVersionFor(b Backend) string {
 	if _, ok := b.(*StoreBackend); ok {
 		return store.RunFilterVersion

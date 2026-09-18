@@ -36,8 +36,6 @@ type PipelinePivotRow struct {
 	LastStartedAt  time.Time `json:"last_started_at,omitempty"`
 }
 
-// perf: a row per pipeline and a bounded sparkline, never the runs themselves,
-// so memory is bounded by the pipeline count rather than the run count.
 type pipelinePivot struct {
 	sparklineLen int
 	rows         map[string]*PipelinePivotRow

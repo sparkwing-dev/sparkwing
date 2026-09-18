@@ -154,15 +154,14 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if advancedFilter && !store.SupportsRunIdentityFilters(resp.Header.Get("X-Sparkwing-Run-Filter-Version")) {
 		return nil, errors.New("controller does not support native run identity filters")
 	}
-	// safety: a controller that drops the cursor answers with the first page again,
-	// so a walk would re-serve rows it already read rather than fail.
+	// safety: a controller that drops the cursor answers with the first page again, so a
+	// walk would re-serve rows it already read rather than fail.
 	cursorCapable := store.SupportsRunCursor(resp.Header.Get("X-Sparkwing-Run-Filter-Version"))
 	if f.HasCursor() && !cursorCapable {
 		return nil, errors.New("controller does not support paging runs by cursor")
 	}
-	// safety: asking past the page ceiling is asking for the row that tells a full page
-	// from a cut one. An older controller clamps that row away and answers a full page,
-	// which reads as the whole set.
+	// safety: an older controller clamps away the row that tells a full page from a cut
+	// one, and answers a full page, which reads as the whole set.
 	if f.Limit > store.MaxRunListLimit && !cursorCapable && !f.ProbeMayBeClamped {
 		return nil, fmt.Errorf(
 			"controller serves at most %d runs and cannot report whether more remain; ask for a smaller --limit",

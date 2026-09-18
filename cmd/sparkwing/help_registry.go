@@ -565,8 +565,6 @@ flags. --split-dir writes generated files.`,
 	},
 }
 
-// queueListingDescription is the body of both `sparkwing queue` and
-// `sparkwing queue list`, which print the same listing from one implementation.
 const queueListingDescription = `Reports the local admission daemon's resource capacity, usage, and queue in
 two sections: running work, then queued work in admission order.
 

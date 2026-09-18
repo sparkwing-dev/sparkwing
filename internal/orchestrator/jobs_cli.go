@@ -131,13 +131,10 @@ func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
 	return overFetch
 }
 
-// hack: a lister narrower than a backend, so the remote client walks the same page loop as a local one.
 type runLister interface {
 	ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
 }
 
-// safety: the shared store and every readable standalone store read as one set,
-// so a walk sees what the first page saw.
 type mergedLister struct {
 	backend    runLister
 	standalone *StandaloneStores
@@ -156,12 +153,8 @@ func standaloneFailed(lister runLister) bool {
 	return ok && merged.standalone.Failed()
 }
 
-// safety: a rollup reads until the filters are exhausted, so on a large population
-// it needs a horizon to bound the walk.
 const runScanCap = 50000
 
-// safety: stopping short of the filters being exhausted returns the reason,
-// which fn cannot tell from having reached the end.
 func forEachRunPage(
 	ctx context.Context,
 	b runLister,
@@ -212,8 +205,6 @@ func lastRun(rows []TaggedRun) *store.Run {
 	return rows[len(rows)-1].Run
 }
 
-// safety: nil where the count cannot be exact: a client-side filter, a merged
-// walk, or no local store to count against.
 func totalMatching(
 	ctx context.Context,
 	b backend.Backend,

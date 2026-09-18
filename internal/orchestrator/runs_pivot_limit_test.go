@@ -66,9 +66,6 @@ func TestListJobsRemoteByPipeline_CountsEveryMatchingRunNotThePage(t *testing.T)
 	}
 }
 
-// A rollup over a subset must count the subset, across pages. A status filter
-// runs in the query, so the window stays page-sized and the walk really pages:
-// a drain that dropped a page or counted one twice lands on a wrong number here.
 func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "subset-state.db")
@@ -78,8 +75,6 @@ func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
 		t.Fatalf("seed open: %v", err)
 	}
 	base := time.Now().Add(-time.Hour)
-	// safety: above the ceiling, so the rollup must walk more than one page to reach
-	// them all; it pages at the ceiling whatever --limit says.
 	const successes, failures = store.MaxRunListLimit + 25, 15
 	for i := range successes + failures {
 		status := "success"
@@ -115,9 +110,6 @@ func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
 	}
 }
 
-// The cursor crosses the wire as query parameters the controller parses back. A
-// listing that walks a controller must reach every run exactly once, or a count
-// taken across pages is wrong in a way no single page shows.
 func TestListJobsRemote_CursorWalksEveryRunExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "remote-page-state.db"))
@@ -162,8 +154,6 @@ func TestListJobsRemote_CursorWalksEveryRunExactlyOnce(t *testing.T) {
 	}
 }
 
-// A rollup that stopped short must say so in its own output. The totals are the
-// number a dashboard divides by, and a log line does not reach a program.
 func TestListJobsByPipeline_SummarySaysWhenTotalsStopShort(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "summary-state.db")

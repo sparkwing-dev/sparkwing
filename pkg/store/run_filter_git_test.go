@@ -89,8 +89,6 @@ func TestParseRunFilterClampsLimit(t *testing.T) {
 	}
 }
 
-// A caller is never served more than one row above the page ceiling, however
-// large a limit it asks for.
 func TestListRunsClampsLimitToOneRowAboveTheCap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")

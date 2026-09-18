@@ -37,8 +37,6 @@ type StandaloneStores struct {
 	failed bool
 }
 
-// safety: a walk reads every store once per page, so appending on each read
-// would grow one line per page.
 func (s *StandaloneStores) noteOnce(note string) {
 	if slices.Contains(s.notes, note) {
 		return
@@ -46,8 +44,8 @@ func (s *StandaloneStores) noteOnce(note string) {
 	s.notes = append(s.notes, note)
 }
 
-// Failed reports whether a store stopped answering while it was being read, so
-// a caller can say its result is short rather than claim it is whole.
+// Failed reports whether a store stopped answering mid-read, so a caller can say its
+// result is short rather than whole.
 func (s *StandaloneStores) Failed() bool { return s != nil && s.failed }
 
 type openStandalone struct {
@@ -211,9 +209,9 @@ func (s *StandaloneStores) ListRuns(ctx context.Context, filter store.RunFilter)
 	return out
 }
 
-// Contributed reports whether any standalone store bears on a listing's count:
-// one holding a matching run, or one this binary could not read. A store that
-// is open and matches nothing leaves the shared store's own count exact.
+// Contributed reports whether any standalone store bears on a listing's count: one
+// holding a matching run, or one this binary could not read. An open store matching
+// nothing leaves the shared store's count exact.
 func (s *StandaloneStores) Contributed(ctx context.Context, filter store.RunFilter) bool {
 	if s == nil {
 		return false
@@ -301,9 +299,8 @@ func MergeTaggedRuns(rows []TaggedRun) []TaggedRun {
 			out[i] = r
 		}
 	}
-	// safety: newest first, then descending id, the order the store returns and the
-	// cursor reads, so a walk resuming after the last merged row cannot land inside a
-	// group of runs sharing an instant.
+	// safety: this order is the one the store returns and the cursor predicate assumes;
+	// a walk resuming after the last merged row would otherwise land inside a tie group.
 	sort.SliceStable(out, func(i, j int) bool {
 		if !out[i].StartedAt.Equal(out[j].StartedAt) {
 			return out[i].StartedAt.After(out[j].StartedAt)

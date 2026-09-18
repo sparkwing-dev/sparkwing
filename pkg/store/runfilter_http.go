@@ -12,22 +12,17 @@ import (
 // larger ask is clamped rather than rejected.
 const MaxRunListLimit = 1000
 
-// safety: one above the largest page, so a caller asking for the ceiling still
-// gets the row that tells a full page from a cut one.
 const maxRunListFetch = MaxRunListLimit + 1
 
-// RunFilterVersion is what a controller reports for the run-list filters it
-// understands. "1" served the branch and SHA identity filters; "2" adds the
-// cursor, which a "1" controller ignores silently rather than refusing, so a
-// caller that needs it checks this before trusting a page.
+// RunFilterVersion is what a controller reports for the run-list filters it understands.
+// A "1" controller ignores the cursor silently rather than refusing it, so a caller that
+// needs the cursor checks this before trusting a page.
 const RunFilterVersion = "2"
 
 // SupportsRunIdentityFilters reports whether a controller announcing version
 // serves the branch, SHA and repo filters natively.
 func SupportsRunIdentityFilters(version string) bool { return runFilterVersion(version) >= 1 }
 
-// SupportsRunCursor reports whether a controller announcing version understands
-// the cursor parameters.
 func SupportsRunCursor(version string) bool { return runFilterVersion(version) >= 2 }
 
 func runFilterVersion(version string) int {

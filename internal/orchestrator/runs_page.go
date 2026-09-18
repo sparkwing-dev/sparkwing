@@ -10,9 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// RunsPage is the trailing record every `runs list` page carries, so a caller
-// reading one page can tell a full result from a cut one without knowing what
-// the server's ceiling is.
+// RunsPage is the trailing record every `runs list` page carries, so a caller can tell
+// a full result from a cut one without knowing the server's ceiling.
 type RunsPage struct {
 	Kind       string `json:"kind"`
 	Total      *int   `json:"total,omitempty"`
@@ -22,14 +21,11 @@ type RunsPage struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// safety: both halves travel together, because runs sharing an instant would
-// otherwise be skipped as a group.
 type runsCursor struct {
 	StartedAt int64
 	ID        string
-	// safety: the window's lower bound travels with the cursor so a walk keeps the one
-	// it began with. Re-deriving it from the clock moves the bound toward the rows a
-	// newest-first walk has yet to reach, dropping them unread.
+	// safety: the window's lower bound travels with the cursor. Re-deriving it from the
+	// clock moves it into rows a newest-first walk has yet to reach, dropping them unread.
 	Since int64
 }
 
@@ -39,8 +35,7 @@ func (c runsCursor) encode() string {
 
 func parseRunsCursor(raw string) (runsCursor, error) {
 	malformed := fmt.Errorf("--cursor %q is not a cursor this listing produced; repeat the query without one", raw)
-	// hack: a run id may carry a colon, so the two numeric fields are taken from the
-	// ends and the id is whatever lies between them.
+	// hack: a run id may carry a colon, so the numeric fields are taken from the ends.
 	instant, rest, found := strings.Cut(strings.TrimSpace(raw), ":")
 	if !found {
 		return runsCursor{}, malformed
@@ -99,15 +94,11 @@ type runsPager struct {
 	budget int
 }
 
-// safety: the window runs at least one row wider than the page, which is what
-// tells a full page from a cut one without counting the table.
 func newRunsPager(limit int, clientFilter CompiledFilter) runsPager {
 	page := effectiveRunsPageLimit(limit)
 	return runsPager{limit: page, budget: listFetchLimitForFilter(page, clientFilter) + 1}
 }
 
-// safety: the resume point is the last run examined rather than the last one kept,
-// so a window the client filters empty still advances.
 func (p runsPager) window(raw []TaggedRun, clientFilter CompiledFilter) (
 	rows []TaggedRun, resume *store.Run, more bool,
 ) {
@@ -135,17 +126,11 @@ func runsQueryFor(opts ListOpts) (store.RunFilter, CompiledFilter, runsPager, er
 	clientFilter := opts.Filter
 	clientFilter.Branches = nil
 	clientFilter.SHAPrefixes = nil
-	// perf: a rollup reads every page and shows none of them, so it pages at the
-	// ceiling. --limit sizes what a listing displays, and a small one here would only
-	// multiply round trips.
 	pageSize := opts.Limit
 	if opts.ByPipeline {
 		pageSize = store.MaxRunListLimit
 	}
 	pager := newRunsPager(pageSize, clientFilter)
-	// safety: a rollup's page size is this command's own, so a server that cannot serve
-	// the probe row reports a short rollup rather than refusing a number the caller
-	// never chose.
 	probeChosenHere := opts.ByPipeline
 
 	filter := store.RunFilter{
@@ -172,9 +157,6 @@ func runsQueryFor(opts ListOpts) (store.RunFilter, CompiledFilter, runsPager, er
 	return filter, clientFilter, pager, nil
 }
 
-// safety: a run that never started reads back as the zero time, whose nanosecond
-// value addresses no stored row. It is carried as zero, which the store reads as
-// the whole never-started group.
 func runStartedAtKey(startedAt time.Time) int64 {
 	if startedAt.IsZero() {
 		return 0

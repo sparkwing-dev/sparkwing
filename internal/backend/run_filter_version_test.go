@@ -8,9 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A backend announces the run-list capability it can honor, not the one this
-// build knows about. A backend that filters runs it fetched itself ignores the
-// cursor, and a caller told otherwise pages a listing that never advances.
 func TestRunFilterVersionFor_AnnouncesWhatTheBackendCanHonour(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

@@ -36,10 +36,6 @@ func TestListRunsSerializesNativeIdentityFilters(t *testing.T) {
 	}
 }
 
-// A capability version the client does not recognize reads as a controller that
-// cannot serve the filter, so every raise of it has to keep the older
-// capabilities admitted. Pinning the fixture to a literal would certify the
-// client against a controller that no longer exists.
 func TestListRunsAcceptsCapabilitiesAtAndAboveTheOneTheyNeed(t *testing.T) {
 	for _, tc := range []struct {
 		version  string
@@ -76,9 +72,6 @@ func TestListRunsAcceptsCapabilitiesAtAndAboveTheOneTheyNeed(t *testing.T) {
 	}
 }
 
-// An older controller clamps away the row that tells a full page from a cut
-// one, so a request that depends on that row is refused rather than answered
-// with a page that reads as the whole set.
 func TestListRunsRefusesAProbeAnOlderControllerWouldClampAway(t *testing.T) {
 	serve := func(version string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

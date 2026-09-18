@@ -3651,22 +3651,19 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 
-	// AfterStartedAt and AfterID resume a listing after one already-seen run.
-	// The id breaks ties among runs sharing an instant, which an instant alone
-	// would skip as a group.
+	// AfterStartedAt and AfterID resume a listing after one already-seen run. The id
+	// breaks ties among runs sharing an instant, which an instant alone would skip.
 	AfterStartedAt int64
 	AfterID        string
 
-	// ProbeMayBeClamped marks a limit this process chose rather than one a
-	// caller asked for. A server that clamps the probe row away then leaves the
-	// result reported as cut rather than refused, because refusing would name a
-	// limit the caller never set and could not lower.
+	// ProbeMayBeClamped marks a limit this process chose rather than one a caller asked
+	// for. A server clamping the probe row away then leaves the result reported as cut
+	// rather than refused, because refusing would name a limit the caller cannot lower.
 	ProbeMayBeClamped bool
 }
 
-// HasCursor reports whether the filter resumes after an already-seen run. It
-// keys on the id alone, because a run started at the Unix epoch carries an
-// instant of zero and would otherwise read as no cursor at all.
+// HasCursor reports whether the filter resumes after an already-seen run. It keys on
+// the id alone, because a run started at the Unix epoch carries an instant of zero.
 func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
 
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
@@ -3745,8 +3742,6 @@ func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return n, nil
 }
 
-// safety: the limit is left out, so a listing and a count of the same filter
-// cannot disagree.
 func runFilterWhere(f RunFilter) (string, []any, error) {
 	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
 	for i, prefix := range f.GitSHAPrefixes {
