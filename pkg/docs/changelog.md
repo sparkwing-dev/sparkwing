@@ -44,9 +44,6 @@ unlock.
   the ceiling now receives it.
 - **cli:** `runs list --by-pipeline` pages at the ceiling rather than at `--limit`,
   which its output does not read.
-
-### Changed
-
 - **scaffold:** `const FallbackSDKVersion` pins v0.53.0, so a fresh scaffold compiles against that release.
 
 
