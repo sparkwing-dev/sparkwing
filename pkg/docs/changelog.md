@@ -19,6 +19,8 @@ unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.54.0] - 2026-09-18
 ### Fixed
 
 - **cli:** `runs list -o json` ends with a `kind:page` record (under `-q`, on stderr as prose) carrying `returned`,
