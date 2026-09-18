@@ -2549,15 +2549,27 @@ store under it -- the ones runs that could not reach the admission
 daemon wrote -- newest first. Each row carries the store it came
 from: 'shared', or the store's path under the home. An id in both
 stores lists once, from the shared store. The STORE column appears
-only when a standalone run is in the table; -o json always carries
-the field. A standalone store this build cannot read is named on
+only when a standalone run is in the table; every run record in
+-o json carries the field. A standalone store this build cannot read is named on
 stderr after the table instead of listed.
 
 With -q / --quiet the output contains run identifiers, one per line, for
 shell piping:
 
   sparkwing runs list --pipeline X --limit 1 -q --profile prod \
-      | xargs -I{} sparkwing runs logs --run {} --profile prod --follow`,
+      | xargs -I{} sparkwing runs logs --run {} --profile prod --follow
+
+Results are paged. JSON ends with a kind:page record reporting returned,
+limit, truncated and next_cursor, plus total where the count can be
+exact; limit is the page size served, so a request above the ceiling
+reports the ceiling rather than the number asked for. Continue with
+--cursor and the same filters until truncated is false. Under -q, and in
+the other formats, a cut listing says so on stderr instead. --limit 0 is
+refused: this listing serves pages, so a page of zero has no meaning.
+
+--by-pipeline aggregates every run the filters admit. Its JSON ends with
+a kind:summary record carrying truncated and, where it stopped short,
+reason, in place of a kind:page record.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "status", Argument: "STATUS", Desc: "Filter by status: running|success|failed|cancelled (repeatable; prefix `!` to exclude)", Group: "Filter"},
@@ -2570,7 +2582,8 @@ shell piping:
 		{Name: "started-before", Argument: "DATE", Desc: "Only runs whose StartedAt <= this", Group: "Filter"},
 		{Name: "finished-after", Argument: "DATE", Desc: "Only runs whose FinishedAt >= this (excludes still-running)", Group: "Filter"},
 		{Name: "finished-before", Argument: "DATE", Desc: "Only runs whose FinishedAt <= this (excludes still-running)", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Maximum runs to show", Default: "20", Group: "Output"},
+		{Name: "limit", Argument: "N", Desc: "Runs per page; a request above the ceiling is served at the ceiling, which the page record reports", Default: "20", Group: "Output"},
+		{Name: "cursor", Argument: "CURSOR", Desc: "Continue after next_cursor with the same filters", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (JSON strings with -o json)", Group: "Output"},
 		{Name: "by-pipeline", Desc: "Pivot into one row per pipeline with a status sparkline of the last N runs", Group: "Output"},
@@ -2582,6 +2595,7 @@ shell piping:
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Last 20 local runs", "sparkwing runs list"},
+		{"Continue after a truncated page", "sparkwing runs list --since 30d --cursor 1700000000000000000:run-fictional:1697408000000000000"},
 		{"Failed runs in the past day", "sparkwing runs list --status failed --since 24h"},
 		{"Exclude success from the list", "sparkwing runs list --status '!success' --since 24h"},
 		{"Runs on main, excluding canary", "sparkwing runs list --branch main --search '-canary'"},

@@ -19,6 +19,13 @@ const (
 	SparkDot   SparklineStyle = "dot"
 )
 
+// PipelinePivotSummary says whether the totals above it cover every matching run.
+type PipelinePivotSummary struct {
+	Kind      string `json:"kind"`
+	Truncated bool   `json:"truncated"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type PipelinePivotRow struct {
 	Pipeline       string    `json:"pipeline"`
 	RecentStatuses []string  `json:"recent_statuses"`
@@ -29,19 +36,29 @@ type PipelinePivotRow struct {
 	LastStartedAt  time.Time `json:"last_started_at,omitempty"`
 }
 
-func pivotByPipeline(runs []*store.Run, sparklineLen int) []PipelinePivotRow {
-	idx := map[string]*PipelinePivotRow{}
+// perf: a row per pipeline and a bounded sparkline, never the runs themselves,
+// so memory is bounded by the pipeline count rather than the run count.
+type pipelinePivot struct {
+	sparklineLen int
+	rows         map[string]*PipelinePivotRow
+}
+
+func newPipelinePivot(sparklineLen int) *pipelinePivot {
+	return &pipelinePivot{sparklineLen: sparklineLen, rows: map[string]*PipelinePivotRow{}}
+}
+
+func (p *pipelinePivot) add(runs []*store.Run) {
 	for _, r := range runs {
-		row, ok := idx[r.Pipeline]
+		row, ok := p.rows[r.Pipeline]
 		if !ok {
 			row = &PipelinePivotRow{Pipeline: r.Pipeline}
-			idx[r.Pipeline] = row
+			p.rows[r.Pipeline] = row
 		}
 		row.Total++
 		if r.Status == "failed" {
 			row.Failures++
 		}
-		if len(row.RecentStatuses) < sparklineLen {
+		if len(row.RecentStatuses) < p.sparklineLen {
 			row.RecentStatuses = append(row.RecentStatuses, r.Status)
 		}
 		if row.LastStartedAt.IsZero() || r.StartedAt.After(row.LastStartedAt) {
@@ -50,14 +67,23 @@ func pivotByPipeline(runs []*store.Run, sparklineLen int) []PipelinePivotRow {
 			row.LastStatus = r.Status
 		}
 	}
-	out := make([]PipelinePivotRow, 0, len(idx))
-	for _, row := range idx {
+}
+
+func (p *pipelinePivot) sorted() []PipelinePivotRow {
+	out := make([]PipelinePivotRow, 0, len(p.rows))
+	for _, row := range p.rows {
 		out = append(out, *row)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].LastStartedAt.After(out[j].LastStartedAt)
 	})
 	return out
+}
+
+func pivotByPipeline(runs []*store.Run, sparklineLen int) []PipelinePivotRow {
+	p := newPipelinePivot(sparklineLen)
+	p.add(runs)
+	return p.sorted()
 }
 
 func renderSparkline(statuses []string, style SparklineStyle) string {
@@ -120,7 +146,10 @@ type PivotOpts struct {
 }
 
 func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error {
-	rows := pivotByPipeline(runs, opts.SparklineLen)
+	return renderPivotRows(pivotByPipeline(runs, opts.SparklineLen), opts, out)
+}
+
+func renderPivotRows(rows []PipelinePivotRow, opts PivotOpts, out io.Writer) error {
 	if opts.Quiet {
 		for _, r := range rows {
 			fmt.Fprintln(out, r.Pipeline)
@@ -147,4 +176,16 @@ func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error
 		)
 	}
 	return tw.Flush()
+}
+
+func (p PipelinePivotSummary) write(jsonOut bool, stdout, stderr io.Writer) error {
+	if jsonOut {
+		return writeNDJSON(stdout, []PipelinePivotSummary{p})
+	}
+	if !p.Truncated {
+		return nil
+	}
+	_, err := fmt.Fprintf(stderr,
+		"these totals cover the newest matching runs only: %s\n", p.Reason)
+	return err
 }

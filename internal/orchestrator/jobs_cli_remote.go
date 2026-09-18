@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,36 +26,38 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 		return errors.New("ListJobsRemote: controller URL required")
 	}
 	c := client.NewWithToken(controllerURL, nil, token)
-	clientFilter := opts.Filter
-	clientFilter.Branches = nil
-	clientFilter.SHAPrefixes = nil
-	filter := store.RunFilter{
-		Limit:          listFetchLimitForFilter(opts.Limit, clientFilter),
-		Pipelines:      opts.Pipelines,
-		Statuses:       opts.Statuses,
-		GitBranches:    opts.Filter.Branches,
-		GitSHAPrefixes: opts.Filter.SHAPrefixes,
-	}
-	if opts.Since > 0 {
-		filter.Since = time.Now().Add(-opts.Since)
+	filter, clientFilter, pager, err := runsQueryFor(opts)
+	if err != nil {
+		return err
 	}
 	runs, err := c.ListRuns(ctx, filter)
 	if err != nil {
 		return err
 	}
-	runs = applyClientFilters(runs, clientFilter)
-	if opts.Limit > 0 && len(runs) > opts.Limit {
-		runs = runs[:opts.Limit]
-	}
+	rows, resume, sourceMore := pager.window(TagShared(runs), clientFilter)
+
 	if opts.ByPipeline {
+		pivot := newPipelinePivot(opts.Pivot.SparklineLen)
+		pivot.add(untagRuns(rows))
+		stopped, err := forEachRunPage(ctx, c, pager, filter, clientFilter, resume, sourceMore,
+			func(page []TaggedRun) { pivot.add(untagRuns(page)) })
+		if err != nil {
+			return err
+		}
+		summary := PipelinePivotSummary{Kind: "summary", Truncated: stopped != "", Reason: stopped}
 		opts.Pivot.JSON = opts.JSON
 		opts.Pivot.Quiet = opts.Quiet
-		return RenderPipelinePivot(runs, opts.Pivot, out)
+		if err := renderPivotRows(pivot.sorted(), opts.Pivot, out); err != nil {
+			return err
+		}
+		return summary.write(opts.JSON && !opts.Quiet, out, os.Stderr)
 	}
-	if opts.Limit > 0 && len(runs) > opts.Limit {
-		runs = runs[:opts.Limit]
+
+	rows, page := pager.page(rows, resume, sourceMore, filter.Since)
+	if err := renderRunList(rows, opts, out, nil); err != nil {
+		return err
 	}
-	return renderRunList(TagShared(runs), opts, out, nil)
+	return page.write(opts.JSON && !opts.Quiet, out, os.Stderr)
 }
 
 func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, opts StatusOpts, out io.Writer) error {

@@ -19,6 +19,31 @@ unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** `runs list -o json` ends with a `kind:page` record (under `-q`, on stderr as prose) carrying `returned`,
+  `limit`, `truncated`, `next_cursor`, and `total` where the backend can count
+  exactly. The ceiling of 1000 runs was applied silently, with no field, no stderr
+  line and no cursor, so a caller could not tell 1000 matches from a million and any
+  rate or completeness check over a larger population was quietly wrong. Page with
+  the new `--cursor` flag, following `next_cursor` until `truncated` is false. Other
+  output formats print the continuation on stderr.
+- **cli:** `runs list --by-pipeline` counts every run its filters admit. It reported
+  the size of one page instead, so a rollup over thousands of runs could head its
+  RUNS column with a two-digit number.
+
+### Changed
+
+- **cli:** Elsewhere `--limit 0` means every match. `runs list` serves pages, so it
+  is refused and the refusal points at `--cursor`.
+- **api:** `X-Sparkwing-Run-Filter-Version` is `2`, which announces the run-list
+  cursor. A client reads it as a floor rather than an exact match, so a controller
+  at `1` still serves the branch and SHA identity filters.
+- **api:** a run-list `limit` clamps one row above `MaxRunListLimit` rather than at
+  it. That row is what tells a full page from a cut one, so a caller asking past
+  the ceiling now receives it.
+- **cli:** `runs list --by-pipeline` pages at the ceiling rather than at `--limit`,
+  which its output does not read.
 
 ## [v0.53.0] - 2026-09-17
 ### Added

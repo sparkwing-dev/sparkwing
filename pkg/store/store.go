@@ -3650,27 +3650,115 @@ type RunFilter struct {
 	Limit          int // <=0 = default
 	ParentRunID    string
 	RootOnly       bool
+
+	// AfterStartedAt and AfterID resume a listing after one already-seen run.
+	// The id breaks ties among runs sharing an instant, which an instant alone
+	// would skip as a group.
+	AfterStartedAt int64
+	AfterID        string
+
+	// ProbeMayBeClamped marks a limit this process chose rather than one a
+	// caller asked for. A server that clamps the probe row away then leaves the
+	// result reported as cut rather than refused, because refusing would name a
+	// limit the caller never set and could not lower.
+	ProbeMayBeClamped bool
 }
 
-// ListRuns returns runs ordered newest-first, filtered by f.
-func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
+// HasCursor reports whether the filter resumes after an already-seen run. It
+// keys on the id alone, because a run started at the Unix epoch carries an
+// instant of zero and would otherwise read as no cursor at all.
+func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
+
+// ListRuns returns runs ordered newest-first, then by id descending, filtered
+// by f. The cursor clause depends on that order.
+func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
+	where, args, err := runFilterWhere(f)
+	if err != nil {
+		return nil, err
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	// safety: clamp again here, because a non-HTTP caller never passes ParseRunFilter's clamp.
+	limit = min(limit, maxRunListFetch)
+	args = append(args, limit)
+
+	query := `
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+  FROM runs` + where + `
+ ORDER BY started_at DESC, id DESC
+ LIMIT ?`
+
+	rows, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if cerr := rows.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	var out []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// safety: the scanner maps every started_at at or below zero to the zero time, so a
+// cursor on a never-started run addresses that whole group and orders it by id. Exact
+// while those rows carry one stored value, which is what a single writer produces; a
+// group holding more would order by the raw value first and this would skip part of it.
+func runCursorClause(afterStartedAt int64) string {
+	if afterStartedAt <= 0 {
+		return "(started_at <= 0 AND id < ?)"
+	}
+	// hack: the expanded form rather than a row-value comparison, so the predicate
+	// holds on every SQLite build this driver may sit on.
+	return "(started_at < ? OR (started_at = ? AND id < ?))"
+}
+
+func runCursorArgs(f RunFilter) []any {
+	if f.AfterStartedAt <= 0 {
+		return []any{f.AfterID}
+	}
+	return []any{f.AfterStartedAt, f.AfterStartedAt, f.AfterID}
+}
+
+// CountRuns returns how many runs match f, ignoring its Limit.
+func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
+	where, args, err := runFilterWhere(f)
+	if err != nil {
+		return 0, err
+	}
+	row := s.queryRow(ctx, `SELECT COUNT(*) FROM runs`+where, args...)
+	var n int
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// safety: the limit is left out, so a listing and a count of the same filter
+// cannot disagree.
+func runFilterWhere(f RunFilter) (string, []any, error) {
 	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
 	for i, prefix := range f.GitSHAPrefixes {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
 		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
 			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
 		}) >= 0 {
-			return nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
+			return "", nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
 		}
 		normalizedPrefixes[i] = prefix
 	}
 	f.GitSHAPrefixes = normalizedPrefixes
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 50
-	}
-	// safety: clamp again here so a non-HTTP caller cannot ask for every row.
-	limit = min(limit, MaxRunListLimit)
 
 	where := ""
 	args := []any{}
@@ -3725,29 +3813,10 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	if !f.Since.IsZero() {
 		addClause("started_at >= ?", f.Since.UnixNano())
 	}
-	args = append(args, limit)
-
-	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
-  FROM runs` + where + `
- ORDER BY started_at DESC
- LIMIT ?`
-
-	rows, err := s.query(ctx, query, args...)
-	if err != nil {
-		return nil, err
+	if f.HasCursor() {
+		addClause(runCursorClause(f.AfterStartedAt), runCursorArgs(f)...)
 	}
-	defer func() { _ = rows.Close() }()
-
-	var out []*Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return where, args, nil
 }
 
 func prefixUpperBound(prefix string) (string, bool) {

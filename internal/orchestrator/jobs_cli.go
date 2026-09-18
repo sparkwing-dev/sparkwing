@@ -45,6 +45,8 @@ type ListOpts struct {
 
 	ByPipeline bool
 	Pivot      PivotOpts
+
+	Cursor string
 }
 
 func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) error {
@@ -63,51 +65,61 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 		}
 	}
 
-	clientFilter := opts.Filter
-	clientFilter.Branches = nil
-	clientFilter.SHAPrefixes = nil
-	filter := store.RunFilter{
-		Limit:          listFetchLimitForFilter(opts.Limit, clientFilter),
-		Pipelines:      opts.Pipelines,
-		Statuses:       opts.Statuses,
-		GitBranches:    opts.Filter.Branches,
-		GitSHAPrefixes: opts.Filter.SHAPrefixes,
-	}
-	if opts.Since > 0 {
-		filter.Since = time.Now().Add(-opts.Since)
+	filter, clientFilter, pager, err := runsQueryFor(opts)
+	if err != nil {
+		return err
 	}
 	runs, err := b.ListRuns(ctx, filter)
 	if err != nil {
 		return err
 	}
 	rows := TagShared(runs)
-	var notes []string
+	var lister runLister = b
+	var merged bool
 	if mergesStandalone(b, paths, opts.Profile) {
 		standalone := OpenStandaloneStores(ctx, paths)
 		defer func() { _ = standalone.Close() }()
 		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
-		notes = standalone.Notes()
+		lister = mergedLister{backend: b, standalone: standalone}
+		defer func() { WriteStandaloneNotes(os.Stderr, standalone.Notes()) }()
+		merged = standalone.Contributed(ctx, filter)
 	}
-	rows = applyClientFiltersTagged(rows, clientFilter)
-	if opts.Limit > 0 && len(rows) > opts.Limit {
-		rows = rows[:opts.Limit]
-	}
+	rows, resume, sourceMore := pager.window(rows, clientFilter)
+
 	if opts.ByPipeline {
-		opts.Pivot.JSON = opts.JSON
-		opts.Pivot.Quiet = opts.Quiet
-		if err := RenderPipelinePivot(untagRuns(rows), opts.Pivot, out); err != nil {
+		pivot := newPipelinePivot(opts.Pivot.SparklineLen)
+		pivot.add(untagRuns(rows))
+		stopped, err := forEachRunPage(ctx, lister, pager, filter, clientFilter, resume, sourceMore,
+			func(page []TaggedRun) { pivot.add(untagRuns(page)) })
+		if err != nil {
 			return err
 		}
-		WriteStandaloneNotes(os.Stderr, notes)
+		if stopped == "" && standaloneFailed(lister) {
+			stopped = "a standalone store stopped answering"
+		}
+		summary := PipelinePivotSummary{Kind: "summary", Truncated: stopped != "", Reason: stopped}
+		opts.Pivot.JSON = opts.JSON
+		opts.Pivot.Quiet = opts.Quiet
+		if err := renderPivotRows(pivot.sorted(), opts.Pivot, out); err != nil {
+			return err
+		}
+		if err := summary.write(opts.JSON && !opts.Quiet, out, os.Stderr); err != nil {
+			return err
+		}
 		return nil
 	}
+
+	rows, page := pager.page(rows, resume, sourceMore, filter.Since)
+	page.Total = totalMatching(ctx, b, filter, clientFilter, merged)
 	admissionStatus := func(runID string) (admissionWaitDetail, bool) {
 		return latestAdmissionWait(ctx, b, runID)
 	}
 	if err := renderRunList(rows, opts, out, admissionStatus); err != nil {
 		return err
 	}
-	WriteStandaloneNotes(os.Stderr, notes)
+	if err := page.write(opts.JSON && !opts.Quiet, out, os.Stderr); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -117,6 +129,110 @@ func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
 	}
 	const overFetch = 1000
 	return overFetch
+}
+
+// hack: a lister narrower than a backend, so the remote client walks the same page loop as a local one.
+type runLister interface {
+	ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
+}
+
+// safety: the shared store and every readable standalone store read as one set,
+// so a walk sees what the first page saw.
+type mergedLister struct {
+	backend    runLister
+	standalone *StandaloneStores
+}
+
+func (m mergedLister) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error) {
+	runs, err := m.backend.ListRuns(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return untagRuns(MergeTaggedRuns(append(TagShared(runs), m.standalone.ListRuns(ctx, f)...))), nil
+}
+
+func standaloneFailed(lister runLister) bool {
+	merged, ok := lister.(mergedLister)
+	return ok && merged.standalone.Failed()
+}
+
+// safety: a rollup reads until the filters are exhausted, so on a large population
+// it needs a horizon to bound the walk.
+const runScanCap = 50000
+
+// safety: stopping short of the filters being exhausted returns the reason,
+// which fn cannot tell from having reached the end.
+func forEachRunPage(
+	ctx context.Context,
+	b runLister,
+	pager runsPager,
+	filter store.RunFilter,
+	clientFilter CompiledFilter,
+	resume *store.Run,
+	more bool,
+	fn func([]TaggedRun),
+) (stopped string, err error) {
+	scanned := 0
+	for more && resume != nil {
+		if scanned >= runScanCap {
+			return "reached the scan horizon", nil
+		}
+		next := filter
+		next.AfterStartedAt, next.AfterID = runStartedAtKey(resume.StartedAt), resume.ID
+		runs, err := b.ListRuns(ctx, next)
+		if err != nil {
+			return "", err
+		}
+		if len(runs) == 0 {
+			return "", nil
+		}
+		scanned += len(runs)
+		previous := resume
+		var rows []TaggedRun
+		rows, resume, more = pager.window(TagShared(runs), clientFilter)
+		if resume != nil && resume.ID == previous.ID {
+			return "this store ignores the cursor", nil
+		}
+		fn(rows)
+	}
+	return "", nil
+}
+
+func effectiveRunsPageLimit(limit int) int {
+	if limit <= 0 {
+		return store.MaxRunListLimit
+	}
+	return min(limit, store.MaxRunListLimit)
+}
+
+func lastRun(rows []TaggedRun) *store.Run {
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows[len(rows)-1].Run
+}
+
+// safety: nil where the count cannot be exact: a client-side filter, a merged
+// walk, or no local store to count against.
+func totalMatching(
+	ctx context.Context,
+	b backend.Backend,
+	filter store.RunFilter,
+	clientFilter CompiledFilter,
+	merged bool,
+) *int {
+	st := localStore(b)
+	if st == nil || clientFilter.HasAny() || merged {
+		return nil
+	}
+	counted := filter
+	counted.Limit = 0
+	counted.AfterStartedAt, counted.AfterID = 0, ""
+	total, err := st.CountRuns(ctx, counted)
+	if err != nil {
+		return nil
+	}
+	return &total
 }
 
 func renderRunList(

@@ -333,12 +333,18 @@ func offlineBinarySources(t *testing.T, listing string) []string {
 			continue
 		}
 		var record struct {
+			Kind       string `json:"kind"`
 			Invocation struct {
 				BinarySource string `json:"binary_source"`
 			} `json:"invocation"`
 		}
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("decode run record %q: %v", line, err)
+		}
+		// safety: a run carries no kind, so a line that has one is the trailing
+		// page record rather than a run.
+		if record.Kind != "" {
+			continue
 		}
 		sources = append(sources, record.Invocation.BinarySource)
 	}

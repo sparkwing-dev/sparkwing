@@ -76,8 +76,9 @@ func TestParseRunFilterClampsLimit(t *testing.T) {
 	}{
 		{name: "under the cap", limit: "25", want: 25},
 		{name: "at the cap", limit: "1000", want: store.MaxRunListLimit},
-		{name: "over the cap", limit: "500000", want: store.MaxRunListLimit},
-		{name: "absurd", limit: "9223372036854775807", want: store.MaxRunListLimit},
+		{name: "one above the cap", limit: "1001", want: store.MaxRunListLimit + 1},
+		{name: "over the cap", limit: "500000", want: store.MaxRunListLimit + 1},
+		{name: "absurd", limit: "9223372036854775807", want: store.MaxRunListLimit + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := store.ParseRunFilter(url.Values{"limit": {tc.limit}})
@@ -88,7 +89,9 @@ func TestParseRunFilterClampsLimit(t *testing.T) {
 	}
 }
 
-func TestListRunsClampsLimitToTheCap(t *testing.T) {
+// A caller is never served more than one row above the page ceiling, however
+// large a limit it asks for.
+func TestListRunsClampsLimitToOneRowAboveTheCap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
@@ -114,8 +117,8 @@ func TestListRunsClampsLimitToTheCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
-	if len(runs) != store.MaxRunListLimit {
-		t.Fatalf("rows = %d, want %d", len(runs), store.MaxRunListLimit)
+	if len(runs) != store.MaxRunListLimit+1 {
+		t.Fatalf("rows = %d, want %d", len(runs), store.MaxRunListLimit+1)
 	}
 }
 

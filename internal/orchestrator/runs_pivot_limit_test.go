@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -31,7 +32,7 @@ func seedPivotRuns(t *testing.T, st *store.Store, n int) {
 
 func pivotRowTotal(t *testing.T, out string) int {
 	t.Helper()
-	line := strings.TrimSpace(out)
+	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 	var row PipelinePivotRow
 	if err := json.Unmarshal([]byte(line), &row); err != nil {
 		t.Fatalf("decode pivot row %q: %v", line, err)
@@ -39,44 +40,7 @@ func pivotRowTotal(t *testing.T, out string) int {
 	return row.Total
 }
 
-func TestListJobsByPipeline_HonoursLimitWithClientFilter(t *testing.T) {
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "pivot-state.db")
-
-	seed, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("seed open: %v", err)
-	}
-	seedPivotRuns(t, seed, 40)
-	_ = seed.Close()
-
-	p := &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: dbPath}}
-	total := func(filter CompiledFilter) int {
-		t.Helper()
-		var buf bytes.Buffer
-		opts := ListOpts{
-			Profile:    p,
-			Limit:      5,
-			JSON:       true,
-			ByPipeline: true,
-			Filter:     filter,
-			Pivot:      PivotOpts{SparklineLen: 30, Style: SparkASCII},
-		}
-		if err := ListJobs(ctx, Paths{Root: t.TempDir()}, opts, &buf); err != nil {
-			t.Fatalf("ListJobs: %v", err)
-		}
-		return pivotRowTotal(t, buf.String())
-	}
-
-	if got := total(CompiledFilter{}); got != 5 {
-		t.Fatalf("unfiltered --limit 5 rolled up %d runs, want 5", got)
-	}
-	if got := total(CompiledFilter{StartedAfter: time.Unix(0, 0)}); got != 5 {
-		t.Fatalf("--limit 5 with a client-side filter rolled up %d runs, want 5", got)
-	}
-}
-
-func TestListJobsRemoteByPipeline_HonoursLimitWithClientFilter(t *testing.T) {
+func TestListJobsRemoteByPipeline_CountsEveryMatchingRunNotThePage(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "controller-state.db"))
 	if err != nil {
@@ -97,7 +61,146 @@ func TestListJobsRemoteByPipeline_HonoursLimitWithClientFilter(t *testing.T) {
 	if err := ListJobsRemote(ctx, srv.URL, "", opts, &buf); err != nil {
 		t.Fatalf("ListJobsRemote: %v", err)
 	}
-	if got := pivotRowTotal(t, buf.String()); got != 5 {
-		t.Fatalf("remote --limit 5 with a client-side filter rolled up %d runs, want 5", got)
+	if got := pivotRowTotal(t, buf.String()); got != 40 {
+		t.Fatalf("remote rollup counted %d runs, want all 40", got)
+	}
+}
+
+// A rollup over a subset must count the subset, across pages. A status filter
+// runs in the query, so the window stays page-sized and the walk really pages:
+// a drain that dropped a page or counted one twice lands on a wrong number here.
+func TestListJobsByPipeline_CountsASubsetAcrossPages(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "subset-state.db")
+
+	seed, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	base := time.Now().Add(-time.Hour)
+	// safety: above the ceiling, so the rollup must walk more than one page to reach
+	// them all; it pages at the ceiling whatever --limit says.
+	const successes, failures = store.MaxRunListLimit + 25, 15
+	for i := range successes + failures {
+		status := "success"
+		if i >= successes {
+			status = "failed"
+		}
+		run := store.Run{
+			ID:        fmt.Sprintf("run-subset-%04d", i),
+			Pipeline:  "demo",
+			Status:    status,
+			StartedAt: base.Add(time.Duration(i) * time.Second),
+		}
+		if err := seed.CreateRun(ctx, run); err != nil {
+			t.Fatalf("seed CreateRun: %v", err)
+		}
+	}
+	_ = seed.Close()
+
+	var buf bytes.Buffer
+	opts := ListOpts{
+		Profile:    &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: dbPath}},
+		Limit:      5,
+		Statuses:   []string{"success"},
+		JSON:       true,
+		ByPipeline: true,
+		Pivot:      PivotOpts{SparklineLen: 30, Style: SparkASCII},
+	}
+	if err := ListJobs(ctx, Paths{Root: t.TempDir()}, opts, &buf); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if got := pivotRowTotal(t, buf.String()); got != successes {
+		t.Fatalf("rollup counted %d successful runs, want %d", got, successes)
+	}
+}
+
+// The cursor crosses the wire as query parameters the controller parses back. A
+// listing that walks a controller must reach every run exactly once, or a count
+// taken across pages is wrong in a way no single page shows.
+func TestListJobsRemote_CursorWalksEveryRunExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "remote-page-state.db"))
+	if err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	seedPivotRuns(t, st, 25)
+	srv := NewControllerServer(t, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	seen := map[string]int{}
+	cursor, pages := "", 0
+	for range 20 {
+		var buf bytes.Buffer
+		if err := ListJobsRemote(ctx, srv.URL, "", ListOpts{Limit: 7, JSON: true, Cursor: cursor}, &buf); err != nil {
+			t.Fatalf("ListJobsRemote: %v", err)
+		}
+		got := decodeListing(t, buf.String())
+		pages++
+		for _, id := range got.ids {
+			seen[id]++
+		}
+		if !got.page.Truncated {
+			break
+		}
+		if got.page.NextCursor == "" {
+			t.Fatal("a truncated remote page carried no cursor")
+		}
+		cursor = got.page.NextCursor
+	}
+
+	if pages < 2 {
+		t.Fatalf("walked %d page(s); the cursor was never exercised", pages)
+	}
+	if len(seen) != 25 {
+		t.Errorf("walked %d distinct runs, want 25", len(seen))
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("run %s served %d times across pages, want once", id, n)
+		}
+	}
+}
+
+// A rollup that stopped short must say so in its own output. The totals are the
+// number a dashboard divides by, and a log line does not reach a program.
+func TestListJobsByPipeline_SummarySaysWhenTotalsStopShort(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "summary-state.db")
+	seed, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	seedPivotRuns(t, seed, 40)
+	_ = seed.Close()
+
+	var buf bytes.Buffer
+	opts := ListOpts{
+		Profile:    &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: dbPath}},
+		Limit:      5,
+		JSON:       true,
+		ByPipeline: true,
+		Pivot:      PivotOpts{SparklineLen: 30, Style: SparkASCII},
+	}
+	if err := ListJobs(ctx, Paths{Root: t.TempDir()}, opts, &buf); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+
+	var summary PipelinePivotSummary
+	found := false
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if !strings.Contains(line, `"kind":"summary"`) {
+			continue
+		}
+		if err := json.Unmarshal([]byte(line), &summary); err != nil {
+			t.Fatalf("decode summary %q: %v", line, err)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("rollup carried no kind:summary record, so a program cannot tell complete totals from capped ones")
+	}
+	if summary.Truncated {
+		t.Errorf("a rollup that read every matching run reported truncated=true (%s)", summary.Reason)
 	}
 }

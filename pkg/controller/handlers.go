@@ -248,7 +248,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []*store.Run{}
 	}
-	w.Header().Set("X-Sparkwing-Run-Filter-Version", "1")
+	w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 

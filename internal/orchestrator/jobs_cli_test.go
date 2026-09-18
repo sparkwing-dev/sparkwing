@@ -135,9 +135,18 @@ func TestListJobs_JSONOutput(t *testing.T) {
 	if err := orchestrator.ListJobs(context.Background(), p, orchestrator.ListOpts{JSON: true, Limit: 10}, &buf); err != nil {
 		t.Fatalf("ListJobs: %v", err)
 	}
-	runs := decodeNDJSON[map[string]any](t, buf.String())
-	if len(runs) != 1 || runs[0]["id"] != res.RunID {
-		t.Fatalf("unexpected json: %v", runs)
+	records := decodeNDJSON[map[string]any](t, buf.String())
+	if len(records) != 2 {
+		t.Fatalf("want a run record and a trailing page record, got %v", records)
+	}
+	if records[0]["id"] != res.RunID {
+		t.Fatalf("unexpected run record: %v", records[0])
+	}
+	if records[1]["kind"] != "page" {
+		t.Fatalf("listing did not end with a page record: %v", records[1])
+	}
+	if records[1]["truncated"] != false {
+		t.Fatalf("a listing holding the only run reported truncated: %v", records[1])
 	}
 }
 
