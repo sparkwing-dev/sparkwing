@@ -43,8 +43,7 @@ var ErrDockerUnavailable = docker.ErrDockerUnavailable
 // DefaultReadyTimeout is used when a Service leaves ReadyTimeout zero.
 const DefaultReadyTimeout = 30 * time.Second
 
-// AutoPort asks WithServices to publish a service on a free host port chosen by
-// the operating system, rather than on a port the caller names.
+// AutoPort publishes a service on a host port the operating system reports free.
 const AutoPort = -1
 
 const readyPollInterval = 500 * time.Millisecond
@@ -64,16 +63,13 @@ type Service struct {
 	// collisions when the same pipeline runs concurrently.
 	Name string
 
-	// Port is the container port the service listens on. When set, it is
-	// published to 127.0.0.1 so a host process (the test) reaches it on
-	// every platform incl. Docker Desktop.
-	// When zero, the container uses host networking (Linux only).
+	// Port is the container port the service listens on. When zero, the
+	// container uses host networking (Linux only).
 	Port int
 
-	// HostPort is the host port Port is published on. Zero publishes Port
-	// itself. AutoPort asks the operating system for a free one, which
-	// [WithServicesAddrs] reports back; a fixed port cannot be shared by two
-	// runs on one machine, so concurrent callers pass AutoPort.
+	// HostPort is the host port on 127.0.0.1 that Port is published on. Zero
+	// publishes Port itself; AutoPort takes a free one, which only
+	// [WithServicesAddrs] reports back.
 	HostPort int
 
 	// Env is the set of environment variables to pass to the container.
@@ -96,10 +92,8 @@ type Service struct {
 // error) occurred first; cleanup errors are swallowed because the
 // caller cannot act on them usefully.
 //
-// If services is empty, fn runs once with no docker interaction.
-//
-// A service published on [AutoPort] needs the port it was given, which this
-// signature cannot carry; call [WithServicesAddrs] instead.
+// If services is empty, fn runs once with no docker interaction. This signature
+// cannot carry an [AutoPort] port back; call [WithServicesAddrs] for that.
 func WithServices(ctx context.Context, services []Service, fn func(context.Context) error) error {
 	return withServices(ctx, "services.WithServices", services, func(ctx context.Context, _ []Addr) error {
 		return fn(ctx)
@@ -108,18 +102,14 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 
 // Addr is where one service ended up, in the order the services were given.
 type Addr struct {
-	// Name is the container name, which WithServicesAddrs derives when the
-	// caller leaves [Service.Name] empty.
 	Name string
 
-	// HostPort is the port on 127.0.0.1 the service is published on, or zero
-	// for a service using host networking.
+	// HostPort is zero for a service using host networking.
 	HostPort int
 }
 
-// WithServicesAddrs is [WithServices] that also hands fn where each service was
-// published, one Addr per service in the order given. A service asking for
-// [AutoPort] reads its port here, which is the only place it is reported.
+// WithServicesAddrs is [WithServices] that also hands fn one Addr per service,
+// in the order given, which is where an [AutoPort] port is reported.
 func WithServicesAddrs(ctx context.Context, services []Service, fn func(context.Context, []Addr) error) error {
 	return withServices(ctx, "services.WithServicesAddrs", services, fn)
 }
@@ -156,6 +146,10 @@ func withServices(ctx context.Context, guard string, services []Service, fn func
 	for i := range resolved {
 		addrs[i] = Addr{Name: resolved[i].Name, HostPort: publishedPort(resolved[i])}
 	}
+
+	// safety: docker binds the host port, so every probe closes before the first
+	// container starts; holding one past this point makes docker fail that bind.
+	release()
 
 	started := make([]string, 0, len(resolved))
 
@@ -195,10 +189,6 @@ func withServices(ctx context.Context, guard string, services []Service, fn func
 			return fmt.Errorf("services: %s not ready: %w", svc.Name, err)
 		}
 	}
-
-	// safety: the probe listeners are closed before fn runs, so a service that
-	// failed to bind its port surfaces to fn rather than to the next caller.
-	release()
 
 	// safety: fn is the last statement so a panic unwinds through defer cleanup without re-wrapping the stack.
 	return fn(ctx, addrs)

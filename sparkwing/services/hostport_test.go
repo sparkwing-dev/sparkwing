@@ -90,12 +90,46 @@ func stubDocker(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	argv := filepath.Join(dir, "argv")
-	stub := "#!/bin/sh\necho \"$@\" >> " + argv + "\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0o755); err != nil {
+	self, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink(self, filepath.Join(dir, "docker")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(stubDockerArgvEnv, argv)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argv
+}
+
+const stubDockerArgvEnv = "SERVICES_TEST_DOCKER_ARGV"
+
+// hack: the stub binds every published host port the way docker does, so a port
+// this package is still holding fails the test rather than a user.
+func runStubDocker(args []string) int {
+	if path := os.Getenv(stubDockerArgvEnv); path != "" {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = fmt.Fprintln(f, strings.Join(args, " "))
+			_ = f.Close()
+		}
+	}
+	for i, arg := range args {
+		if arg != "-p" || i+1 >= len(args) {
+			continue
+		}
+		fields := strings.Split(args[i+1], ":")
+		if len(fields) != 3 {
+			continue
+		}
+		listener, err := net.Listen("tcp", fields[0]+":"+fields[1])
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "docker: bind %s: %v\n", args[i+1], err)
+			return 125
+		}
+		_ = listener.Close()
+	}
+	return 0
 }
 
 func TestWithServicesAddrsPublishesTheAllocatedPort(t *testing.T) {
