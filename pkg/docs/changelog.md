@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.55.0] - 2026-09-18
 ### Added
 
 - **sdk:** `services.Service` carries `HostPort`, and `services.WithServicesAddrs`
