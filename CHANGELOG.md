@@ -32,7 +32,10 @@ unlock.
 - **pipelines:** `sparkwing run jev-sweeper` performs a bounded manual audit of
   the whole Go codebase for mixed responsibilities, abstraction-boundary leaks,
   misleading contracts, unnecessary indirection, and duplicate responsibility.
-  It batches independent judgments and reports advisory probabilities.
+  It also checks Open/Closed and dependency-inversion violations, primitive
+  obsession, and feature envy. Reproducible shuffled samples rotate coverage
+  beyond the highest-ranked candidates. It batches independent judgments and
+  reports advisory probabilities.
 
 ### Changed
 

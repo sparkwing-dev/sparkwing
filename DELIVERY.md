@@ -199,11 +199,15 @@ file. Other syntax and workflow checks remain active.
   without the key.
 - **Whole-codebase semantic sweep:** `sparkwing run jev-sweeper` is a manual,
   heavier companion to `jev-lint`. It parses every non-test Go function,
-  selects bounded candidates across packages, and batches independent Jev
-  judgments for mixed responsibilities, abstraction-boundary leakage,
-  misleading contracts, unnecessary indirection, and duplicate responsibility.
-  `--max-functions` and `--max-pairs` control breadth; `--dry-run` prints every
-  request. Findings remain advisory and do not replace deterministic gates.
+  combines high-signal ranking with a reproducible shuffled sample across
+  packages, and batches independent Jev judgments for mixed responsibilities,
+  Open/Closed and dependency-inversion violations, abstraction-boundary
+  leakage, misleading contracts, primitive obsession, feature envy,
+  unnecessary indirection, and duplicate responsibility. The shuffled sample
+  rotates daily by default; `--shuffle-seed` reproduces it. `--max-functions`,
+  `--max-pairs`, `--sample-functions`, and `--sample-pairs` control breadth;
+  `--dry-run` prints every request. Findings remain advisory and do not replace
+  deterministic gates.
 - **Scripts under `bin/`:** editing one means running `GOWORK=off go test
   ./bin`, about ten seconds. Go tests there pin what the scripts do, including
   the exact argv `bin/install.sh` builds with, so a change to a shell script

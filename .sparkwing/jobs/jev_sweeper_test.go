@@ -29,7 +29,7 @@ func validateOrder(value string) error { return validate(value) }
 	if len(candidates) != 3 {
 		t.Fatalf("candidates = %#v", candidates)
 	}
-	if len(candidates[0].Rules) != 3 || len(candidates[1].Rules) != 3 || len(candidates[2].Rules) != 1 || candidates[2].Rules[0] != "unnecessary_indirection" {
+	if len(candidates[0].Rules) != 5 || len(candidates[1].Rules) != 5 || len(candidates[2].Rules) != 1 || candidates[2].Rules[0] != "unnecessary_indirection" {
 		t.Fatalf("candidate rules = %#v", candidates)
 	}
 }
@@ -58,6 +58,20 @@ func prepareOrder(value string) error { return save(value) }
 	findings, err := interpretJevSweep(candidates, response)
 	if err != nil || len(findings) != 3 || !findings[0].Report || findings[1].Report || findings[2].Report {
 		t.Fatalf("findings = %#v, err %v", findings, err)
+	}
+}
+
+func TestNewJevSweepRequestDefinesDesignPrincipleChecks(t *testing.T) {
+	function := mustJevLintFunctions(t, "orders/orders.go", `package orders
+func routeOrder(kind string) error { return route(kind) }
+`)[0]
+	rules := []string{"open_closed_violation", "dependency_inversion", "primitive_obsession", "feature_envy"}
+	request := newJevSweepRequest([]jevSweepCandidate{{Function: function, Rules: rules}})
+	for _, rule := range rules {
+		question := request.Questions["function_0_"+rule]
+		if question.Type != "noul" || question.Instructions == "" || len(question.Criteria) != 2 {
+			t.Fatalf("question %s = %#v", rule, question)
+		}
 	}
 }
 
@@ -90,4 +104,57 @@ func TestSelectJevSweepPairsReservesCrossPackageJudgments(t *testing.T) {
 	if len(selected) != 6 || cross != 3 {
 		t.Fatalf("selected %d pairs with %d cross-package: %#v", len(selected), cross, selected)
 	}
+}
+
+func TestJevSweepShuffleIsReproducibleAndRotates(t *testing.T) {
+	var functions []jevLintFunction
+	for i := 0; i < 30; i++ {
+		functions = append(functions, jevLintFunction{
+			Path: "pkg" + string(rune('a'+i)) + "/file.go", Directory: "pkg" + string(rune('a'+i)),
+			Identity: "function" + string(rune('a'+i)), Source: strings.Repeat("x", 300),
+		})
+	}
+	first := selectJevShuffledCandidates(functions, nil, 8, "seed-one")
+	repeated := selectJevShuffledCandidates(functions, nil, 8, "seed-one")
+	rotated := selectJevShuffledCandidates(functions, nil, 8, "seed-two")
+	if labelsOfJevSweepCandidates(first) != labelsOfJevSweepCandidates(repeated) {
+		t.Fatalf("same seed changed selection: %#v vs %#v", first, repeated)
+	}
+	if labelsOfJevSweepCandidates(first) == labelsOfJevSweepCandidates(rotated) {
+		t.Fatalf("different seeds kept selection: %#v", first)
+	}
+	for _, candidate := range first {
+		if len(candidate.Rules) != 4 || candidate.Rules[0] != "open_closed_violation" {
+			t.Fatalf("shuffled candidate rules = %#v", candidate.Rules)
+		}
+	}
+}
+
+func TestSelectJevShuffledPairsExcludesRankedPairs(t *testing.T) {
+	var pool []jevLintPair
+	for i := 0; i < 12; i++ {
+		pool = append(pool, jevLintPair{
+			Changed:      jevLintFunction{Path: "changed.go", Identity: string(rune('a' + i))},
+			Candidate:    jevLintFunction{Path: "candidate.go", Identity: string(rune('a' + i))},
+			CrossPackage: i%2 == 0,
+		})
+	}
+	ranked := pool[:2]
+	selected := selectJevShuffledPairs(pool, ranked, 6, "seed")
+	if len(selected) != 6 {
+		t.Fatalf("selected = %#v", selected)
+	}
+	for _, pair := range selected {
+		if jevSweepPairSelected(ranked, pair) {
+			t.Fatalf("shuffled selection repeated ranked pair: %#v", pair)
+		}
+	}
+}
+
+func labelsOfJevSweepCandidates(candidates []jevSweepCandidate) string {
+	var labels []string
+	for _, candidate := range candidates {
+		labels = append(labels, functionLabel(candidate.Function))
+	}
+	return strings.Join(labels, "\n")
 }
