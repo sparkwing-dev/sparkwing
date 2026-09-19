@@ -17,7 +17,8 @@ run often never reaches.
 Every one of these refuses a context carrying no grant:
 
 - `sparkwing.Bash` and `sparkwing.Exec`, at the point the command runs
-  (`Run`, `Capture`, `String`, `MustBeEmpty`) rather than where it is built.
+  (`Run`, `Capture`, `String`, `Lines`, `JSON`, `MustBeEmpty`) rather than
+  where it is built.
 - every `sparkwing/git` helper that shells out to git. `FilesetHash` is the
   exception: outside a git tree it hashes the filesystem directly, runs no git
   command, and so is not refused.

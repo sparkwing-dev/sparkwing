@@ -105,40 +105,72 @@ func TestGuard_RefusesAPlanThatGrantsItsHandedContext(t *testing.T) {
 	}
 }
 
-func TestGuard_RefusesAContextCarryingNoGrant(t *testing.T) {
-	if msg, _ := refusal(context.Background()); !strings.Contains(msg, "carrying no grant") {
-		t.Fatalf("an ungranted context must be refused, got: %q", msg)
+func TestGuard_ReadsEveryStateAContextCanCarry(t *testing.T) {
+	const (
+		planRefusal  = "called inside Pipeline.Plan()"
+		grantRefusal = "carrying no grant"
+	)
+	bg := func() context.Context { return context.Background() }
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"a fresh context", bg(), grantRefusal},
+		{"granted", planguard.Grant(bg()), ""},
+		{"granted twice", planguard.Grant(planguard.Grant(bg())), ""},
+		{"sealed", planguard.Seal(bg()), planRefusal},
+		{"sealed over a grant", planguard.Seal(planguard.Grant(bg())), planRefusal},
+		{"granted after sealing", planguard.Grant(planguard.Seal(planguard.Grant(bg()))), planRefusal},
+		{"granted twice after sealing", planguard.Grant(planguard.Grant(planguard.Seal(bg()))), planRefusal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg, panicked := refusal(tc.ctx)
+			if tc.want == "" {
+				if panicked {
+					t.Fatalf("%s must reach the helper, got: %q", tc.name, msg)
+				}
+				return
+			}
+			if !panicked {
+				t.Fatalf("%s must be refused, and the helper ran", tc.name)
+			}
+			if !strings.Contains(msg, tc.want) {
+				t.Fatalf("refusal = %q, want it to carry %q", msg, tc.want)
+			}
+		})
 	}
 }
 
-func TestGuard_AllowsAGrantedContext(t *testing.T) {
-	if msg, panicked := refusal(planguard.Grant(context.Background())); panicked {
-		t.Fatalf("a granted context must pass, got a panic: %q", msg)
+func TestGuard_ReadsANilContextAsCarryingNoGrant(t *testing.T) {
+	//nolint:staticcheck // a nil context is the case under test
+	msg, panicked := refusal(nil)
+	if !panicked || !strings.Contains(msg, "carrying no grant") {
+		t.Fatalf("Guard(nil) = %q (panicked=%v); nil carries no grant and must be refused by name", msg, panicked)
 	}
 }
 
-func TestGrant_IsANoOpOnASealedContext(t *testing.T) {
-	sealed := planguard.Seal(planguard.Grant(context.Background()))
-	for attempt := 1; attempt <= 2; attempt++ {
-		sealed = planguard.Grant(sealed)
-		msg, _ := refusal(sealed)
-		if !strings.Contains(msg, "called inside Pipeline.Plan()") {
-			t.Fatalf("Grant #%d lifted the seal, got: %q", attempt, msg)
-		}
+func TestGrantAndSeal_LeaveANilParentToTheStandardLibrary(t *testing.T) {
+	for name, derive := range map[string]func(context.Context) context.Context{
+		"Grant": planguard.Grant,
+		"Seal":  planguard.Seal,
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s(nil) returned a context; deriving one from nil must panic at the caller", name)
+				}
+			}()
+			_ = derive(nil)
+		})
 	}
 }
 
-func TestSeal_BeatsAGrantWhicheverOrderTheyArrive(t *testing.T) {
-	if msg, _ := refusal(planguard.Seal(context.Background())); !strings.Contains(msg, "called inside Pipeline.Plan()") {
-		t.Fatalf("a bare seal must refuse, got: %q", msg)
-	}
-	if msg, _ := refusal(planguard.Grant(planguard.Seal(planguard.Grant(context.Background())))); !strings.Contains(msg, "called inside Pipeline.Plan()") {
-		t.Fatalf("grant, seal, grant must still refuse, got: %q", msg)
-	}
-}
-
+// safety: the guard does not close this shape; the plan-io lint refuses a
+// Grant written inside a Plan body. Closing it here is allowed -- change this
+// test deliberately rather than reading a failure as a regression.
 func TestGuard_AMintedThenGrantedContextIsAllowedEvenInsidePlan(t *testing.T) {
 	if msg := invokePlan(t, "planguard-minting-then-granting"); msg != "" {
-		t.Fatalf("the linter refuses this shape, the guard does not; closing it here is allowed, but say so: %q", msg)
+		t.Fatalf("a minted, granted context must reach the helper; got a refusal: %q", msg)
 	}
 }

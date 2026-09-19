@@ -37,6 +37,7 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 	}
 
 	missing := map[string][]string{}
+	harvested := 0
 	for _, p := range docFiles {
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -50,11 +51,18 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 		}
 		// safety: an API summary block lists its names bare, so the qualified
 		// pattern above cannot see the one place the surface is enumerated.
-		for _, name := range bareAPIBlockNames(string(b)) {
+		bare := bareAPIBlockNames(string(b))
+		harvested += len(bare)
+		for _, name := range bare {
 			if !syms[name] {
 				missing[name] = append(missing[name], rel)
 			}
 		}
+	}
+	// safety: the harvest is the assertion's input, so a scan that stops
+	// finding names passes while checking nothing.
+	if harvested < 20 {
+		t.Fatalf("harvested only %d bare API names; the scan would pass vacuously", harvested)
 	}
 	names := make([]string, 0, len(missing))
 	for n := range missing {
@@ -70,13 +78,13 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 func bareAPIBlockNames(doc string) []string {
 	call := regexp.MustCompile(`^([A-Z]\w*)\(`)
 	var names []string
-	inBlock := false
+	inFence := false
 	for _, line := range strings.Split(doc, "\n") {
 		if strings.HasPrefix(line, "```") {
-			inBlock = strings.TrimSpace(strings.TrimPrefix(line, "```")) == ""
+			inFence = !inFence
 			continue
 		}
-		if !inBlock {
+		if !inFence {
 			continue
 		}
 		if m := call.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
