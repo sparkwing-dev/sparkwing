@@ -58,27 +58,22 @@ Consumer-side helper packages can opt their own ctx-taking entry points into the
 guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
 (import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
 
-## Side effects need a grant
+## Plan() is sealed against side effects
 
-A guarded helper runs only where the runtime granted permission. The
-orchestrator grants once per process that executes pipeline work, so every
-callback below it inherits. `Plan` receives a sealed context that
-`sparkwing.Grant` cannot unseal. Thread the context your callback was handed:
+`Plan` receives a sealed context, and a guarded helper handed it refuses:
 
 ```go
 func (p Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in In, rc sparkwing.RunContext) error {
-    sparkwing.Bash(ctx, "git rev-parse HEAD").String()                  // refused: Plan is sealed
-    sparkwing.Bash(context.Background(), "git rev-parse HEAD").String() // refused: no grant
+    sparkwing.Bash(ctx, "git rev-parse HEAD").String() // refused: Plan is sealed
     ...
 }
 ```
 
-Code that calls a guarded helper with no run around it -- a tool, a test --
-marks its own context with `sparkwing.Grant(ctx)`.
-
-The seal travels on the context, so a `Plan` body that mints a fresh context
-and grants that one reaches a guarded helper. The call is the record: `sparkwing pipeline lint` reports a `Grant` inside a
-`Plan` body, and a grep finds the rest.
+The seal travels on the context, so a `Plan` body that mints a fresh one
+escapes it, and so does a helper the `Plan` calls that mints its own.
+`sparkwing pipeline lint` is what reports both: it flags a guarded call
+written in a `Plan` body whatever context it is handed, and follows the `Plan`
+one level into a package-level helper it calls.
 
 ## What each callback's context carries
 

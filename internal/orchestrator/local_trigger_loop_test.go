@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 func TestUnlocatableChildError_NamesRealCauseNotPhantomVerb(t *testing.T) {
@@ -184,7 +183,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 	cache := &localCompileCache{}
 	t.Cleanup(func() { _ = cache.Close() })
 	dispatch := func(id string) error {
-		return dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
+		return dispatchLocalTrigger(context.Background(), &store.Trigger{
 			ID:           id,
 			Pipeline:     "child",
 			ParentRunID:  "parent-live",
@@ -272,7 +271,7 @@ func TestLocateTriggerRepo_RetryUsesRecordedCheckoutAcrossSameNamedPipelines(t *
 		},
 	}
 
-	got, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, repoB)
+	got, err := locateTriggerRepo(context.Background(), trig, repoB)
 	if err != nil {
 		t.Fatalf("locateTriggerRepo: %v", err)
 	}
@@ -295,7 +294,7 @@ func TestLocateTriggerRepo_RetryUsesRecordedCheckoutAcrossSameNamedPipelines(t *
 func TestLocateTriggerRepo_RetryFailsClosedWhenSourceCheckoutUnavailable(t *testing.T) {
 	trig := &store.Trigger{Pipeline: "pre-push", Repo: "owner/repo-a", RetryOf: "source-run"}
 	repoB, _ := writeRetryTestRepo(t, filepath.Join(t.TempDir(), "repo-b"), "git@example.test:owner/repo-b.git", "step-from-b")
-	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, repoB)
+	_, err := locateTriggerRepo(context.Background(), trig, repoB)
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("error=%T %v, want RetrySourceUnavailableError", err, err)
@@ -318,7 +317,7 @@ func TestLocateTriggerRepo_RetryRejectsRepositoryIdentityDrift(t *testing.T) {
 			retryprovenance.PlanHashKey:     "sha256:source-plan",
 		},
 	}
-	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
+	_, err := locateTriggerRepo(context.Background(), trig, "")
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "identity drift") {
 		t.Fatalf("error=%T %v, want typed repository identity drift", err, err)
@@ -339,7 +338,7 @@ func TestLocateTriggerRepo_RetryRejectsARevisionThatIsNotAnObjectID(t *testing.T
 				retryprovenance.PlanHashKey:     "sha256:matching-plan-shape",
 			},
 		}
-		_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
+		_, err := locateTriggerRepo(context.Background(), trig, "")
 		var unavailable *RetrySourceUnavailableError
 		if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "not a git object id") {
 			t.Errorf("revision %q: error=%T %v, want a rejected object id", revision, err, err)
@@ -366,7 +365,7 @@ func TestLocateTriggerRepo_RetryRejectsSamePathSameBasenameReplacement(t *testin
 		},
 	}
 
-	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
+	_, err := locateTriggerRepo(context.Background(), trig, "")
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "identity drift") {
 		t.Fatalf("error=%T %v, want typed repository identity drift", err, err)
@@ -400,7 +399,7 @@ func TestLocateTriggerRepo_RetryRejectsRevisionDriftBeforeCompilation(t *testing
 		},
 	}
 
-	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
+	_, err := locateTriggerRepo(context.Background(), trig, "")
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "revision drift") {
 		t.Fatalf("error=%T %v, want typed revision drift", err, err)
@@ -444,7 +443,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 		},
 	}
 
-	snapshotDir, cleanup, err := prepareTriggerRepo(planguard.Grant(context.Background()), trig, "")
+	snapshotDir, cleanup, err := prepareTriggerRepo(context.Background(), trig, "")
 	if err != nil {
 		t.Fatalf("prepareTriggerRepo: %v", err)
 	}
@@ -494,7 +493,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 			t.Errorf("close local compile cache: %v", err)
 		}
 	})
-	if err := dispatchLocalTrigger(planguard.Grant(context.Background()), trig, "", "", cache, logger, nil); err != nil {
+	if err := dispatchLocalTrigger(context.Background(), trig, "", "", cache, logger, nil); err != nil {
 		t.Fatalf("dispatchLocalTrigger: %v", err)
 	}
 	raw, err = os.ReadFile(outputPath)

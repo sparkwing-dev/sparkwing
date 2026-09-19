@@ -18,7 +18,7 @@ func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
 	if markdownlintCommand != want {
 		t.Fatalf("markdownlint command = %q, want exactly %q", markdownlintCommand, want)
 	}
-	if err := runMarkdownlint(grantedCtx(context.Background())); err != nil {
+	if err := runMarkdownlint(context.Background()); err != nil {
 		t.Fatalf("self-provisioned markdown lint failed: %v", err)
 	}
 }
@@ -41,7 +41,7 @@ func TestActionlintAcceptsTheReleasePublicationQueue(t *testing.T) {
 	previous := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
 	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
-	if err := runActionlint(grantedCtx(t.Context())); err != nil {
+	if err := runActionlint(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -102,7 +102,7 @@ func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
 
 func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
 		t.Fatalf("a fixture with no replace lines must pass: %v", err)
@@ -119,7 +119,7 @@ func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 
 func TestReplaceBanAllowsTheDogfoodSelfReplace(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"),
 		"module fixture-pipelines\n\ngo 1.25\n\nreplace github.com/sparkwing-dev/sparkwing => ..\n")

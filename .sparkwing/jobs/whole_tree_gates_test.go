@@ -35,7 +35,7 @@ func TestThisRepoSatisfiesItsOwnWholeTreeGates(t *testing.T) {
 	start := time.Now()
 	for _, g := range wholeTreeGates {
 		t.Run(g.name, func(t *testing.T) {
-			if err := g.check(grantedCtx(context.Background())); err != nil {
+			if err := g.check(context.Background()); err != nil {
 				t.Fatalf("%s fails against %s:\n%v", g.name, root, err)
 			}
 		})

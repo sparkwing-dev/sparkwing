@@ -26,7 +26,7 @@ func TestResolveCloneURL_NoCache(t *testing.T) {
 	defer func() { gitcacheProbeURL = prev }()
 
 	upstream := "git@github.com:owner/repo.git"
-	got, _, _ := resolveCloneURL(grantedCtx(context.Background()), upstream)
+	got, _, _ := resolveCloneURL(context.Background(), upstream)
 	if got != upstream {
 		t.Fatalf("got %q, want upstream %q", got, upstream)
 	}
@@ -46,7 +46,7 @@ func TestResolveCloneURL_StubServerNotHealthy(t *testing.T) {
 	defer func() { gitcacheProbeURL = prev }()
 
 	upstream := "git@github.com:owner/repo.git"
-	got, _, _ := resolveCloneURL(grantedCtx(context.Background()), upstream)
+	got, _, _ := resolveCloneURL(context.Background(), upstream)
 	if got != upstream {
 		t.Fatalf("404 health: got %q, want upstream %q", got, upstream)
 	}
@@ -71,7 +71,7 @@ func TestResolveCloneURL_StubServerHealthy(t *testing.T) {
 	defer func() { gitcacheProbeURL = prev }()
 
 	upstream := "git@github.com:owner/repo.git"
-	got, _, _ := resolveCloneURL(grantedCtx(context.Background()), upstream)
+	got, _, _ := resolveCloneURL(context.Background(), upstream)
 	want := srv.URL + "/git/" + sourceurl.ClaimedRepoNameFromURL(upstream)
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -83,7 +83,7 @@ func TestResolveCloneURL_EnvOverride(t *testing.T) {
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 
 	upstream := "https://github.com/owner/repo.git"
-	got, _, _ := resolveCloneURL(grantedCtx(context.Background()), upstream)
+	got, _, _ := resolveCloneURL(context.Background(), upstream)
 	want := "http://cache.local:9999/git/" + sourceurl.ClaimedRepoNameFromURL(upstream)
 	if got != want {
 		t.Fatalf("env override: got %q, want %q", got, want)
@@ -144,7 +144,7 @@ func TestCloneThroughSecuredGitcache(t *testing.T) {
 			t.Setenv("SPARKWING_CACHE_TOKEN", c.token)
 
 			dest := filepath.Join(root, "dest")
-			if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+			if err := Clone(context.Background(), upstream, dest); err != nil {
 				t.Fatalf("Clone: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(dest, c.wantFile)); err != nil {
@@ -172,7 +172,7 @@ func TestCloneFallsBackWhenTheCacheDoesNotServeTheName(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
@@ -193,7 +193,7 @@ func TestCloneFallsBackWhenTheCacheAnswersAServerError(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
@@ -213,7 +213,7 @@ func TestCloneFallsBackWhenTheCacheIsUnreachable(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "")
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
@@ -241,7 +241,7 @@ func TestCloneLeavesAPreexistingDestinationAlone(t *testing.T) {
 	if err := os.WriteFile(keep, []byte("mine"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err == nil {
+	if err := Clone(context.Background(), upstream, dest); err == nil {
 		t.Fatal("Clone into a non-empty directory should fail")
 	}
 	if _, err := os.Stat(keep); err != nil {
@@ -372,7 +372,7 @@ func TestProbedCacheNeverSeesTheBearer(t *testing.T) {
 	defer func() { gitcacheProbeURL = prev }()
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if got := seen(); got != "" {
@@ -394,7 +394,7 @@ func TestGitcacheURLEnvRoutesClonesThroughTheCache(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "cached.txt")); err != nil {
@@ -418,7 +418,7 @@ func TestCloneFallsBackWhenTheCacheRedirects(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "upstream.txt")); err != nil {
@@ -437,10 +437,10 @@ func TestFetchAfterCachedCloneCarriesTheBearer(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
 
 	dest := filepath.Join(root, "dest")
-	if err := Clone(grantedCtx(context.Background()), upstream, dest); err != nil {
+	if err := Clone(context.Background(), upstream, dest); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
-	if err := Fetch(grantedCtx(context.Background()), dest); err != nil {
+	if err := Fetch(context.Background(), dest); err != nil {
 		t.Fatalf("Fetch after a cached clone: %v", err)
 	}
 	if got := seen(); got != "Bearer s3cret" {
@@ -458,7 +458,7 @@ func TestFetchLeavesANonCacheOriginAlone(t *testing.T) {
 
 	dest := filepath.Join(root, "dest")
 	runTestGit(t, root, "clone", "--quiet", upstream, dest)
-	if err := Fetch(grantedCtx(context.Background()), dest); err != nil {
+	if err := Fetch(context.Background(), dest); err != nil {
 		t.Fatalf("Fetch from a local origin: %v", err)
 	}
 }

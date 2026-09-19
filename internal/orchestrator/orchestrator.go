@@ -35,7 +35,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 type Options struct {
@@ -160,7 +159,6 @@ type Result struct {
 }
 
 func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) {
-	ctx = planguard.Grant(ctx)
 	var fleetRuntime *localFleetRuntime
 	if opts.Fleet {
 		var err error

@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 func runReplayNodeCLI(args []string) error {
@@ -56,7 +55,6 @@ func runReplayNodeCLI(args []string) error {
 }
 
 func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, nodeID string, delegate sparkwing.Logger) (runner.Result, error) {
-	ctx = planguard.Grant(ctx)
 	st := backends.State
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {

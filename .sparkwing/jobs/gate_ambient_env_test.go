@@ -33,7 +33,7 @@ func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	writeGoFile(t, filepath.Join(root, "internal", "ambient_probe_test.go"), ambientServiceProbe)
 	gitAddAll(t, root)

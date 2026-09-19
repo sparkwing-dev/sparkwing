@@ -1,17 +1,13 @@
-// Package planguard decides where a side-effect helper may run.
+// Package planguard implements the Plan() purity sentinel.
 //
 // Pipeline.Plan must be pure-declarative; side effects belong inside
-// the step closures a Job's Work() body declares; those receive a
-// granted context.
+// a Job's Work() body. This package is a sibling of sparkwing/,
+// sparkwing/docker, sparkwing/git, and sparkwing/services so every
+// layer that ships side-effect helpers can import the same sentinel
+// without violating the SDK's layering rule.
 //
-// A context carries one of three states: ungranted, which is what a fresh
-// context has and which refuses; granted, which Grant produces; and sealed,
-// which Seal produces and which refuses. Two rules move between them. Seal
-// wins from any state, and Grant is a no-op on a sealed context, so a Plan
-// body cannot grant its way out of the seal.
-//
-// The orchestrator calls Grant once per process that executes pipeline work,
-// and Invoke calls Seal for the Plan body.
+// The orchestrator-facing alias is
+// internal/sparkwingruntime.GuardPlanTime, which delegates here.
 package planguard
 
 import (
@@ -19,67 +15,32 @@ import (
 	"fmt"
 )
 
-type state uint8
+type planTimeKey struct{}
 
-const (
-	ungranted state = iota
-	granted
-	sealed
-)
-
-type stateKey struct{}
-
-func from(ctx context.Context) state {
-	if ctx == nil {
-		return ungranted
-	}
-	s, _ := ctx.Value(stateKey{}).(state)
-	return s
+// With returns ctx marked as a Plan() invocation context. The caller
+// is sparkwing.Registration.Invoke.
+func With(ctx context.Context) context.Context {
+	return context.WithValue(ctx, planTimeKey{}, true)
 }
 
-// Grant returns ctx with side-effect helpers granted, and returns a
-// sealed ctx unchanged. The orchestrator calls it once at the root of
-// each process that executes pipeline work; everything dispatched
-// below inherits the grant.
-//
-// This is the spelling for the SDK's own layers and for helper
-// packages that cannot import the root package. Pipeline authors call
-// sparkwing.Grant, which delegates here.
-func Grant(ctx context.Context) context.Context {
-	if from(ctx) == sealed {
-		return ctx
-	}
-	return context.WithValue(ctx, stateKey{}, granted)
+// Active reports whether ctx is currently inside a Plan() call.
+// Side-effect helpers should prefer Guard; Active is for tests and
+// for code that wants to branch quietly on plan-time presence.
+func Active(ctx context.Context) bool {
+	v, _ := ctx.Value(planTimeKey{}).(bool)
+	return v
 }
 
-// Seal returns ctx with side-effect helpers refused, whatever ctx carried
-// before. The runtime calls it for a Plan body and for plan inspection;
-// a pipeline author has no reason to, and sealing a context inside a Job
-// body refuses the helpers that body goes on to call.
-func Seal(ctx context.Context) context.Context {
-	return context.WithValue(ctx, stateKey{}, sealed)
-}
-
-// Guard panics unless ctx grants side effects. `helper` names the
-// call that triggered the guard (e.g. "sparkwing.Bash") so the panic
-// message tells the author which one to lift into a Job.
-func Guard(ctx context.Context, helper string) {
-	switch from(ctx) {
-	case granted:
-		return
-	case sealed:
+// Guard panics if invoked from inside a Pipeline.Plan() call. `what`
+// names the helper that triggered the guard (e.g. "sparkwing.Bash")
+// so the panic message tells the author which call to lift into a Job.
+func Guard(ctx context.Context, what string) {
+	if Active(ctx) {
 		panic(fmt.Sprintf(
-			"sparkwing: %s called inside Pipeline.Plan(). Move side effects into a Job's "+
-				"Work() body and surface the result via sparkwing.Step + Ref[T]. "+
-				"See docs/sdk.md#plan-must-be-pure",
-			helper,
-		))
-	default:
-		panic(fmt.Sprintf(
-			"sparkwing: %s called with a context carrying no grant. Thread the context "+
-				"your callback was handed. If this call really is outside a run, pass "+
-				"sparkwing.Grant(ctx). See docs/sdk.md#side-effects-need-a-grant",
-			helper,
+			"sparkwing: %s called inside Pipeline.Plan() -- Plan() must be pure-declarative; "+
+				"move side effects into a Job's Work() body and surface the result via "+
+				"sparkwing.Step + Ref[T]. See docs/sdk.md#plan-must-be-pure",
+			what,
 		))
 	}
 }

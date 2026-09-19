@@ -12,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 func cronPinnedFixture(t *testing.T) (repoDir string, cache *localCompileCache, logger *slog.Logger) {
@@ -46,7 +45,7 @@ func TestDispatchLocalTrigger_RunsThePinnedBinaryInsteadOfCompiling(t *testing.T
 
 	// safety: the .sparkwing/ here holds no module, so a dispatch that compiled
 	// instead of running the pin would fail rather than pass quietly.
-	err := dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
+	err := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID:         "run-pinned",
 		Pipeline:   "nightly",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
@@ -71,7 +70,7 @@ func TestDispatchLocalTrigger_FailsWhenThePinnedBinaryIsGone(t *testing.T) {
 	repoDir, cache, logger := cronPinnedFixture(t)
 	missing := filepath.Join(t.TempDir(), "pipeline")
 
-	err := dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
+	err := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID:         "run-missing",
 		Pipeline:   "nightly",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: missing},
@@ -96,7 +95,7 @@ func TestDispatchLocalTrigger_RefusesAPinThatIsNotExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
+	err := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID:         "run-not-executable",
 		Pipeline:   "nightly",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
@@ -130,7 +129,7 @@ func TestDispatchLocalTrigger_RefusesAPinReplacedSinceItWasArmed(t *testing.T) {
 
 	// safety: the control -- an untouched pin must still run, or the check below
 	// proves nothing.
-	if derr := dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
+	if derr := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID: "run-intact", Pipeline: "nightly", TriggerEnv: env,
 	}, "", repoDir, cache, logger, nil); derr != nil {
 		t.Fatalf("an untouched pin was refused: %v", derr)
@@ -139,7 +138,7 @@ func TestDispatchLocalTrigger_RefusesAPinReplacedSinceItWasArmed(t *testing.T) {
 	if werr := os.WriteFile(pinned, []byte("#!/bin/sh\necho swapped\nexit 0\n"), 0o700); werr != nil {
 		t.Fatal(werr)
 	}
-	derr := dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
+	derr := dispatchLocalTrigger(context.Background(), &store.Trigger{
 		ID: "run-swapped", Pipeline: "nightly", TriggerEnv: env,
 	}, "", repoDir, cache, logger, nil)
 	if derr == nil {

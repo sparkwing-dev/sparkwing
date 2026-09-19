@@ -161,10 +161,10 @@ func TestReleaseCutRollsTheGuideForTwoBreakingEntries(t *testing.T) {
 		}
 	}
 
-	if err := CheckChangelogLint(grantedCtx(context.Background()), dir); err != nil {
+	if err := CheckChangelogLint(context.Background(), dir); err != nil {
 		t.Fatalf("the rolled tree still fails the changelog check that refuses commits:\n%v", err)
 	}
-	if err := checkMigrationGuide(grantedCtx(context.Background()), dir, "v0.9.0"); err != nil {
+	if err := checkMigrationGuide(context.Background(), dir, "v0.9.0"); err != nil {
 		t.Fatalf("release-verify refuses the tree the cut just rolled: %v", err)
 	}
 }
@@ -333,10 +333,10 @@ func TestReleaseCutStillRepointsAndIndexesAPreRolledGuide(t *testing.T) {
 	if got := readRepoFile(t, dir, migrationsDirRel+"/"+unreleasedGuideName); got != freshUnreleasedGuide {
 		t.Errorf("_unreleased.md still holds the rolled sections: %q", got)
 	}
-	if err := CheckChangelogLint(grantedCtx(context.Background()), dir); err != nil {
+	if err := CheckChangelogLint(context.Background(), dir); err != nil {
 		t.Fatalf("a pre-rolled cut leaves a tree that cannot be committed:\n%v", err)
 	}
-	if err := checkMigrationGuide(grantedCtx(context.Background()), dir, "v0.9.0"); err != nil {
+	if err := checkMigrationGuide(context.Background(), dir, "v0.9.0"); err != nil {
 		t.Fatalf("release-verify refuses the pre-rolled tree: %v", err)
 	}
 }
@@ -344,7 +344,7 @@ func TestReleaseCutStillRepointsAndIndexesAPreRolledGuide(t *testing.T) {
 func TestReleaseVerifyRefusesATagStillLinkingTheUnreleasedGuide(t *testing.T) {
 	dir := migrationRepo(t, twoBreakingChangelog, twoBreakingGuide, migrationIndexFixture)
 
-	err := checkMigrationGuide(grantedCtx(context.Background()), dir, "v0.9.0")
+	err := checkMigrationGuide(context.Background(), dir, "v0.9.0")
 	if err == nil {
 		t.Fatalf("release-verify accepted a tag whose breaking entries link _unreleased.md")
 	}
@@ -367,7 +367,7 @@ func TestReleaseVerifyRefusesAGuideMissingFromTheIndex(t *testing.T) {
 		t.Fatalf("writeChangelogPair: %v", err)
 	}
 
-	err = checkMigrationGuide(grantedCtx(context.Background()), dir, "v0.9.0")
+	err = checkMigrationGuide(context.Background(), dir, "v0.9.0")
 	if err == nil {
 		t.Fatalf("release-verify accepted a guide the index does not list")
 	}

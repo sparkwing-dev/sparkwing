@@ -117,7 +117,7 @@ func TestBuildTouchedCompilesThePackageTheChangeTouches(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "broken.go"), "package internal\n\nfunc Broken() int { return \"not an int\" }\n")
 	gitCommitAll(t, root, "a package that does not compile")
 
-	err := runBuildTouched(grantedCtx(context.Background()))
+	err := runBuildTouched(context.Background())
 	if err == nil {
 		t.Fatal("build-touched passed a package that does not compile")
 	}
@@ -138,7 +138,7 @@ func TestBuildTouchedRejectsBrokenPackagesInAWidePush(t *testing.T) {
 	}
 	gitCommitAll(t, root, "a push wider than the tier fits")
 
-	if err := runBuildTouched(grantedCtx(t.Context())); err == nil {
+	if err := runBuildTouched(t.Context()); err == nil {
 		t.Fatal("build-touched passed nine packages that do not compile")
 	}
 }
@@ -155,7 +155,7 @@ func TestBuildTouchedIgnoresChangesGoBuildNeverReads(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "README.md"), "# fixture\n")
 	gitCommitAll(t, root, "a vendored, test-only and non-Go change")
 
-	if err := runBuildTouched(grantedCtx(context.Background())); err != nil {
+	if err := runBuildTouched(context.Background()); err != nil {
 		t.Fatalf("build-touched judged a vendored, test-only, or non-Go change: %v", err)
 	}
 }
@@ -173,10 +173,10 @@ func TestThePushTierJudgesThePushedCommitsWhateverIsStaged(t *testing.T) {
 		"package internal\n\nfunc Unrelated() int { return 7 }\n")
 	gitAddAll(t, root)
 
-	if err := runBuildTouched(grantedCtx(context.Background())); err == nil {
+	if err := runBuildTouched(context.Background()); err == nil {
 		t.Fatal("a staged unrelated file narrowed the push tier, so the pushed commit went unjudged")
 	}
-	if err := runVetTouched(grantedCtx(context.Background())); err == nil {
+	if err := runVetTouched(context.Background()); err == nil {
 		t.Error("vet-touched read the index instead of the push range")
 	}
 }
@@ -190,10 +190,10 @@ func TestVetTouchedJudgesTheTestFilesBuildNeverReads(t *testing.T) {
 		"package internal\n\nimport \"testing\"\n\nfunc TestBroken(t *testing.T) { var n int = \"not an int\"; _ = n }\n")
 	gitCommitAll(t, root, "a test that does not compile")
 
-	if err := runBuildTouched(grantedCtx(context.Background())); err != nil {
+	if err := runBuildTouched(context.Background()); err != nil {
 		t.Fatalf("build-touched judged a test file: %v", err)
 	}
-	if err := runVetTouched(grantedCtx(context.Background())); err == nil {
+	if err := runVetTouched(context.Background()); err == nil {
 		t.Error("vet-touched passed a test file that does not compile")
 	}
 }

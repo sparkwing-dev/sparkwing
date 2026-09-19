@@ -123,7 +123,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		}
 		plan := NewPlan()
 		plan.setInputs(in)
-		if err := p.Plan(planguard.Seal(ctx), plan, in, rc); err != nil {
+		if err := p.Plan(planguard.With(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
 		if err := plan.validateArtifactEdges(); err != nil {

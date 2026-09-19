@@ -16,7 +16,7 @@ func TestPinLocalSparkwingSDK_AppendsTheTreeReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if err := pinLocalSparkwingSDK(grantedCtx(context.Background()), dir, root); err != nil {
+	if err := pinLocalSparkwingSDK(context.Background(), dir, root); err != nil {
 		t.Fatalf("pinLocalSparkwingSDK: %v", err)
 	}
 	body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
@@ -35,7 +35,7 @@ func TestPinLocalSparkwingSDK_NoRootIsANoOp(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := pinLocalSparkwingSDK(grantedCtx(context.Background()), dir, ""); err != nil {
+	if err := pinLocalSparkwingSDK(context.Background(), dir, ""); err != nil {
 		t.Fatalf("pinLocalSparkwingSDK: %v", err)
 	}
 	body, _ := os.ReadFile(filepath.Join(dir, "go.mod"))

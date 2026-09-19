@@ -25,7 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 func RunNodeOnce(
@@ -36,7 +35,6 @@ func RunNodeOnce(
 	admission *LocalAdmission,
 	opts ...RunNodeOption,
 ) (runner.Result, error) {
-	ctx = planguard.Grant(ctx)
 	var cfg runNodeConfig
 	for _, opt := range opts {
 		opt(&cfg)

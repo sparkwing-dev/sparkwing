@@ -67,7 +67,7 @@ func TestRaceTouchedPassesWhenNoGoFileChanged(t *testing.T) {
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
-	if err := runRaceTouched(grantedCtx(context.Background())); err != nil {
+	if err := runRaceTouched(context.Background()); err != nil {
 		t.Fatalf("race-touched failed with nothing changed: %v", err)
 	}
 }
@@ -82,7 +82,7 @@ func TestRaceTouchedRunsTheRaceDetectorOnTheChangedPackage(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "racy_test.go"), racyTest)
 	gitAddAll(t, root)
 
-	err := runRaceTouched(grantedCtx(context.Background()))
+	err := runRaceTouched(context.Background())
 	if err == nil {
 		t.Fatal("race-touched passed a package whose test races")
 	}

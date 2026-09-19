@@ -66,7 +66,7 @@ func TestCurrentSHAAndShortCommit(t *testing.T) {
 	writeFile(t, dir, "a.txt", "hello")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	sha, err := CurrentSHA(ctx, dir)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestCurrentBranch(t *testing.T) {
 	writeFile(t, dir, "a.txt", "x")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	branch, err := CurrentBranch(ctx, dir)
 	if err != nil {
@@ -122,7 +122,7 @@ func TestDefaultBranch(t *testing.T) {
 	dir := withRepo(t)
 	writeFile(t, dir, "a.txt", "x")
 	commitIn(t, dir, "init")
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	def, err := DefaultBranch(ctx, dir)
 	if err != nil {
 		t.Fatalf("DefaultBranch (no origin): %v", err)
@@ -152,7 +152,7 @@ func TestRemoteOriginURL(t *testing.T) {
 	writeFile(t, dir, "a.txt", "x")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	url, err := RemoteOriginURL(ctx, dir)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestIsDirty(t *testing.T) {
 	writeFile(t, dir, "a.txt", "x")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	dirty, err := IsDirty(ctx, dir)
 	if err != nil {
@@ -203,7 +203,7 @@ func TestFilesetHashDeterministic(t *testing.T) {
 	writeFile(t, dir, "sub/b.txt", "beta")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	h1, err := FilesetHash(ctx, dir)
 	if err != nil {
@@ -264,7 +264,7 @@ func TestFilesetHashRespectsDockerignore(t *testing.T) {
 	writeFile(t, dir, "secret.env", "API_KEY=1")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	h1, err := FilesetHash(ctx, dir)
 	if err != nil {
 		t.Fatalf("FilesetHash: %v", err)
@@ -296,7 +296,7 @@ func TestFilesetHashFilesystemFallback(t *testing.T) {
 	writeFile(t, dir, "a.txt", "alpha")
 	writeFile(t, dir, "sub/b.txt", "beta")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	h1, err := FilesetHash(ctx, dir)
 	if err != nil {
 		t.Fatalf("FilesetHash no-git: %v", err)
@@ -320,7 +320,7 @@ func TestChangedFiles(t *testing.T) {
 	writeFile(t, dir, "a.txt", "alpha")
 	writeFile(t, dir, "b.txt", "beta")
 	commitIn(t, dir, "init")
-	first, err := CurrentSHA(grantedCtx(context.Background()), dir)
+	first, err := CurrentSHA(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestChangedFiles(t *testing.T) {
 	writeFile(t, dir, "c.txt", "charlie")
 	commitIn(t, dir, "second")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	files, err := ChangedFiles(ctx, dir, first)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
@@ -351,7 +351,7 @@ func TestChangedFilesRefusesARevisionThatLeadsWithADash(t *testing.T) {
 
 	victimDir := t.TempDir()
 	victim := filepath.Join(victimDir, "victim.diff")
-	if _, err := ChangedFiles(grantedCtx(context.Background()), dir, "--output="+victim); err == nil {
+	if _, err := ChangedFiles(context.Background(), dir, "--output="+victim); err == nil {
 		t.Fatal("ChangedFiles accepted an option-shaped revision")
 	}
 	written, err := filepath.Glob(filepath.Join(victimDir, "victim.diff*"))
@@ -368,7 +368,7 @@ func TestTagsAtHead(t *testing.T) {
 	writeFile(t, dir, "a.txt", "x")
 	commitIn(t, dir, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	tags, err := TagsAtHead(ctx, dir)
 	if err != nil {
@@ -401,7 +401,7 @@ func TestLatestTagSemverOrdering(t *testing.T) {
 	runIn(t, dir, "git", "tag", "vNext")
 	runIn(t, dir, "git", "tag", "release/v2.0.0")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	got, err := LatestTag(ctx, dir, "v")
 	if err != nil {
@@ -439,7 +439,7 @@ func TestPushTagRefusesExisting(t *testing.T) {
 	commitIn(t, dir, "init")
 	runIn(t, dir, "git", "push", "-u", "origin", "main")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	if err := PushTag(ctx, dir, "v1.0.0", "first cut"); err != nil {
 		t.Fatalf("PushTag first: %v", err)
@@ -474,7 +474,7 @@ func TestNoEnvFallback_OutsideGitRepo(t *testing.T) {
 	t.Setenv("SPARKWING_COMMIT", "deadbeefcafe1234deadbeefcafe1234deadbeef")
 	t.Setenv("SPARKWING_BRANCH", "fake-branch")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	if sha, err := CurrentSHA(ctx, dir); err == nil {
 		t.Errorf("CurrentSHA outside repo: want error, got %q", sha)
@@ -495,7 +495,7 @@ func TestPushTagRejectsEmpty(t *testing.T) {
 	writeFile(t, dir, "a.txt", "x")
 	commitIn(t, dir, "init")
 
-	if err := PushTag(grantedCtx(context.Background()), dir, "", "msg"); err == nil {
+	if err := PushTag(context.Background(), dir, "", "msg"); err == nil {
 		t.Fatalf("PushTag(\"\") = nil, want error")
 	}
 }
@@ -505,11 +505,11 @@ func TestFilesetHashFramesFileContents(t *testing.T) {
 	writeFile(t, first, "a", "")
 	writeFile(t, first, "b", "c")
 	writeFile(t, second, "a", "b\x00c")
-	a, err := FilesetHash(grantedCtx(t.Context()), first)
+	a, err := FilesetHash(t.Context(), first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := FilesetHash(grantedCtx(t.Context()), second)
+	b, err := FilesetHash(t.Context(), second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,14 +524,14 @@ func TestFilesetHashIncludesPermissions(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeFile(t, dir, "run.sh", "echo hello")
-	a, err := FilesetHash(grantedCtx(t.Context()), dir)
+	a, err := FilesetHash(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(filepath.Join(dir, "run.sh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	b, err := FilesetHash(grantedCtx(t.Context()), dir)
+	b, err := FilesetHash(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestFilesetHashRejectsUnreadableFiles(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, "private"), 0); err != nil {
 		t.Fatal(err)
 	}
-	_, err := FilesetHash(grantedCtx(t.Context()), dir)
+	_, err := FilesetHash(t.Context(), dir)
 	if err == nil {
 		t.Fatal("accepted unreadable build input")
 	}
@@ -566,12 +566,12 @@ func TestFilesetHashOmitsDeletedTrackedFiles(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "deleted")); err != nil {
 		t.Fatal(err)
 	}
-	a, err := FilesetHash(grantedCtx(t.Context()), dir)
+	a, err := FilesetHash(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runIn(t, dir, "git", "rm", "--cached", "deleted")
-	b, err := FilesetHash(grantedCtx(t.Context()), dir)
+	b, err := FilesetHash(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +588,7 @@ func TestFilesetHashRejectsGitFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".git", "index"), []byte("broken index"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := FilesetHash(grantedCtx(t.Context()), dir); err == nil {
+	if _, err := FilesetHash(t.Context(), dir); err == nil {
 		t.Fatal("git failure silently changed to filesystem hashing")
 	}
 }
@@ -599,12 +599,12 @@ func TestFilesetHashInSubdirectoryHonorsGitignore(t *testing.T) {
 	writeFile(t, dir, "sub/keep", "keep")
 	writeFile(t, dir, "sub/ignored", "one")
 	sub := filepath.Join(dir, "sub")
-	first, err := FilesetHash(grantedCtx(t.Context()), sub)
+	first, err := FilesetHash(t.Context(), sub)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "sub/ignored", "two")
-	second, err := FilesetHash(grantedCtx(t.Context()), sub)
+	second, err := FilesetHash(t.Context(), sub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,12 +627,12 @@ func TestPushTagRetriesExistingLocalTag(t *testing.T) {
 				writeFile(t, dir, "a", "second")
 				commitIn(t, dir, "second")
 			}
-			err := PushTag(grantedCtx(t.Context()), dir, "v1.0.0", "retry")
+			err := PushTag(t.Context(), dir, "v1.0.0", "retry")
 			if different {
 				if !errors.Is(err, ErrTagAlreadyExists) {
 					t.Fatalf("different local tag: %v", err)
 				}
-				exists, e := TagExistsOnRemote(grantedCtx(t.Context()), dir, "v1.0.0")
+				exists, e := TagExistsOnRemote(t.Context(), dir, "v1.0.0")
 				if e != nil || exists {
 					t.Fatalf("published different local tag: %v %v", exists, e)
 				}
@@ -641,7 +641,7 @@ func TestPushTagRetriesExistingLocalTag(t *testing.T) {
 			if err != nil {
 				t.Fatalf("local tag retry failed: %v", err)
 			}
-			exists, err := TagExistsOnRemote(grantedCtx(t.Context()), dir, "v1.0.0")
+			exists, err := TagExistsOnRemote(t.Context(), dir, "v1.0.0")
 			if err != nil || !exists {
 				t.Fatalf("retry did not push: %v %v", exists, err)
 			}
@@ -654,7 +654,7 @@ func TestGitHelpersDisableTerminalPrompts(t *testing.T) {
 		t.Skip("git shell alias uses POSIX shell")
 	}
 	t.Setenv("GIT_TERMINAL_PROMPT", "1")
-	got, err := runGit(grantedCtx(t.Context()), t.TempDir(), "-c", `alias.check-prompt=!printf '%s' "$GIT_TERMINAL_PROMPT"`, "check-prompt")
+	got, err := runGit(t.Context(), t.TempDir(), "-c", `alias.check-prompt=!printf '%s' "$GIT_TERMINAL_PROMPT"`, "check-prompt")
 	if err != nil {
 		t.Fatal(err)
 	}

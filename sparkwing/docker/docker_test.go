@@ -78,7 +78,7 @@ func commit(t *testing.T, msg string) {
 func TestErrDockerUnavailable(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	if _, err := Build(ctx, BuildConfig{Image: "x", Tags: []string{"t"}}); !errors.Is(err, ErrDockerUnavailable) {
 		t.Errorf("Build: got %v, want ErrDockerUnavailable", err)
@@ -182,7 +182,7 @@ func TestBuildxPlatforms(t *testing.T) {
 	fakeBuildxInspectDocker(t, `Nodes:
 Platforms: linux/arm64*, linux/amd64
 `)
-	got, err := BuildxPlatforms(grantedCtx(context.Background()))
+	got, err := BuildxPlatforms(context.Background())
 	if err != nil {
 		t.Fatalf("BuildxPlatforms: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestFilterBuildxPlatforms(t *testing.T) {
 	fakeBuildxInspectDocker(t, `Nodes:
 Platforms: linux/arm64*
 `)
-	got, err := FilterBuildxPlatforms(grantedCtx(context.Background()), []string{"linux/arm64", "linux/amd64"})
+	got, err := FilterBuildxPlatforms(context.Background(), []string{"linux/arm64", "linux/amd64"})
 	if err != nil {
 		t.Fatalf("FilterBuildxPlatforms: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestBuildPreFlightUnsupportedPlatform(t *testing.T) {
 	fakeBuildxInspectDocker(t, `Nodes:
 Platforms: linux/arm64*
 `)
-	_, err := Build(grantedCtx(context.Background()), BuildConfig{
+	_, err := Build(context.Background(), BuildConfig{
 		Image:     "x",
 		Tags:      []string{"t"},
 		Platforms: []string{"linux/amd64"},
@@ -239,7 +239,7 @@ exit 0
 	}
 	t.Setenv("PATH", dir)
 
-	_, err := Build(grantedCtx(context.Background()), BuildConfig{
+	_, err := Build(context.Background(), BuildConfig{
 		Image:     "x",
 		Tags:      []string{"t"},
 		Platforms: []string{"linux/amd64", "linux/arm64"},
@@ -269,7 +269,7 @@ exit 0
 	t.Setenv("PATH", binDir)
 
 	const secret = "s3cret-do-not-leak"
-	if err := Login(grantedCtx(context.Background()), "registry.example.com", "alice", secret); err != nil {
+	if err := Login(context.Background(), "registry.example.com", "alice", secret); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 
@@ -311,7 +311,7 @@ exit 0
 	}
 	t.Setenv("PATH", binDir)
 
-	err := Push(grantedCtx(context.Background()), "myapp:latest", []string{"v1", "v2"}, []string{"reg1.example.com", "reg2.example.com"})
+	err := Push(context.Background(), "myapp:latest", []string{"v1", "v2"}, []string{"reg1.example.com", "reg2.example.com"})
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestComputeTags(t *testing.T) {
 	writeFile(t, "a.txt", "hello")
 	commit(t, "init")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 
 	tag, err := ComputeTags(ctx)
 	if err != nil {
@@ -400,7 +400,7 @@ func TestComputeTagsOnNonMainBranch(t *testing.T) {
 	commit(t, "init")
 	runHost(t, "git", "checkout", "-b", "feature/weird-name")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	tag, err := ComputeTags(ctx)
 	if err != nil {
 		t.Fatalf("ComputeTags: %v", err)
@@ -422,7 +422,7 @@ func TestComputeTagsDetachedHead(t *testing.T) {
 	sha := strings.TrimSpace(string(out))
 	runHost(t, "git", "checkout", "--detach", sha)
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	tag, err := ComputeTags(ctx)
 	if err != nil {
 		t.Fatalf("ComputeTags detached: %v", err)
@@ -437,7 +437,7 @@ func TestComputeTagsDetachedHead(t *testing.T) {
 
 func TestBuildRejectsMissingImage(t *testing.T) {
 	requireDocker(t)
-	_, err := Build(grantedCtx(context.Background()), BuildConfig{Tags: []string{"t"}})
+	_, err := Build(context.Background(), BuildConfig{Tags: []string{"t"}})
 	if err == nil || !strings.Contains(err.Error(), "Image") {
 		t.Fatalf("got %v, want missing-Image error", err)
 	}
@@ -445,7 +445,7 @@ func TestBuildRejectsMissingImage(t *testing.T) {
 
 func TestBuildRejectsMissingTags(t *testing.T) {
 	requireDocker(t)
-	_, err := Build(grantedCtx(context.Background()), BuildConfig{Image: "x"})
+	_, err := Build(context.Background(), BuildConfig{Image: "x"})
 	if err == nil || !strings.Contains(err.Error(), "Tags") {
 		t.Fatalf("got %v, want missing-Tags error", err)
 	}
@@ -461,7 +461,7 @@ func TestBuildDefaults(t *testing.T) {
 	dockerfile := filepath.Join(dir, "Dockerfile")
 	writeFile(t, dockerfile, "FROM scratch\nLABEL sparkwing-test=1\n")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	image := fmt.Sprintf("sparkwing-test-%d", os.Getpid())
 	tag := fmt.Sprintf("t%d", os.Getpid())
 
@@ -496,7 +496,7 @@ func TestBuildAndPushLocalRegistry(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM scratch\nLABEL sparkwing-test=1\n")
 
-	ctx := grantedCtx(context.Background())
+	ctx := context.Background()
 	image := fmt.Sprintf("sparkwing-push-%d-%s", os.Getpid(), runtime.GOARCH)
 	tag := fmt.Sprintf("t%d", os.Getpid())
 

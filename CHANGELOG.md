@@ -20,12 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Added
-
-- **sdk:** `sparkwing.Grant(ctx)` grants side-effect permission to a context used
-  outside a pipeline run, for a tool or a test that calls an SDK helper with no run
-  around it.
-
 ### Fixed
 
 - **orchestrator:** SDK logging calls in `Pipeline.Plan` reach the run log during
@@ -41,20 +35,17 @@ unlock.
 
 ### Changed
 
-- **sdk (Breaking):** a guarded helper runs only where the runtime granted permission.
-  See [migration guide](docs/migrations/_unreleased.md#the-plan-purity-guard-runs-on-a-granted-permission).
-  A context carrying no grant is refused, so a `Plan` body that called a guarded helper
-  with `context.Background()` instead of the context it was handed no longer runs unnoticed. `Plan` is sealed over the run's grant, and applying `sparkwing.Grant`
-  to a sealed context leaves it sealed.
+- **lint:** `sparkwing pipeline lint` follows a `Plan` body one level into a
+  package-level helper it calls, so I/O a `Plan` delegates is reported where the
+  seal cannot see it. It also treats a `sparkwing/services` call inside `Plan` as
+  plan-time I/O, as it already did for `sparkwing/docker` and `sparkwing/git`.
+  Both can turn a pipeline's lint red on code this release does not change.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.
 
 ### Removed
 
-- **sdk (Breaking):** `planguard.With` and `planguard.Active`, replaced by `planguard.Grant`
-  and `planguard.Seal`.
-- **internal:** `sparkwingruntime.GuardPlanTime` and `IsPlanTime` go with them; neither
-  had a caller.
+- **internal:** `sparkwingruntime.GuardPlanTime` and `IsPlanTime`; neither had a caller.
 
 ## [v0.55.0] - 2026-09-18
 ### Added

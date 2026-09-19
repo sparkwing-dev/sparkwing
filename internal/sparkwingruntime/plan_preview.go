@@ -88,7 +88,7 @@ func PreviewPlan(plan *sparkwing.Plan, pipeline string, resolvedArgs map[string]
 		})
 	}
 
-	planCtx := planguard.Seal(context.Background())
+	planCtx := planguard.With(context.Background())
 
 	seen := make(map[string]bool)
 	for _, n := range plan.Nodes() {

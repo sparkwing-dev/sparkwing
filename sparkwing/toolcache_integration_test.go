@@ -81,7 +81,7 @@ func lintWithCacheConfig(t *testing.T, dir, cache, config string) string {
 	if config != "" {
 		configFlag = "--config " + config
 	}
-	res, err := sparkwing.Bash(grantedCtx(context.Background()), "golangci-lint run "+configFlag+" --path-mode abs ./...").
+	res, err := sparkwing.Bash(context.Background(), "golangci-lint run "+configFlag+" --path-mode abs ./...").
 		Dir(dir).
 		Env("GOLANGCI_LINT_CACHE", cache).
 		Env("TMPDIR", t.TempDir()).

@@ -38,7 +38,7 @@ func TestTemporaryFiles(t *testing.T) {
 			gitAddAll(t, root)
 			for attempt := range 2 {
 				log := &testCacheLog{}
-				ctx := context.WithValue(grantedCtx(context.Background()), sparkwing.RuntimePlumbing.Keys.Logger, log)
+				ctx := context.WithValue(context.Background(), sparkwing.RuntimePlumbing.Keys.Logger, log)
 				if err := run(ctx); err != nil {
 					t.Fatalf("attempt %d: %v", attempt+1, err)
 				}
@@ -50,7 +50,7 @@ func TestTemporaryFiles(t *testing.T) {
 import "testing"
 func TestTemporaryFiles(t *testing.T) { t.Fatal("changed test must run") }
 `)
-			if err := run(grantedCtx(context.Background())); err == nil {
+			if err := run(context.Background()); err == nil {
 				t.Fatal("cached pass hid a changed failing test")
 			}
 		})

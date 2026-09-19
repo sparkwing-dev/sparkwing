@@ -46,48 +46,6 @@ type P struct{ sparkwing.Base }
 
 `
 
-func TestPlanIO_FlagsAGrantInsidePlanBody(t *testing.T) {
-	src := fixtureHeader + `func (p *P) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Bash(sparkwing.Grant(context.Background()), "echo hi").Run()
-	return nil
-}`
-	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanIO); got != 2 {
-		t.Fatalf("plan-io findings = %d, want 2 (the Bash call and the grant): %+v", got, findings)
-	}
-	var sawGrant bool
-	for _, f := range findings {
-		if f.Rule == RulePlanIO && strings.Contains(f.Message, "grants side-effect permission") {
-			sawGrant = true
-		}
-	}
-	if !sawGrant {
-		t.Fatalf("the grant itself went unflagged, so a Plan body can still detach its way past the guard: %+v", findings)
-	}
-}
-
-func TestPlanIO_FlagsAGrantOutsideTheRootPackage(t *testing.T) {
-	src := `package jobs
-
-import (
-	"context"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
-)
-
-type P struct{ sparkwing.Base }
-
-func (p *P) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	planguard.Grant(context.Background())
-	return nil
-}`
-	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanIO); got != 1 {
-		t.Fatalf("plan-io findings = %d, want 1: %+v", got, findings)
-	}
-}
-
 func TestPlanIO_FlagsServicesInPlanBody(t *testing.T) {
 	src := `package jobs
 
@@ -107,17 +65,6 @@ func (p *P) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs
 	findings := lintSource(t, src)
 	if got := countRule(findings, RulePlanIO); got != 1 {
 		t.Fatalf("plan-io findings = %d, want 1: %+v", got, findings)
-	}
-}
-
-func TestPlanIO_AllowsAGrantOutsideAPlanBody(t *testing.T) {
-	src := fixtureHeader + `func tidy() error {
-	_, err := sparkwing.Bash(sparkwing.Grant(context.Background()), "echo hi").Run()
-	return err
-}`
-	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanIO); got != 0 {
-		t.Fatalf("plan-io findings = %d, want 0 outside a Plan body: %+v", got, findings)
 	}
 }
 
@@ -533,5 +480,20 @@ func TestRunnerLabel_InlineWithWhenRunnerIsClean(t *testing.T) {
 	findings := lintSource(t, src)
 	if got := countRule(findings, RuleRunnerLabel); got != 0 {
 		t.Fatalf("WhenRunner is matched against the inline runner; got %d findings: %+v", got, findings)
+	}
+}
+
+func TestPlanIO_FollowsAPlanIntoASamePackageHelper(t *testing.T) {
+	src := fixtureHeader + `func (p *P) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	return describe(ctx)
+}
+
+func describe(ctx context.Context) error {
+	_, _ = sparkwing.Bash(ctx, "git rev-parse HEAD").String()
+	return nil
+}`
+	findings := lintSource(t, src)
+	if got := countRule(findings, RulePlanIO); got != 1 {
+		t.Fatalf("plan-io findings = %d, want the helper's I/O reported: %+v", got, findings)
 	}
 }

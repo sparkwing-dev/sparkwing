@@ -17,7 +17,7 @@ func TestLatestReleasedTagIgnoresATagOffThisLine(t *testing.T) {
 	gitRun(t, repo, "tag", "v9.9.9")
 	gitRun(t, repo, "checkout", "-q", "main")
 
-	latest, err := latestReleasedTag(grantedCtx(context.Background()), repo, -1)
+	latest, err := latestReleasedTag(context.Background(), repo, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestLatestReleasedTagStillReadsATagThisLineCarries(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "later")
 	gitRun(t, repo, "tag", "v0.3.0")
 
-	latest, err := latestReleasedTag(grantedCtx(context.Background()), repo, -1)
+	latest, err := latestReleasedTag(context.Background(), repo, -1)
 	if err != nil {
 		t.Fatal(err)
 	}

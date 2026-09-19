@@ -72,7 +72,7 @@ func TestPreReleaseFailuresDoNotSuppressLaterChecks(t *testing.T) {
 	})
 
 	log := &preReleaseRecordLog{}
-	ctx := context.WithValue(grantedCtx(context.Background()), sparkwing.RuntimePlumbing.Keys.Logger, log)
+	ctx := context.WithValue(context.Background(), sparkwing.RuntimePlumbing.Keys.Logger, log)
 	ctx = context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.Node, "pre-release")
 	_, err := sparkwing.RunWork(ctx, work)
 	if err == nil || !strings.Contains(err.Error(), "first failed") {

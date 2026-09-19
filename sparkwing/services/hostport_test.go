@@ -136,7 +136,7 @@ func TestWithServicesAddrsPublishesTheAllocatedPort(t *testing.T) {
 	argvPath := stubDocker(t)
 
 	var got []Addr
-	err := WithServicesAddrs(grantedCtx(context.Background()), []Service{
+	err := WithServicesAddrs(context.Background(), []Service{
 		{Name: "db", Image: "postgres:15", Port: 5432, HostPort: AutoPort},
 	}, func(_ context.Context, addrs []Addr) error {
 		got = addrs
@@ -172,7 +172,7 @@ func TestWithServicesAddrsReportsAPinnedPortAndHostNetworking(t *testing.T) {
 	stubDocker(t)
 
 	var got []Addr
-	err := WithServicesAddrs(grantedCtx(context.Background()), []Service{
+	err := WithServicesAddrs(context.Background(), []Service{
 		{Name: "pinned", Image: "redis:7", Port: 6379, HostPort: 16379},
 		{Name: "hostnet", Image: "busybox"},
 	}, func(_ context.Context, addrs []Addr) error {
@@ -197,7 +197,7 @@ func TestWithServicesStillRunsFnWithoutAddrs(t *testing.T) {
 	stubDocker(t)
 
 	called := false
-	err := WithServices(grantedCtx(context.Background()), []Service{
+	err := WithServices(context.Background(), []Service{
 		{Name: "db", Image: "postgres:15", Port: 5432, HostPort: AutoPort},
 	}, func(context.Context) error {
 		called = true

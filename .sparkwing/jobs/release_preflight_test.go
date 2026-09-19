@@ -26,7 +26,7 @@ func runReleaseStateCheck(t *testing.T, repo, name string) error {
 			step.SkipIf(func(context.Context) bool { return true })
 		}
 	}
-	_, err := sparkwing.RunWork(grantedCtx(t.Context()), w)
+	_, err := sparkwing.RunWork(t.Context(), w)
 	return err
 }
 
@@ -76,7 +76,7 @@ func TestReleaseFreshnessDoesNotRequireTheLatestMain(t *testing.T) {
 	if err := runReleaseStateCheck(t, repo, "version-freshness"); err != nil {
 		t.Fatalf("release refused an older checkout with current published pins: %v", err)
 	}
-	if err := CheckVersionsFreshness(grantedCtx(t.Context()), repo); err == nil || !strings.Contains(err.Error(), "behind origin/main") {
+	if err := CheckVersionsFreshness(t.Context(), repo); err == nil || !strings.Contains(err.Error(), "behind origin/main") {
 		t.Fatalf("development freshness lost its local replacement check: %v", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestReleasePreparationRefusesMissingNotesBeforeCommit(t *testing.T) {
 			repo := seedReleaseRepo(t)
 			writeFile(t, filepath.Join(repo, "CHANGELOG.md"), tc.body)
 			before := gitRun(t, repo, "rev-parse", "HEAD")
-			ctx := context.WithValue(grantedCtx(t.Context()), sparkwing.RuntimePlumbing.Keys.JSONRefResolver,
+			ctx := context.WithValue(t.Context(), sparkwing.RuntimePlumbing.Keys.JSONRefResolver,
 				func(id string) ([]byte, bool) { return []byte(`"v0.2.0"`), id == "version" })
 			job := prepareChangelogJob{RepoDir: repo, Version: sparkwing.Ref[string]{NodeID: "version"}}
 			err := job.run(ctx)
