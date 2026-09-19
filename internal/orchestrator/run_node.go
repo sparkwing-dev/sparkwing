@@ -161,6 +161,8 @@ func RunNodeOnce(
 
 	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, logger)
 	masker := maskerForInvokeArgs(reg, invokeArgs)
+	// safety: no logger here on purpose. Every dispatching process re-plans,
+	// so a sink would repeat one authored line once per node.
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)

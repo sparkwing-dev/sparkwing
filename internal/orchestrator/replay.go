@@ -100,6 +100,8 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 	}
 
 	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default())
+	// safety: no logger here on purpose. Every dispatching process re-plans,
+	// so a sink would repeat one authored line once per node.
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)

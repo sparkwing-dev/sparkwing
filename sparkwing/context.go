@@ -133,8 +133,10 @@ type LogRecord struct {
 }
 
 // Logger is the sink for job output. The orchestrator installs a
-// logger into ctx before dispatching each node; sparkwing.Info /
-// Warn / Error / Debug emit records through it.
+// logger into ctx before dispatching each node, and into the context
+// it hands Pipeline.Plan during initial planning. Node reconstruction
+// and replay omit the plan logger. sparkwing.Info / Warn / Error / Debug
+// emit records through it. A context carrying none discards them.
 //
 // Log wraps a level+message into a default-event LogRecord; most
 // callers reach it indirectly via the per-level package helpers.

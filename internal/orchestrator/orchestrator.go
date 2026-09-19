@@ -293,6 +293,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID, wedgeBudget)
 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
+	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
 	var profileName string
 	var profileIsLocal bool
@@ -305,7 +306,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		IsLocal: profileIsLocal,
 	})
 
-	plan, err := reg.Invoke(ctx, invokeArgs, rc)
+	// safety: Plan runs before the run has a node to log against, so without a
+	// logger here sparkwing.Info from inside Plan resolves to the no-op sink.
+	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, delegate), invokeArgs, rc)
 	if err != nil {
 		if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err)); err != nil {
 			noteLostStateWrite(ctx, "finish run", runID, err)
@@ -437,7 +440,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if pipelineSecrets != nil {
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, pipelineSecrets)
 	}
-	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
 	if backends.LocalCoordination {
 		profileName := ""
