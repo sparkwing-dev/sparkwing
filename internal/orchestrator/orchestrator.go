@@ -116,6 +116,10 @@ type Options struct {
 	// alone.
 	Priority string
 
+	// AdmissionClass is an inferred trigger class. An explicit class on the
+	// plan takes precedence.
+	AdmissionClass sparkwing.AdmissionClass
+
 	// safety: set only after a store is chosen, so a caller that builds its
 	// own Options cannot claim a run reached the standalone store.
 	standalone *standaloneRun
@@ -183,6 +187,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	trigger := opts.Trigger
 	if trigger.Source == "" {
 		trigger.Source = "manual"
+	}
+	if opts.Admission != nil {
+		opts.Admission.AdmissionClass = inferredAdmissionClass(opts.AdmissionClass, trigger.Source)
 	}
 
 	invokeArgs := mergeInvokeArgs(opts)
@@ -2956,13 +2963,14 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 }
 
 type planSnapshot struct {
-	Pipeline  string         `json:"pipeline"`
-	RunID     string         `json:"run_id"`
-	Priority  int            `json:"priority,omitempty"`
-	Requires  []string       `json:"requires,omitempty"`
-	Nodes     []snapshotNode `json:"nodes"`
-	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
-	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
+	Pipeline       string                   `json:"pipeline"`
+	RunID          string                   `json:"run_id"`
+	Priority       int                      `json:"priority,omitempty"`
+	AdmissionClass sparkwing.AdmissionClass `json:"admission_class,omitempty"`
+	Requires       []string                 `json:"requires,omitempty"`
+	Nodes          []snapshotNode           `json:"nodes"`
+	PlanConc       *snapshotConc            `json:"plan_concurrency,omitempty"`
+	PlanConcs      []snapshotConc           `json:"plan_concurrency_groups,omitempty"`
 
 	Resources *snapshotResources `json:"plan_resources,omitempty"`
 
@@ -3087,11 +3095,12 @@ type planSnapshotMeta struct {
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
 	snap := planSnapshot{
-		Pipeline: rc.Pipeline,
-		RunID:    rc.RunID,
-		Priority: p.PriorityValue(),
-		Requires: slices.Clone(meta.PipelineRequires),
-		Secrets:  meta.Secrets,
+		AdmissionClass: p.AdmissionClassValue(),
+		Pipeline:       rc.Pipeline,
+		RunID:          rc.RunID,
+		Priority:       p.PriorityValue(),
+		Requires:       slices.Clone(meta.PipelineRequires),
+		Secrets:        meta.Secrets,
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
 		snap.PlanConc = &snapshotConc{

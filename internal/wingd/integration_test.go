@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -23,6 +24,78 @@ func coreReq(runID string, cores float64) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
 		RunID:     runID,
 		Resources: wingwire.HostResources{Cores: cores},
+	}
+}
+
+func TestAdmissionModeOffDoesNotGateHostCapacity(t *testing.T) {
+	home := shortHome(t)
+	policy := wingd.AdmissionPolicy{Mode: admission.ModeOff, Scheduling: admission.AutoPolicy()}
+	startDaemon(t, wingd.Config{
+		Home: home, Sampler: newFakeSampler(4, 8<<30), HeadroomFraction: -1, AdmissionPolicy: &policy,
+	})
+	first := ensure(t, home, "")
+	defer first.Close()
+	second := ensure(t, home, "")
+	defer second.Close()
+	mustAcquire(t, first, coreReq("first", 4))
+	mustAcquire(t, second, coreReq("second", 4))
+	state, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.AdmissionMode != "off" || len(state.Holders) != 2 || len(state.Waiters) != 0 {
+		t.Fatalf("queue state = %+v", state)
+	}
+}
+
+type admittingJev struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (j *admittingJev) Advise(_ context.Context, _ wingd.JevState) (wingd.JevAnswer, error) {
+	j.mu.Lock()
+	j.calls++
+	j.mu.Unlock()
+	return wingd.JevAnswer{Admit: true, Choice: "admit_short_backfill", Confidence: 0.9, Probability: 0.9, Model: "fake-jev"}, nil
+}
+
+func TestAdmissionModeJevCanAuthorizeBoundedBackfill(t *testing.T) {
+	home := shortHome(t)
+	advisor := &admittingJev{}
+	policy := wingd.AdmissionPolicy{
+		Mode: admission.ModeJev,
+		Scheduling: admission.SchedulingPolicy{BackfillDelay: map[admission.WorkloadClass]time.Duration{
+			admission.ClassNormal: 0,
+		}},
+		Jev: wingd.JevPolicy{MaxBackfill: 2500 * time.Millisecond, MinConfidence: 0.8},
+	}
+	startDaemon(t, wingd.Config{Home: home, AdmissionPolicy: &policy, JevAdvisor: advisor})
+	holderClient := ensure(t, home, "")
+	defer holderClient.Close()
+	mustAcquire(t, holderClient, semReq("holder", "pool", 10, 5, wingwire.PolicyQueue))
+	heavyClient := ensure(t, home, "")
+	defer heavyClient.Close()
+	positions, _ := acquireAsync(heavyClient, semReq("heavy", "pool", 10, 8, wingwire.PolicyQueue))
+	waitForQueue(t, positions)
+	for _, id := range []string{"short-1", "short-2"} {
+		cl := ensure(t, home, "")
+		req := semReq(id, "pool", 10, 5, wingwire.PolicyQueue)
+		req.Class = "interactive"
+		req.ExpectedP99MS = 1000
+		req.SampleCount = 10
+		mustAcquire(t, cl, req)
+		cl.Close()
+	}
+	state, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Jev == nil || state.Jev.Attempts != 1 || state.Jev.Admits != 1 {
+		t.Fatalf("jev stats = %+v", state.Jev)
+	}
+	if len(state.Waiters) != 1 || state.Waiters[0].RunID != "heavy" || state.Waiters[0].BackfillDelayMS != 2000 {
+		t.Fatalf("waiters = %+v", state.Waiters)
 	}
 }
 

@@ -401,6 +401,24 @@ func TestMarshalPlanSnapshot_CarriesPriority(t *testing.T) {
 	}
 }
 
+func TestMarshalPlanSnapshot_CarriesAdmissionClass(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.AdmissionClass(sparkwing.AdmissionInteractive)
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "run"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		AdmissionClass sparkwing.AdmissionClass `json:"admission_class"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AdmissionClass != sparkwing.AdmissionInteractive {
+		t.Fatalf("admission class = %q", got.AdmissionClass)
+	}
+}
+
 func TestMarshalPlanSnapshot_OmitsResourcesWhenUndeclared(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil })

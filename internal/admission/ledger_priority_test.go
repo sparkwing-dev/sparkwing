@@ -2,6 +2,7 @@ package admission
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -122,6 +123,50 @@ func TestSetPriority_OverrideSurvivesSnapshotRestore(t *testing.T) {
 	}
 	if got := restored.EffectivePriority("node-1", "run", 0); got != 4 {
 		t.Fatalf("EffectivePriority after restore = %d, want 4", got)
+	}
+}
+
+func TestWorkloadClassWeightsReorderWithoutChangingExplicitPriority(t *testing.T) {
+	l, err := New(Config{TotalCores: 1, Scheduling: AutoPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "normal", Cores: 1, Class: ClassNormal})
+	mustQueue(t, l, Request{ID: "interactive", Cores: 1, Class: ClassInteractive})
+	snap := l.Snapshot()
+	if snap.Waiters[0].RequestID != "interactive" {
+		t.Fatalf("waiters = %+v, want interactive class first", snap.Waiters)
+	}
+	mustQueue(t, l, Request{ID: "operator-ranked", Cores: 1, Class: ClassBatch, Priority: 1})
+	if got := l.Snapshot().Waiters[0].RequestID; got != "operator-ranked" {
+		t.Fatalf("first waiter = %q, want explicit priority to outrank class", got)
+	}
+}
+
+func TestWorkloadClassAgingEventuallyOutranksNewInteractiveWork(t *testing.T) {
+	l, err := New(Config{TotalCores: 1, Scheduling: AutoPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "old-normal", Cores: 1, Class: ClassNormal})
+	for i := range 24 {
+		mustQueue(t, l, Request{ID: fmt.Sprintf("interactive-%02d", i), Cores: 1, Class: ClassInteractive})
+	}
+	waiters := l.Snapshot().Waiters
+	last := -1
+	old := -1
+	for i, waiter := range waiters {
+		switch waiter.RequestID {
+		case "old-normal":
+			old = i
+		case "interactive-23":
+			last = i
+		}
+	}
+	if old < 0 || last < 0 || old >= last {
+		t.Fatalf("old normal position %d, newest interactive position %d; aging did not bound starvation", old, last)
 	}
 }
 

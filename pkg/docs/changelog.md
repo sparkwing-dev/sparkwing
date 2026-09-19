@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk + admission:** Plans can classify work as critical, interactive, normal,
+  or batch, and the local daemon supports off, auto, custom, and Jev scheduling
+  modes. Auto scheduling learns short-run duration profiles, prioritizes
+  interactive hooks, and permits one bounded CPU-only burst; custom policies
+  tune the same deterministic controls, while Jev may extend bounded backfill
+  decisions and falls back to auto when its answer is unavailable or uncertain.
+
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.

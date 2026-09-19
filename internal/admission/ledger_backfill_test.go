@@ -3,6 +3,7 @@ package admission
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestWeighted_PromotionBackfillsPastNonFittingHeavyHead(t *testing.T) {
@@ -100,6 +101,112 @@ func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
 	wantKinds(t, events, EventPromoted)
 	if events[0].RequestID != "heavy" {
 		t.Fatalf("promoted %q, want protected heavy", events[0].RequestID)
+	}
+}
+
+func TestAutoBackfillAdmitsMeasuredShortWorkWithinDelayBudget(t *testing.T) {
+	l, err := New(Config{
+		TotalMemoryBytes: 8 << 30,
+		Scheduling: SchedulingPolicy{BackfillDelay: map[WorkloadClass]time.Duration{
+			ClassNormal: 2500 * time.Millisecond,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
+	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
+		t.Fatalf("set headroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "four-minute", MemoryBytes: 6 << 30, Class: ClassNormal})
+
+	for _, id := range []string{"one-second-1", "one-second-2"} {
+		lease := mustGrant(t, l, Request{ID: id, MemoryBytes: 4 << 30, ExpectedP99MS: 1000})
+		mustRelease(t, l, lease.ID, id)
+	}
+	if got := l.Snapshot().Waiters[0].BackfillDelayMS; got != 2000 {
+		t.Fatalf("backfill delay = %dms, want 2000ms", got)
+	}
+	if pos := mustQueue(t, l, Request{ID: "one-second-3", MemoryBytes: 4 << 30, ExpectedP99MS: 1000}); pos != 1 {
+		t.Fatalf("third short request position = %d, want protected behind the older waiter", pos)
+	}
+}
+
+func TestAutoBackfillUnknownDurationCannotSpendProtectedDelayBudget(t *testing.T) {
+	l, err := New(Config{TotalMemoryBytes: 8 << 30, Scheduling: AutoPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
+	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
+		t.Fatalf("set headroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "older", MemoryBytes: 6 << 30})
+	first := mustGrant(t, l, Request{ID: "first", MemoryBytes: 4 << 30, ExpectedP99MS: 500})
+	mustRelease(t, l, first.ID, "first")
+	if pos := mustQueue(t, l, Request{ID: "unknown", MemoryBytes: 4 << 30}); pos != 1 {
+		t.Fatalf("unknown-duration request position = %d, want it behind the protected waiter", pos)
+	}
+}
+
+func TestAdvisorCanEnlargeButNotRemoveBackfillDelayBound(t *testing.T) {
+	l, err := New(Config{
+		TotalMemoryBytes: 8 << 30,
+		Scheduling: SchedulingPolicy{BackfillDelay: map[WorkloadClass]time.Duration{
+			ClassNormal: time.Second,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
+	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
+		t.Fatalf("set headroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "older", MemoryBytes: 6 << 30})
+	first := mustGrant(t, l, Request{ID: "first", MemoryBytes: 4 << 30, ExpectedP99MS: 1000})
+	mustRelease(t, l, first.ID, "first")
+	second := mustGrant(t, l, Request{
+		ID: "advised", MemoryBytes: 4 << 30, ExpectedP99MS: 1000, ReservationBypassBudgetMS: 2500,
+	})
+	mustRelease(t, l, second.ID, "advised")
+	if pos := mustQueue(t, l, Request{
+		ID: "past-bound", MemoryBytes: 4 << 30, ExpectedP99MS: 1000, ReservationBypassBudgetMS: 2500,
+	}); pos != 1 {
+		t.Fatalf("request beyond advisor bound position = %d, want queued behind older", pos)
+	}
+}
+
+func TestInteractiveBurstAllowsOneBoundedCPUOvercommit(t *testing.T) {
+	l, err := New(Config{TotalCores: 10, TotalMemoryBytes: 8 << 30, Scheduling: AutoPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "heavy-1", Cores: 5, MemoryBytes: 3 << 30, StrictCores: true})
+	mustGrant(t, l, Request{ID: "heavy-2", Cores: 5, MemoryBytes: 3 << 30, StrictCores: true})
+	burst := mustGrant(t, l, Request{ID: "interactive", Cores: 1, MemoryBytes: 1 << 30, StrictCores: true, BurstCores: true})
+	if pos := mustQueue(t, l, Request{ID: "second-burst", Cores: 0.5, BurstCores: true}); pos < 0 {
+		t.Fatalf("second burst position = %d", pos)
+	}
+	restored := restoreRoundTrip(t, l)
+	if got := restored.Snapshot().Leases; len(got) != 3 || !got[2].BurstCores {
+		t.Fatalf("restored leases = %+v", got)
+	}
+	restored.SetSchedulingPolicy(SchedulingPolicy{})
+	mustRelease(t, restored, burst.ID, "interactive")
+	if got := restored.Snapshot().Waiters; len(got) != 1 || got[0].RequestID != "second-burst" {
+		t.Fatalf("waiters after disabling burst = %+v", got)
+	}
+}
+
+func TestInteractiveBurstDoesNotRelaxMemory(t *testing.T) {
+	l, err := New(Config{TotalCores: 10, TotalMemoryBytes: 8 << 30, Scheduling: AutoPolicy()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGrant(t, l, Request{ID: "heavy", Cores: 10, MemoryBytes: 8 << 30})
+	if pos := mustQueue(t, l, Request{ID: "interactive", Cores: 1, MemoryBytes: 1, BurstCores: true}); pos < 0 {
+		t.Fatalf("memory-bound burst position = %d", pos)
 	}
 }
 
