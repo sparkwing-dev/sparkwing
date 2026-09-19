@@ -183,6 +183,13 @@ file. Other syntax and workflow checks remain active.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Experimental semantic lint:** `sparkwing run jev-lint` compares changed
+  non-test Go functions with deterministically selected same-package candidates
+  and asks Jev whether each pair duplicates one responsibility. Store the API
+  key as the masked `TYPESAFE_API_KEY` Sparkwing secret. Use `--dry-run` to
+  inspect the exact bounded request without a key or network call. Findings are
+  advisory; analysis, transport, and response-schema failures fail the run. A
+  cached exact request can be read without the key.
 - **Scripts under `bin/`:** editing one means running `GOWORK=off go test
   ./bin`, about ten seconds. Go tests there pin what the scripts do, including
   the exact argv `bin/install.sh` builds with, so a change to a shell script

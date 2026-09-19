@@ -29,6 +29,9 @@ pipelines:
   - name: static-analysis
     entrypoint: StaticAnalysis
 
+  - name: jev-lint
+    entrypoint: JevLint
+
   - name: security-scan
     entrypoint: SecurityScan
 

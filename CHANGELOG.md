@@ -20,6 +20,12 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **pipelines:** `sparkwing run jev-lint` performs one advisory Jev check over
+  changed Go functions and same-package candidates, with bounded source,
+  exact-request caching, and a dry-run that sends nothing.
+
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.
