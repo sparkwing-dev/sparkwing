@@ -89,7 +89,9 @@ func TestToolCacheDir_CreatesTheDirectory(t *testing.T) {
 func TestToolCacheDir_ToolNameStaysInsideCacheRoot(t *testing.T) {
 	useWorkDir(t, t.TempDir())
 
-	root := filepath.Join(os.TempDir(), "sparkwing-toolcache")
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	root := filepath.Join(home, "sparkwing-toolcache")
 	for _, tool := range []string{"../../escape", "..", "", "/etc/shadow", "."} {
 		dir := toolCacheDir(t, tool)
 		rel, err := filepath.Rel(root, dir)
@@ -111,5 +113,52 @@ func TestToolCacheDir_WithoutWorkDirFallsBackToCwd(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("stat cache dir: %v", err)
+	}
+}
+
+func TestToolCacheDir_SurvivesTemporaryDirectoryChanges(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	useWorkDir(t, t.TempDir())
+	firstShell := t.TempDir()
+	t.Setenv("TMPDIR", firstShell)
+	first := sparkwing.ToolCacheDir("golangci-lint")
+	marker := filepath.Join(first, "cached-result")
+	if err := os.WriteFile(marker, []byte("result"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(firstShell); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+	second := sparkwing.ToolCacheDir("golangci-lint")
+	if first != second {
+		t.Fatalf("cache moved between shells: %q -> %q", first, second)
+	}
+	if !strings.HasPrefix(second, home+string(filepath.Separator)) {
+		t.Fatalf("cache outside Sparkwing home: %q", second)
+	}
+	if data, err := os.ReadFile(filepath.Join(second, "cached-result")); err != nil || string(data) != "result" {
+		t.Fatalf("cache did not survive shell exit: %q, %v", data, err)
+	}
+}
+
+func TestSharedToolCacheDir_SharesOnlyWhenRequested(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	useWorkDir(t, t.TempDir())
+	shared := sparkwing.SharedToolCacheDir("go-build")
+	private := sparkwing.ToolCacheDir("go-build")
+	sparkwing.SetWorkDir(t.TempDir())
+	if next := sparkwing.SharedToolCacheDir("go-build"); next != shared {
+		t.Fatalf("shared cache moved: %q -> %q", shared, next)
+	}
+	if next := sparkwing.ToolCacheDir("go-build"); next == private || next == shared {
+		t.Fatalf("worktree cache unexpectedly shared: %q", next)
+	}
+	if private == shared {
+		t.Fatal("shared and worktree cache collide")
+	}
+	if other := sparkwing.SharedToolCacheDir("other"); other == shared {
+		t.Fatal("different tools share a cache")
 	}
 }

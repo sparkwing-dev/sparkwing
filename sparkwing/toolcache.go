@@ -3,9 +3,12 @@ package sparkwing
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 const toolCacheRoot = "sparkwing-toolcache"
@@ -25,12 +28,17 @@ const toolCacheRoot = "sparkwing-toolcache"
 // that worktree's file paths, including paths from a worktree that has
 // since been deleted. A per-worktree directory removes that.
 //
-// The path is derived from the absolute [WorkDir], so it stays stable
-// across runs in one worktree -- the cache still earns its keep --
-// and is disjoint between worktrees, including two worktrees whose
-// leaf directory names match. The directory is created if missing; a
-// creation failure is left to surface from the tool, which is what
-// needs the directory and reports its own cache errors.
+// The cache lives under SPARKWING_HOME, by default ~/.sparkwing. Test binaries
+// take a temporary home; set SPARKWING_HOME explicitly when testing that a
+// cache persists.
+//
+// The path derives from the absolute [WorkDir], so it stays stable across runs
+// in one worktree -- the cache still earns its keep -- and is disjoint between
+// worktrees, including two worktrees whose leaf directory names match.
+//
+// The directory is created if missing; a creation failure is left to surface
+// from the tool, which is what needs the directory and reports its own cache
+// errors. It panics if the Sparkwing home cannot be resolved.
 //
 // A new worktree therefore starts cold, and the obvious remedy is to
 // seed it by copying a cache some other worktree already filled. That
@@ -88,13 +96,37 @@ func ToolCacheDir(tool string) string {
 	}
 	sum := sha256.Sum256([]byte(scope))
 	dir := filepath.Join(
-		os.TempDir(),
-		toolCacheRoot,
+		toolCacheHome(),
 		cacheSegment(tool, "tool"),
 		cacheSegment(filepath.Base(scope), "workdir")+"-"+hex.EncodeToString(sum[:6]),
 	)
 	_ = os.MkdirAll(dir, 0o700)
 	return dir
+}
+
+// SharedToolCacheDir returns a tool cache shared by worktrees on this machine.
+// Use it only when the tool coordinates concurrent writers and its cached
+// results remain valid at different checkout paths. Go's build cache meets
+// these requirements; golangci-lint's diagnostic cache does not.
+//
+// The directory must be on a local filesystem. Sparkwing supplies the
+// directory; the tool supplies its locking and cache keys.
+//
+// Like [ToolCacheDir], it creates the directory if missing and leaves creation
+// errors to the tool. It panics if the Sparkwing home cannot be resolved.
+func SharedToolCacheDir(tool string) string {
+	dir := filepath.Join(toolCacheHome(), cacheSegment(tool, "tool"), "shared")
+	//nolint:errcheck // the tool that needs the directory reports its own cache errors.
+	_ = os.MkdirAll(dir, 0o700)
+	return dir
+}
+
+func toolCacheHome() string {
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		panic(fmt.Sprintf("sparkwing: resolve tool cache home: %v", err))
+	}
+	return filepath.Join(p.Root, toolCacheRoot)
 }
 
 func cacheSegment(s, fallback string) string {

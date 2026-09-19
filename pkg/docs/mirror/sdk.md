@@ -168,7 +168,8 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 ### Tool caches
 
 ```
-ToolCacheDir(tool) string              // cache dir for an external tool, scoped to this worktree
+ToolCacheDir(tool) string              // durable cache scoped to this worktree
+SharedToolCacheDir(tool) string        // opt-in cache shared across worktrees on this machine
 ```
 
 A tool that keys its cache on file content alone - golangci-lint among
@@ -184,8 +185,18 @@ sparkwing.Bash(ctx, "golangci-lint run ./...").
     Run()
 ```
 
-The path derives from `WorkDir()`. Runs in one worktree share a cache;
-each worktree has its own cache.
+Both helpers store caches under `SPARKWING_HOME`, defaulting to `~/.sparkwing`,
+so changing `TMPDIR` between shell invocations does not discard them.
+Test binaries default to an isolated temporary home; set `SPARKWING_HOME`
+explicitly when testing persistence.
+`ToolCacheDir` derives its scope from `WorkDir()`: runs in one worktree share
+a cache, and each worktree has its own cache.
+
+Use `SharedToolCacheDir` only when the tool coordinates concurrent writers
+and its cached results remain valid across checkout paths. Go's build cache
+supports this; golangci-lint's diagnostic cache carries absolute paths and
+does not. Sharing is supported only on a local filesystem on one machine,
+never across machines or on a network filesystem.
 
 `SaveLintCache` and `RestoreLintCache` operate on
 `ToolCacheDir("golangci-lint")` for the current `WorkDir()` and take no

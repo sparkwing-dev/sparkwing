@@ -56,7 +56,6 @@ unlock.
   and the states `Guard` reads. `internal/sparkwingruntime.GuardPlanTime` and `IsPlanTime`
   go with them; neither had a caller.
 
-
 ## [v0.55.0] - 2026-09-18
 ### Added
 

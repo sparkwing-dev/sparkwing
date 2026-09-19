@@ -49,6 +49,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
 - `func SetGit(g *Git)` -- SetGit attaches a fully-populated Git to the runtime.
 - `func SetWorkDir(dir string)` -- SetWorkDir overrides the WorkDir field on the runtime singleton and updates the Git workDir so live methods follow.
+- `func SharedToolCacheDir(tool string) string` -- SharedToolCacheDir returns a tool cache shared by worktrees on this machine.
 - `func SkipArgResolve(ctx context.Context) context.Context` -- SkipArgResolve marks ctx so the registration's invoke() builds a plan without running the v0.6 args resolution+bind pass.
 - `func StepFromContext(ctx context.Context) string` -- StepFromContext returns the active step ID, or "" outside a step.
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
