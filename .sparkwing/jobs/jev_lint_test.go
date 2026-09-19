@@ -51,7 +51,7 @@ func checkOrderForDispatch(order string) error { return checkOrder(order) }
 func writeLog(message string) error { return storeMessage(message) }
 `)[0]
 
-	pairs := rankJevLintPairs([]jevLintFunction{changed}, []jevLintFunction{changed, incidental, best}, 2, jevLintMaxSourceBytes)
+	pairs := rankJevLintPairs([]jevLintFunction{changed}, []jevLintFunction{changed, incidental, best}, 2, jevLintMaxPairSourceBytes)
 	if len(pairs) != 1 {
 		t.Fatalf("pairs = %d, want only the plausible candidate: %#v", len(pairs), pairs)
 	}
@@ -65,9 +65,98 @@ func TestRankJevLintPairsDoesNotReverseDuplicateChangedPairs(t *testing.T) {
 func validateOrder(order string) error { return checkOrder(order) }
 func checkOrderForDispatch(order string) error { return checkOrder(order) }
 `)
-	pairs := rankJevLintPairs(functions, functions, 6, jevLintMaxSourceBytes)
+	pairs := rankJevLintPairs(functions, functions, 6, jevLintMaxPairSourceBytes)
 	if len(pairs) != 1 {
 		t.Fatalf("pairs = %d, want one unordered pair: %#v", len(pairs), pairs)
+	}
+}
+
+func TestRankJevLintPairsIncludesStrongCrossPackageCandidate(t *testing.T) {
+	changed := mustJevLintFunctions(t, "checkout/price.go", `package checkout
+func calculateInvoiceTax(amount int) int { return amount * 7 / 100 }
+`)[0]
+	candidate := mustJevLintFunctions(t, "billing/tax.go", `package billing
+func invoiceTaxAmount(amount int) int { return amount * 7 / 100 }
+`)[0]
+	pairs := rankJevLintPairs([]jevLintFunction{changed}, []jevLintFunction{changed, candidate}, 2, jevLintMaxPairSourceBytes)
+	if len(pairs) != 1 || !pairs[0].CrossPackage {
+		t.Fatalf("cross-package pairs = %#v", pairs)
+	}
+	request := newJevLintRequest(pairs, nil)
+	structure := request.Questions["pair_0_structure"]
+	if _, ok := structure.Criteria["extract_shared_package"]; !ok || len(structure.Criteria) != 5 {
+		t.Fatalf("cross-package structure = %#v", structure)
+	}
+	same := 0.86
+	confidence := 0.30
+	response := jevLintResponse{Model: "jev-1.13.0", Answers: map[string]jevLintAnswer{
+		"pair_0_same_responsibility": {Type: "noul", Noul: &same},
+		"pair_0_structure": {
+			Type:       "choice",
+			Choice:     "extract_shared_package",
+			Confidence: &confidence,
+			Probabilities: map[string]float64{
+				"keep_separate":             0.05,
+				"move_to_changed_package":   0.10,
+				"move_to_candidate_package": 0.10,
+				"extract_shared_package":    0.30,
+				"unclear":                   0.45,
+			},
+		},
+	}}
+	if err := validateJevLintResponse(request, response); err != nil {
+		t.Fatal(err)
+	}
+	findings, _, err := interpretJevLint(pairs, nil, response)
+	if err != nil || !findings[0].Report {
+		t.Fatalf("findings = %#v, err %v", findings, err)
+	}
+}
+
+func TestRankJevLintPairsStopsAtGoModuleBoundary(t *testing.T) {
+	changed := mustJevLintFunctions(t, ".sparkwing/jobs/revision.go", `package jobs
+func shortRevision(value string) string { return value[:12] }
+`)[0]
+	candidate := mustJevLintFunctions(t, "internal/git/revision.go", `package git
+func shortRevision(value string) string { return value[:12] }
+`)[0]
+	changed.Module = ".sparkwing"
+	candidate.Module = "."
+	pairs := rankJevLintPairs([]jevLintFunction{changed}, []jevLintFunction{changed, candidate}, 2, jevLintMaxPairSourceBytes)
+	if len(pairs) != 0 {
+		t.Fatalf("cross-module pairs = %#v", pairs)
+	}
+}
+
+func TestSelectJevLintRulesUsesSyntaxOnlyForCandidateRetrieval(t *testing.T) {
+	function := mustJevLintFunctions(t, "checkout/discount.go", `package checkout
+func discountEligible(total int, member, blocked bool) bool {
+	return total >= 4200 && member && !blocked && "premium" != "disabled"
+}
+`)[0]
+	if function.BooleanTerms != 4 || len(function.Literals) < 2 {
+		t.Fatalf("signals = terms %d, literals %v", function.BooleanTerms, function.Literals)
+	}
+	rules := selectJevLintRules([]jevLintFunction{function}, 3, jevLintMaxRuleSourceBytes)
+	if len(rules) != 1 || len(rules[0].Rules) != 2 {
+		t.Fatalf("rules = %#v", rules)
+	}
+	request := newJevLintRequest(nil, rules)
+	if len(request.Questions) != 2 || len(request.State.Functions) != 1 {
+		t.Fatalf("request = %#v", request)
+	}
+	complex := 0.82
+	magic := 0.79
+	response := jevLintResponse{Model: "jev-1.13.0", Answers: map[string]jevLintAnswer{
+		"function_0_complex_conditional": {Type: "noul", Noul: &complex},
+		"function_0_magic_values":        {Type: "noul", Noul: &magic},
+	}}
+	if err := validateJevLintResponse(request, response); err != nil {
+		t.Fatal(err)
+	}
+	_, findings, err := interpretJevLint(nil, rules, response)
+	if err != nil || len(findings) != 2 || !findings[0].Report || !findings[1].Report {
+		t.Fatalf("findings = %#v, err %v", findings, err)
 	}
 }
 
@@ -76,7 +165,7 @@ func TestNewJevLintRequestKeepsJudgmentsSeparate(t *testing.T) {
 func validateOrder(order string) error { return checkOrder(order) }
 func checkOrderForDispatch(order string) error { return checkOrder(order) }
 `)
-	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}})
+	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}}, nil)
 	if request.Model != jevLintModel || len(request.State.Pairs) != 1 || len(request.Questions) != 2 {
 		t.Fatalf("request = %#v", request)
 	}
@@ -94,7 +183,7 @@ func TestResolveJevLintSendsBearerKeyAndCachesExactRequest(t *testing.T) {
 func validateOrder(order string) error { return checkOrder(order) }
 func checkOrderForDispatch(order string) error { return checkOrder(order) }
 `)
-	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}})
+	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}}, nil)
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -127,7 +216,7 @@ func TestResolveJevLintRequiresKeyForCacheMiss(t *testing.T) {
 func validateOrder(order string) error { return checkOrder(order) }
 func checkOrderForDispatch(order string) error { return checkOrder(order) }
 `)
-	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}})
+	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}}, nil)
 	_, cached, err := resolveJevLint(context.Background(), http.DefaultClient, "unused", "", request, t.TempDir())
 	if err == nil || cached || !strings.Contains(err.Error(), "TYPESAFE_API_KEY") {
 		t.Fatalf("resolve = cached %v, err %v", cached, err)
@@ -141,7 +230,7 @@ type beta struct{}
 func (alpha) Plan() error { return nil }
 func (beta) Plan() error { return nil }
 `)
-	pairs := rankJevLintPairs([]jevLintFunction{functions[0]}, functions, 2, jevLintMaxSourceBytes)
+	pairs := rankJevLintPairs([]jevLintFunction{functions[0]}, functions, 2, jevLintMaxPairSourceBytes)
 	if len(pairs) != 0 {
 		t.Fatalf("pipeline ceremony produced candidates: %#v", pairs)
 	}
@@ -154,7 +243,7 @@ func checkOrderForDispatch(order string) error { return checkOrder(order) }
 `)
 	pairs := []jevLintPair{{Changed: functions[0], Candidate: functions[1]}}
 	response := validJevLintResponse()
-	findings, err := interpretJevLint(pairs, response)
+	findings, _, err := interpretJevLint(pairs, nil, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +253,7 @@ func checkOrderForDispatch(order string) error { return checkOrder(order) }
 
 	low := 0.60
 	response.Answers["pair_0_same_responsibility"] = jevLintAnswer{Type: "noul", Noul: &low}
-	findings, err = interpretJevLint(pairs, response)
+	findings, _, err = interpretJevLint(pairs, nil, response)
 	if err != nil || findings[0].Report {
 		t.Fatalf("low-probability finding reported: %#v, %v", findings, err)
 	}
@@ -176,7 +265,7 @@ func checkOrderForDispatch(order string) error { return checkOrder(order) }
 		Choice:     "combine",
 		Confidence: &lowConfidence,
 	}
-	findings, err = interpretJevLint(pairs, response)
+	findings, _, err = interpretJevLint(pairs, nil, response)
 	if err != nil || findings[0].Report {
 		t.Fatalf("low-confidence finding reported: %#v, %v", findings, err)
 	}
@@ -187,11 +276,63 @@ func TestValidateJevLintResponseRejectsIncompleteChoiceDistribution(t *testing.T
 func validateOrder(order string) error { return checkOrder(order) }
 func checkOrderForDispatch(order string) error { return checkOrder(order) }
 `)
-	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}})
+	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}}, nil)
 	response := validJevLintResponse()
 	delete(response.Answers["pair_0_structure"].Probabilities, "unclear")
 	if err := validateJevLintResponse(request, response); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("validation error = %v", err)
+	}
+}
+
+func TestValidateJevLintResponseAllowsRoundedChoiceDistribution(t *testing.T) {
+	functions := mustJevLintFunctions(t, "orders/orders.go", `package orders
+func validateOrder(order string) error { return checkOrder(order) }
+func checkOrderForDispatch(order string) error { return checkOrder(order) }
+`)
+	request := newJevLintRequest([]jevLintPair{{Changed: functions[0], Candidate: functions[1]}}, nil)
+	response := validJevLintResponse()
+	response.Answers["pair_0_structure"].Probabilities["unclear"] = 0.05
+	if err := validateJevLintResponse(request, response); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInterpretJevLintChangeRequiresProbabilityAndDirection(t *testing.T) {
+	request := newJevLintChangeRequest(jevLintChangeCandidate{Summary: "8 files, 900 added lines", Diff: "large wrapper"})
+	sprawl := 0.88
+	confidence := 0.74
+	response := jevLintResponse{
+		Model: "jev-1.13.0",
+		Answers: map[string]jevLintAnswer{
+			"change_workaround_sprawl": {Type: "noul", Noul: &sprawl},
+			"change_design_direction": {
+				Type:       "choice",
+				Choice:     "revisit_assumption",
+				Confidence: &confidence,
+				Probabilities: map[string]float64{
+					"keep_approach":           0.08,
+					"revisit_assumption":      0.74,
+					"replace_with_direct_fix": 0.12,
+					"unclear":                 0.06,
+				},
+			},
+		},
+	}
+	if err := validateJevLintResponse(request, response); err != nil {
+		t.Fatal(err)
+	}
+	finding, err := interpretJevLintChange(response)
+	if err != nil || !finding.Report {
+		t.Fatalf("finding = %#v, err %v", finding, err)
+	}
+	response.Answers["change_design_direction"] = jevLintAnswer{
+		Type:       "choice",
+		Choice:     "keep_approach",
+		Confidence: &confidence,
+	}
+	finding, err = interpretJevLintChange(response)
+	if err != nil || finding.Report {
+		t.Fatalf("keep finding = %#v, err %v", finding, err)
 	}
 }
 

@@ -22,9 +22,11 @@ unlock.
 
 ### Added
 
-- **pipelines:** `sparkwing run jev-lint` performs one advisory Jev check over
-  changed Go functions and same-package candidates, with bounded source,
-  exact-request caching, and a dry-run that sends nothing.
+- **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
+  duplicate responsibilities across packages, unnamed complex conditions,
+  unexplained magic values, and changes that build sprawling workarounds around
+  reversible assumptions. Requests use bounded source, exact-request caching,
+  and a dry-run that sends nothing.
 
 ### Changed
 

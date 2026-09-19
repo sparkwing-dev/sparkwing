@@ -184,12 +184,16 @@ file. Other syntax and workflow checks remain active.
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
 - **Experimental semantic lint:** `sparkwing run jev-lint` compares changed
-  non-test Go functions with deterministically selected same-package candidates
-  and asks Jev whether each pair duplicates one responsibility. Store the API
-  key as the masked `TYPESAFE_API_KEY` Sparkwing secret. Use `--dry-run` to
-  inspect the exact bounded request without a key or network call. Findings are
-  advisory; analysis, transport, and response-schema failures fail the run. A
-  cached exact request can be read without the key.
+  non-test Go functions with deterministically selected candidates across the
+  repository. Jev judges duplicate responsibility and package ownership,
+  unnamed complex conditions, unexplained magic values, and whether a large
+  change builds a mechanism around a reversible premise instead of fixing the
+  cause. Cross-package findings may recommend either existing package or a
+  focused shared package. Store the API key as the masked `TYPESAFE_API_KEY`
+  Sparkwing secret. Use `--dry-run` to inspect every bounded request without a
+  key or network call. Findings are advisory; analysis, transport, and
+  response-schema failures fail the run. Cached exact requests can be read
+  without the key.
 - **Scripts under `bin/`:** editing one means running `GOWORK=off go test
   ./bin`, about ten seconds. Go tests there pin what the scripts do, including
   the exact argv `bin/install.sh` builds with, so a change to a shell script
