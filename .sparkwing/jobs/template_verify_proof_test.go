@@ -28,7 +28,7 @@ func verifyManifest(t *testing.T, name string) templates.Manifest {
 
 func mustDigest(t *testing.T, env proofEnv, m templates.Manifest) string {
 	t.Helper()
-	d, err := templateProofDigest(context.Background(), env, m)
+	d, err := templateProofDigest(grantedCtx(context.Background()), env, m)
 	if err != nil {
 		t.Fatalf("digest %s: %v", m.Name, err)
 	}
@@ -37,12 +37,12 @@ func mustDigest(t *testing.T, env proofEnv, m templates.Manifest) string {
 
 func TestTemplateProofDigestRefusesIncompleteInputs(t *testing.T) {
 	m := verifyManifest(t, "lint-test-go")
-	_, err := templateProofDigest(context.Background(), proofEnv{Reason: "no local sparks-core checkout"}, m)
+	_, err := templateProofDigest(grantedCtx(context.Background()), proofEnv{Reason: "no local sparks-core checkout"}, m)
 	if err == nil || !strings.Contains(err.Error(), "no local sparks-core checkout") {
 		t.Fatalf("digest on incomplete inputs = %v, want a refusal naming the missing input", err)
 	}
 
-	digest, dir, reuse := reusableProof(context.Background(), proofEnv{Reason: "exhaustive proof requested"}, m)
+	digest, dir, reuse := reusableProof(grantedCtx(context.Background()), proofEnv{Reason: "exhaustive proof requested"}, m)
 	if reuse || digest != "" || dir != "" {
 		t.Fatalf("reusableProof = (%q, %q, %v), want no reuse and no digest", digest, dir, reuse)
 	}
@@ -166,7 +166,7 @@ func write(t *testing.T, path, body string) {
 }
 
 func TestCheckoutDigestTracksTrackedAndUntrackedChanges(t *testing.T) {
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	dir := seedGitCheckout(t)
 
 	clean, err := checkoutDigest(ctx, dir)
@@ -201,7 +201,7 @@ func TestCheckoutDigestTracksTrackedAndUntrackedChanges(t *testing.T) {
 }
 
 func TestResolveProofEnvRefusesWhatItCannotDigest(t *testing.T) {
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	core := map[string]string{"github.com/sparkwing-dev/sparks-core/templates": t.TempDir()}
 
 	if env := resolveProofEnv(ctx, seedGitCheckout(t), core, true); env.Reusable || env.Reason != "exhaustive proof requested" {
@@ -299,7 +299,7 @@ func TestRecordProofPrunesExpiredProofs(t *testing.T) {
 }
 
 func TestToolReachabilityDistinguishesTheDockerDaemon(t *testing.T) {
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	other := toolReachability(ctx, "node", "/usr/bin/node:v22")
 	if other != "/usr/bin/node:v22" {
 		t.Fatalf("non-docker identity = %q, want it untouched", other)
@@ -314,7 +314,7 @@ func TestToolReachabilityDistinguishesTheDockerDaemon(t *testing.T) {
 }
 
 func TestCheckoutDigestCoversGitignoredBuildInputs(t *testing.T) {
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	dir := seedGitCheckout(t)
 	write(t, filepath.Join(dir, ".gitignore"), "go.work\ninternal/web/next-out/\n")
 	commit(t, dir, "ignore build inputs")
@@ -357,7 +357,7 @@ func TestCheckoutDigestCoversGitignoredBuildInputs(t *testing.T) {
 }
 
 func TestSkippedRunStepIsNeverRecordedAsAProof(t *testing.T) {
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	dir := t.TempDir()
 
 	recordVerification(ctx, dir, "skipped-digest", "db-migrate-updown",

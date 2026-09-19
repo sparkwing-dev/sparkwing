@@ -13,7 +13,7 @@ func TestSleepStepGatesTheRangeWhenNothingIsStaged(t *testing.T) {
 		"package internal\n\nfunc committed() int { return 2 }\n")
 	gitCommitAll(t, root, "work the branch already carries")
 
-	command, scope, err := sleepCheckCommand(context.Background())
+	command, scope, err := sleepCheckCommand(grantedCtx(context.Background()))
 	if err != nil {
 		t.Fatalf("sleepCheckCommand: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestSleepStepCountsOnlyTheStagedTestFiles(t *testing.T) {
 		"package internal\n\nfunc product() int { return 4 }\n")
 	gitAddAll(t, root)
 
-	command, scope, err := sleepCheckCommand(context.Background())
+	command, scope, err := sleepCheckCommand(grantedCtx(context.Background()))
 	if err != nil {
 		t.Fatalf("sleepCheckCommand: %v", err)
 	}

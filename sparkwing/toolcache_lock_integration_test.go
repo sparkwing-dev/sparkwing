@@ -104,7 +104,7 @@ func lintWithLockTmp(t *testing.T, dir, tmp, flags string) (string, error) {
 	useWorkDir(t, dir)
 
 	line := "golangci-lint run --no-config --path-mode abs " + flags + " ./..."
-	res, err := sparkwing.Bash(context.Background(), line).
+	res, err := sparkwing.Bash(grantedCtx(context.Background()), line).
 		Dir(dir).
 		Env("GOLANGCI_LINT_CACHE", toolCacheDir(t, "golangci-lint")).
 		Env("TMPDIR", tmp).

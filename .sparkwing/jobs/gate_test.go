@@ -139,7 +139,7 @@ func TestGoStepsRefuseAnUnparseableFileInTheProductModule(t *testing.T) {
 		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	if err := runVet(ctx); err != nil {
 		t.Fatalf("clean fixture must pass vet: %v", err)
@@ -177,7 +177,7 @@ func TestTestStepRefusesAFailingProductTest(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "internal", "sound_test.go"),
 		"package internal\n\nimport \"testing\"\n\nfunc TestSound(t *testing.T) { t.Fatal(\"deliberate\") }\n")
@@ -192,7 +192,7 @@ func TestTestStepRefusesAFailingProductTest(t *testing.T) {
 
 func TestGoStepsStillCoverThePipelineModule(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "negative_control.go"),
 		"package pipelines\n\nfunc Broken( {\n")
@@ -207,7 +207,7 @@ func TestGoStepsCoverEveryCommittedModule(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "tools", "go.mod"), "module fixture/tools\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, "tools", "broken.go"), "package tools\n\nfunc Broken( {\n")
@@ -219,7 +219,7 @@ func TestGoStepsCoverEveryCommittedModule(t *testing.T) {
 }
 
 func TestTheTestStepStripsTheGatesOwnBindingsFromItsChildren(t *testing.T) {
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	var probe string
 	for _, name := range productTestUnset {
 		t.Setenv(name, "gate")
@@ -248,7 +248,7 @@ func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "internal", "index_probe_test.go"), gitIndexProbe)
 	gitAddAll(t, root)
@@ -308,7 +308,7 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "empty", "go.mod"), "module fixture/empty\n\ngo 1.25\n")
 	gitAddAll(t, root)
@@ -391,7 +391,7 @@ func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 
 	writeGoFile(t, packageJSON, `{"scripts":{"test":"node -e \"process.exit(1)\""}}`)
-	err := runFrontendUnit(context.Background())
+	err := runFrontendUnit(grantedCtx(context.Background()))
 	if err == nil {
 		t.Fatal("frontend-unit accepted a failing npm test script")
 	}
@@ -400,7 +400,7 @@ func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
 	}
 
 	writeGoFile(t, packageJSON, `{"scripts":{"test":"node -e \"process.exit(0)\""}}`)
-	if err := runFrontendUnit(context.Background()); err != nil {
+	if err := runFrontendUnit(grantedCtx(context.Background())); err != nil {
 		t.Fatalf("frontend-unit rejected a passing npm test script: %v", err)
 	}
 }
@@ -463,7 +463,7 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 			t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 
 			writeGoFile(t, filepath.Join(web, "package.json"), fmt.Sprintf(`{"scripts":{"%s":"node -e \"process.exit(1)\""}}`, tc.script))
-			err := tc.run(context.Background())
+			err := tc.run(grantedCtx(context.Background()))
 			if err == nil || !strings.Contains(err.Error(), tc.failure) {
 				t.Fatalf("%s failure = %v, want named verdict", tc.name, err)
 			}
@@ -486,7 +486,7 @@ func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T
 	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 
 	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(1)\""}}`)
-	err := runFrontendLint(context.Background())
+	err := runFrontendLint(grantedCtx(context.Background()))
 	if err == nil {
 		t.Fatal("frontend-lint accepted a failing npm lint script")
 	}
@@ -495,7 +495,7 @@ func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T
 	}
 
 	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(0)\""}}`)
-	if err := runFrontendLint(context.Background()); err != nil {
+	if err := runFrontendLint(grantedCtx(context.Background())); err != nil {
 		t.Fatalf("frontend-lint rejected a passing npm lint script: %v", err)
 	}
 	for _, path := range []string{filepath.Join(web, "package-lock.json"), filepath.Join(web, "node_modules")} {
@@ -524,7 +524,7 @@ func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
 	}
 	writeGoFile(t, marker, "stale\n")
 	writeGoFile(t, filepath.Join(web, "package.json"), `{"scripts":{"test:browser:gate":"node -e \"process.exit(0)\""}}`)
-	if err := runFrontendBrowser(context.Background()); err != nil {
+	if err := runFrontendBrowser(grantedCtx(context.Background())); err != nil {
 		t.Fatalf("frontend-browser rejected a passing npm script: %v", err)
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
@@ -532,7 +532,7 @@ func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
 	}
 
 	writeGoFile(t, filepath.Join(web, "package.json"), `{"scripts":{"test:browser:gate":"node -e \"process.exit(1)\""}}`)
-	if err := runFrontendBrowser(context.Background()); err == nil {
+	if err := runFrontendBrowser(grantedCtx(context.Background())); err == nil {
 		t.Fatal("frontend-browser accepted a failing npm script")
 	}
 	if body, err := os.ReadFile(marker); err != nil || string(body) != "failed\n" {
@@ -562,7 +562,7 @@ func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing
 
 	seed()
 	writeGoFile(t, filepath.Join(web, "package.json"), `{"scripts":{"test:browser:gate":"node -e \"process.exit(0)\""}}`)
-	if err := runFrontendBrowser(context.Background()); err != nil {
+	if err := runFrontendBrowser(grantedCtx(context.Background())); err != nil {
 		t.Fatalf("frontend-browser rejected a passing npm script: %v", err)
 	}
 	for _, dir := range []string{report, results} {
@@ -573,7 +573,7 @@ func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing
 
 	failing := `{"scripts":{"test:browser:gate":"node -e \"require('fs').mkdirSync('playwright-report',{recursive:true});require('fs').writeFileSync('playwright-report/index.js','var t = 3');process.exit(1)\""}}`
 	writeGoFile(t, filepath.Join(web, "package.json"), failing)
-	if err := runFrontendBrowser(context.Background()); err == nil {
+	if err := runFrontendBrowser(grantedCtx(context.Background())); err == nil {
 		t.Fatal("frontend-browser accepted a failing npm script")
 	}
 	if _, err := os.Stat(filepath.Join(report, "index.js")); err != nil {
@@ -601,7 +601,7 @@ func gitCommitAll(t *testing.T, dir, message string) {
 
 func TestRegexSweepsIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" and a "+trackerID+" id\n")
 	gitCommitAll(t, root, "history the commit does not touch")
@@ -637,7 +637,7 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 			writeGoFile(t, filepath.Join(root, "internal", "bad.go"), tc.body)
 			gitAddAll(t, root)
 
-			if err := tc.check(context.Background()); err == nil {
+			if err := tc.check(grantedCtx(context.Background())); err == nil {
 				t.Fatal("the sweep passed a staged change that introduces the pattern")
 			}
 		})
@@ -646,7 +646,7 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 
 func TestRegexSweepsReadTheRangeWhenNothingIsStaged(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 
@@ -663,7 +663,7 @@ func TestRegexSweepsReadTheRangeWhenNothingIsStaged(t *testing.T) {
 
 func TestRegexSweepsIgnoreHistoryBeforeTheBaseline(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" and a "+trackerID+" id\n")
 	gitCommitAll(t, root, "history before the baseline")
@@ -683,7 +683,7 @@ func TestRegexSweepsIgnoreHistoryBeforeTheBaseline(t *testing.T) {
 
 func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" here\n")
 	gitCommitAll(t, root, "history the commit does not touch")
@@ -720,7 +720,7 @@ func withFormattersConfig(t *testing.T, root string) {
 
 func TestFormattersIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	requireGolangciLint(t)
 	withFormattersConfig(t, root)
 
@@ -738,7 +738,7 @@ func TestFormattersIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 
 func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	requireGolangciLint(t)
 	withFormattersConfig(t, root)
 	gitCommitAll(t, root, "clean base")
@@ -763,7 +763,7 @@ func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
 
 func TestFormattersCheckTheRangeWhenNothingIsStaged(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 	requireGolangciLint(t)
 	withFormattersConfig(t, root)
 	gitCommitAll(t, root, "clean base")
@@ -788,7 +788,7 @@ func TestFormattersRefuseToJudgeWithoutTheBaseline(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
 
-	err := runFormatters(context.Background())
+	err := runFormatters(grantedCtx(context.Background()))
 	if err == nil {
 		t.Fatal("the formatters step reported success without resolving a base")
 	}
@@ -806,7 +806,7 @@ func TestStagedScopeSkipsNodeModules(t *testing.T) {
 		"package internal\n\nfunc Mine() int { return 2 }\n")
 	gitAddAll(t, root)
 
-	files, scope, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, scope, err := changeScope(grantedCtx(context.Background()), "Go file(s)", existingGoFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,7 +867,7 @@ func TestHomeResolutionRefusesEveryBypassShape(t *testing.T) {
 		}
 		t.Run(rule.label, func(t *testing.T) {
 			root := gateFixtureRepo(t)
-			ctx := context.Background()
+			ctx := grantedCtx(context.Background())
 
 			if err := checkHomeResolution(ctx); err != nil {
 				t.Fatalf("the clean fixture must pass, or the failure below proves nothing: %v", err)
@@ -904,7 +904,7 @@ func TestHomeResolutionExemptsTheAllowlist(t *testing.T) {
 			}
 			gitAddAll(t, root)
 
-			if err := checkHomeResolution(context.Background()); err != nil {
+			if err := checkHomeResolution(grantedCtx(context.Background())); err != nil {
 				t.Fatalf("the gate refused an allowlisted file: %v", err)
 			}
 		})
@@ -916,7 +916,7 @@ func TestHomeResolutionAllowsTheProjectPipelineDirectory(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "projectdir.go"), projectDirJoin)
 	gitAddAll(t, root)
 
-	if err := checkHomeResolution(context.Background()); err != nil {
+	if err := checkHomeResolution(grantedCtx(context.Background())); err != nil {
 		t.Fatalf("the gate refused a checkout-relative pipeline directory: %v", err)
 	}
 }
@@ -936,7 +936,7 @@ func TestHomeResolutionIgnoresCommentsQuotingTheForbiddenCalls(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "documented.go"), quoted)
 	gitAddAll(t, root)
 
-	if err := checkHomeResolution(context.Background()); err != nil {
+	if err := checkHomeResolution(grantedCtx(context.Background())); err != nil {
 		t.Fatalf("the gate refused a comment that only quotes the forbidden calls: %v", err)
 	}
 }
@@ -961,7 +961,7 @@ func TestHomeResolutionExemptions(t *testing.T) {
 			writeGoFile(t, filepath.Join(root, tc.path), tc.body)
 			gitAddAll(t, root)
 
-			if err := checkHomeResolution(context.Background()); err != nil {
+			if err := checkHomeResolution(grantedCtx(context.Background())); err != nil {
 				t.Errorf("the gate refused %s: %v", tc.name, err)
 			}
 		})
@@ -979,7 +979,7 @@ func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
 		"vet": runVet, "build": runBuild, "test": runTest,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := step(context.Background()); err != nil {
+			if err := step(grantedCtx(context.Background())); err != nil {
 				t.Fatalf("node_modules changed the product %s verdict: %v", name, err)
 			}
 		})
@@ -1018,7 +1018,7 @@ func TestScopedStepsRefuseToLetAFilenameRunACommand(t *testing.T) {
 
 	// safety: the step is expected to refuse the file, which is unformatted;
 	// what must not happen is the shell running the name.
-	if err := runGofmtOnTheChange(context.Background()); err == nil {
+	if err := runGofmtOnTheChange(grantedCtx(context.Background())); err == nil {
 		t.Error("gofmt passed an unformatted file, so the hostile name never reached it")
 	}
 
@@ -1034,14 +1034,14 @@ func TestScopedStepsSeeARepoRootNameThatStartsWithWhitespace(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, " lead.go"), "package fixture\n\nfunc  Lead( ) int { return 1 }\n")
 	gitAddAll(t, root)
 
-	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, _, err := changeScope(grantedCtx(context.Background()), "Go file(s)", existingGoFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(files) != 1 || files[0] != " lead.go" {
 		t.Fatalf("staged Go files = %q, want the one name that begins with a space", files)
 	}
-	if err := runGofmtOnTheChange(context.Background()); err == nil {
+	if err := runGofmtOnTheChange(grantedCtx(context.Background())); err == nil {
 		t.Error("gofmt passed an unformatted file, so the leading-space name never reached it")
 	}
 }
@@ -1053,14 +1053,14 @@ func TestScopedStepsSeeARepoRootNameThatStartsWithADash(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "-dash.go"), "package fixture\n\nfunc  Dash( ) int { return 1 }\n")
 	gitAddAll(t, root)
 
-	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, _, err := changeScope(grantedCtx(context.Background()), "Go file(s)", existingGoFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(files) != 1 || files[0] != "-dash.go" {
 		t.Fatalf("staged Go files = %q, want the one name that begins with a dash", files)
 	}
-	err = runGofmtOnTheChange(context.Background())
+	err = runGofmtOnTheChange(grantedCtx(context.Background()))
 	if err == nil {
 		t.Fatal("gofmt passed an unformatted file, so the leading-dash name never reached it")
 	}
@@ -1076,14 +1076,14 @@ func TestScopedStepsSeeAFileGitWouldQuote(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "internal", "caf\u00e9.go"), "package internal\n\nfunc  Cafe( ) int { return 1 }\n")
 	gitAddAll(t, root)
 
-	files, _, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, _, err := changeScope(grantedCtx(context.Background()), "Go file(s)", existingGoFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(files) != 1 || files[0] != "internal/caf\u00e9.go" {
 		t.Fatalf("staged Go files = %v, want the one file whose name git quotes", files)
 	}
-	if err := runGofmtOnTheChange(context.Background()); err == nil {
+	if err := runGofmtOnTheChange(grantedCtx(context.Background())); err == nil {
 		t.Error("gofmt passed an unformatted file, so the quoted name never reached it")
 	}
 }
@@ -1095,7 +1095,7 @@ func TestScopedStepsStayOnTheCommitWhenItStagesNoFileOfTheirKind(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, "NOTES.md"), "a documentation-only commit\n")
 	gitAddAll(t, root)
 
-	files, scope, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, scope, err := changeScope(grantedCtx(context.Background()), "Go file(s)", existingGoFiles)
 	if err != nil {
 		t.Fatalf("a commit that stages no Go file fell through to the baseline: %v", err)
 	}

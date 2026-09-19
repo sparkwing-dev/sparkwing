@@ -177,7 +177,7 @@ func TestWriteMaskedSecret_LandsInScratchDotenv(t *testing.T) {
 
 func TestFixtureToolchainReady_GoAndNoneAlwaysReady(t *testing.T) {
 	for _, fixture := range []string{templates.FixtureNone, templates.FixtureGoModule} {
-		if ok, missing := fixtureToolchainReady(context.Background(), fixture); !ok {
+		if ok, missing := fixtureToolchainReady(grantedCtx(context.Background()), fixture); !ok {
 			t.Errorf("fixture %q should be ready, missing=%q", fixture, missing)
 		}
 	}

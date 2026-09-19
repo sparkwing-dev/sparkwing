@@ -12,7 +12,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/docker`](sdk-docker.md) -- Package docker is the sparkwing SDK's Docker-shelling helper layer: build, push, login, and deterministic tag computation.
 - [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
 - [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs builds cache keys from files, environment variables, and constants.
-- [`sparkwing/planguard`](sdk-planguard.md) -- Package planguard implements the Plan() purity sentinel.
+- [`sparkwing/planguard`](sdk-planguard.md) -- Package planguard decides where a side-effect helper may run.
 - [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: start sidecars for a function, wait for readiness, and clean up services whose startup succeeded on return, error, panic, or context cancellation.
 
 ## Functions
@@ -27,6 +27,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func Error(ctx context.Context, format string, args ...any)` -- Error emits an error-level message.
 - `func GithubOwnerRepo(slug string) (owner, repo string)` -- GithubOwnerRepo splits a "owner/name" slug into its parts.
 - `func Glob(pattern string) ([]string, error)` -- Glob expands a shell-style glob pattern.
+- `func Grant(ctx context.Context) context.Context` -- Grant returns ctx marked as deliberately used outside a pipeline run, so side-effect helpers such as Bash and the git and docker helpers allow it.
 - `func Info(ctx context.Context, format string, args ...any)` -- Info emits an info-level message to the active logger.
 - `func Inputs[T any](ctx context.Context) T` -- Inputs returns the typed Inputs struct that the orchestrator parsed for the current run -- the same value the pipeline's Plan(ctx, plan, in T, rc) method received.
 - `func IsDryRun(ctx context.Context) bool` -- IsDryRun reports whether ctx is in dry-run mode.

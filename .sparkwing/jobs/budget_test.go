@@ -100,7 +100,7 @@ func TestBudgetRecordsACompletedStep(t *testing.T) {
 	b := newTierBudget("probe", 3*time.Second)
 	w := sparkwing.NewWork()
 	b.step(w, "cheap", func(context.Context) error { return nil })
-	if _, err := sparkwing.RunWork(t.Context(), w); err != nil {
+	if _, err := sparkwing.RunWork(grantedCtx(t.Context()), w); err != nil {
 		t.Fatal(err)
 	}
 	if len(b.steps) != 1 || b.steps[0].id != "cheap" || b.steps[0].took < 0 {
@@ -113,7 +113,7 @@ func TestBudgetFailsTheTierWhenItsRecordedStepsOverrun(t *testing.T) {
 	w := sparkwing.NewWork()
 	b.verdict(w)
 
-	_, err := sparkwing.RunWork(t.Context(), w)
+	_, err := sparkwing.RunWork(grantedCtx(t.Context()), w)
 	if err == nil {
 		t.Fatal("a tier past its budget passed; nothing stops a class from regrowing")
 	}
@@ -143,7 +143,7 @@ func TestBudgetReportsAfterAFailedStepWithoutOverridingIt(t *testing.T) {
 	})
 	b.verdict(w)
 
-	_, err := sparkwing.RunWork(t.Context(), w)
+	_, err := sparkwing.RunWork(grantedCtx(t.Context()), w)
 	if err == nil {
 		t.Fatal("a failed check passed")
 	}
@@ -172,7 +172,7 @@ func overrunWithFileset(t *testing.T, count int) error {
 	b := recordedOverrun().over(filesetOf(count))
 	w := sparkwing.NewWork()
 	b.verdict(w)
-	_, err := sparkwing.RunWork(t.Context(), w)
+	_, err := sparkwing.RunWork(grantedCtx(t.Context()), w)
 	return err
 }
 
@@ -208,7 +208,7 @@ func TestBudgetEnforcesWhenTheFilesetCannotBeRead(t *testing.T) {
 	w := sparkwing.NewWork()
 	b.verdict(w)
 
-	if _, err := sparkwing.RunWork(t.Context(), w); err == nil {
+	if _, err := sparkwing.RunWork(grantedCtx(t.Context()), w); err == nil {
 		t.Fatal("a tier that cannot size its change stopped keeping its promise")
 	}
 }

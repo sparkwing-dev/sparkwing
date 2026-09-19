@@ -524,6 +524,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 // StampPID records which process ran a given piece of work.
@@ -573,6 +574,9 @@ type Produce struct {
 func (j *Produce) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (BuildOut, error) {
 		StampPID("produce")
+		// safety: asking the guard here is what proves the dispatching process
+		// makes a grant of its own.
+		planguard.Guard(ctx, "procpernode.probe")
 		return BuildOut{Digest: "sha-abc123"}, nil
 	}), nil
 }

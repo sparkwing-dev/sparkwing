@@ -36,7 +36,7 @@ func TestRun_RegistersADockerCleanupWhileRunningAndClearsAfter(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(context.Background(), RunOptions{Image: "busybox", Cmd: []string{"sleep", "3"}})
+		done <- Run(grantedCtx(context.Background()), RunOptions{Image: "busybox", Cmd: []string{"sleep", "3"}})
 	}()
 
 	var rec sessionledger.Record
@@ -81,7 +81,7 @@ func TestRun_OutsideARunRegistersNothing(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "")
 	t.Setenv("SPARKWING_NODE_ID", "")
-	if err := Run(context.Background(), RunOptions{Image: "busybox", Cmd: []string{"true"}}); err != nil {
+	if err := Run(grantedCtx(context.Background()), RunOptions{Image: "busybox", Cmd: []string{"true"}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if recs, _ := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List(); len(recs) != 0 {

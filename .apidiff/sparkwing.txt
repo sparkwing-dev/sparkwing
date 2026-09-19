@@ -252,6 +252,7 @@ func (g *Git) WorkDir() string
 func GithubOwnerRepo(slug string) (owner, repo string)
 func Glob(pattern string) ([]string, error)
 func GoModules() DirCache
+func Grant(ctx context.Context) context.Context
 type GroupBuilder struct {
 }
 func (g *GroupBuilder) AllOrNone() *GroupBuilder

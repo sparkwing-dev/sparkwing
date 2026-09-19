@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 func TestUnlocatableChildError_NamesRealCauseNotPhantomVerb(t *testing.T) {
@@ -271,7 +272,7 @@ func TestLocateTriggerRepo_RetryUsesRecordedCheckoutAcrossSameNamedPipelines(t *
 		},
 	}
 
-	got, err := locateTriggerRepo(context.Background(), trig, repoB)
+	got, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, repoB)
 	if err != nil {
 		t.Fatalf("locateTriggerRepo: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestLocateTriggerRepo_RetryUsesRecordedCheckoutAcrossSameNamedPipelines(t *
 func TestLocateTriggerRepo_RetryFailsClosedWhenSourceCheckoutUnavailable(t *testing.T) {
 	trig := &store.Trigger{Pipeline: "pre-push", Repo: "owner/repo-a", RetryOf: "source-run"}
 	repoB, _ := writeRetryTestRepo(t, filepath.Join(t.TempDir(), "repo-b"), "git@example.test:owner/repo-b.git", "step-from-b")
-	_, err := locateTriggerRepo(context.Background(), trig, repoB)
+	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, repoB)
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) {
 		t.Fatalf("error=%T %v, want RetrySourceUnavailableError", err, err)
@@ -317,7 +318,7 @@ func TestLocateTriggerRepo_RetryRejectsRepositoryIdentityDrift(t *testing.T) {
 			retryprovenance.PlanHashKey:     "sha256:source-plan",
 		},
 	}
-	_, err := locateTriggerRepo(context.Background(), trig, "")
+	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "identity drift") {
 		t.Fatalf("error=%T %v, want typed repository identity drift", err, err)
@@ -338,7 +339,7 @@ func TestLocateTriggerRepo_RetryRejectsARevisionThatIsNotAnObjectID(t *testing.T
 				retryprovenance.PlanHashKey:     "sha256:matching-plan-shape",
 			},
 		}
-		_, err := locateTriggerRepo(context.Background(), trig, "")
+		_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
 		var unavailable *RetrySourceUnavailableError
 		if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "not a git object id") {
 			t.Errorf("revision %q: error=%T %v, want a rejected object id", revision, err, err)
@@ -365,7 +366,7 @@ func TestLocateTriggerRepo_RetryRejectsSamePathSameBasenameReplacement(t *testin
 		},
 	}
 
-	_, err := locateTriggerRepo(context.Background(), trig, "")
+	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "identity drift") {
 		t.Fatalf("error=%T %v, want typed repository identity drift", err, err)
@@ -399,7 +400,7 @@ func TestLocateTriggerRepo_RetryRejectsRevisionDriftBeforeCompilation(t *testing
 		},
 	}
 
-	_, err := locateTriggerRepo(context.Background(), trig, "")
+	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
 	var unavailable *RetrySourceUnavailableError
 	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "revision drift") {
 		t.Fatalf("error=%T %v, want typed revision drift", err, err)

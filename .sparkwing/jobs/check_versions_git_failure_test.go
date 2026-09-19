@@ -13,7 +13,7 @@ func TestLocalBehindRemoteDistinguishesGitFailures(t *testing.T) {
 	for _, kind := range []string{"outside checkout", "git unavailable", "stale linked worktree", "malformed metadata", "nested malformed metadata", "unreadable directory", "cancelled context"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
-			ctx := context.Background()
+			ctx := grantedCtx(context.Background())
 			if kind != "outside checkout" {
 				versionFixtureGit(t, root, "init", "--quiet")
 			}
@@ -71,7 +71,7 @@ func TestLocalBehindRemoteDistinguishesGitFailures(t *testing.T) {
 
 func versionFixtureGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd := exec.CommandContext(grantedCtx(t.Context()), "git", append([]string{"-C", dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false"}, args...)...)
 	for _, item := range os.Environ() {
 		if !strings.HasPrefix(item, "GIT_") {
 			cmd.Env = append(cmd.Env, item)
@@ -138,7 +138,7 @@ func TestLocalBehindRemotePreservesNonApplicableOrigins(t *testing.T) {
 				}
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			}
-			behind, by, err := localBehindRemote(context.Background(), root)
+			behind, by, err := localBehindRemote(grantedCtx(context.Background()), root)
 			if kind == "unreachable origin" || kind == "unreachable cached origin" || kind == "authentication failure" {
 				if err == nil {
 					t.Fatal("unreachable origin produced a clean verdict")

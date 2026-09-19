@@ -132,12 +132,24 @@ func (a *analysis) checkPlanIO(call *ast.CallExpr) {
 		a.add(RulePlanIO, call.Pos(),
 			"Plan() must be pure-declarative: "+pkg.Name+"."+name+" is I/O and runs while the DAG is built. Move it into a Job or Step body (which runs at dispatch).")
 	}
+	flagGrant := func() {
+		a.add(RulePlanIO, call.Pos(),
+			"Plan() must be pure-declarative: "+pkg.Name+"."+name+" grants side-effect permission, which defeats the Plan seal. Move the work into a Job or Step body (which runs at dispatch).")
+	}
 	switch {
 	case isSDKPath(path):
 		if _, hit := sdkIOFuncs[name]; hit {
 			flag()
 		}
-	case strings.Contains(path, "/sparkwing/docker"), strings.Contains(path, "/sparkwing/git"):
+		if name == "Grant" {
+			flagGrant()
+		}
+	case strings.Contains(path, "/sparkwing/planguard"):
+		if name == "Grant" {
+			flagGrant()
+		}
+	case strings.Contains(path, "/sparkwing/docker"), strings.Contains(path, "/sparkwing/git"),
+		strings.Contains(path, "/sparkwing/services"):
 		flag()
 	case path == "os":
 		if _, hit := osIOFuncs[name]; hit {

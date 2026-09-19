@@ -49,7 +49,7 @@ func TestExec_ShellBurnerRecordsNonzeroCPU(t *testing.T) {
 		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
 	}
 	col := &sampleCollector{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	ctx = sparkwing.WithResourceReporter(ctx, col.report)
 
 	_, err := sparkwing.Bash(ctx, `i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done`).Run()
@@ -73,7 +73,7 @@ func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
 		t.Skip("awk not on PATH")
 	}
 	col := &sampleCollector{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	ctx = sparkwing.WithResourceReporter(ctx, col.report)
 
 	_, err := sparkwing.Exec(ctx, "awk", "BEGIN{for(i=0;i<40000000;i++)s+=i; print s}").Run()
@@ -91,7 +91,7 @@ func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	reported := make(chan time.Duration, 4)
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	started := time.Now()
 	ctx = sparkwing.WithResourceReporter(ctx, func(sparkwing.ResourceSample) {
 		reported <- time.Since(started)
@@ -112,7 +112,7 @@ func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
 }
 
 func TestExec_NoReporterIsHarmless(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	if _, err := sparkwing.Bash(ctx, "true").Run(); err != nil {
 		t.Fatalf("Run without reporter: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestExec_NoReporterIsHarmless(t *testing.T) {
 func TestExec_CancelKillsProcessTree(t *testing.T) {
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "child.pid")
-	ctx, cancel := context.WithCancel(sparkwingruntime.WithLogger(context.Background(), &recordingLogger{}))
+	ctx, cancel := context.WithCancel(sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{}))
 
 	done := make(chan struct{})
 	go func() {

@@ -54,7 +54,7 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 	for _, dir := range productDirs {
 		t.Run(dir, func(t *testing.T) {
 			root := lintFixtureRepo(t)
-			ctx := context.Background()
+			ctx := grantedCtx(context.Background())
 
 			if err := runGolangciLint(ctx); err != nil {
 				t.Fatalf("clean fixture must pass lint, or the red below proves nothing: %v", err)
@@ -80,7 +80,7 @@ func TestLintStillCoversThePipelineModule(t *testing.T) {
 		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
 	}
 	root := lintFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "negative_control.go"),
 		ineffassignViolation("pipelines"))
@@ -96,7 +96,7 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 		t.Skip("slow: 1.3s of real work; the fast class runs under -short")
 	}
 	root := lintFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "tools", "go.mod"), "module fixture/tools\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, "tools", "bad.go"), ineffassignViolation("tools"))
@@ -109,7 +109,7 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 
 func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 	root := lintFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
 
@@ -145,7 +145,7 @@ func TestLintScopeLineNamesEveryModuleAndTheBaseline(t *testing.T) {
 func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	root := lintFixtureRepo(t)
 
-	got, err := resolveLintBaseline(context.Background())
+	got, err := resolveLintBaseline(grantedCtx(context.Background()))
 	if err != nil {
 		t.Fatalf("the fixture's baseline must resolve: %v", err)
 	}

@@ -17,7 +17,7 @@ import (
 
 func TestSh_Success(t *testing.T) {
 	logger := &recordingLogger{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), logger)
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), logger)
 
 	res, err := sparkwing.Bash(ctx, "echo hello-world").Run()
 	if err != nil {
@@ -35,7 +35,7 @@ func TestSh_Success(t *testing.T) {
 }
 
 func TestSh_FailureProducesExecError(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	_, err := sparkwing.Bash(ctx, "exit 7").Run()
 	if err == nil {
 		t.Fatal("expected error on non-zero exit")
@@ -51,7 +51,7 @@ func TestSh_FailureProducesExecError(t *testing.T) {
 
 func TestCmd_DirRunsInDir(t *testing.T) {
 	dir := t.TempDir()
-	res, err := sparkwing.Bash(context.Background(), "pwd").Dir(dir).Run()
+	res, err := sparkwing.Bash(grantedCtx(context.Background()), "pwd").Dir(dir).Run()
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestCmd_DirRunsInDir(t *testing.T) {
 }
 
 func TestCmd_EnvMapInjectsEnv(t *testing.T) {
-	res, err := sparkwing.Exec(context.Background(), "sh", "-c", "echo $SPARKWING_TEST_VAR").
+	res, err := sparkwing.Exec(grantedCtx(context.Background()), "sh", "-c", "echo $SPARKWING_TEST_VAR").
 		EnvMap(map[string]string{"SPARKWING_TEST_VAR": "xyz"}).
 		Run()
 	if err != nil {
@@ -73,7 +73,7 @@ func TestCmd_EnvMapInjectsEnv(t *testing.T) {
 }
 
 func TestCmd_ContextEnvInheritedByExecAndOverriddenByExplicitEnv(t *testing.T) {
-	ctx := sparkwing.WithCommandEnv(context.Background(), map[string]string{
+	ctx := sparkwing.WithCommandEnv(grantedCtx(context.Background()), map[string]string{
 		"SPARKWING_TEST_VAR":  "context-value",
 		"SPARKWING_OTHER_VAR": "other-value",
 		"SPARKWING_EMPTY_KEY": "kept",
@@ -91,7 +91,7 @@ func TestCmd_ContextEnvInheritedByExecAndOverriddenByExplicitEnv(t *testing.T) {
 }
 
 func TestCmd_EnvSingle(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	res, err := sparkwing.Bash(ctx, "echo $SPARKWING_TEST_VAR").
 		Env("SPARKWING_TEST_VAR", "shval").
 		Run()
@@ -104,7 +104,7 @@ func TestCmd_EnvSingle(t *testing.T) {
 }
 
 func TestBash_RunsBashOnlyFeatures(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	res, err := sparkwing.Bash(ctx, `if [[ "abc" == a* ]]; then echo matched; fi`).Run()
 	if err != nil {
 		t.Fatalf("Bash: %v", err)
@@ -127,7 +127,7 @@ func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+			ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 			for i := range perGroup {
 				want := fmt.Sprintf("marker-%d-%d", w, i)
 				res, err := sparkwing.Exec(ctx, "sh", "-c", "echo "+want).Dir(dir).Capture()
@@ -156,7 +156,7 @@ func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
 
 func TestBash_DirRunsInDir(t *testing.T) {
 	dir := t.TempDir()
-	res, err := sparkwing.Bash(context.Background(), "pwd").Dir(dir).Run()
+	res, err := sparkwing.Bash(grantedCtx(context.Background()), "pwd").Dir(dir).Run()
 	if err != nil {
 		t.Fatalf("Bash: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestBash_DirRunsInDir(t *testing.T) {
 }
 
 func TestExecError_MessageIncludesCommandAndOutput(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	_, err := sparkwing.Bash(ctx, "echo problem-one >&2 ; exit 1").Run()
 	if err == nil {
 		t.Fatal("expected error")
@@ -181,7 +181,7 @@ func TestExecError_MessageIncludesCommandAndOutput(t *testing.T) {
 }
 
 func TestBash_EnvInjects(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	res, err := sparkwing.Bash(ctx, `if [[ -n "$SPARKWING_TEST_VAR" ]]; then echo got-$SPARKWING_TEST_VAR; fi`).
 		Env("SPARKWING_TEST_VAR", "bashval").
 		Run()
@@ -194,7 +194,7 @@ func TestBash_EnvInjects(t *testing.T) {
 }
 
 func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	bogus := filepath.Join(t.TempDir(), "does-not-exist")
 	_, err := sparkwing.Bash(ctx, "true").Dir(bogus).Run()
 	if err == nil {
@@ -220,7 +220,7 @@ func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
 }
 
 func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	_, err := sparkwing.Exec(ctx, "sparkwing-bogus-binary-xyz").Run()
 	if err == nil {
 		t.Fatal("expected error for missing binary")
@@ -260,7 +260,7 @@ func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 
 func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "started")
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	var err error
 	done := make(chan struct{})
@@ -328,7 +328,7 @@ func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
 	sparkwing.SetWorkDir(root)
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
 
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	res, err := sparkwing.Bash(ctx, "pwd").Dir("sub").Run()
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -346,7 +346,7 @@ func TestCmd_AbsoluteDirPassesThrough(t *testing.T) {
 	sparkwing.SetWorkDir(root)
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
 
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	res, err := sparkwing.Bash(ctx, "pwd").Dir(other).Run()
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -358,7 +358,7 @@ func TestCmd_AbsoluteDirPassesThrough(t *testing.T) {
 }
 
 func TestCmd_StringTrimsStdout(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	out, err := sparkwing.Bash(ctx, "printf 'hello\\n\\n'").String()
 	if err != nil {
 		t.Fatalf("String: %v", err)
@@ -369,7 +369,7 @@ func TestCmd_StringTrimsStdout(t *testing.T) {
 }
 
 func TestCmd_LinesSplitsAndDropsBlanks(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	lines, err := sparkwing.Bash(ctx, `printf 'a\n\nb\n  c  \n'`).Lines()
 	if err != nil {
 		t.Fatalf("Lines: %v", err)
@@ -386,7 +386,7 @@ func TestCmd_LinesSplitsAndDropsBlanks(t *testing.T) {
 }
 
 func TestCmd_JSONDecodes(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	var got struct {
 		Items []string `json:"items"`
 	}
@@ -400,7 +400,7 @@ func TestCmd_JSONDecodes(t *testing.T) {
 }
 
 func TestCmd_JSONFailurePreservesExecError(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	var dst map[string]any
 	err := sparkwing.Bash(ctx, "exit 11").JSON(&dst)
 	if err == nil {
@@ -416,14 +416,14 @@ func TestCmd_JSONFailurePreservesExecError(t *testing.T) {
 }
 
 func TestCmd_MustBeEmptyHappyPath(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	if err := sparkwing.Bash(ctx, "true").MustBeEmpty("should be quiet"); err != nil {
 		t.Fatalf("MustBeEmpty: %v", err)
 	}
 }
 
 func TestCmd_MustBeEmptyFlagsOutput(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingLogger{})
 	err := sparkwing.Bash(ctx, "echo offending-file.go").MustBeEmpty("formatting drift")
 	if err == nil {
 		t.Fatal("expected error for non-empty stdout")

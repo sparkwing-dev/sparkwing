@@ -116,7 +116,7 @@ func TestGlob_RelativePattern(t *testing.T) {
 
 func TestCapture_DoesNotStreamButFails(t *testing.T) {
 	logger := &recordingEmitter{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), logger)
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), logger)
 
 	res, err := sparkwing.Exec(ctx, "sh", "-c", "echo hi-from-capture").Capture()
 	if err != nil {
@@ -183,7 +183,7 @@ func TestHelpers_FailLoudlyWhenNoProject(t *testing.T) {
 	})
 
 	t.Run("Sh fails (no project, no dir)", func(t *testing.T) {
-		ctx := sparkwingruntime.WithLogger(context.Background(), &recordingEmitter{})
+		ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingEmitter{})
 		_, err := sparkwing.Bash(ctx, "echo hi").Run()
 		var ee *sparkwing.ExecError
 		if !errors.As(err, &ee) || !errors.Is(err, sparkwing.ErrNoProject) {
@@ -195,7 +195,7 @@ func TestHelpers_FailLoudlyWhenNoProject(t *testing.T) {
 	})
 
 	t.Run("Sh.Dir relative dir fails", func(t *testing.T) {
-		ctx := sparkwingruntime.WithLogger(context.Background(), &recordingEmitter{})
+		ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingEmitter{})
 		_, err := sparkwing.Bash(ctx, "echo hi").Dir("backend").Run()
 		if !errors.Is(err, sparkwing.ErrNoProject) {
 			t.Fatalf("Sh.Dir err = %v, want wrap ErrNoProject", err)
@@ -226,7 +226,7 @@ func TestHelpers_AbsolutePathsWorkWithoutProject(t *testing.T) {
 }
 
 func TestCapture_FailureCarriesContext(t *testing.T) {
-	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingEmitter{})
+	ctx := sparkwingruntime.WithLogger(grantedCtx(context.Background()), &recordingEmitter{})
 	_, err := sparkwing.Exec(ctx, "sh", "-c", "echo bad-thing >&2 ; exit 9").Capture()
 	if err == nil {
 		t.Fatal("expected error")

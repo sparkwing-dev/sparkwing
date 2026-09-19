@@ -32,7 +32,7 @@ func TestKubernetesE2EPipelineIsRegisteredAndBounded(t *testing.T) {
 }
 
 func TestKubernetesE2ECommandCancellationRunsCleanup(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(grantedCtx(context.Background()))
 	markerDir := t.TempDir()
 	readyMarker := filepath.Join(markerDir, "ready")
 	cleanupMarker := filepath.Join(markerDir, "cleanup")

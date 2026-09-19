@@ -178,7 +178,7 @@ func TestEveryDeclaredPipelineResolvesToARegisteredName(t *testing.T) {
 
 func TestPreCommitGofmtJudgesOnlyTheChange(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "internal", "legacy.go"),
 		"package internal\nfunc  Legacy( )  int { return 1 }\n")
@@ -198,7 +198,7 @@ func TestPreCommitGofmtJudgesOnlyTheChange(t *testing.T) {
 
 func TestPreCommitGofmtRefusesWhatTheStagedChangeIntroduces(t *testing.T) {
 	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	ctx := grantedCtx(context.Background())
 
 	writeGoFile(t, filepath.Join(root, "internal", "bad.go"),
 		"package internal\nfunc  Bad( )  int { return 3 }\n")

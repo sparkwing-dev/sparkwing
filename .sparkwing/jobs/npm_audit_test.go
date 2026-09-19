@@ -272,7 +272,7 @@ func TestRunNpmAudit_RetriesATransientRegistryAndAcceptsALaterAnswer(t *testing.
 		t.Skip("slow: 9.0s of real work; the fast class runs under -short")
 	}
 	calls := stubNpmAuditRunner(t, unreachableRegistry, unreachableRegistry, cleanReport)
-	verdict, err := runNpmAudit(t.Context())
+	verdict, err := runNpmAudit(grantedCtx(t.Context()))
 	if err != nil {
 		t.Fatalf("runNpmAudit: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestRunNpmAudit_StopsAtTheAttemptCeilingAndReportsUnavailable(t *testing.T)
 		t.Skip("slow: 9.0s of real work; the fast class runs under -short")
 	}
 	calls := stubNpmAuditRunner(t, unreachableRegistry)
-	_, err := runNpmAudit(t.Context())
+	_, err := runNpmAudit(grantedCtx(t.Context()))
 	if !errors.Is(err, errNpmRegistryUnavailable) {
 		t.Fatalf("err = %v, want it to name the registry as unavailable rather than an advisory", err)
 	}
@@ -303,7 +303,7 @@ func TestRunNpmAudit_DoesNotRetryAnAdvisory(t *testing.T) {
 		return `{"auditReportVersion":2,"vulnerabilities":{"left-pad":{"severity":"critical","via":["CVE-0000"]}},"metadata":{"vulnerabilities":{"high":0,"critical":1,"total":1}}}`, nil
 	}
 	calls := stubNpmAuditRunner(t, advisory)
-	verdict, err := runNpmAudit(t.Context())
+	verdict, err := runNpmAudit(grantedCtx(t.Context()))
 	if err != nil {
 		t.Fatalf("runNpmAudit: %v", err)
 	}

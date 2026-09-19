@@ -154,11 +154,11 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		dir := initRepo(t)
 		createBumpFiles(t, dir)
 
-		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err != nil {
+		if err := commitSparkwingPinBump(grantedCtx(context.Background()), dir, "v0.19.0"); err != nil {
 			t.Fatalf("commitSparkwingPinBump() error: %v", err)
 		}
 
-		subject, err := captureGit(context.Background(), dir, "log", "--format=%s", "-1")
+		subject, err := captureGit(grantedCtx(context.Background()), dir, "log", "--format=%s", "-1")
 		if err != nil {
 			t.Fatalf("git log: %v", err)
 		}
@@ -166,7 +166,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 			t.Errorf("commit subject = %q, want %q", got, "chore: bump sparkwing pin to v0.19.0")
 		}
 
-		filesOut, err := captureGit(context.Background(), dir, "show", "--name-only", "--format=", "HEAD")
+		filesOut, err := captureGit(grantedCtx(context.Background()), dir, "show", "--name-only", "--format=", "HEAD")
 		if err != nil {
 			t.Fatalf("git show: %v", err)
 		}
@@ -196,10 +196,10 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		mustGit(t, dir, "config", "core.hooksPath", t.TempDir())
 		createBumpFiles(t, dir)
 
-		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err != nil {
+		if err := commitSparkwingPinBump(grantedCtx(context.Background()), dir, "v0.19.0"); err != nil {
 			t.Fatalf("a checkout that configured no identity could not commit the bump: %v", err)
 		}
-		author, err := captureGit(context.Background(), dir, "log", "--format=%ae", "-1")
+		author, err := captureGit(grantedCtx(context.Background()), dir, "log", "--format=%ae", "-1")
 		if err != nil {
 			t.Fatalf("git log: %v", err)
 		}
@@ -211,7 +211,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 	t.Run("returns error when staged paths do not exist", func(t *testing.T) {
 		dir := initRepo(t)
 
-		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
+		if err := commitSparkwingPinBump(grantedCtx(context.Background()), dir, "v0.19.0"); err == nil {
 			t.Error("commitSparkwingPinBump() returned nil, want error")
 		}
 	})
@@ -223,7 +223,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		mustGit(t, dir, append([]string{"add", "--"}, sparkwingPinArtifacts...)...)
 		mustGit(t, dir, "commit", "-m", "initial")
 
-		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
+		if err := commitSparkwingPinBump(grantedCtx(context.Background()), dir, "v0.19.0"); err == nil {
 			t.Error("commitSparkwingPinBump() returned nil, want error when nothing to commit")
 		}
 	})
@@ -301,7 +301,7 @@ func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
 	gitRun(t, repo, "push", "origin", "v0.1.0")
 	before := gitRun(t, repo, "rev-parse", "HEAD")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(grantedCtx(context.Background()), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T
 	gitRun(t, repo, "checkout", "--detach", "HEAD")
 	before := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(grantedCtx(context.Background()), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestAutoBumpSparkwingPinIfStaleLeavesDetachedCheckoutUnchanged(t *testing.T
 	if status := strings.TrimSpace(gitRun(t, repo, "status", "--porcelain")); status != "" {
 		t.Fatalf("detached auto bump changed the tree or index:\n%s", status)
 	}
-	if err := CheckVersionsFreshness(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
+	if err := CheckVersionsFreshness(grantedCtx(context.Background()), repo); err == nil || !strings.Contains(err.Error(), "v0.99.0") {
 		t.Fatalf("stale detached checkout freshness error = %v, want the available v0.99.0 release", err)
 	}
 }
@@ -378,7 +378,7 @@ func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *tes
 		t.Fatal(err)
 	}
 
-	_, err := autoBumpSparkwingPinIfStale(context.Background(), dir)
+	_, err := autoBumpSparkwingPinIfStale(grantedCtx(context.Background()), dir)
 	if err == nil {
 		t.Fatal("autoBumpSparkwingPinIfStale() returned nil, want error")
 	}
@@ -434,7 +434,7 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 		t.Fatal(err)
 	}
 	mustGit("add", "unrelated.txt")
-	if _, err := autoBumpSparkwingPinIfStale(context.Background(), dir); err == nil {
+	if _, err := autoBumpSparkwingPinIfStale(grantedCtx(context.Background()), dir); err == nil {
 		t.Fatal("auto bump accepted unrelated staged work")
 	}
 	if status := strings.TrimSpace(captureGitOutput(t, dir, "status", "--porcelain")); status != "A  unrelated.txt" {
@@ -453,7 +453,7 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 	}
 	mustGit("config", "core.hooksPath", hooks)
 
-	if _, err := autoBumpSparkwingPinIfStale(context.Background(), dir); err == nil {
+	if _, err := autoBumpSparkwingPinIfStale(grantedCtx(context.Background()), dir); err == nil {
 		t.Fatal("auto bump succeeded despite refusing pre-commit hook")
 	}
 	if status := strings.TrimSpace(captureGitOutput(t, dir, "status", "--porcelain")); status != "" {
@@ -478,7 +478,7 @@ func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
 	gitRun(t, repo, "add", "doc.go")
 	gitRun(t, repo, "commit", "-m", "move past the tag")
 
-	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	bumped, err := autoBumpSparkwingPinIfStale(grantedCtx(context.Background()), repo)
 	if err != nil {
 		t.Fatalf("autoBumpSparkwingPinIfStale: %v", err)
 	}
@@ -646,7 +646,7 @@ func TestCheckVersionsFreshnessIgnoresRetractedProxyVersions(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			repo := seedProxyPinnedRepo(t, c.retract)
 
-			err := CheckVersionsFreshness(context.Background(), repo)
+			err := CheckVersionsFreshness(grantedCtx(context.Background()), repo)
 
 			if c.wantProblem {
 				if err == nil {

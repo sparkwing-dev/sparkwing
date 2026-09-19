@@ -2,12 +2,12 @@
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # SDK API reference: `sparkwing/planguard`
 
-Package planguard implements the Plan() purity sentinel.
+Package planguard decides where a side-effect helper may run.
 
 Import as `swplanguard "github.com/sparkwing-dev/sparkwing/sparkwing/planguard"`. The root package and the other subpackages are indexed in [sdk-reference.md](sdk-reference.md).
 
 ## Functions
 
-- `func Active(ctx context.Context) bool` -- Active reports whether ctx is currently inside a Plan() call.
-- `func Guard(ctx context.Context, what string)` -- Guard panics if invoked from inside a Pipeline.Plan() call.
-- `func With(ctx context.Context) context.Context` -- With returns ctx marked as a Plan() invocation context.
+- `func Grant(ctx context.Context) context.Context` -- Grant returns ctx with side-effect helpers granted, and returns a sealed ctx unchanged.
+- `func Guard(ctx context.Context, helper string)` -- Guard panics unless ctx grants side effects.
+- `func Seal(ctx context.Context) context.Context` -- Seal returns ctx with side-effect helpers refused, whatever ctx carried before.

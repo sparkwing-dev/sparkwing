@@ -17,7 +17,7 @@ func requireDocker(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not on PATH; skipping container smoke test")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(grantedCtx(context.Background()), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
 		t.Skip("docker daemon not reachable; skipping container smoke test")
@@ -53,14 +53,14 @@ func captureRunningService(t *testing.T, parent context.Context, name string) st
 }
 
 func forceRemove(name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(grantedCtx(context.Background()), 2*time.Second)
 	defer cancel()
 	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
 }
 
 func waitForContainerStopped(t *testing.T, name, cause string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(grantedCtx(context.Background()), 2*time.Second)
 	defer cancel()
 	poll := time.NewTicker(100 * time.Millisecond)
 	defer poll.Stop()
@@ -108,7 +108,7 @@ func TestDeriveName(t *testing.T) {
 
 func TestWithServices_Empty(t *testing.T) {
 	calls := 0
-	err := WithServices(context.Background(), nil, func(ctx context.Context) error {
+	err := WithServices(grantedCtx(context.Background()), nil, func(ctx context.Context) error {
 		calls++
 		return nil
 	})
@@ -120,7 +120,7 @@ func TestWithServices_Empty(t *testing.T) {
 	}
 
 	sentinel := errors.New("boom")
-	err = WithServices(context.Background(), []Service{}, func(ctx context.Context) error {
+	err = WithServices(grantedCtx(context.Background()), []Service{}, func(ctx context.Context) error {
 		return sentinel
 	})
 	if !errors.Is(err, sentinel) {
@@ -136,7 +136,7 @@ func TestWithServices_DockerMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	called := false
-	err := WithServices(context.Background(), []Service{{Image: "alpine:latest"}}, func(ctx context.Context) error {
+	err := WithServices(grantedCtx(context.Background()), []Service{{Image: "alpine:latest"}}, func(ctx context.Context) error {
 		called = true
 		return nil
 	})
@@ -159,7 +159,7 @@ func TestWithServices_StartAndCleanup(t *testing.T) {
 	}
 
 	var capturedName string
-	err := WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
+	err := WithServices(grantedCtx(context.Background()), []Service{svc}, func(ctx context.Context) error {
 		capturedName = captureRunningService(t, ctx, svc.Name)
 		return nil
 	})
@@ -170,7 +170,7 @@ func TestWithServices_StartAndCleanup(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never saw the container")
 	}
-	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 2*time.Second)
+	probeCtx, cancelProbe := context.WithTimeout(grantedCtx(context.Background()), 2*time.Second)
 	defer cancelProbe()
 	running, probeErr := containerRunning(probeCtx, capturedName)
 	if probeErr != nil {
@@ -192,7 +192,7 @@ func TestWithServices_ReadyCmdSucceeds(t *testing.T) {
 		ReadyTimeout: 15 * time.Second,
 	}
 	start := time.Now()
-	err := WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
+	err := WithServices(grantedCtx(context.Background()), []Service{svc}, func(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
@@ -211,7 +211,7 @@ func TestWithServices_ReadyCmdTimesOut(t *testing.T) {
 		ReadyCmd:     "false",
 		ReadyTimeout: 1 * time.Second,
 	}
-	err := WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
+	err := WithServices(grantedCtx(context.Background()), []Service{svc}, func(ctx context.Context) error {
 		t.Fatalf("fn should not run when ReadyCmd never succeeds")
 		return nil
 	})
@@ -240,7 +240,7 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 				t.Fatalf("expected panic, got none")
 			}
 		}()
-		_ = WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
+		_ = WithServices(grantedCtx(context.Background()), []Service{svc}, func(ctx context.Context) error {
 			capturedName = captureRunningService(t, ctx, svc.Name)
 			panic("boom")
 		})
@@ -261,7 +261,7 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 		ReadyCmd: "wget -q -O /dev/null http://localhost/",
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(grantedCtx(context.Background()))
 	var capturedName string
 
 	err := WithServices(ctx, []Service{svc}, func(fnCtx context.Context) error {
@@ -299,7 +299,7 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
+			errs <- WithServices(grantedCtx(context.Background()), []Service{svc}, func(ctx context.Context) error {
 				entered <- struct{}{}
 				<-release
 				return nil

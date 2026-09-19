@@ -55,7 +55,7 @@ func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 		ineffassignViolation("internal"))
 	gitAddAll(t, worktree)
 
-	err := runGolangciLint(context.Background())
+	err := runGolangciLint(grantedCtx(context.Background()))
 	if err == nil {
 		t.Fatal("lint passed a finding a linked worktree introduced after the baseline, " +
 			"so the gate does not gate in a worktree")

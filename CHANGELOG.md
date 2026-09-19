@@ -20,9 +20,41 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** `sparkwing.Grant(ctx)` grants side-effect permission to a context used
+  outside a pipeline run, for a tool or a test that calls an SDK helper with no run
+  around it.
+- **sdk:** `SharedToolCacheDir` opts into a cache shared across worktrees on
+  one machine. Use it only for tools with concurrent, path-independent caches
+  on a local filesystem. `ToolCacheDir` retains worktree isolation.
+
+### Fixed
+
+- **orchestrator:** SDK logging calls in `Pipeline.Plan` reach the run log during
+  initial planning. Node reconstruction and replay omit these records to avoid
+  duplicates. Plan records have no node ID, so node-scoped log reads exclude them;
+  terminal visibility follows the selected renderer.
+- **sdk:** `ToolCacheDir` stores caches under `SPARKWING_HOME` instead of the
+  OS temporary directory, so separate development shells reuse the same
+  worktree's cache. Existing temporary caches are not migrated.
+
 ### Changed
 
+- **sdk (Breaking):** a guarded helper runs only where the runtime granted permission.
+  See [migration guide](docs/migrations/_unreleased.md#the-plan-purity-guard-runs-on-a-granted-permission).
+  A context carrying no grant is refused, so a `Plan` body that called a guarded helper
+  with `context.Background()` instead of the context it was handed no longer does state
+  work unnoticed. `Plan` is sealed over the run's grant, and applying `sparkwing.Grant`
+  to a sealed context leaves it sealed.
+
 - **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.
+
+### Removed
+
+- **sdk (Breaking):** `planguard.With` and `planguard.Active`, replaced by `planguard.Seal`
+  and the states `Guard` reads. `internal/sparkwingruntime.GuardPlanTime` and `IsPlanTime`
+  go with them; neither had a caller.
 
 
 ## [v0.55.0] - 2026-09-18

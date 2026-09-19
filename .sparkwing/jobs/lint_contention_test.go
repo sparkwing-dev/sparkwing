@@ -91,7 +91,7 @@ func TestDescribeLintFailureNamesContentionFromTheLinterOwnMessage(t *testing.T)
 		ExitCode: 3,
 	}
 
-	got := describeLintFailure(context.Background(), time.Second, err)
+	got := describeLintFailure(grantedCtx(context.Background()), time.Second, err)
 
 	if !strings.Contains(got, "could not run") {
 		t.Fatalf("contention signature did not report could-not-run: %s", got)
@@ -108,7 +108,7 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 		ExitCode: 1,
 	}
 
-	got := describeLintFailure(context.Background(), time.Second, err)
+	got := describeLintFailure(grantedCtx(context.Background()), time.Second, err)
 
 	if strings.Contains(got, "could not run") {
 		t.Fatalf("a genuine finding was excused as contention: %s", got)
@@ -138,7 +138,7 @@ func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
-	_ = runGolangciLint(context.Background())
+	_ = runGolangciLint(grantedCtx(context.Background()))
 
 	if gets.Load() == 0 {
 		t.Fatal("blob store GET not sent before golangci-lint ran")
@@ -147,7 +147,7 @@ func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
 
 func expiredContext(t *testing.T) context.Context {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	ctx, cancel := context.WithTimeout(grantedCtx(context.Background()), time.Nanosecond)
 	t.Cleanup(cancel)
 	<-ctx.Done()
 	return ctx
@@ -161,7 +161,7 @@ func TestDescribeLintFailureSeparatesTheLinterOwnTimeoutFromFindings(t *testing.
 		ExitCode: 4,
 	}
 
-	got := describeLintFailure(context.Background(), 5*time.Minute, err)
+	got := describeLintFailure(grantedCtx(context.Background()), 5*time.Minute, err)
 
 	if !strings.Contains(got, "could not finish") {
 		t.Fatalf("a run that stopped early read as a completed one: %s", got)
@@ -181,7 +181,7 @@ func TestDescribeLintFailureDoesNotExcuseAFindingThatEchoesTheTimeoutText(t *tes
 		ExitCode: 1,
 	}
 
-	got := describeLintFailure(context.Background(), time.Second, err)
+	got := describeLintFailure(grantedCtx(context.Background()), time.Second, err)
 
 	if strings.Contains(got, "could not finish") {
 		t.Fatalf("a finding quoting the timeout text was excused as an unfinished run: %s", got)
