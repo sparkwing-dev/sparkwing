@@ -1,0 +1,37 @@
+version: 1
+
+invariants:
+  - id: pipelines-run-without-cli
+    statement: >-
+      Sparkwing pipelines remain runnable with the Go toolchain without invoking
+      the Sparkwing CLI binary.
+    why: >-
+      A pipeline is a portable Go program. The CLI may make execution more
+      pleasant, but it must not become the only path that can run one.
+    scope:
+      - .sparkwing/**
+      - cmd/sparkwing/**
+      - internal/orchestrator/**
+      - internal/runners/**
+      - pkg/pipelines/**
+      - pkg/runner/**
+      - sparkwing/**
+    exceptions:
+      - >-
+        Direct execution may lose CLI-provided discovery, compilation caching,
+        admission, presentation, and similar conveniences.
+
+  - id: cli-no-positional-arguments
+    statement: >-
+      Public Sparkwing CLI commands use flags rather than positional arguments.
+    why: >-
+      Named flags keep invocations self-describing and leave room to extend a
+      command without assigning hidden meaning to argument order.
+    scope:
+      - cmd/sparkwing/**
+    exceptions:
+      - >-
+        sparkwing run <pipeline> accepts exactly one positional pipeline name.
+      - >-
+        Command and subcommand names that select a CLI verb are not positional
+        data arguments.

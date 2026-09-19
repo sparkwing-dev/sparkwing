@@ -185,15 +185,25 @@ file. Other syntax and workflow checks remain active.
   relevant; invoke one with `sparkwing run <name>`.
 - **Experimental semantic lint:** `sparkwing run jev-lint` compares changed
   non-test Go functions with deterministically selected candidates across the
-  repository. Jev judges duplicate responsibility and package ownership,
-  unnamed complex conditions, unexplained magic values, and whether a large
-  change builds a mechanism around a reversible premise instead of fixing the
-  cause. Cross-package findings may recommend either existing package or a
-  focused shared package. Store the API key as the masked `TYPESAFE_API_KEY`
-  Sparkwing secret. Use `--dry-run` to inspect every bounded request without a
-  key or network call. Findings are advisory; analysis, transport, and
+  repository. It also reads `.sparkwing/jev-invariants.yaml`, selects invariants
+  whose scopes contain changed files, and asks one independent Jev question per
+  invariant over a shared bounded diff. Jev judges those contracts, duplicate
+  responsibility and package ownership, unnamed complex conditions,
+  unexplained magic values, and whether a large change builds a mechanism
+  around a reversible premise instead of fixing the cause. Cross-package
+  findings may recommend either existing package or a focused shared package.
+  Store the API key as the masked `TYPESAFE_API_KEY` Sparkwing secret. Use
+  `--dry-run` to inspect every bounded request without a key or network call.
+  Findings are advisory; configuration, analysis, transport, and
   response-schema failures fail the run. Cached exact requests can be read
   without the key.
+- **Whole-codebase semantic sweep:** `sparkwing run jev-sweeper` is a manual,
+  heavier companion to `jev-lint`. It parses every non-test Go function,
+  selects bounded candidates across packages, and batches independent Jev
+  judgments for mixed responsibilities, abstraction-boundary leakage,
+  misleading contracts, unnecessary indirection, and duplicate responsibility.
+  `--max-functions` and `--max-pairs` control breadth; `--dry-run` prints every
+  request. Findings remain advisory and do not replace deterministic gates.
 - **Scripts under `bin/`:** editing one means running `GOWORK=off go test
   ./bin`, about ten seconds. Go tests there pin what the scripts do, including
   the exact argv `bin/install.sh` builds with, so a change to a shell script

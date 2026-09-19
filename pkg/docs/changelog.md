@@ -25,8 +25,14 @@ unlock.
 - **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
   duplicate responsibilities across packages, unnamed complex conditions,
   unexplained magic values, and changes that build sprawling workarounds around
-  reversible assumptions. Requests use bounded source, exact-request caching,
-  and a dry-run that sends nothing.
+  reversible assumptions. Repositories can also declare scoped architectural
+  invariants in `.sparkwing/jev-invariants.yaml`; one batched request asks an
+  independent question for every applicable invariant. Requests use bounded
+  source, exact-request caching, and a dry-run that sends nothing.
+- **pipelines:** `sparkwing run jev-sweeper` performs a bounded manual audit of
+  the whole Go codebase for mixed responsibilities, abstraction-boundary leaks,
+  misleading contracts, unnecessary indirection, and duplicate responsibility.
+  It batches independent judgments and reports advisory probabilities.
 
 ### Changed
 

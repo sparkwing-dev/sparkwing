@@ -3,9 +3,12 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -236,6 +239,19 @@ func (beta) Plan() error { return nil }
 	}
 }
 
+func TestRankJevLintPairsIgnoresPlatformImplementationsOfOneFunction(t *testing.T) {
+	linux := mustJevLintFunctions(t, "proc/signal_linux.go", `package proc
+func signalProcess(pid int) error { return signalUnix(pid) }
+`)[0]
+	windows := mustJevLintFunctions(t, "proc/signal_windows.go", `package proc
+func signalProcess(pid int) error { return signalWindows(pid) }
+`)[0]
+	pairs := rankJevLintPairs([]jevLintFunction{linux}, []jevLintFunction{linux, windows}, 2, jevLintMaxPairSourceBytes)
+	if len(pairs) != 0 {
+		t.Fatalf("platform alternatives produced candidates: %#v", pairs)
+	}
+}
+
 func TestInterpretJevLintRequiresBothJudgments(t *testing.T) {
 	functions := mustJevLintFunctions(t, "orders/orders.go", `package orders
 func validateOrder(order string) error { return checkOrder(order) }
@@ -333,6 +349,65 @@ func TestInterpretJevLintChangeRequiresProbabilityAndDirection(t *testing.T) {
 	finding, err = interpretJevLintChange(response)
 	if err != nil || finding.Report {
 		t.Fatalf("keep finding = %#v, err %v", finding, err)
+	}
+}
+
+func TestReadJevLintInvariantsRejectsUnknownFields(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "invariants.yaml")
+	body := `version: 1
+invariants:
+  - id: portable
+    statement: Pipelines stay portable.
+    why: Local execution is a product contract.
+    scope: ["sparkwing/**"]
+    surprise: true
+`
+	if err := os.WriteFile(filename, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readJevLintInvariants(filename); err == nil || !strings.Contains(err.Error(), "field surprise") {
+		t.Fatalf("read error = %v", err)
+	}
+}
+
+func TestSelectJevLintInvariantsUsesScope(t *testing.T) {
+	invariants := []jevLintInvariant{
+		{ID: "pipelines", Scope: []string{"sparkwing/**", ".sparkwing/**"}},
+		{ID: "cli", Scope: []string{"cmd/sparkwing/**"}},
+	}
+	selected := selectJevLintInvariants(invariants, []string{"sparkwing/pipeline.go", "README.md"})
+	if len(selected) != 1 || selected[0].ID != "pipelines" || len(selected[0].Paths) != 1 {
+		t.Fatalf("selected = %#v", selected)
+	}
+	selected = selectJevLintInvariants(invariants, []string{jevLintInvariantFile})
+	if len(selected) != 2 || selected[0].Paths[0] != jevLintInvariantFile || selected[1].Paths[0] != jevLintInvariantFile {
+		t.Fatalf("config-selected = %#v", selected)
+	}
+}
+
+func TestJevLintInvariantRequestAsksIndependentQuestionsOverSharedChange(t *testing.T) {
+	threshold := 0.80
+	invariants := []jevLintInvariant{
+		{ID: "portable", Statement: "Pipelines stay portable.", Why: "Local execution matters.", Paths: []string{"sparkwing/pipeline.go"}},
+		{ID: "flags", Statement: "Commands use flags.", Why: "Calls stay clear.", Exceptions: []string{"run accepts a pipeline name"}, Threshold: &threshold, Paths: []string{"cmd/sparkwing/main.go"}},
+	}
+	request := newJevLintInvariantRequest(jevLintInvariantAnalysis{Summary: "two files", Diff: "shared diff", Invariants: invariants})
+	if len(request.Questions) != 2 || len(request.State.Invariants) != 2 || request.State.Change.Diff != "shared diff" {
+		t.Fatalf("request = %#v", request)
+	}
+	for i := range invariants {
+		question := request.Questions["invariant_"+strconv.Itoa(i)]
+		if question.Type != "noul" || !strings.Contains(question.Instructions, fmt.Sprintf("invariants[%d]", i)) {
+			t.Fatalf("question %d = %#v", i, question)
+		}
+	}
+	high, belowCustomThreshold := 0.70, 0.75
+	findings, err := interpretJevLintInvariants(invariants, jevLintResponse{Answers: map[string]jevLintAnswer{
+		"invariant_0": {Type: "noul", Noul: &high},
+		"invariant_1": {Type: "noul", Noul: &belowCustomThreshold},
+	}})
+	if err != nil || len(findings) != 2 || !findings[0].Report || findings[1].Report {
+		t.Fatalf("findings = %#v, err %v", findings, err)
 	}
 }
 

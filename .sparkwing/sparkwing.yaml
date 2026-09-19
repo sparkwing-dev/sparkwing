@@ -32,6 +32,9 @@ pipelines:
   - name: jev-lint
     entrypoint: JevLint
 
+  - name: jev-sweeper
+    entrypoint: JevSweeper
+
   - name: security-scan
     entrypoint: SecurityScan
 
