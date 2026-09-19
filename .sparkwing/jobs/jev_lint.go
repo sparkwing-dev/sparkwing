@@ -36,6 +36,7 @@ const (
 	jevLintMinChangeLines     = 100
 	jevLintFindingProbability = 0.75
 	jevLintRuleProbability    = 0.65
+	jevLintDesignProbability  = 0.60
 	jevLintChoiceConfidence   = 0.60
 	jevLintCacheVersion       = "semantic-quality-v2"
 	jevLintNameWeight         = 2.0
@@ -1202,7 +1203,7 @@ func interpretJevLintChange(response jevLintResponse) (jevLintDesignFinding, err
 	if sprawl.Noul == nil || direction.Confidence == nil {
 		return jevLintDesignFinding{}, errors.New("TypeSafe response omitted change-design values")
 	}
-	report := *sprawl.Noul >= jevLintFindingProbability && *direction.Confidence >= jevLintChoiceConfidence &&
+	report := *sprawl.Noul >= jevLintDesignProbability &&
 		(direction.Choice == "revisit_assumption" || direction.Choice == "replace_with_direct_fix")
 	return jevLintDesignFinding{
 		Probability: *sprawl.Noul,

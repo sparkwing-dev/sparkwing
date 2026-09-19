@@ -299,8 +299,8 @@ func checkOrderForDispatch(order string) error { return checkOrder(order) }
 
 func TestInterpretJevLintChangeRequiresProbabilityAndDirection(t *testing.T) {
 	request := newJevLintChangeRequest(jevLintChangeCandidate{Summary: "8 files, 900 added lines", Diff: "large wrapper"})
-	sprawl := 0.88
-	confidence := 0.74
+	sprawl := 0.62
+	confidence := 0.18
 	response := jevLintResponse{
 		Model: "jev-1.13.0",
 		Answers: map[string]jevLintAnswer{
@@ -310,10 +310,10 @@ func TestInterpretJevLintChangeRequiresProbabilityAndDirection(t *testing.T) {
 				Choice:     "revisit_assumption",
 				Confidence: &confidence,
 				Probabilities: map[string]float64{
-					"keep_approach":           0.08,
-					"revisit_assumption":      0.74,
-					"replace_with_direct_fix": 0.12,
-					"unclear":                 0.06,
+					"keep_approach":           0.18,
+					"revisit_assumption":      0.31,
+					"replace_with_direct_fix": 0.29,
+					"unclear":                 0.22,
 				},
 			},
 		},
