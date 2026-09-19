@@ -276,7 +276,6 @@ func (r *Registration) SecretValues(args map[string]string) []string {
 // can redact those args without re-resolving the pipeline's schema, which it
 // cannot do because a run row outlives the process that registered its
 // pipeline.
-
 func (r *Registration) SecretArgNames() []string {
 	var out []string
 	for _, f := range r.Schema.Fields {

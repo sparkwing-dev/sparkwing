@@ -102,9 +102,10 @@ rather than work inside one.
 A test renders that table from a pipeline run and fails if this page and the
 runtime disagree.
 
-The table describes a run. `sparkwing pipeline plan` and `--describe` seal instead, so
-a `SkipIf` predicate or a `CacheKeyFn` that reaches a guarded helper is refused
-there, so an inspection command never executes an author's side effects.
+The table describes a run. `sparkwing pipeline plan` and `--describe` seal instead, so a step or spawn
+skip predicate that reaches a guarded helper is refused there and the step is
+reported as skipped, so an inspection command never executes an author's side
+effects.
 
 ## Exec and Bash - running a shell command in a step
 

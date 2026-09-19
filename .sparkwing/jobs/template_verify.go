@@ -730,7 +730,10 @@ func startEphemeralPostgres(ctx context.Context) (string, func(), error) {
 		"postgres:16-alpine").Capture(); err != nil {
 		return "", nil, fmt.Errorf("start postgres: %w", err)
 	}
-	cleanup := func() { _, _ = sparkwing.Exec(context.Background(), "docker", "rm", "-f", name).Capture() }
+	// safety: cleanup outlives a cancelled run, and WithoutCancel keeps the
+	// grant, the logger and the node identity that Background would drop.
+	cleanupCtx := context.WithoutCancel(ctx)
+	cleanup := func() { _, _ = sparkwing.Exec(cleanupCtx, "docker", "rm", "-f", name).Capture() }
 	if err := waitPostgresReady(ctx, name); err != nil {
 		cleanup()
 		return "", nil, err

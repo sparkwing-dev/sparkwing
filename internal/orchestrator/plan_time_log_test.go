@@ -2,9 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -32,28 +30,6 @@ func init() {
 	register("orch-plan-time-log", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLogPipe{} })
 }
 
-func filesCarrying(t *testing.T, root, token string) []string {
-	t.Helper()
-	var hits []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || !d.Type().IsRegular() {
-			return err
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		if strings.Contains(string(data), token) {
-			hits = append(hits, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", root, err)
-	}
-	return hits
-}
-
 func TestRun_InfoFromPlanReachesTheRunLog(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -65,17 +41,16 @@ func TestRun_InfoFromPlanReachesTheRunLog(t *testing.T) {
 		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
 	}
 
-	dir := p.RunDir(res.RunID)
-	if control := filesCarrying(t, dir, stepLogToken); len(control) == 0 {
-		t.Fatalf("the control token never reached any file under %s; the probe proves nothing", dir)
-	}
-
 	envelope, err := os.ReadFile(p.EnvelopeLog(res.RunID))
 	if err != nil {
 		t.Fatalf("read envelope: %v", err)
 	}
+	if !strings.Contains(string(envelope), stepLogToken) {
+		t.Fatalf("the step control never reached %s, so this run says nothing about plan-time logging",
+			p.EnvelopeLog(res.RunID))
+	}
 	if !strings.Contains(string(envelope), planLogToken) {
-		t.Fatalf("sparkwing.Info from inside Plan reached no record in %s, while the step control emitted; plan-time Info has no sink",
+		t.Fatalf("sparkwing.Info from inside Plan reached no record in %s, while the step control did; plan-time Info has no sink",
 			p.EnvelopeLog(res.RunID))
 	}
 }

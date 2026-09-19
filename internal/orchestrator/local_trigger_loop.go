@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
@@ -306,9 +305,6 @@ func (t *stderrTail) lastLines(n int) string {
 }
 
 func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir string) (string, func(), error) {
-	// safety: the trigger loop picks and snapshots a checkout before any run
-	// exists, so there is no grant for the git helpers below it to inherit.
-	ctx = planguard.Grant(ctx)
 	repoDir, err := locateTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
 		return "", func() {}, err

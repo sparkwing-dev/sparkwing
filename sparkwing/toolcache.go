@@ -23,7 +23,6 @@ const toolCacheRoot = "sparkwing-toolcache"
 //
 // The scope is per-worktree: a result that carries absolute paths replays
 // another tree's paths when two worktrees share one directory.
-// [SharedToolCacheDir] is the opt-in for tools whose results carry none.
 //
 // The cache lives under SPARKWING_HOME, by default ~/.sparkwing, so it outlives
 // the shell. Test binaries take a temporary home; set SPARKWING_HOME explicitly
@@ -44,22 +43,6 @@ func ToolCacheDir(tool string) string {
 		cacheSegment(tool, "tool"),
 		cacheSegment(filepath.Base(scope), "workdir")+"-"+hex.EncodeToString(sum[:6]),
 	)
-	_ = os.MkdirAll(dir, 0o700) //nolint:errcheck // the tool that needs the directory reports its own cache errors.
-	return dir
-}
-
-// SharedToolCacheDir returns a tool cache shared by worktrees on this machine.
-// Use it only when the tool coordinates concurrent writers and its cached
-// results remain valid at different checkout paths. Go's build cache meets
-// these requirements; golangci-lint's diagnostic cache does not.
-//
-// The directory must be on a local filesystem. Sparkwing supplies the
-// directory; the tool supplies its locking and cache keys.
-//
-// Like [ToolCacheDir], it creates the directory if missing and leaves creation
-// errors to the tool. It panics if the Sparkwing home cannot be resolved.
-func SharedToolCacheDir(tool string) string {
-	dir := filepath.Join(toolCacheHome(), cacheSegment(tool, "tool"), "shared")
 	_ = os.MkdirAll(dir, 0o700) //nolint:errcheck // the tool that needs the directory reports its own cache errors.
 	return dir
 }

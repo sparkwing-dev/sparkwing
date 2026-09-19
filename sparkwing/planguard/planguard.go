@@ -4,9 +4,14 @@
 // the step closures a Job's Work() body declares; those receive a
 // granted context.
 //
-// A context carries one of three states, and a context with no grant
-// refuses. The orchestrator calls Grant once per process that executes
-// pipeline work, and Invoke calls Seal for the Plan body.
+// A context carries one of three states: ungranted, which is what a fresh
+// context has and which refuses; granted, which Grant produces; and sealed,
+// which Seal produces and which refuses. Two rules move between them. Seal
+// wins from any state, and Grant is a no-op on a sealed context, so a Plan
+// body cannot grant its way out of the seal.
+//
+// The orchestrator calls Grant once per process that executes pipeline work,
+// and Invoke calls Seal for the Plan body.
 package planguard
 
 import (
@@ -41,15 +46,23 @@ func from(ctx context.Context) state {
 // packages that cannot import the root package. Pipeline authors call
 // sparkwing.Grant, which delegates here.
 func Grant(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if from(ctx) == sealed {
 		return ctx
 	}
 	return context.WithValue(ctx, stateKey{}, granted)
 }
 
-// Seal returns ctx with side-effect helpers refused, whatever ctx
-// carried before.
+// Seal returns ctx with side-effect helpers refused, whatever ctx carried
+// before. The runtime calls it for a Plan body and for plan inspection;
+// a pipeline author has no reason to, and sealing a context inside a Job
+// body refuses the helpers that body goes on to call.
 func Seal(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return context.WithValue(ctx, stateKey{}, sealed)
 }
 

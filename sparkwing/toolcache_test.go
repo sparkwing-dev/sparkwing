@@ -142,23 +142,3 @@ func TestToolCacheDir_SurvivesTemporaryDirectoryChanges(t *testing.T) {
 		t.Fatalf("cache did not survive shell exit: %q, %v", data, err)
 	}
 }
-
-func TestSharedToolCacheDir_SharesOnlyWhenRequested(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	useWorkDir(t, t.TempDir())
-	shared := sparkwing.SharedToolCacheDir("go-build")
-	private := sparkwing.ToolCacheDir("go-build")
-	sparkwing.SetWorkDir(t.TempDir())
-	if next := sparkwing.SharedToolCacheDir("go-build"); next != shared {
-		t.Fatalf("shared cache moved: %q -> %q", shared, next)
-	}
-	if next := sparkwing.ToolCacheDir("go-build"); next == private || next == shared {
-		t.Fatalf("worktree cache unexpectedly shared: %q", next)
-	}
-	if private == shared {
-		t.Fatal("shared and worktree cache collide")
-	}
-	if other := sparkwing.SharedToolCacheDir("other"); other == shared {
-		t.Fatal("different tools share a cache")
-	}
-}

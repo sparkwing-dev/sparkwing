@@ -705,7 +705,6 @@ type SecretsProvider interface {
 }
 func SetGit(g *Git)
 func SetWorkDir(dir string)
-func SharedToolCacheDir(tool string) string
 type ShortHelpProvider interface {
 	ShortHelp() string
 }

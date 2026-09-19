@@ -19,7 +19,6 @@ issues:
 
 // TestLintReportsAFindingIntroducedInALinkedWorktree lints a git worktree
 // holding a finding the baseline does not have.
-
 func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")

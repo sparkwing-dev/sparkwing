@@ -2,6 +2,7 @@ package planguard_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,14 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
-func refusal(ctx context.Context) (msg string) {
+func refusal(ctx context.Context) (msg string, panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			msg, _ = r.(string)
+			panicked = true
+			msg = fmt.Sprint(r)
 		}
 	}()
 	planguard.Guard(ctx, "test.helper")
-	return ""
+	return "", false
 }
 
 type threadingPipe struct{ sparkwing.Base }
@@ -33,18 +35,18 @@ func (mintingPipe) Plan(context.Context, *sparkwing.Plan, sparkwing.NoInputs, sp
 	return nil
 }
 
-type mintingDetachingPipe struct{ sparkwing.Base }
+type mintingGrantingPipe struct{ sparkwing.Base }
 
 // safety: a freshly built context records nothing about Plan, so the grant on
 // it is honored.
-func (mintingDetachingPipe) Plan(context.Context, *sparkwing.Plan, sparkwing.NoInputs, sparkwing.RunContext) error {
+func (mintingGrantingPipe) Plan(context.Context, *sparkwing.Plan, sparkwing.NoInputs, sparkwing.RunContext) error {
 	planguard.Guard(sparkwing.Grant(context.Background()), "test.helper") //nolint:contextcheck // minting a context is the case under test.
 	return nil
 }
 
-type detachingPipe struct{ sparkwing.Base }
+type grantingPipe struct{ sparkwing.Base }
 
-func (detachingPipe) Plan(ctx context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+func (grantingPipe) Plan(ctx context.Context, _ *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	planguard.Guard(sparkwing.Grant(ctx), "test.helper")
 	return nil
 }
@@ -54,10 +56,10 @@ func init() {
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return threadingPipe{} })
 	sparkwing.Register[sparkwing.NoInputs]("planguard-minting",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return mintingPipe{} })
-	sparkwing.Register[sparkwing.NoInputs]("planguard-detaching",
-		func() sparkwing.Pipeline[sparkwing.NoInputs] { return detachingPipe{} })
-	sparkwing.Register[sparkwing.NoInputs]("planguard-minting-then-detaching",
-		func() sparkwing.Pipeline[sparkwing.NoInputs] { return mintingDetachingPipe{} })
+	sparkwing.Register[sparkwing.NoInputs]("planguard-granting",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return grantingPipe{} })
+	sparkwing.Register[sparkwing.NoInputs]("planguard-minting-then-granting",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return mintingGrantingPipe{} })
 }
 
 func invokePlan(t *testing.T, name string) (msg string) {
@@ -68,12 +70,14 @@ func invokePlan(t *testing.T, name string) (msg string) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			msg, _ = r.(string)
+			msg = fmt.Sprint(r)
 		}
 	}()
 	// safety: granting first is what makes these cases prove the seal beats a
 	// grant, rather than arriving where none existed.
-	_, _ = reg.Invoke(planguard.Grant(context.Background()), nil, sparkwing.RunContext{Pipeline: name})
+	if _, err := reg.Invoke(planguard.Grant(context.Background()), nil, sparkwing.RunContext{Pipeline: name}); err != nil {
+		t.Fatalf("Invoke(%s): %v; Plan never ran, so this proves nothing", name, err)
+	}
 	return ""
 }
 
@@ -94,46 +98,47 @@ func TestGuard_RefusesAPlanThatMintsItsOwnContext(t *testing.T) {
 	}
 }
 
-func TestGuard_RefusesAPlanThatDetachesItsContext(t *testing.T) {
-	msg := invokePlan(t, "planguard-detaching")
+func TestGuard_RefusesAPlanThatGrantsItsHandedContext(t *testing.T) {
+	msg := invokePlan(t, "planguard-granting")
 	if !strings.Contains(msg, "called inside Pipeline.Plan()") {
-		t.Fatalf("Detached lifted the seal; want the purity refusal, got: %q", msg)
+		t.Fatalf("Grant lifted the seal; want the purity refusal, got: %q", msg)
 	}
 }
 
 func TestGuard_RefusesAContextCarryingNoGrant(t *testing.T) {
-	if msg := refusal(context.Background()); !strings.Contains(msg, "carrying no grant") {
+	if msg, _ := refusal(context.Background()); !strings.Contains(msg, "carrying no grant") {
 		t.Fatalf("an ungranted context must be refused, got: %q", msg)
 	}
 }
 
 func TestGuard_AllowsAGrantedContext(t *testing.T) {
-	if msg := refusal(planguard.Grant(context.Background())); msg != "" {
-		t.Fatalf("a granted context must pass, got: %q", msg)
+	if msg, panicked := refusal(planguard.Grant(context.Background())); panicked {
+		t.Fatalf("a granted context must pass, got a panic: %q", msg)
 	}
 }
 
-func TestAllow_IsANoOpOnASealedContext(t *testing.T) {
+func TestGrant_IsANoOpOnASealedContext(t *testing.T) {
 	sealed := planguard.Seal(planguard.Grant(context.Background()))
-	for _, name := range []string{"once", "twice"} {
+	for attempt := 1; attempt <= 2; attempt++ {
 		sealed = planguard.Grant(sealed)
-		if msg := refusal(sealed); !strings.Contains(msg, "called inside Pipeline.Plan()") {
-			t.Fatalf("Allow(%s) lifted the seal, got: %q", name, msg)
+		msg, _ := refusal(sealed)
+		if !strings.Contains(msg, "called inside Pipeline.Plan()") {
+			t.Fatalf("Grant #%d lifted the seal, got: %q", attempt, msg)
 		}
 	}
 }
 
 func TestSeal_BeatsAGrantWhicheverOrderTheyArrive(t *testing.T) {
-	if msg := refusal(planguard.Seal(context.Background())); !strings.Contains(msg, "called inside Pipeline.Plan()") {
+	if msg, _ := refusal(planguard.Seal(context.Background())); !strings.Contains(msg, "called inside Pipeline.Plan()") {
 		t.Fatalf("a bare seal must refuse, got: %q", msg)
 	}
-	if msg := refusal(planguard.Grant(planguard.Seal(planguard.Grant(context.Background())))); !strings.Contains(msg, "called inside Pipeline.Plan()") {
+	if msg, _ := refusal(planguard.Grant(planguard.Seal(planguard.Grant(context.Background())))); !strings.Contains(msg, "called inside Pipeline.Plan()") {
 		t.Fatalf("grant, seal, grant must still refuse, got: %q", msg)
 	}
 }
 
-func TestGuard_AMintedThenDetachedContextIsAllowedEvenInsidePlan(t *testing.T) {
-	if msg := invokePlan(t, "planguard-minting-then-detaching"); msg != "" {
-		t.Fatalf("this evasion is expected to pass the guard today, got a refusal: %q", msg)
+func TestGuard_AMintedThenGrantedContextIsAllowedEvenInsidePlan(t *testing.T) {
+	if msg := invokePlan(t, "planguard-minting-then-granting"); msg != "" {
+		t.Fatalf("a minted, granted context must reach the helper; got a refusal: %q", msg)
 	}
 }

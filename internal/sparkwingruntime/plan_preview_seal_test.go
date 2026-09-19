@@ -2,6 +2,7 @@ package sparkwingruntime_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -49,10 +50,32 @@ func TestPreviewPlan_RefusesASideEffectInsideAPredicate(t *testing.T) {
 	}
 
 	previewSideEffects.Store(0)
-	if _, err := sparkwingruntime.PreviewPlan(plan, "plan-preview-seal", nil, sparkwingruntime.PreviewOptions{}); err != nil {
+	preview, err := sparkwingruntime.PreviewPlan(plan, "plan-preview-seal", nil, sparkwingruntime.PreviewOptions{})
+	if err != nil {
 		t.Fatalf("PreviewPlan: %v", err)
 	}
+
+	// safety: the counter reads zero both when the guard refused and when the
+	// preview evaluated nothing, so the recorded refusal is what proves reach.
+	var detail string
+	var found bool
+	for _, node := range preview.Nodes {
+		if node.Work == nil {
+			continue
+		}
+		for _, item := range node.Work.Steps {
+			if item.ID == "probe" {
+				detail, found = item.SkipDetail, true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the preview never evaluated the probe step, so it proves nothing about the seal")
+	}
+	if !strings.Contains(detail, "called inside Pipeline.Plan()") {
+		t.Fatalf("probe skip detail = %q, want the guard's refusal", detail)
+	}
 	if got := previewSideEffects.Load(); got != 0 {
-		t.Fatalf("a predicate reached a guarded helper %d time(s) during a preview; the preview context is not sealed", got)
+		t.Fatalf("the predicate body ran past the guard %d time(s)", got)
 	}
 }

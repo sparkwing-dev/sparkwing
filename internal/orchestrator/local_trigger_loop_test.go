@@ -184,7 +184,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 	cache := &localCompileCache{}
 	t.Cleanup(func() { _ = cache.Close() })
 	dispatch := func(id string) error {
-		return dispatchLocalTrigger(context.Background(), &store.Trigger{
+		return dispatchLocalTrigger(planguard.Grant(context.Background()), &store.Trigger{
 			ID:           id,
 			Pipeline:     "child",
 			ParentRunID:  "parent-live",
@@ -444,7 +444,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 		},
 	}
 
-	snapshotDir, cleanup, err := prepareTriggerRepo(context.Background(), trig, "")
+	snapshotDir, cleanup, err := prepareTriggerRepo(planguard.Grant(context.Background()), trig, "")
 	if err != nil {
 		t.Fatalf("prepareTriggerRepo: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 			t.Errorf("close local compile cache: %v", err)
 		}
 	})
-	if err := dispatchLocalTrigger(context.Background(), trig, "", "", cache, logger, nil); err != nil {
+	if err := dispatchLocalTrigger(planguard.Grant(context.Background()), trig, "", "", cache, logger, nil); err != nil {
 		t.Fatalf("dispatchLocalTrigger: %v", err)
 	}
 	raw, err = os.ReadFile(outputPath)
