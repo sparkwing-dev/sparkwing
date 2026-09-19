@@ -510,12 +510,10 @@ type ProfileResolutionContext struct {
 type PullRequest struct {
 	Number int
 
-	Action string
-
+	Action  string
 	BaseRef string
 
 	BaseSHA string
-
 	HeadRef string
 
 	HeadSHA string

@@ -187,7 +187,7 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 	}
 	pinned := binPath != ""
 	if !pinned {
-		//nolint:contextcheck // the compile cache owns its own context, as it did before the pin.
+		//nolint:contextcheck // the compile cache owns its own context.
 		if binPath, err = cache.compile(sparkwingDir); err != nil {
 			return fmt.Errorf("compile %s: %w", sparkwingDir, err)
 		}

@@ -2,10 +2,7 @@
 //
 // Pipeline.Plan must be pure-declarative; side effects belong inside
 // the step closures a Job's Work() body declares; those receive a
-// granted context. This package is a sibling of sparkwing/,
-// sparkwing/docker, sparkwing/git, and sparkwing/services so every
-// layer that ships side-effect helpers can import the same sentinel
-// without violating the SDK's layering rule.
+// granted context.
 //
 // A context carries one of three states, and a context with no grant
 // refuses. The orchestrator calls Grant once per process that executes

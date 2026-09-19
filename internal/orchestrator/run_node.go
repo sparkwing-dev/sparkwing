@@ -36,7 +36,6 @@ func RunNodeOnce(
 	admission *LocalAdmission,
 	opts ...RunNodeOption,
 ) (runner.Result, error) {
-	// safety: this process gets no context from the run, so the grant starts here.
 	ctx = planguard.Grant(ctx)
 	var cfg runNodeConfig
 	for _, opt := range opts {
@@ -123,7 +122,6 @@ func RunNodeOnce(
 		var profileLogs LogBackend
 		localSecrets, art, profileLogs, err = coordinatedChildSurfaces(ctx, run.Pipeline)
 		if err != nil {
-			// safety: the inner errors already name which surface failed.
 			return runner.Result{}, err
 		}
 		if profileLogs != nil {

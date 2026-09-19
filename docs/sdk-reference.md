@@ -847,9 +847,9 @@ LogRecord is the structured unit every Logger receives.
 type LogRecord struct {
     TS    time.Time      `json:"ts"`
     Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
-    JobID string         `json:"node,omitempty"`  // set by jobLogger on writes to disk + delegate; wire tag stays "node" for log-format compat
-    Step  string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
-    Event string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "work_fail_fast", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
+    JobID string         `json:"node,omitempty"`  // the wire tag stays "node" for log-format compatibility
+    Step  string         `json:"step,omitempty"`  // active step ID
+    Event string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
     Msg   string         `json:"msg,omitempty"`
     Attrs map[string]any `json:"attrs,omitempty"`
 }
@@ -1190,16 +1190,13 @@ PullRequest carries the GitHub pull_request fields a PR gate reads.
 
 ```
 type PullRequest struct {
-    // Number is the pull request number (e.g. 42).
     Number int
     // Action is the pull_request event action that fired the run
     // (opened, synchronize, reopened).
-    Action string
-    // BaseRef is the branch the PR targets (e.g. "main").
+    Action  string
     BaseRef string
     // BaseSHA is the tip commit of the base branch at event time.
     BaseSHA string
-    // HeadRef is the PR's source branch.
     HeadRef string
     // HeadSHA is the PR head commit the run checks out.
     HeadSHA string
@@ -1267,13 +1264,11 @@ type Registration struct {
     // Name is the invocation name (e.g. "lint", "build-test-deploy").
     Name string
 
-    // InputType is the reflect.Type of the pipeline's Inputs struct,
-    // retained for introspection. Same struct described by Schema.
+    // InputType is the reflect.Type of the struct Schema describes.
     InputType reflect.Type
 
     // Schema is the resolved input description, parsed once at
-    // registration. CLI describe / --help / completion / dashboard
-    // run-form / MCP tool definitions all read from Schema.
+    // registration.
     Schema InputSchema
 
     // Invoke is the type-erased entry point: parse the wire-format
@@ -1285,8 +1280,8 @@ type Registration struct {
 ```
 
 - `func Lookup(name string) (*Registration, bool)` -- Lookup returns the Registration for a registered pipeline name, or ok=false if none.
-- `func (r *Registration) Instance() any` -- Instance returns a fresh pipeline value for this registration, used by introspection helpers that query optional provider interfaces (HelpProvider, ShortHelpProvider, ExampleProvider).
-- `func (r *Registration) SecretArgNames() []string` -- SecretArgNames returns the flag names of every secret-marked Inputs field, sorted, regardless of whether the run supplied a value for them.
+- `func (r *Registration) Instance() any` -- Instance returns a fresh pipeline value for this registration, for a caller querying the optional provider interfaces.
+- `func (r *Registration) SecretArgNames() []string`
 - `func (r *Registration) SecretValues(args map[string]string) []string` -- SecretValues resolves the schema's secret-marked Inputs fields against the wire-format args map (applying tag-declared defaults for unset keys) and returns the resolved string values.
 
 ### type RequiresProvider
@@ -1432,11 +1427,10 @@ type RiskBlockedError struct {
 
 ### type RunContext
 
-RunContext is the typed environment every Plan and Job sees.
+RunContext is the typed environment every Plan and Job sees, populated by the orchestrator at dispatch time.
 
 ```
 type RunContext struct {
-    // RunID uniquely identifies the overall pipeline run.
     RunID string
 
     // Pipeline is the registered name of the invoked pipeline
@@ -1449,10 +1443,8 @@ type RunContext struct {
     // are the trigger-time snapshot.
     Git *Git
 
-    // Trigger describes how the run was initiated.
     Trigger TriggerInfo
 
-    // StartedAt is set when the orchestrator begins the run.
     StartedAt time.Time
 
     // NoCache reports that this run was asked to ignore cached per-node

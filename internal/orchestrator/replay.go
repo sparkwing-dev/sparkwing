@@ -56,8 +56,6 @@ func runReplayNodeCLI(args []string) error {
 }
 
 func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, nodeID string, delegate sparkwing.Logger) (runner.Result, error) {
-	// safety: exported, so the grant sits here rather than at the verb that
-	// calls it.
 	ctx = planguard.Grant(ctx)
 	st := backends.State
 	run, err := st.GetRun(ctx, runID)

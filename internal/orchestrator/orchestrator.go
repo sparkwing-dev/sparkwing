@@ -117,12 +117,8 @@ type Options struct {
 	// alone.
 	Priority string
 
-	// safety: set only after a store is chosen, so a caller that builds its
-	// own Options cannot claim a run reached the standalone store.
 	standalone *standaloneRun
 
-	// safety: set only by Run, after the queue answered, so buildRunFlags
-	// records the number the run actually carries rather than the request.
 	priority    priorityRequest
 	prioritySet bool
 
@@ -317,8 +313,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	// safety: ahead of the snapshot, so run admission and every node admission
-	// that later reads the snapshot see one priority. The operator's number
-	// beats the author's Plan.Priority.
+	// that later reads the snapshot see one priority.
 	if opts.prioritySet {
 		plan.Priority(opts.priority.value)
 	}
@@ -451,8 +446,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		if opts.standalone != nil {
 			child = childStoreEnv{path: opts.standalone.stateDB, reason: opts.standalone.reason}
 		}
-		// safety: the loop's last writes race the caller's deferred store
-		// close, so this run stops it and waits for it before returning.
+		// safety: the loop's last writes race the caller's deferred store close.
 		var triggerLoop sync.WaitGroup
 		triggerLoop.Add(1)
 		defer triggerLoop.Wait()
@@ -492,7 +486,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
 			}
-			// safety: refused standalone runs release their temporary store; admitted runs retain it.
 			if opts.standalone != nil {
 				opts.standalone.refused = true
 			}
@@ -524,14 +517,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		// safety: release only after FinishRun below, so the daemon's
 		// orphan finalizer can never observe a still-running row.
 		defer lease.release()
-		// safety: announce the standalone store only after admission succeeds.
 		opts.standalone.announce()
 		if outcome == admitSkipped {
 			skipDispatch = true
 		} else if lease != nil {
 			// safety: a run that degraded to unadmitted holds no lease and
-			// still proceeds, so this dereference is guarded rather than
-			// implied by admitErr == nil.
+			// still proceeds.
 			leaseToken = lease.token
 			leaseChildToken = lease.childToken
 			leaseHostAdmitted = lease.hostAdmitted
@@ -575,8 +566,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	finishCtx := context.WithoutCancel(ctx)
 	if ferr := backends.State.FinishRun(finishCtx, runID, finalStatus, errMsg); ferr != nil && runErr == nil {
-		// safety: a terminal state the store never took is a run nobody can read
-		// back, so it must not leave here as a success.
+		// safety: a terminal state the store never took is a run nobody can read back.
 		runErr = fmt.Errorf("persist run state: %w", ferr)
 		finalStatus = statusForRunError(runErr)
 		errMsg = runErr.Error()
@@ -750,8 +740,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		ownsState = false
 	}
 	// safety: a standalone run holds the store the fallback already chose, so
-	// profile resolution must not reopen or replace it the way it would for a
-	// run that arrived with none.
+	// profile resolution must not reopen or replace it.
 	keepState := hosted.APISocket != "" || opts.standalone != nil
 	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)

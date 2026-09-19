@@ -7,11 +7,9 @@ import (
 	"time"
 )
 
-// RunContext is the typed environment every Plan and Job sees.
-// Populated by the orchestrator at dispatch time from the trigger
-// payload, git state, and cluster metadata.
+// RunContext is the typed environment every Plan and Job sees, populated by
+// the orchestrator at dispatch time.
 type RunContext struct {
-	// RunID uniquely identifies the overall pipeline run.
 	RunID string
 
 	// Pipeline is the registered name of the invoked pipeline
@@ -24,10 +22,8 @@ type RunContext struct {
 	// are the trigger-time snapshot.
 	Git *Git
 
-	// Trigger describes how the run was initiated.
 	Trigger TriggerInfo
 
-	// StartedAt is set when the orchestrator begins the run.
 	StartedAt time.Time
 
 	// NoCache reports that this run was asked to ignore cached per-node
@@ -62,20 +58,14 @@ type TriggerInfo struct {
 }
 
 // PullRequest carries the GitHub pull_request fields a PR gate reads.
-// The run checks out HeadSHA / HeadRef (mirrored onto RunContext.Git),
-// so BaseRef and Number are the values not otherwise reachable from the
-// working tree.
 type PullRequest struct {
-	// Number is the pull request number (e.g. 42).
 	Number int
 	// Action is the pull_request event action that fired the run
 	// (opened, synchronize, reopened).
-	Action string
-	// BaseRef is the branch the PR targets (e.g. "main").
+	Action  string
 	BaseRef string
 	// BaseSHA is the tip commit of the base branch at event time.
 	BaseSHA string
-	// HeadRef is the PR's source branch.
 	HeadRef string
 	// HeadSHA is the PR head commit the run checks out.
 	HeadSHA string
@@ -84,7 +74,7 @@ type PullRequest struct {
 // Trigger-env keys carrying GitHub pull_request metadata. The
 // controller stamps these onto the persisted trigger; the orchestrator
 // reads them back via PullRequestFromEnv when it builds the run
-// context. Kept here so writer and reader share one source of truth.
+// context.
 const (
 	EnvGitHubEventName = "GITHUB_EVENT_NAME"
 	EnvPRNumber        = "GITHUB_PR_NUMBER"
@@ -125,18 +115,17 @@ func PullRequestFromEnv(env map[string]string) *PullRequest {
 type LogRecord struct {
 	TS    time.Time      `json:"ts"`
 	Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
-	JobID string         `json:"node,omitempty"`  // set by jobLogger on writes to disk + delegate; wire tag stays "node" for log-format compat
-	Step  string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
-	Event string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "work_fail_fast", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
+	JobID string         `json:"node,omitempty"`  // the wire tag stays "node" for log-format compatibility
+	Step  string         `json:"step,omitempty"`  // active step ID
+	Event string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
 	Msg   string         `json:"msg,omitempty"`
 	Attrs map[string]any `json:"attrs,omitempty"`
 }
 
 // Logger is the sink for job output. The orchestrator installs a
 // logger into ctx before dispatching each node, and into the context
-// it hands Pipeline.Plan during initial planning. Node reconstruction
-// and replay omit the plan logger. sparkwing.Info / Warn / Error / Debug
-// emit records through it. A context carrying none discards them.
+// it hands Pipeline.Plan. sparkwing.Info / Warn / Error / Debug emit
+// records through it, and a context carrying none discards them.
 //
 // Log wraps a level+message into a default-event LogRecord; most
 // callers reach it indirectly via the per-level package helpers.
@@ -170,9 +159,7 @@ const (
 
 // ResourceSample is one measured resource reading for a spawned command:
 // the CPU it drew, averaged over its wall-clock span, and the peak resident
-// memory of its process subtree. Reported to the orchestrator so a node's
-// profile reflects the work its child processes did, not just the
-// orchestrator's own goroutine.
+// memory of its process subtree.
 type ResourceSample struct {
 	// CPUMillicores is the command's average CPU draw over its run, in
 	// thousandths of a core (1000 == one core busy for the whole span).
@@ -187,13 +174,12 @@ type ResourceSample struct {
 }
 
 // ResourceReporter absorbs a [ResourceSample] measured when a spawned
-// command finishes. The orchestrator installs one per node so subprocess
-// cost folds into the node's measured profile.
+// command finishes.
 type ResourceReporter func(ResourceSample)
 
 // WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec
-// report each finished command's measured CPU and memory. The orchestrator
-// wires this per node; pipeline authors do not call it.
+// report each finished command's measured CPU and memory. Pipeline authors
+// do not call it.
 func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context {
 	if fn == nil {
 		return ctx
@@ -224,10 +210,9 @@ func NodeFromContext(ctx context.Context) string {
 }
 
 // WithStep installs the active step ID into ctx so the breadcrumb on
-// records emitted *inside* the step body carries it. Pushed by
-// runOneItem after `step_start` fires and removed before `step_end`,
-// so the start/end events themselves render at the node level
-// without duplicating the step name in the breadcrumb.
+// records emitted *inside* the step body carries it. A step's own
+// start and end events render at the node level instead, so the
+// breadcrumb does not repeat the step name.
 func WithStep(ctx context.Context, stepID string) context.Context {
 	return context.WithValue(ctx, keyStep, stepID)
 }
@@ -248,8 +233,6 @@ func recordEnvelope(ctx context.Context, rec LogRecord) LogRecord {
 }
 
 // Info emits an info-level message to the active logger.
-//
-//	sparkwing.Info(ctx, "deployed %s to %s", version, target)
 func Info(ctx context.Context, format string, args ...any) {
 	emitLevel(ctx, "info", format, args...)
 }
@@ -275,16 +258,6 @@ func Error(ctx context.Context, format string, args ...any) {
 // each message to the node's annotations list in call order. Outside
 // a node context (no logger installed, or no node ID in ctx) Annotate
 // is a no-op, matching the Info/Warn/Error convention.
-//
-// Example:
-//
-//	func (j *Ingest) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-//	    return sparkwing.Step(w, "ingest", func(ctx context.Context) error {
-//	        ok, failed := ingest(ctx)
-//	        sparkwing.Annotate(ctx, fmt.Sprintf("processed %d records · %d failed", ok, failed))
-//	        return nil
-//	    }), nil
-//	}
 func Annotate(ctx context.Context, msg string) {
 	if NodeFromContext(ctx) == "" {
 		return
@@ -307,7 +280,7 @@ const EventNodeAnnotation = "node_annotation"
 // Summary records a persistent markdown run summary on the
 // currently-executing Job or Step. Unlike Annotate, which appends a
 // short scannable line, Summary stores a larger overwrite-on-write
-// markdown blob -- the GitHub-Actions step-summary analog.
+// markdown blob.
 //
 // Multiple calls within the same scope keep only the last value: the
 // later call replaces the earlier one. Summaries fired inside a step
@@ -317,18 +290,7 @@ const EventNodeAnnotation = "node_annotation"
 // no-op, matching the Info/Warn/Error convention.
 //
 // The markdown is stored opaquely; the dashboard sanitizes and
-// renders later. There is no enforced size limit, but values are
-// expected to be small (a few KB at most).
-//
-// Example:
-//
-//	func (j *Deploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-//	    return sparkwing.Step(w, "deploy", func(ctx context.Context) error {
-//	        out, err := deploy(ctx)
-//	        sparkwing.Summary(ctx, fmt.Sprintf("## Deployed\n- version: `%s`\n- replicas: %d", out.Version, out.Replicas))
-//	        return err
-//	    }), nil
-//	}
+// renders later.
 func Summary(ctx context.Context, markdown string) {
 	if NodeFromContext(ctx) == "" {
 		return

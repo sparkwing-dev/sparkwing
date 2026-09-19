@@ -535,7 +535,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
-// StampPID records which process ran a given piece of work.
 func StampPID(name string) {
 	dir := os.Getenv("PROC_PROBE_DIR")
 	if dir == "" {
@@ -805,9 +804,6 @@ func (j *Bouncer) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (BounceOut, error) {
 		attempt := RecordAttempt()
 		if attempt == 1 {
-			// Burn CPU the exit accounting can see, then wait to be
-			// killed. Deliberately ignores ctx: a bounce is a kill, not
-			// a cancellation the body can cooperate with.
 			// safety: the check downstream reads CPU time, so burn CPU rather than wall
 			// time. A loaded machine deschedules this loop, and a spin bounded by the
 			// clock then accrues whatever share it was given rather than the amount the
