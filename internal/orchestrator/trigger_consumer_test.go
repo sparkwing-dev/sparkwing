@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 func quietLogger() *slog.Logger {
@@ -427,7 +428,7 @@ func TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout(t *testing.T) {
 		ID: "run-1", Pipeline: "lint",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir},
 	}
-	got, err := locateTriggerRepo(context.Background(), trig, t.TempDir())
+	got, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, t.TempDir())
 	if err != nil {
 		t.Fatalf("locateTriggerRepo: %v", err)
 	}
@@ -441,7 +442,7 @@ func TestSubmittedTriggerRepoDir_FailsClosedWhenTheCheckoutIsGone(t *testing.T) 
 		ID: "run-1", Pipeline: "lint",
 		TriggerEnv: map[string]string{SubmitRepoDirKey: filepath.Join(t.TempDir(), "gone")},
 	}
-	_, err := locateTriggerRepo(context.Background(), trig, "")
+	_, err := locateTriggerRepo(planguard.Grant(context.Background()), trig, "")
 	if err == nil {
 		t.Fatal("a submitted trigger whose checkout vanished resolved anyway")
 	}

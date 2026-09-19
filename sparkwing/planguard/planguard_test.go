@@ -139,6 +139,6 @@ func TestSeal_BeatsAGrantWhicheverOrderTheyArrive(t *testing.T) {
 
 func TestGuard_AMintedThenGrantedContextIsAllowedEvenInsidePlan(t *testing.T) {
 	if msg := invokePlan(t, "planguard-minting-then-granting"); msg != "" {
-		t.Fatalf("a minted, granted context must reach the helper; got a refusal: %q", msg)
+		t.Fatalf("the linter refuses this shape, the guard does not; closing it here is allowed, but say so: %q", msg)
 	}
 }

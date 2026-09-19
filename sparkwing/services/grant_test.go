@@ -29,7 +29,7 @@ func TestGuardedHelperRefusesAContextCarryingNoGrant(t *testing.T) {
 	if !panicked {
 		t.Fatal("a guarded helper ran on a context carrying no grant")
 	}
-	if !strings.Contains(msg, "services.WithServices") {
+	if !strings.Contains(msg, "services.WithServices called") {
 		t.Errorf("refusal = %q, want it to name the helper", msg)
 	}
 }

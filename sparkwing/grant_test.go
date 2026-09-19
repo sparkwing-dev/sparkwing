@@ -29,7 +29,7 @@ func TestBash_RefusesAContextCarryingNoGrant(t *testing.T) {
 	if !panicked {
 		t.Fatal("Bash ran on a context carrying no grant")
 	}
-	if !strings.Contains(msg, "sparkwing.Bash") {
+	if !strings.Contains(msg, "sparkwing.Bash called") {
 		t.Errorf("refusal = %q, want it to name sparkwing.Bash so the author finds the call", msg)
 	}
 }
@@ -39,7 +39,7 @@ func TestExec_RefusesAContextCarryingNoGrant(t *testing.T) {
 	if !panicked {
 		t.Fatal("Exec ran on a context carrying no grant")
 	}
-	if !strings.Contains(msg, "sparkwing.Exec") {
+	if !strings.Contains(msg, "sparkwing.Exec called") {
 		t.Errorf("refusal = %q, want it to name sparkwing.Exec", msg)
 	}
 }

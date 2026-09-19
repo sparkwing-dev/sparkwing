@@ -46,9 +46,6 @@ func from(ctx context.Context) state {
 // packages that cannot import the root package. Pipeline authors call
 // sparkwing.Grant, which delegates here.
 func Grant(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if from(ctx) == sealed {
 		return ctx
 	}
@@ -60,9 +57,6 @@ func Grant(ctx context.Context) context.Context {
 // a pipeline author has no reason to, and sealing a context inside a Job
 // body refuses the helpers that body goes on to call.
 func Seal(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return context.WithValue(ctx, stateKey{}, sealed)
 }
 

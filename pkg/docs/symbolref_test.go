@@ -42,10 +42,17 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		rel, _ := filepath.Rel(root, p)
 		for _, m := range qualified.FindAllStringSubmatch(string(b), -1) {
 			if !syms[m[1]] {
-				rel, _ := filepath.Rel(root, p)
 				missing[m[1]] = append(missing[m[1]], rel)
+			}
+		}
+		// safety: an API summary block lists its names bare, so the qualified
+		// pattern above cannot see the one place the surface is enumerated.
+		for _, name := range bareAPIBlockNames(string(b)) {
+			if !syms[name] {
+				missing[name] = append(missing[name], rel)
 			}
 		}
 	}
@@ -58,6 +65,25 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 		t.Errorf("docs reference sparkwing.%s, which the SDK does not export (%s)",
 			n, strings.Join(dedupe(missing[n]), ", "))
 	}
+}
+
+func bareAPIBlockNames(doc string) []string {
+	call := regexp.MustCompile(`^([A-Z]\w*)\(`)
+	var names []string
+	inBlock := false
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(line, "```") {
+			inBlock = strings.TrimSpace(strings.TrimPrefix(line, "```")) == ""
+			continue
+		}
+		if !inBlock {
+			continue
+		}
+		if m := call.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+			names = append(names, m[1])
+		}
+	}
+	return names
 }
 
 func exportedSymbols(t *testing.T, dir string) map[string]bool {

@@ -18,7 +18,9 @@ Every one of these refuses a context carrying no grant:
 
 - `sparkwing.Bash` and `sparkwing.Exec`, at the point the command runs
   (`Run`, `Capture`, `String`, `MustBeEmpty`) rather than where it is built.
-- every exported helper in `sparkwing/git`.
+- every `sparkwing/git` helper that shells out to git. `FilesetHash` is the
+  exception: outside a git tree it hashes the filesystem directly, runs no git
+  command, and so is not refused.
 - `sparkwing/docker`: `Build`, `BuildAndPush`, `Push`, `Login`, `Run`,
   `BuildxPlatforms`, `FilterBuildxPlatforms`, `ComputeTags`, `ComputeTagsIn`.
 - `sparkwing/services`: `WithServices` and `WithServicesAddrs`.
@@ -56,7 +58,6 @@ already did for `sparkwing/docker` and `sparkwing/git`. Both can turn a
 consumer's lint red on code this release does not otherwise change.
 
 ## The Plan() purity guard runs on a granted permission
-
 
 The guard used to refuse a context carrying the plan-time mark and allow
 everything else. A `Plan` body that ignored the context it was handed and passed
