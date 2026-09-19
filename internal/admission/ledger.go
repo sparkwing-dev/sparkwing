@@ -185,11 +185,14 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 		s.ownerAdmit = l.admitSeq + 1
 	}
 	s.admit = l.admitSeq + 1
+	if l.scheduling.AgingEvery > 0 && l.scheduling.ClassWeight != nil {
+		return l.submitWithAging(s)
+	}
 
 	if !l.fifoBlocked(s) && l.fits(s) {
-		backfillEvents := l.recordFreshBackfill(s)
 		l.admitSeq++
 		s.admit = l.admitSeq
+		backfillEvents := l.recordFreshBackfill(s)
 		grantedLease, evicted, events := l.grant(s, EventGranted)
 		events = append(backfillEvents, events...)
 		events = append(events, l.promote()...)
@@ -197,18 +200,9 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 		return Decision{Kind: DecisionGranted, Lease: grantedLease, Evicted: evicted}, events, nil
 	}
 
-	for _, c := range s.claims {
-		if c.policy != PolicyFail && c.policy != PolicySkip {
-			continue
-		}
-		if l.fifoBlockedOnKey(c.key) || !l.semBudgetFits(c) {
-			kind := DecisionFailed
-			if c.policy == PolicySkip {
-				kind = DecisionSkipped
-			}
-			l.mustHoldInvariants()
-			return Decision{Kind: kind, Key: c.key}, nil, nil
-		}
+	if decision, rejected := l.terminalClaimDecision(s); rejected {
+		l.mustHoldInvariants()
+		return decision, nil, nil
 	}
 
 	l.admitSeq++
@@ -221,6 +215,62 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	ev.Position = position
 	l.mustHoldInvariants()
 	return Decision{Kind: DecisionQueued, Position: position}, []Event{ev}, nil
+}
+
+func (l *Ledger) submitWithAging(s spec) (Decision, []Event, error) {
+	if l.fifoBlocked(s) || !l.fits(s) {
+		if decision, rejected := l.terminalClaimDecision(s); rejected {
+			l.mustHoldInvariants()
+			return decision, nil, nil
+		}
+	}
+
+	l.admitSeq++
+	s.admit = l.admitSeq
+	l.sortWaiters()
+	if !l.fifoBlocked(s) && l.fits(s) {
+		backfillEvents := l.recordFreshBackfill(s)
+		grantedLease, evicted, events := l.grant(s, EventGranted)
+		events = append(backfillEvents, events...)
+		events = append(events, l.promote()...)
+		l.mustHoldInvariants()
+		return Decision{Kind: DecisionGranted, Lease: grantedLease, Evicted: evicted}, events, nil
+	}
+	if decision, rejected := l.terminalClaimDecision(s); rejected {
+		l.mustHoldInvariants()
+		return decision, nil, nil
+	}
+
+	position := l.queuePosition(s)
+	l.arrivalSeq++
+	l.waiters = append(l.waiters, &waiter{arrival: l.arrivalSeq, spec: s})
+	l.sortWaiters()
+	ev := l.newEvent(EventQueued, s.id)
+	ev.Position = position
+	events := append([]Event{ev}, l.promote()...)
+	if leaseID, granted := l.memberOf[s.id]; granted {
+		le := l.leases[leaseID]
+		l.mustHoldInvariants()
+		return Decision{Kind: DecisionGranted, Lease: Lease{ID: le.id, Token: le.token}}, events, nil
+	}
+	l.mustHoldInvariants()
+	return Decision{Kind: DecisionQueued, Position: position}, events, nil
+}
+
+func (l *Ledger) terminalClaimDecision(s spec) (Decision, bool) {
+	for _, c := range s.claims {
+		if c.policy != PolicyFail && c.policy != PolicySkip {
+			continue
+		}
+		if l.fifoBlockedOnKey(c.key) || !l.semBudgetFits(c) {
+			kind := DecisionFailed
+			if c.policy == PolicySkip {
+				kind = DecisionSkipped
+			}
+			return Decision{Kind: kind, Key: c.key}, true
+		}
+	}
+	return Decision{}, false
 }
 
 func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {

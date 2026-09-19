@@ -142,7 +142,7 @@ func TestAPISocketRefusesAPeerFromAnotherAccount(t *testing.T) {
 	restore := readPeerUID
 	foreign := os.Getuid() + 1
 	readPeerUID = func(net.Conn) (int, bool, error) { return foreign, true, nil }
-	defer func() { readPeerUID = restore }()
+	t.Cleanup(func() { readPeerUID = restore })
 
 	var mu sync.Mutex
 	var logs strings.Builder

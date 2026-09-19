@@ -14,6 +14,7 @@ type Snapshot struct {
 	ArrivalSeq          uint64           `json:"arrival_seq"`
 	AdmitSeq            uint64           `json:"admit_seq,omitempty"`
 	EventSeq            uint64           `json:"event_seq"`
+	Scheduling          SchedulingPolicy `json:"scheduling,omitempty"`
 	BurstMilliCores     int64            `json:"burst_milli_cores,omitempty"`
 	Leases              []LeaseState     `json:"leases,omitempty"`
 	Semaphores          []SemaphoreState `json:"semaphores,omitempty"`
@@ -95,6 +96,7 @@ func (l *Ledger) Snapshot() Snapshot {
 		ArrivalSeq:          l.arrivalSeq,
 		AdmitSeq:            l.admitSeq,
 		EventSeq:            l.eventSeq,
+		Scheduling:          cloneSchedulingPolicy(l.scheduling),
 	}
 	if burst, err := toMilliCores(l.scheduling.Burst.MaxCores); err == nil {
 		snap.BurstMilliCores = max(burst, l.restoredBurstLimit)
@@ -187,6 +189,10 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		return nil, fmt.Errorf("%w: negative core capacity", ErrInvalidSnapshot)
 	}
 	upgradeLegacyAdmitRanks(&snap)
+	scheduling := cloneSchedulingPolicy(snap.Scheduling)
+	if scheduling.Burst.MaxCores == 0 && snap.BurstMilliCores > 0 {
+		scheduling.Burst.MaxCores = float64(snap.BurstMilliCores) / 1000
+	}
 	l := &Ledger{
 		totalMilliCores:    snap.TotalMilliCores,
 		totalMemory:        snap.TotalMemoryBytes,
@@ -203,9 +209,7 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		eventSeq:           snap.EventSeq,
 		tokenGen:           tokenGen,
 		restoredBurstLimit: snap.BurstMilliCores,
-		scheduling: SchedulingPolicy{Burst: BurstPolicy{
-			MaxCores: float64(snap.BurstMilliCores) / 1000,
-		}},
+		scheduling:         scheduling,
 	}
 	for runID, p := range snap.PriorityOverrides {
 		if runID == "" {

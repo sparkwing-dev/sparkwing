@@ -47,3 +47,22 @@ func TestTypeSafeJevAdvisorRejectsUnknownChoice(t *testing.T) {
 		t.Fatal("unknown choice was accepted")
 	}
 }
+
+func TestJevPolicyRequiresConfidenceAndChosenProbability(t *testing.T) {
+	policy := JevPolicy{MinConfidence: 0.5, MinProbability: 0.7}
+	for _, tc := range []struct {
+		name   string
+		answer JevAnswer
+		want   bool
+	}{
+		{name: "both thresholds", answer: JevAnswer{Confidence: 0.5, Probability: 0.7}, want: true},
+		{name: "low confidence", answer: JevAnswer{Confidence: 0.49, Probability: 0.99}},
+		{name: "low probability", answer: JevAnswer{Confidence: 0.99, Probability: 0.69}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := policy.accepts(tc.answer); got != tc.want {
+				t.Fatalf("accepts(%+v) = %t, want %t", tc.answer, got, tc.want)
+			}
+		})
+	}
+}

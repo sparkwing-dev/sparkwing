@@ -4,20 +4,24 @@ Sparkwing's admission daemon decides when work may consume CPU and memory on one
 machine. It does not assess job risk. Risk declarations and approvals remain
 deterministic pipeline contracts and are unaffected by admission mode.
 
-The default `auto` mode needs no configuration. To change the machine-wide
+The default `classic` mode preserves Sparkwing's admission behavior from before
+selectable modes. To change the machine-wide
 policy, create `~/.config/sparkwing/admission.yaml` as an owner-only file and
 restart the daemon. `sparkwing queue` reports the active mode.
 
 ```yaml
-mode: auto # off, auto, jev, or custom
+mode: classic # classic, off, auto, jev, or custom
 ```
 
 The modes are:
 
+- `classic` keeps strict priority and FIFO ordering, permits one opportunistic
+  backfill past a blocked head, then protects that head. It is the default so
+  upgrading Sparkwing does not change admission behavior.
 - `off` does not gate CPU or memory. The daemon still owns run lifecycle,
   measurement, queue visibility, and deterministic concurrency groups.
 - `auto` uses measured duration and resource profiles, weighted workload
-  classes, bounded short-job backfill, and aging. It is the default.
+  classes, bounded short-job backfill, and aging.
 - `jev` starts from `auto` and asks TypeSafe Jev whether a well-measured short
   candidate should spend additional bounded backfill time. Every hard resource
   and semaphore check remains in code. Missing credentials, timeouts, malformed
@@ -40,6 +44,12 @@ plan.AdmissionClass(sparkwing.AdmissionInteractive)
 Higher-weight classes are considered more frequently, while aging raises older
 work until it overtakes newer arrivals. `Plan.Priority` and `--sw-priority`
 remain explicit strict ordering overrides and are separate from workload class.
+
+The orchestrator uses `SPARKWING_ADMISSION_CLASS` to carry its trigger-derived
+class across the CLI-to-pipeline process boundary. Valid values are `critical`,
+`interactive`, `normal`, and `batch`; an invalid or empty value is ignored.
+Pipeline code normally uses `Plan.AdmissionClass` instead, and that explicit
+choice overrides the inherited environment value.
 
 Auto backfill uses measured p99 duration. Unknown-duration jobs receive the
 single opportunistic backfill retained for first-run liveness, but cannot keep
@@ -98,3 +108,33 @@ logs, source, or secrets. Its answer is a typed choice between waiting and a
 short backfill. Sparkwing validates confidence and duration bounds, then
 rechecks the live deterministic ledger before any grant. Queue JSON reports Jev
 attempt, admit, and fallback counters for comparison with `auto`.
+
+## Stress-testing admission
+
+The manual `admission-stress` pipeline supplies repeatable synthetic workloads;
+it is not part of `gate` or release checks. Its profiles pin the resource
+dimension under test so each admission mode sees the same charge while the work
+itself performs real sleeps, hashing, allocation, and page touching. The
+CPU-heavy and light-sequential profiles intentionally leave memory unpinned so
+host memory pressure cannot obscure a CPU admission experiment.
+`light-sequential` pins its complete run so its roughly one-second end-to-end
+duration becomes the learned admission unit:
+
+```bash
+sparkwing run admission-stress-light-sequential --class interactive
+sparkwing run admission-stress-light-parallel --class normal
+sparkwing run admission-stress-medium-fan-in --class batch
+sparkwing run admission-stress-cpu-heavy --class batch
+sparkwing run admission-stress-heavy --class batch
+sparkwing run admission-stress # the complete phased matrix, class=batch
+```
+
+Each workload has a stable pipeline name so its measured history cannot be
+mixed with a different shape. To exercise duration-aware contention, start one
+or more `admission-stress-cpu-heavy` runs as batch work, then submit
+`admission-stress-light-sequential` as interactive work. Use
+`admission-stress-heavy` to verify that hard memory limits remain intact.
+Repeat the same sequence after each admission-mode change and compare queue
+decisions and elapsed time. The profiles are intentionally short and bounded:
+each heavy node runs for four seconds with two CPU workers; the
+combined-resource profile has three such nodes using 512 MiB each.

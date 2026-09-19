@@ -102,7 +102,10 @@ func (a *typesafeJevAdvisor) Advise(ctx context.Context, state JevState) (JevAns
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		limited, _ := io.ReadAll(io.LimitReader(res.Body, 1024))
+		limited, readErr := io.ReadAll(io.LimitReader(res.Body, 1024))
+		if readErr != nil {
+			return JevAnswer{}, fmt.Errorf("typesafe systemone: %s: read response body: %w", res.Status, readErr)
+		}
 		return JevAnswer{}, fmt.Errorf("typesafe systemone: %s: %s", res.Status, strings.TrimSpace(string(limited)))
 	}
 	var decoded struct {
@@ -166,7 +169,7 @@ func (d *Daemon) jevReservationBypass(req *wingwire.AdmissionRequest, resources 
 	answer, err := d.jevAdvisor.Advise(ctx, state)
 	d.mu.Lock()
 	d.jevAttempts++
-	if err != nil || answer.Confidence < policy.Jev.minConfidence() || answer.Probability < policy.Jev.minProbability() {
+	if err != nil || !policy.Jev.accepts(answer) {
 		d.jevFallbacks++
 		d.mu.Unlock()
 		if err != nil {
@@ -179,6 +182,10 @@ func (d *Daemon) jevReservationBypass(req *wingwire.AdmissionRequest, resources 
 	}
 	d.mu.Unlock()
 	return answer.Admit
+}
+
+func (p JevPolicy) accepts(answer JevAnswer) bool {
+	return answer.Confidence >= p.minConfidence() && answer.Probability >= p.minProbability()
 }
 
 func (p JevPolicy) timeout() time.Duration {

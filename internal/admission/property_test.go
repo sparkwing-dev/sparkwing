@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type ledgerTrace struct {
@@ -34,13 +35,41 @@ func TestLedger_RandomSequencesAreDeterministic(t *testing.T) {
 	}
 }
 
+func TestLedger_AdaptivePoliciesPreserveInvariantsAcrossRandomSequences(t *testing.T) {
+	policies := map[string]SchedulingPolicy{
+		"auto": AutoPolicy(),
+		"custom": {
+			BackfillDelay: map[WorkloadClass]time.Duration{
+				ClassCritical: 500 * time.Millisecond, ClassInteractive: 3 * time.Second,
+				ClassNormal: 7 * time.Second, ClassBatch: 15 * time.Second,
+			},
+			ClassWeight: map[WorkloadClass]int{
+				ClassCritical: 20, ClassInteractive: 10, ClassNormal: 3, ClassBatch: 0,
+			},
+			AgingEvery: 2,
+			Burst:      BurstPolicy{MaxCores: 1.5, MaxP99: 3 * time.Second, MinSamples: 2},
+		},
+	}
+	for name, policy := range policies {
+		for seed := int64(0); seed < 50; seed++ {
+			t.Run(fmt.Sprintf("%s-seed-%02d", name, seed), func(t *testing.T) {
+				runRandomSequenceWithPolicy(t, seed, policy)
+			})
+		}
+	}
+}
+
 func runRandomSequence(t *testing.T, seed int64) ledgerTrace {
+	return runRandomSequenceWithPolicy(t, seed, SchedulingPolicy{})
+}
+
+func runRandomSequenceWithPolicy(t *testing.T, seed int64, policy SchedulingPolicy) ledgerTrace {
 	t.Helper()
 	rng := rand.New(rand.NewSource(seed))
 	tokens := sequentialTokens()
 	totalCores := 1 + float64(rng.Intn(15))*0.5
 	totalMemory := uint64(1+rng.Intn(64)) * 128
-	l, err := New(Config{TotalCores: totalCores, TotalMemoryBytes: totalMemory, TokenGen: tokens})
+	l, err := New(Config{TotalCores: totalCores, TotalMemoryBytes: totalMemory, TokenGen: tokens, Scheduling: policy})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -84,7 +113,7 @@ func runRandomSequence(t *testing.T, seed int64) ledgerTrace {
 			}
 			record(events)
 		default:
-			l = restoredCopy(t, l, tokens)
+			l = restoredCopy(t, l, tokens, policy)
 		}
 		l.mustHoldInvariants()
 	}
@@ -112,9 +141,12 @@ func runRandomSequence(t *testing.T, seed int64) ledgerTrace {
 func randomSubmit(t *testing.T, l *Ledger, rng *rand.Rand, n int, totalCores float64, totalMemory uint64, semKeys []string, semCaps map[string]int) []Event {
 	t.Helper()
 	req := Request{
-		ID:          fmt.Sprintf("req-%d", n),
-		Cores:       float64(rng.Intn(int(totalCores*2)+2)) * 0.5,
-		MemoryBytes: uint64(rng.Intn(int(totalMemory) + 1)),
+		ID:            fmt.Sprintf("req-%d", n),
+		Cores:         float64(rng.Intn(int(totalCores*2)+2)) * 0.5,
+		MemoryBytes:   uint64(rng.Intn(int(totalMemory) + 1)),
+		Class:         []WorkloadClass{ClassCritical, ClassInteractive, ClassNormal, ClassBatch}[rng.Intn(4)],
+		ExpectedP99MS: int64(rng.Intn(5001)),
+		BurstCores:    rng.Intn(5) == 0,
 	}
 	policies := []Policy{PolicyQueue, PolicyQueue, PolicyFail, PolicySkip, PolicyCancelOthers}
 	for _, i := range rng.Perm(len(semKeys))[:rng.Intn(len(semKeys)+1)] {
@@ -193,7 +225,7 @@ func randomAttach(t *testing.T, l *Ledger, rng *rand.Rand, n int) {
 	}
 }
 
-func restoredCopy(t *testing.T, l *Ledger, tokens func() string) *Ledger {
+func restoredCopy(t *testing.T, l *Ledger, tokens func() string, policy SchedulingPolicy) *Ledger {
 	t.Helper()
 	snap := l.Snapshot()
 	data, err := json.Marshal(snap)
@@ -208,6 +240,7 @@ func restoredCopy(t *testing.T, l *Ledger, tokens func() string) *Ledger {
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
+	restored.SetSchedulingPolicy(policy)
 	if got := restored.Snapshot(); !reflect.DeepEqual(snap, got) {
 		t.Fatalf("mid-sequence restore diverged:\n got %+v\nwant %+v", got, snap)
 	}

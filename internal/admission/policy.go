@@ -7,10 +7,11 @@ import "time"
 type Mode string
 
 const (
-	ModeOff    Mode = "off"
-	ModeAuto   Mode = "auto"
-	ModeJev    Mode = "jev"
-	ModeCustom Mode = "custom"
+	ModeClassic Mode = "classic"
+	ModeOff     Mode = "off"
+	ModeAuto    Mode = "auto"
+	ModeJev     Mode = "jev"
+	ModeCustom  Mode = "custom"
 )
 
 // WorkloadClass describes how quickly a waiting request should regain its
@@ -88,4 +89,22 @@ func (p SchedulingPolicy) backfillDelayMS(class WorkloadClass) int64 {
 // BackfillDelayFor reports the configured cumulative measured delay for a class.
 func (p SchedulingPolicy) BackfillDelayFor(class WorkloadClass) time.Duration {
 	return time.Duration(p.backfillDelayMS(class)) * time.Millisecond
+}
+
+func cloneSchedulingPolicy(p SchedulingPolicy) SchedulingPolicy {
+	clone := p
+	clone.BackfillDelay = cloneMap(p.BackfillDelay)
+	clone.ClassWeight = cloneMap(p.ClassWeight)
+	return clone
+}
+
+func cloneMap[K comparable, V any](src map[K]V) map[K]V {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[K]V, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }

@@ -10,13 +10,27 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestResolveAdmissionPolicyDefaultsToAuto(t *testing.T) {
+func TestResolveAdmissionPolicyDefaultsToClassic(t *testing.T) {
 	policy, source, err := ResolveAdmissionPolicy(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.Mode != admission.ModeAuto || source != "default" {
+	if policy.Mode != admission.ModeClassic || source != "default" || policy.Scheduling.AgingEvery != 0 || policy.Scheduling.Burst.MaxCores != 0 || policy.Scheduling.BackfillDelay != nil {
 		t.Fatalf("policy/source = %+v %q", policy, source)
+	}
+}
+
+func TestResolveAdmissionPolicyAutoEnablesAdaptiveScheduling(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission.yaml")
+	if err := os.WriteFile(path, []byte("mode: auto\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, _, err := ResolveAdmissionPolicy(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.Mode != admission.ModeAuto || policy.Scheduling.AgingEvery == 0 || policy.Scheduling.Burst.MaxCores == 0 {
+		t.Fatalf("auto policy = %+v", policy)
 	}
 }
 
@@ -45,7 +59,7 @@ func TestResolveAdmissionPolicyCustomAndJevBounds(t *testing.T) {
 }
 
 func TestInteractiveBurstEligibilityRequiresMeasuredShortClass(t *testing.T) {
-	policy := DefaultAdmissionPolicy()
+	policy := AdmissionPolicy{Mode: admission.ModeAuto, Scheduling: admission.AutoPolicy()}
 	resources := wingwire.HostResources{Cores: 1}
 	request := &wingwire.AdmissionRequest{Class: "interactive", ExpectedP99MS: 1500, SampleCount: 3}
 	if !policy.interactiveBurstEligible(request, resources) {

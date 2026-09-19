@@ -8,7 +8,7 @@ import (
 )
 
 // AdmissionPolicy is the daemon's local host-contention policy. A nil policy
-// uses Auto; callers normally obtain one from ResolveAdmissionPolicy.
+// uses Classic; callers normally obtain one from ResolveAdmissionPolicy.
 type AdmissionPolicy struct {
 	Mode       admission.Mode
 	Scheduling admission.SchedulingPolicy
@@ -16,7 +16,7 @@ type AdmissionPolicy struct {
 }
 
 func DefaultAdmissionPolicy() AdmissionPolicy {
-	return AdmissionPolicy{Mode: admission.ModeAuto, Scheduling: admission.AutoPolicy()}
+	return AdmissionPolicy{Mode: admission.ModeClassic}
 }
 
 func (c Config) admissionPolicy() AdmissionPolicy {

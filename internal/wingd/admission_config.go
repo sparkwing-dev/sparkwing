@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"go.yaml.in/yaml/v3"
 )
 
 const AdmissionConfigFilename = "admission.yaml"
@@ -44,7 +45,7 @@ type admissionJevConfigFile struct {
 }
 
 // ResolveAdmissionPolicy reads the optional machine-local policy. A missing
-// file selects Auto, so admission improves without per-repository setup.
+// file selects Classic, preserving the admission behavior from before modes.
 func ResolveAdmissionPolicy(path string) (AdmissionPolicy, string, error) {
 	if path == "" {
 		var err error
@@ -74,36 +75,41 @@ func ResolveAdmissionPolicy(path string) (AdmissionPolicy, string, error) {
 		policy.Mode = admission.Mode(strings.ToLower(strings.TrimSpace(raw.Mode)))
 	}
 	switch policy.Mode {
-	case admission.ModeOff, admission.ModeAuto, admission.ModeJev, admission.ModeCustom:
+	case admission.ModeClassic, admission.ModeOff:
+		policy.Scheduling = admission.SchedulingPolicy{}
+	case admission.ModeAuto, admission.ModeJev, admission.ModeCustom:
+		policy.Scheduling = admission.AutoPolicy()
 	default:
-		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: mode %q must be off, auto, jev, or custom", raw.Mode)
+		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: mode %q must be classic, off, auto, jev, or custom", raw.Mode)
 	}
-	for name, value := range raw.Custom.BackfillDelay {
-		class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
-		if admission.NormalizeWorkloadClass(class) != class {
-			return AdmissionPolicy{}, "", fmt.Errorf("admission policy: unknown workload class %q", name)
+	if policy.Mode == admission.ModeCustom || policy.Mode == admission.ModeJev {
+		for name, value := range raw.Custom.BackfillDelay {
+			class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
+			if admission.NormalizeWorkloadClass(class) != class {
+				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: unknown workload class %q", name)
+			}
+			d, err := time.ParseDuration(strings.TrimSpace(value))
+			if err != nil || d < 0 {
+				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: custom.backfill_delay.%s must be a non-negative duration", name)
+			}
+			policy.Scheduling.BackfillDelay[class] = d
 		}
-		d, err := time.ParseDuration(strings.TrimSpace(value))
-		if err != nil || d < 0 {
-			return AdmissionPolicy{}, "", fmt.Errorf("admission policy: custom.backfill_delay.%s must be a non-negative duration", name)
+		for name, weight := range raw.Custom.ClassWeight {
+			class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
+			if admission.NormalizeWorkloadClass(class) != class {
+				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: unknown workload class %q", name)
+			}
+			if weight < 0 || weight > 1000 {
+				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: custom.class_weight.%s must be between 0 and 1000", name)
+			}
+			policy.Scheduling.ClassWeight[class] = weight
 		}
-		policy.Scheduling.BackfillDelay[class] = d
-	}
-	for name, weight := range raw.Custom.ClassWeight {
-		class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
-		if admission.NormalizeWorkloadClass(class) != class {
-			return AdmissionPolicy{}, "", fmt.Errorf("admission policy: unknown workload class %q", name)
+		if raw.Custom.AgingEvery != nil {
+			policy.Scheduling.AgingEvery = *raw.Custom.AgingEvery
 		}
-		if weight < 0 || weight > 1000 {
-			return AdmissionPolicy{}, "", fmt.Errorf("admission policy: custom.class_weight.%s must be between 0 and 1000", name)
+		if err := applyBurstConfig(&policy.Scheduling.Burst, raw.Custom.InteractiveBurst); err != nil {
+			return AdmissionPolicy{}, "", err
 		}
-		policy.Scheduling.ClassWeight[class] = weight
-	}
-	if raw.Custom.AgingEvery != nil {
-		policy.Scheduling.AgingEvery = *raw.Custom.AgingEvery
-	}
-	if err := applyBurstConfig(&policy.Scheduling.Burst, raw.Custom.InteractiveBurst); err != nil {
-		return AdmissionPolicy{}, "", err
 	}
 	if err := applyJevConfig(&policy.Jev, raw.Jev); err != nil {
 		return AdmissionPolicy{}, "", err

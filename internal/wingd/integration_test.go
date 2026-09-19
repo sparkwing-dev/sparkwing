@@ -27,6 +27,18 @@ func coreReq(runID string, cores float64) wingwire.AdmissionRequest {
 	}
 }
 
+func TestAdmissionDefaultsToClassic(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+	state, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.AdmissionMode != "classic" {
+		t.Fatalf("admission mode = %q, want classic", state.AdmissionMode)
+	}
+}
+
 func TestAdmissionModeOffDoesNotGateHostCapacity(t *testing.T) {
 	home := shortHome(t)
 	policy := wingd.AdmissionPolicy{Mode: admission.ModeOff, Scheduling: admission.AutoPolicy()}

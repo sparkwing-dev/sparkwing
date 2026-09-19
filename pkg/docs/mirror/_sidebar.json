@@ -19,6 +19,7 @@
         "sdk-planguard",
         "sdk-services",
         "artifacts",
+        "admission",
         "local-execution",
         "ci-embedded",
         "native-mode"
