@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.56.0] - 2026-09-20
 ### Added
 
 - **sdk + admission:** Plans can classify work as critical, interactive, normal,
