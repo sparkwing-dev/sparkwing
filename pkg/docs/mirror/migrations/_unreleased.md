@@ -1,6 +1,16 @@
 # Migrating to the next release
 
-No breaking changes so far.
+## The tool cache moves under SPARKWING_HOME
+
+`sparkwing.ToolCacheDir` returned a path under the OS temporary directory and
+now returns one under `SPARKWING_HOME`, so a cache survives a shell that resets
+`TMPDIR`. The first run after upgrading rebuilds each tool's cache. Nothing
+reads the old directories and nothing reclaims the new ones; remove either by
+hand.
+
+`ToolCacheDir` panics where the Sparkwing home cannot be resolved, a case the
+OS temporary directory did not have. Set `SPARKWING_HOME` to a writable
+directory where the default does not resolve.
 
 ## The pipeline linter reaches further
 

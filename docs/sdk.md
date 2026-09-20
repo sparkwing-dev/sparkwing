@@ -71,9 +71,11 @@ func (p Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in In, rc sparkw
 
 The seal travels on the context, so a `Plan` body that mints a fresh one
 escapes it, and so does a helper the `Plan` calls that mints its own.
-`sparkwing pipeline lint` is what reports both: it flags a guarded call
-written in a `Plan` body whatever context it is handed, and follows the `Plan`
-one level into a package-level helper it calls.
+`sparkwing pipeline lint` is what reports both: it flags a call to an SDK
+side-effect helper written in a `Plan` body whatever context it is handed, and
+follows the `Plan` one level into a package-level helper it calls. It reads
+import paths, so a helper of your own that calls `planguard.Guard` is reported
+by the seal at run time rather than by the linter.
 
 ## What each callback's context carries
 

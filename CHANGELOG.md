@@ -26,14 +26,15 @@ unlock.
   initial planning. Node reconstruction and replay omit these records to avoid
   duplicates. Plan records have no node ID, so node-scoped log reads exclude them;
   terminal visibility follows the selected renderer.
+
+### Changed
+
 - **sdk:** `ToolCacheDir` stores caches under `SPARKWING_HOME` instead of the
   OS temporary directory, so separate development shells reuse the same
   worktree's cache. It panics where the Sparkwing home cannot be resolved,
   which the OS temporary directory could not do. Existing temporary caches are
   not migrated, and nothing reclaims the new ones: they sit under the Sparkwing
   home, one directory per worktree path, until removed by hand.
-
-### Changed
 
 - **lint:** `sparkwing pipeline lint` follows a `Plan` body one level into a
   package-level helper it calls, so I/O a `Plan` delegates is reported where the

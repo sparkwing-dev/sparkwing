@@ -11,9 +11,16 @@ import (
 
 func lintSource(t *testing.T, src string) []Finding {
 	t.Helper()
+	return lintFiles(t, map[string]string{"pipeline.go": src})
+}
+
+func lintFiles(t *testing.T, files map[string]string) []Finding {
+	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "pipeline.go"), []byte(src), 0o644); err != nil {
-		t.Fatal(err)
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	findings, err := AnalyzeSource(dir)
 	if err != nil {
@@ -483,17 +490,77 @@ func TestRunnerLabel_InlineWithWhenRunnerIsClean(t *testing.T) {
 	}
 }
 
-func TestPlanIO_FollowsAPlanIntoASamePackageHelper(t *testing.T) {
-	src := fixtureHeader + `func (p *P) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	return describe(ctx)
-}
-
-func describe(ctx context.Context) error {
-	_, _ = sparkwing.Bash(ctx, "git rev-parse HEAD").String()
-	return nil
-}`
-	findings := lintSource(t, src)
-	if got := countRule(findings, RulePlanIO); got != 1 {
-		t.Fatalf("plan-io findings = %d, want the helper's I/O reported: %+v", got, findings)
+func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
+	const io = "\t_, _ = sparkwing.Bash(ctx, \"git rev-parse HEAD\").String()\n\treturn nil\n"
+	plan := func(body string) string {
+		return fixtureHeader + "func (p *P) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {\n" + body + "}\n"
+	}
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  int
+		at    string
+	}{
+		{
+			name: "a helper called twice is reported once, where it is written",
+			files: map[string]string{"pipeline.go": plan(
+				"\tif err := describe(ctx); err != nil {\n\t\treturn err\n\t}\n\treturn describe(ctx)\n") +
+				"\nfunc describe(ctx context.Context) error {\n" + io + "}\n"},
+			want: 1, at: "pipeline.go",
+		},
+		{
+			name:  "a helper in another file resolves against that file's imports",
+			files: map[string]string{"pipeline.go": plan("\treturn describe(ctx)\n"), "helper.go": helperFileAliasedImport},
+			want:  1, at: "helper.go",
+		},
+		{
+			name: "the follow stops after one level",
+			files: map[string]string{"pipeline.go": plan("\treturn outer(ctx)\n") +
+				"\nfunc outer(ctx context.Context) error { return inner(ctx) }\n" +
+				"\nfunc inner(ctx context.Context) error {\n" + io + "}\n"},
+			want: 0,
+		},
+		{
+			name: "a method on the pipeline is not followed",
+			files: map[string]string{"pipeline.go": plan("\treturn p.describe(ctx)\n") +
+				"\nfunc (p *P) describe(ctx context.Context) error {\n" + io + "}\n"},
+			want: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := lintFiles(t, tc.files)
+			got := countRule(findings, RulePlanIO)
+			if got != tc.want {
+				t.Fatalf("plan-io findings = %d, want %d: %+v", got, tc.want, findings)
+			}
+			if tc.at == "" {
+				return
+			}
+			for _, f := range findings {
+				if f.Rule != RulePlanIO {
+					continue
+				}
+				if filepath.Base(f.File) != tc.at {
+					t.Errorf("finding points at %s, want %s; the author edits the file that wrote the I/O", f.File, tc.at)
+				}
+				if f.Line == 0 {
+					t.Error("finding carries no line")
+				}
+			}
+		})
 	}
 }
+
+const helperFileAliasedImport = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+func describe(ctx context.Context) error {
+	_, _ = sw.Bash(ctx, "git rev-parse HEAD").String()
+	return nil
+}
+`

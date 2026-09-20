@@ -50,7 +50,7 @@ func ToolCacheDir(tool string) string {
 func toolCacheHome() string {
 	p, err := paths.DefaultPaths()
 	if err != nil {
-		panic(fmt.Sprintf("sparkwing: resolve tool cache home: %v", err))
+		panic(fmt.Sprintf("sparkwing: resolve tool cache home: %v; set SPARKWING_HOME to a writable directory", err))
 	}
 	return filepath.Join(p.Root, toolCacheRoot)
 }

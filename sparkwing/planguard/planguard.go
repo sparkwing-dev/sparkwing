@@ -5,9 +5,6 @@
 // sparkwing/docker, sparkwing/git, and sparkwing/services so every
 // layer that ships side-effect helpers can import the same sentinel
 // without violating the SDK's layering rule.
-//
-// The orchestrator-facing alias is
-// internal/sparkwingruntime.GuardPlanTime, which delegates here.
 package planguard
 
 import (

@@ -175,33 +175,7 @@ func TestRun_PlanIsTheOnlyCallbackThatRefusesSideEffects(t *testing.T) {
 			continue
 		}
 		if !s.sideEffects {
-			t.Errorf("%s refused a side-effect helper; the run's grant did not reach it", site)
+			t.Errorf("%s refused a side-effect helper; the Plan seal outlived Plan", site)
 		}
 	}
-}
-
-func TestRun_AGuardedHelperRunsInsideAStep(t *testing.T) {
-	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p,
-		orchestrator.Options{Pipeline: "orch-guarded-helper"})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q (err=%v); a guarded helper must run inside a step", res.Status, res.Error)
-	}
-}
-
-type guardedHelperPipe struct{ sparkwing.Base }
-
-func (guardedHelperPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "shell", func(ctx context.Context) error {
-		_, err := sparkwing.Bash(ctx, "true").Run() //nolint:contextcheck // Run executes the context handed to Bash.
-		return err
-	})
-	return nil
-}
-
-func init() {
-	register("orch-guarded-helper", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &guardedHelperPipe{} })
 }

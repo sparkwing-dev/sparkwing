@@ -49,9 +49,9 @@ func TestRun_InfoFromPlanReachesTheRunLog(t *testing.T) {
 		t.Fatalf("the step control never reached %s, so this run says nothing about plan-time logging",
 			p.EnvelopeLog(res.RunID))
 	}
-	if !strings.Contains(string(envelope), planLogToken) {
-		t.Fatalf("sparkwing.Info from inside Plan reached no record in %s, while the step control did; plan-time Info has no sink",
-			p.EnvelopeLog(res.RunID))
+	if n := strings.Count(string(envelope), planLogToken); n != 1 {
+		t.Fatalf("sparkwing.Info from inside Plan wrote %d records in %s, want 1: 0 is no sink, 2 is replay or node reconstruction re-emitting it",
+			n, p.EnvelopeLog(res.RunID))
 	}
 }
 

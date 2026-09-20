@@ -47,9 +47,9 @@ func (Release) Examples() []sparkwing.Example {
 func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
 	r.args = in
 
-	repoDir, err := repoRoot()
-	if err != nil {
-		return fmt.Errorf("release: locate repo root: %w", err)
+	repoDir := sparkwing.WorkDir()
+	if repoDir == "" {
+		return errors.New("release: no working directory; run this pipeline from a checkout")
 	}
 
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{

@@ -119,7 +119,9 @@ func (a *analysis) run(body *ast.BlockStmt) {
 
 // safety: the AST carries no call graph, so this reaches one level -- far
 // enough for a Plan that delegates to a helper, and bounded so a deep call
-// tree cannot make the linter quadratic.
+// tree cannot make the linter quadratic. It follows a plain function call
+// only: resolving a method needs the receiver type, which this pass does not
+// track.
 func (a *analysis) followSamePackageCall(call *ast.CallExpr) {
 	if a.depth > 0 {
 		return
