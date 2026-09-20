@@ -69,6 +69,24 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ## Types
 
+### type AdmissionClass
+
+AdmissionClass describes the latency expectations of a pipeline without imposing an absolute queue order.
+
+```
+type AdmissionClass string
+```
+
+```
+const (
+    AdmissionCritical    AdmissionClass = "critical"
+    AdmissionInteractive AdmissionClass = "interactive"
+    AdmissionNormal      AdmissionClass = "normal"
+    AdmissionBatch       AdmissionClass = "batch"
+)
+```
+
+
 ### type AfterRunFn
 
 AfterRunFn receives the final Run error after all retries, or nil on success.
@@ -1053,6 +1071,8 @@ type Plan struct {
 ```
 
 - `func NewPlan() *Plan`
+- `func (p *Plan) AdmissionClass(class AdmissionClass) *Plan` -- AdmissionClass sets the pipeline's local contention class.
+- `func (p *Plan) AdmissionClassValue() AdmissionClass` -- AdmissionClassValue returns the plan's explicit local contention class.
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
 - `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the first plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
 - `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the first group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.

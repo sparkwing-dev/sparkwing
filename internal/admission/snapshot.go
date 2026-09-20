@@ -14,6 +14,8 @@ type Snapshot struct {
 	ArrivalSeq          uint64           `json:"arrival_seq"`
 	AdmitSeq            uint64           `json:"admit_seq,omitempty"`
 	EventSeq            uint64           `json:"event_seq"`
+	Scheduling          SchedulingPolicy `json:"scheduling,omitempty"`
+	BurstMilliCores     int64            `json:"burst_milli_cores,omitempty"`
 	Leases              []LeaseState     `json:"leases,omitempty"`
 	Semaphores          []SemaphoreState `json:"semaphores,omitempty"`
 	Waiters             []WaiterState    `json:"waiters,omitempty"`
@@ -35,6 +37,7 @@ type LeaseState struct {
 	MilliCores  int64        `json:"milli_cores"`
 	SoftCores   bool         `json:"soft_cores,omitempty"`
 	StrictCores bool         `json:"strict_cores,omitempty"`
+	BurstCores  bool         `json:"burst_cores,omitempty"`
 	MemoryBytes uint64       `json:"memory_bytes"`
 	Claims      []ClaimState `json:"claims,omitempty"`
 	Members     []string     `json:"members"`
@@ -62,18 +65,22 @@ type HoldState struct {
 }
 
 type WaiterState struct {
-	Arrival       uint64       `json:"arrival"`
-	Admit         uint64       `json:"admit,omitempty"`
-	OwnerID       string       `json:"owner_id,omitempty"`
-	OwnerAdmit    uint64       `json:"owner_admit,omitempty"`
-	BackfillCount uint64       `json:"backfill_count,omitempty"`
-	RequestID     string       `json:"request_id"`
-	Priority      int          `json:"priority,omitempty"`
-	MilliCores    int64        `json:"milli_cores"`
-	SoftCores     bool         `json:"soft_cores,omitempty"`
-	StrictCores   bool         `json:"strict_cores,omitempty"`
-	MemoryBytes   uint64       `json:"memory_bytes"`
-	Claims        []ClaimState `json:"claims,omitempty"`
+	Arrival         uint64        `json:"arrival"`
+	Admit           uint64        `json:"admit,omitempty"`
+	OwnerID         string        `json:"owner_id,omitempty"`
+	OwnerAdmit      uint64        `json:"owner_admit,omitempty"`
+	BackfillCount   uint64        `json:"backfill_count,omitempty"`
+	BackfillDelayMS int64         `json:"backfill_delay_ms,omitempty"`
+	RequestID       string        `json:"request_id"`
+	Priority        int           `json:"priority,omitempty"`
+	Class           WorkloadClass `json:"class,omitempty"`
+	ExpectedP99MS   int64         `json:"expected_p99_ms,omitempty"`
+	MilliCores      int64         `json:"milli_cores"`
+	SoftCores       bool          `json:"soft_cores,omitempty"`
+	StrictCores     bool          `json:"strict_cores,omitempty"`
+	BurstCores      bool          `json:"burst_cores,omitempty"`
+	MemoryBytes     uint64        `json:"memory_bytes"`
+	Claims          []ClaimState  `json:"claims,omitempty"`
 }
 
 func (l *Ledger) Snapshot() Snapshot {
@@ -89,6 +96,10 @@ func (l *Ledger) Snapshot() Snapshot {
 		ArrivalSeq:          l.arrivalSeq,
 		AdmitSeq:            l.admitSeq,
 		EventSeq:            l.eventSeq,
+		Scheduling:          cloneSchedulingPolicy(l.scheduling),
+	}
+	if burst, err := toMilliCores(l.scheduling.Burst.MaxCores); err == nil {
+		snap.BurstMilliCores = max(burst, l.restoredBurstLimit)
 	}
 	if len(l.priorityOverrides) > 0 {
 		snap.PriorityOverrides = make(map[string]int, len(l.priorityOverrides))
@@ -114,6 +125,7 @@ func (l *Ledger) Snapshot() Snapshot {
 			MilliCores:  le.milliCores,
 			SoftCores:   le.softCores,
 			StrictCores: le.strictCores,
+			BurstCores:  le.burstCores,
 			MemoryBytes: le.memory,
 			Claims:      claimStates(le.claims),
 			Members:     members,
@@ -140,18 +152,22 @@ func (l *Ledger) Snapshot() Snapshot {
 	}
 	for _, w := range l.waiters {
 		snap.Waiters = append(snap.Waiters, WaiterState{
-			Arrival:       w.arrival,
-			Admit:         w.spec.admit,
-			OwnerID:       w.spec.ownerID,
-			OwnerAdmit:    w.spec.ownerAdmit,
-			BackfillCount: w.backfillCount,
-			RequestID:     w.spec.id,
-			Priority:      w.spec.priority,
-			MilliCores:    w.spec.milliCores,
-			SoftCores:     w.spec.softCores,
-			StrictCores:   w.spec.strictCores,
-			MemoryBytes:   w.spec.memory,
-			Claims:        claimStates(w.spec.claims),
+			Arrival:         w.arrival,
+			Admit:           w.spec.admit,
+			OwnerID:         w.spec.ownerID,
+			OwnerAdmit:      w.spec.ownerAdmit,
+			BackfillCount:   w.backfillCount,
+			BackfillDelayMS: w.backfillDelayMS,
+			RequestID:       w.spec.id,
+			Priority:        w.spec.priority,
+			Class:           w.spec.class,
+			ExpectedP99MS:   w.spec.expectedP99MS,
+			MilliCores:      w.spec.milliCores,
+			SoftCores:       w.spec.softCores,
+			StrictCores:     w.spec.strictCores,
+			BurstCores:      w.spec.burstCores,
+			MemoryBytes:     w.spec.memory,
+			Claims:          claimStates(w.spec.claims),
 		})
 	}
 	return snap
@@ -169,10 +185,14 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	if tokenGen == nil {
 		tokenGen = randomToken
 	}
-	if snap.TotalMilliCores < 0 || snap.HeadroomMilliCores < 0 {
+	if snap.TotalMilliCores < 0 || snap.HeadroomMilliCores < 0 || snap.BurstMilliCores < 0 {
 		return nil, fmt.Errorf("%w: negative core capacity", ErrInvalidSnapshot)
 	}
 	upgradeLegacyAdmitRanks(&snap)
+	scheduling := cloneSchedulingPolicy(snap.Scheduling)
+	if scheduling.Burst.MaxCores == 0 && snap.BurstMilliCores > 0 {
+		scheduling.Burst.MaxCores = float64(snap.BurstMilliCores) / 1000
+	}
 	l := &Ledger{
 		totalMilliCores:    snap.TotalMilliCores,
 		totalMemory:        snap.TotalMemoryBytes,
@@ -188,6 +208,8 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		admitSeq:           snap.AdmitSeq,
 		eventSeq:           snap.EventSeq,
 		tokenGen:           tokenGen,
+		restoredBurstLimit: snap.BurstMilliCores,
+		scheduling:         scheduling,
 	}
 	for runID, p := range snap.PriorityOverrides {
 		if runID == "" {
@@ -293,6 +315,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		milliCores:  ls.MilliCores,
 		softCores:   ls.SoftCores,
 		strictCores: ls.StrictCores,
+		burstCores:  ls.BurstCores,
 		memory:      ls.MemoryBytes,
 		claims:      claims,
 		members:     make(map[string]struct{}, len(ls.Members)),
@@ -360,19 +383,23 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 		ownerAdmit = ws.Admit
 	}
 	l.waiters = append(l.waiters, &waiter{
-		arrival:       ws.Arrival,
-		backfillCount: ws.BackfillCount,
+		arrival:         ws.Arrival,
+		backfillCount:   ws.BackfillCount,
+		backfillDelayMS: ws.BackfillDelayMS,
 		spec: spec{
-			id:          ws.RequestID,
-			admit:       ws.Admit,
-			ownerID:     ws.OwnerID,
-			ownerAdmit:  ownerAdmit,
-			priority:    ws.Priority,
-			milliCores:  ws.MilliCores,
-			softCores:   ws.SoftCores,
-			strictCores: ws.StrictCores,
-			memory:      ws.MemoryBytes,
-			claims:      claims,
+			id:            ws.RequestID,
+			admit:         ws.Admit,
+			ownerID:       ws.OwnerID,
+			ownerAdmit:    ownerAdmit,
+			priority:      ws.Priority,
+			class:         normalizeClass(ws.Class),
+			expectedP99MS: max(ws.ExpectedP99MS, 0),
+			milliCores:    ws.MilliCores,
+			softCores:     ws.SoftCores,
+			strictCores:   ws.StrictCores,
+			burstCores:    ws.BurstCores,
+			memory:        ws.MemoryBytes,
+			claims:        claims,
 		},
 	})
 	return nil

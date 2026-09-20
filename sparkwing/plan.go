@@ -29,6 +29,8 @@ type Plan struct {
 
 	priority int
 
+	admissionClass AdmissionClass
+
 	lintWarnings []LintWarning
 
 	inputs any

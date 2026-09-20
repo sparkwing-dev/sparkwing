@@ -36,6 +36,7 @@ func runWingdRun(args []string) error {
 	version := fs.String("version", "", "binary version to advertise (default: this build)")
 	headroom := fs.Float64("headroom", 0, "reserved host capacity fraction (0..1); 0 uses the default margin")
 	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET, then the budget config file); e.g. 6, 50%, 6,8gb, 50%,enforce")
+	admissionConfig := fs.String("admission-config", "", "admission policy file (default: ~/.config/sparkwing/admission.yaml)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -52,20 +53,26 @@ func runWingdRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	admissionPolicy, admissionSource, err := wingd.ResolveAdmissionPolicy(*admissionConfig)
+	if err != nil {
+		return err
+	}
 
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	art, artFault := orchestrator.WingdArtifactStore(ctx)
 	return orchestrator.RunWingdDaemon(ctx, orchestrator.WingdOptions{
-		Home:               *home,
-		Version:            v,
-		HeadroomFraction:   *headroom,
-		Budget:             resolvedBudget.Budget,
-		BudgetSource:       resolvedBudget.Source,
-		BudgetOrigin:       resolvedBudget.Origin,
-		ArtifactStore:      art,
-		ArtifactStoreError: artFault,
-		Logf:               func(format string, args ...any) { logger.Printf(format, args...) },
+		Home:                  *home,
+		Version:               v,
+		HeadroomFraction:      *headroom,
+		Budget:                resolvedBudget.Budget,
+		BudgetSource:          resolvedBudget.Source,
+		BudgetOrigin:          resolvedBudget.Origin,
+		AdmissionPolicy:       &admissionPolicy,
+		AdmissionPolicySource: admissionSource,
+		ArtifactStore:         art,
+		ArtifactStoreError:    artFault,
+		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 }

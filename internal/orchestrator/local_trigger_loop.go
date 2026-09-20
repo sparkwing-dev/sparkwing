@@ -224,6 +224,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		// ambient one from the submitting shell is the consumer's environment
 		// shaping the run rather than the submission.
 		PriorityEnv:                    {},
+		AdmissionClassEnv:              {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
 		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},
 		StandaloneStateDBEnv:               {}, StandaloneReasonEnv: {},

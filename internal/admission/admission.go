@@ -62,6 +62,17 @@ type Request struct {
 	Semaphores []SemaphoreClaim
 
 	Priority int
+
+	Class WorkloadClass
+
+	ExpectedP99MS int64
+
+	// ReservationBypassBudgetMS lets a bounded advisor enlarge the delay
+	// budget considered for this request. It never bypasses capacity or
+	// semaphore checks.
+	ReservationBypassBudgetMS int64
+
+	BurstCores bool
 }
 
 type LeaseID string
@@ -131,6 +142,8 @@ type Event struct {
 	BypassedBy string `json:"bypassed_by,omitempty"`
 
 	BackfillCount uint64 `json:"backfill_count,omitempty"`
+
+	BackfillDelayMS int64 `json:"backfill_delay_ms,omitempty"`
 
 	Priority int `json:"priority,omitempty"`
 }

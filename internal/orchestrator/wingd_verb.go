@@ -30,6 +30,7 @@ func runWingdCLI(args []string) error {
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: the compiled SDK version)")
 	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET, then the budget config file)")
+	admissionConfig := fs.String("admission-config", "", "admission policy file (default: ~/.config/sparkwing/admission.yaml)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -41,17 +42,23 @@ func runWingdCLI(args []string) error {
 	if err != nil {
 		return err
 	}
+	admissionPolicy, admissionSource, err := wingd.ResolveAdmissionPolicy(*admissionConfig)
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	art, artFault := WingdArtifactStore(ctx)
 	return RunWingdDaemon(ctx, WingdOptions{
-		Home:               *home,
-		Version:            v,
-		Budget:             resolvedBudget.Budget,
-		BudgetSource:       resolvedBudget.Source,
-		BudgetOrigin:       resolvedBudget.Origin,
-		ArtifactStore:      art,
-		ArtifactStoreError: artFault,
+		Home:                  *home,
+		Version:               v,
+		Budget:                resolvedBudget.Budget,
+		BudgetSource:          resolvedBudget.Source,
+		BudgetOrigin:          resolvedBudget.Origin,
+		AdmissionPolicy:       &admissionPolicy,
+		AdmissionPolicySource: admissionSource,
+		ArtifactStore:         art,
+		ArtifactStoreError:    artFault,
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))

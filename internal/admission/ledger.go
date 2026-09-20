@@ -17,6 +17,8 @@ type Config struct {
 	TotalMemoryBytes uint64
 
 	TokenGen func() string
+
+	Scheduling SchedulingPolicy
 }
 
 type Ledger struct {
@@ -38,19 +40,25 @@ type Ledger struct {
 	admitSeq           uint64
 	eventSeq           uint64
 	tokenGen           func() string
+	scheduling         SchedulingPolicy
+	restoredBurstLimit int64
 }
 
 type spec struct {
-	id          string
-	admit       uint64
-	ownerID     string
-	ownerAdmit  uint64
-	priority    int
-	milliCores  int64
-	softCores   bool
-	strictCores bool
-	memory      uint64
-	claims      []claim
+	id                        string
+	admit                     uint64
+	ownerID                   string
+	ownerAdmit                uint64
+	priority                  int
+	class                     WorkloadClass
+	expectedP99MS             int64
+	reservationBypassBudgetMS int64
+	burstCores                bool
+	milliCores                int64
+	softCores                 bool
+	strictCores               bool
+	memory                    uint64
+	claims                    []claim
 }
 
 type claim struct {
@@ -71,6 +79,7 @@ type lease struct {
 	milliCores  int64
 	softCores   bool
 	strictCores bool
+	burstCores  bool
 	memory      uint64
 	claims      []claim
 	members     map[string]struct{}
@@ -90,9 +99,10 @@ type hold struct {
 }
 
 type waiter struct {
-	arrival       uint64
-	backfillCount uint64
-	spec          spec
+	arrival         uint64
+	backfillCount   uint64
+	backfillDelayMS int64
+	spec            spec
 }
 
 type resource string
@@ -126,7 +136,18 @@ func New(cfg Config) (*Ledger, error) {
 		memberOf:           map[string]LeaseID{},
 		priorityOverrides:  map[string]int{},
 		tokenGen:           gen,
+		scheduling:         cfg.Scheduling,
 	}, nil
+}
+
+// SetSchedulingPolicy changes future backfill decisions without disturbing
+// leases, queue order, or already-spent delay budgets.
+func (l *Ledger) SetSchedulingPolicy(policy SchedulingPolicy) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.scheduling = policy
+	l.sortWaiters()
+	l.mustHoldInvariants()
 }
 
 func randomToken() string {
@@ -164,11 +185,14 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 		s.ownerAdmit = l.admitSeq + 1
 	}
 	s.admit = l.admitSeq + 1
+	if l.scheduling.AgingEvery > 0 && l.scheduling.ClassWeight != nil {
+		return l.submitWithAging(s)
+	}
 
 	if !l.fifoBlocked(s) && l.fits(s) {
-		backfillEvents := l.recordFreshBackfill(s)
 		l.admitSeq++
 		s.admit = l.admitSeq
+		backfillEvents := l.recordFreshBackfill(s)
 		grantedLease, evicted, events := l.grant(s, EventGranted)
 		events = append(backfillEvents, events...)
 		events = append(events, l.promote()...)
@@ -176,18 +200,9 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 		return Decision{Kind: DecisionGranted, Lease: grantedLease, Evicted: evicted}, events, nil
 	}
 
-	for _, c := range s.claims {
-		if c.policy != PolicyFail && c.policy != PolicySkip {
-			continue
-		}
-		if l.fifoBlockedOnKey(c.key) || !l.semBudgetFits(c) {
-			kind := DecisionFailed
-			if c.policy == PolicySkip {
-				kind = DecisionSkipped
-			}
-			l.mustHoldInvariants()
-			return Decision{Kind: kind, Key: c.key}, nil, nil
-		}
+	if decision, rejected := l.terminalClaimDecision(s); rejected {
+		l.mustHoldInvariants()
+		return decision, nil, nil
 	}
 
 	l.admitSeq++
@@ -200,6 +215,62 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	ev.Position = position
 	l.mustHoldInvariants()
 	return Decision{Kind: DecisionQueued, Position: position}, []Event{ev}, nil
+}
+
+func (l *Ledger) submitWithAging(s spec) (Decision, []Event, error) {
+	if l.fifoBlocked(s) || !l.fits(s) {
+		if decision, rejected := l.terminalClaimDecision(s); rejected {
+			l.mustHoldInvariants()
+			return decision, nil, nil
+		}
+	}
+
+	l.admitSeq++
+	s.admit = l.admitSeq
+	l.sortWaiters()
+	if !l.fifoBlocked(s) && l.fits(s) {
+		backfillEvents := l.recordFreshBackfill(s)
+		grantedLease, evicted, events := l.grant(s, EventGranted)
+		events = append(backfillEvents, events...)
+		events = append(events, l.promote()...)
+		l.mustHoldInvariants()
+		return Decision{Kind: DecisionGranted, Lease: grantedLease, Evicted: evicted}, events, nil
+	}
+	if decision, rejected := l.terminalClaimDecision(s); rejected {
+		l.mustHoldInvariants()
+		return decision, nil, nil
+	}
+
+	position := l.queuePosition(s)
+	l.arrivalSeq++
+	l.waiters = append(l.waiters, &waiter{arrival: l.arrivalSeq, spec: s})
+	l.sortWaiters()
+	ev := l.newEvent(EventQueued, s.id)
+	ev.Position = position
+	events := append([]Event{ev}, l.promote()...)
+	if leaseID, granted := l.memberOf[s.id]; granted {
+		le := l.leases[leaseID]
+		l.mustHoldInvariants()
+		return Decision{Kind: DecisionGranted, Lease: Lease{ID: le.id, Token: le.token}}, events, nil
+	}
+	l.mustHoldInvariants()
+	return Decision{Kind: DecisionQueued, Position: position}, events, nil
+}
+
+func (l *Ledger) terminalClaimDecision(s spec) (Decision, bool) {
+	for _, c := range s.claims {
+		if c.policy != PolicyFail && c.policy != PolicySkip {
+			continue
+		}
+		if l.fifoBlockedOnKey(c.key) || !l.semBudgetFits(c) {
+			kind := DecisionFailed
+			if c.policy == PolicySkip {
+				kind = DecisionSkipped
+			}
+			return Decision{Kind: kind, Key: c.key}, true
+		}
+	}
+	return Decision{}, false
 }
 
 func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
@@ -295,6 +366,9 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 	for _, c := range le.claims {
 		l.dropHold(c.key, id)
 	}
+	if le.burstCores {
+		l.restoredBurstLimit = 0
+	}
 	ev := l.newEvent(EventReleased, le.requestID)
 	ev.Lease = id
 	events := append([]Event{ev}, l.promote()...)
@@ -348,7 +422,7 @@ func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	if err != nil {
 		return fmt.Errorf("%w: cores %v", ErrInvalidResize, cores)
 	}
-	if l.usedMilliCores > mc && !l.softCoreOvercommit() {
+	if l.usedMilliCores > mc && !l.softCoreOvercommit() && !l.burstCoreOvercommitAt(mc) {
 		return fmt.Errorf("%w: granted cores %d exceed total %d", ErrInvalidResize, l.usedMilliCores, mc)
 	}
 	if l.usedMemory > memoryBytes {
@@ -380,13 +454,17 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		return spec{}, err
 	}
 	s := spec{
-		id:          req.ID,
-		ownerID:     req.OwnerID,
-		priority:    req.Priority,
-		milliCores:  mc,
-		softCores:   req.SoftCores,
-		strictCores: req.StrictCores,
-		memory:      req.MemoryBytes,
+		id:                        req.ID,
+		ownerID:                   req.OwnerID,
+		priority:                  req.Priority,
+		class:                     normalizeClass(req.Class),
+		expectedP99MS:             max(req.ExpectedP99MS, 0),
+		reservationBypassBudgetMS: max(req.ReservationBypassBudgetMS, 0),
+		burstCores:                req.BurstCores,
+		milliCores:                mc,
+		softCores:                 req.SoftCores,
+		strictCores:               req.StrictCores,
+		memory:                    req.MemoryBytes,
 	}
 	seen := make(map[string]bool, len(req.Semaphores))
 	for _, c := range req.Semaphores {
@@ -612,7 +690,7 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 	blocked := map[resource]bool{}
 	var protected []*waiter
 	for i, w := range l.waiters {
-		if arrival.id != "" && !waiterPrecedesSpec(w, arrival) {
+		if arrival.id != "" && !l.waiterPrecedesSpec(w, arrival) {
 			break
 		}
 		rs := w.spec.fifoResources()
@@ -669,12 +747,24 @@ func (l *Ledger) violatesReservation(candidate spec, protected []*waiter) bool {
 			}
 			// safety: a head squeezed out by host pressure regains its fit when the pressure lifts, so
 			// the reservation is judged against the capacity the host recovers to, not what it offers now
-			if !fitsCost(surviving+demand, candidateCost, limits.recovered) {
+			if !fitsCost(surviving+demand, candidateCost, limits.recovered) &&
+				!l.delayBoundedBackfill(candidate, w) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func (l *Ledger) delayBoundedBackfill(candidate spec, protected *waiter) bool {
+	if candidate.expectedP99MS <= 0 {
+		return false
+	}
+	budget := l.scheduling.backfillDelayMS(protected.spec.class)
+	if candidate.reservationBypassBudgetMS > budget {
+		budget = candidate.reservationBypassBudgetMS
+	}
+	return budget > 0 && protected.backfillDelayMS <= budget-candidate.expectedP99MS
 }
 
 func specResourceCost(s spec, r resource) (int64, bool) {
@@ -723,14 +813,16 @@ func leaseConflictsWithWaiter(le *lease, w spec) bool {
 func (l *Ledger) recordFreshBackfill(s spec) []Event {
 	var events []Event
 	for _, w := range l.waiters {
-		if !waiterPrecedesSpec(w, s) {
+		if !l.waiterPrecedesSpec(w, s) {
 			break
 		}
 		if !l.fits(w.spec) && specsCompete(w.spec, s) {
 			w.backfillCount++
+			w.backfillDelayMS += max(s.expectedP99MS, 0)
 			ev := l.newEvent(EventBackfilled, w.spec.id)
 			ev.BypassedBy = s.id
 			ev.BackfillCount = w.backfillCount
+			ev.BackfillDelayMS = w.backfillDelayMS
 			events = append(events, ev)
 		}
 	}
@@ -744,9 +836,11 @@ func (l *Ledger) recordQueuedBackfill(index int) []Event {
 		w := l.waiters[i]
 		if !l.fits(w.spec) && specsCompete(w.spec, s) {
 			w.backfillCount++
+			w.backfillDelayMS += max(s.expectedP99MS, 0)
 			ev := l.newEvent(EventBackfilled, w.spec.id)
 			ev.BypassedBy = s.id
 			ev.BackfillCount = w.backfillCount
+			ev.BackfillDelayMS = w.backfillDelayMS
 			events = append(events, ev)
 		}
 	}
@@ -870,7 +964,7 @@ func (l *Ledger) queuePosition(s spec) int {
 	mine := resourceSet(s.fifoResources())
 	n := 0
 	for _, w := range l.waiters {
-		if !waiterPrecedesSpec(w, s) {
+		if !l.waiterPrecedesSpec(w, s) {
 			break
 		}
 		if touchesAny(w.spec, mine) {
@@ -908,8 +1002,25 @@ func (l *Ledger) hostFits(s spec) bool {
 	if s.softCores {
 		coresOK = l.coresFitSoft(s)
 	}
+	if !coresOK && s.burstCores {
+		coresOK = l.coresFitBurst(s)
+	}
 	memoryOK := s.memory == 0 || (l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
 	return coresOK && memoryOK
+}
+
+func (l *Ledger) coresFitBurst(s spec) bool {
+	limit, err := toMilliCores(l.scheduling.Burst.MaxCores)
+	if err != nil || limit <= 0 || s.milliCores > limit || l.usedMilliCores > l.totalMilliCores ||
+		l.usedMilliCores+s.milliCores > l.totalMilliCores+limit {
+		return false
+	}
+	for _, lease := range l.leases {
+		if lease.burstCores {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *Ledger) resourcesIdle() bool {
@@ -1009,6 +1120,9 @@ func (l *Ledger) fits(s spec) bool {
 }
 
 func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
+	normal := s
+	normal.burstCores = false
+	usedBurst := s.burstCores && !l.hostFits(normal)
 	l.leaseSeq++
 	id := LeaseID(fmt.Sprintf("lease-%d", l.leaseSeq))
 	token := l.mintToken()
@@ -1039,6 +1153,7 @@ func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
 		milliCores:  s.milliCores,
 		softCores:   s.softCores,
 		strictCores: s.strictCores,
+		burstCores:  usedBurst,
 		memory:      s.memory,
 		claims:      s.claims,
 		members:     map[string]struct{}{s.id: {}},
@@ -1125,14 +1240,41 @@ func (l *Ledger) nextPromotable() int {
 }
 
 func (l *Ledger) sortWaiters() {
-	sort.SliceStable(l.waiters, func(i, j int) bool { return waiterLess(l.waiters[i], l.waiters[j]) })
+	sort.SliceStable(l.waiters, func(i, j int) bool { return l.waiterLess(l.waiters[i], l.waiters[j]) })
 }
 
-func waiterPrecedesSpec(w *waiter, s spec) bool {
+func (l *Ledger) waiterPrecedesSpec(w *waiter, s spec) bool {
 	if w.spec.priority != s.priority {
 		return w.spec.priority > s.priority
 	}
+	if left, right := l.classScore(w.spec), l.classScore(s); left != right {
+		return left > right
+	}
 	return w.spec.admit <= s.admit
+}
+
+func (l *Ledger) waiterLess(a, b *waiter) bool {
+	if a.spec.priority != b.spec.priority {
+		return a.spec.priority > b.spec.priority
+	}
+	if left, right := l.classScore(a.spec), l.classScore(b.spec); left != right {
+		return left > right
+	}
+	if a.spec.admit != b.spec.admit {
+		return a.spec.admit < b.spec.admit
+	}
+	return a.arrival < b.arrival
+}
+
+func (l *Ledger) classScore(s spec) int {
+	if l.scheduling.AgingEvery == 0 || l.scheduling.ClassWeight == nil {
+		return 0
+	}
+	age := uint64(0)
+	if l.admitSeq > s.admit {
+		age = l.admitSeq - s.admit
+	}
+	return l.scheduling.ClassWeight[normalizeClass(s.class)] + int(age/l.scheduling.AgingEvery)
 }
 
 func anyIn(set map[resource]bool, rs []resource) bool {

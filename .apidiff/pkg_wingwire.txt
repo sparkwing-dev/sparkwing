@@ -40,6 +40,8 @@ type AdmissionRequest struct {
 	Origin Origin
 
 	Priority int
+
+	Class string
 }
 type BudgetSource string
 const BudgetSourceConfig BudgetSource = "config"
@@ -226,6 +228,8 @@ type Holder struct {
 
 	Resources HostResources
 
+	Burst bool
+
 	Semaphores []string
 
 	ConnectionOnly bool
@@ -257,6 +261,11 @@ type HostResources struct {
 	Cores float64
 
 	MemoryBytes int64
+}
+type JevAdmissionStats struct {
+	Attempts  uint64
+	Admits    uint64
+	Fallbacks uint64
 }
 const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN"
 type LivenessAck struct {
@@ -292,6 +301,9 @@ type QueueState struct {
 	Resources []ResourceState
 	Holders   []Holder
 	Waiters   []Waiter
+
+	AdmissionMode string
+	Jev           *JevAdmissionStats
 
 	ExpectedClearMS *int64
 
@@ -428,10 +440,13 @@ type Waiter struct {
 
 	Position int
 	Priority int
+	Class    string
 
-	BackfillCount uint64
-	Resources     HostResources
-	Semaphores    []string
+	BackfillCount   uint64
+	BackfillDelayMS int64
+	Resources       HostResources
+	Burst           bool
+	Semaphores      []string
 
 	WaitingOn []string
 

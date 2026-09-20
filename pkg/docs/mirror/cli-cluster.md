@@ -999,9 +999,7 @@ minted, which is how a warm pool already running starts costing
 credits without a new credential. Metering is an operator
 decision: a runner's own labels never make its work billable.
 A claim by a metered token reserves a minute of cloud runner
-time and is refused when the balance cannot cover it. The reservation protects
-concurrent spend while the runner waits; charging begins when the exact claimed
-attempt starts execution.
+time and is refused when the balance cannot cover it.
 
 ### Flags
 

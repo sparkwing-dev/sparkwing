@@ -215,6 +215,7 @@ func Run(args []string) error {
 	fs := flag.NewFlagSet("wingd supervise", flag.ContinueOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "", "")
+	admissionConfig := fs.String("admission-config", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -231,6 +232,9 @@ func Run(args []string) error {
 	}
 	if *version != "" {
 		childArgs = append(childArgs, "--version", *version)
+	}
+	if *admissionConfig != "" {
+		childArgs = append(childArgs, "--admission-config", *admissionConfig)
 	}
 	logger := log.New(os.Stderr, "wingd supervisor: ", log.LstdFlags|log.LUTC)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

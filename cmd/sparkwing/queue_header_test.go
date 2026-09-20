@@ -18,6 +18,10 @@ func TestFmtDaemonHeader(t *testing.T) {
 	if got := fmtDaemonHeader(wingwire.QueueState{DaemonVersion: "v0.16.0"}); !strings.Contains(got, "just started") {
 		t.Errorf("zero-uptime header = %q, want 'just started'", got)
 	}
+	jev := fmtDaemonHeader(wingwire.QueueState{AdmissionMode: "jev", Jev: &wingwire.JevAdmissionStats{Attempts: 4, Admits: 2, Fallbacks: 1}})
+	if !strings.Contains(jev, "admission jev") || !strings.Contains(jev, "4 Jev attempts") {
+		t.Errorf("Jev header = %q", jev)
+	}
 }
 
 func TestRenderQueuePretty_ShowsDaemonHeader(t *testing.T) {
