@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/diskspace"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
@@ -95,7 +96,7 @@ func newServer(root string, logger *slog.Logger, private bool) (*Server, error) 
 		dirMode:   dirMode,
 		fileMode:  fileMode,
 		limits:    DefaultLimits(),
-		diskSpace: diskSpace,
+		diskSpace: diskspace.Usage,
 	}
 	return s.WithStoreCeiling(objectguard.CeilingConfig{}), nil
 }
