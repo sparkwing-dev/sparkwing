@@ -490,6 +490,15 @@ func TestRunnerLabel_InlineWithWhenRunnerIsClean(t *testing.T) {
 	}
 }
 
+func lineOf(src, needle string) int {
+	for i, line := range strings.Split(src, "\n") {
+		if strings.Contains(line, needle) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 	const io = "\t_, _ = sparkwing.Bash(ctx, \"git rev-parse HEAD\").String()\n\treturn nil\n"
 	plan := func(body string) string {
@@ -514,6 +523,14 @@ func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 			want:  1, at: "helper.go",
 		},
 		{
+			name: "each Plan in the package reports the helper it calls",
+			files: map[string]string{"pipeline.go": plan("\treturn describe(ctx)\n") +
+				"\ntype Q struct{ sparkwing.Base }\n" +
+				"\nfunc (q *Q) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {\n\treturn describe(ctx)\n}\n" +
+				"\nfunc describe(ctx context.Context) error {\n" + io + "}\n"},
+			want: 2, at: "pipeline.go",
+		},
+		{
 			name: "the follow stops after one level",
 			files: map[string]string{"pipeline.go": plan("\treturn outer(ctx)\n") +
 				"\nfunc outer(ctx context.Context) error { return inner(ctx) }\n" +
@@ -526,6 +543,13 @@ func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 				"\nfunc (p *P) describe(ctx context.Context) error {\n" + io + "}\n"},
 			want: 0,
 		},
+		{
+			name: "a method call does not resolve to a package function sharing its name",
+			files: map[string]string{"pipeline.go": plan("\treturn p.describe(ctx)\n") +
+				"\nfunc (p *P) describe(context.Context) error { return nil }\n" +
+				"\nfunc describe(ctx context.Context) error {\n" + io + "}\n"},
+			want: 0,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			findings := lintFiles(t, tc.files)
@@ -536,6 +560,7 @@ func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 			if tc.at == "" {
 				return
 			}
+			wantLine := lineOf(tc.files[tc.at], ".Bash(")
 			for _, f := range findings {
 				if f.Rule != RulePlanIO {
 					continue
@@ -543,8 +568,11 @@ func TestPlanIO_FollowingAPlanIntoASamePackageHelper(t *testing.T) {
 				if filepath.Base(f.File) != tc.at {
 					t.Errorf("finding points at %s, want %s; the author edits the file that wrote the I/O", f.File, tc.at)
 				}
-				if f.Line == 0 {
-					t.Error("finding carries no line")
+				if f.Line != wantLine {
+					t.Errorf("finding points at line %d, want %d; a wrong line sends the author to the wrong call", f.Line, wantLine)
+				}
+				if f.Pipeline == "" {
+					t.Error("finding names no pipeline, so the author cannot tell which Plan to fix")
 				}
 			}
 		})

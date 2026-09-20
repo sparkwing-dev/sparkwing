@@ -29,18 +29,21 @@ unlock.
 
 ### Changed
 
-- **sdk:** `ToolCacheDir` stores caches under `SPARKWING_HOME` instead of the
+- **sdk (Breaking):** `ToolCacheDir` stores caches under `SPARKWING_HOME` instead of the
   OS temporary directory, so separate development shells reuse the same
   worktree's cache. It panics where the Sparkwing home cannot be resolved,
   which the OS temporary directory could not do. Existing temporary caches are
   not migrated, and nothing reclaims the new ones: they sit under the Sparkwing
-  home, one directory per worktree path, until removed by hand.
+  home, one directory per worktree path, until removed by hand. See
+  [the migration guide](docs/migrations/_unreleased.md#the-tool-cache-moves-under-sparkwing_home).
 
-- **lint:** `sparkwing pipeline lint` follows a `Plan` body one level into a
-  package-level helper it calls, so I/O a `Plan` delegates is reported where the
-  seal cannot see it. It also treats a `sparkwing/services` call inside `Plan` as
-  plan-time I/O, as it already did for `sparkwing/docker` and `sparkwing/git`.
-  Both can turn a pipeline's lint red on code this release does not change.
+- **lint (Breaking):** `sparkwing pipeline lint` follows a `Plan` body one level
+  into a package-level function it calls, so I/O a `Plan` delegates is reported
+  where the seal cannot see it. A method on the pipeline is not followed. It also
+  treats a `sparkwing/services` call inside `Plan` as plan-time I/O, as it already
+  did for `sparkwing/docker` and `sparkwing/git`. Both can turn a pipeline's lint
+  red on code this release does not change. See
+  [the migration guide](docs/migrations/_unreleased.md#the-pipeline-linter-reaches-further).
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.
 

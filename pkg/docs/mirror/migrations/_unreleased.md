@@ -15,7 +15,8 @@ directory where the default does not resolve.
 ## The pipeline linter reaches further
 
 `sparkwing pipeline lint` follows a `Plan` body one level into a package-level
-helper it calls, so I/O a `Plan` delegates is reported rather than missed. It
+function it calls, so I/O a `Plan` delegates is reported rather than missed. A
+method on the pipeline is not followed. It
 also treats a `sparkwing/services` call inside `Plan` as plan-time I/O, as it
 already did for `sparkwing/docker` and `sparkwing/git`.
 

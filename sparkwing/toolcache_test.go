@@ -1,6 +1,7 @@
 package sparkwing_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,4 +142,28 @@ func TestToolCacheDir_SurvivesTemporaryDirectoryChanges(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(second, "cached-result")); err != nil || string(data) != "result" {
 		t.Fatalf("cache did not survive shell exit: %q, %v", data, err)
 	}
+}
+
+func TestToolCacheDir_RefusesTheOperatorHomeFromATestBinary(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("no home directory, so this run cannot reach the refusal: %v", err)
+	}
+	operatorHome := filepath.Join(home, ".sparkwing")
+	t.Setenv("SPARKWING_HOME", operatorHome)
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("ToolCacheDir returned a path under the operator's home; a test binary must be refused one")
+		}
+		msg := fmt.Sprint(r)
+		if !strings.Contains(msg, "resolve tool cache home") {
+			t.Errorf("panic names no failing step: %q", msg)
+		}
+		if !strings.Contains(msg, operatorHome) {
+			t.Errorf("panic names no home, so the reader cannot tell which was refused: %q", msg)
+		}
+	}()
+	_ = sparkwing.ToolCacheDir("golangci-lint")
 }
