@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.57.0] - 2026-09-20
 ### Fixed
 
 - **orchestrator:** SDK logging calls in `Pipeline.Plan` reach the run log during
@@ -35,7 +36,7 @@ unlock.
   which the OS temporary directory could not do. Existing temporary caches are
   not migrated, and nothing reclaims the new ones: they sit under the Sparkwing
   home, one directory per worktree path, until removed by hand. See
-  [the migration guide](docs/migrations/_unreleased.md#the-tool-cache-moves-under-sparkwing_home).
+  [the migration guide](docs/migrations/v0.57.0.md#the-tool-cache-moves-under-sparkwing_home).
 
 - **lint (Breaking):** `sparkwing pipeline lint` follows a `Plan` body one level
   into a package-level function it calls, so I/O a `Plan` delegates is reported
@@ -43,7 +44,7 @@ unlock.
   treats a `sparkwing/services` call inside `Plan` as plan-time I/O, as it already
   did for `sparkwing/docker` and `sparkwing/git`. Both can turn a pipeline's lint
   red on code this release does not change. See
-  [the migration guide](docs/migrations/_unreleased.md#the-pipeline-linter-reaches-further).
+  [the migration guide](docs/migrations/v0.57.0.md#the-pipeline-linter-reaches-further).
 
 ### Removed
 
