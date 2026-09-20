@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"math"
 	"os"
 	"os/exec"
@@ -37,6 +38,11 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	)
 
 	out := runBin(t, mod, runEnv, bin, "spawnproof")
+
+	if got := strings.Count(out, planTimeToken); got != 1 {
+		t.Errorf("one Info in Plan reached the run stream %d times; an author wrote it once", got)
+	}
+	assertPlanLinePersistedOnce(t, home)
 
 	dispatcher := readPID(t, probe, "dispatcher")
 	for _, node := range []string{"produce", "consume", "recover"} {
@@ -510,6 +516,8 @@ func readPID(t *testing.T, dir, name string) int {
 	return pid
 }
 
+const planTimeToken = "spawnproof-plan-time-line"
+
 const procPerNodeJobs = `package jobs
 
 import (
@@ -524,9 +532,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
-// StampPID records which process ran a given piece of work.
 func StampPID(name string) {
 	dir := os.Getenv("PROC_PROBE_DIR")
 	if dir == "" {
@@ -573,6 +581,9 @@ type Produce struct {
 func (j *Produce) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (BuildOut, error) {
 		StampPID("produce")
+		// safety: asking the guard here is what proves the dispatching process
+		// makes a grant of its own.
+		planguard.Guard(ctx, "procpernode.probe")
 		return BuildOut{Digest: "sha-abc123"}, nil
 	}), nil
 }
@@ -647,7 +658,8 @@ func (p *Orphanproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 
 type Spawnproof struct{ sparkwing.Base }
 
-func (p *Spawnproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+func (p *Spawnproof) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Info(ctx, "%s", "` + planTimeToken + `")
 	produce := sparkwing.Job(plan, "produce", &Produce{})
 	sparkwing.Job(plan, "consume", &Consume{Build: sparkwing.RefTo[BuildOut](produce)}).Needs(produce)
 
@@ -792,9 +804,6 @@ func (j *Bouncer) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (BounceOut, error) {
 		attempt := RecordAttempt()
 		if attempt == 1 {
-			// Burn CPU the exit accounting can see, then wait to be
-			// killed. Deliberately ignores ctx: a bounce is a kill, not
-			// a cancellation the body can cooperate with.
 			// safety: the check downstream reads CPU time, so burn CPU rather than wall
 			// time. A loaded machine deschedules this loop, and a spin bounded by the
 			// clock then accrues whatever share it was given rather than the amount the
@@ -870,3 +879,25 @@ func main() {
 	runner.Main()
 }
 `
+
+func assertPlanLinePersistedOnce(t *testing.T, home string) {
+	t.Helper()
+	total := 0
+	err := filepath.WalkDir(home, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, "_envelope.ndjson") {
+			return err
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		total += strings.Count(string(data), planTimeToken)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", home, err)
+	}
+	if total != 1 {
+		t.Errorf("the plan-time line is persisted %d times across every run envelope under %s; an author wrote it once", total, home)
+	}
+}

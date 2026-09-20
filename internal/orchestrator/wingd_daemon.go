@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -25,12 +26,14 @@ const runStoreReapTimeout = 30 * time.Second
 // WingdOptions are the host's choices when it runs the admission daemon in
 // this process. Zero values take the daemon's own defaults.
 type WingdOptions struct {
-	Home             string
-	Version          string
-	HeadroomFraction float64
-	Budget           wingd.Budget
-	BudgetSource     wingd.BudgetSource
-	BudgetOrigin     string
+	Home                  string
+	Version               string
+	HeadroomFraction      float64
+	Budget                wingd.Budget
+	BudgetSource          wingd.BudgetSource
+	BudgetOrigin          string
+	AdmissionPolicy       *wingd.AdmissionPolicy
+	AdmissionPolicySource string
 	// ArtifactStore backs the controller API's artifact routes. Nil leaves
 	// them unregistered, which is what a machine with no cache configured
 	// gets from a run's own controller today.
@@ -53,6 +56,12 @@ func RunWingdDaemon(ctx context.Context, opts WingdOptions) error {
 }
 
 func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Config, *HeldRunStore)) error {
+	admissionPolicy := wingd.DefaultAdmissionPolicy()
+	admissionSource := "default"
+	if opts.AdmissionPolicy != nil {
+		admissionPolicy = *opts.AdmissionPolicy
+		admissionSource = opts.AdmissionPolicySource
+	}
 	runs, err := NewHeldRunStore(opts.Home)
 	if err != nil {
 		return err
@@ -70,6 +79,8 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		Budget:             opts.Budget,
 		BudgetSource:       opts.BudgetSource,
 		BudgetOrigin:       opts.BudgetOrigin,
+		AdmissionPolicy:    &admissionPolicy,
+		TypeSafeAPIKey:     os.Getenv("TYPESAFE_API_KEY"),
 		Runs:               runs,
 		StoreSchemaVersion: store.ExpectedSchemaVersion(),
 		StoreRequirements:  store.KnownRequirements(),
@@ -77,6 +88,7 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		ArtifactStoreError: opts.ArtifactStoreError,
 		Logf:               logf,
 	}
+	logf("admission mode %s (%s)", admissionPolicy.Mode, admissionSource)
 	if opts.ArtifactStoreError != "" {
 		logf("cache backend unavailable, serving no artifact routes: %s", opts.ArtifactStoreError)
 	}

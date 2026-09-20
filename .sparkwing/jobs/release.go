@@ -47,9 +47,12 @@ func (Release) Examples() []sparkwing.Example {
 func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
 	r.args = in
 
-	repoDir, err := repoRoot()
-	if err != nil {
-		return fmt.Errorf("release: locate repo root: %w", err)
+	// safety: Plan is pure-declarative, so it reads WorkDir rather than calling
+	// repoRoot, whose .git stat is I/O the plan-io linter refuses here. The jobs
+	// below run git in this directory and fail there when it is not a checkout.
+	repoDir := sparkwing.WorkDir()
+	if repoDir == "" {
+		return errors.New("release: no working directory; run this pipeline from a tree with a .sparkwing directory above it")
 	}
 
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{
@@ -666,7 +669,6 @@ func validateReleaseVersion(v string) error {
 	if semver.Prerelease(v) != "" {
 		return fmt.Errorf("release: version %q is a pre-release; the pipeline only cuts stable tags", v)
 	}
-	// safety: module is locked to v0.x; remove this check to allow v1+ tags.
 	if !onReleaseLine(v) {
 		return fmt.Errorf("release: version %q is v1.0.0+ but sparkwing is locked to v0.x. "+
 			"Bumping to v1+ commits the public API surface (see VERSIONING.md); "+

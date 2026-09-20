@@ -146,6 +146,11 @@
           "name": "priority",
           "kind": "int",
           "omitempty": true
+        },
+        {
+          "name": "class",
+          "kind": "string",
+          "omitempty": true
         }
       ]
     },
@@ -504,6 +509,11 @@
               ]
             },
             {
+              "name": "burst",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
               "name": "semaphores",
               "kind": "[]string",
               "omitempty": true
@@ -616,8 +626,18 @@
               "omitempty": true
             },
             {
+              "name": "class",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
               "name": "backfill_count",
               "kind": "uint64",
+              "omitempty": true
+            },
+            {
+              "name": "backfill_delay_ms",
+              "kind": "int64",
               "omitempty": true
             },
             {
@@ -636,6 +656,11 @@
                   "omitempty": true
                 }
               ]
+            },
+            {
+              "name": "burst",
+              "kind": "bool",
+              "omitempty": true
             },
             {
               "name": "semaphores",
@@ -686,6 +711,33 @@
               "name": "origin",
               "kind": "string",
               "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "admission_mode",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "jev",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "attempts",
+              "kind": "uint64",
+              "omitempty": false
+            },
+            {
+              "name": "admits",
+              "kind": "uint64",
+              "omitempty": false
+            },
+            {
+              "name": "fallbacks",
+              "kind": "uint64",
+              "omitempty": false
             }
           ]
         },

@@ -241,6 +241,9 @@ type AdmissionRequest struct {
 	// Priority orders queued work. Larger values admit before smaller
 	// values; equal values keep FIFO order.
 	Priority int `json:"priority,omitempty"`
+	// Class describes latency sensitivity without becoming a strict priority
+	// override. Empty is normal work.
+	Class string `json:"class,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
@@ -501,6 +504,8 @@ type Holder struct {
 	ElapsedMS int64 `json:"elapsed_ms"`
 	// Resources is the host capacity the holder is charged.
 	Resources HostResources `json:"resources"`
+	// Burst marks the one bounded interactive CPU lane above reservations.
+	Burst bool `json:"burst,omitempty"`
 	// Semaphores names the semaphores the holder occupies.
 	Semaphores []string `json:"semaphores,omitempty"`
 	// ConnectionOnly marks a zero-cost orchestration lease. It keeps the run
@@ -574,14 +579,17 @@ type Waiter struct {
 	Repo string `json:"repo,omitempty"`
 	// Position is the waiter's 1-based place in admission order; 1 is
 	// admitted next.
-	Position int `json:"position"`
-	Priority int `json:"priority,omitempty"`
+	Position int    `json:"position"`
+	Priority int    `json:"priority,omitempty"`
+	Class    string `json:"class,omitempty"`
 	// BackfillCount is how many younger requests have used spare capacity
 	// ahead of this waiter. A positive count reserves its resources against
 	// further backfill until it is admitted.
-	BackfillCount uint64        `json:"backfill_count,omitempty"`
-	Resources     HostResources `json:"resources"`
-	Semaphores    []string      `json:"semaphores,omitempty"`
+	BackfillCount   uint64        `json:"backfill_count,omitempty"`
+	BackfillDelayMS int64         `json:"backfill_delay_ms,omitempty"`
+	Resources       HostResources `json:"resources"`
+	Burst           bool          `json:"burst,omitempty"`
+	Semaphores      []string      `json:"semaphores,omitempty"`
 	// WaitingOn names the resources the waiter lacks room for right now
 	// -- host dimensions ("cores", "memory") and full semaphore keys.
 	// Empty means the waiter is held only by admission order behind a
@@ -627,6 +635,10 @@ type QueueState struct {
 	Resources []ResourceState `json:"resources,omitempty"`
 	Holders   []Holder        `json:"holders,omitempty"`
 	Waiters   []Waiter        `json:"waiters,omitempty"`
+	// AdmissionMode is the machine-local host contention policy. Empty means
+	// the serving daemon predates configurable admission.
+	AdmissionMode string             `json:"admission_mode,omitempty"`
+	Jev           *JevAdmissionStats `json:"jev,omitempty"`
 	// ExpectedClearMS is the estimated time until the queue fully drains,
 	// in milliseconds from now. Nil when the estimate is unavailable
 	// because some queued or holding run lacks a measured duration.
@@ -680,6 +692,13 @@ type QueueState struct {
 	// the state comes from a controller's unified admission view. Empty for
 	// the local daemon, which arbitrates only its own host.
 	Runners []RunnerHeadroom `json:"runners,omitempty"`
+}
+
+// JevAdmissionStats reports advisory outcomes since this daemon started.
+type JevAdmissionStats struct {
+	Attempts  uint64 `json:"attempts"`
+	Admits    uint64 `json:"admits"`
+	Fallbacks uint64 `json:"fallbacks"`
 }
 
 // RunnerHeadroom is one registered runner's most recently advertised free

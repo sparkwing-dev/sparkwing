@@ -106,6 +106,11 @@ type Daemon struct {
 	container *containerSensor
 
 	cgroup *cgroupLimiter
+
+	jevAdvisor   JevAdvisor
+	jevAttempts  uint64
+	jevAdmits    uint64
+	jevFallbacks uint64
 }
 
 type delivery struct {
@@ -138,6 +143,10 @@ func New(cfg Config) (*Daemon, error) {
 	if ownedSampler == nil {
 		ownedSampler = newOwnedCPUSampler()
 	}
+	advisor := cfg.JevAdvisor
+	if advisor == nil && cfg.admissionPolicy().Mode == admission.ModeJev {
+		advisor = newTypeSafeJevAdvisor(cfg.TypeSafeAPIKey, cfg.admissionPolicy().Jev)
+	}
 	return &Daemon{
 		cfg:                 cfg,
 		layout:              lay,
@@ -158,6 +167,7 @@ func New(cfg Config) (*Daemon, error) {
 		cancelPending:       map[string]struct{}{},
 		cancelledRuns:       map[string]struct{}{},
 		disconnectedPending: map[string]struct{}{},
+		jevAdvisor:          advisor,
 	}, nil
 }
 
@@ -357,6 +367,7 @@ func (d *Daemon) initLedger() error {
 		lg, err := admission.New(admission.Config{
 			TotalCores:       d.budgetCores,
 			TotalMemoryBytes: d.budgetMemory,
+			Scheduling:       d.cfg.admissionPolicy().Scheduling,
 		})
 		if err != nil {
 			return fmt.Errorf("wingd: new ledger: %w", err)
@@ -384,6 +395,7 @@ func (d *Daemon) restoreLedger(snap admission.Snapshot) (*admission.Ledger, []ad
 	if err != nil {
 		return nil, nil, fmt.Errorf("restore ledger: %w", err)
 	}
+	lg.SetSchedulingPolicy(d.cfg.admissionPolicy().Scheduling)
 	neededMilliCores := int64(0)
 	neededMemory := uint64(0)
 	for _, lease := range snap.Leases {
@@ -613,13 +625,19 @@ func softCoreCostSource(costSource wingwire.CostSource) bool {
 }
 
 func requestFromWire(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
+	return requestFromWireWithMetadata(runID, ownerRunID, res, sems, costSource, priority, "", 0)
+}
+
+func requestFromWireWithMetadata(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int, class string, expectedP99MS int64) admission.Request {
 	req := admission.Request{
-		ID:          runID,
-		OwnerID:     ownerRunID,
-		Priority:    priority,
-		Cores:       res.Cores,
-		SoftCores:   softCoreCostSource(costSource),
-		StrictCores: strictCoreCostSource(costSource),
+		ID:            runID,
+		OwnerID:       ownerRunID,
+		Priority:      priority,
+		Class:         admission.WorkloadClass(class),
+		ExpectedP99MS: expectedP99MS,
+		Cores:         res.Cores,
+		SoftCores:     softCoreCostSource(costSource),
+		StrictCores:   strictCoreCostSource(costSource),
 	}
 	if res.MemoryBytes > 0 {
 		req.MemoryBytes = uint64(res.MemoryBytes)
@@ -725,6 +743,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	requested := chargedResources(req.Resources)
 	charged := requested
+	jevBypass := d.jevReservationBypass(req, requested)
 
 	d.mu.Lock()
 	if _, cancelled := d.cancelledRuns[req.RunID]; cancelled {
@@ -747,12 +766,21 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	// requestIdentityMatches compares the connection's, so both sides of a
 	// reconnect have to see the same resolved rank.
 	req.Priority = d.ledger.EffectivePriority(req.RunID, req.OwnerRunID, req.Priority)
-	ar := requestFromWire(req.RunID, req.OwnerRunID, charged, req.Semaphores, req.CostSource, req.Priority)
+	ledgerCharge := charged
+	if d.cfg.admissionPolicy().Mode == admission.ModeOff {
+		ledgerCharge = wingwire.HostResources{}
+	}
+	ar := requestFromWireWithMetadata(req.RunID, req.OwnerRunID, ledgerCharge, req.Semaphores, req.CostSource, req.Priority, req.Class, req.ExpectedP99MS)
+	ar.BurstCores = d.cfg.admissionPolicy().interactiveBurstEligible(req, ledgerCharge)
+	if jevBypass {
+		ar.ReservationBypassBudgetMS = d.cfg.admissionPolicy().Jev.maxBackfill().Milliseconds()
+	}
 	c.runID = req.RunID
 	c.ownerRunID = req.OwnerRunID
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
 	c.priority = req.Priority
+	c.class = string(admission.NormalizeWorkloadClass(admission.WorkloadClass(req.Class)))
 	c.repo = req.Repo
 	c.pid = req.PID
 	c.resources = charged
@@ -983,6 +1011,7 @@ func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest, newF
 		existing.pid == req.PID &&
 		existing.origin == req.Origin &&
 		existing.priority == req.Priority &&
+		existing.class == string(admission.NormalizeWorkloadClass(admission.WorkloadClass(req.Class))) &&
 		existing.ownerRunID == req.OwnerRunID &&
 		existing.displayRunID == req.DisplayRunID &&
 		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&

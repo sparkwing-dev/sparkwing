@@ -43,7 +43,7 @@ func (l *Ledger) hostInvariant() error {
 	if memory != l.usedMemory {
 		return fmt.Errorf("used memory %d does not match lease sum %d", l.usedMemory, memory)
 	}
-	if l.usedMilliCores > l.totalMilliCores && !l.softCoreOvercommit() {
+	if l.usedMilliCores > l.totalMilliCores && !l.softCoreOvercommit() && !l.burstCoreOvercommit() {
 		return fmt.Errorf("granted hard cores %d exceed total %d", l.usedMilliCores, l.totalMilliCores)
 	}
 	if l.usedMemory > l.totalMemory {
@@ -65,6 +65,28 @@ func (l *Ledger) softCoreOvercommit() bool {
 		}
 	}
 	return false
+}
+
+func (l *Ledger) burstCoreOvercommit() bool {
+	return l.burstCoreOvercommitAt(l.totalMilliCores)
+}
+
+func (l *Ledger) burstCoreOvercommitAt(total int64) bool {
+	limit, err := toMilliCores(l.scheduling.Burst.MaxCores)
+	if err != nil {
+		return false
+	}
+	limit = max(limit, l.restoredBurstLimit)
+	if limit <= 0 || l.usedMilliCores > total+limit {
+		return false
+	}
+	bursts := 0
+	for _, lease := range l.leases {
+		if lease.burstCores {
+			bursts++
+		}
+	}
+	return bursts == 1
 }
 
 func (l *Ledger) leaseInvariants() error {
@@ -186,7 +208,7 @@ func leaseClaims(le *lease, key string) bool {
 func (l *Ledger) waiterInvariants() error {
 	seen := make(map[string]bool, len(l.waiters))
 	for i, w := range l.waiters {
-		if i > 0 && !waiterLess(l.waiters[i-1], w) {
+		if i > 0 && !l.waiterLess(l.waiters[i-1], w) {
 			return fmt.Errorf("waiter %q is out of priority order", w.spec.id)
 		}
 		if w.arrival > l.arrivalSeq {
@@ -225,16 +247,6 @@ func (l *Ledger) ownerRankInvariant(ownerID string, ownerAdmit, admit uint64, su
 			subject, ownerAdmit, ownerID, l.leases[ownerLeaseID].admit)
 	}
 	return nil
-}
-
-func waiterLess(a, b *waiter) bool {
-	if a.spec.priority != b.spec.priority {
-		return a.spec.priority > b.spec.priority
-	}
-	if a.spec.admit != b.spec.admit {
-		return a.spec.admit < b.spec.admit
-	}
-	return a.arrival < b.arrival
 }
 
 func (l *Ledger) sortedLeaseIDs() []LeaseID {

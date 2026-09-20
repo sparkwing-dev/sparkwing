@@ -19,12 +19,6 @@ issues:
 
 // TestLintReportsAFindingIntroducedInALinkedWorktree lints a git worktree
 // holding a finding the baseline does not have.
-//
-// The gate reported "0 issues" for such a tree while hosted CI rejected the
-// same commit. It lent the run a canonical alias path so worktrees could share
-// one linter cache; git resolves the alias and reports the real worktree as the
-// repository root, so every finding the linter recorded under the alias sat
-// outside the diff and the baseline filter dropped it.
 func TestLintReportsAFindingIntroducedInALinkedWorktree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")

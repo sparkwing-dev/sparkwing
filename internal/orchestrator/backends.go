@@ -36,6 +36,12 @@ type Backends struct {
 
 	Artifact storage.ArtifactStore
 
+	// DiskRoot is a directory on the volume this run's own storage sits on,
+	// set only where that storage is local. A run backed by an object store
+	// or a remote controller leaves it empty, because this machine's free
+	// bytes describe no disk that run is writing to.
+	DiskRoot string
+
 	// LocalCoordination marks state that is this machine's own runs store,
 	// so this process dispatches the run's child triggers itself and owns
 	// the host capacity profile. A hosted controller runs both of those on
@@ -168,6 +174,7 @@ func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Back
 		Logs:              localLogs{paths: paths},
 		Concurrency:       localConcurrency{st: st},
 		Artifact:          art,
+		DiskRoot:          paths.Root,
 		LocalCoordination: true,
 	}
 }

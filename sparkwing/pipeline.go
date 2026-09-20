@@ -10,8 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
-// Base is the marker embedded by every pipeline. Reserved for future
-// shared metadata helpers; today it has no fields.
+// Base is the marker embedded by every pipeline.
 type Base struct{}
 
 // Registration is the registry's record for one pipeline. Produced
@@ -21,13 +20,11 @@ type Registration struct {
 	// Name is the invocation name (e.g. "lint", "build-test-deploy").
 	Name string
 
-	// InputType is the reflect.Type of the pipeline's Inputs struct,
-	// retained for introspection. Same struct described by Schema.
+	// InputType is the reflect.Type of the struct Schema describes.
 	InputType reflect.Type
 
 	// Schema is the resolved input description, parsed once at
-	// registration. CLI describe / --help / completion / dashboard
-	// run-form / MCP tool definitions all read from Schema.
+	// registration.
 	Schema InputSchema
 
 	// Invoke is the type-erased entry point: parse the wire-format
@@ -63,24 +60,8 @@ var (
 //	    return Deploy{}
 //	})
 //
-// Use sparkwing.NoInputs for pipelines that take no flags:
-//
-//	sparkwing.Register[sparkwing.NoInputs]("lint", func() sparkwing.Pipeline[sparkwing.NoInputs] {
-//	    return Lint{}
-//	})
-//
-// Anonymous embedded structs in Inputs are walked recursively, so
-// shared flag bundles can be reused across pipelines. The outermost
-// declaration wins on name conflicts (Go embedding shadowing).
-//
-//	type SkipFilterArgs struct {
-//	    Skip string `flag:"skip"`
-//	    Only string `flag:"only"`
-//	}
-//	type ReleaseArgs struct {
-//	    Version string `flag:"version"`
-//	    SkipFilterArgs   // --skip and --only become first-class flags
-//	}
+// An anonymous embedded struct in Inputs is walked recursively, and the
+// outermost declaration wins on a name conflict.
 func Register[T any](name string, factory func() Pipeline[T]) {
 	reg := buildRegistration(name, factory, "sparkwing.Register")
 	registryMu.Lock()
@@ -200,10 +181,8 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 // resolve to this same factory after [BindPipelinesFromYAML] runs
 // at the orchestrator's bootstrap.
 //
-// For the older one-pipeline-per-Go-entry model, [Register] is
-// kept as a deprecation-marked sugar wrapper that registers the
-// entrypoint AND inserts an implicit pipeline binding under the
-// same name.
+// [Register] is the one-pipeline-per-Go-entry form: it registers the
+// entrypoint and inserts an implicit pipeline binding under the same name.
 func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]) {
 	reg := buildRegistration(entrypointName, factory, "sparkwing.RegisterEntrypoint")
 	registryMu.Lock()
@@ -227,8 +206,7 @@ func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]
 // registered" at lookup time.
 //
 // Safe to call multiple times; existing pipeline-name bindings are
-// preserved (a name that was registered via the legacy [Register]
-// API doesn't get clobbered by a YAML rebind).
+// preserved.
 func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
 },
@@ -294,15 +272,10 @@ func (r *Registration) SecretValues(args map[string]string) []string {
 // SecretArgNames returns the flag names of every secret-marked Inputs
 // field, sorted, regardless of whether the run supplied a value for
 // them. This is the classification half of [Registration.SecretValues]:
-// the orchestrator records it on the run's invocation snapshot so read
-// paths (runs list / get / status / receipt, the controller API, the
-// dashboard) can redact those args without re-resolving the pipeline's
-// schema -- which they cannot do, since a run row outlives the process
-// that registered its pipeline.
-//
-// Bag-field secrets stay out of scope for the same reason
-// [Registration.SecretValues] skips them: `,extra` bags carry arbitrary
-// keys with no per-key opt-in.
+// the orchestrator records it on the run's invocation snapshot so a reader
+// can redact those args without re-resolving the pipeline's schema, which it
+// cannot do because a run row outlives the process that registered its
+// pipeline.
 func (r *Registration) SecretArgNames() []string {
 	var out []string
 	for _, f := range r.Schema.Fields {
@@ -315,12 +288,9 @@ func (r *Registration) SecretArgNames() []string {
 	return out
 }
 
-// Instance returns a fresh pipeline value for this registration, used
-// by introspection helpers that query optional provider interfaces
-// (HelpProvider, ShortHelpProvider, ExampleProvider). The orchestrator
-// goes through Registration.Invoke instead.
-//
-// Exposed for internal/sparkwingruntime.
+// Instance returns a fresh pipeline value for this registration, for a caller
+// querying the optional provider interfaces. The orchestrator goes through
+// Registration.Invoke instead.
 func (r *Registration) Instance() any {
 	if r == nil || r.instance == nil {
 		return nil

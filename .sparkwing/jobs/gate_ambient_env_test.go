@@ -14,7 +14,8 @@ import (
 
 func listeningUnixSocket(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "gate-socket-")
+	// hack: Darwin limits Unix socket paths to 104 bytes; /tmp leaves room for race-test nesting.
+	dir, err := os.MkdirTemp("/tmp", "swg")
 	if err != nil {
 		t.Fatalf("create socket directory: %v", err)
 	}

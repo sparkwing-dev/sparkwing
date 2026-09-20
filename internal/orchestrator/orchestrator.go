@@ -116,12 +116,14 @@ type Options struct {
 	// alone.
 	Priority string
 
+	// AdmissionClass is an inferred trigger class. An explicit class on the
+	// plan takes precedence.
+	AdmissionClass sparkwing.AdmissionClass
+
 	// safety: set only after a store is chosen, so a caller that builds its
 	// own Options cannot claim a run reached the standalone store.
 	standalone *standaloneRun
 
-	// safety: set only by Run, after the queue answered, so buildRunFlags
-	// records the number the run actually carries rather than the request.
 	priority    priorityRequest
 	prioritySet bool
 
@@ -183,6 +185,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	trigger := opts.Trigger
 	if trigger.Source == "" {
 		trigger.Source = "manual"
+	}
+	if opts.Admission != nil {
+		opts.Admission.AdmissionClass = inferredAdmissionClass(opts.AdmissionClass, trigger.Source)
 	}
 
 	invokeArgs := mergeInvokeArgs(opts)
@@ -291,6 +296,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID, wedgeBudget)
 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
+	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
 	var profileName string
 	var profileIsLocal bool
@@ -303,7 +309,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		IsLocal: profileIsLocal,
 	})
 
-	plan, err := reg.Invoke(ctx, invokeArgs, rc)
+	// safety: Plan runs before the run has a node to log against, so without a
+	// logger here sparkwing.Info from inside Plan resolves to the no-op sink.
+	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, delegate), invokeArgs, rc)
 	if err != nil {
 		if err := backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err)); err != nil {
 			noteLostStateWrite(ctx, "finish run", runID, err)
@@ -312,8 +320,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	// safety: ahead of the snapshot, so run admission and every node admission
-	// that later reads the snapshot see one priority. The operator's number
-	// beats the author's Plan.Priority.
+	// that later reads the snapshot see one priority.
 	if opts.prioritySet {
 		plan.Priority(opts.priority.value)
 	}
@@ -405,7 +412,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwingruntime.WithDryRun(ctx)
 	}
 
-	emitRunStart(opts.Delegate, invocation)
+	emitRunStart(opts.Delegate, invocation, backends.DiskRoot)
 	emitRunPlan(opts.Delegate, plan)
 
 	r := opts.Runner
@@ -435,7 +442,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if pipelineSecrets != nil {
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, pipelineSecrets)
 	}
-	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
 	if backends.LocalCoordination {
 		profileName := ""
@@ -447,8 +453,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		if opts.standalone != nil {
 			child = childStoreEnv{path: opts.standalone.stateDB, reason: opts.standalone.reason}
 		}
-		// safety: the loop's last writes race the caller's deferred store
-		// close, so this run stops it and waits for it before returning.
+		// safety: the loop's last writes race the caller's deferred store close.
 		var triggerLoop sync.WaitGroup
 		triggerLoop.Add(1)
 		defer triggerLoop.Wait()
@@ -488,7 +493,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
 			}
-			// safety: refused standalone runs release their temporary store; admitted runs retain it.
 			if opts.standalone != nil {
 				opts.standalone.refused = true
 			}
@@ -520,14 +524,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		// safety: release only after FinishRun below, so the daemon's
 		// orphan finalizer can never observe a still-running row.
 		defer lease.release()
-		// safety: announce the standalone store only after admission succeeds.
 		opts.standalone.announce()
 		if outcome == admitSkipped {
 			skipDispatch = true
 		} else if lease != nil {
 			// safety: a run that degraded to unadmitted holds no lease and
-			// still proceeds, so this dereference is guarded rather than
-			// implied by admitErr == nil.
+			// still proceeds.
 			leaseToken = lease.token
 			leaseChildToken = lease.childToken
 			leaseHostAdmitted = lease.hostAdmitted
@@ -571,8 +573,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	finishCtx := context.WithoutCancel(ctx)
 	if ferr := backends.State.FinishRun(finishCtx, runID, finalStatus, errMsg); ferr != nil && runErr == nil {
-		// safety: a terminal state the store never took is a run nobody can read
-		// back, so it must not leave here as a success.
+		// safety: a terminal state the store never took is a run nobody can read back.
 		runErr = fmt.Errorf("persist run state: %w", ferr)
 		finalStatus = statusForRunError(runErr)
 		errMsg = runErr.Error()
@@ -746,8 +747,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		ownsState = false
 	}
 	// safety: a standalone run holds the store the fallback already chose, so
-	// profile resolution must not reopen or replace it the way it would for a
-	// run that arrived with none.
+	// profile resolution must not reopen or replace it.
 	keepState := hosted.APISocket != "" || opts.standalone != nil
 	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)
@@ -1221,7 +1221,7 @@ func containsNamedArg(args map[string]string, names []string) bool {
 	return false
 }
 
-func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
+func emitRunStart(delegate sparkwing.Logger, invocation map[string]any, diskRoot string) {
 	if delegate == nil {
 		return
 	}
@@ -1229,7 +1229,7 @@ func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 		TS:    time.Now(),
 		Level: "info",
 		Event: "run_start",
-		Attrs: store.RedactInvocation(invocation),
+		Attrs: withDiskAttrs(store.RedactInvocation(invocation), diskRoot),
 	})
 }
 
@@ -2512,11 +2512,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	}
 	noteEvent(s.ctx, s.backends.State, s.runID, node.ID(), "node_started", nil)
 	nodeStartTS := time.Now()
-	nodeLog.Emit(sparkwing.LogRecord{
-		TS:    nodeStartTS,
-		Level: "info",
-		Event: "node_start",
-	})
+	emitNodeStart(nodeLog, nodeStartTS, s.backends.DiskRoot, nil)
 
 	timeoutMS := cfg.Timeout.Milliseconds()
 	onTimeout := string(cfg.OnExpiry)
@@ -2956,13 +2952,14 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 }
 
 type planSnapshot struct {
-	Pipeline  string         `json:"pipeline"`
-	RunID     string         `json:"run_id"`
-	Priority  int            `json:"priority,omitempty"`
-	Requires  []string       `json:"requires,omitempty"`
-	Nodes     []snapshotNode `json:"nodes"`
-	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
-	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
+	Pipeline       string                   `json:"pipeline"`
+	RunID          string                   `json:"run_id"`
+	Priority       int                      `json:"priority,omitempty"`
+	AdmissionClass sparkwing.AdmissionClass `json:"admission_class,omitempty"`
+	Requires       []string                 `json:"requires,omitempty"`
+	Nodes          []snapshotNode           `json:"nodes"`
+	PlanConc       *snapshotConc            `json:"plan_concurrency,omitempty"`
+	PlanConcs      []snapshotConc           `json:"plan_concurrency_groups,omitempty"`
 
 	Resources *snapshotResources `json:"plan_resources,omitempty"`
 
@@ -3087,11 +3084,12 @@ type planSnapshotMeta struct {
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
 	snap := planSnapshot{
-		Pipeline: rc.Pipeline,
-		RunID:    rc.RunID,
-		Priority: p.PriorityValue(),
-		Requires: slices.Clone(meta.PipelineRequires),
-		Secrets:  meta.Secrets,
+		AdmissionClass: p.AdmissionClassValue(),
+		Pipeline:       rc.Pipeline,
+		RunID:          rc.RunID,
+		Priority:       p.PriorityValue(),
+		Requires:       slices.Clone(meta.PipelineRequires),
+		Secrets:        meta.Secrets,
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
 		snap.PlanConc = &snapshotConc{

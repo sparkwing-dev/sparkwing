@@ -32,6 +32,8 @@ type LocalAdmission struct {
 
 	Origin wingwire.Origin
 
+	AdmissionClass sparkwing.AdmissionClass
+
 	Out io.Writer
 
 	Delegate sparkwing.Logger
@@ -204,6 +206,8 @@ func (la *LocalAdmission) admitRun(
 	if hostPinned {
 		res, prof, drift, overCap = la.resolveHostCost(ctx, backends, pipeline, plan)
 	}
+	class := effectiveAdmissionClass(plan, la.AdmissionClass)
+	la.AdmissionClass = class
 	req := wingwire.AdmissionRequest{
 		RunID:              runID,
 		Pipeline:           pipeline,
@@ -216,6 +220,7 @@ func (la *LocalAdmission) admitRun(
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
 		Priority:           plan.PriorityValue(),
+		Class:              string(class),
 	}
 	if prof != nil {
 		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
@@ -294,7 +299,7 @@ func (la *LocalAdmission) admitNode(
 	node *sparkwing.JobNode,
 	priority int,
 ) (*runLease, error) {
-	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	res, prof, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
 	req := wingwire.AdmissionRequest{
 		RunID:              nodeHostRunID(runID, nodeID),
 		OwnerRunID:         runID,
@@ -310,6 +315,11 @@ func (la *LocalAdmission) admitNode(
 		DriftWarning:       overCap,
 		SubLease:           true,
 		Priority:           priority,
+		Class:              string(la.AdmissionClass),
+	}
+	if prof != nil {
+		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
+		req.SampleCount = prof.SampleCount
 	}
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
 	if err != nil || outcome != admitProceed {

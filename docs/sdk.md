@@ -58,6 +58,53 @@ Consumer-side helper packages can opt their own ctx-taking entry points into the
 guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
 (import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
 
+## Plan() is sealed against side effects
+
+`Plan` receives a sealed context, and a guarded helper handed it refuses:
+
+```go
+func (p Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in In, rc sparkwing.RunContext) error {
+    sparkwing.Bash(ctx, "git rev-parse HEAD").String() // refused: Plan is sealed
+    ...
+}
+```
+
+The seal travels on the context, so a `Plan` body that mints a fresh one
+escapes it, and so does a helper the `Plan` calls that mints its own.
+`sparkwing pipeline lint` is what reports both: it flags plan-time I/O written
+in a `Plan` body whatever context it is handed -- an SDK side-effect helper,
+`os` and `os/exec`, `net/http`, and the like -- and follows the `Plan` one level
+into a package-level function it calls. It matches import paths, so a helper of
+your own that calls `planguard.Guard` is reported by the seal at run time rather
+than by the linter, and a method on the pipeline is not followed.
+
+## What each callback's context carries
+
+Which callback you are in decides whether a guarded helper runs, and
+what `NodeFromContext` and `StepFromContext` answer. A `JobNode.SkipIf` predicate and a
+`CacheKeyFn` carry no node id: both are orchestrator decisions *about* a node
+rather than work inside one.
+
+<!-- BEGIN measured-context-table -->
+| Callback | Side effects | Node id | Step id |
+|---|---|---|---|
+| Pipeline.Plan | no | no | no |
+| JobNode.SkipIf | yes | no | no |
+| CacheKeyFn | yes | no | no |
+| Job body step | yes | yes | yes |
+| Verify | yes | yes | no |
+| BeforeRun | yes | yes | no |
+| AfterRun | yes | yes | no |
+<!-- END measured-context-table -->
+
+A test renders that table from a pipeline run and fails if this page and the
+runtime disagree.
+
+The table describes a run. `sparkwing pipeline plan` and `--describe` seal instead, so a step or spawn
+skip predicate that reaches a guarded helper is refused there and the step is
+reported as skipped, so an inspection command never executes an author's side
+effects.
+
 ## Exec and Bash - running a shell command in a step
 
 Two entry points pick the kind of execution. Each returns a `*Cmd`
@@ -120,7 +167,7 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 ### Tool caches
 
 ```
-ToolCacheDir(tool) string              // cache dir for an external tool, scoped to this worktree
+ToolCacheDir(tool) string              // durable cache scoped to this worktree
 ```
 
 A tool that keys its cache on file content alone - golangci-lint among
@@ -136,8 +183,11 @@ sparkwing.Bash(ctx, "golangci-lint run ./...").
     Run()
 ```
 
-The path derives from `WorkDir()`. Runs in one worktree share a cache;
-each worktree has its own cache.
+`ToolCacheDir` stores caches under `SPARKWING_HOME`, defaulting to
+`~/.sparkwing`, so they outlive the shell. Test binaries default to an isolated
+temporary home; set `SPARKWING_HOME` explicitly when testing persistence.
+`ToolCacheDir` derives its scope from `WorkDir()`: runs in one worktree share
+a cache, and each worktree has its own cache.
 
 `SaveLintCache` and `RestoreLintCache` operate on
 `ToolCacheDir("golangci-lint")` for the current `WorkDir()` and take no

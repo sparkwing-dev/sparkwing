@@ -44,6 +44,26 @@ pipelines:
   - name: store-postgres
     entrypoint: StorePostgres
 
+  # Manual synthetic workloads for comparing local admission modes. Keep each
+  # shape under a stable pipeline name so learned profiles never mix costs.
+  - name: admission-stress
+    entrypoint: AdmissionStressMatrix
+
+  - name: admission-stress-light-sequential
+    entrypoint: AdmissionStressLightSequential
+
+  - name: admission-stress-light-parallel
+    entrypoint: AdmissionStressLightParallel
+
+  - name: admission-stress-medium-fan-in
+    entrypoint: AdmissionStressMediumFanIn
+
+  - name: admission-stress-cpu-heavy
+    entrypoint: AdmissionStressCPUHeavy
+
+  - name: admission-stress-heavy
+    entrypoint: AdmissionStressHeavy
+
   - name: build
     entrypoint: Build
 

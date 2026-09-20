@@ -107,6 +107,12 @@ func RenderUnreachableDaemon(w io.Writer, format string, cause error) error {
 }
 
 func renderQueuePlain(w io.Writer, qs wingwire.QueueState, now time.Time) error {
+	if qs.AdmissionMode != "" {
+		fmt.Fprintf(w, "admission\t%s\n", qs.AdmissionMode)
+	}
+	if qs.Jev != nil {
+		fmt.Fprintf(w, "jev\t%d\t%d\t%d\n", qs.Jev.Attempts, qs.Jev.Admits, qs.Jev.Fallbacks)
+	}
 	for _, r := range qs.Resources {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
@@ -299,14 +305,14 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Queued")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tPRI\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tSTARTS IN\tFINISH\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tPRI\tCLASS\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tSTARTS IN\tFINISH\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t-\t(no one queued)\t\t\t\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "-\t-\t-\t(no one queued)\t\t\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
 		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
 		finish, word := waiterSchedule(wt)
-		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
+		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, orDash(wt.Class), run,
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
 			orDash(wt.CostSource), fmtWaiterStart(wt),
 			fmtFinishClock(now, finish, word),
@@ -643,7 +649,7 @@ func queueDriftNotes(qs wingwire.QueueState) []queueDriftNote {
 }
 
 func FmtDaemonHeader(qs wingwire.QueueState) string {
-	if qs.DaemonVersion == "" && qs.DaemonUptimeMS <= 0 {
+	if qs.DaemonVersion == "" && qs.DaemonUptimeMS <= 0 && qs.AdmissionMode == "" {
 		return ""
 	}
 	version := qs.DaemonVersion
@@ -654,7 +660,14 @@ func FmtDaemonHeader(qs wingwire.QueueState) string {
 	if qs.DaemonUptimeMS > 0 {
 		up = "up " + (time.Duration(qs.DaemonUptimeMS) * time.Millisecond).Round(time.Second).String()
 	}
-	return fmt.Sprintf("daemon %s, %s", version, up)
+	header := fmt.Sprintf("daemon %s, %s", version, up)
+	if qs.AdmissionMode != "" {
+		header += ", admission " + qs.AdmissionMode
+	}
+	if qs.Jev != nil {
+		header += fmt.Sprintf(" (%d Jev attempts, %d admits, %d fallbacks)", qs.Jev.Attempts, qs.Jev.Admits, qs.Jev.Fallbacks)
+	}
+	return header
 }
 
 func FmtCapacityChange(cc *wingwire.CapacityChange) string {

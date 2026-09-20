@@ -29,9 +29,6 @@ var releaseRecipe = []string{
 func releasePlan(t *testing.T) *sparkwing.Plan {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
-		t.Fatalf("seed fake repo root: %v", err)
-	}
 	prev := sparkwing.CurrentRuntime().WorkDir
 	sparkwing.SetWorkDir(dir)
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })

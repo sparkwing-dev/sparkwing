@@ -36,6 +36,58 @@ unlock.
   obsession, and feature envy. Reproducible shuffled samples rotate coverage
   beyond the highest-ranked candidates. It batches independent judgments and
   reports advisory probabilities.
+## [v0.58.0] - 2026-09-20
+### Added
+
+- **orchestrator:** `run_start` and every `node_start` record carry
+  `disk_free_bytes`, `disk_total_bytes` and `disk_path` for the volume the
+  run's own state sits on, so a run starved of disk is distinguishable from an
+  idle one. A run whose state is remote has no local volume, and a volume that
+  cannot be read omits the fields rather than reporting zero free.
+
+## [v0.57.0] - 2026-09-20
+### Fixed
+
+- **orchestrator:** SDK logging calls in `Pipeline.Plan` reach the run log during
+  initial planning. Node reconstruction and replay omit these records to avoid
+  duplicates. Plan records have no node ID, so node-scoped log reads exclude them;
+  terminal visibility follows the selected renderer.
+
+### Changed
+
+- **sdk (Breaking):** `ToolCacheDir` stores caches under `SPARKWING_HOME` instead of the
+  OS temporary directory, so separate development shells reuse the same
+  worktree's cache. It panics where the Sparkwing home cannot be resolved,
+  which the OS temporary directory could not do. Existing temporary caches are
+  not migrated, and nothing reclaims the new ones: they sit under the Sparkwing
+  home, one directory per worktree path, until removed by hand. See
+  [the migration guide](docs/migrations/v0.57.0.md#the-tool-cache-moves-under-sparkwing_home).
+
+- **lint (Breaking):** `sparkwing pipeline lint` follows a `Plan` body one level
+  into a package-level function it calls, so I/O a `Plan` delegates is reported
+  where the seal cannot see it. A method on the pipeline is not followed. It also
+  treats a `sparkwing/services` call inside `Plan` as plan-time I/O, as it already
+  did for `sparkwing/docker` and `sparkwing/git`. Both can turn a pipeline's lint
+  red on code this release does not change. See
+  [the migration guide](docs/migrations/v0.57.0.md#the-pipeline-linter-reaches-further).
+
+### Removed
+
+- **internal:** `sparkwingruntime.GuardPlanTime` and `IsPlanTime`; neither had a caller.
+
+## [v0.56.0] - 2026-09-20
+### Added
+
+- **sdk + admission:** Plans can classify work as critical, interactive, normal,
+  or batch, and the local daemon supports classic, off, auto, custom, and Jev
+  scheduling modes. Classic remains the default and preserves the prior queue
+  rules. Auto scheduling learns short-run duration profiles, prioritizes
+  interactive hooks, and permits one bounded CPU-only burst; custom policies
+  tune the same deterministic controls, while Jev may extend bounded backfill
+  decisions and falls back to auto when its answer is unavailable or uncertain.
+- **checks:** The manual `admission-stress` pipeline provides repeatable light,
+  medium, and heavy CPU, memory, and sleep workloads in sequential, parallel,
+  and fan-in DAGs, with selectable workload classes for admission comparisons.
 
 ### Changed
 

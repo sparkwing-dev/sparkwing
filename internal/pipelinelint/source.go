@@ -15,7 +15,13 @@ func AnalyzeSource(dir string) ([]Finding, error) {
 		return nil, err
 	}
 	fset := token.NewFileSet()
-	var findings []Finding
+	type parsedFile struct {
+		path    string
+		file    *ast.File
+		imports map[string]string
+	}
+	var parsed []parsedFile
+	helpers := map[string]helperFunc{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
 			continue
@@ -26,17 +32,38 @@ func AnalyzeSource(dir string) ([]Finding, error) {
 			return nil, perr
 		}
 		imports := importMap(file)
+		parsed = append(parsed, parsedFile{path: path, file: file, imports: imports})
 		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Body == nil {
+				continue
+			}
+			helpers[fn.Name.Name] = helperFunc{decl: fn, imports: imports, file: path}
+		}
+	}
+
+	var findings []Finding
+	for _, pf := range parsed {
+		for _, decl := range pf.file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || !isPlanMethod(fn) {
 				continue
 			}
-			a := &analysis{fset: fset, file: path, typeName: receiverTypeName(fn), imports: imports}
+			a := &analysis{
+				fset: fset, file: pf.path, typeName: receiverTypeName(fn),
+				imports: pf.imports, helpers: helpers, visited: map[string]bool{},
+			}
 			a.run(fn.Body)
 			findings = append(findings, a.findings...)
 		}
 	}
 	return findings, nil
+}
+
+type helperFunc struct {
+	decl    *ast.FuncDecl
+	imports map[string]string
+	file    string
 }
 
 type analysis struct {
@@ -45,6 +72,9 @@ type analysis struct {
 	typeName string
 	imports  map[string]string
 	builders map[string]string
+	helpers  map[string]helperFunc
+	visited  map[string]bool
+	depth    int
 	findings []Finding
 }
 
@@ -73,6 +103,7 @@ func (a *analysis) run(body *ast.BlockStmt) {
 		case *ast.CallExpr:
 			a.checkPlanIO(node)
 			a.checkRuntimeBranch(node)
+			a.followSamePackageCall(node)
 		case *ast.SelectorExpr:
 			a.checkRuntimeSelector(node)
 		case *ast.AssignStmt:
@@ -82,6 +113,27 @@ func (a *analysis) run(body *ast.BlockStmt) {
 		}
 		return true
 	})
+}
+
+func (a *analysis) followSamePackageCall(call *ast.CallExpr) {
+	if a.depth > 0 {
+		return
+	}
+	name, ok := call.Fun.(*ast.Ident)
+	if !ok {
+		return
+	}
+	helper, known := a.helpers[name.Name]
+	if !known || a.visited[name.Name] {
+		return
+	}
+	a.visited[name.Name] = true
+	sub := &analysis{
+		fset: a.fset, file: helper.file, typeName: a.typeName,
+		imports: helper.imports, helpers: a.helpers, visited: a.visited, depth: a.depth + 1,
+	}
+	sub.run(helper.decl.Body)
+	a.findings = append(a.findings, sub.findings...)
 }
 
 // collectBuilders records which SDK constructor each local variable holds, so
@@ -137,7 +189,8 @@ func (a *analysis) checkPlanIO(call *ast.CallExpr) {
 		if _, hit := sdkIOFuncs[name]; hit {
 			flag()
 		}
-	case strings.Contains(path, "/sparkwing/docker"), strings.Contains(path, "/sparkwing/git"):
+	case strings.Contains(path, "/sparkwing/docker"), strings.Contains(path, "/sparkwing/git"),
+		strings.Contains(path, "/sparkwing/services"):
 		flag()
 	case path == "os":
 		if _, hit := osIOFuncs[name]; hit {

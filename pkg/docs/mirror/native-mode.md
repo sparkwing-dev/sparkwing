@@ -49,6 +49,10 @@ Locally, nothing needs to stay up between runs:
 
 The one daemon on a local machine is `wingd`, the admission daemon. It starts on demand when a pipeline needs a concurrency decision, serves the runs that asked for it, and exits when it goes idle. `sparkwing daemon status` reports it and never starts one.
 
+The daemon's CPU and memory scheduling is configured independently from pipeline
+risk. See [Local admission policy](admission.md) for the compatibility-preserving
+`classic` default and the `off`, `auto`, `jev`, and `custom` modes.
+
 ## Multi-run demo
 
 In one terminal, start a couple of background runs:
@@ -69,4 +73,3 @@ Point your browser at `http://127.0.0.1:4343`. Both runs stream live; when they 
 ## What lives in the controller instead
 
 Cluster mode. The controller queues work for runners that poll and claim it, ingests GitHub webhooks, and tracks team-wide history -- none of which applies when you iterate on your own laptop.
-

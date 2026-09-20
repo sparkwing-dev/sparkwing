@@ -1,5 +1,10 @@
 # sparkwing
 
+const AdmissionBatch AdmissionClass = "batch"
+type AdmissionClass string
+const AdmissionCritical AdmissionClass = "critical"
+const AdmissionInteractive AdmissionClass = "interactive"
+const AdmissionNormal AdmissionClass = "normal"
 type AfterRunFn func(ctx context.Context, err error)
 func Always() Predicate
 func And(preds ...Predicate) Predicate
@@ -457,6 +462,8 @@ type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, max
 func PipelineSecrets[T any](ctx context.Context) *T
 type Plan struct {
 }
+func (p *Plan) AdmissionClass(class AdmissionClass) *Plan
+func (p *Plan) AdmissionClassValue() AdmissionClass
 func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan
 func (p *Plan) ConcurrencyCost() int
 func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup
@@ -509,12 +516,10 @@ type ProfileResolutionContext struct {
 type PullRequest struct {
 	Number int
 
-	Action string
-
+	Action  string
 	BaseRef string
 
 	BaseSHA string
-
 	HeadRef string
 
 	HeadSHA string

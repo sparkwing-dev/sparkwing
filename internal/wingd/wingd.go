@@ -69,6 +69,10 @@ type Config struct {
 	BudgetSource BudgetSource
 	BudgetOrigin string
 
+	AdmissionPolicy *AdmissionPolicy
+	JevAdvisor      JevAdvisor
+	TypeSafeAPIKey  string
+
 	Sampler HostSampler
 
 	ContainerRoot string

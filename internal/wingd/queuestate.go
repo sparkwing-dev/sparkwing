@@ -19,6 +19,10 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	snap := d.ledger.Snapshot()
 	var qs wingwire.QueueState
 	qs.DaemonVersion = d.cfg.Version
+	qs.AdmissionMode = string(d.cfg.admissionPolicy().Mode)
+	if qs.AdmissionMode == "jev" {
+		qs.Jev = &wingwire.JevAdmissionStats{Attempts: d.jevAttempts, Admits: d.jevAdmits, Fallbacks: d.jevFallbacks}
+	}
 	if !d.startedAt.IsZero() {
 		qs.DaemonUptimeMS = d.now().Sub(d.startedAt).Milliseconds()
 	}
@@ -97,16 +101,18 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	now := d.now()
 	for _, ls := range snap.Leases {
 		rowID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
+		charge, recorded := d.leaseCharge[ls.ID]
+		if !recorded {
+			charge = wingwire.HostResources{Cores: float64(ls.MilliCores) / 1000.0, MemoryBytes: int64(ls.MemoryBytes)}
+		}
 		h := wingwire.Holder{
-			RunID:         rowID.runID,
-			ParticipantID: rowID.participantID,
-			DisplayRunID:  rowID.displayRunID,
-			Resources: wingwire.HostResources{
-				Cores:       float64(ls.MilliCores) / 1000.0,
-				MemoryBytes: int64(ls.MemoryBytes),
-			},
+			RunID:          rowID.runID,
+			ParticipantID:  rowID.participantID,
+			DisplayRunID:   rowID.displayRunID,
+			Resources:      charge,
+			Burst:          ls.BurstCores,
 			Semaphores:     claimKeys(ls.Claims),
-			ConnectionOnly: !leaseHoldsResources(snap, ls),
+			ConnectionOnly: !leaseHoldsResources(snap, ls) && charge.Cores == 0 && charge.MemoryBytes == 0,
 		}
 		if c := d.byRun[ls.RequestID]; c != nil {
 			h.Pipeline = c.pipeline
@@ -184,16 +190,19 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		rowID := queueRowIdentity(w.RequestID, c)
 		rationale := d.costRationale(c)
 		waiter := wingwire.Waiter{
-			RunID:         rowID.runID,
-			ParticipantID: rowID.participantID,
-			DisplayRunID:  rowID.displayRunID,
-			Position:      i + 1,
-			Priority:      w.Priority,
-			BackfillCount: w.BackfillCount,
+			RunID:           rowID.runID,
+			ParticipantID:   rowID.participantID,
+			DisplayRunID:    rowID.displayRunID,
+			Position:        i + 1,
+			Priority:        w.Priority,
+			Class:           string(w.Class),
+			BackfillCount:   w.BackfillCount,
+			BackfillDelayMS: w.BackfillDelayMS,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
 			},
+			Burst:          w.BurstCores,
 			Semaphores:     claimKeys(w.Claims),
 			WaitingOn:      waitingOn(w, remaining),
 			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
@@ -201,7 +210,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		}
 		waiter.BlockingReason = queueBlockingReason(waiter.BlockingReason, waiter.WaitingOn, i+1)
 		if w.BackfillCount > 0 {
-			protection := fmt.Sprintf("protected from further backfill after %d younger grant(s)", w.BackfillCount)
+			protection := fmt.Sprintf("protected from further backfill after %d younger grant(s); measured delay spent %dms", w.BackfillCount, w.BackfillDelayMS)
 			if waiter.BlockingReason == "" {
 				waiter.BlockingReason = protection
 			} else {

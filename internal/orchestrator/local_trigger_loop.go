@@ -186,7 +186,7 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 	}
 	pinned := binPath != ""
 	if !pinned {
-		//nolint:contextcheck // the compile cache owns its own context, as it did before the pin.
+		//nolint:contextcheck // the compile cache owns its own context.
 		if binPath, err = cache.compile(sparkwingDir); err != nil {
 			return fmt.Errorf("compile %s: %w", sparkwingDir, err)
 		}
@@ -224,6 +224,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		// ambient one from the submitting shell is the consumer's environment
 		// shaping the run rather than the submission.
 		PriorityEnv:                    {},
+		AdmissionClassEnv:              {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
 		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},
 		StandaloneStateDBEnv:               {}, StandaloneReasonEnv: {},

@@ -141,6 +141,7 @@ func Main() {
 		Only:                      os.Getenv("SPARKWING_ONLY"),
 		NoCache:                   noCacheFromEnv(),
 		Priority:                  os.Getenv(PriorityEnv),
+		AdmissionClass:            admissionClassFromEnv(),
 		DryRun:                    dryRunFromEnv(),
 		LocalOnly:                 os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		Fleet:                     os.Getenv("SPARKWING_FLEET") == "1",
