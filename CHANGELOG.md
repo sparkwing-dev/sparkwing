@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.58.0] - 2026-09-20
 ### Added
 
 - **orchestrator:** `run_start` and every `node_start` record carry
