@@ -371,7 +371,7 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, pa
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
-		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{"cache_hit": true}})
+		emitNodeStart(nodeLog, ts, r.backends.DiskRoot, map[string]any{"cache_hit": true})
 		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
 			"outcome": string(sparkwing.Cached), "duration_ms": int64(0), "cache_hit": true,
 		}})
@@ -395,7 +395,7 @@ func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Re
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
-		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start"})
+		emitNodeStart(nodeLog, ts, r.backends.DiskRoot, nil)
 		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
 			"outcome": string(sparkwing.SkippedConcurrent), "duration_ms": int64(0),
 		}})
@@ -771,9 +771,9 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
-		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{
+		emitNodeStart(nodeLog, ts, r.backends.DiskRoot, map[string]any{
 			"coalesced_from": fmt.Sprintf("%s/%s", leaderRunID, leaderNodeID),
-		}})
+		})
 		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
 			"outcome": string(outcome), "duration_ms": int64(0),
 			"coalesced_from": fmt.Sprintf("%s/%s", leaderRunID, leaderNodeID),

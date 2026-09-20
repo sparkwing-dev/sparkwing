@@ -412,7 +412,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwingruntime.WithDryRun(ctx)
 	}
 
-	emitRunStart(opts.Delegate, invocation)
+	emitRunStart(opts.Delegate, invocation, backends.DiskRoot)
 	emitRunPlan(opts.Delegate, plan)
 
 	r := opts.Runner
@@ -1221,7 +1221,7 @@ func containsNamedArg(args map[string]string, names []string) bool {
 	return false
 }
 
-func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
+func emitRunStart(delegate sparkwing.Logger, invocation map[string]any, diskRoot string) {
 	if delegate == nil {
 		return
 	}
@@ -1229,7 +1229,7 @@ func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 		TS:    time.Now(),
 		Level: "info",
 		Event: "run_start",
-		Attrs: store.RedactInvocation(invocation),
+		Attrs: withDiskAttrs(store.RedactInvocation(invocation), diskRoot),
 	})
 }
 
@@ -2512,11 +2512,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	}
 	noteEvent(s.ctx, s.backends.State, s.runID, node.ID(), "node_started", nil)
 	nodeStartTS := time.Now()
-	nodeLog.Emit(sparkwing.LogRecord{
-		TS:    nodeStartTS,
-		Level: "info",
-		Event: "node_start",
-	})
+	emitNodeStart(nodeLog, nodeStartTS, s.backends.DiskRoot, nil)
 
 	timeoutMS := cfg.Timeout.Milliseconds()
 	onTimeout := string(cfg.OnExpiry)

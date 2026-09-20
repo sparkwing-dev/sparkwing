@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **orchestrator:** `run_start` and every `node_start` record carry
+  `disk_free_bytes`, `disk_total_bytes` and `disk_path` for the volume the
+  run's own state sits on, so a run starved of disk is distinguishable from an
+  idle one. A run whose state is remote has no local volume, and a volume that
+  cannot be read omits the fields rather than reporting zero free.
+
 ## [v0.57.0] - 2026-09-20
 ### Fixed
 

@@ -1,10 +1,13 @@
 //go:build windows
 
-package logs
+package diskspace
 
 import "golang.org/x/sys/windows"
 
-func diskSpace(path string) (free, total uint64, ok bool) {
+// Usage reports the bytes available to this user and the volume's total
+// size. ok is false where the path cannot be queried, which a caller
+// treats as "unknown" rather than zero.
+func Usage(path string) (free, total uint64, ok bool) {
 	pathPtr, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return 0, 0, false

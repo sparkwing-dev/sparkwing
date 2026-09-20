@@ -1,10 +1,13 @@
 //go:build !windows
 
-package logs
+package diskspace
 
 import "syscall"
 
-func diskSpace(path string) (free, total uint64, ok bool) {
+// Usage reports the bytes available to this user and the volume's total
+// size. ok is false where the path cannot be stat'd, which a caller treats
+// as "unknown" rather than zero.
+func Usage(path string) (free, total uint64, ok bool) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, 0, false

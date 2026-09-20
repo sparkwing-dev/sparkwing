@@ -241,11 +241,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	noteEvent(ctx, r.backends.State, runID, node.ID(), "node_started", nil)
 
 	nodeStartTS := time.Now()
-	nlog.Emit(sparkwing.LogRecord{
-		TS:    nodeStartTS,
-		Level: "info",
-		Event: "node_start",
-	})
+	emitNodeStart(nlog, nodeStartTS, r.backends.DiskRoot, nil)
 	emitNodeEnd := func(outcome sparkwing.Outcome, errMsg string) {
 		attrs := map[string]any{
 			"outcome":     string(outcome),
