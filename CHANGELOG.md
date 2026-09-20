@@ -26,19 +26,6 @@ unlock.
   initial planning. Node reconstruction and replay omit these records to avoid
   duplicates. Plan records have no node ID, so node-scoped log reads exclude them;
   terminal visibility follows the selected renderer.
-## [v0.56.0] - 2026-09-20
-### Added
-
-- **sdk + admission:** Plans can classify work as critical, interactive, normal,
-  or batch, and the local daemon supports classic, off, auto, custom, and Jev
-  scheduling modes. Classic remains the default and preserves the prior queue
-  rules. Auto scheduling learns short-run duration profiles, prioritizes
-  interactive hooks, and permits one bounded CPU-only burst; custom policies
-  tune the same deterministic controls, while Jev may extend bounded backfill
-  decisions and falls back to auto when its answer is unavailable or uncertain.
-- **checks:** The manual `admission-stress` pipeline provides repeatable light,
-  medium, and heavy CPU, memory, and sleep workloads in sequential, parallel,
-  and fan-in DAGs, with selectable workload classes for admission comparisons.
 
 ### Changed
 
@@ -58,11 +45,28 @@ unlock.
   red on code this release does not change. See
   [the migration guide](docs/migrations/_unreleased.md#the-pipeline-linter-reaches-further).
 
-- **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.
-
 ### Removed
 
 - **internal:** `sparkwingruntime.GuardPlanTime` and `IsPlanTime`; neither had a caller.
+
+## [v0.56.0] - 2026-09-20
+### Added
+
+- **sdk + admission:** Plans can classify work as critical, interactive, normal,
+  or batch, and the local daemon supports classic, off, auto, custom, and Jev
+  scheduling modes. Classic remains the default and preserves the prior queue
+  rules. Auto scheduling learns short-run duration profiles, prioritizes
+  interactive hooks, and permits one bounded CPU-only burst; custom policies
+  tune the same deterministic controls, while Jev may extend bounded backfill
+  decisions and falls back to auto when its answer is unavailable or uncertain.
+- **checks:** The manual `admission-stress` pipeline provides repeatable light,
+  medium, and heavy CPU, memory, and sleep workloads in sequential, parallel,
+  and fan-in DAGs, with selectable workload classes for admission comparisons.
+
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.55.0, so a fresh scaffold compiles against that release.
+
 
 ## [v0.55.0] - 2026-09-18
 ### Added
