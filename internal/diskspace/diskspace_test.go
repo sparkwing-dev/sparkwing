@@ -22,7 +22,8 @@ func TestUsage_DescribesTheVolumeHoldingThePath(t *testing.T) {
 }
 
 func TestUsage_RefusesAPathItCannotRead(t *testing.T) {
-	for _, path := range []string{"", "/no/such/volume/on/any/machine"} {
+	missing := filepath.Join(t.TempDir(), "nothing-created-this")
+	for _, path := range []string{"", missing} {
 		free, total, ok := diskspace.Usage(path)
 		if ok {
 			t.Errorf("Usage(%q) reported ok with %d free of %d total; an unreadable path has no volume to describe", path, free, total)
