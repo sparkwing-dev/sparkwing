@@ -320,7 +320,16 @@ var cmdConfigureXrepo = Command{
 cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
 annotations. Auto-populated when you run 'sparkwing run <pipeline>'
 in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).`,
+disable).
+
+The registry lives at $SPARKWING_REPOS (if set), else
+$XDG_CONFIG_HOME/sparkwing/repos.yaml, else
+~/.config/sparkwing/repos.yaml. SPARKWING_HOME does not move it; it
+is the state, cache and logs root, and a registered checkout is a
+machine-wide fact that outlives any one home. A write from a command
+running under a home of its own is refused rather than sent to the
+machine's registry: set SPARKWING_REPOS to a path inside that home
+to keep it there.`,
 	SubcommandOrder: []string{"list", "add", "remove", "prune"},
 	Examples: []Example{
 		{"Register the current checkout", "sparkwing configure xrepo add"},
@@ -469,7 +478,13 @@ persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
 version-hold); the SPARKWING_VERSION_HOLD environment variable
 overrides the file for a shell or a whole fleet. Releases beyond the
 hold still show in 'sparkwing version' so the operator sees what is
-being deferred.`,
+being deferred.
+
+SPARKWING_HOME does not move this file; it is the state, cache and
+logs root, and the hold is machine-wide even though the toolchains it
+governs live under that root. A --set or --clear from a command
+running under a home of its own is refused rather than applied to the
+machine's hold: set SPARKWING_VERSION_HOLD to hold that shell alone.`,
 	Flags: []FlagSpec{
 		{Name: "set", Argument: "VERSION", Desc: "Set the ceiling (vMAJOR.MINOR or vMAJOR.MINOR.PATCH)", Group: "Action"},
 		{Name: "clear", Desc: "Remove the hold so upgrades are unrestricted", Group: "Action"},
@@ -3373,7 +3388,14 @@ invoked through 'sparkwing run <pipeline>' locally.
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
 time. Pipelines declare a typed Secrets provider to resolve their secrets.
-'secrets list' masks values; 'secrets get' prints them.`,
+'secrets list' masks values; 'secrets get' prints them.
+
+SPARKWING_HOME does not move the local files; it is the state, cache
+and logs root, and the local store is machine-wide. A write from a
+command running under a home of its own is refused rather than sent
+to the machine's store: set SPARKWING_SECRETS (masked) or
+SPARKWING_CONFIG_ENV (--plain) to a path inside that home to keep it
+there.`,
 	SubcommandOrder: []string{"set", "get", "list", "delete", "rotate"},
 }
 
@@ -3959,7 +3981,13 @@ Tailscale Serve or reverse proxy and therefore require a literal loopback
 listener. Plain HTTP is accepted only at a literal IP that the local Tailscale
 client confirms belongs to this machine. Tailscale supplies transport, not
 Sparkwing authorization: only explicitly enrolled helpers receive credentials,
-and no peer discovery occurs.`,
+and no peer discovery occurs.
+
+SPARKWING_HOME does not move fleet.yaml; it is the state, cache and
+logs root, and the fleet policy is machine-wide. A write from a
+command running under a home of its own is refused rather than sent
+to the machine's policy: set SPARKWING_FLEET_CONFIG to a path inside
+that home to keep it there.`,
 	Flags: []FlagSpec{
 		{Name: "tailnet", Desc: "Use this machine's Tailscale IPv4 address on port 4346", Group: "Network"},
 		{Name: "listen", Argument: "HOST:PORT", Desc: "Fixed private listener address", Group: "Network"},

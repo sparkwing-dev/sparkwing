@@ -2,7 +2,6 @@ package orchestrator_test
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,10 +43,7 @@ func init() {
 
 func TestRun_AnnotationsAndSummariesPersistMasked(t *testing.T) {
 	p := newPaths(t)
-	dotenv := filepath.Join(t.TempDir(), "secrets.env")
-	if err := secrets.WriteDotenvEntry(dotenv, "WRAP_TOKEN", wrapOrderSecret); err != nil {
-		t.Fatalf("seed secret: %v", err)
-	}
+	dotenv := seedLocalSecret(t, "", "WRAP_TOKEN", wrapOrderSecret)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "wrap-order-leak",

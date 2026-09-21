@@ -291,11 +291,14 @@ file. Other syntax and workflow checks remain active.
   so it is invisible to `sparkwing queue` and the dashboard and contends with
   every other run on the OS. It is not a way around a full queue. It does not
   move the user config directory, which answers to `XDG_CONFIG_HOME` and the
-  per-file overrides (`SPARKWING_PROFILES`, `SPARKWING_REPOS`), because a
-  profile is a machine-wide connection that outlives any one home. A profiles
-  write from a command running under a home of its own is refused rather than
-  sent to the machine's config; set `SPARKWING_PROFILES=DIR/profiles.yaml` to
-  keep it inside that home.
+  per-file overrides, because what lives there is machine-wide and outlives any
+  one home. Every config write from a command running under a home of its own
+  is refused rather than sent to the machine's config, naming both paths and
+  the value that keeps the write inside the home: `SPARKWING_PROFILES` for
+  `profiles.yaml`, `SPARKWING_REPOS` for `repos.yaml`, `SPARKWING_SECRETS` and
+  `SPARKWING_CONFIG_ENV` for the local secret stores, `SPARKWING_FLEET_CONFIG`
+  for `fleet.yaml`. No variable moves `version-hold`; `SPARKWING_VERSION_HOLD`
+  holds one shell without writing it.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is

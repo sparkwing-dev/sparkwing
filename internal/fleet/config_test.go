@@ -127,6 +127,9 @@ func TestLoadRejectsReachableConfigSymlinkOrBroadMode(t *testing.T) {
 
 func TestCreateWritesOwnerOnlyConfigAndNeverReplacesIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config", Filename)
+	// safety: Create refuses a config outside the sparkwing home unless the
+	// operator named the file, and a test binary's home is the test sandbox.
+	t.Setenv(PathEnv, path)
 	cfg := Config{
 		Listen: "127.0.0.1:7443", PublicURL: "http://127.0.0.1:7443",
 		Local: Local{MaxConcurrent: 1, Contribution: "50%,50%"},

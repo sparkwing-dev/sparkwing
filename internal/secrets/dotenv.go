@@ -9,17 +9,49 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/dotenv"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const (
+	// SecretsPathEnv names the masked local store, the way SPARKWING_PROFILES
+	// names profiles.yaml. SPARKWING_HOME does not move the file.
+	SecretsPathEnv = "SPARKWING_SECRETS"
+
+	// ConfigPathEnv names the plain local store, the one `secret set --plain`
+	// writes.
+	ConfigPathEnv = "SPARKWING_CONFIG_ENV"
+)
+
+// DefaultDotenvPath reports the masked local store: $SPARKWING_SECRETS when
+// set, else secrets.env in [fssecure.ConfigDir].
 func DefaultDotenvPath() (string, error) {
+	if v := os.Getenv(SecretsPathEnv); v != "" {
+		return v, nil
+	}
 	return fssecure.ConfigFile("secrets.env")
 }
 
+// DefaultConfigPath reports the plain local store: $SPARKWING_CONFIG_ENV when
+// set, else config.env in [fssecure.ConfigDir].
 func DefaultConfigPath() (string, error) {
+	if v := os.Getenv(ConfigPathEnv); v != "" {
+		return v, nil
+	}
 	return fssecure.ConfigFile("config.env")
+}
+
+// safety: a command under a scratch home is expected to stay there, and a
+// secret written into the operator's real store is found only by accident.
+// Which variable moves this file depends on which of the two stores it is.
+func guardSandboxWrite(path string) error {
+	override := SecretsPathEnv
+	if plain, err := DefaultConfigPath(); err == nil && plain == path {
+		override = ConfigPathEnv
+	}
+	return configguard.GuardWrite("the local secret store", override, path)
 }
 
 type DotenvSource struct {
@@ -126,6 +158,9 @@ func WriteDotenvEntry(path, name, value string) error {
 		}
 		path = p
 	}
+	if err := guardSandboxWrite(path); err != nil {
+		return err
+	}
 	if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("prepare %s: %w", filepath.Dir(path), err)
 	}
@@ -144,6 +179,9 @@ func DeleteDotenvEntry(path, name string) error {
 			return err
 		}
 		path = p
+	}
+	if err := guardSandboxWrite(path); err != nil {
+		return err
 	}
 	existing, err := parseDotenvFile(path)
 	if err != nil {

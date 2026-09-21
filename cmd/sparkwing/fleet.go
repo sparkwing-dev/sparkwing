@@ -38,7 +38,7 @@ func runFleetInit(args []string) error {
 		}
 		return err
 	}
-	path := os.Getenv("SPARKWING_FLEET_CONFIG")
+	path := os.Getenv(fleet.PathEnv)
 	var err error
 	if path == "" {
 		path, err = fleet.DefaultPath()

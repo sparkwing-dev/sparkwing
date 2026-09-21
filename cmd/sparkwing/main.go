@@ -235,7 +235,7 @@ func dispatchRun(args []string) error {
 	}
 	var fleetSnapshot *worktreeSnapshot
 	if flags.fleet {
-		configPath := os.Getenv("SPARKWING_FLEET_CONFIG")
+		configPath := os.Getenv(fleet.PathEnv)
 		if configPath == "" {
 			configPath, err = fleet.DefaultPath()
 			if err != nil {
@@ -252,7 +252,7 @@ func dispatchRun(args []string) error {
 		if len(fleetConfig.Executors) == 0 {
 			return fmt.Errorf("--sw-fleet has no enrolled helpers; %s lists no executors", configPath)
 		}
-		env = setEnv(env, "SPARKWING_FLEET_CONFIG", configPath)
+		env = setEnv(env, fleet.PathEnv, configPath)
 		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 			return err
 		}

@@ -19,6 +19,13 @@ Used for prod / staging secrets that the cluster needs at run
 time. Pipelines declare a typed Secrets provider to resolve their secrets.
 'secrets list' masks values; 'secrets get' prints them.
 
+SPARKWING_HOME does not move the local files; it is the state, cache
+and logs root, and the local store is machine-wide. A write from a
+command running under a home of its own is refused rather than sent
+to the machine's store: set SPARKWING_SECRETS (masked) or
+SPARKWING_CONFIG_ENV (--plain) to a path inside that home to keep it
+there.
+
 ### Subcommands
 
 - `set` -- Store (or replace) a secret value

@@ -10,6 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -24,8 +25,15 @@ type Config struct {
 	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
 }
 
+// PathEnv names the repo registry, the way SPARKWING_HOME names the state root.
+const PathEnv = "SPARKWING_REPOS"
+
+// DefaultPath reports the repo registry: $SPARKWING_REPOS when set, else
+// repos.yaml in [fssecure.ConfigDir]. SPARKWING_HOME does not move it, because
+// a registered repo is a machine-wide fact that outlives any one home;
+// [configguard.ErrOutsideSandboxHome] is how a write says so.
 func DefaultPath() (string, error) {
-	if v := os.Getenv("SPARKWING_REPOS"); v != "" {
+	if v := os.Getenv(PathEnv); v != "" {
 		return v, nil
 	}
 	if os.Getenv("XDG_CONFIG_HOME") == "" && paths.UnderTest() {
@@ -49,7 +57,12 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// Save writes cfg to path. It refuses a path outside the sparkwing home in
+// use; see [configguard.GuardWrite].
 func Save(path string, cfg *Config) error {
+	if err := configguard.GuardWrite("the repo registry", PathEnv, path); err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	if err := fssecure.EnsureConfigDir(dir); err != nil {
 		return fmt.Errorf("prepare %s: %w", dir, err)

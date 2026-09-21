@@ -91,6 +91,9 @@ func TestHoldRefusalOmitsOverride(t *testing.T) {
 func TestResolveVersionHold_EnvOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	// safety: version hold refuses a write outside the sparkwing home in use,
+	// and this one keeps the config the test writes inside the home it names.
+	t.Setenv("SPARKWING_HOME", dir)
 	t.Setenv(versionHoldEnv, "")
 	if err := runVersionHold([]string{"--set", "v0.15"}); err != nil {
 		t.Fatalf("set hold: %v", err)
@@ -107,6 +110,9 @@ func TestResolveVersionHold_EnvOverridesFile(t *testing.T) {
 func TestRunVersionHold_SetClearRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	// safety: version hold refuses a write outside the sparkwing home in use,
+	// and this one keeps the config the test writes inside the home it names.
+	t.Setenv("SPARKWING_HOME", dir)
 	t.Setenv(versionHoldEnv, "")
 	if err := runVersionHold([]string{"--set", "v0.15"}); err != nil {
 		t.Fatalf("set: %v", err)
