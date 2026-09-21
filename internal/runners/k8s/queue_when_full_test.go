@@ -226,9 +226,9 @@ func TestRunNode_ShapeNoMachineCanHoldStillFailsAtTheGracePeriod(t *testing.T) {
 	defer cancel()
 	st, srv := queueTestStore(t, nil)
 
-	pod := unschedulablePodAsking(64, cpuBandLarge)
+	pod := unschedulablePodAsking(64, cpuBandSmall)
 	kcli := fake.NewSimpleClientset(pendingJob(), pod,
-		poolNode("pool-a", cpuBandLarge, 8), poolNode("pool-b", cpuBandLarge, 8))
+		poolNode("pool-a", cpuBandSmall, 8), poolNode("pool-b", cpuBandSmall, 8))
 
 	r := New(kcli, client.New(srv.URL, nil), Config{
 		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
@@ -278,8 +278,8 @@ func TestFleetRunsAShapeFor(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "the only machine big enough is in another band",
-			nodes: []runtime.Object{poolNode("pool-a", cpuBandLarge, 64)},
+			name:  "the only machine big enough carries another band's label",
+			nodes: []runtime.Object{poolNode("pool-a", "other-band", 64)},
 			want:  false,
 		},
 		{
