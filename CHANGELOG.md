@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.59.0] - 2026-09-21
 ### Added
 
 - **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
