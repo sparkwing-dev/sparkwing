@@ -44,6 +44,18 @@ unlock.
 
 ### Changed
 
+- **runner:** a node queues when the Kubernetes fleet is full instead of failing
+  A pod no node would take failed its node after five minutes, whatever the
+  reason, so an hour busy enough to fill the runner pool turned ordinary builds
+  into failures. The runner now measures the pod's requests against the
+  `allocatable` of the pool machines its own node selector admits. A machine of
+  that shape is running and merely busy, so the node queues for up to nine
+  minutes with `status_detail` reading `queued: the runner fleet is full`, a
+  `capacity_queued` event opening the wait, and the run starting the moment a
+  machine frees; the wait ends in `queue_timeout` with a
+  `capacity_queue_timeout` event. No machine in the pool could hold the pod
+  even when empty, so waiting cures nothing and the five-minute failure stands.
+
 - **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
   `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
   and response fields are `pipeline`, and the `?repo=` query parameter on
