@@ -412,18 +412,30 @@ file. Other syntax and workflow checks remain active.
   conformance` job in `.github/workflows/ci.yaml` on every pull request
   and push to main, and `sparkwing run integration` against its
   Dockerized Postgres and MinIO.
+- **Postgres client on the hosted lane:** the `Postgres conformance` job
+  installs `postgresql-client-17` from the PostgreSQL Apt repository and
+  points `SPARKWING_PG_BIN` at `/usr/lib/postgresql/17/bin`, because
+  Ubuntu's own repository tops out at 16 and a `pg_dump` older than its
+  server refuses the dump outright. `SPARKWING_PG_BIN` names the real
+  binaries rather than `/usr/bin/pg_dump`, which is postgresql-common's
+  wrapper and picks a version from the clusters the image happens to
+  have. A step prints both client versions and fails when the major is
+  below 17, so a repository that stops shipping 17 fails the job instead
+  of quietly sending the tests back to skipping. `sparkwing run
+  integration` installs nothing and takes whatever client the developer's
+  machine has.
 - **Backup and restore drill:** `TestBackupRestoreDrill` in `pkg/store`
   runs the procedure in `docs/backup-restore.md` end to end. Its SQLite
-  subtests always run. Its Postgres subtest needs `pg_dump` and
-  `pg_restore` at least as new as the server, because an older `pg_dump`
-  refuses a newer server outright; it takes them from `SPARKWING_PG_BIN`
-  or `PATH` and skips when neither supplies them. That is a narrower gate
-  than a reachable server, so the drill's name carries no dialect and the
-  `-run 'Postgres|Pg'` no-skip lanes do not select it. Run it against a
-  server with `SPARKWING_TEST_PG_URL=... SPARKWING_PG_BIN=/usr/lib/postgresql/17/bin
-  go test -run TestBackupRestoreDrill -v ./pkg/store`. The hosted
-  `Postgres conformance` job supplies no client binaries, so that lane
-  runs the SQLite half only.
+  subtests always run. Its Postgres subtest shells out to `pg_dump` and
+  `pg_restore`, taking them from `SPARKWING_PG_BIN` or `PATH` and
+  skipping when neither supplies them. Run it against a server with
+  `SPARKWING_TEST_PG_URL=... SPARKWING_PG_BIN=/usr/lib/postgresql/17/bin
+  go test -run TestBackupRestoreDrill -v ./pkg/store`. The drill's name
+  carries no dialect, so the hosted no-skip step selects it by name:
+  `-run 'Postgres|Pg|BackupRestoreDrill'`. That is what turns a missing
+  or too-old client into a red lane rather than a green one with a
+  skipped subtest. `sparkwing run integration` still selects
+  `Postgres|Pg` only, so the drill can skip there unnoticed.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied
