@@ -19,6 +19,13 @@ unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **docs:** A backup, restore and upgrade runbook for self-hosted controllers
+  Covers both database shapes, names what a restore needs beside the database,
+  and says what rollback means at each stage of an upgrade. The store suite
+  runs the same procedure end to end for SQLite and, against a configured
+  server, for PostgreSQL.
 
 ## [v0.60.0] - 2026-09-21
 ### Added
