@@ -41,9 +41,9 @@ const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
 
-	SealBound(name, repo string, shared, masked bool, plain string) (string, error)
+	SealBound(name, scope string, shared, masked bool, plain string) (string, error)
 
-	OpenBound(name, repo string, shared, masked bool, envelope string) (string, error)
+	OpenBound(name, scope string, shared, masked bool, envelope string) (string, error)
 }
 type Cipher interface {
 	Seal(plain string) (string, error)
@@ -222,6 +222,7 @@ const ScopeApprovalsWrite = "approvals.write"
 const ScopeLogsRead = "logs.read"
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"
+const ScopeRunsControl = "runs.control"
 const ScopeRunsRead = "runs.read"
 const ScopeRunsState = "runs.state"
 const ScopeRunsWrite = "runs.write"

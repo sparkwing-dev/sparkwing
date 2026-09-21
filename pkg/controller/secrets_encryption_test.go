@@ -89,33 +89,33 @@ func TestSecrets_EncryptionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSecrets_EnvelopeIsBoundToNameAndRepo(t *testing.T) {
+func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 	key, _ := secrets.GenerateKey()
 	c, _ := secrets.NewCipher(key)
 	srv, st := newSecretsTestServer(t, c)
 
 	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
-		map[string]string{"name": "TOKEN", "value": "supersecret", "repo": "acme/api"})
+		map[string]string{"name": "TOKEN", "value": "supersecret", "pipeline": "deploy-api"})
 	resp.Body.Close()
 
-	row, err := st.GetSecretForRepo("TOKEN", "acme/api")
+	row, err := st.GetSecretForPipeline("TOKEN", "deploy-api")
 	if err != nil {
-		t.Fatalf("GetSecretForRepo: %v", err)
+		t.Fatalf("GetSecretForPipeline: %v", err)
 	}
 	if !strings.HasPrefix(row.Value, "enc:v2:") {
 		t.Fatalf("stored envelope = %q, want an enc:v2: prefix", row.Value)
 	}
 
 	for _, c2 := range []struct {
-		label, name, repo, query string
+		label, name, pipeline, query string
 	}{
-		{"other name in the same repository", "OTHER", "acme/api", "?repo=acme/api"},
-		{"same name in another repository", "TOKEN", "acme/web", "?repo=acme/web"},
+		{"other name in the same pipeline", "OTHER", "deploy-api", "?pipeline=deploy-api"},
+		{"same name in another pipeline", "TOKEN", "deploy-web", "?pipeline=deploy-web"},
 		{"same name on the unscoped row", "TOKEN", "", ""},
 	} {
 		t.Run(c2.label, func(t *testing.T) {
 			if err := st.CreateOrReplaceSecret(store.Secret{
-				Name: c2.name, Value: row.Value, Principal: "attacker", Repo: c2.repo,
+				Name: c2.name, Value: row.Value, Principal: "attacker", Pipeline: c2.pipeline,
 			}, time.Now().UTC()); err != nil {
 				t.Fatalf("CreateOrReplaceSecret: %v", err)
 			}
@@ -129,7 +129,7 @@ func TestSecrets_EnvelopeIsBoundToNameAndRepo(t *testing.T) {
 		})
 	}
 
-	status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/TOKEN?repo=acme/api")
+	status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/TOKEN?pipeline=deploy-api")
 	if status != http.StatusOK {
 		t.Fatalf("GET own row status = %d, body = %s", status, body)
 	}

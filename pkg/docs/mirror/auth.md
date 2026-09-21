@@ -318,7 +318,8 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
-| `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
+| `runs.write`      | POST `/api/v1/triggers`, `/gitcache/refresh`: starting new work |
+| `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
@@ -334,9 +335,9 @@ scope check passes if the principal carries `admin`.
 
 A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
 and `logs.write`. That set claims work, drives the run it claimed from plan to
-finish, reads the secrets its repository owns, and ships logs. It mints no
-token, reads no user, lists no secret, and cannot read cached source for an
-unclaimed run. A pool replica that executes
+finish, reads the secrets its pipeline owns, and ships logs. It mints no token,
+reads no user, lists no secret, cannot start or retry a run of its own
+choosing, and cannot read cached source for an unclaimed run. A pool replica that executes
 already-created nodes still needs `runs.state`, because `start`, `finish`, and
 event append are its own writes; it can drop `triggers.claim` when a separate
 dispatcher claims triggers.
@@ -467,29 +468,33 @@ request that carries no principal is refused.
 
 ## Secret ownership
 
-A secret carries an owning repository slug, or none. Store one with
-`sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web
---profile prod`. A secret stored with neither `--repo` nor `--shared` answers
-`admin` callers only; `--shared` opens an unscoped secret to **every run in the
-cluster**, so reserve it for values that are genuinely shared, such as a
-registry pull token.
+A secret carries an owning pipeline, or none. Store one with
+`sparkwing secrets set --name DEPLOY_KEY --file ./key --pipeline deploy-web
+--profile prod`. A secret stored with neither `--pipeline` nor `--shared`
+answers `admin` callers only; `--shared` opens an unscoped secret to **every
+run in the cluster**, so reserve it for values that are genuinely shared, such
+as a registry pull token.
+
+The scope is the pipeline and not the repository, because a run's repository is
+a string its submitter typed: the product grants nothing on it. Two teams may
+name the same repository and it means nothing either way.
 
 `GET /api/v1/secrets/{name}` resolves differently per principal:
 
-- An `admin` principal reads any row. `?repo=<slug>` selects a repository's
-  row, `?run=<id>` selects the repository of that run, and without either the
+- An `admin` principal reads any row. `?pipeline=<name>` selects a pipeline's
+  row, `?run=<id>` selects the pipeline of that run, and without either the
   unscoped row answers.
-- A `secrets.read` principal without `admin` cannot name a repository. It names
+- A `secrets.read` principal without `admin` cannot name a pipeline. It names
   the run it is executing with `?run=<id>`, and the controller answers only
   when the caller holds that run's claim; the name then resolves against that
-  run's repository, falling back to an unscoped row only when that row is
-  shared. A caller holding no claim reads nothing. A caller holding claims in
-  one repository may omit `?run`; holding claims in two, it must name the run.
+  run's pipeline, falling back to an unscoped row only when that row is shared.
+  A caller holding no claim reads nothing. A caller holding claims in one
+  pipeline may omit `?run`; holding claims in two, it must name the run.
 
-So one runner token cannot lift another repository's deploy credential by
-asking for it by name, and a token working two runs cannot read the wrong one's
+So one runner token cannot lift another pipeline's deploy credential by asking
+for it by name, and a token working two runs cannot read the wrong one's
 credential by accident. `GET /api/v1/secrets` (the list) and the secret writes
-stay `admin`; the list carries each row's repository and shared flag.
+stay `admin`; the list carries each row's pipeline and shared flag.
 
 Token creation validates scopes against that same set: a scope the
 controller does not honor is rejected with a `400` naming the offending
@@ -553,8 +558,9 @@ with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
 scope set of every account.
 
 The web pod's own service token needs `runs.read` plus `logs.read`. Add
-`runs.write` where the UI cancels, retries, or releases a debug pause, and
-`approvals.write` where it resolves approval gates. That token bounds what the
+`runs.control` where the UI cancels, retries, or releases a debug pause,
+`runs.write` where it submits a trigger, and `approvals.write` where it
+resolves approval gates. That token bounds what the
 proxy can reach at all; the session's scopes bound what one signed-in user
 reaches through it.
 

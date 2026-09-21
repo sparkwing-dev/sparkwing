@@ -61,12 +61,12 @@ func seedRepoTrigger(t *testing.T, st *store.Store, id, repo string) {
 	}
 }
 
-func seedSecret(t *testing.T, st *store.Store, name, value, repo string, shared bool) {
+func seedSecret(t *testing.T, st *store.Store, name, value, pipeline string, shared bool) {
 	t.Helper()
 	if err := st.CreateOrReplaceSecret(store.Secret{
-		Name: name, Value: value, Principal: "root", Repo: repo, Masked: true, Shared: shared,
+		Name: name, Value: value, Principal: "root", Pipeline: pipeline, Masked: true, Shared: shared,
 	}, time.Now().UTC()); err != nil {
-		t.Fatalf("CreateOrReplaceSecret %s/%s: %v", name, repo, err)
+		t.Fatalf("CreateOrReplaceSecret %s/%s: %v", name, pipeline, err)
 	}
 }
 
@@ -180,8 +180,8 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	if run.Status != "success" {
 		t.Errorf("run status = %q, want success", run.Status)
 	}
-	if run.Repo != "acme/web" {
-		t.Errorf("run repo = %q, want the trigger's acme/web", run.Repo)
+	if run.DeclaredRepo != "acme/web" {
+		t.Errorf("run declared repo = %q, want the trigger's acme/web", run.DeclaredRepo)
 	}
 }
 
@@ -512,15 +512,15 @@ func TestRunMutationFence_RechecksAfterRequestBodyUnblocks(t *testing.T) {
 	}
 }
 
-func TestRunnerScopes_PoolRunnerReadsItsRepositorySecret(t *testing.T) {
+func TestRunnerScopes_PoolRunnerReadsItsPipelineSecret(t *testing.T) {
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
 
-	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "acme/web", false)
+	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "deploy-web", false)
 	seedRepoTrigger(t, f.store, "run-web", "acme/web")
 	seedRunNode(t, f.store, "run-web", "build")
-	setRunRepo(t, f.store, "run-web", "acme/web")
+	setRunPipeline(t, f.store, "run-web", "deploy-web")
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
 		t.Fatal(err)
 	}
@@ -539,14 +539,14 @@ func TestRunnerScopes_PoolRunnerReadsItsRepositorySecret(t *testing.T) {
 		t.Fatalf("GetSecretForRun while holding the claim: %v", err)
 	}
 	if sec.Value != "web-key" {
-		t.Errorf("GetSecretForRun value = %q, want the claimed run's repository row", sec.Value)
+		t.Errorf("GetSecretForRun value = %q, want the claimed run's pipeline row", sec.Value)
 	}
 }
 
-func setRunRepo(t *testing.T, st *store.Store, runID, repo string) {
+func setRunPipeline(t *testing.T, st *store.Store, runID, pipeline string) {
 	t.Helper()
 	if _, err := st.DB().ExecContext(context.Background(),
-		`UPDATE runs SET repo = ? WHERE id = ?`, repo, runID); err != nil {
+		`UPDATE runs SET pipeline = ? WHERE id = ?`, pipeline, runID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -555,9 +555,9 @@ func TestRunnerScopes_SecretsReadIsNotAdmin(t *testing.T) {
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 
-	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "acme/api", false)
+	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "deploy-api", false)
 	seedRunNode(t, f.store, "run-web", "build")
-	setRunRepo(t, f.store, "run-web", "acme/web")
+	setRunPipeline(t, f.store, "run-web", "deploy-web")
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
 		t.Fatal(err)
 	}
@@ -566,10 +566,10 @@ func TestRunnerScopes_SecretsReadIsNotAdmin(t *testing.T) {
 		t.Fatalf("ClaimNode: %v", err)
 	}
 
-	t.Run("cannot read another repository's secret", func(t *testing.T) {
+	t.Run("cannot read another pipeline's secret", func(t *testing.T) {
 		c := client.NewWithToken(f.url, nil, raw)
-		if _, err := c.GetSecretForRepo(ctx, "DEPLOY_KEY", "acme/api"); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("GetSecretForRepo(acme/api) err = %v, want ErrNotFound; the caller named a repo it does not hold", err)
+		if _, err := c.GetSecretForPipeline(ctx, "DEPLOY_KEY", "deploy-api"); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("GetSecretForPipeline(deploy-api) err = %v, want ErrNotFound; the caller named a pipeline it does not hold", err)
 		}
 	})
 
@@ -594,16 +594,17 @@ func TestRunnerScopes_SecretsReadIsNotAdmin(t *testing.T) {
 	}
 }
 
-// A runner cannot repoint its own run at another repository and then
-// read that repository's credential.
+// A runner cannot repoint its own run at another repository, and doing so
+// would buy it nothing either way: the secret it reads belongs to the run's
+// pipeline.
 func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
 
 	seedRepoTrigger(t, f.store, "run-web", "acme/web")
-	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "acme/web", false)
-	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "acme/api", false)
+	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "deploy", false)
+	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "deploy-api", false)
 
 	trig, err := c.ClaimTrigger(ctx)
 	if err != nil || trig == nil {
@@ -621,7 +622,7 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	}
 	if err := c.CreateRun(ctx, store.Run{
 		ID: "run-web", Pipeline: "deploy", Status: "running",
-		Repo: "acme/api", StartedAt: time.Now().UTC(),
+		DeclaredRepo: "acme/api", StartedAt: time.Now().UTC(),
 	}); err == nil {
 		t.Error("CreateRun with a repo the trigger does not name succeeded, want a 400")
 	}
@@ -635,8 +636,8 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if run.Repo != "acme/web" {
-		t.Fatalf("run repo = %q, want acme/web; the runner rewrote it", run.Repo)
+	if run.DeclaredRepo != "acme/web" {
+		t.Fatalf("run declared repo = %q, want acme/web; the runner rewrote it", run.DeclaredRepo)
 	}
 	sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
 	if err != nil {
@@ -647,21 +648,21 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	}
 }
 
-// One pool token holds claims in two repositories at once, so the read
-// has to name the run it is for instead of picking one.
+// One pool token holds claims in two pipelines at once, so the read has to
+// name the run it is for instead of picking one.
 func TestRunnerScopes_SecretReadNamesItsRun(t *testing.T) {
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
 
-	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "acme/web", false)
-	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "acme/api", false)
-	for _, seed := range []struct{ run, repo string }{
-		{"run-web", "acme/web"},
-		{"run-api", "acme/api"},
+	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "deploy-web", false)
+	seedSecret(t, f.store, "DEPLOY_KEY", "api-key", "deploy-api", false)
+	for _, seed := range []struct{ run, pipeline string }{
+		{"run-web", "deploy-web"},
+		{"run-api", "deploy-api"},
 	} {
 		seedRunNode(t, f.store, seed.run, "build")
-		setRunRepo(t, f.store, seed.run, seed.repo)
+		setRunPipeline(t, f.store, seed.run, seed.pipeline)
 		if err := f.store.MarkNodeReady(ctx, seed.run, "build"); err != nil {
 			t.Fatal(err)
 		}
@@ -671,7 +672,7 @@ func TestRunnerScopes_SecretReadNamesItsRun(t *testing.T) {
 	}
 
 	if _, err := c.GetSecret(ctx, "DEPLOY_KEY"); err == nil {
-		t.Error("GetSecret with claims in two repositories succeeded, want a refusal naming ?run")
+		t.Error("GetSecret with claims in two pipelines succeeded, want a refusal naming ?run")
 	}
 	for _, tc := range []struct{ run, want string }{
 		{"run-web", "web-key"},
@@ -695,7 +696,7 @@ func TestRunnerScopes_UnscopedSecretNeedsShared(t *testing.T) {
 	seedSecret(t, f.store, "LEGACY_KEY", "legacy", "", false)
 	seedSecret(t, f.store, "NPM_TOKEN", "npm", "", true)
 	seedRunNode(t, f.store, "run-web", "build")
-	setRunRepo(t, f.store, "run-web", "acme/web")
+	setRunPipeline(t, f.store, "run-web", "deploy-web")
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
 		t.Fatal(err)
 	}
@@ -1139,11 +1140,11 @@ func TestRunnerScopes_CoordinationWritesNeedAClaimOnThatPipeline(t *testing.T) {
 	}
 }
 
-// A capacity profile is scoped by repository, so a claim on one
-// repository's pipeline is no standing on another repository's pipeline
-// of the same name. The pin the write can set is a hard limit for every
-// later run of the pipeline it names.
-func TestRunnerScopes_ProfileWritesAreScopedToTheClaimedRepository(t *testing.T) {
+// A capacity profile is bound to the pipeline the caller holds a claim in.
+// The repository half of a profile key is not part of the proof, because a
+// run's repository is a string its submitter typed. The pin the write can set
+// is a hard limit for every later run of the pipeline it names.
+func TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline(t *testing.T) {
 	f, raw := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
 	c := client.NewWithToken(f.url, nil, raw)
@@ -1154,32 +1155,32 @@ func TestRunnerScopes_ProfileWritesAreScopedToTheClaimedRepository(t *testing.T)
 	}
 
 	own := store.JoinProfileKey("github.com/acme/web", "deploy")
-	other := store.JoinProfileKey("github.com/evil/other", "deploy")
+	otherPipeline := store.JoinProfileKey("github.com/acme/web", "release")
 	measurement := store.ProfileObservation{
 		Duration: time.Minute, PeakCores: 99, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}
 
 	if err := c.RecordProfileObservation(ctx, own, "", measurement); err != nil {
-		t.Fatalf("observation on this runner's own repository: %v", err)
+		t.Fatalf("observation on the claimed pipeline: %v", err)
 	}
 	if err := c.SetPipelinePin(ctx, own, "", 64, 1<<30); err != nil {
-		t.Fatalf("pin on this runner's own repository: %v", err)
+		t.Fatalf("pin on the claimed pipeline: %v", err)
 	}
 	if err := c.RecordProfileObservation(ctx, "deploy", "", measurement); err != nil {
 		t.Fatalf("observation on the unscoped key: %v", err)
 	}
 
-	if err := c.RecordProfileObservation(ctx, other, "", measurement); err == nil {
-		t.Error("wrote another repository's profile for a pipeline of the same name")
+	if err := c.RecordProfileObservation(ctx, otherPipeline, "", measurement); err == nil {
+		t.Error("wrote the profile of a pipeline this runner holds no claim in")
 	}
-	if err := c.SetPipelinePin(ctx, other, "", 64, 1<<30); err == nil {
-		t.Error("pinned another repository's pipeline of the same name")
+	if err := c.SetPipelinePin(ctx, otherPipeline, "", 64, 1<<30); err == nil {
+		t.Error("pinned a pipeline this runner holds no claim in")
 	}
-	if err := c.RecordContention(ctx, other); err == nil {
-		t.Error("recorded contention on another repository's pipeline")
+	if err := c.RecordContention(ctx, otherPipeline); err == nil {
+		t.Error("recorded contention on a pipeline this runner holds no claim in")
 	}
-	if prof, err := f.store.GetPipelineProfile(ctx, other, ""); err != nil || prof != nil {
-		t.Errorf("other-repository profile = %v (err %v), want none: every write to it was refused", prof, err)
+	if prof, err := f.store.GetPipelineProfile(ctx, otherPipeline, ""); err != nil || prof != nil {
+		t.Errorf("other-pipeline profile = %v (err %v), want none: every write to it was refused", prof, err)
 	}
 	if prof, err := f.store.GetPipelineProfile(ctx, own, ""); err != nil || prof == nil || prof.PinnedCores != 64 {
 		t.Fatalf("own profile = %v (err %v), want a row pinned at 64 cores", prof, err)

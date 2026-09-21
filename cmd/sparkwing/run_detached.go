@@ -338,7 +338,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		GitBranch:     branch,
 		GitSHA:        sha,
 		Args:          sub.Args,
-		Repo:          repoSlug,
+		DeclaredRepo:  repoSlug,
 		RepoURL:       repoURL,
 		GithubOwner:   trigger.GithubOwner,
 		GithubRepo:    trigger.GithubRepo,

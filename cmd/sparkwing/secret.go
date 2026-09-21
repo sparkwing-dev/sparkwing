@@ -55,7 +55,7 @@ func runSecretSet(args []string) error {
 	value := v.String("value")
 	file := v.String("file")
 	plain := v.Bool("plain")
-	repo := v.String("repo")
+	pipeline := v.String("pipeline")
 	shared := v.Bool("shared")
 	on := v.String("profile")
 	if !fs.Changed("value") && !fs.Changed("file") {
@@ -79,14 +79,14 @@ func runSecretSet(args []string) error {
 
 	masked := !plain
 
-	if repo != "" && !fs.Changed("profile") {
-		return errors.New("secret set: --repo needs --profile; the local store has no repository dimension")
+	if pipeline != "" && !fs.Changed("profile") {
+		return errors.New("secret set: --pipeline needs --profile; the local store has no pipeline dimension")
 	}
 	if shared && !fs.Changed("profile") {
-		return errors.New("secret set: --shared needs --profile; the local store has no repository dimension")
+		return errors.New("secret set: --shared needs --profile; the local store has no pipeline dimension")
 	}
-	if shared && repo != "" {
-		return errors.New("secret set: --shared and --repo are exclusive; a repository's secret is already scoped")
+	if shared && pipeline != "" {
+		return errors.New("secret set: --shared and --pipeline are exclusive; a pipeline's secret is already scoped")
 	}
 
 	if !fs.Changed("profile") {
@@ -115,17 +115,17 @@ func runSecretSet(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.CreateSecretForRepo(ctx, name, raw, repo, masked, shared); err != nil {
+	if err := c.CreateSecretForPipeline(ctx, name, raw, pipeline, masked, shared); err != nil {
 		return fmt.Errorf("secret set: %w", err)
 	}
 	scope := "admin only"
 	switch {
-	case repo != "":
-		scope = repo
+	case pipeline != "":
+		scope = pipeline
 	case shared:
-		scope = "every repo"
+		scope = "every pipeline"
 	}
-	fmt.Fprintf(os.Stdout, "secret %q set (on: %s, repo: %s, masked=%v)\n", name, prof.Name, scope, masked)
+	fmt.Fprintf(os.Stdout, "secret %q set (on: %s, pipeline: %s, masked=%v)\n", name, prof.Name, scope, masked)
 	return nil
 }
 
@@ -146,13 +146,13 @@ func runSecretGet(args []string) error {
 		return err
 	}
 	name := v.String("name")
-	repo := v.String("repo")
+	pipeline := v.String("pipeline")
 	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret get: --name is required")
 	}
-	if repo != "" && !fs.Changed("profile") {
-		return errors.New("secret get: --repo needs --profile; the local store has no repository dimension")
+	if pipeline != "" && !fs.Changed("profile") {
+		return errors.New("secret get: --pipeline needs --profile; the local store has no pipeline dimension")
 	}
 
 	if !fs.Changed("profile") {
@@ -178,7 +178,7 @@ func runSecretGet(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	sec, err := c.GetSecretForRepo(ctx, name, repo)
+	sec, err := c.GetSecretForPipeline(ctx, name, pipeline)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("secret get: %q not found", name)
@@ -278,16 +278,16 @@ func runSecretList(args []string) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tREPO\tMASKED\tBOUND\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, sec := range secs {
-		repo := sec.Repo
-		if repo == "" {
-			repo = "(admin only)"
+		scope := sec.Pipeline
+		if scope == "" {
+			scope = "(admin only)"
 			if sec.Shared {
-				repo = "(every repo)"
+				scope = "(every pipeline)"
 			}
 		}
 		fmt.Fprintf(
 			tw, "%s\t%s\t%v\t%v\t%s\t%s\t%s\n",
-			sec.Name, repo, sec.Masked, sec.Bound, sec.Principal,
+			sec.Name, scope, sec.Masked, sec.Bound, sec.Principal,
 			time.Unix(sec.CreatedAt, 0).UTC().Format("2006-01-02 15:04"),
 			time.Unix(sec.UpdatedAt, 0).UTC().Format("2006-01-02 15:04"),
 		)
@@ -305,13 +305,13 @@ func runSecretDelete(args []string) error {
 		return err
 	}
 	name := v.String("name")
-	repo := v.String("repo")
+	pipeline := v.String("pipeline")
 	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret delete: --name is required")
 	}
-	if repo != "" && !fs.Changed("profile") {
-		return errors.New("secret delete: --repo needs --profile; the local store has no repository dimension")
+	if pipeline != "" && !fs.Changed("profile") {
+		return errors.New("secret delete: --pipeline needs --profile; the local store has no pipeline dimension")
 	}
 
 	if !fs.Changed("profile") {
@@ -349,7 +349,7 @@ func runSecretDelete(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.DeleteSecretForRepo(ctx, name, repo); err != nil {
+	if err := c.DeleteSecretForPipeline(ctx, name, pipeline); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("secret delete: %q not found", name)
 		}
@@ -391,11 +391,11 @@ func runSecretRotate(args []string) error {
 	fmt.Fprintf(os.Stdout,
 		"%d secret(s) opened under no configured key and were left as they are:\n", len(result.Skipped))
 	for _, skip := range result.Skipped {
-		if skip.Repo == "" {
+		if skip.Pipeline == "" {
 			fmt.Fprintf(os.Stdout, "  %s\n", skip.Name)
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "  %s (repo %s)\n", skip.Name, skip.Repo)
+		fmt.Fprintf(os.Stdout, "  %s (pipeline %s)\n", skip.Name, skip.Pipeline)
 	}
 	fmt.Fprintln(os.Stdout,
 		"re-set those secrets, or name the key they were sealed under, before dropping the previous key")

@@ -42,7 +42,7 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 		PlanSnapshot:   []byte(`{"plan":"snapshot"}`),
 		StartedAt:      time.Unix(1746335000, 1),
 		ParentRunID:    "parent-run",
-		Repo:           "my-app",
+		DeclaredRepo:   "my-app",
 		RepoURL:        "https://github.com/example/my-app.git",
 		GithubOwner:    "example",
 		GithubRepo:     "my-app",

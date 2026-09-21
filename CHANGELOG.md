@@ -21,6 +21,43 @@ unlock.
 ## [Unreleased]
 ### Security
 
+- **controller:** a run's repository is metadata and grants nothing (Breaking)
+  A run's repository was a free-text field its submitter typed, and three
+  checks read it as proof of which repository the caller was working in: the
+  secret read, the two store helpers behind it, and the Git cache proxy. A
+  caller that typed another team's repository reached that team's secrets and
+  the controller's cached clone of its source. Secrets now scope to the
+  pipeline a caller holds live work in, `runs.repo` is `runs.declared_repo` and
+  no authorization reads it, and the Git cache serves only a repository an
+  operator connected to the pipeline of a run a signed webhook delivery
+  created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
+  `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
+  about pipelines.
+
+- **controller:** `runs.control` separates operator actions from runner reports (Breaking)
+  `runs.write` covered both starting work and acting on a run somebody else
+  started, and a token that could submit a trigger could also retry an
+  arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
+  and the cron writes now require `runs.control`. `runs.write` keeps trigger
+  submission and the Git cache refresh. Add `runs.control` to operator and
+  dashboard tokens; runner tokens neither had it nor need it.
+
+### Changed
+
+- **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
+  `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
+  and response fields are `pipeline`, and the `?repo=` query parameter on
+  `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
+  `CreateSecretForRepo`, `GetSecretForRepo` and `DeleteSecretForRepo` are
+  `CreateSecretForPipeline`, `GetSecretForPipeline` and
+  `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
+  `secrets.pipeline` and keeps every stored value, so a row scoped to a
+  repository slug survives the upgrade, answers no run, and is re-keyed to a
+  pipeline by an admin.
+
+- **api:** a run serializes `declared_repo` where it serialized `repo` (Breaking)
+  `store.Run.Repo` is `store.Run.DeclaredRepo` and `store.RunFilter.Repos` is
+  `store.RunFilter.DeclaredRepos`. The `?repo=` list filter is unchanged.
 - **web (Breaking):** the dashboard's session and CSRF cookies carry the
   `__Host-` prefix
   Host-only scoping stops a sibling host under the same registrable domain

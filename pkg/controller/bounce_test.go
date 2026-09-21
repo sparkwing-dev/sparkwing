@@ -23,7 +23,7 @@ func newBounceTestServer(t *testing.T) (*Server, string, *store.Store, store.Nod
 	t.Cleanup(func() { _ = st.Close() })
 
 	raw, tok, err := st.CreateToken("alice", store.TokenKindUser,
-		[]string{ScopeRunsWrite, ScopeNodesClaim}, 0, time.Now().UTC())
+		[]string{ScopeRunsControl, ScopeNodesClaim}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

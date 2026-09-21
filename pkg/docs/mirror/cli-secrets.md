@@ -40,7 +40,7 @@ resolve until the secret is re-added.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Secret name to remove (required) |
-| `--repo SLUG` | Remove the row owned by one repository slug (controller only); omit for the unscoped row |
+| `--pipeline NAME` | Remove the row owned by one pipeline (controller only); omit for the unscoped row |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
@@ -66,7 +66,7 @@ so it can be piped into another command. Use 'secrets list' for metadata.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Secret name (required) |
-| `--repo SLUG` | Read the row owned by one repository slug (controller only); omit for the unscoped row |
+| `--pipeline NAME` | Read the row owned by one pipeline (controller only); omit for the unscoped row |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
@@ -156,8 +156,8 @@ does not land in shell history.
 | `--value VALUE` | Secret value (prefer --file for long values) |
 | `--file PATH` | Read value from file (keeps value out of shell history) |
 | `--plain` | Store a configuration value visible in run logs. Values are masked by default. |
-| `--repo SLUG` | Scope the secret to one repository slug (controller only) |
-| `--shared` | Let every run read this unscoped secret (controller only). Without --repo or --shared the secret answers admin callers only. |
+| `--pipeline NAME` | Scope the secret to one pipeline (controller only) |
+| `--shared` | Let every run read this unscoped secret (controller only). Without --pipeline or --shared the secret answers admin callers only. |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples

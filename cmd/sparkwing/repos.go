@@ -96,11 +96,11 @@ func observeRuns() []repos.RunObservation {
 	}
 	out := make([]repos.RunObservation, 0, len(runs))
 	for _, r := range runs {
-		if r.Repo == "" {
+		if r.DeclaredRepo == "" {
 			continue
 		}
 		out = append(out, repos.RunObservation{
-			Repo:     r.Repo,
+			Repo:     r.DeclaredRepo,
 			RepoURL:  r.RepoURL,
 			Pipeline: r.Pipeline,
 			At:       r.StartedAt,

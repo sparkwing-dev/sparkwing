@@ -150,7 +150,9 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// safety: the trigger names the repository a run's secrets resolve against, and the caller never does.
+// safety: a run's declared repository is display metadata, so it is copied from
+// the trigger rather than taken from the body, which keeps the two rows agreeing
+// on one story. Nothing is granted on either value.
 func (s *Server) bindRunRepoToTrigger(w http.ResponseWriter, r *http.Request, run *store.Run) bool {
 	trig, err := s.store.GetTrigger(r.Context(), run.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -158,15 +160,15 @@ func (s *Server) bindRunRepoToTrigger(w http.ResponseWriter, r *http.Request, ru
 		return false
 	}
 	if trig == nil {
-		run.Repo, run.RepoURL, run.GithubOwner, run.GithubRepo = "", "", "", ""
+		run.DeclaredRepo, run.RepoURL, run.GithubOwner, run.GithubRepo = "", "", "", ""
 		return true
 	}
-	if run.Repo != "" && run.Repo != trig.Repo {
+	if run.DeclaredRepo != "" && run.DeclaredRepo != trig.Repo {
 		writeError(w, http.StatusBadRequest,
-			fmt.Errorf("repo %q does not match the trigger's repository %q", run.Repo, trig.Repo))
+			fmt.Errorf("repo %q does not match the trigger's repository %q", run.DeclaredRepo, trig.Repo))
 		return false
 	}
-	run.Repo, run.RepoURL = trig.Repo, trig.RepoURL
+	run.DeclaredRepo, run.RepoURL = trig.Repo, trig.RepoURL
 	run.GithubOwner, run.GithubRepo = trig.GithubOwner, trig.GithubRepo
 	return true
 }
@@ -845,7 +847,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
 				body.Trigger.Source = parent.TriggerSource
 			}
-			body.Git.Repo = parent.Repo
+			body.Git.Repo = parent.DeclaredRepo
 			body.Git.RepoURL = parent.RepoURL
 			if body.Git.Branch == "" {
 				body.Git.Branch = parent.GitBranch
@@ -979,7 +981,7 @@ func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
 		GitSHA:        in.Git.SHA,
 		Args:          in.Args,
 		ParentRunID:   in.ParentRunID,
-		Repo:          in.Git.Repo,
+		DeclaredRepo:  in.Git.Repo,
 		RepoURL:       in.Git.RepoURL,
 		GithubOwner:   in.Git.GithubOwner,
 		GithubRepo:    in.Git.GithubRepo,

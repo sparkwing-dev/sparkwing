@@ -206,7 +206,7 @@ func (s *Server) openWebhookSecret(pipeline, repo, stored string) (string, error
 }
 
 func webhookSecretBinding(pipeline, repo string) secretBinding {
-	return secretBinding{Name: "github-webhook/" + pipeline, Repo: repo, Masked: true}
+	return secretBinding{Name: "github-webhook/" + pipeline, Scope: repo, Masked: true}
 }
 
 // safety: bound means a stored binding names this pipeline and repository,

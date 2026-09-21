@@ -39,8 +39,16 @@ func (p *Principal) HasScope(s string) bool {
 // Scope names used throughout the controller. Centralized as
 // constants so a rename is a compile-error not a silent drift.
 const (
-	ScopeRunsRead     = "runs.read"
-	ScopeRunsWrite    = "runs.write"
+	ScopeRunsRead = "runs.read"
+	// ScopeRunsWrite gates starting new work: POST /api/v1/triggers and
+	// the Git cache refresh. It does not reach an existing run.
+	ScopeRunsWrite = "runs.write"
+	// ScopeRunsControl gates acting on a run somebody else started, or on
+	// a schedule: retry, cancel, bounce, release a debug pause, and the
+	// cron writes including firing one now. These are operator actions, so
+	// they are held apart from the scopes a runner carries: a runner
+	// reports state on work it holds and never reaches for another run.
+	ScopeRunsControl  = "runs.control"
 	ScopeNodesClaim   = "nodes.claim"
 	ScopeLogsRead     = "logs.read"
 	ScopeLogsWrite    = "logs.write"
@@ -55,7 +63,7 @@ const (
 	// claim.
 	ScopeRunsState = "runs.state"
 	// ScopeSecretsRead gates GET /api/v1/secrets/{name}. A non-admin
-	// holder resolves a name against the repository of the run it
+	// holder resolves a name against the pipeline of the run it
 	// currently holds a claim in.
 	ScopeSecretsRead = "secrets.read"
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
@@ -68,6 +76,7 @@ const (
 var allScopes = []string{
 	ScopeRunsRead,
 	ScopeRunsWrite,
+	ScopeRunsControl,
 	ScopeNodesClaim,
 	ScopeLogsRead,
 	ScopeLogsWrite,

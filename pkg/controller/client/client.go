@@ -115,8 +115,8 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if len(f.GitBranches) > 0 {
 		q.Set("git_branch", strings.Join(f.GitBranches, ","))
 	}
-	if len(f.Repos) > 0 {
-		q.Set("repo", strings.Join(f.Repos, ","))
+	if len(f.DeclaredRepos) > 0 {
+		q.Set("repo", strings.Join(f.DeclaredRepos, ","))
 	}
 	if len(f.RepoURLs) > 0 {
 		q.Set("repo_url", strings.Join(f.RepoURLs, ","))
@@ -150,7 +150,7 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}
-	advancedFilter := len(f.GitSHAPrefixes) > 0 || len(f.GitBranches) > 0 || len(f.Repos) > 0 || len(f.RepoURLs) > 0 || f.RootOnly
+	advancedFilter := len(f.GitSHAPrefixes) > 0 || len(f.GitBranches) > 0 || len(f.DeclaredRepos) > 0 || len(f.RepoURLs) > 0 || f.RootOnly
 	if advancedFilter && !store.SupportsRunIdentityFilters(resp.Header.Get("X-Sparkwing-Run-Filter-Version")) {
 		return nil, errors.New("controller does not support native run identity filters")
 	}

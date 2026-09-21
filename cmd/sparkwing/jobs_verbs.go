@@ -111,7 +111,7 @@ func failureRunFilter(pipeline, gitSHA, branch, repo string, since time.Duration
 		f.GitBranches = []string{branch}
 	}
 	if repo != "" {
-		f.Repos = []string{repo}
+		f.DeclaredRepos = []string{repo}
 	}
 	if since > 0 {
 		f.Since = time.Now().Add(-since)
@@ -900,7 +900,7 @@ func findRunFilter(gitSHA, branch, pipeline, repo string, rootOnly bool, since t
 		filter.GitBranches = []string{branch}
 	}
 	if repo != "" {
-		filter.Repos = []string{repo}
+		filter.DeclaredRepos = []string{repo}
 	}
 	if since > 0 {
 		filter.Since = time.Now().Add(-since)
