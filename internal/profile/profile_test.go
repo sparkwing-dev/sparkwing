@@ -9,6 +9,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
+// safety: Save refuses a profiles path outside the sparkwing home unless the
+// operator named the file, and a test binary's home is the test sandbox.
+func savedAt(t *testing.T, path string) string {
+	t.Helper()
+	t.Setenv("SPARKWING_PROFILES", path)
+	return path
+}
+
 func TestInheritControllerDefaults(t *testing.T) {
 	prefilledTokenEnv := "PREFILLED"
 	p := &profile.Profile{
@@ -44,7 +52,7 @@ func TestLoad_MissingFile(t *testing.T) {
 }
 
 func TestLoadSaveRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := savedAt(t, filepath.Join(t.TempDir(), "profiles.yaml"))
 	mirror := false
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
@@ -78,7 +86,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 }
 
 func TestSave_0600Mode(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := savedAt(t, filepath.Join(t.TempDir(), "profiles.yaml"))
 	if err := profile.Save(path, &profile.Config{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 
 func TestSaveKeepsTheConfigDirectoryAndFilePrivate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sparkwing")
-	path := filepath.Join(dir, "profiles.yaml")
+	path := savedAt(t, filepath.Join(dir, "profiles.yaml"))
 	cfg := &profile.Config{Profiles: map[string]*profile.Profile{
 		"prod": {Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 	}}
@@ -59,7 +59,7 @@ func TestSaveTightensAWorldReadableConfigDirectory(t *testing.T) {
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatalf("chmod %s: %v", dir, err)
 	}
-	path := filepath.Join(dir, "profiles.yaml")
+	path := savedAt(t, filepath.Join(dir, "profiles.yaml"))
 	if err := profile.Save(path, &profile.Config{Profiles: map[string]*profile.Profile{}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestSaveIgnoresAPlantedTempSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	path := filepath.Join(dir, "profiles.yaml")
+	path := savedAt(t, filepath.Join(dir, "profiles.yaml"))
 	cfg := &profile.Config{Profiles: map[string]*profile.Profile{
 		"prod": {Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 	}}
@@ -109,7 +109,7 @@ func TestSaveIgnoresAPlantedTempSymlink(t *testing.T) {
 
 func TestSaveCreatesNoPredictableTempSibling(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sparkwing")
-	path := filepath.Join(dir, "profiles.yaml")
+	path := savedAt(t, filepath.Join(dir, "profiles.yaml"))
 	cfg := &profile.Config{Profiles: map[string]*profile.Profile{
 		"prod": {Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
 	}}

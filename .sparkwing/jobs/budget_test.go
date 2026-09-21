@@ -200,6 +200,18 @@ func TestBudgetIsWaivedForAFilesetWiderThanATierIsBudgetedFor(t *testing.T) {
 	}
 }
 
+func TestBudgetSaysWhenATierJudgedNoGoFile(t *testing.T) {
+	b := newTierBudget("probe", 3*time.Second).over(filesetOf(0))
+	count, scope := b.changedGoFiles(t.Context())
+	if count != 0 {
+		t.Fatalf("changedGoFiles = %d, want 0", count)
+	}
+	notice := emptyScopeNotice("probe", scope)
+	if !strings.Contains(notice, scope) || !strings.Contains(notice, "covers nothing") {
+		t.Errorf("an empty-scope verdict does not name what it covered: %q", notice)
+	}
+}
+
 func TestBudgetEnforcesWhenTheFilesetCannotBeRead(t *testing.T) {
 	b := recordedOverrun().over(
 		func(context.Context, string, func([]string) []string) ([]string, string, error) {

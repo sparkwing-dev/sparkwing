@@ -19,29 +19,6 @@ unlock.
 ---
 
 ## [Unreleased]
-### Security
-
-- **controller:** a run's repository is metadata and grants nothing (Breaking)
-  A run's repository was a free-text field its submitter typed, and three
-  checks read it as proof of which repository the caller was working in: the
-  secret read, the two store helpers behind it, and the Git cache proxy. A
-  caller that typed another team's repository reached that team's secrets and
-  the controller's cached clone of its source. Secrets now scope to the
-  pipeline a caller holds live work in, `runs.repo` is `runs.declared_repo` and
-  no authorization reads it, and the Git cache serves only a repository an
-  operator connected to the pipeline of a run a signed webhook delivery
-  created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
-  `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
-  about pipelines.
-
-- **controller:** `runs.control` separates operator actions from runner reports (Breaking)
-  `runs.write` covered both starting work and acting on a run somebody else
-  started, and a token that could submit a trigger could also retry an
-  arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
-  and the cron writes now require `runs.control`. `runs.write` keeps trigger
-  submission and the Git cache refresh. Add `runs.control` to operator and
-  dashboard tokens; runner tokens neither had it nor need it.
-
 ### Changed
 
 - **runner:** a node queues when the Kubernetes fleet is full instead of failing
@@ -55,6 +32,16 @@ unlock.
   machine frees; the wait ends in `queue_timeout` with a
   `capacity_queue_timeout` event. No machine in the pool could hold the pod
   even when empty, so waiting cures nothing and the five-minute failure stands.
+- **controller + runner:** the default credit rate table stops at the 8-core class
+  The 16, 32 and 64-core entries are gone from the default ladder, and the
+  `large` cpu band the classes above 8 cores selected goes with them: one
+  `sparkwing.dev/cpu-band: small` pool now serves every class above the warm
+  one. No pool could schedule a 64-core pod, so choosing that class reserved a
+  team's credits and failed five minutes later. A node pinned above 8 cores is
+  refused when its class is chosen, naming the largest class still priced. A
+  rate table an operator stored keeps every class it names, so a cluster
+  provisioned for the larger classes is unaffected.
+
 
 - **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
   `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
@@ -85,6 +72,29 @@ unlock.
   Summary: every signed-in browser signs in once more, and a custom browser
   client reads `__Host-sw_csrf` before `sw_csrf`.
 
+### Security
+
+- **controller:** a run's repository is metadata and grants nothing (Breaking)
+  A run's repository was a free-text field its submitter typed, and three
+  checks read it as proof of which repository the caller was working in: the
+  secret read, the two store helpers behind it, and the Git cache proxy. A
+  caller that typed another team's repository reached that team's secrets and
+  the controller's cached clone of its source. Secrets now scope to the
+  pipeline a caller holds live work in, `runs.repo` is `runs.declared_repo` and
+  no authorization reads it, and the Git cache serves only a repository an
+  operator connected to the pipeline of a run a signed webhook delivery
+  created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
+  `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
+  about pipelines.
+
+- **controller:** `runs.control` separates operator actions from runner reports (Breaking)
+  `runs.write` covered both starting work and acting on a run somebody else
+  started, and a token that could submit a trigger could also retry an
+  arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
+  and the cron writes now require `runs.control`. `runs.write` keeps trigger
+  submission and the Git cache refresh. Add `runs.control` to operator and
+  dashboard tokens; runner tokens neither had it nor need it.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 
@@ -98,6 +108,20 @@ unlock.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
+
+### Fixed
+
+- **config:** a profiles write from a command under its own `SPARKWING_HOME` is
+  refused, not sent to the machine's config
+  `sparkwing configure profiles add|set|remove|duplicate` and `sparkwing cloud
+  enroll` resolved `~/.config/sparkwing/profiles.yaml` whatever home the command
+  ran under, so a drill under a scratch `SPARKWING_HOME` edited the operator's
+  own profiles and nothing in the invocation said it would. `SPARKWING_HOME`
+  still does not move the file, because a profile is a machine-wide connection
+  that outlives any one home; the write now fails naming both paths and the
+  `SPARKWING_PROFILES` value that keeps it inside the home. A command with no
+  `SPARKWING_HOME`, or one whose `SPARKWING_HOME` is the operator's own
+  `~/.sparkwing`, writes where it always did.
 
 ## [v0.59.0] - 2026-09-21
 ### Added
@@ -122,6 +146,24 @@ unlock.
   forwarded only alongside `--sw-mode`, so `sparkwing run <pipeline>
   --sw-workers=3` accepted the flag and ran at one worker per CPU with no
   diagnostic.
+
+- **checks:** four gates that could report success without judging anything
+  now refuse instead. `bin/check-shell.sh` fails when it finds no tracked
+  script rather than passing on an empty list; `bin/check-release-tag-order.sh`
+  refuses a terminal on stdin rather than calling any candidate the first
+  release tag; `bin/check-release-binary-vulnerabilities.sh` no longer waives
+  GO-2026-5932 when `go list -deps` fails, because an unreadable dependency
+  list is not proof the package is unreachable; and
+  `bin/check-release-schema-parity.sh` exits 2 with real usage on a bad
+  argument list, where `--help` had printed its own shell source under a zero
+  exit since the header comment it read was removed. A new
+  `bin/check-release-schema-parity-test.sh` holds those refusals, and
+  `pre-release` runs it.
+
+- **checks:** `pre-commit` and `pre-push` warn when the scope they judge holds
+  no Go file. Both tiers run every step and pass every one of them on an empty
+  scope, and that verdict was indistinguishable from a full pass. The warning
+  names the scope it read, so a push judged against an empty range says so.
 
 ## [v0.58.0] - 2026-09-20
 ### Added
