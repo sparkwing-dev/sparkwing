@@ -296,10 +296,10 @@ func dispatchRun(args []string) error {
 	}
 
 	if flags.mode != "" {
-		env = append(env, "SPARKWING_MODE="+flags.mode)
-		if flags.workers > 0 {
-			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", flags.workers))
-		}
+		env = setEnv(env, "SPARKWING_MODE", flags.mode)
+	}
+	if flags.workers > 0 {
+		env = setEnv(env, "SPARKWING_WORKERS", strconv.Itoa(flags.workers))
 	}
 
 	// safety: relative priority resolves against the queue at admission time.

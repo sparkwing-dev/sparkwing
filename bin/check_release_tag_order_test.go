@@ -4,25 +4,23 @@ import (
 	"bytes"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func runTagOrder(t *testing.T, candidate string, existing []string) (string, bool) {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate the test source")
+	script, err := filepath.Abs("check-release-tag-order.sh")
+	if err != nil {
+		t.Fatal(err)
 	}
-	script := filepath.Join(filepath.Dir(thisFile), "check-release-tag-order.sh")
 	cmd := exec.Command("bash", script, candidate)
 	cmd.Stdin = strings.NewReader(strings.Join(existing, "\n"))
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	err := cmd.Run()
-	return out.String(), err == nil
+	runErr := cmd.Run()
+	return out.String(), runErr == nil
 }
 
 func TestCheckReleaseTagOrder(t *testing.T) {
@@ -94,7 +92,13 @@ func TestCheckReleaseTagOrder(t *testing.T) {
 
 func TestCheckReleaseTagOrderRequiresACandidate(t *testing.T) {
 	t.Parallel()
-	if out, accepted := runTagOrder(t, "", nil); accepted {
+	out, accepted := runTagOrder(t, "", nil)
+	if accepted {
 		t.Fatalf("a missing candidate was accepted:\n%s", out)
+	}
+	// safety: any failure to start bash refuses too, so this case only means
+	// something once the refusal is the script's own.
+	if !strings.Contains(out, "usage: check-release-tag-order.sh") {
+		t.Fatalf("refusal did not come from the script:\n%s", out)
 	}
 }

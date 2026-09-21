@@ -19,7 +19,11 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
+
+## [v0.59.0] - 2026-09-21
 ### Added
 
 - **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
@@ -61,6 +65,13 @@ unlock.
   `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
+### Fixed
+
+- **cli:** `--sw-workers` caps the local dispatcher on its own. It was
+  forwarded only alongside `--sw-mode`, so `sparkwing run <pipeline>
+  --sw-workers=3` accepted the flag and ran at one worker per CPU with no
+  diagnostic.
+
 ## [v0.58.0] - 2026-09-20
 ### Added
 

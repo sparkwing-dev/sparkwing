@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -41,7 +40,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 		// safety: go test's default 10-minute budget is per package binary and
 		// pkg/store under the race detector outlives it on a one-core hosted
 		// runner; the pipeline's own timeout still bounds the step.
-		cmd := raceGoCommand(runtime.NumCPU(), "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
+		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
 		script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
 		if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
@@ -68,13 +67,13 @@ func racePackageOrder(packages []string) []string {
 	return ordered
 }
 
-func raceGoCommand(cpuCount int, args string) string {
+func raceGoCommand(h hostShape, args string) string {
 	// perf: four-core runners can overlap two package processes while each Go
 	// runtime retains the existing GOMAXPROCS=1 bound.
-	if cpuCount == 4 {
+	if h.cpus == overlappedGoSuiteCPUs {
 		return goCommandWithLimits(1, 2, "test", args)
 	}
-	return boundedGoCommand(cpuCount, "test", args)
+	return boundedGoCommand(h, "test", args)
 }
 
 func touchedPackageTargets(files, modules []string) map[string][]string {

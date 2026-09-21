@@ -36,6 +36,37 @@ func auxDocFiles(repoRoot string) []string {
 	return out
 }
 
+var pipelineFlagTagRE = regexp.MustCompile(`flag:"([a-z0-9][a-z0-9-]*)"`)
+
+// safety: run control is sw-prefixed, so a pipeline owns the whole unprefixed
+// flag namespace and a flag it declares is live however a banned pattern reads.
+func pipelineOwnedFlags(files []string) map[string]bool {
+	owned := map[string]bool{}
+	for _, path := range files {
+		// #nosec G703 -- a build-time tool reading paths the operator names
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, m := range pipelineFlagTagRE.FindAllStringSubmatch(string(data), -1) {
+			owned[m[1]] = true
+		}
+	}
+	return owned
+}
+
+var matchedFlagRE = regexp.MustCompile(`--([a-z0-9][a-z0-9-]*)`)
+
+// safety: a banned pattern ends at the flag it bans, so the last flag in the
+// match is the one the rule is judging.
+func ownsMatchedFlag(owned map[string]bool, match string) bool {
+	found := matchedFlagRE.FindAllStringSubmatch(match, -1)
+	if len(found) == 0 {
+		return false
+	}
+	return owned[found[len(found)-1][1]]
+}
+
 func checkAuxDocs(repoRoot string) bool {
 	valid, posArgs, err := loadRegistry(repoRoot)
 	if err != nil {
@@ -48,6 +79,7 @@ func checkAuxDocs(repoRoot string) bool {
 	jobFiles, _ := filepath.Glob(filepath.Join(repoRoot, ".sparkwing", "jobs", "*.go"))
 	yamlFiles, _ := filepath.Glob(filepath.Join(repoRoot, "examples", "*.yaml"))
 	nonMD := append(append(append([]string{}, goFiles...), jobFiles...), yamlFiles...)
+	ownedFlags := pipelineOwnedFlags(append(append([]string{}, goFiles...), jobFiles...))
 
 	var hits []string
 	var verbs, links int
@@ -63,7 +95,7 @@ func checkAuxDocs(repoRoot string) bool {
 
 		for ln, line := range strings.Split(doc, "\n") {
 			for _, b := range banned {
-				if m := b.re.FindString(line); m != "" {
+				if m := b.re.FindString(line); m != "" && !ownsMatchedFlag(ownedFlags, m) {
 					hits = append(hits, fmt.Sprintf("%s:%d: dead token %q -- %s", rel, ln+1, m, b.want))
 				}
 			}
@@ -108,7 +140,7 @@ func checkAuxDocs(repoRoot string) bool {
 		rel, _ := filepath.Rel(repoRoot, path)
 		for ln, line := range strings.Split(string(data), "\n") {
 			for _, b := range banned {
-				if m := b.re.FindString(line); m != "" {
+				if m := b.re.FindString(line); m != "" && !ownsMatchedFlag(ownedFlags, m) {
 					hits = append(hits, fmt.Sprintf("%s:%d: dead token %q -- %s", rel, ln+1, m, b.want))
 				}
 			}

@@ -108,3 +108,21 @@ func TestCheckSidebar_FailsOnListedButMissingPage(t *testing.T) {
 		t.Fatal("a sidebar slug with no page must fail")
 	}
 }
+
+func TestCheckAuxDocs_FailsOnRunControlFlagByItsOldName(t *testing.T) {
+	root := writeFakeRepo(t)
+	writeRepoFile(t, root, "README.md", "```\nsparkwing run build --dry-run\n```\n")
+	if checkAuxDocs(root) {
+		t.Fatal("the run-control dry-run flag named without its sw- prefix must fail")
+	}
+}
+
+func TestCheckAuxDocs_AcceptsAFlagAPipelineDeclares(t *testing.T) {
+	root := writeFakeRepo(t)
+	declares := "package jobs\n\ntype Inputs struct {\n\tDryRun bool `flag:\"dry-run\" desc:\"Print the request\"`\n}\n"
+	writeRepoFile(t, root, ".sparkwing/jobs/demo.go", declares)
+	writeRepoFile(t, root, "README.md", "```\nsparkwing run build --dry-run\n```\n")
+	if !checkAuxDocs(root) {
+		t.Fatal("a flag a pipeline declares is live, however a banned pattern reads it")
+	}
+}
