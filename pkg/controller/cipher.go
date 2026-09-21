@@ -27,7 +27,7 @@ type Cipher interface {
 
 // BoundCipher is an optional extension of [Cipher] that binds a
 // sealed value to the row fields that decide who may read the secret
-// and how it is handled -- its name, its owning repository, whether an
+// and how it is handled -- its name, its owning pipeline, whether an
 // unscoped row answers every run, and whether it is redacted in run
 // output -- so an envelope copied onto another row, or a row edited to
 // widen its own access, no longer opens. A [Cipher] that also
@@ -40,38 +40,41 @@ type Cipher interface {
 // checks an implementation against this contract.
 type BoundCipher interface {
 	Cipher
-	// SealBound encrypts plain with name, repo, shared and masked as
-	// additional authenticated data; repo is empty for an unscoped
-	// secret. Same nonce requirement as [Cipher.Seal].
-	SealBound(name, repo string, shared, masked bool, plain string) (string, error)
+	// SealBound encrypts plain with name, scope, shared and masked as
+	// additional authenticated data; scope is the owning pipeline, and
+	// empty for an unscoped secret. Same nonce requirement as [Cipher.Seal].
+	SealBound(name, scope string, shared, masked bool, plain string) (string, error)
 	// OpenBound decrypts an envelope sealed for this combination of
-	// name, repo, shared and masked, and errors when the envelope
+	// name, scope, shared and masked, and errors when the envelope
 	// was sealed for a different one. Implementations that also hold
 	// envelopes written before binding open those unchanged.
-	OpenBound(name, repo string, shared, masked bool, envelope string) (string, error)
+	OpenBound(name, scope string, shared, masked bool, envelope string) (string, error)
 }
 
+// safety: Scope is whatever the row is owned by, because one binding serves
+// two tables: the pipeline for a secrets row, the repository for a webhook
+// signing secret.
 type secretBinding struct {
 	Name   string
-	Repo   string
+	Scope  string
 	Shared bool
 	Masked bool
 }
 
 func bindingForRow(sec *store.Secret) secretBinding {
-	return secretBinding{Name: sec.Name, Repo: sec.Repo, Shared: sec.Shared, Masked: sec.Masked}
+	return secretBinding{Name: sec.Name, Scope: sec.Pipeline, Shared: sec.Shared, Masked: sec.Masked}
 }
 
 func sealSecret(c Cipher, b secretBinding, plain string) (string, error) {
 	if bc, ok := c.(BoundCipher); ok {
-		return bc.SealBound(b.Name, b.Repo, b.Shared, b.Masked, plain)
+		return bc.SealBound(b.Name, b.Scope, b.Shared, b.Masked, plain)
 	}
 	return c.Seal(plain)
 }
 
 func openSecret(c Cipher, b secretBinding, envelope string) (string, error) {
 	if bc, ok := c.(BoundCipher); ok {
-		return bc.OpenBound(b.Name, b.Repo, b.Shared, b.Masked, envelope)
+		return bc.OpenBound(b.Name, b.Scope, b.Shared, b.Masked, envelope)
 	}
 	return c.Open(envelope)
 }

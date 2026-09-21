@@ -51,7 +51,7 @@ func newParentClaimFixture(t *testing.T) parentClaimFixture {
 	}
 	if err := st.CreateRun(t.Context(), store.Run{
 		ID: "parent", Pipeline: "parent-pipeline", Status: "running", StartedAt: now,
-		Repo: "acme/repo", RepoURL: "https://example.invalid/acme/repo.git",
+		DeclaredRepo: "acme/repo", RepoURL: "https://example.invalid/acme/repo.git",
 		GitBranch: "main", GitSHA: strings.Repeat("a", 40),
 	}); err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestTriggerParentClaim_TriggerClaimCreatesChild(t *testing.T) {
 	}
 	if err := f.store.CreateRun(t.Context(), store.Run{
 		ID: "trigger-parent", Pipeline: "parent-pipeline", Status: "running", StartedAt: now,
-		Repo: "acme/repo",
+		DeclaredRepo: "acme/repo",
 	}); err != nil {
 		t.Fatal(err)
 	}

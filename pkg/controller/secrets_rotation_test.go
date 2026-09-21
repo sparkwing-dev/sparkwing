@@ -16,8 +16,8 @@ import (
 type rotateResult struct {
 	Rotated int `json:"rotated"`
 	Skipped []struct {
-		Name string `json:"name"`
-		Repo string `json:"repo"`
+		Name     string `json:"name"`
+		Pipeline string `json:"pipeline"`
 	} `json:"skipped"`
 }
 
@@ -109,23 +109,23 @@ func TestSecrets_RotateReencryptsUnderTheCurrentKey(t *testing.T) {
 	srv, st := newSecretsTestServer(t, rotating)
 
 	rows := []struct {
-		name, repo, value string
-		shared, masked    bool
+		name, pipeline, value string
+		shared, masked        bool
 	}{
 		{name: "TOKEN", value: "supersecret", masked: true},
-		{name: "TOKEN", repo: "acme/web", value: "repo-secret", masked: true},
+		{name: "TOKEN", pipeline: "deploy-web", value: "pipeline-secret", masked: true},
 		{name: "REGION", value: "us-east-1", shared: true},
 	}
 	for _, row := range rows {
-		sealed, serr := oldCipher.SealBound(row.name, row.repo, row.shared, row.masked, row.value)
+		sealed, serr := oldCipher.SealBound(row.name, row.pipeline, row.shared, row.masked, row.value)
 		if serr != nil {
-			t.Fatalf("SealBound(%s/%s): %v", row.name, row.repo, serr)
+			t.Fatalf("SealBound(%s/%s): %v", row.name, row.pipeline, serr)
 		}
 		if err := st.CreateOrReplaceSecret(store.Secret{
 			Name: row.name, Value: sealed, Principal: "admin",
-			Repo: row.repo, Masked: row.masked, Shared: row.shared,
+			Pipeline: row.pipeline, Masked: row.masked, Shared: row.shared,
 		}, time.Now().UTC()); err != nil {
-			t.Fatalf("CreateOrReplaceSecret(%s/%s): %v", row.name, row.repo, err)
+			t.Fatalf("CreateOrReplaceSecret(%s/%s): %v", row.name, row.pipeline, err)
 		}
 	}
 
@@ -135,16 +135,16 @@ func TestSecrets_RotateReencryptsUnderTheCurrentKey(t *testing.T) {
 
 	currentOnly, _ := secrets.NewCipher(newKey)
 	for _, row := range rows {
-		stored, err := st.GetSecretRow(row.name, row.repo)
+		stored, err := st.GetSecretRow(row.name, row.pipeline)
 		if err != nil {
-			t.Fatalf("GetSecretRow(%s/%s): %v", row.name, row.repo, err)
+			t.Fatalf("GetSecretRow(%s/%s): %v", row.name, row.pipeline, err)
 		}
-		plain, oerr := currentOnly.OpenBound(row.name, row.repo, row.shared, row.masked, stored.Value)
+		plain, oerr := currentOnly.OpenBound(row.name, row.pipeline, row.shared, row.masked, stored.Value)
 		if oerr != nil {
-			t.Fatalf("secret %s/%s does not open under the current key alone: %v", row.name, row.repo, oerr)
+			t.Fatalf("secret %s/%s does not open under the current key alone: %v", row.name, row.pipeline, oerr)
 		}
 		if plain != row.value {
-			t.Fatalf("secret %s/%s = %q, want %q", row.name, row.repo, plain, row.value)
+			t.Fatalf("secret %s/%s = %q, want %q", row.name, row.pipeline, plain, row.value)
 		}
 	}
 	if got := secretValue(t, srv.URL, "/api/v1/secrets/TOKEN"); got != "supersecret" {
@@ -220,12 +220,12 @@ func TestSecrets_RotateSkipsARowThatOpensUnderNoKey(t *testing.T) {
 	srv, st := newSecretsTestServer(t, rotating)
 
 	good, _ := oldCipher.SealBound("GOOD", "", false, true, "readable")
-	lost, _ := stray.SealBound("LOST", "acme/web", false, true, "unreachable")
+	lost, _ := stray.SealBound("LOST", "deploy-web", false, true, "unreachable")
 	// safety: a plaintext value that opens with the envelope prefix is indistinguishable from a lost envelope.
 	const impostor = "enc:v1:not-really-an-envelope"
 	rows := []store.Secret{
 		{Name: "GOOD", Value: good, Principal: "admin", Masked: true},
-		{Name: "LOST", Value: lost, Principal: "admin", Repo: "acme/web", Masked: true},
+		{Name: "LOST", Value: lost, Principal: "admin", Pipeline: "deploy-web", Masked: true},
 		{Name: "IMPOSTOR", Value: impostor, Principal: "admin", Masked: true},
 	}
 	for _, row := range rows {
@@ -243,10 +243,10 @@ func TestSecrets_RotateSkipsARowThatOpensUnderNoKey(t *testing.T) {
 	}
 	skipped := map[string]string{}
 	for _, skip := range result.Skipped {
-		skipped[skip.Name] = skip.Repo
+		skipped[skip.Name] = skip.Pipeline
 	}
-	if repo, ok := skipped["LOST"]; !ok || repo != "acme/web" {
-		t.Fatalf("skipped = %+v, want LOST named with its repository", result.Skipped)
+	if pipeline, ok := skipped["LOST"]; !ok || pipeline != "deploy-web" {
+		t.Fatalf("skipped = %+v, want LOST named with its pipeline", result.Skipped)
 	}
 	if _, ok := skipped["IMPOSTOR"]; !ok {
 		t.Fatalf("skipped = %+v, want IMPOSTOR named", result.Skipped)

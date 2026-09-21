@@ -76,12 +76,12 @@ func TestRotateSecretValues_RewritesEveryRowInOneTransaction(t *testing.T) {
 
 	rows := []store.Secret{
 		{Name: "api_token", Value: "old:abc", Principal: "alice", Masked: true},
-		{Name: "api_token", Value: "old:def", Principal: "alice", Repo: "acme/web", Masked: true},
+		{Name: "api_token", Value: "old:def", Principal: "alice", Pipeline: "deploy-web", Masked: true},
 		{Name: "region", Value: "old:us-east-1", Principal: "bot", Shared: true},
 	}
 	for _, row := range rows {
 		if err := s.CreateOrReplaceSecret(row, now); err != nil {
-			t.Fatalf("CreateOrReplaceSecret(%s/%s): %v", row.Name, row.Repo, err)
+			t.Fatalf("CreateOrReplaceSecret(%s/%s): %v", row.Name, row.Pipeline, err)
 		}
 	}
 
@@ -101,19 +101,19 @@ func TestRotateSecretValues_RewritesEveryRowInOneTransaction(t *testing.T) {
 	}
 	for _, sec := range got {
 		if !strings.HasPrefix(sec.Value, "new:") {
-			t.Fatalf("secret %s/%s value=%q, want the rewritten value", sec.Name, sec.Repo, sec.Value)
+			t.Fatalf("secret %s/%s value=%q, want the rewritten value", sec.Name, sec.Pipeline, sec.Value)
 		}
 		if !sec.UpdatedAt.Equal(now) {
 			t.Fatalf("secret %s/%s updated_at=%v, want the rotation to leave it at %v",
-				sec.Name, sec.Repo, sec.UpdatedAt, now)
+				sec.Name, sec.Pipeline, sec.UpdatedAt, now)
 		}
 	}
-	scoped, err := s.GetSecretRow("api_token", "acme/web")
+	scoped, err := s.GetSecretRow("api_token", "deploy-web")
 	if err != nil {
 		t.Fatalf("GetSecretRow: %v", err)
 	}
 	if scoped.Value != "new:def" {
-		t.Fatalf("repo-scoped value=%q, want new:def", scoped.Value)
+		t.Fatalf("pipeline-scoped value=%q, want new:def", scoped.Value)
 	}
 	if scoped.Principal != "alice" || !scoped.Masked {
 		t.Fatalf("rotation changed columns other than value: %+v", scoped)

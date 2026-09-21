@@ -169,7 +169,7 @@ func clientCalls() []struct {
 		{"ObserveSlot", func(ctx context.Context, c *client.Client) error { _, err := c.ObserveSlot(ctx, "k", "h"); return err }},
 		{"ConcurrencyState", func(ctx context.Context, c *client.Client) error { _, err := c.ConcurrencyState(ctx, "k"); return err }},
 		{"GetSecret", func(ctx context.Context, c *client.Client) error { _, err := c.GetSecret(ctx, "s"); return err }},
-		{"DeleteSecretForRepo", func(ctx context.Context, c *client.Client) error { return c.DeleteSecretForRepo(ctx, "s", "") }},
+		{"DeleteSecretForPipeline", func(ctx context.Context, c *client.Client) error { return c.DeleteSecretForPipeline(ctx, "s", "") }},
 	}
 }
 

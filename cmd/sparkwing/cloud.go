@@ -28,6 +28,7 @@ import (
 var cloudUserTokenScopes = []string{
 	controller.ScopeRunsRead,
 	controller.ScopeRunsWrite,
+	controller.ScopeRunsControl,
 	controller.ScopeTriggersRead,
 	controller.ScopeLogsRead,
 	controller.ScopeApprovalsWrite,
