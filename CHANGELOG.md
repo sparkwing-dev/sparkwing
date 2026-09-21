@@ -19,6 +19,15 @@ unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `sparkwing.Admitted(ctx)` reports the cores and memory the scheduler
+  reserved for the running job
+  A step sizing its own parallelism reads its share rather than the machine,
+  which on a host running several jobs reports a larger number. The second
+  result is false where nothing reserved anything, so a caller told nothing
+  sizes itself as before.
+
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.

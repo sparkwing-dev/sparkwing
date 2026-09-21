@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -30,6 +31,16 @@ func recordNodeUsage(ctx context.Context, backends Backends, runID, nodeID strin
 type runCharge struct {
 	Cores       float64
 	MemoryBytes int64
+}
+
+func withAdmittedCharge(ctx context.Context, charge runCharge) context.Context {
+	if charge.Cores <= 0 && charge.MemoryBytes <= 0 {
+		return ctx
+	}
+	return sparkwingruntime.WithAdmission(ctx, sparkwing.Admission{
+		Cores:       charge.Cores,
+		MemoryBytes: charge.MemoryBytes,
+	})
 }
 
 func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {

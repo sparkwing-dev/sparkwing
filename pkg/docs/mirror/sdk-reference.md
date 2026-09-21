@@ -69,6 +69,19 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ## Types
 
+### type Admission
+
+Admission is the resource share the scheduler reserved for the running job, rather than the capacity of the machine it runs on.
+
+```
+type Admission struct {
+    Cores       float64
+    MemoryBytes int64
+}
+```
+
+- `func Admitted(ctx context.Context) (Admission, bool)` -- Admitted reports the share the scheduler reserved for the running job.
+
 ### type AdmissionClass
 
 AdmissionClass describes the latency expectations of a pipeline without imposing an absolute queue order.
@@ -2062,6 +2075,7 @@ var RuntimePlumbing = struct {
         Node:              keyNode,
         ResolvedArgs:      keyResolvedArgs,
         ProfileResolution: keyProfileResolution,
+        Admission:         keyAdmission,
     },
     Fns: runtimePlumbingFns{
         PlanInsertChild:        (*Plan).insertChild,
