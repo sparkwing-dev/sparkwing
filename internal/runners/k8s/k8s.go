@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -81,6 +82,17 @@ type Config struct {
 	TTLSecondsAfterFinished int32
 
 	MissingJobGracePeriod time.Duration
+
+	// UnschedulableGracePeriod bounds how long a pod no machine of its shape
+	// can ever hold sits before its node fails. Zero means
+	// [UnschedulableGracePeriod].
+	UnschedulableGracePeriod time.Duration
+
+	// FleetFullWait bounds how long a node queues for a busy runner pool to
+	// free a machine of the shape it needs. Zero means [FleetFullWait], which
+	// is the longest the dispatcher's unrenewed claim covers, so an operator
+	// raising this must raise the claim lease with it.
+	FleetFullWait time.Duration
 
 	// JobActiveDeadline bounds a fallback Job whose node declared no timeout.
 	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it.
@@ -137,7 +149,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
 	}
 	if msg := r.ceilingUnderClass(class); msg != "" {
-		r.failNode(ctx, req, msg, store.FailureUnknown)
+		r.failNode(ctx, req, msg, store.FailureUnknown, eventClassRefused)
 		return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 	}
 	job := r.buildJob(name, req, res, class, fence)
@@ -166,8 +178,9 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
 
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "job created")
-	var lastPhase string
+	var lastDetail string
 	var unschedulableSince time.Time
+	queued := false
 
 	t := time.NewTicker(r.cfg.PollInterval)
 	defer t.Stop()
@@ -187,24 +200,39 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			if isJobDone(j) {
 				return r.readFinalResult(ctx, req, j)
 			}
-			if phase := r.observePodPhase(ctx, name); phase != "" && phase != lastPhase {
-				_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, phase)
-				lastPhase = phase
-			}
-			if detail := r.observeUnschedulable(ctx, name); detail == "" {
+			detail := ""
+			if pod := r.unschedulablePod(ctx, name); pod == nil {
 				unschedulableSince = time.Time{}
+				queued = false
 			} else {
 				now := time.Now()
 				if unschedulableSince.IsZero() {
 					unschedulableSince = now
 				}
-				if now.Sub(unschedulableSince) >= UnschedulableGracePeriod {
-					msg := fmt.Sprintf(
-						"K8sRunner: no node accepted this pod within %s: %s",
-						UnschedulableGracePeriod, detail)
-					r.failNode(ctx, req, msg, store.FailureUnknown)
+				why := unschedulableMessage(pod)
+				budget := r.unschedulableGrace()
+				if r.fleetRunsAShapeFor(ctx, pod) {
+					budget = r.fleetFullWait()
+					detail = queuedDetail(why)
+					if !queued {
+						queued = true
+						r.noteQueued(ctx, req, why)
+					}
+				} else {
+					queued = false
+				}
+				if now.Sub(unschedulableSince) >= budget {
+					msg, reason := unschedulableFailure(queued, budget, why)
+					r.failNode(ctx, req, msg, reason, unschedulableEvent(queued))
 					return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 				}
+			}
+			if detail == "" {
+				detail = r.observePodPhase(ctx, name)
+			}
+			if detail != "" && detail != lastDetail {
+				r.reportActivity(ctx, req, detail)
+				lastDetail = detail
 			}
 		}
 	}
@@ -216,33 +244,172 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 // of the Job's wall-clock deadline.
 const UnschedulableGracePeriod = 5 * time.Minute
 
+// safety: the dispatcher never renews the node claim, so a wait outliving it would have the node reaped and its
+// reservation refunded while the Job still sat in the queue. One minute is the margin between the last poll inside
+// the wait and the reaper.
+const queuedWaitSlack = time.Minute
+
+// FleetFullWait is how long a node queues for the runner fleet to free a
+// machine of the shape it needs before it fails with [store.FailureQueueTimeout].
+// It is the longest wait the claim the dispatcher holds can cover.
+const FleetFullWait = ClaimLease - queuedWaitSlack
+
+func (r *Runner) unschedulableGrace() time.Duration {
+	if r.cfg.UnschedulableGracePeriod > 0 {
+		return r.cfg.UnschedulableGracePeriod
+	}
+	return UnschedulableGracePeriod
+}
+
+func (r *Runner) fleetFullWait() time.Duration {
+	if r.cfg.FleetFullWait > 0 {
+		return r.cfg.FleetFullWait
+	}
+	return FleetFullWait
+}
+
 // safety: an unschedulable pod would otherwise sit until the Job deadline hours
 // later with nothing saying why, so the scheduler's own message is what the
 // node fails with.
 func (r *Runner) observeUnschedulable(ctx context.Context, jobName string) string {
+	return unschedulableMessage(r.unschedulablePod(ctx, jobName))
+}
+
+func (r *Runner) unschedulablePod(ctx context.Context, jobName string) *corev1.Pod {
 	pods, err := r.client.CoreV1().Pods(r.cfg.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("batch.kubernetes.io/job-name=%s", jobName),
 	})
 	if err != nil || len(pods.Items) == 0 {
-		return ""
+		return nil
 	}
 	for _, p := range pods.Items {
 		if p.Status.Phase != corev1.PodPending {
-			return ""
+			return nil
 		}
 	}
-	for _, p := range pods.Items {
-		for _, c := range p.Status.Conditions {
+	for i := range pods.Items {
+		for _, c := range pods.Items[i].Status.Conditions {
 			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse &&
 				c.Reason == corev1.PodReasonUnschedulable {
-				if c.Message != "" {
-					return c.Message
-				}
-				return string(corev1.PodReasonUnschedulable)
+				return &pods.Items[i]
 			}
 		}
 	}
+	return nil
+}
+
+func unschedulableMessage(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse &&
+			c.Reason == corev1.PodReasonUnschedulable {
+			if c.Message != "" {
+				return c.Message
+			}
+			return string(corev1.PodReasonUnschedulable)
+		}
+	}
 	return ""
+}
+
+// safety: the scheduler's own message cannot separate these, because a pod too large for every machine and a pod
+// behind a full fleet are both rejected as "Insufficient cpu". Allocatable is the figure the scheduler fits against
+// and it does not move as a machine fills, so measuring the pod against it asks that question with the neighbors
+// removed. A pool running nothing answers false, because a fleet with no machines in it is not a full fleet.
+func (r *Runner) fleetRunsAShapeFor(ctx context.Context, pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	cpu, memory := podRequestTotals(pod)
+	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		LabelSelector: labels.Set(pod.Spec.NodeSelector).String(),
+	})
+	if err != nil || len(nodes.Items) == 0 {
+		return false
+	}
+	for i := range nodes.Items {
+		n := &nodes.Items[i]
+		if n.Spec.Unschedulable {
+			continue
+		}
+		alloc := n.Status.Allocatable
+		if alloc.Cpu().Cmp(cpu) < 0 || alloc.Memory().Cmp(memory) < 0 {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// safety: the scheduler fits a pod by the larger of its init-container peak and
+// the sum of its app containers, so the same arithmetic decides here.
+func podRequestTotals(pod *corev1.Pod) (resource.Quantity, resource.Quantity) {
+	var cpu, memory resource.Quantity
+	for _, c := range pod.Spec.Containers {
+		cpu.Add(*c.Resources.Requests.Cpu())
+		memory.Add(*c.Resources.Requests.Memory())
+	}
+	for _, c := range pod.Spec.InitContainers {
+		if q := c.Resources.Requests.Cpu(); q.Cmp(cpu) > 0 {
+			cpu = *q
+		}
+		if q := c.Resources.Requests.Memory(); q.Cmp(memory) > 0 {
+			memory = *q
+		}
+	}
+	return cpu, memory
+}
+
+func queuedDetail(why string) string {
+	return "queued: the runner fleet is full (" + firstLine(why) + ")"
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+const (
+	eventQueuedOnFleet  = "capacity_queued"
+	eventQueueTimeout   = "capacity_queue_timeout"
+	eventClassRefused   = "resource_class_refused"
+	queuedFailureFormat = "K8sRunner: the runner fleet stayed full for %s, so no machine freed up for this node: %s"
+)
+
+// safety: the detail is the only thing telling the dashboard and the queue
+// listing why a node is sitting still, so a write that fails is logged rather
+// than dropped.
+func (r *Runner) reportActivity(ctx context.Context, req runner.Request, detail string) {
+	if err := r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, detail); err != nil {
+		r.logger.Debug("k8s: reporting node activity failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	}
+}
+
+func (r *Runner) noteQueued(ctx context.Context, req runner.Request, why string) {
+	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, eventQueuedOnFleet, []byte(why)); err != nil {
+		r.logger.Warn("k8s: recording the capacity wait failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	}
+}
+
+func unschedulableFailure(queued bool, budget time.Duration, why string) (string, string) {
+	if queued {
+		return fmt.Sprintf(queuedFailureFormat, budget, why), store.FailureQueueTimeout
+	}
+	return fmt.Sprintf("K8sRunner: no node accepted this pod within %s: %s", budget, why),
+		store.FailureUnknown
+}
+
+func unschedulableEvent(queued bool) string {
+	if queued {
+		return eventQueueTimeout
+	}
+	return eventClassRefused
 }
 
 // safety: a customer is billed for the class at the claim, so a pod that cannot
@@ -266,8 +433,8 @@ func (r *Runner) ceilingUnderClass(class store.CPUClass) string {
 	return ""
 }
 
-func (r *Runner) failNode(ctx context.Context, req runner.Request, msg, reason string) {
-	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "resource_class_refused", []byte(msg)); err != nil {
+func (r *Runner) failNode(ctx context.Context, req runner.Request, msg, reason, event string) {
+	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, event, []byte(msg)); err != nil {
 		r.logger.Warn("k8s: recording the refusal failed",
 			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
 	}

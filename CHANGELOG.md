@@ -26,8 +26,28 @@ unlock.
   and says what rollback means at each stage of an upgrade. The store suite
   runs the same procedure end to end for SQLite and, against a configured
   server, for PostgreSQL.
+### Fixed
+
+- **wingd:** an admission refusal is counted in the events window before the
+  refusal is sent, not after
+  A caller that had its answer could query the window and find the rejection it
+  had just been told about missing, because `rejectInvalid` replied first and
+  recorded last. The hosted gate caught it as a count of 2 where 3 were
+  expected.
+
 ### Changed
 
+- **runner:** a node queues when the Kubernetes fleet is full instead of failing
+  A pod no node would take failed its node after five minutes, whatever the
+  reason, so an hour busy enough to fill the runner pool turned ordinary builds
+  into failures. The runner now measures the pod's requests against the
+  `allocatable` of the pool machines its own node selector admits. A machine of
+  that shape is running and merely busy, so the node queues for up to nine
+  minutes with `status_detail` reading `queued: the runner fleet is full`, a
+  `capacity_queued` event opening the wait, and the run starting the moment a
+  machine frees; the wait ends in `queue_timeout` with a
+  `capacity_queue_timeout` event. No machine in the pool could hold the pod
+  even when empty, so waiting cures nothing and the five-minute failure stands.
 - **controller + runner:** the default credit rate table stops at the 8-core class
   The 16, 32 and 64-core entries are gone from the default ladder, and the
   `large` cpu band the classes above 8 cores selected goes with them: one
@@ -50,9 +70,12 @@ unlock.
   repository slug survives the upgrade, answers no run, and is re-keyed to a
   pipeline by an admin.
 
-- **api:** a run serializes `declared_repo` where it serialized `repo` (Breaking)
-  `store.Run.Repo` is `store.Run.DeclaredRepo` and `store.RunFilter.Repos` is
-  `store.RunFilter.DeclaredRepos`. The `?repo=` list filter is unchanged.
+- **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
+  `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
+  repository a submitter typed grants nothing and the name should say so.
+  A run still serializes the field as `repo` and the `?repo=` list filter is
+  unchanged, because a CLI and a controller version independently and the
+  run-create decoder refuses an unknown field.
 - **web (Breaking):** the dashboard's session and CSRF cookies carry the
   `__Host-` prefix
   Host-only scoping stops a sibling host under the same registrable domain
@@ -68,6 +91,7 @@ unlock.
   Summary: every signed-in browser signs in once more, and a custom browser
   client reads `__Host-sw_csrf` before `sw_csrf`.
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 ### Security
 
 - **controller:** a run's repository is metadata and grants nothing (Breaking)
