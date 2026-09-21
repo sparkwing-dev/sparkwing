@@ -19,27 +19,8 @@ unlock.
 ---
 
 ## [Unreleased]
-### Changed
-
-- **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
-
-## [v0.59.0] - 2026-09-21
 ### Added
 
-- **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
-  duplicate responsibilities across packages, unnamed complex conditions,
-  unexplained magic values, and changes that build sprawling workarounds around
-  reversible assumptions. Repositories can also declare scoped architectural
-  invariants in `.sparkwing/jev-invariants.yaml`; one batched request asks an
-  independent question for every applicable invariant. Requests use bounded
-  source, exact-request caching, and a dry-run that sends nothing.
-- **pipelines:** `sparkwing run jev-sweeper` performs a bounded manual audit of
-  the whole Go codebase for mixed responsibilities, abstraction-boundary leaks,
-  misleading contracts, unnecessary indirection, and duplicate responsibility.
-  It also checks Open/Closed and dependency-inversion violations, primitive
-  obsession, and feature envy. Reproducible shuffled samples rotate coverage
-  beyond the highest-ranked candidates. It batches independent judgments and
-  reports advisory probabilities.
 - **store:** schema 48 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -65,6 +46,27 @@ unlock.
   `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
+
+## [v0.59.0] - 2026-09-21
+### Added
+
+- **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
+  duplicate responsibilities across packages, unnamed complex conditions,
+  unexplained magic values, and changes that build sprawling workarounds around
+  reversible assumptions. Repositories can also declare scoped architectural
+  invariants in `.sparkwing/jev-invariants.yaml`; one batched request asks an
+  independent question for every applicable invariant. Requests use bounded
+  source, exact-request caching, and a dry-run that sends nothing.
+- **pipelines:** `sparkwing run jev-sweeper` performs a bounded manual audit of
+  the whole Go codebase for mixed responsibilities, abstraction-boundary leaks,
+  misleading contracts, unnecessary indirection, and duplicate responsibility.
+  It also checks Open/Closed and dependency-inversion violations, primitive
+  obsession, and feature envy. Reproducible shuffled samples rotate coverage
+  beyond the highest-ranked candidates. It batches independent judgments and
+  reports advisory probabilities.
 ### Fixed
 
 - **cli:** `--sw-workers` caps the local dispatcher on its own. It was
