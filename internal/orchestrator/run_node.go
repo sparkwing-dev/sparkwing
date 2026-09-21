@@ -267,7 +267,7 @@ func RunNodeOnce(
 				return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
 			}
 			defer lease.release()
-			ctx = withLocalAdmission(ctx, admission, lease.token, lease.childToken, lease.hostAdmitted, priority)
+			ctx = withLocalAdmission(ctx, admission, lease.token, lease.childToken, lease.hostAdmitted, priority, lease.charge)
 		}
 	}
 

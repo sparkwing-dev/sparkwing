@@ -533,7 +533,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			leaseToken = lease.token
 			leaseChildToken = lease.childToken
 			leaseHostAdmitted = lease.hostAdmitted
-			runCtx = sparkwingruntime.WithAdmission(runCtx, lease.charge.admission())
+			runCtx = withAdmittedCharge(runCtx, lease.charge)
 		}
 	}
 
@@ -1685,7 +1685,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue())
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue(), runCharge{})
 	s.resolverCtx = withAdmissionWaitTracker(s.resolverCtx, s.admissionWaits)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())

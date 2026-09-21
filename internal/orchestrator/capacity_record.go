@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -30,11 +31,20 @@ func recordNodeUsage(ctx context.Context, backends Backends, runID, nodeID strin
 type runCharge struct {
 	Cores       float64
 	MemoryBytes int64
-	Source      string
 }
 
-func (c runCharge) admission() *sparkwing.Admission {
-	return &sparkwing.Admission{Cores: c.Cores, MemoryBytes: c.MemoryBytes, Source: c.Source}
+// safety: a charge of zero means nothing was reserved -- an unpinned run
+// before a node resolves, and a child run on a parent's lease -- so the
+// context keeps whatever charge it already carries rather than taking a zero
+// share, which a caller would size itself down to.
+func withAdmittedCharge(ctx context.Context, charge runCharge) context.Context {
+	if charge.Cores <= 0 && charge.MemoryBytes <= 0 {
+		return ctx
+	}
+	return sparkwingruntime.WithAdmission(ctx, sparkwing.Admission{
+		Cores:       charge.Cores,
+		MemoryBytes: charge.MemoryBytes,
+	})
 }
 
 func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {

@@ -72,7 +72,7 @@ func (la *LocalAdmission) attachReservedNode(ctx context.Context, priority int) 
 		return ctx, false
 	}
 	token := la.reservedNodeLeaseToken
-	return withLocalAdmission(ctx, la, token, token, true, priority), true
+	return withLocalAdmission(ctx, la, token, token, true, priority, runCharge{}), true
 }
 
 const defaultQueueHeartbeat = 30 * time.Second
@@ -247,7 +247,7 @@ func (la *LocalAdmission) admitRun(
 		rl.childToken = lease.Token
 	}
 	rl.driftWarning = warning
-	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes, Source: string(res.Source)}
+	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
 	if lease.SoleRunUnderLoad {
 		fmt.Fprintf(la.out(),
 			"admitted as sole run; host under external load %.1f cores - additional runs will queue\n",
@@ -330,7 +330,7 @@ func (la *LocalAdmission) admitNode(
 		childToken:   lease.Token,
 		hostAdmitted: leaseCarriesHost(lease),
 		leases:       []*wingdclient.Lease{lease},
-		charge:       runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes, Source: string(res.Source)},
+		charge:       runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
 	}
 	return rl, nil
 }
@@ -1033,10 +1033,12 @@ func withLocalAdmission(
 	childToken string,
 	hostAdmitted bool,
 	priority int,
+	charge runCharge,
 ) context.Context {
 	if la == nil {
 		return ctx
 	}
+	ctx = withAdmittedCharge(ctx, charge)
 	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
 		la:           la,
 		token:        leaseToken,

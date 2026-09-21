@@ -1,5 +1,7 @@
 package sparkwing
 
+import "context"
+
 // AdmissionClass describes the latency expectations of a pipeline without
 // imposing an absolute queue order. Most pipelines should leave it unset and
 // let Sparkwing infer the class from the trigger.
@@ -33,3 +35,27 @@ func (p *Plan) AdmissionClassValue() AdmissionClass {
 	defer p.mu.Unlock()
 	return p.admissionClass
 }
+
+// Admission is the resource share the scheduler reserved for the running job.
+// A step sizing its own parallelism reads this rather than the machine,
+// because a host runs several jobs at once.
+type Admission struct {
+	Cores       float64
+	MemoryBytes int64
+}
+
+// Admitted reports the share the scheduler reserved for the running job. The
+// second result is false where nothing reserved anything -- inside Plan, in a
+// test that installed none, and on any path not carrying the dispatch context.
+// A caller told nothing sizes itself as it otherwise would.
+func Admitted(ctx context.Context) (Admission, bool) {
+	if ctx == nil {
+		return Admission{}, false
+	}
+	a, ok := ctx.Value(keyAdmission).(Admission)
+	return a, ok
+}
+
+type keyAdmissionType struct{}
+
+var keyAdmission = keyAdmissionType{}

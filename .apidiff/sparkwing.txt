@@ -1,10 +1,15 @@
 # sparkwing
 
+type Admission struct {
+	Cores       float64
+	MemoryBytes int64
+}
 const AdmissionBatch AdmissionClass = "batch"
 type AdmissionClass string
 const AdmissionCritical AdmissionClass = "critical"
 const AdmissionInteractive AdmissionClass = "interactive"
 const AdmissionNormal AdmissionClass = "normal"
+func Admitted(ctx context.Context) (Admission, bool)
 type AfterRunFn func(ctx context.Context, err error)
 func Always() Predicate
 func And(preds ...Predicate) Predicate
@@ -656,6 +661,7 @@ var RuntimePlumbing = struct {
 		Node:              keyNode,
 		ResolvedArgs:      keyResolvedArgs,
 		ProfileResolution: keyProfileResolution,
+		Admission:         keyAdmission,
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,

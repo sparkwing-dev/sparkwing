@@ -190,8 +190,7 @@ func (r *NodeExecutor) executeNodeWithAdmission(ctx context.Context, req runner.
 	if childToken == "" {
 		childToken = lease.token
 	}
-	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted, priority)
-	nodeCtx = sparkwingruntime.WithAdmission(nodeCtx, lease.charge.admission())
+	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted, priority, lease.charge)
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
