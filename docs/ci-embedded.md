@@ -72,7 +72,7 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
 | `--sw-mode=ci-embedded` | (off) | Enables this mode. |
-| `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. Takes effect only alongside `--sw-mode`; passed on its own the CLI consumes it and forwards nothing, so the cap silently stays at `runtime.NumCPU()`. GHA hosted runners are 2-CPU, so `--sw-workers=4` over-subscribes a small VM -- pick deliberately. |
+| `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. A hosted runner has far fewer cores than a workstation, so a value picked for local use over-subscribes it -- pick deliberately. |
 | `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/profiles.yaml` (override the path with `SPARKWING_PROFILES`). Absent, the pipeline's own `profile:` field applies, then the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
 
 State, cache, and logs come from the resolved profile; see
