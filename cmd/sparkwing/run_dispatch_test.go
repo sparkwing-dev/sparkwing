@@ -322,6 +322,9 @@ func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
 	t.Setenv("SPARKWING_NO_BINCACHE", "1")
 	t.Setenv("SPARKWING_NO_AUTO_REGISTER", "1")
 	t.Setenv("GOWORK", "off")
+	// safety: an inherited cap would satisfy the assertion without the flag reaching
+	// the child, so the ambient value is set to one the test never expects to see.
+	t.Setenv("SPARKWING_WORKERS", "99")
 	repository := t.TempDir()
 	pipelineDirectory := filepath.Join(repository, ".sparkwing")
 	if err := os.Mkdir(pipelineDirectory, 0o700); err != nil {
@@ -335,13 +338,15 @@ func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
 import (
  "encoding/json"
  "os"
+ "sort"
  "strings"
 )
 func main() {
- var carried []string
+ carried := []string{}
  for _, entry := range os.Environ() {
-  if strings.HasPrefix(entry, "SPARKWING_WORKERS=") { carried = append(carried, entry) }
+  if strings.HasPrefix(entry, "SPARKWING_WORKERS=") || strings.HasPrefix(entry, "SPARKWING_MODE=") { carried = append(carried, entry) }
  }
+ sort.Strings(carried)
  data, err := json.Marshal(carried)
  if err != nil { panic(err) }
  if err := os.WriteFile(os.Getenv("FICTIONAL_ENVIRONMENT_FILE"), data, 0600); err != nil { panic(err) }
