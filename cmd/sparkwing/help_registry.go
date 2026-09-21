@@ -1999,6 +1999,12 @@ var cmdProfiles = Command{
 $XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
 ~/.config/sparkwing/profiles.yaml. Permissions on save are 0600.
 
+SPARKWING_HOME does not move this file. It is the state, cache and
+logs root; profiles are machine-wide connections that outlive any
+one home. A write from a command running under a home of its own is
+refused rather than sent to the machine's profiles: set
+SPARKWING_PROFILES to a path inside that home to keep it there.
+
 Every human-driven client command (tokens, users, runs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
