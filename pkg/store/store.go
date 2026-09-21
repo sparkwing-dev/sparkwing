@@ -2246,6 +2246,17 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		_, err := tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN IF EXISTS csrf_token`)
 		return err
 	case 22:
+		// safety: a store built by v1's current DDL already keys secrets on
+		// (name, pipeline), so adding (name, repo) here points the key at a
+		// second column, and v48's rename then skips because its target
+		// name is taken.
+		secretCols, err := columnsOfTable(ctx, tx, "secrets")
+		if err != nil {
+			return err
+		}
+		if secretCols["pipeline"] {
+			return nil
+		}
 		for _, stmt := range secretRepoScopePostgres {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return err
