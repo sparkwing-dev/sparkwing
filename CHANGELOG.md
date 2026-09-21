@@ -54,9 +54,12 @@ unlock.
   repository slug survives the upgrade, answers no run, and is re-keyed to a
   pipeline by an admin.
 
-- **api:** a run serializes `declared_repo` where it serialized `repo` (Breaking)
-  `store.Run.Repo` is `store.Run.DeclaredRepo` and `store.RunFilter.Repos` is
-  `store.RunFilter.DeclaredRepos`. The `?repo=` list filter is unchanged.
+- **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
+  `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
+  repository a submitter typed grants nothing and the name should say so.
+  A run still serializes the field as `repo` and the `?repo=` list filter is
+  unchanged, because a CLI and a controller version independently and the
+  run-create decoder refuses an unknown field.
 - **web (Breaking):** the dashboard's session and CSRF cookies carry the
   `__Host-` prefix
   Host-only scoping stops a sibling host under the same registrable domain
