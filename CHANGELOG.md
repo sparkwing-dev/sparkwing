@@ -19,9 +19,6 @@ unlock.
 ---
 
 ## [Unreleased]
-### Changed
-
-- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 ### Security
 
 - **controller:** a run's repository is metadata and grants nothing (Breaking)
@@ -75,6 +72,8 @@ unlock.
   See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
   Summary: every signed-in browser signs in once more, and a custom browser
   client reads `__Host-sw_csrf` before `sw_csrf`.
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ## [v0.60.0] - 2026-09-21
 ### Added
