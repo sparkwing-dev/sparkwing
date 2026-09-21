@@ -19,6 +19,24 @@ unlock.
 ---
 
 ## [Unreleased]
+
+### Fixed
+
+- **store:** the backup drill skips a Postgres client older than the server
+  instead of failing
+  Its comment claimed `SPARKWING_PG_BIN` names a client at least as new as the
+  server, and nothing checked. The pre-release lane runs an embedded Postgres
+  17 and takes whatever `pg_dump` the runner has, which is 16 on the hosted
+  image, so the drill failed the lane rather than reporting an environment it
+  could not run in. The conformance lane keeps its no-skip guard, so the drill
+  still has one place it must actually run.
+- **wingd:** an admission refusal is counted in the events window before the
+  refusal is sent, not after
+  A caller that had its answer could query the window and find the rejection it
+  had just been told about missing, because `rejectInvalid` replied first and
+  recorded last. The hosted gate caught it as a count of 2 where 3 were
+  expected.
+
 ### Added
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
@@ -26,14 +44,6 @@ unlock.
   and says what rollback means at each stage of an upgrade. The store suite
   runs the same procedure end to end for SQLite and, against a configured
   server, for PostgreSQL.
-### Fixed
-
-- **wingd:** an admission refusal is counted in the events window before the
-  refusal is sent, not after
-  A caller that had its answer could query the window and find the rejection it
-  had just been told about missing, because `rejectInvalid` replied first and
-  recorded last. The hosted gate caught it as a count of 2 where 3 were
-  expected.
 
 ### Changed
 
@@ -92,6 +102,7 @@ unlock.
   client reads `__Host-sw_csrf` before `sw_csrf`.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
+
 ### Security
 
 - **controller:** a run's repository is metadata and grants nothing (Breaking)

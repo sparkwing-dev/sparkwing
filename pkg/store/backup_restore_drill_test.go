@@ -2,12 +2,14 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -375,6 +377,7 @@ func drillPostgres(t *testing.T) {
 	base := storetest.PostgresURL(t)
 	dump := drillPGTool(t, "pg_dump")
 	restore := drillPGTool(t, "pg_restore")
+	drillRequireClientNotOlderThanServer(t, base, dump)
 
 	cipher := drillCipher(t)
 	unique := storetest.Unique()
@@ -424,6 +427,50 @@ func drillPostgres(t *testing.T) {
 
 // safety: SPARKWING_PG_BIN names client binaries at least as new as the server,
 // because a pg_dump older than the server it reads refuses the dump outright.
+// drillRequireClientNotOlderThanServer skips when pg_dump is older than the
+// server, because pg_dump refuses a newer server outright and the refusal is
+// an environment fact rather than a defect in the code under test. A lane that
+// must not skip turns this into a failure with its own no-skip guard.
+func drillRequireClientNotOlderThanServer(t *testing.T, baseURL, dump string) {
+	t.Helper()
+	db, err := sql.Open("pgx", baseURL)
+	if err != nil {
+		t.Fatalf("open for server version: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var server string
+	if err := db.QueryRow("SHOW server_version").Scan(&server); err != nil {
+		t.Fatalf("read server version: %v", err)
+	}
+	out, err := exec.Command(dump, "--version").CombinedOutput()
+	if err != nil {
+		t.Skipf("%s --version failed, so the client version is unknown: %v", dump, err)
+	}
+	client := string(out)
+	sMajor, cMajor := drillMajor(server), drillMajor(client)
+	if sMajor == 0 || cMajor == 0 {
+		t.Skipf("could not read a major version from server %q or client %q", server, strings.TrimSpace(client))
+	}
+	if cMajor < sMajor {
+		t.Skipf("pg_dump %d is older than server %d, so the dump would be refused. "+
+			"Point SPARKWING_PG_BIN at a client at least as new as the server.", cMajor, sMajor)
+	}
+}
+
+func drillMajor(v string) int {
+	for _, f := range strings.Fields(v) {
+		digits := strings.TrimLeft(f, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ()")
+		cut := strings.IndexFunc(digits, func(r rune) bool { return r < '0' || r > '9' })
+		if cut > 0 {
+			digits = digits[:cut]
+		}
+		if n, err := strconv.Atoi(digits); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
 func drillPGTool(t *testing.T, name string) string {
 	t.Helper()
 	if dir := strings.TrimSpace(os.Getenv("SPARKWING_PG_BIN")); dir != "" {
