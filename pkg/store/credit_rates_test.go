@@ -12,8 +12,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// safety: the rates GitHub charges a Linux x64 runner per second, which is the
-// ladder a cluster is provisioned with.
+// safety: the rates GitHub charges a Linux x64 runner per second, stored by an
+// operator. It reaches past the default ladder on purpose, because a table an
+// operator stored has to keep pricing classes the default no longer names.
 func githubRateTable() store.CreditRateTable {
 	return store.CreditRateTable{
 		{Cores: 2, MicroPerSecond: 10_000},
@@ -123,7 +124,11 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rate table: %v", err)
 	}
-	want := githubRateTable()
+	want := store.CreditRateTable{
+		{Cores: 2, MicroPerSecond: 10_000},
+		{Cores: 4, MicroPerSecond: 20_000},
+		{Cores: 8, MicroPerSecond: 36_667},
+	}
 	if len(table) != len(want) {
 		t.Fatalf("the default table prices %d classes, want %d", len(table), len(want))
 	}
@@ -289,6 +294,51 @@ func TestClaimIsRefusedAboveTheLargestPricedClass(t *testing.T) {
 	}
 	if len(charges) != 0 {
 		t.Fatalf("a refused claim wrote %+v", charges)
+	}
+}
+
+// The default ladder stops at 8 cores, and a node pinned above it is refused
+// when its class is chosen, because a claim that reserved credits first would
+// take a customer's money for a pod no pool can schedule. A table an operator
+// stored still prices the class it names.
+func TestTheDefaultLadderRefusesAClassAboveEight(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	fundLedger(t, s, 10_000)
+	readyNodeWithCores(t, s, "run-sixteen", "build", 16)
+
+	_, err := s.ClaimNamedNode(ctx, claimant, "run-sixteen", "build", "pod-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true})
+	var unpriced *store.UnpricedCPUClassError
+	if !errors.As(err, &unpriced) {
+		t.Fatalf("claim of a 16-core node on the default ladder = %v, want a refusal", err)
+	}
+	if unpriced.Cores != 16 || unpriced.MaxCores != 8 {
+		t.Fatalf("refusal = %+v, want 16 cores against the 8-core ceiling", unpriced)
+	}
+	if !strings.Contains(unpriced.Error(), "largest priced class is 8") {
+		t.Fatalf("refusal = %q, want the largest class still on offer", unpriced.Error())
+	}
+	charges, err := s.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatalf("list charges: %v", err)
+	}
+	if len(charges) != 0 {
+		t.Fatalf("a refused claim reserved %+v", charges)
+	}
+
+	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+		t.Fatalf("set the rate table: %v", err)
+	}
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-sixteen", "build", "pod-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true}); err != nil {
+		t.Fatalf("claim under a stored table that prices 16 cores: %v", err)
+	}
+	if charge := lastChargeFor(t, s, "run-sixteen"); charge.CPUClassCores != 16 ||
+		charge.RateMicroPerSecond != 70_000 {
+		t.Fatalf("a stored table billed class %d at %d, want the 16-core class it prices",
+			charge.CPUClassCores, charge.RateMicroPerSecond)
 	}
 }
 

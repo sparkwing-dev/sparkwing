@@ -22,7 +22,7 @@ func TestListRunsSerializesNativeIdentityFilters(t *testing.T) {
 	_, err := New(server.URL, nil).ListRuns(context.Background(), store.RunFilter{
 		GitSHAPrefixes: []string{"abc", "def"},
 		GitBranches:    []string{"main"},
-		Repos:          []string{"acme/app"},
+		DeclaredRepos:  []string{"acme/app"},
 		RepoURLs:       []string{"https://example.com/acme/app.git"},
 		RootOnly:       true,
 		Limit:          7,

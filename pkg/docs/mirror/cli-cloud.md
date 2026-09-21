@@ -67,7 +67,7 @@ probes 'sparkwing configure profiles test' runs.
 | `--name NAME` | Profile name (default: derived from the controller host) |
 | `--admin-token-stdin` | Read an admin token from stdin and mint a user token with it |
 | `--token-stdin` | Read an already-minted user token from stdin |
-| `--scope CSV` | Comma-separated scopes for the minted token (default: runs.read,runs.write,triggers.read,logs.read,approvals.write) |
+| `--scope CSV` | Comma-separated scopes for the minted token (default: runs.read,runs.write,runs.control,triggers.read,logs.read,approvals.write) |
 | `--set-default` | Set defaults.profile in this project's .sparkwing/sparkwing.yaml |
 | `--force` | Replace an existing profile of that name |
 

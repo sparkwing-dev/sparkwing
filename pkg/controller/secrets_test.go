@@ -54,7 +54,7 @@ func TestSecretsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSecrets_AdminReadResolvesTheNamedRunsRepository(t *testing.T) {
+func TestSecrets_AdminReadResolvesTheNamedRunsPipeline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
@@ -67,18 +67,18 @@ func TestSecrets_AdminReadResolvesTheNamedRunsRepository(t *testing.T) {
 	}
 	c := client.NewWithToken(f.url, nil, admin)
 
-	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "acme/web", false)
+	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "deploy-web", false)
 	seedRunNode(t, f.store, "run-web", "build")
-	setRunRepo(t, f.store, "run-web", "acme/web")
+	setRunPipeline(t, f.store, "run-web", "deploy-web")
 
 	if _, err := c.GetSecret(ctx, "DEPLOY_KEY"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("GetSecret without a repository = %v, want ErrNotFound", err)
+		t.Fatalf("GetSecret without a pipeline = %v, want ErrNotFound", err)
 	}
 	for _, get := range []struct {
 		name string
 		call func() (*client.Secret, error)
 	}{
-		{"by repo", func() (*client.Secret, error) { return c.GetSecretForRepo(ctx, "DEPLOY_KEY", "acme/web") }},
+		{"by pipeline", func() (*client.Secret, error) { return c.GetSecretForPipeline(ctx, "DEPLOY_KEY", "deploy-web") }},
 		{"by run", func() (*client.Secret, error) { return c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web") }},
 	} {
 		sec, err := get.call()

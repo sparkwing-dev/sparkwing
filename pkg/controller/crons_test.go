@@ -39,7 +39,7 @@ func newCronsFixture(t *testing.T) *cronsFixture {
 
 	now := time.Now().UTC()
 	writer, _, err := st.CreateToken("pusher", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead, controller.ScopeRunsWrite}, 0, now)
+		[]string{controller.ScopeRunsRead, controller.ScopeRunsControl}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken writer: %v", err)
 	}

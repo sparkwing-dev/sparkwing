@@ -40,6 +40,27 @@ printf '%s\0' \
 cmp "$CASE_ROOT/expected" "$CASE_ROOT/actual"
 unset SYMBOL_SCAN_STATUS
 
+mkdir -p "$CASE_ROOT/broken-go"
+cat >"$CASE_ROOT/broken-go/go" <<'EOF'
+#!/usr/bin/env bash
+echo "go: cannot find main module" >&2
+exit 1
+EOF
+chmod +x "$CASE_ROOT/broken-go/go"
+
+: >"$SCAN_CAPTURE"
+export SYMBOL_SCAN_STATUS=3
+set +e
+PATH="$CASE_ROOT/broken-go:$PATH" \
+  bash "$ROOT/bin/check-release-binary-vulnerabilities.sh" "$CASE_ROOT/one"
+status=$?
+set -e
+unset SYMBOL_SCAN_STATUS
+if [[ $status -ne 3 ]]; then
+  echo "release vulnerability scan test: an undecidable reachability waiver exited $status, want 3" >&2
+  exit 1
+fi
+
 export SECOND_SCAN_STATUS=23
 set +e
 bash "$ROOT/bin/check-release-binary-vulnerabilities.sh" \

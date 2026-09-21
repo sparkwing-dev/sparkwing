@@ -28,14 +28,14 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 
 	ctx := context.Background()
 	src := store.Run{
-		ID:        "src-run",
-		Pipeline:  "deploy",
-		Args:      map[string]string{"env": "prod", "tag": "v1"},
-		Status:    "failed",
-		GitBranch: "main",
-		GitSHA:    "abc123",
-		Repo:      "owner/repo-a",
-		RepoURL:   "git@example.test:owner/repo-a.git",
+		ID:           "src-run",
+		Pipeline:     "deploy",
+		Args:         map[string]string{"env": "prod", "tag": "v1"},
+		Status:       "failed",
+		GitBranch:    "main",
+		GitSHA:       "abc123",
+		DeclaredRepo: "owner/repo-a",
+		RepoURL:      "git@example.test:owner/repo-a.git",
 		Invocation: map[string]any{
 			"cwd": filepath.Join(dir, "repo-a"),
 		},

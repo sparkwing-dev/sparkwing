@@ -201,7 +201,7 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/debug-pauses", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleListDebugPauses)))
 	mux.Handle("GET /api/v1/runs/{id}/paused", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleListDebugPauses)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetActiveDebugPause)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsWrite, l.ownRun(l.handleReleaseDebugPause)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsControl, l.ownRun(l.handleReleaseDebugPause)))
 
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, l.ownRun(l.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, l.ownRun(l.handleResolveApproval)))
@@ -310,16 +310,15 @@ func (l *Loopback) refuseTrigger(w http.ResponseWriter, id string) {
 		fmt.Errorf("trigger %s: %w on the loopback controller for run %s", id, store.ErrNotFound, l.runID))
 }
 
-// safety: the path carries a stored profile key, so both halves are checked
-// against this run: two repositories' pipelines of the same name are priced
-// separately, and a claim on one is no standing on the other.
+// safety: the path carries a stored profile key, so its pipeline half is checked
+// against this run. The repository half is not, because a run's repository is a
+// string its submitter typed and matching it proves nothing.
 func (l *Loopback) ownPipeline(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		keyRepo, named := store.SplitProfileKey(name)
+		_, named := store.SplitProfileKey(name)
 		run, err := l.state.GetRun(r.Context(), l.runID)
-		if err != nil || run == nil || named == "" || named != run.Pipeline ||
-			!store.RepoIdentityMatches(keyRepo, run.Repo, run.RepoURL) {
+		if err != nil || run == nil || named == "" || named != run.Pipeline {
 			writeError(w, http.StatusNotFound,
 				fmt.Errorf("pipeline %s: %w on the loopback controller for run %s", name, store.ErrNotFound, l.runID))
 			return

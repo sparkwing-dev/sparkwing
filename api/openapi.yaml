@@ -278,7 +278,7 @@ paths:
   /api/v1/runs/{id}/cancel:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [runs]
       summary: Request cancellation. The orchestrator surfaces this via heartbeat.
       description: Takes no request body; the handler reads none.
@@ -289,7 +289,7 @@ paths:
   /api/v1/runs/{id}/retry:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [runs]
       summary: Re-run a failed run. `?full=1` re-runs every node; default skips passed.
       parameters:
@@ -788,7 +788,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [debug-pauses]
       summary: Release any active debug pause on the node.
       responses:
@@ -799,7 +799,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [nodes]
       summary: Ask a running node to restart its process.
       description: |
@@ -2220,9 +2220,9 @@ paths:
               properties:
                 name: {type: string}
                 value: {type: string}
-                repo:
+                pipeline:
                   type: string
-                  description: Bind the secret to this repository. Omit for a principal-wide secret.
+                  description: Bind the secret to this pipeline. Omit for a principal-wide secret.
                 masked:
                   type: boolean
                   description: Omit to store the value masked; only an explicit `false` stores plain config.
@@ -3228,7 +3228,7 @@ paths:
 
   /api/v1/crons/repos:
     put:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Replace one repository's controller schedules.
       description: |
@@ -3251,7 +3251,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
     delete:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Remove every schedule pushed for one repository URL.
       parameters:
@@ -3300,7 +3300,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Stop a schedule firing, keeping it armed.
       description: |
@@ -3324,7 +3324,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Let a paused schedule fire again from its next due instant.
       responses:
@@ -3344,7 +3344,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Launch a schedule's pipeline now.
       description: |
@@ -3369,7 +3369,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Remove one schedule and its fire history.
       description: |
@@ -3392,7 +3392,7 @@ paths:
         required: true
         schema: {type: string}
     put:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Lay the controller's own cadence over what the repository declared.
       description: |
@@ -3417,7 +3417,7 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
     delete:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: runs.control
       tags: [crons]
       summary: Return one schedule to what the repository declared.
       responses:
@@ -3552,9 +3552,9 @@ paths:
                       required: [name]
                       properties:
                         name: {type: string}
-                        repo:
+                        pipeline:
                           type: string
-                          description: Owning repository slug; absent on the unscoped row.
+                          description: Owning pipeline; absent on the unscoped row.
         "400": {$ref: "#/components/responses/BadRequest"}
 
   /api/v1/object-store/breaker:
@@ -4237,7 +4237,7 @@ components:
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
         parent_run_id: {type: string}
-        repo: {type: string}
+        declared_repo: {type: string, description: The repository the submitter typed. Metadata only; nothing is granted on it.}
         repo_url: {type: string}
         github_owner: {type: string}
         github_repo: {type: string}
@@ -4918,10 +4918,10 @@ components:
         name: {type: string}
         value: {type: string}
         principal: {type: string}
-        repo: {type: string, description: Repository this secret is bound to; empty for a principal-wide secret.}
+        pipeline: {type: string, description: Pipeline this secret is bound to; empty for a principal-wide secret.}
         masked: {type: boolean}
         shared: {type: boolean, description: Whether the secret is readable beyond its owning principal.}
-        bound: {type: boolean, description: Whether the secret is bound to a repository.}
+        bound: {type: boolean, description: Whether the secret is bound to its row.}
         created_at: {type: integer, format: int64, description: Unix seconds.}
         updated_at: {type: integer, format: int64, description: Unix seconds.}
     User:

@@ -23,7 +23,7 @@ func newCronsClient(t *testing.T) (*client.Client, *store.Store) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	raw, _, err := st.CreateToken("operator", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead, controller.ScopeRunsWrite}, 0, time.Now().UTC())
+		[]string{controller.ScopeRunsRead, controller.ScopeRunsControl}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

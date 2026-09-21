@@ -23,10 +23,14 @@ while IFS= read -r -d '' f; do
   if [[ -n "$include" ]]; then
     scripts+=("$f")
   fi
-done < <(git ls-files -z 2>/dev/null | LC_ALL=C sort -zu)
+done < <(git ls-files -z | LC_ALL=C sort -zu)
 
+# safety: this repository tracks dozens of scripts, so an empty list is a
+# broken enumeration, not a clean tree. Passing on it would report a verdict
+# that judged no script at all.
 if [[ ${#scripts[@]} -eq 0 ]]; then
-  exit 0
+  echo "check-shell: no tracked shell scripts found; git ls-files returned nothing here" >&2
+  exit 1
 fi
 
 shellcheck --severity=warning --shell=bash "${scripts[@]}"

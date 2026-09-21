@@ -68,17 +68,18 @@ hour, so ten dollars buys just under fourteen hours.
 A second is priced by the node's cpu class. The rate table prices one class per
 whole-core size, and a node is billed at the class it pinned, which is the class
 the pod is given. Nothing a claimant says about itself reaches the price,
-because a runner that priced its own work would bill a 64-core node at the
-smallest class. A request above the largest class the table prices fails the
-node with `unpriced_cpu_class` and a `credits_unpriced_class` event naming both
-sizes, rather than leaving a node no claim can pay for.
+because a runner that priced its own work would bill an 8-core node at the
+smallest class. A request above the largest class the table prices is refused
+when the class is chosen, failing the node with `unpriced_cpu_class` and a
+`credits_unpriced_class` event naming both sizes, rather than reserving credits
+for a node no claim can pay for.
 
 An installation that never set a table bills the default ladder, which carries
 GitHub Actions' Linux x64 rates to the second: 2-core 10,000 micro-credits,
-4-core 20,000, 8-core 36,667, 16-core 70,000, 32-core 136,667, 64-core 270,000.
-`credit_rate_micro_per_second` is the four-core entry of that ladder under
-another name. Once a table exists that setting is derived: a `PUT` that names
-it, alone or beside `rate_table`, answers `400` and says to write the table.
+4-core 20,000, 8-core 36,667. `credit_rate_micro_per_second` is the four-core
+entry of that ladder under another name. Once a table exists that setting is
+derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
+says to write the table.
 `sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
 the ladder and needs `admin`. A stored table this build cannot read is an error
 on every credit read rather than a silent return to the flat rate.
@@ -164,13 +165,13 @@ two passes to engage.
 ## Runner classes
 
 A class is a whole number of cores with the memory that comes with it, and it
-is the unit a pipeline buys. The ladder is 2, 4, 8, 16, 32, and 64 cores, and
-each class carries 4 GiB of memory for each of its cores: 8 GiB at two cores,
-32 GiB at eight, 256 GiB at sixty-four. A node takes the smallest class that
-covers both halves of what it pinned, so a pin of three cores and 20 GB takes
-the 8-core class because the 4-core class carries only 16 GiB. The pod is
-created with cpu and memory requests and limits equal to its class, so a node
-never outgrows the class it is billed at.
+is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
+carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
+four, 32 GiB at eight. A node takes the smallest class that covers both halves
+of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
+because the 4-core class carries only 16 GiB. The pod is created with cpu and
+memory requests and limits equal to its class, so a node never outgrows the
+class it is billed at.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the
@@ -182,22 +183,16 @@ always have.
 
 Each class above the warm one names the band of machines it runs on. The 4-core
 and 8-core classes select nodes labeled `sparkwing.dev/cpu-band: small` and
-tolerate the `sparkwing.dev/cpu-band=small:NoSchedule` taint. The 16-core class
-and every class above it select and tolerate `large` on the same key, and their
-pods carry a required anti-affinity on that label across
-`kubernetes.io/hostname`, so one of them holds a machine alone: the taint by
-itself does not give it the machine, because two 16-core pods fit one 48-vCPU
-node. The operator's own node selector and tolerations are merged in and win on
-this key, so a cluster that pins Jobs its own way keeps doing so. A cluster that
-serves classes above the warm one needs node pools carrying that label and that
-taint; without them the pod is unschedulable and the node fails as below, with
-the scheduler's own message.
+tolerate the `sparkwing.dev/cpu-band=small:NoSchedule` taint. The operator's own
+node selector and tolerations are merged in and win on this key, so a cluster
+that pins Jobs its own way keeps doing so. A cluster that serves classes above
+the warm one needs a node pool carrying that label and that taint; without one
+the pod is unschedulable and the node fails as below, with the scheduler's own
+message.
 
-The whole machine is bought with throughput. Concurrency in the large band is
-the number of machines the pool's own limit allows, one Job to each, and nothing
-queues behind it: a pool bounded at three 32-vCPU machines runs three 16-core
-Jobs at once and fails the fourth after the five-minute wait below, and a class
-that fills the pool's limit on its own runs one at a time.
+Concurrency in the band is whatever the pool's own cpu limit fits, and nothing
+queues behind it: a Job that finds no room fails after the five-minute wait
+below.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
 `credit_cpu_class_memory_bytes`, and the Job is created from those two figures,
@@ -318,7 +313,8 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
-| `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
+| `runs.write`      | POST `/api/v1/triggers`, `/gitcache/refresh`: starting new work |
+| `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
@@ -334,9 +330,9 @@ scope check passes if the principal carries `admin`.
 
 A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
 and `logs.write`. That set claims work, drives the run it claimed from plan to
-finish, reads the secrets its repository owns, and ships logs. It mints no
-token, reads no user, lists no secret, and cannot read cached source for an
-unclaimed run. A pool replica that executes
+finish, reads the secrets its pipeline owns, and ships logs. It mints no token,
+reads no user, lists no secret, cannot start or retry a run of its own
+choosing, and cannot read cached source for an unclaimed run. A pool replica that executes
 already-created nodes still needs `runs.state`, because `start`, `finish`, and
 event append are its own writes; it can drop `triggers.claim` when a separate
 dispatcher claims triggers.
@@ -467,29 +463,33 @@ request that carries no principal is refused.
 
 ## Secret ownership
 
-A secret carries an owning repository slug, or none. Store one with
-`sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web
---profile prod`. A secret stored with neither `--repo` nor `--shared` answers
-`admin` callers only; `--shared` opens an unscoped secret to **every run in the
-cluster**, so reserve it for values that are genuinely shared, such as a
-registry pull token.
+A secret carries an owning pipeline, or none. Store one with
+`sparkwing secrets set --name DEPLOY_KEY --file ./key --pipeline deploy-web
+--profile prod`. A secret stored with neither `--pipeline` nor `--shared`
+answers `admin` callers only; `--shared` opens an unscoped secret to **every
+run in the cluster**, so reserve it for values that are genuinely shared, such
+as a registry pull token.
+
+The scope is the pipeline and not the repository, because a run's repository is
+a string its submitter typed: the product grants nothing on it. Two teams may
+name the same repository and it means nothing either way.
 
 `GET /api/v1/secrets/{name}` resolves differently per principal:
 
-- An `admin` principal reads any row. `?repo=<slug>` selects a repository's
-  row, `?run=<id>` selects the repository of that run, and without either the
+- An `admin` principal reads any row. `?pipeline=<name>` selects a pipeline's
+  row, `?run=<id>` selects the pipeline of that run, and without either the
   unscoped row answers.
-- A `secrets.read` principal without `admin` cannot name a repository. It names
+- A `secrets.read` principal without `admin` cannot name a pipeline. It names
   the run it is executing with `?run=<id>`, and the controller answers only
   when the caller holds that run's claim; the name then resolves against that
-  run's repository, falling back to an unscoped row only when that row is
-  shared. A caller holding no claim reads nothing. A caller holding claims in
-  one repository may omit `?run`; holding claims in two, it must name the run.
+  run's pipeline, falling back to an unscoped row only when that row is shared.
+  A caller holding no claim reads nothing. A caller holding claims in one
+  pipeline may omit `?run`; holding claims in two, it must name the run.
 
-So one runner token cannot lift another repository's deploy credential by
-asking for it by name, and a token working two runs cannot read the wrong one's
+So one runner token cannot lift another pipeline's deploy credential by asking
+for it by name, and a token working two runs cannot read the wrong one's
 credential by accident. `GET /api/v1/secrets` (the list) and the secret writes
-stay `admin`; the list carries each row's repository and shared flag.
+stay `admin`; the list carries each row's pipeline and shared flag.
 
 Token creation validates scopes against that same set: a scope the
 controller does not honor is rejected with a `400` naming the offending
@@ -553,8 +553,9 @@ with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
 scope set of every account.
 
 The web pod's own service token needs `runs.read` plus `logs.read`. Add
-`runs.write` where the UI cancels, retries, or releases a debug pause, and
-`approvals.write` where it resolves approval gates. That token bounds what the
+`runs.control` where the UI cancels, retries, or releases a debug pause,
+`runs.write` where it submits a trigger, and `approvals.write` where it
+resolves approval gates. That token bounds what the
 proxy can reach at all; the session's scopes bound what one signed-in user
 reaches through it.
 
@@ -619,7 +620,7 @@ The login, first-admin, and logout forms carry a CSRF token in both a
 cross-origin, or mismatched token with `403` before it calls the controller.
 Unsafe browser API requests (`POST`, `PUT`, `PATCH`, and `DELETE` under
 `/api/v1/`) also require a same-origin request whose `X-CSRF-Token` header
-matches both the browser's `sw_csrf` cookie and the live controller session.
+matches both the browser's CSRF cookie and the live controller session.
 The dashboard proxy removes browser cookies and the CSRF header before adding
 its server-side bearer to controller or logs-service requests.
 Logout also verifies the token against the live controller session. It clears
@@ -638,6 +639,18 @@ user. The controller answers `5xx` when the state store or the session signing
 key is unreadable, so only an unknown or expired session reaches the browser as
 `401`. Browser redirects preserve the original path and query as one encoded
 `next` value and accept only same-origin absolute paths.
+
+The session and CSRF cookies are named `__Host-sw_session` and
+`__Host-sw_csrf`. A browser honors that prefix only on a cookie that carries
+`Secure`, names no `Domain` and is scoped to `/`, and the `Domain` refusal is
+the point: host-only scoping stops a sibling host under the same registrable
+domain reading these cookies but does nothing to stop one writing a same-named
+cookie with a longer `Path`, which sorts first in the `Cookie` header and is
+the one the server reads. The insecure-cookie escape below drops the prefix
+along with `Secure`, because a browser discards a `__Host-` cookie that is not
+`Secure`; on those deployments the names are `sw_session` and `sw_csrf`. A
+custom browser client reads whichever name the deployment sets, preferring the
+prefixed one.
 
 Login cookies are `Secure` by default, so a login-required dashboard must be
 served over HTTPS. A plain `http://localhost` port-forward can reach health

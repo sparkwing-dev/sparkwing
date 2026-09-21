@@ -240,7 +240,7 @@ probes 'sparkwing configure profiles test' runs.`,
 		{Name: "name", Argument: "NAME", Desc: "Profile name (default: derived from the controller host)", Group: "Identity"},
 		{Name: "admin-token-stdin", Desc: "Read an admin token from stdin and mint a user token with it", ConflictsWith: []string{"token-stdin"}, Group: "Credential"},
 		{Name: "token-stdin", Desc: "Read an already-minted user token from stdin", ConflictsWith: []string{"admin-token-stdin"}, Group: "Credential"},
-		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes for the minted token", Default: "runs.read,runs.write,triggers.read,logs.read,approvals.write", Group: "Credential"},
+		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes for the minted token", Default: "runs.read,runs.write,runs.control,triggers.read,logs.read,approvals.write", Group: "Credential"},
 		{Name: "set-default", Desc: "Set defaults.profile in this project's .sparkwing/sparkwing.yaml", Group: "Project"},
 		{Name: "force", Desc: "Replace an existing profile of that name", Group: "Project"},
 	},
@@ -1999,6 +1999,12 @@ var cmdProfiles = Command{
 $XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
 ~/.config/sparkwing/profiles.yaml. Permissions on save are 0600.
 
+SPARKWING_HOME does not move this file. It is the state, cache and
+logs root; profiles are machine-wide connections that outlive any
+one home. A write from a command running under a home of its own is
+refused rather than sent to the machine's profiles: set
+SPARKWING_PROFILES to a path inside that home to keep it there.
+
 Every human-driven client command (tokens, users, runs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
@@ -2323,7 +2329,7 @@ runs.read scope and setting needs admin.`,
 		{"Read the settings", "sparkwing cluster credits settings --profile prod"},
 		{"Cut a node off at the first heartbeat past its reservation", "sparkwing cluster credits settings --grace-seconds 0 --profile prod"},
 		{"Reprice a cloud runner second at 0.03 credits", "sparkwing cluster credits settings --rate-micro 30000 --profile prod"},
-		{"Price the six sizes at the GitHub Actions rates", "sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667,16=70000,32=136667,64=270000 --profile prod"},
+		{"Price the three sizes at the GitHub Actions rates", "sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667 --profile prod"},
 	},
 }
 
@@ -3384,8 +3390,8 @@ does not land in shell history.`,
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
 		{Name: "plain", Type: FlagBool, Desc: "Store a configuration value visible in run logs. Values are masked by default.", Group: "Input"},
-		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Scope the secret to one repository slug (controller only)", ConflictsWith: []string{"shared"}, Group: "Input"},
-		{Name: "shared", Type: FlagBool, Desc: "Let every run read this unscoped secret (controller only). Without --repo or --shared the secret answers admin callers only.", ConflictsWith: []string{"repo"}, Group: "Input"},
+		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Scope the secret to one pipeline (controller only)", ConflictsWith: []string{"shared"}, Group: "Input"},
+		{Name: "shared", Type: FlagBool, Desc: "Let every run read this unscoped secret (controller only). Without --pipeline or --shared the secret answers admin callers only.", ConflictsWith: []string{"pipeline"}, Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
@@ -3406,7 +3412,7 @@ named profile's controller. Prints only the raw value (no trailing newline)
 so it can be piped into another command. Use 'secrets list' for metadata.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name", Required: true, Group: "Input"},
-		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Read the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
+		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Read the row owned by one pipeline (controller only); omit for the unscoped row", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
@@ -3442,7 +3448,7 @@ named profile's controller. Pipelines that reference the name will fail to
 resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
-		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Remove the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
+		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Remove the row owned by one pipeline (controller only); omit for the unscoped row", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
