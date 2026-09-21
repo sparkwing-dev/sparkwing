@@ -19,6 +19,17 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **controller + runner:** the default credit rate table stops at the 8-core class
+  The 16, 32 and 64-core entries are gone from the default ladder, and the
+  `large` cpu band the classes above 8 cores selected goes with them: one
+  `sparkwing.dev/cpu-band: small` pool now serves every class above the warm
+  one. No pool could schedule a 64-core pod, so choosing that class reserved a
+  team's credits and failed five minutes later. A node pinned above 8 cores is
+  refused when its class is chosen, naming the largest class still priced. A
+  rate table an operator stored keeps every class it names, so a cluster
+  provisioned for the larger classes is unaffected.
 
 ## [v0.60.0] - 2026-09-21
 ### Added
