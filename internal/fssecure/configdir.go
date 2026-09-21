@@ -62,6 +62,13 @@ func UnderConfigDir(path string) bool {
 	if err != nil {
 		return false
 	}
+	return UnderDir(root, path)
+}
+
+// UnderDir reports whether path is root or sits inside it. A path neither can
+// be made absolute is not contained, because containment that cannot be shown
+// must not be assumed.
+func UnderDir(root, path string) bool {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return false

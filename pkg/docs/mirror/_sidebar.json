@@ -53,6 +53,7 @@
         "deployment",
         "deployment-modes",
         "self-hosting",
+        "backup-restore",
         "backends",
         "scheduling",
         "warm-pool",

@@ -1624,10 +1624,13 @@ const (
 )
 
 func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, reason string) {
+	// safety: the window is recorded before the refusal is sent, because a
+	// caller that has its answer can query the window immediately and a
+	// rejection it already saw must not be missing from it.
+	d.events.record(d.now(), admissionEvent{Kind: eventRejection, Key: cause})
 	_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
 	d.cfg.logf("conn %d rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
 		c.id, req.RunID, reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
-	d.events.record(d.now(), admissionEvent{Kind: eventRejection, Key: cause})
 }
 
 func refusalReason(err error) string {

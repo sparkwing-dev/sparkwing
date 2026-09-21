@@ -87,7 +87,11 @@ file. Other syntax and workflow checks remain active.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
   and still report the span and slowest step. Every selected check still runs.
   At or below 25 files, both hook budgets are enforced. The release cut always
-  enforces its five-minute budget, regardless of change size. The
+  enforces its five-minute budget, regardless of change size. A tier whose
+  scope holds no Go file still runs and passes every step, so it warns and
+  names the scope it read: a push judged against an empty
+  `origin/main..HEAD` range reports success over nothing, and uncommitted
+  work is outside what `pre-push` reads. The
   budget judges the span the job's own steps cover, not the admission wait or
   the 2.5 s the pipeline binary takes to recompile after a Go change. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
@@ -280,12 +284,18 @@ file. Other syntax and workflow checks remain active.
   schema ships in a release. Either way the machine keeps one daemon and every
   run keeps its place in `sparkwing queue` and the dashboard.
 - **Running against a home of your own:** `SPARKWING_HOME=DIR` points one
-  command's state and config at DIR, which is deliberate isolation for work
+  command's state, cache and logs at DIR, which is isolation for work
   that must not touch the operational runs store, the release preview under
   Decisions before landing being the case that needs it. A run started that way
   is arbitrated by whatever daemon lives in that home rather than the machine's,
   so it is invisible to `sparkwing queue` and the dashboard and contends with
-  every other run on the OS. It is not a way around a full queue.
+  every other run on the OS. It is not a way around a full queue. It does not
+  move the user config directory, which answers to `XDG_CONFIG_HOME` and the
+  per-file overrides (`SPARKWING_PROFILES`, `SPARKWING_REPOS`), because a
+  profile is a machine-wide connection that outlives any one home. A profiles
+  write from a command running under a home of its own is refused rather than
+  sent to the machine's config; set `SPARKWING_PROFILES=DIR/profiles.yaml` to
+  keep it inside that home.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is
@@ -402,6 +412,30 @@ file. Other syntax and workflow checks remain active.
   conformance` job in `.github/workflows/ci.yaml` on every pull request
   and push to main, and `sparkwing run integration` against its
   Dockerized Postgres and MinIO.
+- **Postgres client on the hosted lane:** the `Postgres conformance` job
+  installs `postgresql-client-17` from the PostgreSQL Apt repository and
+  points `SPARKWING_PG_BIN` at `/usr/lib/postgresql/17/bin`, because
+  Ubuntu's own repository tops out at 16 and a `pg_dump` older than its
+  server refuses the dump outright. `SPARKWING_PG_BIN` names the real
+  binaries rather than `/usr/bin/pg_dump`, which is postgresql-common's
+  wrapper and picks a version from the clusters the image happens to
+  have. A step prints both client versions and fails when the major is
+  below 17, so a repository that stops shipping 17 fails the job instead
+  of quietly sending the tests back to skipping. `sparkwing run
+  integration` installs nothing and takes whatever client the developer's
+  machine has.
+- **Backup and restore drill:** `TestBackupRestoreDrill` in `pkg/store`
+  runs the procedure in `docs/backup-restore.md` end to end. Its SQLite
+  subtests always run. Its Postgres subtest shells out to `pg_dump` and
+  `pg_restore`, taking them from `SPARKWING_PG_BIN` or `PATH` and
+  skipping when neither supplies them. Run it against a server with
+  `SPARKWING_TEST_PG_URL=... SPARKWING_PG_BIN=/usr/lib/postgresql/17/bin
+  go test -run TestBackupRestoreDrill -v ./pkg/store`. The drill's name
+  carries no dialect, so the hosted no-skip step selects it by name:
+  `-run 'Postgres|Pg|BackupRestoreDrill'`. That is what turns a missing
+  or too-old client into a red lane rather than a green one with a
+  skipped subtest. `sparkwing run integration` still selects
+  `Postgres|Pg` only, so the drill can skip there unnoticed.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied
