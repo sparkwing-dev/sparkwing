@@ -68,17 +68,18 @@ hour, so ten dollars buys just under fourteen hours.
 A second is priced by the node's cpu class. The rate table prices one class per
 whole-core size, and a node is billed at the class it pinned, which is the class
 the pod is given. Nothing a claimant says about itself reaches the price,
-because a runner that priced its own work would bill a 64-core node at the
-smallest class. A request above the largest class the table prices fails the
-node with `unpriced_cpu_class` and a `credits_unpriced_class` event naming both
-sizes, rather than leaving a node no claim can pay for.
+because a runner that priced its own work would bill an 8-core node at the
+smallest class. A request above the largest class the table prices is refused
+when the class is chosen, failing the node with `unpriced_cpu_class` and a
+`credits_unpriced_class` event naming both sizes, rather than reserving credits
+for a node no claim can pay for.
 
 An installation that never set a table bills the default ladder, which carries
 GitHub Actions' Linux x64 rates to the second: 2-core 10,000 micro-credits,
-4-core 20,000, 8-core 36,667, 16-core 70,000, 32-core 136,667, 64-core 270,000.
-`credit_rate_micro_per_second` is the four-core entry of that ladder under
-another name. Once a table exists that setting is derived: a `PUT` that names
-it, alone or beside `rate_table`, answers `400` and says to write the table.
+4-core 20,000, 8-core 36,667. `credit_rate_micro_per_second` is the four-core
+entry of that ladder under another name. Once a table exists that setting is
+derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
+says to write the table.
 `sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
 the ladder and needs `admin`. A stored table this build cannot read is an error
 on every credit read rather than a silent return to the flat rate.
@@ -164,13 +165,13 @@ two passes to engage.
 ## Runner classes
 
 A class is a whole number of cores with the memory that comes with it, and it
-is the unit a pipeline buys. The ladder is 2, 4, 8, 16, 32, and 64 cores, and
-each class carries 4 GiB of memory for each of its cores: 8 GiB at two cores,
-32 GiB at eight, 256 GiB at sixty-four. A node takes the smallest class that
-covers both halves of what it pinned, so a pin of three cores and 20 GB takes
-the 8-core class because the 4-core class carries only 16 GiB. The pod is
-created with cpu and memory requests and limits equal to its class, so a node
-never outgrows the class it is billed at.
+is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
+carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
+four, 32 GiB at eight. A node takes the smallest class that covers both halves
+of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
+because the 4-core class carries only 16 GiB. The pod is created with cpu and
+memory requests and limits equal to its class, so a node never outgrows the
+class it is billed at.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the
@@ -182,22 +183,16 @@ always have.
 
 Each class above the warm one names the band of machines it runs on. The 4-core
 and 8-core classes select nodes labeled `sparkwing.dev/cpu-band: small` and
-tolerate the `sparkwing.dev/cpu-band=small:NoSchedule` taint. The 16-core class
-and every class above it select and tolerate `large` on the same key, and their
-pods carry a required anti-affinity on that label across
-`kubernetes.io/hostname`, so one of them holds a machine alone: the taint by
-itself does not give it the machine, because two 16-core pods fit one 48-vCPU
-node. The operator's own node selector and tolerations are merged in and win on
-this key, so a cluster that pins Jobs its own way keeps doing so. A cluster that
-serves classes above the warm one needs node pools carrying that label and that
-taint; without them the pod is unschedulable and the node fails as below, with
-the scheduler's own message.
+tolerate the `sparkwing.dev/cpu-band=small:NoSchedule` taint. The operator's own
+node selector and tolerations are merged in and win on this key, so a cluster
+that pins Jobs its own way keeps doing so. A cluster that serves classes above
+the warm one needs a node pool carrying that label and that taint; without one
+the pod is unschedulable and the node fails as below, with the scheduler's own
+message.
 
-The whole machine is bought with throughput. Concurrency in the large band is
-the number of machines the pool's own limit allows, one Job to each, and nothing
-queues behind it: a pool bounded at three 32-vCPU machines runs three 16-core
-Jobs at once and fails the fourth after the five-minute wait below, and a class
-that fills the pool's limit on its own runs one at a time.
+Concurrency in the band is whatever the pool's own cpu limit fits, and nothing
+queues behind it: a Job that finds no room fails after the five-minute wait
+below.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
 `credit_cpu_class_memory_bytes`, and the Job is created from those two figures,

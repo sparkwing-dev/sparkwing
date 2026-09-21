@@ -54,9 +54,6 @@ var defaultCreditRates = []CreditRate{
 	{Cores: 2, MicroPerSecond: 10_000},
 	{Cores: CreditRateBaseClassCores, MicroPerSecond: DefaultCreditRateMicro},
 	{Cores: 8, MicroPerSecond: 36_667},
-	{Cores: 16, MicroPerSecond: 70_000},
-	{Cores: 32, MicroPerSecond: 136_667},
-	{Cores: 64, MicroPerSecond: 270_000},
 }
 
 const metaKeyCreditRateTable = "credit_rate_table"
@@ -321,7 +318,7 @@ func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) e
 
 // safety: the class is resolved from the cpu and memory the scheduler sizes the
 // node by, which is what the pod is given. Nothing a claimant says about itself
-// reaches this, because a runner that priced its own work could bill a 64-core
+// reaches this, because a runner that priced its own work could bill an 8-core
 // node at the smallest class.
 func nodeCreditClassTx(
 	ctx context.Context, q rowQuerier, table CreditRateTable, runID, nodeID string,
