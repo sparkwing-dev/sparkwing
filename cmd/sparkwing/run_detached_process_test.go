@@ -487,7 +487,7 @@ func TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes(t *testing.T) {
 		Status:       "failed",
 		GitBranch:    "main",
 		GitSHA:       revision,
-		Repo:         "acme/retry-fixture",
+		DeclaredRepo: "acme/retry-fixture",
 		RepoURL:      "https://example.test/acme/retry-fixture.git",
 		PlanSnapshot: []byte(`{"pipeline":"fixture","nodes":[]}`),
 		Invocation:   map[string]any{"cwd": e.repoDir},

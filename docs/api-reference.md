@@ -34,15 +34,15 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
 | `PUT` | `/api/v1/credits/settings` | `admin` |
 | `GET` | `/api/v1/crons` | `runs.read` |
-| `DELETE` | `/api/v1/crons/repos` | `runs.write` |
-| `PUT` | `/api/v1/crons/repos` | `runs.write` |
+| `DELETE` | `/api/v1/crons/repos` | `runs.control` |
+| `PUT` | `/api/v1/crons/repos` | `runs.control` |
 | `GET` | `/api/v1/crons/{id}` | `runs.read` |
-| `POST` | `/api/v1/crons/{id}/disarm` | `runs.write` |
-| `DELETE` | `/api/v1/crons/{id}/override` | `runs.write` |
-| `PUT` | `/api/v1/crons/{id}/override` | `runs.write` |
-| `POST` | `/api/v1/crons/{id}/pause` | `runs.write` |
-| `POST` | `/api/v1/crons/{id}/resume` | `runs.write` |
-| `POST` | `/api/v1/crons/{id}/run` | `runs.write` |
+| `POST` | `/api/v1/crons/{id}/disarm` | `runs.control` |
+| `DELETE` | `/api/v1/crons/{id}/override` | `runs.control` |
+| `PUT` | `/api/v1/crons/{id}/override` | `runs.control` |
+| `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
+| `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
+| `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
 | `GET` | `/api/v1/egress` | `admin` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
@@ -75,7 +75,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/cancel` | `runs.write` |
+| `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
 | `GET` | `/api/v1/runs/{id}/debug-pauses` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
@@ -93,7 +93,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.write` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `logs.write` |
@@ -114,7 +114,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.write` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
@@ -130,7 +130,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/retry` | `runs.write` |
+| `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/secrets` | `admin` |
 | `POST` | `/api/v1/secrets` | `admin` |

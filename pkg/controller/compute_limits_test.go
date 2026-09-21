@@ -434,7 +434,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 	ctx := context.Background()
 	setComputeLimit(t, f, store.ComputeLimitRunsPerHour, 1)
 	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now().UTC(),
+		[]string{controller.ScopeRunsWrite, controller.ScopeRunsControl, controller.ScopeRunsRead}, 0, time.Now().UTC(),
 		store.TokenOptions{})
 	if err != nil {
 		t.Fatalf("mint a writer for the metered principal: %v", err)
@@ -470,7 +470,7 @@ func TestComputeLimits_RetriesCountAgainstTheRetryingPrincipal(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	writer, _, err := f.store.CreateTokenWith(ctx, "pool", store.TokenKindUser,
-		[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, time.Now().UTC(),
+		[]string{controller.ScopeRunsWrite, controller.ScopeRunsControl, controller.ScopeRunsRead}, 0, time.Now().UTC(),
 		store.TokenOptions{})
 	if err != nil {
 		t.Fatalf("mint a writer for the metered principal: %v", err)

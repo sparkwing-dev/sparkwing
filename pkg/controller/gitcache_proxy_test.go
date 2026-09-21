@@ -225,7 +225,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
-	repoURL := "https://git.example.com/acme/widgets.git"
+	repoURL := "git@github.com:acme/widgets.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -263,15 +263,38 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := st.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
+		Pipeline: "build", Repo: "acme/widgets", Secret: "hook-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.CreateTrigger(ctx, store.Trigger{
 		ID: "run-remote", Pipeline: "build", Status: "running", CreatedAt: now,
+		Repo: "acme/widgets", RepoURL: repoURL, WebhookDelivery: "delivery-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "run-typed", Pipeline: "build", Status: "running", CreatedAt: now,
 		Repo: "acme/widgets", RepoURL: repoURL,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-typed", Pipeline: "build", Status: "running", StartedAt: now,
+		DeclaredRepo: "acme/widgets", RepoURL: repoURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-typed", NodeID: "compile", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-typed", "compile"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
 		ID: "run-remote", Pipeline: "build", Status: "running", StartedAt: now,
-		Repo: "acme/widgets", RepoURL: repoURL,
+		DeclaredRepo: "acme/widgets", RepoURL: repoURL,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,10 +308,12 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
-	claimed, err := client.NewWithToken(srv.URL, nil, owner).
-		ClaimNode(ctx, "agent:workstation:1", nil, time.Minute, nil)
-	if err != nil || claimed == nil {
-		t.Fatalf("ClaimNode = %+v, %v", claimed, err)
+	for range 2 {
+		claimed, cerr := client.NewWithToken(srv.URL, nil, owner).
+			ClaimNode(ctx, "agent:workstation:1", nil, time.Minute, nil)
+		if cerr != nil || claimed == nil {
+			t.Fatalf("ClaimNode = %+v, %v", claimed, cerr)
+		}
 	}
 
 	request := func(method, path, token, body string) *http.Response {
@@ -321,10 +346,12 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		}
 	}
 	for name, path := range map[string]string{
-		"same-basename foreign repository": base + "/register?name=" +
-			sourceurl.ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git") +
-			"&repo=https://git.example.com/other/widgets.git",
+		"same-basename repository nobody connected": base + "/register?name=" +
+			sourceurl.ClaimedRepoNameFromURL("git@github.com:other/widgets.git") +
+			"&repo=git@github.com:other/widgets.git",
 		"foreign cache name": base + "/other/info/refs?service=git-upload-pack",
+		"a run no signed delivery created": "/api/v1/runs/run-typed/gitcache/git/" +
+			cacheName + "/info/refs?service=git-upload-pack",
 	} {
 		t.Run(name, func(t *testing.T) {
 			resp := request(http.MethodPost, path, owner, "")

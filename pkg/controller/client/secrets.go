@@ -19,7 +19,7 @@ type Secret struct {
 	Name      string `json:"name"`
 	Value     string `json:"value,omitempty"`
 	Principal string `json:"principal"`
-	Repo      string `json:"repo,omitempty"`
+	Pipeline  string `json:"pipeline,omitempty"`
 	Masked    bool   `json:"masked"`
 	Shared    bool   `json:"shared,omitempty"`
 	Bound     bool   `json:"bound"`
@@ -30,14 +30,14 @@ type Secret struct {
 // CreateSecret uploads value under name, replacing any existing row.
 // masked=false registers non-secret config (region, log level, etc).
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error {
-	return c.CreateSecretForRepo(ctx, name, value, "", masked, false)
+	return c.CreateSecretForPipeline(ctx, name, value, "", masked, false)
 }
 
-// CreateSecretForRepo uploads value under name, owned by the given
-// repository slug. An empty repo stores the secret unscoped, where only
-// an admin reads it until shared is true, which opens it to every run.
-func (c *Client) CreateSecretForRepo(ctx context.Context, name, value, repo string, masked, shared bool) error {
-	body := map[string]any{"name": name, "value": value, "repo": repo, "masked": masked, "shared": shared}
+// CreateSecretForPipeline uploads value under name, owned by the named
+// pipeline. An empty pipeline stores the secret unscoped, where only an
+// admin reads it until shared is true, which opens it to every run.
+func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipeline string, masked, shared bool) error {
+	body := map[string]any{"name": name, "value": value, "pipeline": pipeline, "masked": masked, "shared": shared}
 	return c.post(ctx, "/api/v1/secrets", body, http.StatusNoContent, nil)
 }
 
@@ -47,19 +47,19 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error) {
 	return c.getSecret(ctx, name, "")
 }
 
-// GetSecretForRun fetches the row owned by the repository of runID. The
+// GetSecretForRun fetches the row owned by the pipeline of runID. The
 // controller checks the caller's claim on that run, so this is how a
 // runner working several runs names which one the read is for.
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error) {
 	return c.getSecret(ctx, name, queryParam("run", runID))
 }
 
-// GetSecretForRepo fetches the row a repository owns, falling back to
-// the unscoped row. The repo hint is honored only for an admin
-// caller; a narrower principal reads the repository of the run it
-// holds a claim in.
-func (c *Client) GetSecretForRepo(ctx context.Context, name, repo string) (*Secret, error) {
-	return c.getSecret(ctx, name, queryParam("repo", repo))
+// GetSecretForPipeline fetches the row a pipeline owns, falling back to
+// the unscoped row. The pipeline hint is honored only for an admin
+// caller; a narrower principal reads the pipeline of the run it holds a
+// claim in.
+func (c *Client) GetSecretForPipeline(ctx context.Context, name, pipeline string) (*Secret, error) {
+	return c.getSecret(ctx, name, queryParam("pipeline", pipeline))
 }
 
 func (c *Client) getSecret(ctx context.Context, name, query string) (*Secret, error) {
@@ -121,11 +121,11 @@ type SecretRotation struct {
 	Skipped []SecretRotationSkip `json:"skipped"`
 }
 
-// SecretRotationSkip names one row a rotation left as it was. Repo is
-// empty for the unscoped row.
+// SecretRotationSkip names one row a rotation left as it was. Pipeline
+// is empty for the unscoped row.
 type SecretRotationSkip struct {
-	Name string `json:"name"`
-	Repo string `json:"repo,omitempty"`
+	Name     string `json:"name"`
+	Pipeline string `json:"pipeline,omitempty"`
 }
 
 // RotateSecrets re-encrypts every stored secret under the key the
@@ -144,13 +144,13 @@ func (c *Client) RotateSecrets(ctx context.Context) (SecretRotation, error) {
 // DeleteSecret removes the row by name. Returns store.ErrNotFound
 // when no row existed.
 func (c *Client) DeleteSecret(ctx context.Context, name string) error {
-	return c.DeleteSecretForRepo(ctx, name, "")
+	return c.DeleteSecretForPipeline(ctx, name, "")
 }
 
-// DeleteSecretForRepo removes the row a repository owns. An empty
-// repo removes the unscoped row.
-func (c *Client) DeleteSecretForRepo(ctx context.Context, name, repo string) error {
-	u := fmt.Sprintf("%s/api/v1/secrets/%s%s", c.baseURL, url.PathEscape(name), queryParam("repo", repo))
+// DeleteSecretForPipeline removes the row a pipeline owns. An empty
+// pipeline removes the unscoped row.
+func (c *Client) DeleteSecretForPipeline(ctx context.Context, name, pipeline string) error {
+	u := fmt.Sprintf("%s/api/v1/secrets/%s%s", c.baseURL, url.PathEscape(name), queryParam("pipeline", pipeline))
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err

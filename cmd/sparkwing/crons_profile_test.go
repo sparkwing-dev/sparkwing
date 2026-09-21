@@ -32,7 +32,7 @@ func newCronsProfileFixture(t *testing.T) *cronsProfileFixture {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	raw, _, err := st.CreateToken("operator", store.TokenKindUser,
-		[]string{controller.ScopeRunsRead, controller.ScopeRunsWrite}, 0, time.Now().UTC())
+		[]string{controller.ScopeRunsRead, controller.ScopeRunsControl}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

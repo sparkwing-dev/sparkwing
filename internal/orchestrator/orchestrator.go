@@ -261,7 +261,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		TriggerSource: trigger.Source,
 		GitBranch:     gitOpt.Branch,
 		GitSHA:        runGitSHA,
-		Repo:          gitOpt.Repo,
+		DeclaredRepo:  gitOpt.Repo,
 		RepoURL:       gitOpt.RepoURL,
 		GithubOwner:   owner,
 		GithubRepo:    repo,
