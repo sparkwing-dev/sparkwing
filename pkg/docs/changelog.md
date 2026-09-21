@@ -19,6 +19,22 @@ unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **web (Breaking):** the dashboard's session and CSRF cookies carry the
+  `__Host-` prefix
+  Host-only scoping stops a sibling host under the same registrable domain
+  reading these cookies and does nothing to stop one writing a same-named
+  cookie with a `Domain` attribute and a longer `Path`, which sorts first in
+  the `Cookie` header and is the one the server reads. A browser refuses a
+  `__Host-` cookie that carries `Domain`, which is that write. The CSRF token
+  is an HMAC of the session id rather than independent state, so a planted
+  session carries its own matching token and that layer does not catch the
+  swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
+  `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
+  See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
+  Summary: every signed-in browser signs in once more, and a custom browser
+  client reads `__Host-sw_csrf` before `sw_csrf`.
 
 ## [v0.60.0] - 2026-09-21
 ### Added

@@ -619,7 +619,7 @@ The login, first-admin, and logout forms carry a CSRF token in both a
 cross-origin, or mismatched token with `403` before it calls the controller.
 Unsafe browser API requests (`POST`, `PUT`, `PATCH`, and `DELETE` under
 `/api/v1/`) also require a same-origin request whose `X-CSRF-Token` header
-matches both the browser's `sw_csrf` cookie and the live controller session.
+matches both the browser's CSRF cookie and the live controller session.
 The dashboard proxy removes browser cookies and the CSRF header before adding
 its server-side bearer to controller or logs-service requests.
 Logout also verifies the token against the live controller session. It clears
@@ -638,6 +638,18 @@ user. The controller answers `5xx` when the state store or the session signing
 key is unreadable, so only an unknown or expired session reaches the browser as
 `401`. Browser redirects preserve the original path and query as one encoded
 `next` value and accept only same-origin absolute paths.
+
+The session and CSRF cookies are named `__Host-sw_session` and
+`__Host-sw_csrf`. A browser honors that prefix only on a cookie that carries
+`Secure`, names no `Domain` and is scoped to `/`, and the `Domain` refusal is
+the point: host-only scoping stops a sibling host under the same registrable
+domain reading these cookies but does nothing to stop one writing a same-named
+cookie with a longer `Path`, which sorts first in the `Cookie` header and is
+the one the server reads. The insecure-cookie escape below drops the prefix
+along with `Secure`, because a browser discards a `__Host-` cookie that is not
+`Secure`; on those deployments the names are `sw_session` and `sw_csrf`. A
+custom browser client reads whichever name the deployment sets, preferring the
+prefixed one.
 
 Login cookies are `Secure` by default, so a login-required dashboard must be
 served over HTTPS. A plain `http://localhost` port-forward can reach health
