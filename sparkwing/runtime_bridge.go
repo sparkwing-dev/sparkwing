@@ -17,6 +17,7 @@ type runtimePlumbingKeys struct {
 	Node              any
 	ResolvedArgs      any
 	ProfileResolution any
+	Admission         any
 }
 
 type runtimePlumbingFns struct {
@@ -36,8 +37,8 @@ type runtimePlumbingFns struct {
 // types.
 //
 // Pipeline authors should NOT reach for it. The supported surface is
-// the typed accessors: IsDryRun, Runner, Ref[T].Get, and the
-// SpawnHandler / WorkStep methods.
+// the typed accessors: IsDryRun, Runner, Admitted, Ref[T].Get, and
+// the SpawnHandler / WorkStep methods.
 var RuntimePlumbing = struct {
 	Keys runtimePlumbingKeys
 	Fns  runtimePlumbingFns
@@ -57,6 +58,7 @@ var RuntimePlumbing = struct {
 		Node:              keyNode,
 		ResolvedArgs:      keyResolvedArgs,
 		ProfileResolution: keyProfileResolution,
+		Admission:         keyAdmission,
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,

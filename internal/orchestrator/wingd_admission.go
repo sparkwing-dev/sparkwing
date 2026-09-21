@@ -72,7 +72,7 @@ func (la *LocalAdmission) attachReservedNode(ctx context.Context, priority int) 
 		return ctx, false
 	}
 	token := la.reservedNodeLeaseToken
-	return withLocalAdmission(ctx, la, token, token, true, priority), true
+	return withLocalAdmission(ctx, la, token, token, true, priority, runCharge{}), true
 }
 
 const defaultQueueHeartbeat = 30 * time.Second
@@ -330,6 +330,7 @@ func (la *LocalAdmission) admitNode(
 		childToken:   lease.Token,
 		hostAdmitted: leaseCarriesHost(lease),
 		leases:       []*wingdclient.Lease{lease},
+		charge:       runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
 	}
 	return rl, nil
 }
@@ -1032,10 +1033,12 @@ func withLocalAdmission(
 	childToken string,
 	hostAdmitted bool,
 	priority int,
+	charge runCharge,
 ) context.Context {
 	if la == nil {
 		return ctx
 	}
+	ctx = withAdmittedCharge(ctx, charge)
 	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
 		la:           la,
 		token:        leaseToken,

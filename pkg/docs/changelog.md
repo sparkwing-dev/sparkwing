@@ -46,6 +46,17 @@ unlock.
   `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
+
+## [v0.60.0] - 2026-09-21
+### Added
+
+- **sdk:** `sparkwing.Admitted(ctx)` reports the cores and memory the scheduler
+  reserved for the running job
+  A step sizing its own parallelism reads its share rather than the machine,
+  which on a host running several jobs reports a larger number. The second
+  result is false where nothing reserved anything, so a caller told nothing
+  sizes itself as before.
+
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.

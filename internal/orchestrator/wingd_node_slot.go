@@ -139,7 +139,8 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 		if childToken == "" {
 			childToken = lease.Token
 		}
-		runCtx = withLocalAdmission(execCtx, la, lease.Token, childToken, leaseCarriesHost(lease), localAdmissionPriorityFromContext(execCtx))
+		runCtx = withLocalAdmission(execCtx, la, lease.Token, childToken, leaseCarriesHost(lease), localAdmissionPriorityFromContext(execCtx),
+			runCharge{Cores: lease.Resources.Cores, MemoryBytes: lease.Resources.MemoryBytes})
 	}
 	output, err := r.executeNodeWithAdmission(runCtx, req)
 	if ev := evicted.Load(); ev != nil {

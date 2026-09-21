@@ -522,7 +522,7 @@ func TestNodeExecutorRunNodeCancelledLeavesRowForTeardownClassifier(t *testing.T
 		Home:  home,
 		Out:   io.Discard,
 		Spawn: func(string, string) error { return errors.New("daemon unavailable") },
-	}, "", "", false, 0)
+	}, "", "", false, 0, runCharge{})
 
 	r := &NodeExecutor{backends: LocalBackends(paths, st, nil)}
 	res := r.RunNode(cancelled, runner.Request{
