@@ -19,6 +19,15 @@ unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **wingd:** an admission refusal is counted in the events window before the
+  refusal is sent, not after
+  A caller that had its answer could query the window and find the rejection it
+  had just been told about missing, because `rejectInvalid` replied first and
+  recorded last. The hosted gate caught it as a count of 2 where 3 were
+  expected.
+
 ### Changed
 
 - **runner:** a node queues when the Kubernetes fleet is full instead of failing
