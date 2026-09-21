@@ -4237,7 +4237,7 @@ components:
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
         parent_run_id: {type: string}
-        declared_repo: {type: string, description: The repository the submitter typed. Metadata only; nothing is granted on it.}
+        repo: {type: string, description: The repository the submitter typed. Metadata only; nothing is granted on it.}
         repo_url: {type: string}
         github_owner: {type: string}
         github_repo: {type: string}

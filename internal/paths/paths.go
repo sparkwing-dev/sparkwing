@@ -66,6 +66,18 @@ func isOperatorHome(root string) bool {
 	return filepath.Clean(root) == filepath.Join(operatorHome, ".sparkwing")
 }
 
+// SandboxHome reports the sparkwing home in use when it is not the operator's
+// own ~/.sparkwing, so a caller can refuse to write outside it. Both a
+// SPARKWING_HOME redirect and the test-binary sandbox answer true, because
+// neither is the home whose state the operator keeps.
+func SandboxHome() (string, bool) {
+	p, err := DefaultPaths()
+	if err != nil || p.Root == "" || isOperatorHome(p.Root) {
+		return "", false
+	}
+	return p.Root, true
+}
+
 func PathsAt(root string) Paths { return Paths{Root: root} }
 
 func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
