@@ -33,10 +33,6 @@ type runCharge struct {
 	MemoryBytes int64
 }
 
-// safety: a charge of zero means nothing was reserved -- an unpinned run
-// before a node resolves, and a child run on a parent's lease -- so the
-// context keeps whatever charge it already carries rather than taking a zero
-// share, which a caller would size itself down to.
 func withAdmittedCharge(ctx context.Context, charge runCharge) context.Context {
 	if charge.Cores <= 0 && charge.MemoryBytes <= 0 {
 		return ctx

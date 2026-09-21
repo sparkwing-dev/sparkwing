@@ -36,18 +36,15 @@ func (p *Plan) AdmissionClassValue() AdmissionClass {
 	return p.admissionClass
 }
 
-// Admission is the resource share the scheduler reserved for the running job.
-// A step sizing its own parallelism reads this rather than the machine,
-// because a host runs several jobs at once.
+// Admission is the resource share the scheduler reserved for the running job,
+// rather than the capacity of the machine it runs on.
 type Admission struct {
 	Cores       float64
 	MemoryBytes int64
 }
 
 // Admitted reports the share the scheduler reserved for the running job. The
-// second result is false where nothing reserved anything -- inside Plan, in a
-// test that installed none, and on any path not carrying the dispatch context.
-// A caller told nothing sizes itself as it otherwise would.
+// second result is false where nothing reserved anything.
 func Admitted(ctx context.Context) (Admission, bool) {
 	if ctx == nil {
 		return Admission{}, false

@@ -71,7 +71,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ### type Admission
 
-Admission is the resource share the scheduler reserved for the running job.
+Admission is the resource share the scheduler reserved for the running job, rather than the capacity of the machine it runs on.
 
 ```
 type Admission struct {
