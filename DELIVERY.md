@@ -280,12 +280,18 @@ file. Other syntax and workflow checks remain active.
   schema ships in a release. Either way the machine keeps one daemon and every
   run keeps its place in `sparkwing queue` and the dashboard.
 - **Running against a home of your own:** `SPARKWING_HOME=DIR` points one
-  command's state and config at DIR, which is deliberate isolation for work
+  command's state, cache and logs at DIR, which is isolation for work
   that must not touch the operational runs store, the release preview under
   Decisions before landing being the case that needs it. A run started that way
   is arbitrated by whatever daemon lives in that home rather than the machine's,
   so it is invisible to `sparkwing queue` and the dashboard and contends with
-  every other run on the OS. It is not a way around a full queue.
+  every other run on the OS. It is not a way around a full queue. It does not
+  move the user config directory, which answers to `XDG_CONFIG_HOME` and the
+  per-file overrides (`SPARKWING_PROFILES`, `SPARKWING_REPOS`), because a
+  profile is a machine-wide connection that outlives any one home. A profiles
+  write from a command running under a home of its own is refused rather than
+  sent to the machine's config; set `SPARKWING_PROFILES=DIR/profiles.yaml` to
+  keep it inside that home.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is

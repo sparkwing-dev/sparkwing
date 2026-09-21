@@ -87,6 +87,20 @@ unlock.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
 
+### Fixed
+
+- **config:** a profiles write from a command under its own `SPARKWING_HOME` is
+  refused, not sent to the machine's config
+  `sparkwing configure profiles add|set|remove|duplicate` and `sparkwing cloud
+  enroll` resolved `~/.config/sparkwing/profiles.yaml` whatever home the command
+  ran under, so a drill under a scratch `SPARKWING_HOME` edited the operator's
+  own profiles and nothing in the invocation said it would. `SPARKWING_HOME`
+  still does not move the file, because a profile is a machine-wide connection
+  that outlives any one home; the write now fails naming both paths and the
+  `SPARKWING_PROFILES` value that keeps it inside the home. A command with no
+  `SPARKWING_HOME`, or one whose `SPARKWING_HOME` is the operator's own
+  `~/.sparkwing`, writes where it always did.
+
 ## [v0.59.0] - 2026-09-21
 ### Added
 
