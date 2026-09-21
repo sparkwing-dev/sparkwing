@@ -19,10 +19,6 @@ unlock.
 ---
 
 ## [Unreleased]
-### Changed
-
-- **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
-
 ### Added
 
 - **sdk:** `sparkwing.Admitted(ctx)` reports the cores and memory the scheduler
@@ -31,6 +27,10 @@ unlock.
   which on a host running several jobs reports a larger number. The second
   result is false where nothing reserved anything, so a caller told nothing
   sizes itself as before.
+
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
 
 ## [v0.59.0] - 2026-09-21
 ### Added
