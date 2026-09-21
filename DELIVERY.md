@@ -109,8 +109,17 @@ file. Other syntax and workflow checks remain active.
   uses its released one-core slot while the race suite continues. The
   store-first race order applies on every host; machines with one to three or
   more than four logical CPUs retain their existing dependency schedule and
-  Go parallelism. The 40-minute boundary remains a liveness limit rather than
-  a completion guarantee. That publication path
+  Go parallelism. A Go step's own parallelism depends on who else holds the
+  box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
+  saturate a machine another gate is running on. A host that sets `CI` carries
+  one gate and is discarded after it, so it holds nothing back for a neighbor
+  and bounds each step to `cpus/2` instead. The two agree on an odd CPU count
+  and differ by one thread on an even one, except where the shared form
+  collapses: at four CPUs a shared host runs one thread and a single-tenant
+  host runs two. The race suite keeps `GOMAXPROCS=1`
+  on four CPUs either way.
+  The 40-minute boundary remains a liveness limit rather than a completion
+  guarantee. That publication path
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
   output. Measured on this 16-core Linux

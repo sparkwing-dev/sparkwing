@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"context"
-	"runtime"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -28,7 +27,7 @@ func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 
 func (p *Test) run(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
-		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(runtime.NumCPU()), home)).Run(); err != nil {
+		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(currentHost()), home)).Run(); err != nil {
 			return err
 		}
 		sparkwing.Info(ctx, "go test: all packages passed")
@@ -36,8 +35,8 @@ func (p *Test) run(ctx context.Context) error {
 	})
 }
 
-func testGoCommand(cpuCount int) string {
-	return boundedGoCommand(cpuCount, "test", "./...")
+func testGoCommand(h hostShape) string {
+	return boundedGoCommand(h, "test", "./...")
 }
 
 func init() {

@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -400,12 +399,11 @@ func offlineTrackLatest(t *testing.T, sparkwingDir string) {
 
 func offlineRepoRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot resolve this test's source path")
-	}
-	root, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
+		t.Fatalf("resolve repository root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		t.Fatalf("resolve repository root: %v", err)
 	}
 	return root

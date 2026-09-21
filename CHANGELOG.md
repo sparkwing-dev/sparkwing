@@ -19,6 +19,9 @@ unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
 
 ### Added
 

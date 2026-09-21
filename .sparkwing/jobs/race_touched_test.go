@@ -45,7 +45,7 @@ func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
 		{4, "GOMAXPROCS=1 go test -p 2 " + args},
 		{8, "GOMAXPROCS=3 go test -p 3 " + args},
 	} {
-		if got := raceGoCommand(tc.cpus, args); got != tc.want {
+		if got := raceGoCommand(hostShape{cpus: tc.cpus}, args); got != tc.want {
 			t.Errorf("race command on %d CPUs = %q, want %q", tc.cpus, got, tc.want)
 		}
 	}
