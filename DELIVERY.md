@@ -87,7 +87,11 @@ file. Other syntax and workflow checks remain active.
   Above 25 changed Go files, the two hook tiers waive only their time budgets
   and still report the span and slowest step. Every selected check still runs.
   At or below 25 files, both hook budgets are enforced. The release cut always
-  enforces its five-minute budget, regardless of change size. The
+  enforces its five-minute budget, regardless of change size. A tier whose
+  scope holds no Go file still runs and passes every step, so it warns and
+  names the scope it read: a push judged against an empty
+  `origin/main..HEAD` range reports success over nothing, and uncommitted
+  work is outside what `pre-push` reads. The
   budget judges the span the job's own steps cover, not the admission wait or
   the 2.5 s the pipeline binary takes to recompile after a Go change. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
