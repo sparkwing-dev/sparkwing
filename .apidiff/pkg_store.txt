@@ -493,6 +493,7 @@ var ErrExecutorCredentialMismatch = errors.New("executor credential does not mat
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
+var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
 var ErrInvalidCredentials = errors.New("invalid username or password")
@@ -508,6 +509,7 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
+var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 var ErrUserNotFound = errors.New("user not found")
@@ -882,6 +884,7 @@ type NodeUsage struct {
 	Wall        time.Duration
 }
 func NormalizeGitHubWebhookRepo(repo string) string
+func NormalizeTeam(team Team) Team
 const OnLimitCancelOthers = "cancel_others"
 const OnLimitCoalesce = "coalesce"
 const OnLimitFail = "fail"
@@ -891,8 +894,10 @@ func Open(path string) (*Store, error)
 func OpenPostgres(_ context.Context, dsn string) (*Store, error)
 func OpenReadOnly(path string) (*Store, error)
 func OpenReadOnlySnapshot(path string) (*Store, error)
-type Operator struct{ *Store }
+type Operator struct{}
+func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
+func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -1320,7 +1325,7 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
 func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
-func (s *Store) ForTeam(team Team) (*Tenant, error)
+func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)

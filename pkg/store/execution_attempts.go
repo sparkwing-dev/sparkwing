@@ -201,7 +201,7 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	var consumed int
@@ -364,7 +364,7 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)
@@ -442,7 +442,7 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	var root, status, outcome, claimed string
@@ -543,7 +543,7 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)

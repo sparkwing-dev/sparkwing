@@ -177,7 +177,7 @@ func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runI
 			runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
 	} else if _, triggerOK := TriggerClaimFenceFromContext(ctx); triggerOK {
-		if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+		if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 			return err
 		}
 		err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
@@ -220,7 +220,9 @@ func (s *Store) execNodeMutation(ctx context.Context, runID, nodeID, query strin
 	return result, fenced, nil
 }
 
-func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, runID string) error {
+// safety: the fence reads a tenant-owned table, so it takes the team of the
+// handle that is mutating rather than matching an id across every team.
+func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
 	}
@@ -230,8 +232,8 @@ func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, runID
 	}
 	var held int
 	err := tx.QueryRowContext(ctx, `SELECT 1 FROM triggers
-	WHERE id = ? AND claim_principal = ? AND claim_token_prefix = ?
-	  AND claim_seq = ? AND `+triggerClaimLiveSQL("")+s.forUpdate(), runID,
+	WHERE team = ? AND id = ? AND claim_principal = ? AND claim_token_prefix = ?
+	  AND claim_seq = ? AND `+triggerClaimLiveSQL("")+s.forUpdate(), string(team), runID,
 		fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 		fence.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -240,13 +242,13 @@ func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, runID
 	return err
 }
 
-func (s *Store) assertRunHeartbeatFenceTx(ctx context.Context, tx *storeTx, runID string) error {
+func (s *Store) assertRunHeartbeatFenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if fence, ok := NodeClaimFenceFromContext(ctx); ok {
 		var held int
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
-	WHERE run_id = ? AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?
+	WHERE team = ? AND run_id = ? AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?
 	  AND claim_membership_id = ? AND reservation_id = ? AND claim_generation = ?
-	  AND `+nodeClaimLiveSQL("")+s.forUpdate(), runID, fence.HolderID,
+	  AND `+nodeClaimLiveSQL("")+s.forUpdate(), string(team), runID, fence.HolderID,
 			fence.Claimant.Principal, fence.Claimant.TokenPrefix, fence.MembershipID,
 			fence.ReservationID, fence.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -254,7 +256,7 @@ func (s *Store) assertRunHeartbeatFenceTx(ctx context.Context, tx *storeTx, runI
 		}
 		return err
 	}
-	return s.assertRunMutationFenceTx(ctx, tx, runID)
+	return s.assertRunMutationFenceTx(ctx, tx, team, runID)
 }
 
 func fencedRows(result rowsAffected, fenced bool) error {

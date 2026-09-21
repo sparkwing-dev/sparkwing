@@ -3361,7 +3361,7 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	if err := ValidateRunInvocation(r); err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, r.ID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, r.ID); err != nil {
 		return err
 	}
 	argsJSON, _ := json.Marshal(r.Args)
@@ -3400,7 +3400,11 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	if err := enforceRunsPerHourTx(ctx, tx, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `
+	// safety: the team is in the conflict guard, not the conflict target,
+	// because the target must name a unique index and runs has only the
+	// primary key on id; a (team, id) target would race that key's own
+	// violation on a same-team re-create.
+	res, err := tx.ExecContext(ctx, `
 INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
@@ -3431,7 +3435,7 @@ ON CONFLICT(id) DO UPDATE SET
     invocation_json   = excluded.invocation_json,
     last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
     created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
-WHERE runs.status = '`+runStatusPending+`'`,
+WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`'`,
 		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
@@ -3440,7 +3444,45 @@ WHERE runs.status = '`+runStatusPending+`'`,
 		r.ReplayOfRunID, r.ReplayOfNodeID,
 		invocationJSON, heartbeat, creatingPrincipal(ctx),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// safety: a refused conflict guard is not an error, so without this a
+	// team told its create succeeded could not read the row it "created"
+	// and the other team would run the writer's plan under its own repo.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		owner, found, err := runOwnerTx(ctx, tx, r.ID)
+		if err != nil {
+			return err
+		}
+		if found && owner != team {
+			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, r.ID)
+		}
+	}
+	return nil
+}
+
+// ErrIDOwnedByAnotherTeam reports a write whose key already names a row of
+// a different team. It is not [ErrNotFound] because the caller supplied the
+// id and the id is taken, and it is not success because nothing was written.
+var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
+
+// safety: takes no team because the question is who owns the id, and an
+// answer scoped to the asker is no answer.
+func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, error) {
+	var owner string
+	err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return Team(owner), true, nil
 }
 
 const finishRunStmt = `
@@ -3455,7 +3497,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, finishRunStmt,
@@ -3497,7 +3539,7 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunHeartbeatFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunHeartbeatFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -3518,7 +3560,7 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(snapshot)
@@ -3643,7 +3685,7 @@ SELECT `+runColumns+`
 	if err != nil {
 		return nil, err
 	}
-	if err := s.loadAgentLossRetry(ctx, run); err != nil {
+	if err := s.loadAgentLossRetry(ctx, DefaultTeam, run); err != nil {
 		return nil, err
 	}
 	return run, nil
@@ -3679,14 +3721,16 @@ func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
 
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
+//
+// Scope: this reads every team. A tenant caller wants [Tenant.ListRuns]
+// and a maintenance caller wants [Operator.ListRunsAcrossTeams]; this
+// twin exists because pkg/storage.StateStore still names it.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
-	return s.listRuns(ctx, "", f)
+	return s.listRuns(ctx, allTeams(), f)
 }
 
-// safety: the empty team reads every team's runs, because this body is
-// shared with [Tenant.ListRuns], which always passes one.
-func (s *Store) listRuns(ctx context.Context, team Team, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(team, f)
+func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
+	where, args, err := runFilterWhere(scope, f)
 	if err != nil {
 		return nil, err
 	}
@@ -3746,14 +3790,14 @@ func runCursorArgs(f RunFilter) []any {
 }
 
 // CountRuns returns how many runs match f, ignoring its Limit.
+//
+// Scope: this counts every team. See [Store.ListRuns].
 func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
-	return s.countRuns(ctx, "", f)
+	return s.countRuns(ctx, allTeams(), f)
 }
 
-// safety: the empty team counts every team's runs, because this body is
-// shared with [Tenant.CountRuns], which always passes one.
-func (s *Store) countRuns(ctx context.Context, team Team, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(team, f)
+func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
+	where, args, err := runFilterWhere(scope, f)
 	if err != nil {
 		return 0, err
 	}
@@ -3765,7 +3809,10 @@ func (s *Store) countRuns(ctx context.Context, team Team, f RunFilter) (int, err
 	return n, nil
 }
 
-func runFilterWhere(team Team, f RunFilter) (string, []any, error) {
+func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
+	if !scope.all && scope.team == "" {
+		return "", nil, ErrNoTeam
+	}
 	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
 	for i, prefix := range f.GitSHAPrefixes {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
@@ -3780,9 +3827,9 @@ func runFilterWhere(team Team, f RunFilter) (string, []any, error) {
 
 	where := ""
 	args := []any{}
-	if team != "" {
+	if !scope.all {
 		where = " WHERE team = ?"
-		args = append(args, string(team))
+		args = append(args, string(scope.team))
 	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {
@@ -4148,7 +4195,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, n.RunID); err != nil {
 		return err
 	}
 	// safety: this transaction takes the compute-guard key alone; a later edit
@@ -6114,7 +6161,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
-	} else if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	} else if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return 0, err
 	}
 

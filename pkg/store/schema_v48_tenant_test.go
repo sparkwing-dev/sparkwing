@@ -107,7 +107,7 @@ func TestSchemaV48BackfillsAnExistingSingleTenantInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("un-ported GetRun after upgrade: %v", err)
 	}
-	def, err := up.ForTeam(store.DefaultTeam)
+	def, err := up.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}

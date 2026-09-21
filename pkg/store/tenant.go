@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -31,20 +33,113 @@ var ErrNoTeam = errors.New("store: team is required")
 // package outside this one can widen a Tenant back to the unscoped
 // surface.
 //
-// Moving a method family onto Tenant is three mechanical edits: take
-// the receiver from *Store to *Tenant, add `team = ?` to every WHERE
-// and `team` to every INSERT column list, and pass t.team as the
-// argument. tenant_runs.go is the worked example.
+// # The compiler does not protect you yet
+//
+// Every method ported to Tenant still exists, byte-identical, on
+// *Store, because pkg/storage.StateStore and internal/backend.Backend
+// name those methods and removing them one family at a time would break
+// satisfaction mid-port. Go interface satisfaction is structural, so
+// until that single atomic deletion lands a *Store substitutes for a
+// *Tenant at every seam and a forgotten `team = ?` compiles, links,
+// runs and passes review. What catches it instead is
+// tenant_sql_scope_guard_test.go, which parses this package and fails
+// on any statement that touches a tenant-owned table without a team
+// predicate. Run it. Its allowlist is the list of statements not yet
+// ported, and the entry a family owns must be deleted in the same
+// commit that ports it.
+//
+// # Porting a method family
+//
+// The mechanical edits are not the whole job. Work the list:
+//
+//  1. Receiver: *Store becomes *Tenant, and the team argument, if the
+//     method had one, goes away. Keep the *Store twin until the final
+//     deletion; it writes [DefaultTeam].
+//  2. WHERE: every clause gains `team = ?`, including the ones in
+//     subqueries and in EXISTS.
+//  3. INSERT: the column list gains `team`, and so does every VALUES
+//     row.
+//  4. ON CONFLICT: the column list is not enough. A conflict target on
+//     caller-supplied values -- a name, a pipeline, a run id -- matches
+//     another team's row, and a DO UPDATE then overwrites it while the
+//     row keeps its original team. Put the team in the conflict guard
+//     (`WHERE t.team = excluded.team`), and check RowsAffected: a guard
+//     that refuses reports no error, so without the check the writer is
+//     told it succeeded and then cannot read what it "created".
+//     createRunTx in store.go is the worked example.
+//  5. Uniqueness and indexes: the conflict target needs a unique index
+//     to fire at all, and a scoped listing needs a team-leading index or
+//     it scans the fleet. runs got idx_runs_team_started here; the next
+//     table needs its own. Widening an existing unique index to lead with
+//     team is its own change, not part of a method port.
+//  6. Mutators that match nothing: a foreign id must report
+//     [ErrNotFound], not nil. A tenant whose writes silently no-op while
+//     its reads say not-found makes a cancel endpoint answer 200 and
+//     cancel nothing. assertRunBelongsToTeamTx is the check to copy.
+//  7. Helpers: a helper that still takes *Store and reads a tenant-owned
+//     table is a hole the receiver change does not close. Give it a
+//     `team Team` parameter and pass t.team. loadAgentLossRetry and
+//     assertRunMutationFenceTx were both such holes.
+//  8. Lookups that fail open: a lookup whose miss means "no limit"
+//     inverts when it is scoped. [Store.StorageQuotaFor] returns an
+//     unlimited quota on a miss and [StorageQuota] reads a zero limit as
+//     unbounded, so adding `team = ?` to it against rows written before
+//     the port makes every team unlimited, silently, with the suite
+//     green. Scoping such a lookup needs a backfill in the same commit,
+//     or a miss that fails closed. Find them before you scope them.
+//
+// # What stays unscoped
+//
+// Not every caller is a tenant. A method with both a user caller and a
+// maintenance caller keeps an unscoped twin on [Operator] and gains a
+// scoped one on Tenant.
+//
+//   - Reapers and sweeps run for the deployment. An expiry sweep that
+//     only reaped one team would leave every other team's leases held.
+//   - Dispatch and claim are cross-team by construction. An executor
+//     enrolls with the deployment and is offered work from every team on
+//     it, so ClaimNextReadyNode, ClaimNextTrigger and the offer and award
+//     path cannot take a team and stay on the operator handle. The team
+//     of the work claimed comes off the row, not off the caller.
+//   - Migration reads and writes every row by definition.
+//
+// tenant_runs.go is the worked example for the scoped half.
 type Tenant struct {
 	s    *Store
 	team Team
 }
 
+// ErrUnknownTeam reports a handle asked for a team that is not
+// registered.
+var ErrUnknownTeam = errors.New("store: team is not registered")
+
+// NormalizeTeam is the one spelling of a team name. Decision 0004 routes
+// on `<team>.sparkwing.dev` and DNS is case-insensitive, so Acme and acme
+// address one tenant and must not become two.
+func NormalizeTeam(team Team) Team {
+	return Team(strings.ToLower(strings.TrimSpace(string(team))))
+}
+
 // ForTeam returns the handle through which tenant-owned rows are read
-// and written.
-func (s *Store) ForTeam(team Team) (*Tenant, error) {
-	if strings.TrimSpace(string(team)) == "" {
+// and written. It rejects a team that is not registered, because nothing
+// has a foreign key to teams: SQLite cannot add one to an existing table
+// without rewriting all 34 of them, so the registry is enforced at the
+// one place a handle is minted rather than 34 times in the schema. The
+// cost is a read per handle and a window in which a team deleted after
+// the check still has a live handle; deleting a team is an operator path
+// that has to drain its rows anyway.
+func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
+	team = NormalizeTeam(team)
+	if team == "" {
 		return nil, ErrNoTeam
+	}
+	var name string
+	err := s.queryRow(ctx, `SELECT name FROM teams WHERE name = ?`, string(team)).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return &Tenant{s: s, team: team}, nil
 }
@@ -52,17 +147,42 @@ func (s *Store) ForTeam(team Team) (*Tenant, error) {
 // Team reports which team t is scoped to.
 func (t *Tenant) Team() Team { return t.team }
 
-// Operator is the unscoped view of the store: every method on it reads
-// and writes across all teams. Reaping, maintenance and migration paths
-// take it by name, so a statement that crosses teams is visible in the
-// code that asks for one. It embeds *Store because a method that has
-// not yet moved to Tenant is unscoped already, which is what an
-// operator wants; each family the port moves leaves Operator holding
-// only what a maintenance path still needs.
-type Operator struct{ *Store }
+// Operator is the unscoped view of the store. It does not embed *Store,
+// because an embedded *Store would hand every method on the store to
+// anything holding an operator and the unscoped surface would grow by
+// default instead of by review. Each unscoped operation is a named
+// method here, added when a maintenance path needs it.
+//
+// The fleet-wide readers carry AcrossTeams in the name, because an
+// empty-string team standing for "every team" reads as a missing team to
+// everyone who sees it and turns a Tenant that lost its scope into a
+// fleet reader.
+type Operator struct{ s *Store }
 
 // AsOperator returns the unscoped handle.
-func (s *Store) AsOperator() *Operator { return &Operator{Store: s} }
+func (s *Store) AsOperator() *Operator { return &Operator{s: s} }
+
+// ListRunsAcrossTeams returns runs from every team, newest first.
+func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error) {
+	return o.s.listRuns(ctx, allTeams(), f)
+}
+
+// CountRunsAcrossTeams counts runs from every team, ignoring f's Limit.
+func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, error) {
+	return o.s.countRuns(ctx, allTeams(), f)
+}
+
+// safety: a type rather than an empty team meaning "all", because that
+// sentinel cannot be told from a team a caller failed to set; the zero
+// value here scopes to the empty team, which matches nothing.
+type teamScope struct {
+	team Team
+	all  bool
+}
+
+func oneTeam(team Team) teamScope { return teamScope{team: team} }
+
+func allTeams() teamScope { return teamScope{all: true} }
 
 const teamsTableSQLite = `CREATE TABLE IF NOT EXISTS teams (
     name       TEXT PRIMARY KEY,
@@ -182,11 +302,12 @@ func recordDefaultTeamTx(ctx context.Context, tx *storeTx) error {
 // provisioning retries the whole team-creation path rather than half
 // of it.
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error {
-	if strings.TrimSpace(string(team)) == "" {
+	team = NormalizeTeam(team)
+	if team == "" {
 		return ErrNoTeam
 	}
 	now := time.Now().UnixNano()
-	_, err := o.exec(ctx,
+	_, err := o.s.exec(ctx,
 		`INSERT INTO teams (name, created_at, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (name) DO NOTHING`,
 		string(team), now, now)
@@ -195,7 +316,7 @@ func (o *Operator) CreateTeam(ctx context.Context, team Team) error {
 
 // ListTeams returns every registered team, name order.
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error) {
-	rows, err := o.query(ctx, `SELECT name FROM teams ORDER BY name`)
+	rows, err := o.s.query(ctx, `SELECT name FROM teams ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}

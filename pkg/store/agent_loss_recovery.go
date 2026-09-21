@@ -98,11 +98,14 @@ func (s *Store) expirePendingAgentLossRetriesTx(ctx context.Context, tx *storeTx
 	return nil
 }
 
-func (s *Store) loadAgentLossRetry(ctx context.Context, run *Run) error {
+// safety: this reads a tenant-owned table on behalf of a run its caller
+// already scoped, so it takes the team rather than trusting the run id to
+// be unique across teams.
+func (s *Store) loadAgentLossRetry(ctx context.Context, team Team, run *Run) error {
 	var causesJSON []byte
 	var availableAt, deadlineAt int64
 	err := s.queryRow(ctx, `SELECT cause_nodes_json, available_at, deadline_at, retry_count
-  FROM agent_loss_retries WHERE run_id = ?`, run.ID).Scan(
+  FROM agent_loss_retries WHERE team = ? AND run_id = ?`, string(team), run.ID).Scan(
 		&causesJSON, &availableAt, &deadlineAt, &run.AgentLossRetryCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil

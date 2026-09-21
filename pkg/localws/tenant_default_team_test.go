@@ -89,7 +89,7 @@ func TestLocalwsServesRowsWrittenWithNoTeam(t *testing.T) {
 		t.Fatalf("reopen the local state db: %v", err)
 	}
 	defer func() { _ = after.Close() }()
-	def, err := after.ForTeam(store.DefaultTeam)
+	def, err := after.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}

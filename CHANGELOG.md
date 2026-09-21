@@ -37,14 +37,30 @@ unlock.
   beyond the highest-ranked candidates. It batches independent judgments and
   reports advisory probabilities.
 - **store:** schema 48 adds a `team` column to every tenant-owned table and a
-  `teams` table. `Store.ForTeam` returns a `*store.Tenant` whose methods take no
-  team argument and cannot express a query across teams; `Store.AsOperator`
-  returns the unscoped handle that maintenance, reaping and migration paths use.
-  The runs family (`CreateRun`, `GetRun`, `ListRuns`, `CountRuns`, `FinishRun`,
-  `FinishRunsIfActive`, `TouchRunHeartbeat`) is available on the tenant handle;
-  the rest of the store is unchanged for now. The migration is additive: an
-  existing install backfills into a single `default` team and keeps behaving as
-  it did, with no new configuration.
+  `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
+  methods take no team argument and cannot express a query across teams; it
+  normalizes the name (trimmed, lower-cased, because team subdomains are
+  DNS names) and refuses a team that is not registered. `Store.AsOperator`
+  returns the unscoped handle, which no longer embeds `*Store`: each unscoped
+  operation is a named method, and fleet-wide listing is
+  `ListRunsAcrossTeams` / `CountRunsAcrossTeams`. The runs family (`CreateRun`,
+  `GetRun`, `ListRuns`, `CountRuns`, `FinishRun`, `FinishRunsIfActive`,
+  `TouchRunHeartbeat`) is available on the tenant handle; the rest of the store
+  is unchanged for now. A tenant mutator handed another team's run id reports
+  `ErrNotFound` rather than succeeding silently, and `CreateRun` reports the new
+  `ErrIDOwnedByAnotherTeam` rather than upserting over another team's pending
+  run. The migration is additive: an existing install backfills into a single
+  `default` team and keeps behaving as it did, with no new configuration.
+
+  The port is not finished, and **a missing team scope is not yet a compile
+  error**: every ported method still has a byte-identical twin on `*Store`
+  because `pkg/storage.StateStore` and `internal/backend.Backend` name those
+  methods, and Go satisfies interfaces structurally, so a `*Store` substitutes
+  for a `*Tenant` at every seam until those twins are deleted in one change.
+  What refuses an unscoped statement in the meantime is
+  `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
+  fails on any statement touching a tenant-owned table without a team
+  predicate, in a `WHERE` or in an `ON CONFLICT`.
 ## [v0.58.0] - 2026-09-20
 ### Added
 
