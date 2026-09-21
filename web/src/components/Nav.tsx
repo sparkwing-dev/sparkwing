@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
+import { readCSRFCookie } from "@/lib/csrfCookie";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
 type Tab = { href: string; label: string; external?: boolean };
@@ -132,16 +133,7 @@ function readLogoutCSRFToken() {
     window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
   ).__SPARKWING_REQUIRE_LOGIN__;
   if (configured !== "true") return "";
-  const cookie = document.cookie
-    .split(";")
-    .map((value) => value.trim())
-    .find((value) => value.startsWith("sw_csrf="));
-  if (!cookie) return "";
-  try {
-    return decodeURIComponent(cookie.slice("sw_csrf=".length));
-  } catch {
-    return "";
-  }
+  return readCSRFCookie();
 }
 
 function emptyLogoutCSRFToken() {

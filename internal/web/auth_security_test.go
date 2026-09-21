@@ -950,7 +950,7 @@ func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("GET /login = %d, want 200", rec.Code)
 			}
-			assertCookieSecure(t, rec.Result().Cookies(), csrfCookieName, tc.wantSecure)
+			assertCookieSecure(t, rec.Result().Cookies(), cookieName(csrfCookieName, tc.wantSecure), tc.wantSecure)
 
 			form := url.Values{
 				"username":   {"admin"},
@@ -960,14 +960,14 @@ func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
 			submit := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
 			submit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			submit.Header.Set("Origin", "https://dashboard.example")
-			submit.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "login-token"})
+			submit.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, tc.wantSecure), Value: "login-token"})
 			submitted := httptest.NewRecorder()
 			handler.ServeHTTP(submitted, submit)
 			if submitted.Code != http.StatusSeeOther {
 				t.Fatalf("POST /login = %d, want 303: %s", submitted.Code, submitted.Body)
 			}
-			assertCookieSecure(t, submitted.Result().Cookies(), sessionCookieName, tc.wantSecure)
-			assertCookieSecure(t, submitted.Result().Cookies(), csrfCookieName, tc.wantSecure)
+			assertCookieSecure(t, submitted.Result().Cookies(), cookieName(sessionCookieName, tc.wantSecure), tc.wantSecure)
+			assertCookieSecure(t, submitted.Result().Cookies(), cookieName(csrfCookieName, tc.wantSecure), tc.wantSecure)
 		})
 	}
 }
