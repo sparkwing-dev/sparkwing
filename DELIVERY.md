@@ -412,6 +412,18 @@ file. Other syntax and workflow checks remain active.
   conformance` job in `.github/workflows/ci.yaml` on every pull request
   and push to main, and `sparkwing run integration` against its
   Dockerized Postgres and MinIO.
+- **Backup and restore drill:** `TestBackupRestoreDrill` in `pkg/store`
+  runs the procedure in `docs/backup-restore.md` end to end. Its SQLite
+  subtests always run. Its Postgres subtest needs `pg_dump` and
+  `pg_restore` at least as new as the server, because an older `pg_dump`
+  refuses a newer server outright; it takes them from `SPARKWING_PG_BIN`
+  or `PATH` and skips when neither supplies them. That is a narrower gate
+  than a reachable server, so the drill's name carries no dialect and the
+  `-run 'Postgres|Pg'` no-skip lanes do not select it. Run it against a
+  server with `SPARKWING_TEST_PG_URL=... SPARKWING_PG_BIN=/usr/lib/postgresql/17/bin
+  go test -run TestBackupRestoreDrill -v ./pkg/store`. The hosted
+  `Postgres conformance` job supplies no client binaries, so that lane
+  runs the SQLite half only.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied
