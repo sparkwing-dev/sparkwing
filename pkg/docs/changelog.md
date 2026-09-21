@@ -111,6 +111,24 @@ unlock.
   --sw-workers=3` accepted the flag and ran at one worker per CPU with no
   diagnostic.
 
+- **checks:** four gates that could report success without judging anything
+  now refuse instead. `bin/check-shell.sh` fails when it finds no tracked
+  script rather than passing on an empty list; `bin/check-release-tag-order.sh`
+  refuses a terminal on stdin rather than calling any candidate the first
+  release tag; `bin/check-release-binary-vulnerabilities.sh` no longer waives
+  GO-2026-5932 when `go list -deps` fails, because an unreadable dependency
+  list is not proof the package is unreachable; and
+  `bin/check-release-schema-parity.sh` exits 2 with real usage on a bad
+  argument list, where `--help` had printed its own shell source under a zero
+  exit since the header comment it read was removed. A new
+  `bin/check-release-schema-parity-test.sh` holds those refusals, and
+  `pre-release` runs it.
+
+- **checks:** `pre-commit` and `pre-push` warn when the scope they judge holds
+  no Go file. Both tiers run every step and pass every one of them on an empty
+  scope, and that verdict was indistinguishable from a full pass. The warning
+  names the scope it read, so a push judged against an empty range says so.
+
 ## [v0.58.0] - 2026-09-20
 ### Added
 

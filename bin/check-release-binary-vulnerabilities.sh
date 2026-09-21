@@ -35,10 +35,19 @@ for artifact in "$@"; do
   fi
   printf '%s\n' "$output"
   findings="$(printf '%s\n' "$output" | sed -n 's/^Vulnerability #[0-9][0-9]*: \(GO-[0-9-][0-9-]*\)$/\1/p' | sort -u)"
-  if [[ "$findings" == "GO-2026-5932" ]] && \
-      ! go list -deps ./... 2>/dev/null | grep -Eq '^golang.org/x/crypto/openpgp(/|$)'; then
-    echo "release vulnerability scan: GO-2026-5932 does not reach an OpenPGP package"
-    continue
+  if [[ "$findings" == "GO-2026-5932" ]]; then
+    # safety: the waiver rests on the dependency list, so a `go list` that
+    # cannot produce one waives nothing. Silencing its error read an unusable
+    # answer as proof the package is unreachable.
+    if ! deps="$(go list -deps ./... 2>&1)"; then
+      echo "release vulnerability scan: cannot decide GO-2026-5932 reachability; go list -deps failed:" >&2
+      printf '%s\n' "$deps" >&2
+      exit "$scan_status"
+    fi
+    if ! printf '%s\n' "$deps" | grep -Eq '^golang.org/x/crypto/openpgp(/|$)'; then
+      echo "release vulnerability scan: GO-2026-5932 does not reach an OpenPGP package"
+      continue
+    fi
   fi
   exit "$scan_status"
 done
