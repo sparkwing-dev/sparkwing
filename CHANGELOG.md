@@ -19,6 +19,8 @@ unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.60.0] - 2026-09-21
 ### Added
 
 - **sdk:** `sparkwing.Admitted(ctx)` reports the cores and memory the scheduler
