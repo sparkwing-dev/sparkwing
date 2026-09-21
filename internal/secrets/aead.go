@@ -67,11 +67,11 @@ func (c *Cipher) Seal(plain string) (string, error) {
 
 // SealBound seals plain with the row fields that decide access to the
 // secret as additional authenticated data: its name, its owning
-// repository (empty for an unscoped secret), whether an unscoped row
+// scope (the owning pipeline, empty for an unscoped secret), whether an unscoped row
 // answers every run, and whether the value is redacted in run output.
 // The envelope opens only under that same combination.
-func (c *Cipher) SealBound(name, repo string, shared, masked bool, plain string) (string, error) {
-	return c.seal(plain, envelopePrefixBound, boundAAD(name, repo, shared, masked))
+func (c *Cipher) SealBound(name, scope string, shared, masked bool, plain string) (string, error) {
+	return c.seal(plain, envelopePrefixBound, boundAAD(name, scope, shared, masked))
 }
 
 func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
@@ -89,26 +89,26 @@ func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
 
 func (c *Cipher) Open(envelope string) (string, error) {
 	if strings.HasPrefix(envelope, envelopePrefixBound) {
-		return "", errors.New("secrets cipher: envelope is bound to a secret name and repository; open it with those")
+		return "", errors.New("secrets cipher: envelope is bound to a secret name and scope; open it with those")
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
 // OpenBound decrypts an envelope sealed for this combination of name,
-// repo, shared and masked. Envelopes written before binding carry no
+// scope, shared and masked. Envelopes written before binding carry no
 // additional data and open unchanged.
-func (c *Cipher) OpenBound(name, repo string, shared, masked bool, envelope string) (string, error) {
+func (c *Cipher) OpenBound(name, scope string, shared, masked bool, envelope string) (string, error) {
 	if strings.HasPrefix(envelope, envelopePrefixBound) {
-		return c.open(envelope, envelopePrefixBound, boundAAD(name, repo, shared, masked))
+		return c.open(envelope, envelopePrefixBound, boundAAD(name, scope, shared, masked))
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
 // safety: length prefixes keep one field from spelling another, so the binding needs no name rule to hold.
-func boundAAD(name, repo string, shared, masked bool) []byte {
-	aad := make([]byte, 0, 18+len(name)+len(repo))
+func boundAAD(name, scope string, shared, masked bool) []byte {
+	aad := make([]byte, 0, 18+len(name)+len(scope))
 	aad = appendBoundField(aad, name)
-	aad = appendBoundField(aad, repo)
+	aad = appendBoundField(aad, scope)
 	return append(aad, boundFlag(shared), boundFlag(masked))
 }
 

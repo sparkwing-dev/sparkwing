@@ -139,7 +139,7 @@ func collectDispatchEnv(ctx context.Context, node *sparkwing.JobNode, runID stri
 		stamp("SPARKWING_BRANCH", run.GitBranch)
 		stamp("SPARKWING_COMMIT", run.GitSHA)
 		stamp("SPARKWING_TRIGGER_SOURCE", run.TriggerSource)
-		stamp("SPARKWING_REPO", run.Repo)
+		stamp("SPARKWING_REPO", run.DeclaredRepo)
 		if run.GithubOwner != "" && run.GithubRepo != "" {
 			stamp("GITHUB_REPOSITORY", run.GithubOwner+"/"+run.GithubRepo)
 		}

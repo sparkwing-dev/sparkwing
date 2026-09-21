@@ -20,7 +20,7 @@ func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handle
 			next.ServeHTTP(w, r)
 			return
 		}
-		cookie, err := r.Cookie(sessionCookieName)
+		cookie, err := r.Cookie(cookieName(sessionCookieName, cookiesSecure(opts)))
 		if err != nil || cookie.Value == "" {
 			redirectOrUnauth(w, r)
 			return
@@ -35,7 +35,7 @@ func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handle
 			}
 			return
 		}
-		if unsafeAPIRequest(r) && !validAPIRequestCSRF(r, sess.CSRFToken) {
+		if unsafeAPIRequest(r) && !validAPIRequestCSRF(r, sess.CSRFToken, cookiesSecure(opts)) {
 			csrfError(w)
 			return
 		}
@@ -68,11 +68,11 @@ func unsafeAPIRequest(r *http.Request) bool {
 	}
 }
 
-func validAPIRequestCSRF(r *http.Request, sessionToken string) bool {
+func validAPIRequestCSRF(r *http.Request, sessionToken string, secure bool) bool {
 	if !sameOriginRequest(r) {
 		return false
 	}
-	cookie, err := r.Cookie(csrfCookieName)
+	cookie, err := r.Cookie(cookieName(csrfCookieName, secure))
 	if err != nil {
 		return false
 	}

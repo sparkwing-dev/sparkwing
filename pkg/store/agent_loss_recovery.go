@@ -447,11 +447,11 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runs
     (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json,
-     created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo,
+     created_at, started_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, retry_cause_node_id, retry_avoid_coordinator_id,
      retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, invocation_json)
  SELECT ?, pipeline, ?, ?, git_branch, git_sha, args_json, plan_json,
-        ?, ?, parent_run_id, repo, repo_url, github_owner, github_repo,
+        ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, ?, ?, ?, ?, ?, invocation_json
    FROM runs WHERE id = ?`, retryID, runStatusPending, triggerSource,
 		now.UnixNano(), now.UnixNano(), RetrySourceAuto, causes[0], first.coordinatorID,
@@ -463,7 +463,7 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
      status, created_at, parent_run_id, repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, "full", available_at)
  SELECT ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
-        ?, ?, parent_run_id, repo, repo_url, github_owner, github_repo,
+        ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, 0, ?
    FROM runs WHERE id = ?`, retryID, triggerSource, provenanceJSON, triggerStatusPending,
 		now.UnixNano(), RetrySourceAuto, availableAt.UnixNano(), sourceRunID); err != nil {

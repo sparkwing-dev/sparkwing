@@ -30,6 +30,59 @@ unlock.
   refused when its class is chosen, naming the largest class still priced. A
   rate table an operator stored keeps every class it names, so a cluster
   provisioned for the larger classes is unaffected.
+### Security
+
+- **controller:** a run's repository is metadata and grants nothing (Breaking)
+  A run's repository was a free-text field its submitter typed, and three
+  checks read it as proof of which repository the caller was working in: the
+  secret read, the two store helpers behind it, and the Git cache proxy. A
+  caller that typed another team's repository reached that team's secrets and
+  the controller's cached clone of its source. Secrets now scope to the
+  pipeline a caller holds live work in, `runs.repo` is `runs.declared_repo` and
+  no authorization reads it, and the Git cache serves only a repository an
+  operator connected to the pipeline of a run a signed webhook delivery
+  created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
+  `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
+  about pipelines.
+
+- **controller:** `runs.control` separates operator actions from runner reports (Breaking)
+  `runs.write` covered both starting work and acting on a run somebody else
+  started, and a token that could submit a trigger could also retry an
+  arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
+  and the cron writes now require `runs.control`. `runs.write` keeps trigger
+  submission and the Git cache refresh. Add `runs.control` to operator and
+  dashboard tokens; runner tokens neither had it nor need it.
+
+### Changed
+
+- **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
+  `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
+  and response fields are `pipeline`, and the `?repo=` query parameter on
+  `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
+  `CreateSecretForRepo`, `GetSecretForRepo` and `DeleteSecretForRepo` are
+  `CreateSecretForPipeline`, `GetSecretForPipeline` and
+  `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
+  `secrets.pipeline` and keeps every stored value, so a row scoped to a
+  repository slug survives the upgrade, answers no run, and is re-keyed to a
+  pipeline by an admin.
+
+- **api:** a run serializes `declared_repo` where it serialized `repo` (Breaking)
+  `store.Run.Repo` is `store.Run.DeclaredRepo` and `store.RunFilter.Repos` is
+  `store.RunFilter.DeclaredRepos`. The `?repo=` list filter is unchanged.
+- **web (Breaking):** the dashboard's session and CSRF cookies carry the
+  `__Host-` prefix
+  Host-only scoping stops a sibling host under the same registrable domain
+  reading these cookies and does nothing to stop one writing a same-named
+  cookie with a `Domain` attribute and a longer `Path`, which sorts first in
+  the `Cookie` header and is the one the server reads. A browser refuses a
+  `__Host-` cookie that carries `Domain`, which is that write. The CSRF token
+  is an HMAC of the session id rather than independent state, so a planted
+  session carries its own matching token and that layer does not catch the
+  swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
+  `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
+  See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
+  Summary: every signed-in browser signs in once more, and a custom browser
+  client reads `__Host-sw_csrf` before `sw_csrf`.
 
 ## [v0.60.0] - 2026-09-21
 ### Added

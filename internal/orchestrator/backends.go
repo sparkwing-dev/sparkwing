@@ -612,7 +612,7 @@ func (l localState) EnqueueTriggerWithEnv(
 			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
 				tg.TriggerSource = parent.TriggerSource
 			}
-			tg.Repo = parent.Repo
+			tg.Repo = parent.DeclaredRepo
 			tg.RepoURL = parent.RepoURL
 			tg.GitBranch = firstNonEmptyStr(branch, parent.GitBranch)
 			tg.GitSHA = parent.GitSHA
