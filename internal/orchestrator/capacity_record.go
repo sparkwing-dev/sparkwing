@@ -30,6 +30,11 @@ func recordNodeUsage(ctx context.Context, backends Backends, runID, nodeID strin
 type runCharge struct {
 	Cores       float64
 	MemoryBytes int64
+	Source      string
+}
+
+func (c runCharge) admission() *sparkwing.Admission {
+	return &sparkwing.Admission{Cores: c.Cores, MemoryBytes: c.MemoryBytes, Source: c.Source}
 }
 
 func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {

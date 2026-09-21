@@ -17,6 +17,7 @@ type runtimePlumbingKeys struct {
 	Node              any
 	ResolvedArgs      any
 	ProfileResolution any
+	Admission         any
 }
 
 type runtimePlumbingFns struct {
@@ -57,6 +58,7 @@ var RuntimePlumbing = struct {
 		Node:              keyNode,
 		ResolvedArgs:      keyResolvedArgs,
 		ProfileResolution: keyProfileResolution,
+		Admission:         keyAdmitted,
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,

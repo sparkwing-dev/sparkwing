@@ -20,6 +20,15 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** `sparkwing.Admitted(ctx)` reports the resource charge the scheduler
+  reserved for the running job -- cores, memory, and how the charge was reached.
+  A step sizing its own parallelism reads its share rather than the machine,
+  which on a host running several jobs are different numbers. Returns nil where
+  no admission reserved anything, so a caller told nothing sizes itself as
+  before.
+
 ## [v0.59.0] - 2026-09-21
 ### Added
 

@@ -533,6 +533,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			leaseToken = lease.token
 			leaseChildToken = lease.childToken
 			leaseHostAdmitted = lease.hostAdmitted
+			runCtx = sparkwingruntime.WithAdmission(runCtx, lease.charge.admission())
 		}
 	}
 

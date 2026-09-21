@@ -247,7 +247,7 @@ func (la *LocalAdmission) admitRun(
 		rl.childToken = lease.Token
 	}
 	rl.driftWarning = warning
-	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
+	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes, Source: string(res.Source)}
 	if lease.SoleRunUnderLoad {
 		fmt.Fprintf(la.out(),
 			"admitted as sole run; host under external load %.1f cores - additional runs will queue\n",
@@ -330,6 +330,7 @@ func (la *LocalAdmission) admitNode(
 		childToken:   lease.Token,
 		hostAdmitted: leaseCarriesHost(lease),
 		leases:       []*wingdclient.Lease{lease},
+		charge:       runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes, Source: string(res.Source)},
 	}
 	return rl, nil
 }
