@@ -20,14 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **cli:** `--sw-workers` caps the local dispatcher on its own. It was
-  forwarded only when `--sw-mode` was also given, so `sparkwing run <p>
-  --sw-workers=3` parsed and validated the flag, discarded it, and ran at one
-  worker per CPU with no diagnostic. `SPARKWING_WORKERS` was unaffected and
-  already worked alone, which is what made the two disagree.
-
 ### Added
 
 - **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
@@ -44,6 +36,13 @@ unlock.
   obsession, and feature envy. Reproducible shuffled samples rotate coverage
   beyond the highest-ranked candidates. It batches independent judgments and
   reports advisory probabilities.
+### Fixed
+
+- **cli:** `--sw-workers` caps the local dispatcher on its own. It was
+  forwarded only alongside `--sw-mode`, so `sparkwing run <pipeline>
+  --sw-workers=3` accepted the flag and ran at one worker per CPU with no
+  diagnostic.
+
 ## [v0.58.0] - 2026-09-20
 ### Added
 

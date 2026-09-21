@@ -295,7 +295,12 @@ func dispatchRun(args []string) error {
 		env = append(env, "SPARKWING_SECRETS_PROFILE="+flags.secrets)
 	}
 
-	env = append(env, dispatchModeEnv(flags.mode, flags.workers)...)
+	if flags.mode != "" {
+		env = setEnv(env, "SPARKWING_MODE", flags.mode)
+	}
+	if flags.workers > 0 {
+		env = setEnv(env, "SPARKWING_WORKERS", strconv.Itoa(flags.workers))
+	}
 
 	// safety: relative priority resolves against the queue at admission time.
 	if priority != "" {
@@ -937,19 +942,4 @@ func findSparkwingDirFrom(start string) (string, error) {
 func mustGetwd() string {
 	d, _ := os.Getwd()
 	return d
-}
-
-// safety: mode and the worker cap are independent -- applyCIEmbeddedEnv reads
-// SPARKWING_WORKERS with no mode check -- so gating the cap behind a mode
-// discards a flag the CLI already parsed and validated, leaving the run at one
-// worker per CPU with no diagnostic.
-func dispatchModeEnv(mode string, workers int) []string {
-	var out []string
-	if mode != "" {
-		out = append(out, "SPARKWING_MODE="+mode)
-	}
-	if workers > 0 {
-		out = append(out, fmt.Sprintf("SPARKWING_WORKERS=%d", workers))
-	}
-	return out
 }

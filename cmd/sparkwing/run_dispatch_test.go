@@ -313,6 +313,66 @@ func main() {
 	}
 }
 
+func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds a pipeline binary; the fast class runs under -short")
+	}
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SPARKWING_NO_BINCACHE", "1")
+	t.Setenv("SPARKWING_NO_AUTO_REGISTER", "1")
+	t.Setenv("GOWORK", "off")
+	repository := t.TempDir()
+	pipelineDirectory := filepath.Join(repository, ".sparkwing")
+	if err := os.Mkdir(pipelineDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	environmentFile := filepath.Join(t.TempDir(), "environment.json")
+	t.Setenv("FICTIONAL_ENVIRONMENT_FILE", environmentFile)
+	files := map[string]string{
+		"go.mod": "module example.com/fictional\n\ngo 1.26\n",
+		"main.go": `package main
+import (
+ "encoding/json"
+ "os"
+ "strings"
+)
+func main() {
+ var carried []string
+ for _, entry := range os.Environ() {
+  if strings.HasPrefix(entry, "SPARKWING_WORKERS=") { carried = append(carried, entry) }
+ }
+ data, err := json.Marshal(carried)
+ if err != nil { panic(err) }
+ if err := os.WriteFile(os.Getenv("FICTIONAL_ENVIRONMENT_FILE"), data, 0600); err != nil { panic(err) }
+}
+`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(pipelineDirectory, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previousDaemon := ensureRunDaemonFn
+	ensureRunDaemonFn = func() {}
+	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
+
+	if err := dispatchRun([]string{"fictional", "--sw-no-update", "--sw-cd", repository, "--sw-workers", "3"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(environmentFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"SPARKWING_WORKERS=3"}; !slices.Equal(got, want) {
+		t.Fatalf("run carried %q, want %q", got, want)
+	}
+}
+
 func TestDispatchRunRejectsMalformedWorkersBeforeProjectLookup(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, args := range [][]string{{"--sw-workers=four"}, {"--sw-workers=-2"}, {"--sw-workers", "four"}, {"--sw-workers", "-2"}, {"--sw-workers"}} {
