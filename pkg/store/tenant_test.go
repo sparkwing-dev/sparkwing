@@ -210,14 +210,14 @@ func TestTenantCreateRunCannotOverwriteAnotherTeamsPendingRun(t *testing.T) {
 
 	if err := alpha.CreateRun(ctx, store.Run{
 		ID: "shared-id", Pipeline: "alpha-pipeline", Status: "pending",
-		Repo: "alpha-repo", StartedAt: time.Now(),
+		DeclaredRepo: "alpha-repo", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("alpha.CreateRun: %v", err)
 	}
 
 	err := beta.CreateRun(ctx, store.Run{
 		ID: "shared-id", Pipeline: "beta-pipeline", Status: "pending",
-		Repo: "beta-repo", StartedAt: time.Now(),
+		DeclaredRepo: "beta-repo", StartedAt: time.Now(),
 	})
 	if !errors.Is(err, store.ErrIDOwnedByAnotherTeam) {
 		t.Errorf("beta.CreateRun on alpha's pending id = %v, want ErrIDOwnedByAnotherTeam", err)
@@ -230,8 +230,8 @@ func TestTenantCreateRunCannotOverwriteAnotherTeamsPendingRun(t *testing.T) {
 	if got.Pipeline != "alpha-pipeline" {
 		t.Errorf("pipeline = %q after the cross-team insert, want alpha-pipeline", got.Pipeline)
 	}
-	if got.Repo != "alpha-repo" {
-		t.Errorf("repo = %q after the cross-team insert, want alpha-repo", got.Repo)
+	if got.DeclaredRepo != "alpha-repo" {
+		t.Errorf("declared repo = %q after the cross-team insert, want alpha-repo", got.DeclaredRepo)
 	}
 	if got.Status != "pending" {
 		t.Errorf("status = %q after the cross-team insert, want pending", got.Status)

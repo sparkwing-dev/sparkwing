@@ -870,7 +870,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
 		s.meteredBytes(egress.ClassGit, s.claimedRunAccess(http.HandlerFunc(s.handleGitcacheGit)))))
 
-	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
+	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleCancelRun)))
 
 	mux.Handle("GET /api/v1/trends", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTrends)))
 	mux.Handle("GET /api/v1/agents", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleAgents)))
@@ -879,7 +879,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// one would take the agent and every node it runs down with it.
 	mux.Handle("POST /api/v1/agents/{name}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatAgent)))
 
-	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRetry)))
+	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
@@ -900,15 +900,15 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
 
 	mux.Handle("GET /api/v1/crons", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCrons)))
-	mux.Handle("PUT /api/v1/crons/repos", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handlePutCronRepo)))
-	mux.Handle("DELETE /api/v1/crons/repos", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleDeleteCronRepo)))
+	mux.Handle("PUT /api/v1/crons/repos", requireScope(ScopeRunsControl, http.HandlerFunc(s.handlePutCronRepo)))
+	mux.Handle("DELETE /api/v1/crons/repos", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleDeleteCronRepo)))
 	mux.Handle("GET /api/v1/crons/{id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetCron)))
-	mux.Handle("POST /api/v1/crons/{id}/pause", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handlePauseCron)))
-	mux.Handle("POST /api/v1/crons/{id}/resume", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleResumeCron)))
-	mux.Handle("POST /api/v1/crons/{id}/run", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRunCronNow)))
-	mux.Handle("POST /api/v1/crons/{id}/disarm", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleDisarmCron)))
-	mux.Handle("PUT /api/v1/crons/{id}/override", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleSetCronOverride)))
-	mux.Handle("DELETE /api/v1/crons/{id}/override", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleClearCronOverride)))
+	mux.Handle("POST /api/v1/crons/{id}/pause", requireScope(ScopeRunsControl, http.HandlerFunc(s.handlePauseCron)))
+	mux.Handle("POST /api/v1/crons/{id}/resume", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleResumeCron)))
+	mux.Handle("POST /api/v1/crons/{id}/run", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRunCronNow)))
+	mux.Handle("POST /api/v1/crons/{id}/disarm", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleDisarmCron)))
+	mux.Handle("PUT /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleSetCronOverride)))
+	mux.Handle("DELETE /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleClearCronOverride)))
 
 	mux.Handle("POST /api/v1/maintenance/reconcile-orphans", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReconcileOrphans)))
 
@@ -967,10 +967,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/runs/{id}/events", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListEvents)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetActiveDebugPause)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleReleaseDebugPause)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleReleaseDebugPause)))
 	// safety: nodes.claim may consume only the bounce request already assigned
 	// to that supervising runner; creating one still requires runs.write.
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRequestNodeBounce)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRequestNodeBounce)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handlePendingNodeBounce))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleConsumeNodeBounce))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleSetNodeStatus))))

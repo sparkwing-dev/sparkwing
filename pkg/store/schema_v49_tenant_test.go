@@ -14,14 +14,14 @@ import (
 // safety: dropping the column and its index is what makes reopening the
 // database run the migration against the shape the previous binary left
 // behind.
-func downgradeTenantKeyToV47(t *testing.T, db *sql.DB) {
+func downgradeTenantKeyToV48(t *testing.T, db *sql.DB) {
 	t.Helper()
 	ctx := context.Background()
 	stmts := []string{`DROP INDEX idx_runs_team_started`}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)
 	}
-	stmts = append(stmts, `DROP TABLE teams`, `DELETE FROM sparkwing_schema_version WHERE version >= 48`)
+	stmts = append(stmts, `DROP TABLE teams`, `DELETE FROM sparkwing_schema_version WHERE version >= 49`)
 	for _, q := range stmts {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -29,7 +29,7 @@ func downgradeTenantKeyToV47(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestSchemaV48FreshSQLiteTenantShape(t *testing.T) {
+func TestSchemaV49FreshSQLiteTenantShape(t *testing.T) {
 	st, err := storetest.NewSQLite(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestSchemaV48FreshSQLiteTenantShape(t *testing.T) {
 // binary that never heard of a team. They have to end up in the default
 // team, readable through its handle and through the un-ported surface,
 // with no configuration asked of whoever is running it.
-func TestSchemaV48BackfillsAnExistingSingleTenantInstall(t *testing.T) {
+func TestSchemaV49BackfillsAnExistingSingleTenantInstall(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "v47.db")
 
@@ -59,7 +59,7 @@ func TestSchemaV48BackfillsAnExistingSingleTenantInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeTenantKeyToV47(t, st.DB())
+	downgradeTenantKeyToV48(t, st.DB())
 	// safety: the older binary names no team anywhere, so the seed does not either.
 	for _, q := range []string{
 		`INSERT INTO runs (id, pipeline, status, started_at) VALUES ('run-old', 'build', 'success', 1)`,
@@ -76,7 +76,7 @@ func TestSchemaV48BackfillsAnExistingSingleTenantInstall(t *testing.T) {
 
 	up, err := store.Open(path)
 	if err != nil {
-		t.Fatalf("upgrade v47 to v48: %v", err)
+		t.Fatalf("upgrade v48 to v49: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
@@ -138,13 +138,13 @@ func TestSchemaV48BackfillsAnExistingSingleTenantInstall(t *testing.T) {
 		t.Fatalf("RequirementsWritingWouldAdd: %v", err)
 	}
 	if len(adds) != 0 {
-		t.Errorf("v48 declares requirements %v; it is additive and should declare none", adds)
+		t.Errorf("v49 declares requirements %v; it is additive and should declare none", adds)
 	}
 }
 
 // A store whose rows all predate teams keeps answering the way it did,
 // which is what a local `sparkwing serve start` depends on.
-func TestSchemaV48LeavesTheSingleTenantSurfaceUnchanged(t *testing.T) {
+func TestSchemaV49LeavesTheSingleTenantSurfaceUnchanged(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	if err := st.CreateRun(ctx, store.Run{

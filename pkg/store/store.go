@@ -506,7 +506,9 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at      INTEGER NOT NULL DEFAULT 0,
     started_at      INTEGER NOT NULL,
     finished_at     INTEGER,
-    repo            TEXT NOT NULL DEFAULT '',
+    -- declared_repo is whatever the submitter typed. Nothing is granted on
+    -- it, because nothing proves the submitter owns the repository it names.
+    declared_repo   TEXT NOT NULL DEFAULT '',
     repo_url        TEXT NOT NULL DEFAULT '',
     github_owner    TEXT NOT NULL DEFAULT '',
     github_repo     TEXT NOT NULL DEFAULT '',
@@ -537,9 +539,9 @@ CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON runs(pipeline, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(declared_repo, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(declared_repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(declared_repo, git_branch, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS nodes (
     run_id           TEXT NOT NULL,
@@ -974,11 +976,11 @@ CREATE TABLE IF NOT EXISTS secrets (
     updated_at INTEGER NOT NULL,
     -- masked=0 = non-sensitive config (not redacted in run output).
     masked     INTEGER NOT NULL DEFAULT 1,
-    -- repo='' is unscoped: only a shared unscoped row answers a run.
-    repo       TEXT NOT NULL DEFAULT '',
-    -- shared=1 lets an unscoped row answer a run that names no repo of its own.
+    -- pipeline='' is unscoped: only a shared unscoped row answers a run.
+    pipeline   TEXT NOT NULL DEFAULT '',
+    -- shared=1 lets an unscoped row answer a run of any pipeline.
     shared     INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (name, repo)
+    PRIMARY KEY (name, pipeline)
 );
 
 -- Debug pauses; one row per (run, node, reason).
@@ -1062,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 48
+const expectedSchemaVersion = 49
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1276,9 +1278,9 @@ var executorsTablePostgres = strings.NewReplacer(
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);`
+CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(declared_repo, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(declared_repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(declared_repo, git_branch, started_at DESC);`
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1834,7 +1836,15 @@ var migrationRequirements = map[int][]string{
 	31: {assistedExecutionPolicyRequirement},
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
+	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
 }
+
+// safety: v48 renames two columns, so a binary predating it writes the names
+// that are gone; both halves are declared rather than left additive.
+const (
+	pipelineScopedSecretsRequirement = "pipeline-scoped-secrets"
+	declaredRunRepoRequirement       = "declared-run-repo"
+)
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
 func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
@@ -1975,6 +1985,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 47:
 		return applyStorageAllowanceMigrationSQLite(ctx, tx)
 	case 48:
+		return applyRepoGrantsNothingMigrationSQLite(ctx, tx)
+	case 49:
 		return applyTenantKeyMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2316,6 +2328,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 47:
 		return applyStorageAllowanceMigrationPostgres(ctx, tx)
 	case 48:
+		return applyRepoGrantsNothingMigrationPostgres(ctx, tx)
+	case 49:
 		return applyTenantKeyMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2527,7 +2541,7 @@ var columnMigrations = []columnSpec{
 	}},
 	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
-		"repo":              "TEXT NOT NULL DEFAULT ''",
+		"declared_repo":     "TEXT NOT NULL DEFAULT ''",
 		"repo_url":          "TEXT NOT NULL DEFAULT ''",
 		"github_owner":      "TEXT NOT NULL DEFAULT ''",
 		"github_repo":       "TEXT NOT NULL DEFAULT ''",
@@ -2953,6 +2967,59 @@ var secretRepoScopePostgres = []string{
 	`ALTER TABLE secrets ADD PRIMARY KEY (name, repo)`,
 }
 
+// safety: both are renames and no value is rewritten, so a secret scoped to a
+// repository slug keeps its bytes, names a pipeline that does not exist, and
+// answers no run until an admin re-keys it.
+func applyRepoGrantsNothingMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	return renameRepoColumns(ctx, tx)
+}
+
+func applyRepoGrantsNothingMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	return renameRepoColumns(ctx, tx)
+}
+
+func columnsOfTable(ctx context.Context, tx *storeTx, table string) (_ map[string]bool, err error) {
+	if tx.dialect != DialectPostgres {
+		return tableColumns(ctx, tx, table)
+	}
+	rows, err := tx.QueryContext(ctx, `
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = $1`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		have[name] = true
+	}
+	return have, rows.Err()
+}
+
+func renameRepoColumns(ctx context.Context, tx *storeTx) error {
+	for _, rename := range []struct{ table, from, to string }{
+		{"runs", "repo", "declared_repo"},
+		{"secrets", "repo", "pipeline"},
+	} {
+		have, err := columnsOfTable(ctx, tx, rename.table)
+		if err != nil {
+			return err
+		}
+		if !have[rename.from] || have[rename.to] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(
+			`ALTER TABLE %s RENAME COLUMN %s TO %s`, rename.table, rename.from, rename.to)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func addSecretRepoScope(ctx context.Context, tx *storeTx) error {
 	have, err := tableColumns(ctx, tx, "secrets")
 	if err != nil {
@@ -3270,8 +3337,11 @@ type Run struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	// ParentRunID identifies the spawning RunAndAwait caller.
 	ParentRunID string `json:"parent_run_id,omitempty"`
-	// Repo is the short name (e.g. "my-app").
-	Repo string `json:"repo,omitempty"`
+	// DeclaredRepo is the repository the submitter typed (e.g.
+	// "my-app"). It is metadata for display and filtering, and it
+	// grants nothing, because no step proves the submitter owns the
+	// repository it names.
+	DeclaredRepo string `json:"declared_repo,omitempty"`
 	// RepoURL is `git remote get-url origin` at trigger time.
 	RepoURL string `json:"repo_url,omitempty"`
 	// GithubOwner/Repo: parsed when origin is github.
@@ -3405,7 +3475,7 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	// primary key on id; a (team, id) target would race that key's own
 	// violation on a same-team re-create.
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
+INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
@@ -3418,7 +3488,7 @@ ON CONFLICT(id) DO UPDATE SET
     started_at      = excluded.started_at,
     finished_at     = excluded.finished_at,
     parent_run_id   = excluded.parent_run_id,
-    repo            = CASE WHEN runs.repo = '' THEN excluded.repo ELSE runs.repo END,
+    declared_repo   = CASE WHEN runs.declared_repo = '' THEN excluded.declared_repo ELSE runs.declared_repo END,
     repo_url        = CASE WHEN runs.repo_url = '' THEN excluded.repo_url ELSE runs.repo_url END,
     github_owner    = CASE WHEN runs.github_owner = '' THEN excluded.github_owner ELSE runs.github_owner END,
     github_repo     = CASE WHEN runs.github_repo = '' THEN excluded.github_repo ELSE runs.github_repo END,
@@ -3438,7 +3508,7 @@ ON CONFLICT(id) DO UPDATE SET
 WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`'`,
 		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
-		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
+		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
 		r.RetryAvoidCoordinatorID, r.RetryAvoidExecutorKind, r.RetryAvoidExecutorID, nullableTimeNS(r.RetryAvoidUntil),
 		r.ReplayOfRunID, r.ReplayOfNodeID,
@@ -3671,7 +3741,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at`
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at`
 
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -3697,7 +3767,7 @@ type RunFilter struct {
 	Statuses       []string
 	GitSHAPrefixes []string
 	GitBranches    []string
-	Repos          []string
+	DeclaredRepos  []string
 	RepoURLs       []string
 	Since          time.Time
 	Limit          int // <=0 = default
@@ -3850,7 +3920,7 @@ func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
 	addIn("pipeline", f.Pipelines)
 	addIn("status", f.Statuses)
 	addIn("git_branch", f.GitBranches)
-	addIn("repo", f.Repos)
+	addIn("declared_repo", f.DeclaredRepos)
 	addIn("repo_url", f.RepoURLs)
 	addClause := func(clause string, values ...any) {
 		if where == "" {
@@ -4018,7 +4088,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
 		&createdNS, &startedNS, &finishedNS, &parent,
-		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
+		&r.DeclaredRepo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
 		&r.RetryCauseNodeID, &r.RetryAvoidCoordinatorID, &r.RetryAvoidExecutorKind,
 		&r.RetryAvoidExecutorID, &retryAvoidUntilNS,
@@ -5833,9 +5903,9 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 
 // PrincipalHoldsPipelineClaim reports whether claimant holds an
 // unexpired claim on any node of any run of the named pipeline, whatever
-// repository the run belongs to. A write that names a profile key uses
-// PrincipalHoldsProfileClaim, which also checks the key's repository
-// scope. An unbound claimant holds nothing.
+// repository the run declares. A write that names a profile key uses
+// PrincipalHoldsProfileClaim, which accepts the trigger claim as well.
+// An unbound claimant holds nothing.
 func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
 	if !claimant.bound() {
 		return false, nil
@@ -5854,54 +5924,40 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 }
 
 // PrincipalHoldsProfileClaim reports whether claimant may write the
-// capacity profile stored under key. The proof is a live claim -- on a
-// node of a run of that pipeline, or on the run's trigger -- and, when
-// the key carries a repository scope, that claim must be on a run of
-// that repository: two repositories' pipelines of the same name are
-// priced separately, so a claim on one is no standing on the other. An
-// unbound claimant holds nothing.
+// capacity profile stored under key. The proof is a live claim on a node
+// of a run of that pipeline, or on that run's trigger. The repository
+// half of the key is not part of the proof, because a run's repository
+// is a string its submitter typed and two callers may type the same one.
+// An unbound claimant holds nothing.
 func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error) {
 	if !claimant.bound() {
 		return false, nil
 	}
-	keyRepo, pipeline := SplitProfileKey(key)
+	_, pipeline := SplitProfileKey(key)
 	if pipeline == "" {
 		return false, nil
 	}
-	for _, q := range []struct{ sql string }{
-		{`SELECT repo, repo_url FROM triggers
-		   WHERE pipeline = ? AND claim_principal = ? AND claim_token_prefix = ?
-		     AND ` + triggerClaimLiveSQL("")},
-		{`SELECT repo, repo_url FROM runs
-		   WHERE pipeline = ? AND id IN (
-		         SELECT run_id FROM nodes
-		          WHERE claim_principal = ? AND claim_token_prefix = ?
-		            AND ` + nodeClaimLiveSQL("") + `)`},
+	// safety: the trigger arm stands on its own, because a claimed trigger
+	// prices its pipeline's admission wait before its run row exists.
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM triggers
+		  WHERE pipeline = ? AND claim_principal = ? AND claim_token_prefix = ?
+		    AND ` + triggerClaimLiveSQL(""),
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id IN (SELECT id FROM runs WHERE pipeline = ?)
+		    AND claim_principal = ? AND claim_token_prefix = ?
+		    AND ` + nodeClaimLiveSQL(""),
 	} {
-		held, err := s.anyClaimedRepoMatches(ctx, q.sql, pipeline, claimant, now, keyRepo)
-		if err != nil || held {
-			return held, err
-		}
-	}
-	return false, nil
-}
-
-func (s *Store) anyClaimedRepoMatches(ctx context.Context, query, pipeline string, claimant ClaimIdentity, now time.Time, keyRepo string) (bool, error) {
-	rows, err := s.query(ctx, query, pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano())
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var repo, repoURL string
-		if err := rows.Scan(&repo, &repoURL); err != nil {
+		var held int
+		if err := s.queryRow(ctx, query,
+			pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held); err != nil {
 			return false, err
 		}
-		if RepoIdentityMatches(keyRepo, repo, repoURL) {
+		if held > 0 {
 			return true, nil
 		}
 	}
-	return false, rows.Err()
+	return false, nil
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired

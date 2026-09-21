@@ -19,11 +19,26 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
+// safety: host-only scoping stops a sibling host under the registrable domain reading these cookies and does not
+// stop one writing a same-named cookie with Domain and a longer Path, which sorts first in the Cookie header and is
+// the duplicate r.Cookie returns. A browser refuses a __Host- cookie carrying Domain, and that write is the attack.
+const hostPrefix = "__Host-"
+
 const (
-	sessionCookieName = "sw_session"
-	csrfCookieName    = "sw_csrf"
+	sessionCookieName = hostPrefix + "sw_session"
+	csrfCookieName    = hostPrefix + "sw_csrf"
 	csrfHeaderName    = "X-CSRF-Token"
 )
+
+// safety: a browser discards a __Host- cookie that is not Secure, so the local-http escape has to drop the prefix
+// rather than keep it or it signs nobody in. Only that escape drops Secure, and a developer's localhost has no
+// sibling host to be written from.
+func cookieName(name string, secure bool) string {
+	if secure {
+		return name
+	}
+	return strings.TrimPrefix(name, hostPrefix)
+}
 
 var errInvalidControllerSession = errors.New("invalid controller session")
 
@@ -97,7 +112,7 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 		data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
-		if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		if c, err := r.Cookie(cookieName(sessionCookieName, cookiesSecure(opts))); err == nil && c.Value != "" {
 			if _, err := controllerResolveSession(r.Context(), controllerURL, c.Value); err == nil {
 				http.Redirect(w, r, data.Next, http.StatusSeeOther)
 				return
@@ -175,7 +190,7 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		sessionCookie, err := r.Cookie(sessionCookieName)
+		sessionCookie, err := r.Cookie(cookieName(sessionCookieName, cookiesSecure(opts)))
 		if err != nil || sessionCookie.Value == "" {
 			clearSessionCookies(w, cookiesSecure(opts))
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -205,7 +220,7 @@ func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-func csrfFormMiddleware(next http.Handler) http.Handler {
+func csrfFormMiddleware(secure bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !sameOriginRequest(r) {
 			csrfError(w)
@@ -215,7 +230,7 @@ func csrfFormMiddleware(next http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !validFormCSRF(r) {
+		if !validFormCSRF(r, secure) {
 			csrfError(w)
 			return
 		}
@@ -296,7 +311,7 @@ func safeNext(next string) string {
 
 func renderLoginPage(w http.ResponseWriter, r *http.Request, data loginPageData, status int, secure bool) {
 	token := ""
-	if cookie, err := r.Cookie(csrfCookieName); err == nil {
+	if cookie, err := r.Cookie(cookieName(csrfCookieName, secure)); err == nil {
 		token = cookie.Value
 	}
 	if token == "" {
@@ -323,11 +338,11 @@ func newCSRFToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-func validFormCSRF(r *http.Request) bool {
+func validFormCSRF(r *http.Request, secure bool) bool {
 	if !sameOriginRequest(r) {
 		return false
 	}
-	cookie, err := r.Cookie(csrfCookieName)
+	cookie, err := r.Cookie(cookieName(csrfCookieName, secure))
 	if err != nil || cookie.Value == "" {
 		return false
 	}
@@ -450,7 +465,7 @@ func controllerResolveSession(ctx context.Context, controllerURL, sessionID stri
 
 func setSessionCookies(w http.ResponseWriter, sess *loginResp, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     cookieName(sessionCookieName, secure),
 		Value:    sess.SessionID,
 		Path:     "/",
 		HttpOnly: true,
@@ -463,7 +478,7 @@ func setSessionCookies(w http.ResponseWriter, sess *loginResp, secure bool) {
 
 func setCSRFCookie(w http.ResponseWriter, token string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     csrfCookieName,
+		Name:     cookieName(csrfCookieName, secure),
 		Value:    token,
 		Path:     "/",
 		HttpOnly: false, // safety: the native logout form reads the session-bound token without exposing the HttpOnly session id
@@ -476,7 +491,7 @@ func setCSRFCookie(w http.ResponseWriter, token string, secure bool) {
 func clearSessionCookies(w http.ResponseWriter, secure bool) {
 	for _, name := range []string{sessionCookieName, csrfCookieName} {
 		http.SetCookie(w, &http.Cookie{
-			Name:     name,
+			Name:     cookieName(name, secure),
 			Value:    "",
 			Path:     "/",
 			MaxAge:   -1,

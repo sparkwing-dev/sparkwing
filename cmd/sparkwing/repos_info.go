@@ -267,7 +267,7 @@ func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
 			defer func() { _ = st.Close() }()
 			if runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1000}); err == nil {
 				for _, r := range runs {
-					if !repos.RunMatchesRepo(repos.RunObservation{Repo: r.Repo, RepoURL: r.RepoURL}, repo) {
+					if !repos.RunMatchesRepo(repos.RunObservation{Repo: r.DeclaredRepo, RepoURL: r.RepoURL}, repo) {
 						continue
 					}
 					p := add(r.Pipeline)

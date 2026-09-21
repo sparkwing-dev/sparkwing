@@ -1,3 +1,5 @@
+import { readCSRFCookie } from "./csrfCookie";
+
 function getApiUrl(): string {
   if (typeof window !== "undefined") return "";
   return process.env.SPARKWING_CONTROLLER_URL || "";
@@ -23,17 +25,9 @@ function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
     case "TRACE":
       return {};
   }
-  const cookie = document.cookie
-    .split(";")
-    .map((value) => value.trim())
-    .find((value) => value.startsWith("sw_csrf="));
-  if (!cookie) return {};
-  const token = cookie.slice("sw_csrf=".length);
-  try {
-    return { "X-CSRF-Token": decodeURIComponent(token) };
-  } catch {
-    return {};
-  }
+  const token = readCSRFCookie();
+  if (!token) return {};
+  return { "X-CSRF-Token": token };
 }
 
 export type ConnectionStatus =

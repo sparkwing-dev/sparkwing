@@ -230,8 +230,10 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
 		"cron-schedule-names-v1",
+		"declared-run-repo",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
+		"pipeline-scoped-secrets",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
 		t.Fatalf("requirements unknown to a pre-fleet binary = %v, want %v", got, want)
@@ -275,7 +277,15 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	if got, err := ro.CurrentSchemaVersion(context.Background()); err != nil || got != 29 {
 		t.Fatalf("read-only schema = %d, %v; want unchanged v29", got, err)
 	}
-	if got, err := ro.Requirements(context.Background()); err != nil || len(got) != 4 {
-		t.Fatalf("read-only requirements = %v, %v; want only the four pre-Fleet gates", got, err)
+	wantListed := []string{
+		"declared-run-repo",
+		"inherited-holder-marker",
+		"pipeline-scoped-secrets",
+		"repo-scoped-secrets",
+		"session-token-digest",
+		"unique-token-prefix",
+	}
+	if got, err := ro.Requirements(context.Background()); err != nil || !reflect.DeepEqual(got, wantListed) {
+		t.Fatalf("read-only requirements = %v, %v; want %v", got, err, wantListed)
 	}
 }

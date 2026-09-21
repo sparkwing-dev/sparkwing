@@ -51,7 +51,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		Git: &sparkwing.Git{
 			Branch:  created.Source.GitBranch,
 			SHA:     created.Source.GitSHA,
-			Repo:    created.Source.Repo,
+			Repo:    created.Source.DeclaredRepo,
 			RepoURL: created.Source.RepoURL,
 		},
 		RetryOf: srcID,

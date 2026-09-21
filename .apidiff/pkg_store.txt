@@ -998,7 +998,6 @@ func RedactedRun(run *Run) *Run
 func RedactedRuns(runs []*Run) []*Run
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
-func RepoIdentityMatches(keyRepo, repo, repoURL string) bool
 type RetentionSweep struct {
 	Events           int64
 	NodeMetrics      int64
@@ -1025,7 +1024,7 @@ type Run struct {
 
 	ParentRunID string
 
-	Repo string
+	DeclaredRepo string
 
 	RepoURL string
 
@@ -1064,7 +1063,7 @@ type RunFilter struct {
 	Statuses       []string
 	GitSHAPrefixes []string
 	GitBranches    []string
-	Repos          []string
+	DeclaredRepos  []string
 	RepoURLs       []string
 	Since          time.Time
 	Limit          int
@@ -1111,7 +1110,7 @@ type Secret struct {
 	Name      string
 	Value     string
 	Principal string
-	Repo      string
+	Pipeline  string
 	Masked    bool
 	Shared    bool
 	CreatedAt time.Time
@@ -1298,7 +1297,7 @@ func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteSecret(name, repo string) error
+func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
@@ -1340,9 +1339,9 @@ func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string)
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error)
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
 func (s *Store) GetSecret(name string) (*Secret, error)
-func (s *Store) GetSecretForRepo(name, repo string) (*Secret, error)
-func (s *Store) GetSecretForRun(name, repo string) (*Secret, error)
-func (s *Store) GetSecretRow(name, repo string) (*Secret, error)
+func (s *Store) GetSecretForPipeline(name, pipeline string) (*Secret, error)
+func (s *Store) GetSecretForRun(name, pipeline string) (*Secret, error)
+func (s *Store) GetSecretRow(name, pipeline string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
@@ -1400,6 +1399,8 @@ func (s *Store) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
+func (s *Store) PipelineForClaimedRun(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (string, error)
+func (s *Store) PipelinesForClaimant(ctx context.Context, claimant ClaimIdentity, now time.Time) ([]string, error)
 func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
 func (s *Store) PreviewExecutorEligibility(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) ([]ExecutorEligibilityPreview, error)
@@ -1427,8 +1428,6 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-func (s *Store) RepoForClaimedRun(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (string, error)
-func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, now time.Time) ([]string, error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)

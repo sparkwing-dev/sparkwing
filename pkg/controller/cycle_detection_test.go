@@ -136,7 +136,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:     time.Now(),
 		TriggerSource: "pipeline-working-tree@laptop.local",
-		Repo:          "sample-app",
+		DeclaredRepo:  "sample-app",
 		RepoURL:       "git@github.com:acme/sample-app.git",
 		GitBranch:     "main",
 		GitSHA:        "abc123",
@@ -207,8 +207,8 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
-		StartedAt: time.Now(),
-		Repo:      "parent-repo", GitBranch: "main", GitSHA: "parentSHA",
+		StartedAt:    time.Now(),
+		DeclaredRepo: "parent-repo", GitBranch: "main", GitSHA: "parentSHA",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:     time.Now(),
 		TriggerSource: "pipeline-working-tree@laptop.local",
-		Repo:          "acme/sample-app",
+		DeclaredRepo:  "acme/sample-app",
 		RepoURL:       "git@github.com:acme/sample-app.git",
 		GitBranch:     "main",
 		GitSHA:        "parentSHAofProduct",

@@ -50,7 +50,7 @@ func ParseRunFilter(q url.Values) RunFilter {
 		f.GitBranches = splitCSV(v)
 	}
 	if v := q.Get("repo"); v != "" {
-		f.Repos = splitCSV(v)
+		f.DeclaredRepos = splitCSV(v)
 	}
 	if v := q.Get("repo_url"); v != "" {
 		f.RepoURLs = splitCSV(v)
