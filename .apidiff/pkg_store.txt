@@ -1362,7 +1362,7 @@ func (s *Store) ListEgressUsage(ctx context.Context, month string) (_ []EgressUs
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
-func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error)
+func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (s *Store) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
@@ -1515,14 +1515,47 @@ type TableSize struct {
 type Team string
 type Tenant struct {
 }
+func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
+func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
+func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
+func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
+func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
+func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
+func (t *Tenant) DeleteSecret(name, pipeline string) error
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
+func (t *Tenant) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
+func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
+func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error)
+func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
+func (t *Tenant) GetSecret(name string) (*Secret, error)
+func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error)
+func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)
+func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
+func (t *Tenant) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
+func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error)
+func (t *Tenant) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
+func (t *Tenant) ListSecrets() ([]Secret, error)
+func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
+func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
+func (t *Tenant) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
+func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
+func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
+func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
+func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
+func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
+func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
+func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
+func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
+func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
+func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
+func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
 	Hash       string

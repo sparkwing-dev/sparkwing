@@ -52,10 +52,20 @@ func NormalizeGitHubWebhookRepo(repo string) string {
 	return strings.ToLower(strings.TrimSpace(repo))
 }
 
-// PutGitHubWebhookBinding stores b, replacing any binding of the same
-// pipeline and repository. The creation time of a replaced row is kept,
-// so reconnecting a repository does not look like a fresh connection.
+// PutGitHubWebhookBinding stores b in the default team.
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error {
+	return s.defaultTenant().PutGitHubWebhookBinding(ctx, b)
+}
+
+// PutGitHubWebhookBinding stores b in t's team, replacing any binding of
+// the same pipeline and repository. The creation time of a replaced row
+// is kept, so reconnecting a repository does not look like a fresh
+// connection.
+//
+// The team is in the conflict target because it leads the primary key,
+// so connecting a repository another team has already connected replaces
+// nothing of theirs.
+func (t *Tenant) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error {
 	pipeline := strings.TrimSpace(b.Pipeline)
 	repo := NormalizeGitHubWebhookRepo(b.Repo)
 	if pipeline == "" || repo == "" {
@@ -65,34 +75,39 @@ func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBind
 		return fmt.Errorf("%w: secret is required", ErrGitHubWebhookBinding)
 	}
 	now := time.Now().UTC().UnixNano()
-	_, err := s.exec(ctx, `
+	_, err := t.s.exec(ctx, `
         INSERT INTO github_webhook_bindings
-            (pipeline, repo, secret, events, hook_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (pipeline, repo) DO UPDATE SET
+            (team, pipeline, repo, secret, events, hook_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (team, pipeline, repo) DO UPDATE SET
             secret = excluded.secret,
             events = excluded.events,
             hook_id = excluded.hook_id,
             updated_at = excluded.updated_at`,
-		pipeline, repo, b.Secret, strings.Join(b.Events, ","), b.HookID, now, now)
+		string(t.team), pipeline, repo, b.Secret, strings.Join(b.Events, ","), b.HookID, now, now)
 	if err != nil {
 		return fmt.Errorf("store github webhook binding: %w", err)
 	}
 	return nil
 }
 
-// ListGitHubWebhookBindings returns the bindings of one pipeline, or
-// every binding when pipeline is empty, ordered by repository.
-func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error) {
+// ListGitHubWebhookBindings returns the default team's bindings.
+func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error) {
+	return s.defaultTenant().ListGitHubWebhookBindings(ctx, pipeline)
+}
+
+// ListGitHubWebhookBindings returns t's bindings for one pipeline, or
+// all of t's bindings when pipeline is empty, ordered by repository.
+func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error) {
 	query := `SELECT pipeline, repo, secret, events, hook_id, created_at, updated_at
-              FROM github_webhook_bindings`
-	args := []any{}
+              FROM github_webhook_bindings WHERE team = ?`
+	args := []any{string(t.team)}
 	if pipeline = strings.TrimSpace(pipeline); pipeline != "" {
-		query += ` WHERE pipeline = ?`
+		query += ` AND pipeline = ?`
 		args = append(args, pipeline)
 	}
 	query += ` ORDER BY pipeline, repo`
-	rows, err := s.query(ctx, query, args...)
+	rows, err := t.s.query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list github webhook bindings: %w", err)
 	}
@@ -111,13 +126,18 @@ func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) 
 	return out, nil
 }
 
-// GetGitHubWebhookBinding returns one binding, or [ErrNotFound] when the
-// repository is not connected to that pipeline.
+// GetGitHubWebhookBinding returns one of the default team's bindings.
 func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error) {
-	row := s.queryRow(ctx, `
+	return s.defaultTenant().GetGitHubWebhookBinding(ctx, pipeline, repo)
+}
+
+// GetGitHubWebhookBinding returns one of t's bindings, or [ErrNotFound]
+// when the repository is not connected to that pipeline in t's team.
+func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error) {
+	row := t.s.queryRow(ctx, `
         SELECT pipeline, repo, secret, events, hook_id, created_at, updated_at
-        FROM github_webhook_bindings WHERE pipeline = ? AND repo = ?`,
-		strings.TrimSpace(pipeline), NormalizeGitHubWebhookRepo(repo))
+        FROM github_webhook_bindings WHERE team = ? AND pipeline = ? AND repo = ?`,
+		string(t.team), strings.TrimSpace(pipeline), NormalizeGitHubWebhookRepo(repo))
 	b, err := scanGitHubWebhookBinding(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -128,12 +148,17 @@ func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo stri
 	return &b, nil
 }
 
-// DeleteGitHubWebhookBinding removes one binding and reports whether a
-// row was there to remove.
+// DeleteGitHubWebhookBinding removes one of the default team's bindings.
 func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error) {
-	res, err := s.exec(ctx,
-		`DELETE FROM github_webhook_bindings WHERE pipeline = ? AND repo = ?`,
-		strings.TrimSpace(pipeline), NormalizeGitHubWebhookRepo(repo))
+	return s.defaultTenant().DeleteGitHubWebhookBinding(ctx, pipeline, repo)
+}
+
+// DeleteGitHubWebhookBinding removes one of t's bindings and reports
+// whether a row was there to remove.
+func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error) {
+	res, err := t.s.exec(ctx,
+		`DELETE FROM github_webhook_bindings WHERE team = ? AND pipeline = ? AND repo = ?`,
+		string(t.team), strings.TrimSpace(pipeline), NormalizeGitHubWebhookRepo(repo))
 	if err != nil {
 		return false, fmt.Errorf("delete github webhook binding: %w", err)
 	}

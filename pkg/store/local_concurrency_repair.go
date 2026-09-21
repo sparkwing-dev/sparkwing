@@ -37,18 +37,21 @@ func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	touched := map[string]struct{}{}
+	touched := map[concurrencyKey]struct{}{}
 
-	type holderRow struct{ key, holderID string }
+	type holderRow struct {
+		team          Team
+		key, holderID string
+	}
 	var deadHolders []holderRow
 	hrows, err := tx.QueryContext(ctx,
-		`SELECT key, holder_id FROM concurrency_holders WHERE `+deadLocalPredicate, runStatusRunning)
+		`SELECT team, key, holder_id FROM concurrency_holders WHERE `+deadLocalPredicate, runStatusRunning)
 	if err != nil {
 		return 0, 0, err
 	}
 	for hrows.Next() {
 		var r holderRow
-		if err := hrows.Scan(&r.key, &r.holderID); err != nil {
+		if err := hrows.Scan(&r.team, &r.key, &r.holderID); err != nil {
 			_ = hrows.Close()
 			return 0, 0, err
 		}
@@ -60,16 +63,19 @@ func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters
 	}
 	_ = hrows.Close()
 
-	type waiterRow struct{ key, runID, nodeID string }
+	type waiterRow struct {
+		team               Team
+		key, runID, nodeID string
+	}
 	var deadWaiters []waiterRow
 	wrows, err := tx.QueryContext(ctx,
-		`SELECT key, run_id, node_id FROM concurrency_waiters WHERE `+deadLocalPredicate, runStatusRunning)
+		`SELECT team, key, run_id, node_id FROM concurrency_waiters WHERE `+deadLocalPredicate, runStatusRunning)
 	if err != nil {
 		return 0, 0, err
 	}
 	for wrows.Next() {
 		var r waiterRow
-		if err := wrows.Scan(&r.key, &r.runID, &r.nodeID); err != nil {
+		if err := wrows.Scan(&r.team, &r.key, &r.runID, &r.nodeID); err != nil {
 			_ = wrows.Close()
 			return 0, 0, err
 		}
@@ -82,19 +88,19 @@ func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters
 	_ = wrows.Close()
 
 	for _, r := range deadHolders {
-		if err := txDeleteHolder(ctx, tx, r.key, r.holderID); err != nil {
+		if err := txDeleteHolder(ctx, tx, r.team, r.key, r.holderID); err != nil {
 			return 0, 0, err
 		}
-		touched[r.key] = struct{}{}
+		touched[concurrencyKey{r.team, r.key}] = struct{}{}
 	}
 	for _, r := range deadWaiters {
-		if _, err := txDeleteWaiter(ctx, tx, r.key, r.runID, r.nodeID); err != nil {
+		if _, err := txDeleteWaiter(ctx, tx, r.team, r.key, r.runID, r.nodeID); err != nil {
 			return 0, 0, err
 		}
-		touched[r.key] = struct{}{}
+		touched[concurrencyKey{r.team, r.key}] = struct{}{}
 	}
 
-	keys := make([]string, 0, len(touched))
+	keys := make([]concurrencyKey, 0, len(touched))
 	for k := range touched {
 		keys = append(keys, k)
 	}

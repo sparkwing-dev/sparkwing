@@ -26,24 +26,33 @@ type Secret struct {
 	UpdatedAt time.Time
 }
 
-// CreateOrReplaceSecret upserts sec; created_at is preserved. Pipeline
-// scopes the secret to one pipeline, and Shared opens an unscoped row to
-// every run.
+// CreateOrReplaceSecret upserts sec into the default team.
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error {
+	return s.defaultTenant().CreateOrReplaceSecret(sec, now)
+}
+
+// CreateOrReplaceSecret upserts sec into t's team; created_at is
+// preserved. Pipeline scopes the secret to one pipeline, and Shared
+// opens an unscoped row to every run.
+//
+// The team is in the conflict target because it leads the primary key,
+// so a name another team already used names a different row rather than
+// that team's.
+func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error {
 	if sec.Name == "" {
 		return errors.New("secrets: name required")
 	}
 	ts := now.UTC().Unix()
-	_, err := s.execNoCtx(`
-        INSERT INTO secrets (name, value, principal, masked, pipeline, shared, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(name, pipeline) DO UPDATE SET
+	_, err := t.s.execNoCtx(`
+        INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(team, name, pipeline) DO UPDATE SET
             value = excluded.value,
             principal = excluded.principal,
             masked = excluded.masked,
             shared = excluded.shared,
             updated_at = excluded.updated_at
-    `, sec.Name, sec.Value, sec.Principal, boolInt(sec.Masked), sec.Pipeline, boolInt(sec.Shared), ts, ts)
+    `, string(t.team), sec.Name, sec.Value, sec.Principal, boolInt(sec.Masked), sec.Pipeline, boolInt(sec.Shared), ts, ts)
 	return err
 }
 
@@ -54,19 +63,30 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// GetSecret returns the unscoped row including Value.
+// GetSecret returns the default team's unscoped row including Value.
 func (s *Store) GetSecret(name string) (*Secret, error) {
-	return s.readSecret(name, "")
+	return s.defaultTenant().GetSecret(name)
+}
+
+// GetSecret returns t's unscoped row including Value.
+func (t *Tenant) GetSecret(name string) (*Secret, error) {
+	return t.readSecret(name, "")
 }
 
 // GetSecretRow returns the row stored under exactly this name and
 // pipeline, and ErrNotFound when there is none. Unlike
 // GetSecretForPipeline it never falls back to the unscoped row.
 func (s *Store) GetSecretRow(name, pipeline string) (*Secret, error) {
+	return s.defaultTenant().GetSecretRow(name, pipeline)
+}
+
+// GetSecretRow returns t's row stored under exactly this name and
+// pipeline, and ErrNotFound when there is none.
+func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error) {
 	if name == "" {
 		return nil, errors.New("secrets: name required")
 	}
-	return s.readSecret(name, pipeline)
+	return t.readSecret(name, pipeline)
 }
 
 // GetSecretForPipeline returns the row named for pipeline, falling back
@@ -74,32 +94,44 @@ func (s *Store) GetSecretRow(name, pipeline string) (*Secret, error) {
 // when neither exists. This is the administrative read: it reaches an
 // unscoped row whether or not it is shared.
 func (s *Store) GetSecretForPipeline(name, pipeline string) (*Secret, error) {
+	return s.defaultTenant().GetSecretForPipeline(name, pipeline)
+}
+
+// GetSecretForPipeline returns t's row named for pipeline, falling back
+// to t's unscoped row when the pipeline has none of its own.
+func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error) {
 	if name == "" {
 		return nil, errors.New("secrets: name required")
 	}
 	if pipeline != "" {
-		sec, err := s.readSecret(name, pipeline)
+		sec, err := t.readSecret(name, pipeline)
 		if err == nil || !errors.Is(err, ErrNotFound) {
 			return sec, err
 		}
 	}
-	return s.readSecret(name, "")
+	return t.readSecret(name, "")
 }
 
 // GetSecretForRun returns the row pipeline owns, falling back to an
 // unscoped row only when that row is shared. ErrNotFound otherwise, so
 // an unshared unscoped secret is indistinguishable from a missing one.
 func (s *Store) GetSecretForRun(name, pipeline string) (*Secret, error) {
+	return s.defaultTenant().GetSecretForRun(name, pipeline)
+}
+
+// GetSecretForRun returns t's row that pipeline owns, falling back to
+// t's unscoped row only when that row is shared.
+func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error) {
 	if name == "" {
 		return nil, errors.New("secrets: name required")
 	}
 	if pipeline != "" {
-		sec, err := s.readSecret(name, pipeline)
+		sec, err := t.readSecret(name, pipeline)
 		if err == nil || !errors.Is(err, ErrNotFound) {
 			return sec, err
 		}
 	}
-	sec, err := s.readSecret(name, "")
+	sec, err := t.readSecret(name, "")
 	if err != nil {
 		return nil, err
 	}
@@ -109,12 +141,12 @@ func (s *Store) GetSecretForRun(name, pipeline string) (*Secret, error) {
 	return sec, nil
 }
 
-func (s *Store) readSecret(name, pipeline string) (*Secret, error) {
-	row := s.queryRowNoCtx(`
+func (t *Tenant) readSecret(name, pipeline string) (*Secret, error) {
+	row := t.s.queryRowNoCtx(`
         SELECT name, value, principal, pipeline, masked, shared, created_at, updated_at
           FROM secrets
-         WHERE name = ? AND pipeline = ?
-    `, name, pipeline)
+         WHERE team = ? AND name = ? AND pipeline = ?
+    `, string(t.team), name, pipeline)
 	var sec Secret
 	var maskedInt, sharedInt int
 	var created, updated int64
@@ -132,14 +164,20 @@ func (s *Store) readSecret(name, pipeline string) (*Secret, error) {
 	return &sec, nil
 }
 
-// ListSecrets returns rows ordered by name then pipeline. HTTP handlers
-// must blank Value before serializing.
+// ListSecrets returns the default team's rows.
 func (s *Store) ListSecrets() ([]Secret, error) {
-	rows, err := s.queryNoCtx(`
+	return s.defaultTenant().ListSecrets()
+}
+
+// ListSecrets returns t's rows ordered by name then pipeline. HTTP
+// handlers must blank Value before serializing.
+func (t *Tenant) ListSecrets() ([]Secret, error) {
+	rows, err := t.s.queryNoCtx(`
         SELECT name, value, principal, pipeline, masked, shared, created_at, updated_at
           FROM secrets
+         WHERE team = ?
          ORDER BY name, pipeline
-    `)
+    `, string(t.team))
 	if err != nil {
 		return nil, err
 	}
@@ -147,10 +185,17 @@ func (s *Store) ListSecrets() ([]Secret, error) {
 	return scanSecretRows(rows)
 }
 
-// DeleteSecret removes the row owned by pipeline ("" for the unscoped
-// row); ErrNotFound when missing.
+// DeleteSecret removes the default team's row.
 func (s *Store) DeleteSecret(name, pipeline string) error {
-	res, err := s.execNoCtx(`DELETE FROM secrets WHERE name = ? AND pipeline = ?`, name, pipeline)
+	return s.defaultTenant().DeleteSecret(name, pipeline)
+}
+
+// DeleteSecret removes t's row owned by pipeline ("" for the unscoped
+// row); ErrNotFound when missing.
+func (t *Tenant) DeleteSecret(name, pipeline string) error {
+	res, err := t.s.execNoCtx(
+		`DELETE FROM secrets WHERE team = ? AND name = ? AND pipeline = ?`,
+		string(t.team), name, pipeline)
 	if err != nil {
 		return err
 	}
@@ -254,14 +299,17 @@ func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (str
 		return 0, err
 	}
 
-	for _, sec := range current {
-		value, rerr := reseal(sec)
+	for _, row := range current {
+		value, rerr := reseal(row.Secret)
 		if rerr != nil {
 			return 0, rerr
 		}
+		// safety: the team is in the predicate because the name and the
+		// pipeline no longer identify one row, and without it a rotation
+		// would reseal every team's secret of that name with one team's key.
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE secrets SET value = ? WHERE name = ? AND pipeline = ?`,
-			value, sec.Name, sec.Pipeline,
+			`UPDATE secrets SET value = ? WHERE team = ? AND name = ? AND pipeline = ?`,
+			value, row.team, row.Secret.Name, row.Secret.Pipeline,
 		); err != nil {
 			return 0, err
 		}
@@ -272,16 +320,40 @@ func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (str
 	return len(current), nil
 }
 
-func selectSecretsTx(ctx context.Context, tx *storeTx) (secs []Secret, err error) {
+// safety: the team is not a field of [Secret], because that is the shape
+// a tenant reads and writes and a tenant never names its own team; a
+// rotation across every team still has to write each row back under the
+// team that owns it.
+type teamSecret struct {
+	Secret
+	team string
+}
+
+func selectSecretsTx(ctx context.Context, tx *storeTx) (secs []teamSecret, err error) {
 	rows, err := tx.QueryContext(ctx, `
-        SELECT name, value, principal, pipeline, masked, shared, created_at, updated_at
+        SELECT team, name, value, principal, pipeline, masked, shared, created_at, updated_at
           FROM secrets
-         ORDER BY name, pipeline`+tx.forUpdate())
+         ORDER BY team, name, pipeline`+tx.forUpdate())
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	return scanSecretRows(rows)
+	var out []teamSecret
+	for rows.Next() {
+		var row teamSecret
+		var maskedInt, sharedInt int
+		var created, updated int64
+		if err := rows.Scan(&row.team, &row.Secret.Name, &row.Secret.Value, &row.Secret.Principal,
+			&row.Secret.Pipeline, &maskedInt, &sharedInt, &created, &updated); err != nil {
+			return nil, err
+		}
+		row.Secret.Masked = maskedInt != 0
+		row.Secret.Shared = sharedInt != 0
+		row.Secret.CreatedAt = time.Unix(created, 0).UTC()
+		row.Secret.UpdatedAt = time.Unix(updated, 0).UTC()
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func scanSecretRows(rows *sql.Rows) ([]Secret, error) {
