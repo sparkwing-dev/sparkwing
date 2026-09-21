@@ -3348,7 +3348,10 @@ type Run struct {
 	// "my-app"). It is metadata for display and filtering, and it
 	// grants nothing, because no step proves the submitter owns the
 	// repository it names.
-	DeclaredRepo string `json:"declared_repo,omitempty"`
+	// safety: the wire name stays `repo` because a CLI and a controller
+	// version independently, and a released client sending `repo` meets a
+	// DisallowUnknownFields decoder.
+	DeclaredRepo string `json:"repo,omitempty"`
 	// RepoURL is `git remote get-url origin` at trigger time.
 	RepoURL string `json:"repo_url,omitempty"`
 	// GithubOwner/Repo: parsed when origin is github.
