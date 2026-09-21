@@ -28,7 +28,7 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 	if hints := nodes[0].ResourceHints(); hints != nil {
 		t.Fatalf("node resource pin = %#v, want measured admission", hints)
 	}
-	if got := testGoCommand(14); got != "GOMAXPROCS=6 go test -p 6 ./..." {
+	if got := testGoCommand(hostShape{cpus: 14}); got != "GOMAXPROCS=6 go test -p 6 ./..." {
 		t.Fatalf("bounded command = %q", got)
 	}
 
@@ -53,7 +53,7 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 	}
 	want := `func (p *Test) run(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
-		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(runtime.NumCPU()), home)).Run(); err != nil {
+		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(currentHost()), home)).Run(); err != nil {
 			return err
 		}
 		sparkwing.Info(ctx, "go test: all packages passed")

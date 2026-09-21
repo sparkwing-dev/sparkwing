@@ -47,6 +47,10 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInput
 	return nil
 }
 
+// perf: the one logical-CPU count whose schedule starts the full Go suite and
+// the touched-package race suite together.
+const overlappedGoSuiteCPUs = 4
+
 // perf: admission charges sustained CPU. The four-core schedule overlaps the
 // two long Go suites and needs 2.5 cores; larger hosts use the p95 measured on
 // a 16-core Linux host over 20 uncontended runs (3.9 cores, maximum 4.4). A pin
@@ -55,23 +59,42 @@ func gateCoreReservation(cpuCount int) float64 {
 	if cpuCount < 4 {
 		return 1
 	}
-	if cpuCount == 4 {
+	if cpuCount == overlappedGoSuiteCPUs {
 		return 2.5
 	}
 	return float64(cpuCount)/4 + 0.5
 }
 
-// perf: bounds a Go step's burst to under half the machine, so one gate cannot
-// saturate a box another gate is sharing.
-func goStepParallelism(cpuCount int) int {
-	if parallelism := (cpuCount - 1) / 2; parallelism > 1 {
+// safety: tenancy travels with the CPU count so a step's parallelism has no
+// input the caller cannot see, and a test says which host it describes.
+type hostShape struct {
+	cpus         int
+	singleTenant bool
+}
+
+// safety: CI names the hosted runner, which carries one job and is thrown away
+// after it, so no neighbor loses cores to a gate that takes the whole box.
+func currentHost() hostShape {
+	return hostShape{cpus: runtime.NumCPU(), singleTenant: os.Getenv("CI") != ""}
+}
+
+// perf: half the machine, so one gate cannot saturate a box another is
+// sharing. The shared form subtracts a CPU first and so collapses to one
+// thread at four, pinning a gate that reserved 2.5 cores to one of them. A
+// single-tenant host holds nothing back for a neighbor it does not have.
+func goStepParallelism(h hostShape) int {
+	parallelism := (h.cpus - 1) / 2
+	if h.singleTenant {
+		parallelism = h.cpus / 2
+	}
+	if parallelism > 1 {
 		return parallelism
 	}
 	return 1
 }
 
-func boundedGoCommand(cpuCount int, verb, args string) string {
-	return goCommandAt(goStepParallelism(cpuCount), verb, args)
+func boundedGoCommand(h hostShape, verb, args string) string {
+	return goCommandAt(goStepParallelism(h), verb, args)
 }
 
 func goCommandAt(parallelism int, verb, args string) string {
@@ -97,11 +120,11 @@ func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep,
 	lintDeps := []sparkwing.WorkDep{testStep}
 	// perf: four-core hosted runners otherwise spend the full test and touched
 	// race durations serially and cross the gate's liveness deadline.
-	if cpuCount == 4 {
+	if cpuCount == overlappedGoSuiteCPUs {
 		raceDep = buildStep
 	}
 	raceStep := sparkwing.Step(w, "race-touched", runRaceTouched).Needs(raceDep)
-	if cpuCount == 4 {
+	if cpuCount == overlappedGoSuiteCPUs {
 		lintDeps = append(lintDeps, raceStep)
 	}
 	sparkwing.Step(w, "lint", runGolangciLint).Needs(lintDeps...)
@@ -612,16 +635,16 @@ func withProductTestHome(run func(home string) error) error {
 }
 
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), "")
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(currentHost(), "vet", "./..."), "")
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), "")
+	return forEachGoModule(ctx, "go build", boundedGoCommand(currentHost(), "build", "./..."), "")
 }
 
 func runTest(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
-		return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), home)
+		return forEachGoModule(ctx, "go test", boundedGoCommand(currentHost(), "test", "./..."), home)
 	})
 }
 
@@ -630,7 +653,7 @@ func runTest(ctx context.Context) error {
 // that make it minutes long.
 func runShortTest(ctx context.Context) error {
 	return withProductTestHome(func(home string) error {
-		return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "-short ./..."), home)
+		return forEachGoModule(ctx, "go test", boundedGoCommand(currentHost(), "test", "-short ./..."), home)
 	})
 }
 

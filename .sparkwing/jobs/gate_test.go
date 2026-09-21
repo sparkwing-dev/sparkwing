@@ -69,12 +69,28 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 		t.Errorf("reservation %v on four cores consumes the machine's admission headroom", got)
 	}
 	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
-		if got := goStepParallelism(tc.cpus); got != tc.parallelism {
-			t.Errorf("goStepParallelism(%d) = %d, want %d", tc.cpus, got, tc.parallelism)
+		if got := goStepParallelism(hostShape{cpus: tc.cpus}); got != tc.parallelism {
+			t.Errorf("goStepParallelism(%d shared) = %d, want %d", tc.cpus, got, tc.parallelism)
 		}
 	}
-	if got := boundedGoCommand(14, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
-		t.Fatalf("bounded command = %q", got)
+	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 2}, {8, 4}, {16, 8}} {
+		if got := goStepParallelism(hostShape{cpus: tc.cpus, singleTenant: true}); got != tc.parallelism {
+			t.Errorf("goStepParallelism(%d single-tenant) = %d, want %d", tc.cpus, got, tc.parallelism)
+		}
+	}
+	if got := boundedGoCommand(hostShape{cpus: 14}, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
+		t.Fatalf("shared bounded command = %q", got)
+	}
+	if got := boundedGoCommand(hostShape{cpus: 14, singleTenant: true}, "test", "./..."); got != "GOMAXPROCS=7 go test -p 7 ./..." {
+		t.Fatalf("single-tenant bounded command = %q", got)
+	}
+	t.Setenv("CI", "1")
+	if got := currentHost(); !got.singleTenant || got.cpus != runtime.NumCPU() {
+		t.Fatalf("currentHost under CI = %#v, want the machine's CPUs and single tenancy", got)
+	}
+	t.Setenv("CI", "")
+	if currentHost().singleTenant {
+		t.Fatal("currentHost reported single tenancy with CI unset")
 	}
 }
 

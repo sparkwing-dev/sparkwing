@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -240,7 +239,7 @@ func lastLines(text string, n int) string {
 func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 	return withGoTestScratch(func(testRoot string) error {
 		return withProductTestHome(func(home string) error {
-			script := productTestScript(storePostgresGoCommand(runtime.NumCPU()), home)
+			script := productTestScript(storePostgresGoCommand(currentHost()), home)
 			_, err := sparkwing.Bash(ctx, script).
 				Env("TMPDIR", testRoot).
 				Env("SPARKWING_TEST_STORE", "postgres").
@@ -255,8 +254,8 @@ func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 	})
 }
 
-func storePostgresGoCommand(cpuCount int) string {
-	return boundedGoCommand(cpuCount, "test", "-count=1 ./pkg/store/...")
+func storePostgresGoCommand(h hostShape) string {
+	return boundedGoCommand(h, "test", "-count=1 ./pkg/store/...")
 }
 
 func init() {

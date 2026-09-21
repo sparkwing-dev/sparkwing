@@ -67,7 +67,7 @@ func TestFreeLocalPortReturnsAnUnprivilegedPort(t *testing.T) {
 
 func TestStorePostgresCommandBoundsParallelismLikeTheTestPipeline(t *testing.T) {
 	t.Parallel()
-	if got, want := storePostgresGoCommand(14), "GOMAXPROCS=6 go test -p 6 -count=1 ./pkg/store/..."; got != want {
+	if got, want := storePostgresGoCommand(hostShape{cpus: 14}), "GOMAXPROCS=6 go test -p 6 -count=1 ./pkg/store/..."; got != want {
 		t.Fatalf("store-postgres go command = %q, want %q", got, want)
 	}
 }
