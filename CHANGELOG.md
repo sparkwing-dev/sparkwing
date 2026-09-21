@@ -21,6 +21,17 @@ unlock.
 ## [Unreleased]
 ### Changed
 
+- **runner:** a node queues when the Kubernetes fleet is full instead of failing
+  A pod no node would take failed its node after five minutes, whatever the
+  reason, so an hour busy enough to fill the runner pool turned ordinary builds
+  into failures. The runner now measures the pod's requests against the
+  `allocatable` of the pool machines its own node selector admits. A machine of
+  that shape is running and merely busy, so the node queues for up to nine
+  minutes with `status_detail` reading `queued: the runner fleet is full`, a
+  `capacity_queued` event opening the wait, and the run starting the moment a
+  machine frees; the wait ends in `queue_timeout` with a
+  `capacity_queue_timeout` event. No machine in the pool could hold the pod
+  even when empty, so waiting cures nothing and the five-minute failure stands.
 - **controller + runner:** the default credit rate table stops at the 8-core class
   The 16, 32 and 64-core entries are gone from the default ladder, and the
   `large` cpu band the classes above 8 cores selected goes with them: one

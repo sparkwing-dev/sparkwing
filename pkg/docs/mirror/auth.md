@@ -190,9 +190,11 @@ the warm one needs a node pool carrying that label and that taint; without one
 the pod is unschedulable and the node fails as below, with the scheduler's own
 message.
 
-Concurrency in the band is whatever the pool's own cpu limit fits, and nothing
-queues behind it: a Job that finds no room fails after the five-minute wait
-below.
+Concurrency in the band is whatever the pool's own cpu limit fits. A Job that
+finds no room waits for a machine to free rather than failing, because a full
+fleet is a condition that clears. A Job whose shape no machine in the pool
+could hold still fails after the five-minute wait below, because waiting cures
+nothing.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
 `credit_cpu_class_memory_bytes`, and the Job is created from those two figures,
@@ -206,9 +208,20 @@ one process and one token, so the controller takes the flag at its word until
 the Job builder moves server-side and the pod shape is the controller's own.
 A runner cpu or memory ceiling below the billed class fails the node naming
 both, because a customer must never be billed for a class the pod cannot get.
-A pod no node accepts within five minutes fails the node with the scheduler's
-own message, which is what a class larger than the cluster provisions looks
-like. A node whose `.Requires()` labels no runner advertises, and which no
+A pod no node accepts is one of two things, and the runner tells them apart by
+measuring the pod's requests against the `allocatable` of the pool machines its
+own node selector admits. No machine in the pool could hold the pod even when
+empty, which is what a class larger than the cluster provisions looks like: the
+node fails after five minutes with the scheduler's own message, as it always
+has. A machine of the right shape is running and simply busy: the node queues,
+its `status_detail` reads `queued: the runner fleet is full` with the
+scheduler's message, a `capacity_queued` event opens the wait, and it runs the
+moment a machine frees. The queue is bounded at nine minutes, one minute short
+of the claim the dispatcher holds and does not renew, after which the node
+fails `queue_timeout` with a `capacity_queue_timeout` event. A pool running no
+machines at all is not a full pool, so a pod waiting on one that has yet to be
+launched keeps the five-minute window, which is long enough for a machine to
+boot. A node whose `.Requires()` labels no runner advertises, and which no
 fallback may take, fails after five minutes with a `node_unmatchable` event
 naming the labels, the labels the fallback does advertise, and the class, so
 work the fleet cannot serve ends where an operator can see it.
