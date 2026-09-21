@@ -81,6 +81,11 @@ var additiveColumnSources = map[int][]map[string]string{
 	// and bytes a storage charge billed, all defaulted, so an older binary
 	// keeps writing the migrated database.
 	47: {storageQuotaAllowanceCols, creditChargeStorageCols},
+	// safety: v48 adds the tenant key to every tenant-owned table with a
+	// default naming the team the existing rows are backfilled into, so an
+	// older binary keeps writing the migrated database and its inserts land
+	// in that team.
+	48: {teamColumn},
 }
 
 func columnSpecMaps() []map[string]string {

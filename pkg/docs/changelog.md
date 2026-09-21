@@ -36,6 +36,15 @@ unlock.
   obsession, and feature envy. Reproducible shuffled samples rotate coverage
   beyond the highest-ranked candidates. It batches independent judgments and
   reports advisory probabilities.
+- **store:** schema 48 adds a `team` column to every tenant-owned table and a
+  `teams` table. `Store.ForTeam` returns a `*store.Tenant` whose methods take no
+  team argument and cannot express a query across teams; `Store.AsOperator`
+  returns the unscoped handle that maintenance, reaping and migration paths use.
+  The runs family (`CreateRun`, `GetRun`, `ListRuns`, `CountRuns`, `FinishRun`,
+  `FinishRunsIfActive`, `TouchRunHeartbeat`) is available on the tenant handle;
+  the rest of the store is unchanged for now. The migration is additive: an
+  existing install backfills into a single `default` team and keeps behaving as
+  it did, with no new configuration.
 ## [v0.58.0] - 2026-09-20
 ### Added
 

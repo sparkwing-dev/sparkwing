@@ -1062,7 +1062,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 47
+const expectedSchemaVersion = 48
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1974,6 +1974,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyCreditClassMigrationSQLite(ctx, tx)
 	case 47:
 		return applyStorageAllowanceMigrationSQLite(ctx, tx)
+	case 48:
+		return applyTenantKeyMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2313,6 +2315,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyCreditClassMigrationPostgres(ctx, tx)
 	case 47:
 		return applyStorageAllowanceMigrationPostgres(ctx, tx)
+	case 48:
+		return applyTenantKeyMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3325,7 +3329,10 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := s.createRunTx(ctx, tx, r); err != nil {
+	// safety: this method has not moved to Tenant yet, so it writes the
+	// team the column's default writes; a run it created landing in any
+	// other team would be invisible to the install that asked for it.
+	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3344,13 +3351,13 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 	if err := createTriggerTx(ctx, tx, t); err != nil {
 		return err
 	}
-	if err := s.createRunTx(ctx, tx, r); err != nil {
+	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) createRunTx(ctx context.Context, tx *storeTx, r Run) error {
+func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) error {
 	if err := ValidateRunInvocation(r); err != nil {
 		return err
 	}
@@ -3394,8 +3401,8 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, r Run) error {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -3425,7 +3432,7 @@ ON CONFLICT(id) DO UPDATE SET
     last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
     created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
 WHERE runs.status = '`+runStatusPending+`'`,
-		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
+		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
@@ -3589,7 +3596,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 		next := frontier[:0:0]
 		for _, id := range frontier {
 			rows, err := s.query(ctx,
-				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+				`SELECT `+runColumns+`
 				   FROM runs WHERE retry_of = ?`, id)
 			if err != nil {
 				return nil, err
@@ -3620,10 +3627,14 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 	return out, nil
 }
 
+// safety: every run read shares this list, because a column added to runs
+// has to reach each of them and scanRun together or the scan misaligns.
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at`
+
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.queryRow(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT `+runColumns+`
   FROM runs WHERE id = ?`, runID)
 	run, err := scanRun(row)
 	if errors.Is(err, ErrNotFound) {
@@ -3669,7 +3680,13 @@ func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(f)
+	return s.listRuns(ctx, "", f)
+}
+
+// safety: the empty team reads every team's runs, because this body is
+// shared with [Tenant.ListRuns], which always passes one.
+func (s *Store) listRuns(ctx context.Context, team Team, f RunFilter) (_ []*Run, err error) {
+	where, args, err := runFilterWhere(team, f)
 	if err != nil {
 		return nil, err
 	}
@@ -3682,7 +3699,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT ` + runColumns + `
   FROM runs` + where + `
  ORDER BY started_at DESC, id DESC
  LIMIT ?`
@@ -3730,7 +3747,13 @@ func runCursorArgs(f RunFilter) []any {
 
 // CountRuns returns how many runs match f, ignoring its Limit.
 func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(f)
+	return s.countRuns(ctx, "", f)
+}
+
+// safety: the empty team counts every team's runs, because this body is
+// shared with [Tenant.CountRuns], which always passes one.
+func (s *Store) countRuns(ctx context.Context, team Team, f RunFilter) (int, error) {
+	where, args, err := runFilterWhere(team, f)
 	if err != nil {
 		return 0, err
 	}
@@ -3742,7 +3765,7 @@ func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return n, nil
 }
 
-func runFilterWhere(f RunFilter) (string, []any, error) {
+func runFilterWhere(team Team, f RunFilter) (string, []any, error) {
 	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
 	for i, prefix := range f.GitSHAPrefixes {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
@@ -3757,6 +3780,10 @@ func runFilterWhere(f RunFilter) (string, []any, error) {
 
 	where := ""
 	args := []any{}
+	if team != "" {
+		where = " WHERE team = ?"
+		args = append(args, string(team))
+	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {
 			return
@@ -3847,7 +3874,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT ` + runColumns + `
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
