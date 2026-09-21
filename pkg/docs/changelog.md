@@ -75,6 +75,7 @@ unlock.
   Summary: every signed-in browser signs in once more, and a custom browser
   client reads `__Host-sw_csrf` before `sw_csrf`.
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 ### Security
 
 - **controller:** a run's repository is metadata and grants nothing (Breaking)
