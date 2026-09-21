@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** `--sw-workers` caps the local dispatcher on its own. It was
+  forwarded only when `--sw-mode` was also given, so `sparkwing run <p>
+  --sw-workers=3` parsed and validated the flag, discarded it, and ran at one
+  worker per CPU with no diagnostic. `SPARKWING_WORKERS` was unaffected and
+  already worked alone, which is what made the two disagree.
+
 ### Added
 
 - **pipelines:** `sparkwing run jev-lint` performs advisory Jev checks for
