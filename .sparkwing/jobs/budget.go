@@ -57,15 +57,15 @@ func (b *tierBudget) over(scopeOf scopeFunc) *tierBudget {
 
 // safety: a scope that cannot be read enforces the budget. A tier that stops
 // knowing how wide its change is must not stop keeping its promise.
-func (b *tierBudget) changedGoFiles(ctx context.Context) int {
+func (b *tierBudget) changedGoFiles(ctx context.Context) (int, string) {
 	if b.scopeOf == nil {
-		return -1
+		return -1, ""
 	}
-	files, _, err := b.scopeOf(ctx, "Go file(s)", existingGoFiles)
+	files, scope, err := b.scopeOf(ctx, "Go file(s)", existingGoFiles)
 	if err != nil {
-		return -1
+		return -1, ""
 	}
-	return len(files)
+	return len(files), scope
 }
 
 // safety: wrapping is the only way a step enters the budget, so a step
@@ -109,11 +109,24 @@ func (b *tierBudget) report(ctx context.Context) error {
 	steps, stepFail := b.steps, b.stepFail
 	b.mu.Unlock()
 
-	line, err := budgetVerdict(tier, limit, took, steps, stepFail, b.changedGoFiles(ctx))
+	changed, scope := b.changedGoFiles(ctx)
+	line, err := budgetVerdict(tier, limit, took, steps, stepFail, changed)
 	if line != "" {
 		sparkwing.Info(ctx, "%s", line)
 	}
+	// safety: a tier whose scope is empty runs every step and passes every one
+	// of them without judging a line of Go. That verdict reads exactly like a
+	// full pass, so it says out loud what it covered.
+	if changed == 0 {
+		sparkwing.Warn(ctx, "%s", emptyScopeNotice(tier, scope))
+	}
 	return err
+}
+
+func emptyScopeNotice(tier, scope string) string {
+	return fmt.Sprintf("%s judged no Go file: %s. This verdict covers nothing Go-side. "+
+		"Work outside the scope named above is unjudged here; run `sparkwing run gate` to judge the whole tree",
+		tier, scope)
 }
 
 // safety: a red tier reports the failed check, not the budget. Its steps were
