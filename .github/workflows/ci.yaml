@@ -25,6 +25,10 @@ jobs:
       GOWORK: "off"
       SPARKWING_REQUIRE_PG: "1"
       SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      # The backup drill takes its client from here rather than PATH, because
+      # /usr/bin/pg_dump is postgresql-common's wrapper and the version it
+      # picks depends on which clusters the image has.
+      SPARKWING_PG_BIN: /usr/lib/postgresql/17/bin
     services:
       postgres:
         image: postgres:17
@@ -51,13 +55,36 @@ jobs:
             go.sum
             .sparkwing/go.sum
 
+      - name: Install a Postgres 17 client
+        run: |
+          set -euo pipefail
+          codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${codename}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+
+      - name: Prove the client is no older than the server
+        run: |
+          set -euo pipefail
+          "$SPARKWING_PG_BIN/pg_dump" --version
+          "$SPARKWING_PG_BIN/pg_restore" --version
+          major="$("$SPARKWING_PG_BIN/pg_dump" --version | awk '{print $3}' | cut -d. -f1)"
+          if [ "$major" -lt 17 ]; then
+            echo "pg_dump is $major, older than the postgres:17 service, and will refuse the dump" >&2
+            exit 1
+          fi
+
       - name: Run the Postgres conformance suites
         run: go test ./pkg/store ./internal/backend ./internal/orchestrator
 
       - name: Prove the Postgres-gated tests did not skip
         run: |
           set -euo pipefail
-          go test -v -count=1 -run 'Postgres|Pg' ./pkg/store ./internal/backend ./internal/orchestrator \
+          go test -v -count=1 -run 'Postgres|Pg|BackupRestoreDrill' ./pkg/store ./internal/backend ./internal/orchestrator \
             | tee "$RUNNER_TEMP/postgres-gated.log"
           if grep -q -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log"; then
             echo 'a Postgres-gated test skipped on the lane that promises Postgres coverage:' >&2
