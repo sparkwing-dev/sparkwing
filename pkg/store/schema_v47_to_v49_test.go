@@ -64,10 +64,10 @@ func columnReadable(t *testing.T, db *sql.DB, table, column string) bool {
 	return rows.Err() == nil
 }
 
-// A v47 store reaches v49 in one open, running v48 and then v49. The ladder
-// refuses a gap, so the pair either composes or no deployment on v47 can
-// upgrade at all.
-func TestSchemaV47ReachesV49InOneOpen(t *testing.T) {
+// A v47 store reaches the newest version in one open, running v48, v49 and
+// every version since. The ladder refuses a gap, so they either compose or no
+// deployment on v47 can upgrade at all.
+func TestSchemaV47ReachesTheNewestVersionInOneOpen(t *testing.T) {
 	ctx := context.Background()
 	target := storetest.New(t)
 	st, err := target.TryOpen()
@@ -95,15 +95,16 @@ func TestSchemaV47ReachesV49InOneOpen(t *testing.T) {
 
 	up, err := target.TryOpen()
 	if err != nil {
-		t.Fatalf("upgrade v47 to v49: %v", err)
+		t.Fatalf("upgrade v47 to the newest version: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 
-	if got := readSchemaVersion(t, up.DB()); got != 49 {
-		t.Fatalf("schema version = %d, want 49", got)
+	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
-	if store.ExpectedSchemaVersion() != 49 {
-		t.Fatalf("ExpectedSchemaVersion = %d, want 49", store.ExpectedSchemaVersion())
+	if store.ExpectedSchemaVersion() < 49 {
+		t.Fatalf("ExpectedSchemaVersion = %d, want at least the tenant key's 49",
+			store.ExpectedSchemaVersion())
 	}
 
 	if !columnReadable(t, up.DB(), "runs", "declared_repo") {

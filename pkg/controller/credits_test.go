@@ -136,8 +136,8 @@ func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at
 func ageExhaustionStamp(t *testing.T, st *store.Store, at time.Time) {
 	t.Helper()
 	if _, err := st.DB().Exec(
-		`UPDATE sparkwing_meta SET value = ? WHERE key = 'credit_exhausted_at'`,
-		at.UnixNano()); err != nil {
+		`UPDATE teams SET credit_exhausted_at = ? WHERE name = ?`,
+		at.UnixNano(), string(store.DefaultTeam)); err != nil {
 		t.Fatalf("age the exhaustion stamp: %v", err)
 	}
 }

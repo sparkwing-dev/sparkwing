@@ -48,11 +48,13 @@ node that is requeued -- its lease reaped, its runner lost, or its attempt
 reset for a retry -- releases its charge window, so the next attempt starts a
 fresh reservation and the idle time between attempts is never billed.
 
-Once the balance reaches zero the node keeps running for the grace period. The
-first heartbeat after that window fails the node with the failure reason
-`credits_exhausted`, releases its claim, and answers `409`, which is how the
-runner learns to stop. The run records a `credits_exhausted` event naming the
-balance and how long it had been spent.
+Once the team's balance reaches zero the node keeps running for the grace
+period. The first heartbeat after that window fails the node with the failure
+reason `credits_exhausted`, releases its claim, and answers `409`, which is how
+the runner learns to stop. The run records a `credits_exhausted` event naming
+the balance and how long it had been spent. Both the balance and the instant it
+ran out are the team's own, so one team spending its grants refuses and cancels
+that team's nodes and leaves every other team on the controller running.
 
 A token with no marker is neither checked nor charged, so a deployment that
 marks none bills nothing.
@@ -83,8 +85,13 @@ it, alone or beside `rate_table`, answers `400` and says to write the table.
 the ladder and needs `admin`. A stored table this build cannot read is an error
 on every credit read rather than a silent return to the flat rate.
 
-The balance is the sum of grants less the sum of charges, computed in SQL over
-the `credit_grants` and `credit_charges` tables. A grant is `free` or `paid`
+A balance belongs to a team: it is the sum of that team's grants less the sum of
+that team's charges, computed in SQL over the `credit_grants` and
+`credit_charges` tables. A grant reference is a payment id, so it stays unique
+across the deployment and a second team replaying one is refused rather than
+granted the first team's credits. The price of a second, the grace period, the
+charge cap, the rate table, the warm cpu class and the storage rate are the
+deployment's and are the same for every team. A grant is `free` or `paid`
 and records who added it and the payment it came from. A charge is a
 `reservation` a claim took, the `usage` an interval billed, or the `refund` of
 a reservation a node did not use; each names the run, node, token prefix, and
@@ -121,8 +128,10 @@ with the current instant and billed from the next pass, so pricing storage
 never bills for the past, and so a team's first bytes cost one pass before the
 meter reaches them. A team that drops to nothing keeps no watermark, and an
 interval is never billed for longer than the bytes in it have been held, so an
-idle stretch is not charged against whatever a team stores next. A team whose
-retained runs all carry no creation date bills nothing for that interval. Each
+idle stretch is not charged against whatever a team stores next. A pass bills
+one team's bytes under one token principal, so two teams that both label a
+token `ci` are metered apart. A team whose retained runs all carry no creation
+date bills nothing for that interval. Each
 team's watermark moves by compare-and-set, so two controllers on one database
 bill an interval once whatever either clock says, and a clock that steps
 backwards bills nothing rather than billing twice.

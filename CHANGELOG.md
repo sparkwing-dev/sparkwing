@@ -46,6 +46,30 @@ unlock.
   `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
+### Fixed
+
+- **store:** the credit balance and credit exhaustion are per team. The balance
+  summed every grant and every charge on the controller with no team predicate,
+  so one team spending its grants emptied the balance every other team claimed
+  against, and a funded team silently paid for an unfunded one's compute. A
+  balance is now one team's grants less that team's charges, the claim
+  reservation, the heartbeat charge, the storage-growth refusal and the
+  non-payment storage drain each read the balance of the team that owns the
+  work, and a grant reference, which is a payment id, is refused rather than
+  honored when a second team replays it. Schema 50 moves `credit_exhausted_at`
+  out of `sparkwing_meta` onto a `credit_exhausted_at` column on the team's
+  registry row, because the bag is the deployment's and a team column on it
+  would make the session CSRF key per team; the same migration carries the
+  existing stamp onto the `default` team and moves each
+  `storage_charged_through/<principal>` watermark to
+  `storage_charged_through/<team>/<principal>`. The deployment-wide settings
+  stay in the bag: the rate, the rate table, the grace period, the charge cap,
+  the warm cpu class and the storage rate are one operator's price list and
+  policy for the whole controller. `Tenant` gains `CreditBalanceMicro`,
+  `CreditState`, `GrantCredits` and `RecordCreditGrant`; their `*Store` twins
+  read the `default` team, which is the only team a local or single-tenant
+  install has, so its behavior is unchanged and it is asked for no new
+  configuration.
 ### Security
 
 - **controller:** a run's repository is metadata and grants nothing (Breaking)
