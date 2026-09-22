@@ -1261,8 +1261,8 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 // A node another claim holds, a finished node, a node of a finished run, or one
 // the caller may not name returns [store.ErrLockHeld]; an unknown node returns
 // [store.ErrNotFound]. A controller too old to serve the route returns
-// [ErrControllerLacksRoute], which a dispatcher answers by running the node the
-// way it did before the fence existed.
+// [ErrControllerLacksRoute], which a dispatcher treats as a refusal: the claim
+// is where the credit check lives, so no node runs without one.
 //
 // sizesToClass reports that the caller creates the node's executor at the cpu
 // class the claim bills; a metered caller that does not is refused a class

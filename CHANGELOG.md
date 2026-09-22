@@ -163,8 +163,9 @@ unlock.
   controller refuses the node's named claim. The claim is where the credit check
   lives, and a refusal such as `402 insufficient credits` was logged and the Job
   created anyway, unfenced and uncharged, so a team with no credits ran cloud
-  compute. The node now fails with `credits_exhausted` (or the refusal it got);
-  only a controller that predates the route still runs the Job unfenced. A
+  compute. The node now fails with `credits_exhausted` (or the refusal it got).
+  A controller that does not serve the named-claim route is refused the same
+  way, so no Job runs without a claim. A
   node's declared timeout now stretches its Job's deadline to at most 24 hours,
   or the operator's `--k8s-job-deadline` when that is longer.
 - **store:** the credit balance and credit exhaustion are per team. The balance

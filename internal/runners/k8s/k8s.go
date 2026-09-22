@@ -144,15 +144,13 @@ func (r *Runner) AdvertisedLabels() []string {
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	res := r.resolveResources(ctx, req)
-	fence, class, claimed, refused := r.claimNode(ctx, req, name)
+	fence, class, refused := r.claimNode(ctx, req, name)
 	if refused != nil {
 		return r.refuseUnclaimedJob(ctx, req, refused)
 	}
-	if claimed {
-		// safety: the dispatcher reached here holding the run's trigger claim,
-		// and the controller refuses a request that carries both identities.
-		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
-	}
+	// safety: the dispatcher reached here holding the run's trigger claim,
+	// and the controller refuses a request that carries both identities.
+	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
 	if msg := r.ceilingUnderClass(class); msg != "" {
 		r.failNode(ctx, req, msg, store.FailureUnknown, eventClassRefused)
 		return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
@@ -509,13 +507,12 @@ const jobDeadlineSlack = 10 * time.Minute
 // the timeout is the pipeline author's to choose.
 const MaxDeclaredJobActiveDeadline = 24 * time.Hour
 
-// safety: only a controller that does not carry the targeted-claim route leaves
-// the Job running unfenced, as it did before the fence existed. Any refusal from
-// a controller that does is returned, because the claim is where the credit
-// check lives and an unfenced Job would run on compute nobody paid for.
+// safety: every refusal is returned, including a controller that does not
+// serve the named-claim route, because the claim is where the credit check
+// lives and an unfenced Job would run on compute nobody paid for.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
-) (store.NodeClaimFence, store.CPUClass, bool, error) {
+) (store.NodeClaimFence, store.CPUClass, error) {
 	holderID := "k8s-job:" + jobName
 	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true)
 	// safety: only the operator's metered pool may claim it sizes a node to its
@@ -524,20 +521,15 @@ func (r *Runner) claimNode(
 	if errors.Is(err, store.ErrLockHeld) {
 		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false)
 	}
-	if errors.Is(err, client.ErrControllerLacksRoute) {
-		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
-			"run_id", req.RunID, "node_id", req.NodeID)
-		return store.NodeClaimFence{}, store.CPUClass{}, false, nil
-	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",
 			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
-		return store.NodeClaimFence{}, store.CPUClass{}, false, err
+		return store.NodeClaimFence{}, store.CPUClass{}, err
 	}
 	return store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, true, nil
+	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, nil
 }
 
 const eventClaimRefused = "job_claim_refused"
