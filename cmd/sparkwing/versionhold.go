@@ -10,6 +10,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	sharedtoolchain "github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -52,6 +53,18 @@ func resolveVersionHold() versionHold {
 
 func versionHoldPath() (string, error) {
 	return fssecure.ConfigFile("version-hold")
+}
+
+// safety: the hold file is machine-wide while the toolchains it governs live
+// under SPARKWING_HOME, so a command under a scratch home that wrote or
+// removed it would change every other shell's ceiling unannounced. No variable
+// moves the file, but SPARKWING_VERSION_HOLD holds this shell without one.
+func guardVersionHoldWrite(path string) error {
+	err := configguard.GuardWrite("the version hold", "", path)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w, or set %s for this shell instead", err, versionHoldEnv)
 }
 
 func normalizeHold(raw string) (string, error) {
@@ -116,6 +129,9 @@ func runVersionHold(args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := guardVersionHoldWrite(path); err != nil {
+			return err
+		}
 		if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {
 			return fmt.Errorf("create config dir: %w", err)
 		}
@@ -130,6 +146,9 @@ func runVersionHold(args []string) error {
 	case *clear:
 		path, err := versionHoldPath()
 		if err != nil {
+			return err
+		}
+		if err := guardVersionHoldWrite(path); err != nil {
 			return err
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

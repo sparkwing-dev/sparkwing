@@ -81,9 +81,7 @@ func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 
 func TestRun_LocalOnlyReplacesOptionsSecretSourceWithDotenv(t *testing.T) {
 	p := newPaths(t)
-	if err := secrets.WriteDotenvEntry("", "TOKEN", "from-local-dotenv"); err != nil {
-		t.Fatalf("seed local secret: %v", err)
-	}
+	seedLocalSecret(t, "", "TOKEN", "from-local-dotenv")
 	if value, _, err := secrets.NewDotenvSource("").Read("TOKEN"); err != nil || value != "from-local-dotenv" {
 		t.Fatalf("local dotenv precondition = %q, %v", value, err)
 	}
