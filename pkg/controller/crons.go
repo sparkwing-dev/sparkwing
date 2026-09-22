@@ -54,7 +54,11 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	key := CronIdempotencyKey(s.ID, due)
 	runID := newRunID()
-	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), triggerIntake{
+	tenant, err := l.server.tenantForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return "", err
+	}
+	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), tenant, triggerIntake{
 		RunID:    runID,
 		Pipeline: s.Pipeline,
 		Args:     s.Effective().Args,

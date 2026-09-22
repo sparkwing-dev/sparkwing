@@ -116,6 +116,8 @@ type Server struct {
 	localExecution bool
 
 	identity identityConfig
+
+	tenants tenantCache
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -815,7 +817,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //     pass-through.
 func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(s.tokenBudgeted(unsupportedRouteFallback(mux))))
+	router.Handle("/", s.authenticated(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux)))))
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 }

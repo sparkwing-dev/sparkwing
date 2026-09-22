@@ -136,7 +136,15 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	// safety: the per-principal guards measure the authenticated caller, so the
 	// principal comes from the token rather than anything the body asserts.
 	runCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
-	if err := s.store.CreateRun(runCtx, body); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.CreateRun(runCtx, body); err != nil {
+		if errors.Is(err, store.ErrIDOwnedByAnotherTeam) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -241,7 +249,11 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, parseErr)
 		return
 	}
-	runs, err := s.store.ListRuns(r.Context(), filter)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	runs, err := tenant.ListRuns(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -385,7 +397,11 @@ func executorClaimPreparationForResponse(preparation *store.ExecutorClaimPrepara
 
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	run, err := s.store.GetRun(r.Context(), runID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	run, err := tenant.GetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -811,6 +827,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeTriggerParent(w, r, body.ParentRunID, body.ParentNodeID) {
 		return
 	}
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
@@ -821,7 +841,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("ancestor walk: %w", err))
 			return
 		}
-		parent, perr := s.store.GetRun(r.Context(), body.ParentRunID)
+		parent, perr := tenant.GetRun(r.Context(), body.ParentRunID)
 		if perr != nil {
 			if errors.Is(perr, store.ErrNotFound) {
 				writeError(w, http.StatusBadRequest, fmt.Errorf("parent_run_id %s not found", body.ParentRunID))
@@ -895,7 +915,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.admitTrigger(triggerCtx, intake); err != nil {
+	if err := s.admitTrigger(triggerCtx, tenant, intake); err != nil {
 		release()
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
@@ -950,10 +970,10 @@ type triggerIntake struct {
 // safety: every path that starts a run on this controller writes its three rows
 // here -- the trigger, the pending run, the dispatch -- so an HTTP submission
 // and a schedule the controller fired land identically.
-func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
+func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIntake) error {
 	// safety: the trigger and the run it names are written together, so a guard
 	// that refuses the run leaves no trigger behind for a worker to claim.
-	if err := s.store.CreateTriggerWithRun(ctx, store.Trigger{
+	if err := t.CreateTriggerWithRun(ctx, store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
 		Args:           in.Args,
