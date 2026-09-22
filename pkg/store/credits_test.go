@@ -1016,26 +1016,6 @@ func TestAppendEventOnceCollapsesRepeats(t *testing.T) {
 	}
 }
 
-func TestOldestWaitingReadyNodeNamesTheWaitingRun(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	runID, nodeID, err := s.OldestWaitingReadyNode(ctx)
-	if err != nil {
-		t.Fatalf("oldest waiting: %v", err)
-	}
-	if runID != "" || nodeID != "" {
-		t.Fatalf("empty queue named %s/%s", runID, nodeID)
-	}
-	readyNode(t, s, "run-wait", "build")
-	runID, nodeID, err = s.OldestWaitingReadyNode(ctx)
-	if err != nil {
-		t.Fatalf("oldest waiting: %v", err)
-	}
-	if runID != "run-wait" || nodeID != "build" {
-		t.Fatalf("oldest waiting = %s/%s, want run-wait/build", runID, nodeID)
-	}
-}
-
 func TestCreditHistoryLimitIsClampedToItsMaximum(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

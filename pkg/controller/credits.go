@@ -454,8 +454,8 @@ func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err
 	if errors.As(err, &shortfall) {
 		refusal.BalanceMicro = shortfall.BalanceMicro
 		refusal.RequiredMicro = shortfall.RequiredMicro
+		s.noteCreditsBlocked(r, shortfall)
 	}
-	s.noteCreditsBlocked(r, refusal.BalanceMicro, refusal.RequiredMicro)
 	writeJSON(w, http.StatusPaymentRequired, refusal)
 	return true
 }
@@ -500,13 +500,16 @@ func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, r *http.Reques
 }
 
 // safety: the poller asks twice a second, so the waiting run records the
-// refusal once per node rather than on every poll.
-func (s *Server) noteCreditsBlocked(r *http.Request, balance, required int64) {
+// refusal once per node rather than on every poll. It lands on the node the
+// claim was refused for, which is the claimant's own team's; the oldest
+// waiting node on the controller may be another team's.
+func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.InsufficientCreditsError) {
 	ctx := r.Context()
-	runID, nodeID, err := s.store.OldestWaitingReadyNode(ctx)
-	if err != nil || runID == "" {
+	runID, nodeID := shortfall.RunID, shortfall.NodeID
+	if runID == "" {
 		return
 	}
+	balance, required := shortfall.BalanceMicro, shortfall.RequiredMicro
 	payload, err := json.Marshal(map[string]int64{
 		"balance_micro": balance, "required_micro": required,
 	})

@@ -93,6 +93,11 @@ unlock.
   runner holding another team's trigger can now mutate that run's nodes,
   events and attempts: its fence was checked in the default team and every
   such write was refused as held by another holder.
+- **controller:** a claim refused for an empty balance records its
+  `credits_blocked` event on the node it was refused for, which
+  `store.InsufficientCreditsError` now names (`RunID`, `NodeID`), instead of
+  on the oldest waiting node on the controller, which could be another team's.
+  `Store.OldestWaitingReadyNode` is removed.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

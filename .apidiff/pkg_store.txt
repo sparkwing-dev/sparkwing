@@ -698,6 +698,9 @@ func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 type InsufficientCreditsError struct {
 	BalanceMicro  int64
 	RequiredMicro int64
+
+	RunID  string
+	NodeID string
 }
 func (e *InsufficientCreditsError) Error() string
 func (e *InsufficientCreditsError) Unwrap() error
@@ -1408,7 +1411,6 @@ func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runI
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
-func (s *Store) OldestWaitingReadyNode(ctx context.Context) (runID, nodeID string, err error)
 func (s *Store) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
