@@ -1103,6 +1103,8 @@ type RunnerPresence struct {
 	Labels []string
 
 	FreeSlots int
+
+	TokenPrefix string
 }
 const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 1_000_000_000
