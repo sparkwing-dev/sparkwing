@@ -81,6 +81,8 @@ type FloodPolicy struct {
 
 	DedupeWindow time.Duration
 }
+const GitHubActionsLabel = "github-actions"
+func GitHubRunnerWorkflow(controllerURL, team string) string
 type GitHubWebhookBinding struct {
 	Repos  []string
 	Secret string
@@ -283,6 +285,7 @@ func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
+func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
@@ -335,7 +338,7 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
-func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
+func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
 func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
