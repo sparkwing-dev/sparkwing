@@ -182,6 +182,16 @@ func (t *storeTx) forUpdate() string {
 	return ""
 }
 
+// safety: FOR UPDATE also blocks the key-share lock an event insert's foreign
+// key takes on its run while holding the run's sequence lock, so a transaction
+// that locks its run and then appends an event deadlocks with that insert.
+func (t *storeTx) forNoKeyUpdate() string {
+	if t.dialect == DialectPostgres {
+		return " FOR NO KEY UPDATE"
+	}
+	return ""
+}
+
 func (t *storeTx) Commit() error   { return t.tx.Commit() }
 func (t *storeTx) Rollback() error { return t.tx.Rollback() }
 

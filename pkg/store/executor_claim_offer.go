@@ -803,7 +803,7 @@ func (s *Store) awardBestExecutorOffer(ctx context.Context, tx *storeTx, runID, 
 		return nil, err
 	}
 	var lockedRun string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&lockedRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(), runID).Scan(&lockedRun); err != nil {
 		return nil, err
 	}
 	summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)
