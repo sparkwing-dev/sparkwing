@@ -101,6 +101,9 @@ func TestForegroundFleetAuthorityRequiresBodyAttestationThenFallsBackToCoordinat
 
 	address := reserveFleetTestAddress(t)
 	configPath := filepath.Join(root, "config", fleet.Filename)
+	// safety: Create refuses a config outside the sparkwing home unless the
+	// operator named the file, and a test binary's home is the test sandbox.
+	t.Setenv(fleet.PathEnv, configPath)
 	if err := fleet.Create(configPath, fleet.Config{
 		Listen: address, PublicURL: "http://" + address,
 		Local: fleet.Local{
