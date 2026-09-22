@@ -4006,11 +4006,28 @@ func prefixUpperBound(prefix string) (string, bool) {
 // GetLatestRun returns the newest run for pipeline matching statuses
 // within maxAge. ErrNotFound on miss.
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return s.getLatestRun(ctx, allTeams(), pipeline, statuses, maxAge)
+}
+
+// GetLatestRun returns t's newest run for pipeline matching statuses within
+// maxAge. ErrNotFound on miss.
+func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
+}
+
+func (s *Store) getLatestRun(ctx context.Context, scope teamScope, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if pipeline == "" {
 		return nil, errors.New("GetLatestRun: pipeline is required")
 	}
 	where := "WHERE pipeline = ?"
 	args := []any{pipeline}
+	if !scope.all {
+		if scope.team == "" {
+			return nil, ErrNoTeam
+		}
+		where += " AND team = ?"
+		args = append(args, string(scope.team))
+	}
 	if len(statuses) > 0 {
 		ph := make([]string, len(statuses))
 		for i, st := range statuses {
@@ -7927,6 +7944,16 @@ const (
 // with the limit unfilled is logged, since the caller cannot tell that
 // from a genuinely empty result.
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
+	return s.listTriggers(ctx, allTeams(), f)
+}
+
+// ListTriggers returns t's triggers newest-first, filtered by f, with the
+// same paging and repo matching as [Store.ListTriggers].
+func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
+	return t.s.listTriggers(ctx, oneTeam(t.team), f)
+}
+
+func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilter) ([]*Trigger, error) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 20
@@ -7941,6 +7968,13 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 		} else {
 			where += " AND " + clause
 		}
+	}
+	if !scope.all {
+		if scope.team == "" {
+			return nil, ErrNoTeam
+		}
+		addClause("team = ?")
+		args = append(args, string(scope.team))
 	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {

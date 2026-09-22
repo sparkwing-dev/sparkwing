@@ -34,7 +34,11 @@ var reviewedUnscopedSQL = map[string]string{
 		"read after the award is of the row the scoped update just proved in team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).countRuns":                     "shares listRuns' predicate builder and its refusal",
+	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
+	"(*Store).listTriggers": "the team predicate comes from its scope at run time; " +
+		"a scope with no team and no all-teams flag is refused there",
+	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
+		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).CountConcurrencyCache":         "an ops gauge of the whole table, which is what the ceiling is set against",
 	"(*Store).CountDeadLocalConcurrency":     "the dry run of that repair, and has to count what it would remove",
 	"(*Store).ListConcurrencyStates":         "enumerates the deployment's live keys with their teams and reads each through that team's handle",
@@ -106,7 +110,6 @@ var unportedSQL = []string{
 	"(*Store).GetActiveDebugPause",
 	"(*Store).GetApproval",
 	"(*Store).GetCronSchedule",
-	"(*Store).GetLatestRun",
 	"(*Store).GetNode",
 	"(*Store).GetNodeDispatch",
 	"(*Store).GetRun",
@@ -133,11 +136,9 @@ var unportedSQL = []string{
 	"(*Store).ListPendingApprovals",
 	"(*Store).ListPendingTriggersForParent",
 	"(*Store).ListRunRetryTree",
-	"(*Store).ListRunTrends",
 	"(*Store).ListSpawnedChildrenByRun",
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
-	"(*Store).ListTriggers",
 	"(*Store).ListUsers",
 	"(*Store).LookupSession",
 	"(*Store).LookupToken",
@@ -300,7 +301,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 239
+const unportedSQLSize = 236
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

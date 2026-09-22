@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 )
 
 // OwnsRun reports whether id names a run or a trigger of t's team. A
@@ -24,4 +25,31 @@ LIMIT 1`, string(t.team), id, string(t.team), id).Scan(&found)
 		return false, err
 	}
 	return true, nil
+}
+
+// OwnedRunIDs returns the subset of ids that name one of t's runs.
+func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error) {
+	owned := map[string]bool{}
+	if len(ids) == 0 {
+		return owned, nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, string(t.team))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := t.s.query(ctx, `SELECT id FROM runs WHERE team = ? AND id IN (`+
+		strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		owned[id] = true
+	}
+	return owned, rows.Err()
 }

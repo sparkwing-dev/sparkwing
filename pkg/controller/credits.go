@@ -229,7 +229,11 @@ type createGrantReq struct {
 }
 
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
-	state, err := s.store.CreditState(r.Context(), creditsBurnWindow)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	state, err := tenant.CreditState(r.Context(), creditsBurnWindow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -390,12 +394,16 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = v
 	}
-	grants, err := s.store.ListCreditGrants(r.Context(), limit)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	grants, err := tenant.ListCreditGrants(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	charges, err := s.store.ListCreditCharges(r.Context(), limit)
+	charges, err := tenant.ListCreditCharges(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
