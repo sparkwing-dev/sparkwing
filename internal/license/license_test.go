@@ -1,6 +1,7 @@
 package license_test
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"strings"
@@ -102,5 +103,70 @@ func TestResolveGrantsNothingWithoutAUsableLicense(t *testing.T) {
 func TestEmbeddedKeyIsUsable(t *testing.T) {
 	if _, err := license.EmbeddedKey(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVerifyAcceptsALicenseWithSurroundingWhitespace(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	if _, err := license.Verify(" "+licensetest.Sign(t, priv, multiTeamTerms())+"\n", pub, now); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestVerifyBoundsTheLicenseLength(t *testing.T) {
+	const limit = 16 << 10
+	pub, priv := licensetest.NewKey(t)
+	var under, over string
+	for pad := 12000; over == ""; pad++ {
+		terms := multiTeamTerms()
+		terms.IssuedTo = strings.Repeat("a", pad)
+		raw := licensetest.Sign(t, priv, terms)
+		if len(raw) <= limit {
+			under = raw
+		} else {
+			over = raw
+		}
+	}
+	if _, err := license.Verify(under, pub, now); err != nil {
+		t.Fatalf("Verify(%d bytes) = %v, want accepted", len(under), err)
+	}
+	if _, err := license.Verify(over, pub, now); !errors.Is(err, license.ErrMalformed) {
+		t.Fatalf("Verify(%d bytes) = %v, want ErrMalformed", len(over), err)
+	}
+}
+
+func TestVerifyRefusesAKeyOfTheWrongSize(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	if _, err := license.Verify(licensetest.Sign(t, priv, multiTeamTerms()), pub[:16], now); err == nil {
+		t.Fatal("Verify accepted a truncated public key")
+	}
+}
+
+func TestVerifyRefusesJunkAfterASignedPayload(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	encPayload, encSig, _ := strings.Cut(licensetest.Sign(t, priv, multiTeamTerms()), ".")
+	if _, err := license.Verify(encPayload+"!."+encSig, pub, now); !errors.Is(err, license.ErrMalformed) {
+		t.Fatalf("Verify = %v, want ErrMalformed", err)
+	}
+}
+
+func TestVerifyRefusesASignedPayloadItCannotRead(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	expires := now.Add(time.Hour).Format(time.RFC3339)
+	for name, body := range map[string]string{
+		"features not a list": `{"features":"multi-team","expires_at":"` + expires + `"}`,
+		"no expiry":           `{"features":["multi-team"]}`,
+	} {
+		raw := licensetest.Encode([]byte(body), ed25519.Sign(priv, []byte(body)))
+		if _, err := license.Verify(raw, pub, now); !errors.Is(err, license.ErrMalformed) {
+			t.Errorf("%s: Verify = %v, want ErrMalformed", name, err)
+		}
+	}
+}
+
+func TestResolveGrantsAValidLicense(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	if lic := license.Resolve(licensetest.Sign(t, priv, multiTeamTerms()), pub, now, nil); !lic.Allows(license.FeatureMultiTeam, now) {
+		t.Fatal("a valid multi-team license resolves to nothing")
 	}
 }
