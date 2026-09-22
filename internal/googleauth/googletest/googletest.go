@@ -26,11 +26,12 @@ type Issuer struct {
 	ClientID     string
 	ClientSecret string
 
-	key   *rsa.PrivateKey
-	kid   string
-	mu    sync.Mutex
-	codes map[string]grant
-	srv   *httptest.Server
+	key        *rsa.PrivateKey
+	kid        string
+	mu         sync.Mutex
+	codes      map[string]grant
+	keyFetches int
+	srv        *httptest.Server
 }
 
 type grant struct {
@@ -96,7 +97,27 @@ func (i *Issuer) CodeSignedBy(signer *rsa.PrivateKey, p Person, verifier, redire
 	return i.code(p, verifier, redirectURI, nil, signer)
 }
 
-func (i *Issuer) code(p Person, verifier, redirectURI string, override map[string]any, signer *rsa.PrivateKey) string {
+// IDToken returns an ID token about p signed by the published key, for a
+// test that calls Verify directly. claims and head override the token's
+// claims and JOSE header the way CodeWith does, which is how a test builds a
+// token naming another algorithm or an unpublished key id.
+func (i *Issuer) IDToken(t testing.TB, p Person, claims, head map[string]any) string {
+	t.Helper()
+	token, err := i.sign(i.key, head, i.claims(p, claims))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+// KeyFetches reports how many times a client has fetched the published keys.
+func (i *Issuer) KeyFetches() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.keyFetches
+}
+
+func (i *Issuer) claims(p Person, override map[string]any) map[string]any {
 	now := time.Now()
 	claims := map[string]any{
 		"iss": i.URL, "aud": i.ClientID, "sub": p.Subject,
@@ -104,13 +125,22 @@ func (i *Issuer) code(p Person, verifier, redirectURI string, override map[strin
 		"email": p.Email, "email_verified": p.EmailVerified,
 		"name": p.Name, "given_name": p.GivenName,
 	}
+	return overridden(claims, override)
+}
+
+func overridden(base, override map[string]any) map[string]any {
 	for k, v := range override {
 		if v == nil {
-			delete(claims, k)
+			delete(base, k)
 			continue
 		}
-		claims[k] = v
+		base[k] = v
 	}
+	return base
+}
+
+func (i *Issuer) code(p Person, verifier, redirectURI string, override map[string]any, signer *rsa.PrivateKey) string {
+	claims := i.claims(p, override)
 	code := rand.Text()
 	i.mu.Lock()
 	i.codes[code] = grant{verifier: verifier, redirectURI: redirectURI, claims: claims, signer: signer}
@@ -146,7 +176,7 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		refuse("redirect_uri_mismatch")
 		return
 	}
-	token, err := i.sign(g.signer, g.claims)
+	token, err := i.sign(g.signer, nil, g.claims)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -154,8 +184,8 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id_token": token})
 }
 
-func (i *Issuer) sign(key *rsa.PrivateKey, claims map[string]any) (string, error) {
-	head, err := json.Marshal(map[string]string{"alg": "RS256", "kid": i.kid, "typ": "JWT"})
+func (i *Issuer) sign(key *rsa.PrivateKey, headOverride, claims map[string]any) (string, error) {
+	head, err := json.Marshal(overridden(map[string]any{"alg": "RS256", "kid": i.kid, "typ": "JWT"}, headOverride))
 	if err != nil {
 		return "", err
 	}
@@ -186,6 +216,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func (i *Issuer) handleCerts(w http.ResponseWriter, _ *http.Request) {
+	i.mu.Lock()
+	i.keyFetches++
+	i.mu.Unlock()
 	pub := i.key.PublicKey
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{
