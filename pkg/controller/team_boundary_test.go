@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,6 +39,8 @@ type tenancyFixture struct {
 	victim string
 }
 
+var digestHex = strings.Repeat("ab", 32)
+
 var everyScope = []string{
 	controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsControl,
 	controller.ScopeNodesClaim, controller.ScopeLogsRead, controller.ScopeLogsWrite,
@@ -52,7 +55,11 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
 		t.Fatal(err)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore()
+	art := &fakeArtifactStore{objects: map[string][]byte{
+		"runs/run-team-a/state.ndjson":     []byte("team-a-state"),
+		"artifacts/manifests/" + digestHex: []byte("team-a-manifest"),
+	}}
+	srv := controller.New(st, nil).EnableAuthFromStore().WithArtifactStore(art)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
@@ -628,6 +635,29 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 		}
 		if run.Status != "success" {
 			t.Errorf("team B's run finished as %q, want success", run.Status)
+		}
+	})
+}
+
+// The artifact store is shared by every team. A run's own keys are read only
+// by its team, and a content-addressed key, which names no run, only by the
+// operator.
+func TestTeamBoundary_ArtifactsStayWithTheirRunsTeam(t *testing.T) {
+	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		runKey := "/api/v1/artifacts/" + url.PathEscape("runs/"+f.runA+"/state.ndjson")
+		blobKey := "/api/v1/artifacts/" + url.PathEscape("artifacts/manifests/"+digestHex)
+		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
+			for _, key := range []string{runKey, blobKey} {
+				if code, body := f.do("GET", key, other.auth, nil); code != http.StatusNotFound || strings.Contains(body, "team-a") {
+					t.Errorf("GET %s as %s = %d want 404: %s", key, other.name, code, body)
+				}
+			}
+		}
+		if code, body := f.do("GET", runKey, f.readerA, nil); code != http.StatusOK || body != "team-a-state" {
+			t.Errorf("team A's reader cannot read its run's artifact: %d %s", code, body)
+		}
+		if code, _ := f.do("GET", blobKey, f.ownerA, nil); code != http.StatusNotFound {
+			t.Errorf("a team owner read a content-addressed key: %d", code)
 		}
 	})
 }
