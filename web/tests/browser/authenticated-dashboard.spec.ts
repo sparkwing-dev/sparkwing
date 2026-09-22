@@ -266,7 +266,7 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     expect(state.proxy_authorizations.length).toBeGreaterThan(0);
     expect(
       state.proxy_authorizations.every(
-        (authorization) => authorization === `Bearer ${dashboard.service_token}`,
+        (authorization) => authorization === "Session session-1",
       ),
     ).toBe(true);
     expect(state.proxy_cookies.every((cookie) => cookie === "")).toBe(true);

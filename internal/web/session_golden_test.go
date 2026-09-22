@@ -233,8 +233,8 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 		!containsString(state.sessionHeaders, "Session session-2") {
 		t.Errorf("controller session headers = %v, want both sessions resolved", state.sessionHeaders)
 	}
-	if state.proxyAuth != "Bearer service-token" {
-		t.Errorf("proxied Authorization = %q, want service token", state.proxyAuth)
+	if state.proxyAuth != "Session session-2" {
+		t.Errorf("proxied Authorization = %q, want the signed-in user's own session", state.proxyAuth)
 	}
 	if state.proxyCalls != 1 {
 		t.Errorf("controller proxy calls = %d, want only the session-authenticated request", state.proxyCalls)
