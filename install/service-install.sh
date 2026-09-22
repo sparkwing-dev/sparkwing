@@ -94,7 +94,6 @@ fi
 CONTROLLER_URL="${SPARKWING_CONTROLLER:-}"
 LOGS_URL="${SPARKWING_LOGS:-}"
 GITCACHE_URL="${SPARKWING_GITCACHE_URL:-}"
-CACHE_TOKEN="${SPARKWING_CACHE_TOKEN:-}"
 API_TOKEN="${SPARKWING_API_TOKEN:-}"
 RUNNER_NAME="${RUNNER_NAME:-}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-}"
@@ -131,7 +130,6 @@ fi
 reject_unsafe_value "Controller URL" "$CONTROLLER_URL"
 reject_unsafe_value "Logs service URL" "$LOGS_URL"
 reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
-reject_unsafe_value "Cache token" "$CACHE_TOKEN"
 reject_unsafe_value "Runner name" "$RUNNER_NAME"
 reject_unsafe_value "Contribution ceiling" "$CONTRIBUTION"
 reject_unsafe_value "Local reserve" "$LOCAL_RESERVE"
@@ -168,7 +166,6 @@ cat > "$CONFIG_PATH" <<YAML
 controller: "${CONTROLLER_URL}"
 logs: "${LOGS_URL}"
 gitcache: "${GITCACHE_URL}"
-cache_token: "${CACHE_TOKEN}"
 token: "${API_TOKEN}"
 max_concurrent: ${MAX_CONCURRENT}
 holder_prefix: "${RUNNER_NAME}"

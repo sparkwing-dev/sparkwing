@@ -272,6 +272,11 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
+// Handler serves the cache's routes without the listener, background fetch or
+// store reconcile that Run starts, so a caller can mount the cache on its own
+// listener.
+func (s *Server) Handler() http.Handler { return s.handler }
+
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
 	measureStore(ctx)

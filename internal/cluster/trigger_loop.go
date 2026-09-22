@@ -203,11 +203,12 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	if sourceErr != nil {
 		return awaitHeartbeat(), sourceErr
 	}
+	grant := requestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
 	if repoURL == "" {
 		if BakedBinary == "" {
 			return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)
 		}
-		execErr := execHandleTrigger(childCtx, BakedBinary, "", trigger, opts, logger)
+		execErr := execHandleTrigger(childCtx, BakedBinary, "", trigger, opts, grant, logger)
 		return awaitHeartbeat(), execErr
 	}
 
@@ -230,20 +231,20 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	var sparkwingDir string
 	var fetchErr error
 	if workspaceSource {
-		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token,
+		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)
 	} else {
-		sparkwingDir, fetchErr = fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token,
+		sparkwingDir, fetchErr = fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)
 	}
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
 	if workspaceSource {
-		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, logger)
+		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, logger)
 	}
 
-	binary, buildErr := triggerBuildOrFetchBinary(sparkwingDir, opts, logger)
+	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, opts, grant, logger)
 	if buildErr != nil {
 		shipCompileOutput(ctx, opts, trigger.ID, buildErr, logger)
 		return awaitHeartbeat(), buildErr
@@ -251,11 +252,11 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	logBinaryReady(logger, trigger.ID, binary)
 	defer binary.release()
 
-	execErr := execHandleTrigger(childCtx, binary.path, filepath.Dir(sparkwingDir), trigger, opts, logger)
+	execErr := execHandleTrigger(childCtx, binary.path, filepath.Dir(sparkwingDir), trigger, opts, grant, logger)
 	return awaitHeartbeat(), execErr
 }
 
-func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
+func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) error {
 	childArgs := handleTriggerArgs(trigger.ID, opts)
 
 	childCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -264,17 +265,7 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	env := append(
-		os.Environ(),
-		"SPARKWING_CONTROLLER_URL="+opts.ControllerURL,
-		"SPARKWING_LOGS_URL="+opts.LogsURL,
-		"SPARKWING_AGENT_TOKEN="+opts.Token,
-		"SPARKWING_RUNNER_TYPE=kubernetes",
-	)
-	if tp := otelutil.TraceParentEnv(ctx); tp != "" {
-		env = append(env, tp)
-	}
-	cmd.Env = env
+	cmd.Env = triggerChildEnv(ctx, os.Environ(), opts, cacheGrant)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	logger.Info("trigger loop: exec child",
@@ -354,8 +345,8 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 }
 
 var (
-	fetchSourceFn          = bincache.FetchPipelineSourceWithToken
-	fetchWorkspaceSourceFn = bincache.FetchPipelineWorkspaceSourceWithToken
+	fetchSourceFn          = bincache.FetchPipelineSourceWithCredentials
+	fetchWorkspaceSourceFn = bincache.FetchPipelineWorkspaceSourceWithCredentials
 )
 
 var (
@@ -368,26 +359,26 @@ var (
 
 const notOurRefSubstr = "not our ref"
 
-func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
 	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
-		return fetchSourceFn(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+		return fetchSourceFn(ctx, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir)
 	}, sha, logger, runID)
 }
 
-func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
 	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
-		return fetchWorkspaceSourceFn(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
+		return fetchWorkspaceSourceFn(ctx, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir)
 	}, sha, logger, runID)
 }
 
 var adoptBaselineFn = bincache.AdoptWorkspaceBaseline
 
-func adoptTriggerBaseline(ctx context.Context, opts TriggerLoopOptions, trigger *store.Trigger, checkoutDir, sha string, logger *slog.Logger) {
+func adoptTriggerBaseline(ctx context.Context, opts TriggerLoopOptions, trigger *store.Trigger, checkoutDir, sha, cacheGrant string, logger *slog.Logger) {
 	baseline := bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv)
 	if baseline == (bincache.WorkspaceBaseline{}) {
 		return
 	}
-	bearer := bincache.GitcacheBearer(opts.GitcacheURL, opts.ControllerURL, opts.Token, "")
+	bearer := bincache.GitcacheBearer(opts.GitcacheURL, opts.ControllerURL, opts.Token, cacheGrant)
 	err := adoptBaselineWithRetry(ctx, checkoutDir, opts.GitcacheURL, bearer, sha, baseline, logger, trigger.ID)
 	switch {
 	case err == nil:
@@ -518,12 +509,12 @@ func (b triggerBinary) release() {
 	}
 }
 
-func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, logger *slog.Logger) (triggerBinary, error) {
+func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) (triggerBinary, error) {
 	start := time.Now()
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-trigger-loop-bin")
-		if cerr := bincache.CompilePipeline(context.Background(), sparkwingDir, tmp); cerr != nil {
+		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
 			return triggerBinary{}, cerr
 		}
 		return triggerBinary{path: tmp, cache: binaryCacheCompiled, build: time.Since(start)}, nil
@@ -535,12 +526,12 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 	compiled := false
 	fetched := false
 	binaryCacheURL := opts.GitcacheURL
-	if bincache.ControllerGitcacheToken(opts.GitcacheURL, opts.ControllerURL, opts.Token) != "" {
+	if cacheGrant == "" || bincache.ControllerGitcacheToken(opts.GitcacheURL, opts.ControllerURL, opts.Token) != "" {
 		binaryCacheURL = ""
 	}
-	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
+	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
 		if binaryCacheURL != "" {
-			if fetchErr := bincache.TryBinary(context.Background(), binaryCacheURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(ctx, binaryCacheURL, cacheGrant, key, tempPath); fetchErr == nil {
 				fetched = true
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
@@ -548,13 +539,13 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 			}
 		}
 		compiled = true
-		return bincache.CompilePipeline(context.Background(), sparkwingDir, tempPath)
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
 	})
 	if err != nil {
 		return triggerBinary{}, err
 	}
 	if published && compiled && binaryCacheURL != "" {
-		if err := bincache.UploadBinary(context.Background(), binaryCacheURL, bincache.CacheToken(), key, lease.Path()); err != nil {
+		if err := bincache.UploadBinary(ctx, binaryCacheURL, cacheGrant, key, lease.Path()); err != nil {
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

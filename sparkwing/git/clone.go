@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -109,7 +110,7 @@ func gitcacheToken(named bool) string {
 	if !named {
 		return ""
 	}
-	return os.Getenv("SPARKWING_CACHE_TOKEN")
+	return authwire.CacheBearerFromEnv()
 }
 
 func gitcacheEnv(cacheBase, token string) []string {

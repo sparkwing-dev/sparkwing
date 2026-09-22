@@ -351,7 +351,7 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    incomplete pairs. Web, runner, and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
    `sparkwing-runner-bundle.controller.tokenSecret` is also what the cache
-   reads as `SPARKWING_API_TOKEN`, the runner as `SPARKWING_CACHE_TOKEN`, and
+   reads as `SPARKWING_API_TOKEN`, the controller as `SPARKWING_CACHE_TOKEN`, and
    the logs service as the signal to resolve callers against the controller;
    a cache-enabled install without it fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a

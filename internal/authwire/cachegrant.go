@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -96,4 +97,22 @@ func VerifyCacheGrant(operatorToken, raw string, now time.Time) (CacheGrant, err
 		return CacheGrant{}, ErrCacheGrant
 	}
 	return g, nil
+}
+
+// CacheGrantEnv names the variable a runner hands a run's cache grant in. The
+// run's processes send it to the cache in place of the operator token, which a
+// runner never holds.
+const CacheGrantEnv = "SPARKWING_CACHE_GRANT"
+
+// CacheTokenEnv names the variable an operator's own shell carries the cache's
+// operator token in.
+const CacheTokenEnv = "SPARKWING_CACHE_TOKEN"
+
+// CacheBearerFromEnv returns the bearer this process sends the cache: the
+// run's grant when a runner handed it one, otherwise the operator token.
+func CacheBearerFromEnv() string {
+	if grant := os.Getenv(CacheGrantEnv); grant != "" {
+		return grant
+	}
+	return os.Getenv(CacheTokenEnv)
 }

@@ -24,6 +24,7 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -199,44 +200,35 @@ func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, paren
 	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "")
 }
 
-// FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
-func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return FetchPipelineSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
-}
-
-// FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
-func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
-}
-
 // FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
 func FetchPipelineSourceWithCredentials(
 	ctx context.Context,
-	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
+	gcURL, controllerURL, controllerToken, cacheGrant, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant),
 		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
 // FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
 func FetchPipelineWorkspaceSourceWithCredentials(
 	ctx context.Context,
-	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
+	gcURL, controllerURL, controllerToken, cacheGrant, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant),
 		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
-// GitcacheBearer resolves the credential a cache read may carry: the controller bearer only for
-// the controller's own proxy origin, otherwise the caller's direct cache token or the environment's.
-func GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken string) string {
+// GitcacheBearer resolves the credential a runner's cache read may carry: the controller bearer
+// only for the controller's own proxy origin, otherwise the run's cache grant. A runner never
+// holds the cache's operator token, so it never falls back to one.
+func GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant string) string {
 	if bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken); bearer != "" {
 		return bearer
 	}
-	if cacheToken != "" {
-		return cacheToken
+	if cacheGrant != "" {
+		return cacheGrant
 	}
-	return CacheToken()
+	return os.Getenv(authwire.CacheGrantEnv)
 }
 
 // ControllerRunGitcacheURL turns the admin cache proxy into the claim-bound route used by node executors.
@@ -318,7 +310,7 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
 	if token == "" {
-		token = CacheToken()
+		token = os.Getenv(authwire.CacheGrantEnv)
 	}
 	repoSSH, err = sourceurl.ValidateCloneURL(repoSSH)
 	if err != nil {

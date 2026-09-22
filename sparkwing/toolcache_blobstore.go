@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
 const lintCacheManifestName = "workdir"
@@ -115,7 +117,8 @@ func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error) {
 // silently expanding paths from another tree.
 //
 // The blob store authenticates reads as well as writes, so the request
-// carries $SPARKWING_CACHE_TOKEN as its bearer when that variable is set.
+// carries the run's $SPARKWING_CACHE_GRANT, or else $SPARKWING_CACHE_TOKEN,
+// as its bearer.
 func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 	if gcURL == "" {
 		return false, 0, nil
@@ -126,7 +129,7 @@ func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	if token := os.Getenv("SPARKWING_CACHE_TOKEN"); token != "" {
+	if token := authwire.CacheBearerFromEnv(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 

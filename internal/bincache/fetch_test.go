@@ -325,7 +325,7 @@ func TestFetchPipelineSource_RegistersDistinctNamesForEqualBasenames(t *testing.
 	}
 }
 
-func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) {
+func TestFetchPipelineSourceWithCredentials_AuthenticatesRegisterAndGit(t *testing.T) {
 	repoParent := t.TempDir()
 	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
@@ -350,10 +350,10 @@ func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	sparkwingDir, err := FetchPipelineSourceWithToken(srv.URL+"/api/v1/gitcache", srv.URL, "runner-token",
+	sparkwingDir, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL+"/api/v1/gitcache", srv.URL, "runner-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", tipSHA, t.TempDir())
 	if err != nil {
-		t.Fatalf("FetchPipelineSourceWithToken: %v", err)
+		t.Fatalf("FetchPipelineSourceWithCredentials: %v", err)
 	}
 	got, err := exec.Command("git", "-C", filepath.Dir(sparkwingDir), "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -364,7 +364,7 @@ func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) 
 	}
 }
 
-func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t *testing.T) {
+func TestFetchPipelineSourceWithCredentials_DoesNotSendControllerTokenToDirectCache(t *testing.T) {
 	repoParent := t.TempDir()
 	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
@@ -387,7 +387,7 @@ func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t 
 	}))
 	defer srv.Close()
 
-	if _, err := FetchPipelineSourceWithToken(srv.URL, "https://controller.example", "controller-admin-token",
+	if _, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "controller-admin-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", tipSHA, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t 
 	}
 }
 
-func TestFetchPipelineSourceWithToken_ControllerRedirectCannotCarryBearer(t *testing.T) {
+func TestFetchPipelineSourceWithCredentials_ControllerRedirectCannotCarryBearer(t *testing.T) {
 	var targetRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		targetRequests++
@@ -421,7 +421,7 @@ func TestFetchPipelineSourceWithToken_ControllerRedirectCannotCarryBearer(t *tes
 	}))
 	defer controller.Close()
 
-	_, err := FetchPipelineSourceWithToken(controller.URL+"/api/v1/gitcache", controller.URL, "runner-token",
+	_, err := FetchPipelineSourceWithCredentials(context.Background(), controller.URL+"/api/v1/gitcache", controller.URL, "runner-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", strings.Repeat("a", 40), t.TempDir())
 	if err == nil {
 		t.Fatal("controller Git redirect unexpectedly succeeded")
@@ -448,7 +448,7 @@ func TestFetchPipelineSource_DirectCacheRedirectsStayAtConfiguredOrigin(t *testi
 				http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
 			}))
 			defer cache.Close()
-			_, err := FetchPipelineSourceWithToken(cache.URL, "https://controller.example", "agent-token",
+			_, err := FetchPipelineSourceWithCredentials(context.Background(), cache.URL, "https://controller.example", "agent-token", "",
 				"git@github.com:sparkwing-dev/sparkwing.git", "main", strings.Repeat("a", 40), t.TempDir())
 			if err == nil {
 				t.Fatal("direct cache redirect unexpectedly succeeded")
@@ -485,7 +485,7 @@ func TestFetchPipelineWorkspaceSource_RestoresRawGitBlobs(t *testing.T) {
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
-	sparkwingDir, err := FetchPipelineSourceWithToken(srv.URL, "https://controller.example", "ignored-controller-token",
+	sparkwingDir, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "ignored-controller-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", workspaceSHA, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -828,7 +828,7 @@ func TestAdoptWorkspaceBaseline_ResolvesTheBaselineAStepDiffsAgainst(t *testing.
 		{name: "without one"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
+			sparkwingDir, err := FetchPipelineWorkspaceSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "ignored", "",
 				testRepoSSH, "main", workspaceSHA, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -884,7 +884,7 @@ func TestAdoptWorkspaceBaseline_SkipsASourceThatServesOnlyTheSnapshot(t *testing
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
-	sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
+	sparkwingDir, err := FetchPipelineWorkspaceSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "ignored", "",
 		testRepoSSH, "main", workspaceSHA, t.TempDir())
 	if err != nil {
 		t.Fatal(err)

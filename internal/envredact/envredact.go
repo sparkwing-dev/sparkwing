@@ -81,6 +81,7 @@ var nonCredentialSegments = map[string]bool{
 var credentialExact = map[string]bool{
 	"SPARKWING_AGENT_TOKEN": true,
 	"SPARKWING_CACHE_TOKEN": true,
+	"SPARKWING_CACHE_GRANT": true,
 	"SPARKWING_LEASE_TOKEN": true,
 	"SPARKWING_SECRETS_KEY": true,
 	"SPARKWING_PG_URL":      true,

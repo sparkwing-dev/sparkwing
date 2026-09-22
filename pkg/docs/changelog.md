@@ -65,6 +65,19 @@ unlock.
 
 ### Changed
 
+- **runner (Breaking):** a runner hands a run a cache grant, never the cache
+  token. After each claim the trigger loop, pool runner and agent ask the
+  controller for a grant for that run with their own runner token, send it on
+  their own cache calls, and pass it to the pipeline as
+  `SPARKWING_CACHE_GRANT`, including into Kubernetes fallback Jobs. A
+  controller that mints no grant leaves the run without the binary cache
+  rather than failing it. The pipeline binary a trigger runs starts from an
+  allowlist of the launcher's environment instead of all of it, so the
+  launcher's credentials no longer reach team code. The runner no longer reads
+  `SPARKWING_CACHE_TOKEN`, the runner-bundle chart no longer sets it on the
+  runner, and `agent.yaml` refuses `cache_token`. See
+  [migration guide](docs/migrations/_unreleased.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
+
 - **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
   replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
   dependencies allowed to run build scripts, and the local build, dev server and

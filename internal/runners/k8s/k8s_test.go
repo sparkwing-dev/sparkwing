@@ -952,17 +952,29 @@ func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 	}
 }
 
-func TestBuildJob_PassesTheCacheTokenThrough(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
-	if got := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; got != "s3cret" {
-		t.Fatalf("SPARKWING_CACHE_TOKEN = %q, want the runner's own cache bearer", got)
+// The pod runs the team's code, so it carries the run's grant and never the
+// operator cache token, even when the dispatcher's own environment holds one.
+func TestBuildJob_PassesTheRunGrantAndNeverTheCacheToken(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "operator-cache-token")
+	t.Setenv("SPARKWING_CACHE_GRANT", "swcg1.run-grant")
+	env := jobEnv(t, Config{Image: "img"})
+	if got := env["SPARKWING_CACHE_GRANT"]; got != "swcg1.run-grant" {
+		t.Fatalf("SPARKWING_CACHE_GRANT = %q, want the run's grant", got)
+	}
+	if got, ok := env["SPARKWING_CACHE_TOKEN"]; ok {
+		t.Fatalf("SPARKWING_CACHE_TOKEN = %q reached the pod", got)
+	}
+	for name, value := range env {
+		if value == "operator-cache-token" {
+			t.Fatalf("%s carries the operator cache token into the pod", name)
+		}
 	}
 }
 
-func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "")
-	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; ok {
-		t.Fatal("SPARKWING_CACHE_TOKEN should be absent when the runner has none")
+func TestBuildJob_OmitsTheGrantWhenTheRunHasNone(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_GRANT", "")
+	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_GRANT"]; ok {
+		t.Fatal("SPARKWING_CACHE_GRANT should be absent when the run has none")
 	}
 }
 

@@ -156,9 +156,10 @@ and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
 `~/.config/systemd/user/`.
 
 The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
-`SPARKWING_GITCACHE_URL` and `SPARKWING_CACHE_TOKEN` only for a direct cache on
-a trusted LAN, VPN, or tailnet. The same values are stored in the mode-0600
-agent configuration.
+`SPARKWING_GITCACHE_URL` only for a direct cache on a trusted LAN, VPN, or
+tailnet; the value is stored in the mode-0600 agent configuration. The agent
+holds no cache token: for each claimed run it asks the controller for a cache
+grant, and runs without the binary cache when the controller mints none.
 
 For unattended installation, supply the same values as environment variables:
 

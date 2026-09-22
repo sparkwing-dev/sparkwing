@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -25,7 +26,6 @@ type PoolLoopConfig struct {
 	ControllerURL     string
 	LogsURL           string
 	GitcacheURL       string
-	CacheToken        string
 	Token             string
 	HolderPrefix      string
 	Labels            []string
@@ -97,7 +97,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	}
 
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
-		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token, cfg.CacheToken,
+		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
@@ -449,7 +449,6 @@ func runRunnerCLI(args []string, version string) error {
 		ControllerURL:     *controllerURL,
 		LogsURL:           *logsURL,
 		GitcacheURL:       *gitcacheURL,
-		CacheToken:        os.Getenv("SPARKWING_CACHE_TOKEN"),
 		Token:             *token,
 		HolderPrefix:      *holderPrefix,
 		Labels:            []string(labels),
@@ -474,7 +473,7 @@ func currentCapacity(ctx context.Context, provider headroomProvider) capacityRep
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
-	controllerURL, logsURL, gitcacheURL, token, cacheToken string,
+	controllerURL, logsURL, gitcacheURL, token string,
 	n *store.Node,
 	holderID string,
 	lease, hbInterval time.Duration,
@@ -504,8 +503,9 @@ func executePooledNode(
 		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
+	grant := requestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNodeAttempt(n))
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
 
@@ -516,6 +516,22 @@ func executePooledNode(
 	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
+}
+
+// requestRunCacheGrant returns the grant a claimed run's cache traffic carries,
+// or "" when the controller mints none; the run then goes without the binary
+// and dependency caches rather than failing.
+func requestRunCacheGrant(ctx context.Context, controllerURL, token, runID string, logger *slog.Logger) string {
+	grant, err := bincache.RequestCacheGrant(ctx, controllerURL, token, runID)
+	switch {
+	case err == nil:
+		return grant
+	case errors.Is(err, bincache.ErrNoCacheGrant):
+		logger.Debug("controller mints no cache grant; running without the cache", "run_id", runID)
+	default:
+		logger.Warn("cache grant unavailable; running without the cache", "run_id", runID, "err", err)
+	}
+	return ""
 }
 
 var (

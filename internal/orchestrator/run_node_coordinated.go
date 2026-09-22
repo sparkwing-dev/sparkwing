@@ -23,7 +23,7 @@ type runNodeConfig struct {
 	brokerArtifact bool
 	claimFence     store.NodeClaimFence
 	gitcacheURL    string
-	gitcacheToken  string
+	gitcacheGrant  string
 	apiSocket      string
 }
 
@@ -69,11 +69,12 @@ func OverAPISocket(sock string) RunNodeOption {
 	return func(c *runNodeConfig) { c.apiSocket = sock }
 }
 
-// WithGitcache avoids process-global cache credentials when one agent executes concurrent nodes.
-func WithGitcache(url, token string) RunNodeOption {
+// WithGitcache hands a claimed node the cache and the grant its run's cache
+// traffic carries, so concurrent nodes of different runs never share one.
+func WithGitcache(url, grant string) RunNodeOption {
 	return func(c *runNodeConfig) {
 		c.gitcacheURL = url
-		c.gitcacheToken = token
+		c.gitcacheGrant = grant
 	}
 }
 

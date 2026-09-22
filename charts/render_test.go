@@ -2090,33 +2090,21 @@ func envSecretRef(t *testing.T, rendered, envName string) renderedSecretKeyRef {
 	return renderedSecretKeyRef{}
 }
 
-func TestRunnerAndCacheShareOneCacheTokenSecret(t *testing.T) {
+// The runner runs team code, so it holds no cache operator token; it asks the
+// controller for a per-run grant instead.
+func TestRunnerCarriesNoCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	sets := []string{
-		"controller.tokenSecret.name=sparkwing-token",
-		"controller.tokenSecret.key=bearer",
-	}
-	runner := envSecretRef(t, renderRunner(t, sets...), "SPARKWING_CACHE_TOKEN")
-	cache := envSecretRef(t, renderCache(t, sets...), "SPARKWING_API_TOKEN")
-	if runner != cache {
-		t.Fatalf("runner SPARKWING_CACHE_TOKEN = %+v, cache SPARKWING_API_TOKEN = %+v; want one source", runner, cache)
-	}
-	if runner.Name != "sparkwing-token" || runner.Key != "bearer" {
-		t.Errorf("token source = %+v, want the configured Secret and key", runner)
-	}
-}
-
-func TestFullChartVendorsTheRunnerCacheToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderInNamespace(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	if ref := envSecretRef(t, rendered, "SPARKWING_CACHE_TOKEN"); ref.Name != "sparkwing-token" {
-		t.Errorf("SPARKWING_CACHE_TOKEN source = %+v, want the release token Secret", ref)
+	for name, rendered := range map[string]string{
+		"runner bundle": renderRunner(t, "controller.tokenSecret.name=sparkwing-token", "controller.tokenSecret.key=bearer"),
+		"full chart": helmRenderInNamespace(t, "./sparkwing-full",
+			"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing",
+			"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token"),
+	} {
+		if strings.Contains(rendered, "SPARKWING_CACHE_TOKEN") {
+			t.Errorf("%s: the runner Deployment carries SPARKWING_CACHE_TOKEN:\n%s", name, rendered)
+		}
 	}
 }
 

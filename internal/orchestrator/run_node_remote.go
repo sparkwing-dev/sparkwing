@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -38,9 +39,12 @@ func runNodeRemote(
 	ctx context.Context,
 	trigger *store.Trigger,
 	run *store.Run,
-	controllerURL, logsURL, gitcacheURL, cacheToken, runID, nodeID, token string,
+	controllerURL, logsURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
+	if cacheGrant == "" {
+		cacheGrant = os.Getenv(authwire.CacheGrantEnv)
+	}
 	gcURL := strings.TrimRight(gitcacheURL, "/")
 	if gcURL == "" {
 		gcURL = bincache.CacheURL()
@@ -83,10 +87,10 @@ func runNodeRemote(
 	var sparkwingDir string
 	var err error
 	if workspaceSource {
-		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheToken,
+		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)
 	} else {
-		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheToken,
+		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)
 	}
 	if err != nil {
@@ -94,24 +98,21 @@ func runNodeRemote(
 	}
 	if workspaceSource {
 		adoptNodeBaseline(ctx, trigger, filepath.Dir(sparkwingDir),
-			gcURL, bincache.GitcacheBearer(gcURL, controllerURL, token, cacheToken), runID, nodeID, logger)
+			gcURL, bincache.GitcacheBearer(gcURL, controllerURL, token, cacheGrant), runID, nodeID, logger)
 	}
 
 	binaryCacheURL := gcURL
-	if bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
+	if cacheGrant == "" || bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
 		binaryCacheURL = ""
 	}
-	if cacheToken == "" {
-		cacheToken = bincache.CacheToken()
-	}
-	binary, err := resolveRemoteBinary(ctx, sparkwingDir, binaryCacheURL, cacheToken, logger)
+	binary, err := resolveRemoteBinary(ctx, sparkwingDir, binaryCacheURL, cacheGrant, logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.path)
-	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, runID, nodeID, logger)
+	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, cacheGrant, runID, nodeID, logger)
 }
 
 func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, gcURL, token, runID, nodeID string, logger *slog.Logger) {
@@ -136,7 +137,7 @@ func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir,
 
 func runNodeIsolated(
 	ctx context.Context,
-	controllerURL, logsURL, runID, nodeID, token string,
+	controllerURL, logsURL, runID, nodeID, token, cacheGrant string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	binary, err := os.Executable()
@@ -150,14 +151,17 @@ func runNodeIsolated(
 			return runner.Result{}, fmt.Errorf("resolve runner work directory: %w", err)
 		}
 	}
-	return runNodeChild(ctx, binary, dir, controllerURL, logsURL, token, runID, nodeID, logger)
+	return runNodeChild(ctx, binary, dir, controllerURL, logsURL, token, cacheGrant, runID, nodeID, logger)
 }
 
 var runNodeIsolatedFn = runNodeIsolated
 
+// runNodeChild runs one node in the pipeline binary. The child is the team's
+// own code: of the credentials this process holds it receives only the run's
+// cache grant, and reaches the controller through the broker.
 func runNodeChild(
 	ctx context.Context,
-	binary, dir, controllerURL, logsURL, token, runID, nodeID string,
+	binary, dir, controllerURL, logsURL, token, cacheGrant, runID, nodeID string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	fence, _ := store.NodeClaimFenceFromContext(ctx)
@@ -189,6 +193,9 @@ func runNodeChild(
 	}
 	if artifact != nil {
 		childEnv = append(childEnv, remoteBrokeredArtifactEnv+"=1")
+	}
+	if cacheGrant != "" {
+		childEnv = append(childEnv, authwire.CacheGrantEnv+"="+cacheGrant)
 	}
 
 	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell
@@ -267,6 +274,7 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_ONLY":                     true,
 	ArtifactStoreEnvVar:                  true,
 	"SPARKWING_CACHE_TOKEN":              true,
+	authwire.CacheGrantEnv:               true,
 	remoteExecutionCapabilityEnv:         true,
 	remoteExecutionCapabilityInputEnv:    true,
 	remoteBrokeredArtifactEnv:            true,

@@ -16,7 +16,6 @@ func TestConfig_RoundTripFromYAML(t *testing.T) {
 controller: http://localhost:4344
 logs: http://localhost:4345
 gitcache: http://localhost:4344/api/v1/gitcache
-cache_token: cache-abc
 profile: dev
 token: tok-abc
 max_concurrent: 3
@@ -40,8 +39,8 @@ spawn_policy: return-to-queue
 	if cfg.Controller != "http://localhost:4344" {
 		t.Fatalf("controller: %q", cfg.Controller)
 	}
-	if cfg.Gitcache != "http://localhost:4344/api/v1/gitcache" || cfg.CacheToken != "cache-abc" {
-		t.Fatalf("gitcache credentials: url=%q token=%q", cfg.Gitcache, cfg.CacheToken)
+	if cfg.Gitcache != "http://localhost:4344/api/v1/gitcache" {
+		t.Fatalf("gitcache url=%q", cfg.Gitcache)
 	}
 	if cfg.Token != "tok-abc" || cfg.MaxConcurrent != 3 {
 		t.Fatalf("unexpected cfg: %+v", cfg)
@@ -189,4 +188,20 @@ func writePrivateConfig(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// The agent asks the controller for a per-run cache grant, so a config that
+// still hands it the operator cache token is refused, naming the key to delete.
+func TestConfig_RefusesACacheToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte("controller: http://localhost:4344\ncache_token: operator-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fssecure.SecurePrivateConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "cache_token") {
+		t.Fatalf("Load error = %v, want one naming cache_token", err)
+	}
 }
