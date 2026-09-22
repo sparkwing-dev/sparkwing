@@ -206,7 +206,7 @@ func TestCapabilitiesAnswerUnauthenticated(t *testing.T) {
 	if code := f.call("GET", "/api/v1/capabilities", "", nil, &caps); code != http.StatusOK {
 		t.Fatalf("capabilities = %d", code)
 	}
-	if !caps.Teams.Enabled || !slices.Equal(caps.Auth.Providers, []string{"google"}) {
+	if !caps.Teams.Enabled || !slices.Equal(caps.Auth.Providers, []string{"google", "github"}) {
 		t.Fatalf("capabilities = %+v", caps)
 	}
 }

@@ -1057,6 +1057,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
 	router.Handle("POST /api/v1/auth/oauth/google/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleStart)))
 	router.Handle("POST /api/v1/auth/oauth/google/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange)))
+	router.Handle("POST /api/v1/auth/oauth/github/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubStart)))
+	router.Handle("POST /api/v1/auth/oauth/github/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange)))
 	if s.metricsAddr == "" {
 		router.Handle("GET /metrics", metricsHandler())
 	}

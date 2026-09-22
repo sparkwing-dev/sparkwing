@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -17,6 +18,8 @@ type identityFlags struct {
 	LicenseFile        string
 	GoogleClientID     string
 	GoogleClientSecret string
+	GitHubClientID     string
+	GitHubClientSecret string
 	RedirectURIs       string
 }
 
@@ -44,33 +47,62 @@ func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Log
 	}
 	srv.WithLicense(license.Resolve(raw, key, time.Now(), logger))
 
-	if f.GoogleClientID == "" && f.GoogleClientSecret == "" {
+	google, err := providerConfigured("Google", "google", f.GoogleClientID, f.GoogleClientSecret)
+	if err != nil {
+		return err
+	}
+	github, err := providerConfigured("GitHub", "github", f.GitHubClientID, f.GitHubClientSecret)
+	if err != nil {
+		return err
+	}
+	if !google && !github {
 		return nil
 	}
-	if f.GoogleClientID == "" || f.GoogleClientSecret == "" {
-		return fmt.Errorf("google sign-in needs both --google-client-id (SPARKWING_GOOGLE_CLIENT_ID) " +
-			"and SPARKWING_GOOGLE_CLIENT_SECRET")
+	uris, err := redirectAllowlist(f.RedirectURIs)
+	if err != nil {
+		return err
 	}
-	uris := splitCSV(f.RedirectURIs)
+	if google {
+		srv.WithGoogleSignIn(googleauth.New(googleauth.Google(f.GoogleClientID, f.GoogleClientSecret)), uris)
+	}
+	if github {
+		srv.WithGitHubSignIn(githubauth.New(githubauth.GitHub(f.GitHubClientID, f.GitHubClientSecret)), uris)
+	}
+	if !srv.MultiTeam() {
+		logger.Warn("sign-in is configured but not offered: it needs a multi-team license")
+	}
+	return nil
+}
+
+func providerConfigured(label, flag, id, secret string) (bool, error) {
+	if id == "" && secret == "" {
+		return false, nil
+	}
+	if id == "" || secret == "" {
+		upper := strings.ToUpper(flag)
+		return false, fmt.Errorf("%s sign-in needs both --%s-client-id (SPARKWING_%s_CLIENT_ID) and SPARKWING_%s_CLIENT_SECRET",
+			label, flag, upper, upper)
+	}
+	return true, nil
+}
+
+func redirectAllowlist(raw string) ([]string, error) {
+	uris := splitCSV(raw)
 	if len(uris) == 0 {
-		return fmt.Errorf("google sign-in needs --oauth-redirect-uris (SPARKWING_OAUTH_REDIRECT_URIS), " +
-			"the dashboard callback URLs Google may send a browser back to")
+		return nil, fmt.Errorf("sign-in needs --oauth-redirect-uris (SPARKWING_OAUTH_REDIRECT_URIS), " +
+			"the dashboard callback URLs a provider may send a browser back to")
 	}
 	for _, u := range uris {
 		parsed, err := url.Parse(u)
 		if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" ||
 			parsed.RawQuery != "" || parsed.Fragment != "" {
-			return fmt.Errorf("--oauth-redirect-uris: %q is not an absolute http(s) URL without a query", u)
+			return nil, fmt.Errorf("--oauth-redirect-uris: %q is not an absolute http(s) URL without a query", u)
 		}
 		if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
-			return fmt.Errorf("--oauth-redirect-uris: %q uses http on a host that is not loopback", u)
+			return nil, fmt.Errorf("--oauth-redirect-uris: %q uses http on a host that is not loopback", u)
 		}
 	}
-	srv.WithGoogleSignIn(googleauth.New(googleauth.Google(f.GoogleClientID, f.GoogleClientSecret)), uris)
-	if !srv.MultiTeam() {
-		logger.Warn("google sign-in is configured but not offered: it needs a multi-team license")
-	}
-	return nil
+	return uris, nil
 }
 
 func isLoopbackHost(host string) bool {

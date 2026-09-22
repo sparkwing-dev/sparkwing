@@ -63,8 +63,11 @@ func (r Role) rank() int {
 // AtLeast reports whether r carries at least as much authority as other.
 func (r Role) AtLeast(other Role) bool { return r.rank() > 0 && r.rank() >= other.rank() }
 
-// ProviderGoogle names Google as the identity provider of an identity row.
-const ProviderGoogle = "google"
+// Identity providers an identity row can name.
+const (
+	ProviderGoogle = "google"
+	ProviderGitHub = "github"
+)
 
 // safety: an invitation that never expires is a standing grant to whoever ends up holding the address.
 const invitationTTL = 7 * 24 * time.Hour

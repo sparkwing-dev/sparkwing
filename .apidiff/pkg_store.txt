@@ -1037,6 +1037,7 @@ type ProfileSample struct {
 	SustainedCores  float64
 	PeakMemoryBytes int64
 }
+const ProviderGitHub = "github"
 const ProviderGoogle = "google"
 const QueueStateApprovalPending = "approval_pending"
 const QueueStateClaimed = "claimed"

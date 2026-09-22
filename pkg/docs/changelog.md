@@ -43,6 +43,14 @@ unlock.
   `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
   `accounts`, `identities`, `memberships` and `invitations` tables and is
   additive.
+- **controller:** GitHub sign-in beside Google. `POST
+  /api/v1/auth/oauth/github/start` and `/exchange` run the same flow with
+  `--github-client-id` (`SPARKWING_GITHUB_CLIENT_ID`) and
+  `SPARKWING_GITHUB_CLIENT_SECRET`, under the same license and redirect
+  allowlist, and `auth.providers` lists `github` when it is configured. The
+  identity is keyed on GitHub's numeric account id, and only the primary email
+  GitHub has verified counts. A GitHub identity joins an existing user on the
+  same verified email unless that user already has a GitHub identity.
 - **controller:** team administration for signed-in users. `PATCH
   /api/v1/team` renames the active team; `GET`, `PATCH` and `DELETE
   /api/v1/team/members[/{user_id}]` list members, change roles and remove a
