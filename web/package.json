@@ -9,8 +9,8 @@
     "lint": "eslint",
     "lint:browser": "eslint playwright.config.ts tests/browser",
     "test": "node scripts/run-tests.mjs",
-    "test:browser": "npm run build && playwright test",
-    "test:browser:gate": "npm run test:browser:install && playwright test",
+    "test:browser": "pnpm run build && playwright test",
+    "test:browser:gate": "pnpm run test:browser:install && playwright test",
     "test:browser:install": "playwright install chromium"
   },
   "dependencies": {

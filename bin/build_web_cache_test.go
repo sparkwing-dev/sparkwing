@@ -41,14 +41,14 @@ func newWebBuildFixture(t *testing.T) webBuildFixture {
 		}
 	}
 	trace := filepath.Join(t.TempDir(), "calls")
-	npm := `#!/bin/sh
+	pnpm := `#!/bin/sh
 set -eu
 case "$1" in
- --version) printf '%s\n' "${WEB_TEST_NPM_VERSION:-10.9.8}" ;;
- config) if [ -n "${WEB_TEST_NPM_CONFIG:-}" ]; then printf '%s\n' "$WEB_TEST_NPM_CONFIG"; else printf '{}\n'; fi ;;
- ci)
-  case " $* " in *" --include=dev "*) ;; *) echo 'build dependencies omitted' >&2; exit 26 ;; esac
-  printf 'ci\n' >> "$WEB_TEST_TRACE" ;;
+ --version) printf '%s\n' "${WEB_TEST_PNPM_VERSION:-12.5.1}" ;;
+ config) if [ -n "${WEB_TEST_PNPM_CONFIG:-}" ]; then printf '%s\n' "$WEB_TEST_PNPM_CONFIG"; else printf '{}\n'; fi ;;
+ install)
+  case " $* " in *" --frozen-lockfile "*) ;; *) echo 'install would resolve outside the lockfile' >&2; exit 26 ;; esac
+  printf 'install\n' >> "$WEB_TEST_TRACE" ;;
 
  run)
   [ "$2" = build ]
@@ -63,13 +63,13 @@ case "$1" in
  *) exit 24 ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(stub, "npm"), []byte(npm), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(stub, "pnpm"), []byte(pnpm), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	f := webBuildFixture{root: root, trace: trace, env: append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"), "WEB_TEST_TRACE="+trace, "NODE_ENV=production")}
 	f.write(t, "web/src/page.tsx", "first")
 	f.write(t, "web/package.json", `{"scripts":{"build":"next build"}}`)
-	f.write(t, "web/package-lock.json", `{"lockfileVersion":3}`)
+	f.write(t, "web/pnpm-lock.yaml", "lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n\nimporters:\n\n  .: {}\n")
 	return f
 }
 
@@ -154,8 +154,8 @@ func TestWebBuildReuseInvalidatesContentAndBuildInputs(t *testing.T) {
 			f.write(t, "web/src/build/component.tsx", "export const ready = true")
 			return nil
 		},
-		"effective npm config": func(t *testing.T, f webBuildFixture) []string {
-			return []string{`WEB_TEST_NPM_CONFIG={"omit":["dev"]}`}
+		"effective pnpm config": func(t *testing.T, f webBuildFixture) []string {
+			return []string{`WEB_TEST_PNPM_CONFIG={"allowBuilds":{"esbuild":true}}`}
 		},
 		"untracked source addition": func(t *testing.T, f webBuildFixture) []string {
 			f.write(t, "web/src/new.ts", "export const fresh = true")
@@ -168,7 +168,7 @@ func TestWebBuildReuseInvalidatesContentAndBuildInputs(t *testing.T) {
 			return nil
 		},
 		"lockfile": func(t *testing.T, f webBuildFixture) []string {
-			f.write(t, "web/package-lock.json", `{"lockfileVersion":3,"changed":true}`)
+			f.write(t, "web/pnpm-lock.yaml", "lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n\nimporters:\n\n  .:\n    dependencies: {}\n")
 			return nil
 		},
 		"configuration": func(t *testing.T, f webBuildFixture) []string {
@@ -182,7 +182,7 @@ func TestWebBuildReuseInvalidatesContentAndBuildInputs(t *testing.T) {
 		"public environment": func(t *testing.T, f webBuildFixture) []string {
 			return []string{"NEXT_PUBLIC_API_TOKEN=fixture-private-value"}
 		},
-		"npm identity": func(t *testing.T, f webBuildFixture) []string { return []string{"WEB_TEST_NPM_VERSION=99.0.0"} },
+		"pnpm identity": func(t *testing.T, f webBuildFixture) []string { return []string{"WEB_TEST_PNPM_VERSION=99.0.0"} },
 		"builder recipe": func(t *testing.T, f webBuildFixture) []string {
 			p := filepath.Join(f.root, "bin/build-web.sh")
 			body, err := os.ReadFile(p)
@@ -351,7 +351,7 @@ func TestWebBuildCustomNodeConfigurationFallsBackToBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
-	for _, config := range []string{"NODE_OPTIONS=--max-old-space-size=256", `WEB_TEST_NPM_CONFIG={"node-options":"--max-old-space-size=256"}`, `WEB_TEST_NPM_CONFIG={"script-shell":"/bin/sh"}`} {
+	for _, config := range []string{"NODE_OPTIONS=--max-old-space-size=256", `WEB_TEST_PNPM_CONFIG={"node-options":"--max-old-space-size=256"}`, `WEB_TEST_PNPM_CONFIG={"script-shell":"/bin/sh"}`} {
 		t.Run(config, func(t *testing.T) {
 			f := newWebBuildFixture(t)
 			f.mustRun(t, config)
@@ -381,7 +381,7 @@ func TestWebBuildWithoutFlockBuildsFresh(t *testing.T) {
 			originalStub = filepath.SplitList(strings.TrimPrefix(value, "PATH="))[0]
 		}
 	}
-	if err := os.Symlink(filepath.Join(originalStub, "npm"), filepath.Join(isolated, "npm")); err != nil {
+	if err := os.Symlink(filepath.Join(originalStub, "pnpm"), filepath.Join(isolated, "pnpm")); err != nil {
 		t.Fatal(err)
 	}
 	f.mustRun(t, "PATH="+isolated)

@@ -279,8 +279,8 @@ func TestSecurityWorkflowPinsExternalActions(t *testing.T) {
 			t.Errorf("%s: external action is not pinned to a full commit SHA: %s", step.where(), step.uses)
 		}
 	}
-	if len(steps) != 9 {
-		t.Fatalf("external action uses = %d, want 9", len(steps))
+	if len(steps) != 10 {
+		t.Fatalf("external action uses = %d, want 10", len(steps))
 	}
 }
 

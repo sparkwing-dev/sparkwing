@@ -66,15 +66,16 @@ jobs:
       - name: Capture the immutable source commit
         run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
 
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dashboard dependencies
         if: matrix.gate == 'gate'
-        run: npm ci --ignore-scripts --prefix web
+        run: pnpm install --frozen-lockfile --ignore-scripts --dir web
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
