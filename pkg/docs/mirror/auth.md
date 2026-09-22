@@ -669,23 +669,28 @@ registers `DELETE /api/v1/runs/{id}` at `admin`: the signed-in account must
 carry it, or, without `--require-login`, the web pod's token. Without it the
 dashboard button reports `delete needs the admin scope` and nothing is removed.
 
-### Google sign-in
+### Google and GitHub sign-in
 
-When the controller's `GET /api/v1/capabilities` reports `teams.enabled` and
-lists `google` under `auth.providers`, the sign-in page offers "Sign in with
-Google". The flow runs through the dashboard host: `GET /auth/google/start`
-asks the controller for an authorize URL, a state and a PKCE verifier, keeps
-the state and verifier in a ten-minute `__Host-sw_oauth` cookie (`Secure`,
-`HttpOnly`, `SameSite=Lax`, `Path=/`), and redirects to Google. Google returns
-to `GET /auth/google/callback`, which refuses a callback whose `state` does
-not match that cookie, then has the controller exchange the code and sets the
-dashboard session cookies. Register
-`https://<dashboard-host>/auth/google/callback` as the OAuth client's redirect
-URI; the scheme follows the same TLS evidence as the CSRF origin check, so a
-dashboard behind a TLS-terminating proxy needs `--trusted-proxy-cidrs` or
-`--hsts`. The host is the one the browser used, so a local dashboard reached
-as `http://localhost:4343` uses `http://localhost:4343/auth/google/callback`,
-and reaching it as `127.0.0.1` sends a redirect URI Google does not recognize.
+When the controller's `GET /api/v1/capabilities` reports `teams.enabled`, the
+sign-in page offers "Sign in with Google" when `auth.providers` lists `google`
+and "Sign in with GitHub" when it lists `github`, above the password form. Each
+flow runs through the dashboard host: `GET /auth/<provider>/start` asks the
+controller's `POST /api/v1/auth/oauth/<provider>/start` for an authorize URL, a
+state and a PKCE verifier, keeps the provider, state and verifier in a
+ten-minute `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`,
+`Path=/`), and redirects to the provider. The provider returns to
+`GET /auth/<provider>/callback`, which refuses a callback whose `state` does not
+match that cookie or whose provider is not the one the flow started with, then
+has the controller exchange the code and sets the dashboard session cookies.
+Any other provider name answers `404`.
+
+Register `https://<dashboard-host>/auth/<provider>/callback` as the OAuth
+client's redirect URI (the authorization callback URL on GitHub). The scheme
+follows the same TLS evidence as the CSRF origin check, so a dashboard behind a
+TLS-terminating proxy needs `--trusted-proxy-cidrs` or `--hsts`. The host is the
+one the browser used, so a local dashboard reached as `http://localhost:4343`
+uses `http://localhost:4343/auth/google/callback`, and reaching it as
+`127.0.0.1` sends a redirect URI the provider does not recognize.
 
 `sparkwing-web --require-login` needs a controller session backend. Pass
 `--controller URL`, or select a `--profile` whose `controller.url` is set. A

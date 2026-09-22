@@ -56,17 +56,21 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"teams": map[string]bool{"enabled": true},
-			"auth":  map[string][]string{"providers": {"google"}},
+			"auth":  map[string][]string{"providers": {"google", "github"}},
 		})
 	case "/api/v1/auth/bootstrap-needed":
 		_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
-	case "/api/v1/auth/oauth/google/start":
-		c.starts = append(c.starts, decode())
+	case "/api/v1/auth/oauth/google/start", "/api/v1/auth/oauth/github/start":
+		body := decode()
+		body["path"] = r.URL.Path
+		c.starts = append(c.starts, body)
 		_ = json.NewEncoder(w).Encode(oauthStartResp{
 			AuthorizeURL: fakeAuthorizeURL, State: fakeOAuthState, Verifier: fakeVerifier,
 		})
-	case "/api/v1/auth/oauth/google/exchange":
-		c.exchanges = append(c.exchanges, decode())
+	case "/api/v1/auth/oauth/google/exchange", "/api/v1/auth/oauth/github/exchange":
+		body := decode()
+		body["path"] = r.URL.Path
+		c.exchanges = append(c.exchanges, body)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"session_id":  "google-session",
 			"user":        map[string]string{"id": "u1", "email": "ada@example.com", "name": "Ada"},
@@ -104,7 +108,11 @@ func teamDashboard(t *testing.T, controllerURL string) http.Handler {
 }
 
 func flowCookieValue(state, verifier, next string) string {
-	raw, _ := json.Marshal(oauthFlow{State: state, Verifier: verifier, Next: next})
+	return providerFlowCookie("google", state, verifier, next)
+}
+
+func providerFlowCookie(provider, state, verifier, next string) string {
+	raw, _ := json.Marshal(oauthFlow{Provider: provider, State: state, Verifier: verifier, Next: next})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
@@ -167,8 +175,10 @@ func TestGoogleStartOnLocalhostUsesThePlainHTTPCallback(t *testing.T) {
 	}
 }
 
-func googleCallback(handler http.Handler, query, flowCookie string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/auth/google/callback?"+query, nil)
+var testProviders = []string{"google", "github"}
+
+func oauthCallback(handler http.Handler, provider, query, flowCookie string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/auth/"+provider+"/callback?"+query, nil)
 	if flowCookie != "" {
 		req.AddCookie(&http.Cookie{Name: "__Host-sw_oauth", Value: flowCookie})
 	}
@@ -177,95 +187,158 @@ func googleCallback(handler http.Handler, query, flowCookie string) *httptest.Re
 	return rec
 }
 
-func TestGoogleCallbackRefusesAMissingFlowCookie(t *testing.T) {
+func TestOAuthStartAsksTheNamedProvider(t *testing.T) {
 	t.Parallel()
-	ctrl := newIdentityController(t, true)
-	rec := googleCallback(teamDashboard(t, ctrl.URL), "code=attacker-code&state="+fakeOAuthState, "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("callback without flow cookie = %d, want 400", rec.Code)
-	}
-	if findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
-		t.Fatal("callback without flow cookie set a session cookie")
-	}
-	if _, exchanges, _, _ := ctrl.snapshot(); len(exchanges) != 0 {
-		t.Fatalf("callback without flow cookie reached the controller exchange: %v", exchanges)
+	for _, provider := range testProviders {
+		ctrl := newIdentityController(t, true)
+		rec := httptest.NewRecorder()
+		teamDashboard(t, ctrl.URL).ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+			"https://dashboard.example/auth/"+provider+"/start", nil))
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("%s start = %d, want 303", provider, rec.Code)
+		}
+		flow := findCookie(rec.Result().Cookies(), "__Host-sw_oauth")
+		if flow == nil || flow.Value != providerFlowCookie(provider, fakeOAuthState, fakeVerifier, "/") {
+			t.Errorf("%s flow cookie = %+v, want it bound to %s", provider, flow, provider)
+		}
+		starts, _, _, _ := ctrl.snapshot()
+		if len(starts) != 1 || starts[0]["path"] != "/api/v1/auth/oauth/"+provider+"/start" ||
+			starts[0]["redirect_uri"] != "https://dashboard.example/auth/"+provider+"/callback" {
+			t.Errorf("%s controller starts = %v", provider, starts)
+		}
 	}
 }
 
-func TestGoogleCallbackRefusesAStateThisBrowserDidNotStart(t *testing.T) {
+func TestOAuthRoutesRefuseAnUnknownProvider(t *testing.T) {
 	t.Parallel()
 	ctrl := newIdentityController(t, true)
-	cookie := flowCookieValue(fakeOAuthState, fakeVerifier, "/")
-	for _, query := range []string{
-		"code=attacker-code&state=attacker-state",
-		"code=attacker-code&state=",
-		"code=attacker-code",
-		"code=attacker-code&state=" + fakeOAuthState + "x",
-	} {
-		rec := googleCallback(teamDashboard(t, ctrl.URL), query, cookie)
+	handler := teamDashboard(t, ctrl.URL)
+	for _, path := range []string{"/auth/gitlab/start", "/auth/gitlab/callback?code=c&state=" + fakeOAuthState} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://dashboard.example"+path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, rec.Code)
+		}
+	}
+	if starts, exchanges, _, _ := ctrl.snapshot(); len(starts)+len(exchanges) != 0 {
+		t.Fatalf("an unknown provider reached the controller: %v %v", starts, exchanges)
+	}
+}
+
+func TestOAuthCallbackRefusesAMissingFlowCookie(t *testing.T) {
+	t.Parallel()
+	for _, provider := range testProviders {
+		ctrl := newIdentityController(t, true)
+		rec := oauthCallback(teamDashboard(t, ctrl.URL), provider, "code=attacker-code&state="+fakeOAuthState, "")
 		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("callback %q = %d, want 400", query, rec.Code)
+			t.Fatalf("%s callback without flow cookie = %d, want 400", provider, rec.Code)
 		}
 		if findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
-			t.Fatalf("callback %q set a session cookie", query)
+			t.Fatalf("%s callback without flow cookie set a session cookie", provider)
 		}
-		if c := findCookie(rec.Result().Cookies(), "__Host-sw_oauth"); c != nil {
-			t.Fatalf("callback %q discarded the flow cookie this browser is midway through", query)
+		if _, exchanges, _, _ := ctrl.snapshot(); len(exchanges) != 0 {
+			t.Fatalf("%s callback without flow cookie reached the controller exchange: %v", provider, exchanges)
 		}
+	}
+}
+
+func TestOAuthCallbackRefusesAStateThisBrowserDidNotStart(t *testing.T) {
+	t.Parallel()
+	for _, provider := range testProviders {
+		ctrl := newIdentityController(t, true)
+		cookie := providerFlowCookie(provider, fakeOAuthState, fakeVerifier, "/")
+		for _, query := range []string{
+			"code=attacker-code&state=attacker-state",
+			"code=attacker-code&state=",
+			"code=attacker-code",
+			"code=attacker-code&state=" + fakeOAuthState + "x",
+		} {
+			rec := oauthCallback(teamDashboard(t, ctrl.URL), provider, query, cookie)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s callback %q = %d, want 400", provider, query, rec.Code)
+			}
+			if findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
+				t.Fatalf("%s callback %q set a session cookie", provider, query)
+			}
+			if c := findCookie(rec.Result().Cookies(), "__Host-sw_oauth"); c != nil {
+				t.Fatalf("%s callback %q discarded the flow cookie this browser is midway through", provider, query)
+			}
+		}
+		if _, exchanges, _, _ := ctrl.snapshot(); len(exchanges) != 0 {
+			t.Fatalf("forged %s callbacks reached the controller exchange: %v", provider, exchanges)
+		}
+	}
+}
+
+func TestOAuthCallbackRefusesAFlowStartedWithAnotherProvider(t *testing.T) {
+	t.Parallel()
+	ctrl := newIdentityController(t, true)
+	rec := oauthCallback(teamDashboard(t, ctrl.URL), "github",
+		"code=real-code&state="+fakeOAuthState, providerFlowCookie("google", fakeOAuthState, fakeVerifier, "/"))
+	if rec.Code != http.StatusBadRequest || findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
+		t.Fatalf("github callback on a google flow = %d, want 400 and no session", rec.Code)
 	}
 	if _, exchanges, _, _ := ctrl.snapshot(); len(exchanges) != 0 {
-		t.Fatalf("forged callbacks reached the controller exchange: %v", exchanges)
+		t.Fatalf("cross-provider callback reached the controller exchange: %v", exchanges)
 	}
 }
 
-func TestGoogleCallbackExchangesAndSignsIn(t *testing.T) {
+func TestOAuthCallbackExchangesAndSignsIn(t *testing.T) {
 	t.Parallel()
-	ctrl := newIdentityController(t, true)
-	rec := googleCallback(teamDashboard(t, ctrl.URL),
-		"code=real-code&state="+fakeOAuthState, flowCookieValue(fakeOAuthState, fakeVerifier, "/crons"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("callback = %d, want 200 interstitial: %s", rec.Code, rec.Body)
-	}
-	if !strings.Contains(rec.Body.String(), `content="0;url=/crons"`) {
-		t.Errorf("interstitial does not move on to next: %s", rec.Body)
-	}
-	cookies := rec.Result().Cookies()
-	sess := findCookie(cookies, sessionCookieName)
-	if sess == nil || sess.Value != "google-session" || !sess.HttpOnly || !sess.Secure {
-		t.Fatalf("session cookie = %+v, want the exchanged session, HttpOnly and Secure", sess)
-	}
-	if csrf := findCookie(cookies, csrfCookieName); csrf == nil || csrf.Value != "csrf-google-session" {
-		t.Errorf("csrf cookie = %+v, want the session's own token", csrf)
-	}
-	if flow := findCookie(cookies, "__Host-sw_oauth"); flow == nil || flow.MaxAge >= 0 {
-		t.Errorf("flow cookie = %+v, want it spent", flow)
-	}
-	_, exchanges, _, _ := ctrl.snapshot()
-	want := map[string]string{
-		"code": "real-code", "verifier": fakeVerifier,
-		"redirect_uri": "https://dashboard.example/auth/google/callback",
-	}
-	if len(exchanges) != 1 {
-		t.Fatalf("exchanges = %v, want one", exchanges)
-	}
-	for k, v := range want {
-		if exchanges[0][k] != v {
-			t.Errorf("exchange %s = %q, want %q", k, exchanges[0][k], v)
+	for _, provider := range testProviders {
+		ctrl := newIdentityController(t, true)
+		rec := oauthCallback(teamDashboard(t, ctrl.URL), provider,
+			"code=real-code&state="+fakeOAuthState, providerFlowCookie(provider, fakeOAuthState, fakeVerifier, "/crons"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s callback = %d, want 200 interstitial: %s", provider, rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), `content="0;url=/crons"`) {
+			t.Errorf("%s interstitial does not move on to next: %s", provider, rec.Body)
+		}
+		cookies := rec.Result().Cookies()
+		sess := findCookie(cookies, sessionCookieName)
+		if sess == nil || sess.Value != "google-session" || !sess.HttpOnly || !sess.Secure {
+			t.Fatalf("%s session cookie = %+v, want the exchanged session, HttpOnly and Secure", provider, sess)
+		}
+		if csrf := findCookie(cookies, csrfCookieName); csrf == nil || csrf.Value != "csrf-google-session" {
+			t.Errorf("%s csrf cookie = %+v, want the session's own token", provider, csrf)
+		}
+		if flow := findCookie(cookies, "__Host-sw_oauth"); flow == nil || flow.MaxAge >= 0 {
+			t.Errorf("%s flow cookie = %+v, want it spent", provider, flow)
+		}
+		_, exchanges, _, _ := ctrl.snapshot()
+		want := map[string]string{
+			"path": "/api/v1/auth/oauth/" + provider + "/exchange",
+			"code": "real-code", "verifier": fakeVerifier,
+			"redirect_uri": "https://dashboard.example/auth/" + provider + "/callback",
+		}
+		if len(exchanges) != 1 {
+			t.Fatalf("%s exchanges = %v, want one", provider, exchanges)
+		}
+		for k, v := range want {
+			if exchanges[0][k] != v {
+				t.Errorf("%s exchange %s = %q, want %q", provider, k, exchanges[0][k], v)
+			}
 		}
 	}
 }
 
-func TestGoogleCallbackReportsAProviderRefusal(t *testing.T) {
+func TestOAuthCallbackReportsAProviderRefusal(t *testing.T) {
 	t.Parallel()
-	ctrl := newIdentityController(t, true)
-	rec := googleCallback(teamDashboard(t, ctrl.URL),
-		"error=access_denied&state="+fakeOAuthState, flowCookieValue(fakeOAuthState, fakeVerifier, "/"))
-	if rec.Code != http.StatusUnauthorized || findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
-		t.Fatalf("provider refusal = %d, want 401 and no session", rec.Code)
+	for provider, label := range map[string]string{"google": "Google", "github": "GitHub"} {
+		ctrl := newIdentityController(t, true)
+		rec := oauthCallback(teamDashboard(t, ctrl.URL), provider,
+			"error=access_denied&state="+fakeOAuthState, providerFlowCookie(provider, fakeOAuthState, fakeVerifier, "/"))
+		if rec.Code != http.StatusUnauthorized || findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
+			t.Fatalf("%s refusal = %d, want 401 and no session", provider, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), label+" sign-in was not completed.") {
+			t.Errorf("%s refusal does not name the provider: %s", provider, rec.Body)
+		}
 	}
 }
 
-func TestLoginPageOffersGoogleOnlyWhenTheControllerDoes(t *testing.T) {
+func TestLoginPageOffersOnlyTheProvidersTheControllerDoes(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name  string
@@ -276,14 +349,39 @@ func TestLoginPageOffersGoogleOnlyWhenTheControllerDoes(t *testing.T) {
 			rec := httptest.NewRecorder()
 			teamDashboard(t, ctrl.URL).ServeHTTP(rec,
 				httptest.NewRequest(http.MethodGet, "https://dashboard.example/login?next=%2Fruns", nil))
-			offered := strings.Contains(rec.Body.String(), "Sign in with Google")
-			if offered != tc.teams {
-				t.Fatalf("Google button shown = %v, want %v", offered, tc.teams)
-			}
-			if tc.teams && !strings.Contains(rec.Body.String(), `href="/auth/google/start?next=%2fruns"`) {
-				t.Errorf("Google button does not carry next: %s", rec.Body)
+			body := rec.Body.String()
+			for _, want := range []string{
+				"Sign in with Google", "Sign in with GitHub", "or use a password",
+				`href="/auth/google/start?next=%2fruns"`, `href="/auth/github/start?next=%2fruns"`,
+			} {
+				if strings.Contains(body, want) != tc.teams {
+					t.Errorf("login page carries %q = %v, want %v", want, !tc.teams, tc.teams)
+				}
 			}
 		})
+	}
+}
+
+func TestLoginPageOffersGitHubAloneWhenGoogleIsNotConfigured(t *testing.T) {
+	t.Parallel()
+	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"teams": map[string]bool{"enabled": true},
+				"auth":  map[string][]string{"providers": {"github"}},
+			})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
+		}
+	}))
+	t.Cleanup(ctrl.Close)
+	rec := httptest.NewRecorder()
+	teamDashboard(t, ctrl.URL).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://dashboard.example/login", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "Sign in with GitHub") || strings.Contains(body, "Sign in with Google") ||
+		!strings.Contains(body, "or use a password") {
+		t.Fatalf("login page with only github offered: %s", body)
 	}
 }
 
@@ -385,8 +483,8 @@ func TestCapabilitiesCarryTheControllersTeamsAndProviders(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&caps); err != nil {
 		t.Fatal(err)
 	}
-	if caps.Teams == nil || !caps.Teams.Enabled || caps.Auth == nil || len(caps.Auth.Providers) != 1 || caps.Auth.Providers[0] != "google" {
-		t.Fatalf("capabilities = %+v, want teams enabled and google offered", caps)
+	if caps.Teams == nil || !caps.Teams.Enabled || caps.Auth == nil || len(caps.Auth.Providers) != 2 || caps.Auth.Providers[0] != "google" || caps.Auth.Providers[1] != "github" {
+		t.Fatalf("capabilities = %+v, want teams enabled and google and github offered", caps)
 	}
 
 	local := httptest.NewRecorder()
