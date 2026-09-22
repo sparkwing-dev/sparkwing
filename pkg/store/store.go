@@ -3655,6 +3655,17 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
 
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
+}
+
+// UpdatePlanSnapshot records the plan of one of t's runs. The trigger fence a
+// runner's request carries is checked in t's team, so an orchestrator of any
+// team can record the plan of the run it holds.
+func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	return t.s.updatePlanSnapshot(ctx, t.team, runID, snapshot)
+}
+
+func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string, snapshot []byte) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -3663,16 +3674,18 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(snapshot)
 	planHash := "sha256:" + hex.EncodeToString(sum[:])
-	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (run_id, plan_hash)
-SELECT id, ? FROM runs WHERE id = ? ON CONFLICT(run_id) DO NOTHING`, planHash, runID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (team, run_id, plan_hash)
+SELECT team, id, ? FROM runs WHERE team = ? AND id = ?
+ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
+ WHERE run_definition_plans.team = excluded.team`, planHash, string(team), runID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
+	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE team = ? AND id = ?`, snapshot, string(team), runID)
 	if err != nil {
 		return err
 	}

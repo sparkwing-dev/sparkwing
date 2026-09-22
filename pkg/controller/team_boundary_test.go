@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -529,6 +530,68 @@ func TestTeamBoundary_AClaimWhoseCredentialNamesNoTeamIsRefused(t *testing.T) {
 			if code != http.StatusForbidden || !strings.Contains(body, "claim_no_team") {
 				t.Errorf("POST %s with a teamless credential = %d want 403 claim_no_team: %s", path, code, body)
 			}
+		}
+	})
+}
+
+// A runner of a team other than default claims its team's trigger and carries
+// the run to the end under that claim: the plan, the heartbeat and the finish
+// are each fenced by the trigger claim, checked in the run's own team.
+func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) {
+	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		ctx := context.Background()
+		now := time.Now()
+		const runB = "run-team-b"
+		if err := f.teamB.CreateTriggerWithRun(ctx,
+			store.Trigger{ID: runB, Pipeline: "build-b", TriggerSource: "api", CreatedAt: now},
+			store.Run{ID: runB, Pipeline: "build-b", Status: "pending", CreatedAt: now, StartedAt: now},
+		); err != nil {
+			t.Fatal(err)
+		}
+		code, body := f.do("POST", "/api/v1/triggers/claim", f.runnerB, map[string]any{})
+		if code != http.StatusOK {
+			t.Fatalf("claim as team B's runner = %d: %s", code, body)
+		}
+		var claimed store.Trigger
+		if err := json.Unmarshal([]byte(body), &claimed); err != nil || claimed.ID != runB {
+			t.Fatalf("claimed %s, want %s: %v", body, runB, err)
+		}
+		fenced := func(method, path string, payload any) (int, string) {
+			t.Helper()
+			b, _ := json.Marshal(payload)
+			req, err := http.NewRequestWithContext(ctx, method, f.url+path, bytes.NewReader(b))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", f.runnerB)
+			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			raw, _ := io.ReadAll(resp.Body)
+			return resp.StatusCode, string(raw)
+		}
+		for _, step := range []struct {
+			path    string
+			payload any
+		}{
+			{"/api/v1/runs/" + runB + "/plan", map[string]any{"nodes": []any{}}},
+			{"/api/v1/runs/" + runB + "/heartbeat", map[string]any{}},
+			{"/api/v1/runs/" + runB + "/finish", map[string]any{"status": "success"}},
+		} {
+			if code, body := fenced("POST", step.path, step.payload); code/100 != 2 {
+				t.Errorf("POST %s under team B's trigger claim = %d: %s", step.path, code, body)
+			}
+		}
+		run, err := f.teamB.GetRun(ctx, runB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status != "success" {
+			t.Errorf("team B's run finished as %q, want success", run.Status)
 		}
 	})
 }

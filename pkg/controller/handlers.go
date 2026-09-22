@@ -244,7 +244,11 @@ func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.UpdatePlanSnapshot(r.Context(), runID, snapshot); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.UpdatePlanSnapshot(r.Context(), runID, snapshot); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
