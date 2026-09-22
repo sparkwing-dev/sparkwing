@@ -83,6 +83,9 @@ unlock.
   through the new `Store.CreateRetryWithRun`, rather than in the default
   team, where the team that asked could not see it and the default team's
   runners could claim it.
+- **store:** an assisted executor's offer for another team's node
+  (`OfferExecutorClaim`) is refused as not found before the attestation check,
+  whose refusals would otherwise confirm that the node exists.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

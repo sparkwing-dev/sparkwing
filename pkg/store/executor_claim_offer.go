@@ -572,13 +572,13 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 		offer.ReservationID == "" || offer.ResourceDigest == "" || offer.Slot < 0 {
 		return ExecutorClaimOfferResult{}, errors.New("executor offer requires executor, holder, node, reservation, digest, and slot")
 	}
-	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
+	// safety: the offer names its own node, so the team boundary the
+	// preparation scan drew is redrawn here, and before the attestation check,
+	// whose refusals would tell another team's executor the node exists.
+	if err := s.assertClaimantOwnsNode(ctx, claimant, offer.RunID, offer.NodeID); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
-	// safety: the offer names its own node, so the team boundary the
-	// preparation scan drew has to be redrawn here; an attestation is the
-	// wrong thing to lean on because it proves what the node is, not whose.
-	if err := s.assertClaimantOwnsNode(ctx, claimant, offer.RunID, offer.NodeID); err != nil {
+	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
 	return s.recordExecutorOfferAt(ctx, claimant, offer, now)
