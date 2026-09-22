@@ -106,3 +106,14 @@ SELECT n.run_id, n.node_id, n.ready_at
 		after = page[len(page)-1]
 	}
 }
+
+// TestOnlyMarkNodeReadySealed readies a node under a sealed execution policy,
+// so an external test can drive the production assisted prepare and offer.
+func (s *Store) TestOnlyMarkNodeReadySealed(ctx context.Context, runID, nodeID string) error {
+	policy := testExecutionPolicy()
+	policy.NodeID = nodeID
+	policy.Dependencies = nil
+	policy.SecretNames = nil
+	policy.AllowedLocations = []string{"cloud", "local"}
+	return s.markNodeReadyWithExecutionPolicy(ctx, runID, nodeID, policy)
+}

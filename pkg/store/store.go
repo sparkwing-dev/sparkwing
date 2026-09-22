@@ -3447,7 +3447,7 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, t); err != nil {
+	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
 		return err
 	}
 	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
@@ -4294,7 +4294,13 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, n.RunID); err != nil {
+	// safety: the team comes off the run rather than off the caller, so a node
+	// cannot land in a team its run does not belong to.
+	team, err := creditTeamForRunTx(ctx, tx, n.RunID)
+	if err != nil {
+		return err
+	}
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, n.RunID); err != nil {
 		return err
 	}
 	// safety: this transaction takes the compute-guard key alone; a later edit
@@ -4352,7 +4358,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		bodyRequirementsHash = persisted.BodyRequirementsHash
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_labels,
+INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
 			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
@@ -4360,7 +4366,7 @@ INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_lab
 			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 			       execution_body_requirements_json, execution_body_requirements_hash,
 			       seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
@@ -4371,7 +4377,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
-		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
+		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
 		n.AvoidCoordinatorID, n.RunID,
 		n.AvoidExecutorKind, n.RunID,
@@ -4879,10 +4885,10 @@ func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string)
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at)
-VALUES (?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
+		runID, runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4906,12 +4912,12 @@ func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, statu
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
     finished_at = excluded.finished_at`,
-		runID, nodeID, stepID, status, now, now); err != nil {
+		runID, runID, nodeID, stepID, status, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4931,12 +4937,12 @@ func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
     finished_at = excluded.finished_at`,
-		runID, nodeID, stepID, StepSkipped, now, now); err != nil {
+		runID, runID, nodeID, stepID, StepSkipped, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5003,11 +5009,11 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 	// because the row, not the value, is what this needs.
 	var current []byte
 	if err := tx.QueryRowContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status)
-VALUES (?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status)
+VALUES (`+runTeamSQL+`,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
 RETURNING annotations_json`,
-		runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
+		runID, runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
@@ -5054,10 +5060,10 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status)
-VALUES (?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status)
+VALUES (`+runTeamSQL+`,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning); err != nil {
+		runID, runID, nodeID, stepID, StepRunning); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -5375,6 +5381,11 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // only that token afterwards. Pass the zero value when the caller is
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
+//
+// The claim never crosses teams. The team comes off the claimant's own
+// credential, so a machine holding one team's token cannot see another
+// team's queue at all. A metered credential is no exception, because
+// metering decides who pays and not whose work the claimant may see.
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
 	return s.ClaimNextReadyNodeAs(ctx, claimant, holderID, lease, runnerLabels, ExecutorIdentity{})
 }
@@ -5392,19 +5403,27 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
+	placement, err = s.placementForTeam(ctx, placement, scope.team)
+	if err != nil {
+		return nil, err
+	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm)
+		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm, scope)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.bumpMismatchedNodes(ctx, mismatched); err != nil {
+		if err := s.bumpMismatchedNodes(ctx, scope, mismatched); err != nil {
 			return nil, err
 		}
 		if target == nil {
 			return nil, notFound("ready node", "")
 		}
-		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true)
+		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -5514,11 +5533,11 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter) (*claimCandidate, []nodeKey, error) {
+func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
 	for range claimScanRounds {
-		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm)
+		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -5554,9 +5573,14 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 }
 
 func (s *Store) readClaimCandidates(
-	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter,
+	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter, scope teamScope,
 ) ([]claimCandidate, error) {
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return nil, err
+	}
 	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
+	args = append(args, teamArgs...)
 	// safety: the stamped class keeps a queue of large nodes out of the scan
 	// window, so a small node behind thousands of them is still reachable.
 	classClause := ""
@@ -5576,7 +5600,7 @@ func (s *Store) readClaimCandidates(
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+classClause+keyset+`
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {
@@ -5646,9 +5670,13 @@ func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool
 
 // safety: moves the nodes this runner's labels rule out behind the clock so
 // they do not starve the queue behind them.
-func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
+func (s *Store) bumpMismatchedNodes(ctx context.Context, scope teamScope, keys []nodeKey) error {
 	if len(keys) == 0 {
 		return nil
+	}
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -5656,11 +5684,13 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 	}
 	defer rollbackOrLog(tx)
 	for _, key := range keys {
+		args := []any{time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID}
+		args = append(args, teamArgs...)
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE nodes SET ready_at = `+s.greatest()+`(?, ready_at + ?)
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`,
-			time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID,
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`+teamClause,
+			args...,
 		); err != nil {
 			return err
 		}
@@ -5671,11 +5701,18 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 // safety: returns nil when another runner took the node between the scan and
 // the award, which the caller answers by scanning again.
 func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, claimant ClaimIdentity,
-	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool, scope teamScope,
 ) (*Node, error) {
 	readyClause := ""
 	if queued {
 		readyClause = ` AND ready_at IS NOT NULL`
+	}
+	// safety: the award repeats the scan's team predicate rather than trusting
+	// it, because [Store.ClaimNamedNode] reaches this with a node the caller
+	// named and no scan behind it.
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -5687,6 +5724,11 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	}
 	now := time.Now()
 	expires := now.Add(lease)
+	awardArgs := []any{
+		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
+		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+	}
+	awardArgs = append(awardArgs, teamArgs...)
 	res, err := tx.ExecContext(
 		ctx,
 		`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
@@ -5697,9 +5739,8 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
 		    AND `+nodeNotDone+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
-		    AND `+nodeExecutionUnsealed,
-		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
-		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+		    AND `+nodeExecutionUnsealed+teamClause,
+		awardArgs...,
 	)
 	if err != nil {
 		return nil, err
@@ -6250,7 +6291,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
-	} else if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
 
@@ -6287,8 +6328,8 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO events (run_id, seq, node_id, kind, ts, payload)
-VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, at.UnixNano(), raw)
+INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
 	return seq, err
 }
 
@@ -6338,15 +6379,15 @@ type DebugPause struct {
 // CreateDebugPause inserts (or upserts) an open pause row.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
 	_, err := s.exec(ctx, `
-INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at)
-VALUES (?,?,?,?,?)
+INSERT INTO debug_pauses (team, run_id, node_id, reason, paused_at, expires_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
     paused_at = excluded.paused_at,
     expires_at = excluded.expires_at,
     released_at = NULL,
     released_by = '',
     release_kind = ''`,
-		p.RunID, p.NodeID, p.Reason,
+		p.RunID, p.RunID, p.NodeID, p.Reason,
 		p.PausedAt.UnixNano(), p.ExpiresAt.UnixNano())
 	return err
 }
@@ -6608,13 +6649,15 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, t); err != nil {
+	// safety: the unscoped twin writes [DefaultTeam], the team the migration
+	// put every pre-tenant row in.
+	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
+func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status
@@ -6635,12 +6678,12 @@ func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
 	}
 	_, err := tx.ExecContext(
 		ctx, `
-INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
+INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
 		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
 		              idempotency_key, webhook_delivery, webhook_replay_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
 		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
@@ -7051,9 +7094,17 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 
 // ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics)
 // and records claimant as the token the claim answers to.
+//
+// The claim never crosses teams: the team comes off the claimant's own
+// credential exactly as for [Store.ClaimNextReadyNode], because a claimed
+// trigger is what a runner's whole run, and every secret it reads, rests on.
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7076,8 +7127,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
        WHERE alr.run_id = triggers.id
-         AND source_run.status NOT IN ('success','failed','cancelled'))`
+         AND source_run.status NOT IN ('success','failed','cancelled'))` + teamClause
 	args := []any{triggerStatusPending, now.UnixNano()}
+	args = append(args, teamArgs...)
 	if len(pipelines) > 0 {
 		ph := make([]string, len(pipelines))
 		for i, p := range pipelines {
@@ -7684,10 +7736,16 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 // recorded, so [Store.PrincipalHoldsTriggerClaim] can later prove the
 // claim and the writes it authorizes. A trigger id is the id of the run
 // it creates, so this claim is what the claimant's whole run rests on.
-// ErrNotFound when the trigger is not pending.
+// ErrNotFound when the trigger is not pending, and equally when it belongs
+// to a team the claimant's credential does not, so naming another team's
+// trigger id learns nothing about whether it exists.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7716,8 +7774,8 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		        SELECT 1 FROM agent_loss_retries alr
 		        JOIN runs source_run ON source_run.id = alr.source_run_id
 		        WHERE alr.run_id = triggers.id
-		          AND source_run.status NOT IN ('success','failed','cancelled'))`,
-		append(args, now.UnixNano())...)
+		          AND source_run.status NOT IN ('success','failed','cancelled'))`+teamClause,
+		append(append(args, now.UnixNano()), teamArgs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -8206,8 +8264,8 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO approvals (run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (?,?,?,?,?,?)
+INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id) DO UPDATE SET
     requested_at = excluded.requested_at,
     message      = excluded.message,
@@ -8217,7 +8275,7 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
     resolved_at  = NULL,
     resolution   = '',
     comment      = ''`,
-		a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
+		a.RunID, a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
 		a.Message, a.TimeoutMS, a.OnTimeout); err != nil {
 		return err
 	}

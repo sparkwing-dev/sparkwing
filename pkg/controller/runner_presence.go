@@ -121,7 +121,7 @@ func (r *runnerPresenceRegistry) live(now time.Time, within time.Duration, exclu
 			continue
 		}
 		out = append(out, store.RunnerPresence{
-			Name: key.name, Labels: p.Labels, FreeSlots: p.freeSlots(),
+			Name: key.name, Labels: p.Labels, FreeSlots: p.freeSlots(), TokenPrefix: key.tokenPrefix,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

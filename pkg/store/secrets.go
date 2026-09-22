@@ -206,18 +206,27 @@ func (t *Tenant) DeleteSecret(name, pipeline string) error {
 	return nil
 }
 
-// PipelineForClaimedRun returns the pipeline of runID when claimant
-// holds live work on it: an unexpired claim on one of its nodes, or the
+// ClaimedRun names the team and pipeline of a run a claimant holds live
+// work in. A secret read for that claimant resolves in Team, never in the
+// team of whoever asked, because the run's team is what owns its secrets.
+type ClaimedRun struct {
+	Team     Team
+	Pipeline string
+}
+
+// ClaimedRunFor returns the team and pipeline of runID when claimant holds
+// live work on it: an unexpired claim on one of its nodes, or the
 // unexpired claim on the trigger that created it. ErrNotFound when the
 // claimant holds neither, so a caller cannot name a run it is not
 // executing.
-func (s *Store) PipelineForClaimedRun(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (string, error) {
+func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error) {
 	if !claimant.bound() || runID == "" {
-		return "", ErrNotFound
+		return ClaimedRun{}, ErrNotFound
 	}
-	var pipeline string
+	var run ClaimedRun
+	var team string
 	err := s.queryRow(ctx, `
-        SELECT runs.pipeline
+        SELECT runs.team, runs.pipeline
           FROM runs
          WHERE runs.id = ?
            AND (EXISTS (SELECT 1 FROM nodes
@@ -230,25 +239,26 @@ func (s *Store) PipelineForClaimedRun(ctx context.Context, runID string, claiman
 		                   AND `+triggerClaimLiveSQL("")+`))`,
 		runID,
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
-		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&pipeline)
+		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return ClaimedRun{}, ErrNotFound
 	}
 	if err != nil {
-		return "", err
+		return ClaimedRun{}, err
 	}
-	return pipeline, nil
+	run.Team = Team(team)
+	return run, nil
 }
 
-// PipelinesForClaimant returns the distinct pipelines of the runs
+// ClaimedRunsFor returns the distinct team and pipeline pairs of the runs
 // claimant currently holds work in, through node claims or trigger
 // claims. Empty when it holds none.
-func (s *Store) PipelinesForClaimant(ctx context.Context, claimant ClaimIdentity, now time.Time) ([]string, error) {
+func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now time.Time) (_ []ClaimedRun, err error) {
 	if !claimant.bound() {
 		return nil, nil
 	}
 	rows, err := s.query(ctx, `
-        SELECT DISTINCT runs.pipeline
+        SELECT DISTINCT runs.team, runs.pipeline
           FROM runs
          WHERE EXISTS (SELECT 1 FROM nodes
                         WHERE nodes.run_id = runs.id
@@ -263,14 +273,16 @@ func (s *Store) PipelinesForClaimant(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []string
+	defer closeRowsInto(rows, &err)
+	var out []ClaimedRun
 	for rows.Next() {
-		var pipeline string
-		if err := rows.Scan(&pipeline); err != nil {
+		var run ClaimedRun
+		var team string
+		if err := rows.Scan(&team, &run.Pipeline); err != nil {
 			return nil, err
 		}
-		out = append(out, pipeline)
+		run.Team = Team(team)
+		out = append(out, run)
 	}
 	return out, rows.Err()
 }

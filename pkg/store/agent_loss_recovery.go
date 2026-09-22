@@ -453,12 +453,14 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	if first.executorID != "" {
 		retryAvoidUntil = now.Add(agentLossAvoidWindow).UnixNano()
 	}
+	// safety: the retry and its trigger copy the source run's team, because a
+	// retry filed under another team is invisible to whoever lost the agent.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runs
-    (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json,
+    (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json,
      created_at, started_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, retry_cause_node_id, retry_avoid_coordinator_id,
      retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, invocation_json)
- SELECT ?, pipeline, ?, ?, git_branch, git_sha, args_json, plan_json,
+ SELECT team, ?, pipeline, ?, ?, git_branch, git_sha, args_json, plan_json,
         ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, ?, ?, ?, ?, ?, invocation_json
    FROM runs WHERE id = ?`, retryID, runStatusPending, triggerSource,
@@ -467,10 +469,10 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 		return "", nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO triggers
-    (id, pipeline, args_json, trigger_source, trigger_user, trigger_env, git_branch, git_sha,
+    (team, id, pipeline, args_json, trigger_source, trigger_user, trigger_env, git_branch, git_sha,
      status, created_at, parent_run_id, repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, "full", available_at)
- SELECT ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
+ SELECT team, ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
         ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, 0, ?
    FROM runs WHERE id = ?`, retryID, triggerSource, provenanceJSON, triggerStatusPending,
@@ -478,8 +480,8 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 		return "", nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_loss_retries
-    (run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, retryID, sourceRunID, rootRunID, causesJSON,
+    (team, run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?)`, retryID, retryID, sourceRunID, rootRunID, causesJSON,
 		availableAt.UnixNano(), deadline.UnixNano(), retryCount); err != nil {
 		return "", nil, nil, err
 	}

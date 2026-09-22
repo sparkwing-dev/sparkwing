@@ -1130,12 +1130,17 @@ SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_
 // ClaimReadyNodeForExecutorWithReservation claims only the named ready node,
 // recomputes its scheduling resource digest, and persists the supplied
 // reservation and slot binding. The offer layer must validate reservation
-// liveness before calling it.
+// liveness before calling it. A node of a team the claimant's credential
+// does not belong to reports not found, as on every other claim path.
 func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error) {
 	if executorName == "" || runID == "" || nodeID == "" || holderID == "" || reservationID == "" || slot < 0 || resourceDigest == "" {
 		return nil, ErrLockHeld
 	}
 	lease = clampNodeLease(lease)
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "team")
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -1144,7 +1149,8 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return nil, err
 	}
-	n, err := s.claimReadyNodeForExecutorTx(ctx, tx, claimant, executorName, runID, nodeID, holderID, lease, reservationID, slot, resourceDigest)
+	n, err := s.claimReadyNodeForExecutorTx(ctx, tx, claimant, executorName, runID, nodeID, holderID, lease,
+		reservationID, slot, resourceDigest, teamClause, teamArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -1154,11 +1160,14 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 	return n, nil
 }
 
-func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error) {
+func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string,
+	teamClause string, teamArgs []any,
+) (*Node, error) {
 	n := &nodeRecord{}
 	err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+tx.forUpdate(), runID, nodeID), n)
+ WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+teamClause+tx.forUpdate(),
+		append([]any{runID, nodeID}, teamArgs...)...), n)
 	if errors.Is(err, ErrNotFound) {
 		return nil, notFound("ready node for executor", "")
 	}

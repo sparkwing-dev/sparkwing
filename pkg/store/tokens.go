@@ -55,8 +55,12 @@ var (
 
 // Token is one row in the tokens table.
 type Token struct {
-	Hash       string
-	Prefix     string
+	Hash   string
+	Prefix string
+	// Team owns the credential. A bearer lookup resolves the team a
+	// request acts for from this, so a token that does not carry its own
+	// team can only ever act for [DefaultTeam].
+	Team       Team
 	Principal  string
 	Kind       string
 	Scopes     []string
@@ -123,7 +127,10 @@ func (s *Store) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
 ) (string, *Token, error) {
 	for attempt := 1; ; attempt++ {
-		raw, tok, err := createTokenRow(ctx, storeExecer{s: s}, principal, kind, scopes, ttl, now, opts)
+		// safety: the unscoped twin mints into [DefaultTeam], because a caller
+		// predating the tenant key has no team to name and a credential filed
+		// under any other team would authenticate nobody.
+		raw, tok, err := createTokenRow(ctx, storeExecer{s: s}, DefaultTeam, principal, kind, scopes, ttl, now, opts)
 		if err == nil {
 			return raw, tok, nil
 		}
@@ -213,7 +220,7 @@ func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []str
 }
 
 func createTokenRow(
-	ctx context.Context, e tokenExecer,
+	ctx context.Context, e tokenExecer, team Team,
 	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 	opts TokenOptions,
 ) (string, *Token, error) {
@@ -225,7 +232,7 @@ func createTokenRow(
 	if err != nil {
 		return "", nil, err
 	}
-	tok, err := insertTokenRow(ctx, e, raw, principal, kind, scopes, ttl, now, opts)
+	tok, err := insertTokenRow(ctx, e, raw, team, principal, kind, scopes, ttl, now, opts)
 	if err != nil {
 		return "", nil, err
 	}
@@ -233,10 +240,13 @@ func createTokenRow(
 }
 
 func insertTokenRow(
-	ctx context.Context, e tokenExecer, raw string,
+	ctx context.Context, e tokenExecer, raw string, team Team,
 	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 	opts TokenOptions,
 ) (*Token, error) {
+	if team == "" {
+		return nil, ErrNoTeam
+	}
 	if principal == "" {
 		return nil, errors.New("tokens: principal is required")
 	}
@@ -258,10 +268,10 @@ func insertTokenRow(
 		metered = 1
 	}
 	if _, err := e.ExecContext(ctx, `
-        INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at, metered)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tokens (team, hash, prefix, principal, kind, scopes, created_at, expires_at, metered)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-		hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
+		string(team), hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
 		now.UTC().Unix(),
 		expiresUnix(expires),
 		metered,
@@ -271,6 +281,7 @@ func insertTokenRow(
 	return &Token{
 		Hash:      hash,
 		Prefix:    raw[:PrefixLen],
+		Team:      team,
 		Principal: principal,
 		Kind:      kind,
 		Scopes:    scoped,
@@ -326,7 +337,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 }
 
 const selectTokensByPrefixSQL = `
-        SELECT hash, prefix, principal, kind, scopes,
+        SELECT team, hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
                COALESCE(replaced_by, ''), metered
           FROM tokens
@@ -358,7 +369,7 @@ func scanTokenRows(rows *sql.Rows) ([]Token, error) {
 		var expiresAt, lastUsedAt, revokedAt sql.NullInt64
 		var created, metered int64
 		if err := rows.Scan(
-			&t.Hash, &t.Prefix, &t.Principal, &t.Kind, &scopes,
+			&t.Team, &t.Hash, &t.Prefix, &t.Principal, &t.Kind, &scopes,
 			&created, &expiresAt, &lastUsedAt, &revokedAt,
 			&t.ReplacedBy, &metered,
 		); err != nil {
@@ -419,7 +430,7 @@ func (s *Store) RevokeToken(prefix string, now time.Time) error {
 // ListTokens returns matching rows. Empty kind = all.
 func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 	q := `
-        SELECT hash, prefix, principal, kind, scopes,
+        SELECT team, hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
                COALESCE(replaced_by, ''), metered
           FROM tokens
@@ -504,7 +515,10 @@ func (s *Store) rotateToken(
 		return "", nil, nil, errors.New("token is already revoked")
 	}
 
-	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
+	// safety: the replacement inherits the original's team; a rotation that
+	// re-minted into [DefaultTeam] would move the credential out of the team
+	// whose work it authorizes.
+	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Team, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
 		TokenOptions{Metered: oldTok.Metered})
 	if err != nil {
 		return "", nil, nil, err

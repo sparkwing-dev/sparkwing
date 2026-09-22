@@ -96,11 +96,13 @@ var ErrNoTeam = errors.New("store: team is required")
 //
 //   - Reapers and sweeps run for the deployment. An expiry sweep that
 //     only reaped one team would leave every other team's leases held.
-//   - Dispatch and claim are cross-team by construction. An executor
-//     enrolls with the deployment and is offered work from every team on
-//     it, so ClaimNextReadyNode, ClaimNextTrigger and the offer and award
-//     path cannot take a team and stay on the operator handle. The team
-//     of the work claimed comes off the row, not off the caller.
+//   - Claims stay on *Store but are never cross-team. ClaimNextReadyNode,
+//     ClaimNamedNode, ClaimNextTriggerFor, ClaimSpecificTriggerFor and the
+//     executor offer and award path take no team argument because the team
+//     comes off the claimant's own token row (claimScope), never off the
+//     caller or the request. A metered token is one team's like any other,
+//     and no credential reads every team's queue. The placement hold counts
+//     only live runners of the claim's team.
 //   - Migration reads and writes every row by definition.
 //
 // tenant_runs.go is the worked example for the scoped half.
@@ -151,6 +153,11 @@ func (t *Tenant) Team() Team { return t.team }
 // handle, because a caller predating the tenant key has no team to offer
 // and the migration put every existing row in this one. It skips the
 // registry read, which the migration's own registration makes redundant.
+// safety: a row that belongs to a run takes the run's team in the statement
+// that writes it, so no caller can hand it another; a row whose run is gone
+// lands where every pre-tenant row did.
+const runTeamSQL = `COALESCE((SELECT team FROM runs WHERE id = ?), '` + string(DefaultTeam) + `')`
+
 func (s *Store) defaultTenant() *Tenant { return &Tenant{s: s, team: DefaultTeam} }
 
 // Operator is the unscoped view of the store. It does not embed *Store,

@@ -36,8 +36,9 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 		retrySource = src.TriggerSource
 	}
 	// safety: the trigger and its pending run are written together, so a guard
-	// that refuses the run leaves no trigger behind for a worker to claim.
-	if err := st.CreateTriggerWithRun(ctx, store.Trigger{
+	// that refuses the run leaves no trigger behind for a worker to claim, and
+	// both land in the source run's team rather than the default one.
+	if err := st.CreateRetryWithRun(ctx, sourceID, store.Trigger{
 		ID:            newID,
 		Pipeline:      src.Pipeline,
 		Args:          src.Args,
