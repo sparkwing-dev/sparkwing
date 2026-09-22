@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -274,5 +276,89 @@ func TestMeteredTokenClaimsOnlyItsOwnTeam(t *testing.T) {
 	}
 	if rest, err := st.ClaimNextReadyNode(ctx, laptop, "acme-laptop", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("after acme's queue drained its flipped token claimed %+v (err %v), want not found", rest, err)
+	}
+}
+
+// Two teams' runners drain their queues at once. Every trigger and node goes
+// to a runner of its own team exactly once, which is the property a skip-locked
+// scan has to keep when the team predicate and the lock meet under contention.
+func TestConcurrentClaimsNeverCrossTeams(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	const perTeam = 6
+	teams := map[store.Team]*store.Tenant{
+		"alpha": tenantFor(t, st, "alpha"),
+		"bravo": tenantFor(t, st, "bravo"),
+	}
+	owner := map[string]store.Team{}
+	for team, tn := range teams {
+		for i := range perTeam {
+			id := fmt.Sprintf("%s-%d", team, i)
+			if err := tn.CreateTrigger(ctx, store.Trigger{ID: "trg-" + id, Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
+				t.Fatalf("CreateTrigger(%s): %v", id, err)
+			}
+			seedTenantRun(t, tn, "run-"+id, "demo")
+			seedReadyNode(t, st, "run-"+id, "build")
+			owner["trg-"+id] = team
+			owner["run-"+id] = team
+		}
+	}
+
+	type result struct {
+		team store.Team
+		id   string
+	}
+	results := make(chan result, 4*perTeam*len(teams))
+	errs := make(chan error, 8*len(teams))
+	var wg sync.WaitGroup
+	for team, tn := range teams {
+		for w := range 4 {
+			runner := mintTeamClaimant(t, tn, fmt.Sprintf("agent:%s-%d", team, w))
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					trig, err := st.ClaimNextTriggerFor(ctx, runner, time.Minute, nil, nil)
+					if errors.Is(err, store.ErrNotFound) {
+						break
+					}
+					if err != nil {
+						errs <- err
+						return
+					}
+					results <- result{team, trig.ID}
+				}
+				for {
+					n, err := st.ClaimNextReadyNode(ctx, runner, runner.Principal, time.Minute, nil)
+					if errors.Is(err, store.ErrNotFound) {
+						return
+					}
+					if err != nil {
+						errs <- err
+						return
+					}
+					results <- result{team, n.RunID}
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		t.Errorf("claim under contention: %v", err)
+	}
+	seen := map[string]bool{}
+	for r := range results {
+		if seen[r.id] {
+			t.Errorf("%s was claimed twice", r.id)
+		}
+		seen[r.id] = true
+		if owner[r.id] != r.team {
+			t.Errorf("a %s runner claimed %s, which belongs to %s", r.team, r.id, owner[r.id])
+		}
+	}
+	if len(seen) != len(owner) {
+		t.Errorf("claimed %d of %d triggers and nodes", len(seen), len(owner))
 	}
 }
