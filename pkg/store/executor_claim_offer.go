@@ -170,8 +170,15 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 		return nil, err
 	}
 	activeAfter := now.Add(-ExecutorRegistrationActiveWindow)
+	// safety: the enrollment's own credential decides the team, and the
+	// credential was matched against the enrollment above, so an executor
+	// cannot be offered a node of a team its token does not belong to.
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
 	cursor := s.loadExecutorPrepareCursor(executorName, runID)
-	page, err := s.loadExecutorPrepareCandidates(ctx, runID, executorName, now, cursor)
+	page, err := s.loadExecutorPrepareCandidates(ctx, runID, executorName, now, cursor, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -301,26 +308,29 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 }
 
 func (s *Store) loadExecutorPrepareCandidates(ctx context.Context, runID, executorName string, now time.Time,
-	cursor executorPrepareCursor,
+	cursor executorPrepareCursor, scope teamScope,
 ) ([]executorPrepareCandidate, error) {
 	if cursor == (executorPrepareCursor{}) {
 		return s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
-			executorPrepareFromStart, cursor, executorPrepareCandidateLimit)
+			executorPrepareFromStart, cursor, executorPrepareCandidateLimit, scope)
 	}
 	page, err := s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
-		executorPrepareAfterCursor, cursor, executorPrepareCandidateLimit)
+		executorPrepareAfterCursor, cursor, executorPrepareCandidateLimit, scope)
 	if err != nil || len(page) == executorPrepareCandidateLimit {
 		return page, err
 	}
 	wrapped, err := s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
-		executorPrepareThroughCursor, cursor, executorPrepareCandidateLimit-len(page))
+		executorPrepareThroughCursor, cursor, executorPrepareCandidateLimit-len(page), scope)
 	return append(page, wrapped...), err
 }
 
 func (s *Store) loadExecutorPrepareCandidateRange(ctx context.Context, runID, executorName string, now time.Time,
-	rangeKind executorPrepareRange, cursor executorPrepareCursor, limit int,
+	rangeKind executorPrepareRange, cursor executorPrepareCursor, limit int, scope teamScope,
 ) ([]executorPrepareCandidate, error) {
-	query, args := executorPrepareCandidateQuery(runID, executorName, now, rangeKind, cursor, limit)
+	query, args, err := executorPrepareCandidateQuery(runID, executorName, now, rangeKind, cursor, limit, scope)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -346,8 +356,12 @@ func (s *Store) loadExecutorPrepareCandidateRange(ctx context.Context, runID, ex
 }
 
 func executorPrepareCandidateQuery(runID, executorName string, now time.Time, rangeKind executorPrepareRange,
-	cursor executorPrepareCursor, limit int,
-) (string, []any) {
+	cursor executorPrepareCursor, limit int, scope teamScope,
+) (string, []any, error) {
+	teamClause, teamArgs, err := claimTeamWhere(scope, "n.team")
+	if err != nil {
+		return "", nil, err
+	}
 	cursorPredicate := ""
 	args := []any{
 		executionpolicy.NodeExecutionPolicyVersion, executionpolicy.MaxEncodedPolicyBytes,
@@ -355,6 +369,7 @@ func executorPrepareCandidateQuery(runID, executorName string, now time.Time, ra
 		executorPrepareNeedsJSONMaxSize,
 		runID, runID, executorName, now.Add(-executorOfferLiveness).UnixNano(),
 	}
+	args = append(args, teamArgs...)
 	switch rangeKind {
 	case executorPrepareAfterCursor:
 		cursorPredicate = `
@@ -395,9 +410,9 @@ SELECT n.run_id, n.node_id, n.ready_at, n.needs_labels,
 	       SELECT 1 FROM node_claim_offers o
 	        WHERE o.run_id = n.run_id AND o.node_id = n.node_id
 	          AND o.executor_name = ? AND o.last_seen_at >= ?)
-	` + cursorPredicate + `
+	` + teamClause + cursorPredicate + `
 	ORDER BY n.ready_at, n.run_id, n.node_id
-	LIMIT ?`, args
+	LIMIT ?`, args, nil
 }
 
 func isExecutorRuntimeRefusal(err error) bool {
@@ -558,6 +573,12 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 		return ExecutorClaimOfferResult{}, errors.New("executor offer requires executor, holder, node, reservation, digest, and slot")
 	}
 	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
+	// safety: the offer names its own node, so the team boundary the
+	// preparation scan drew has to be redrawn here; an attestation is the
+	// wrong thing to lean on because it proves what the node is, not whose.
+	if err := s.assertClaimantOwnsNode(ctx, claimant, offer.RunID, offer.NodeID); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
 	return s.recordExecutorOfferAt(ctx, claimant, offer, now)

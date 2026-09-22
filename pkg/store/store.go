@@ -5385,6 +5385,11 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // only that token afterwards. Pass the zero value when the caller is
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
+//
+// The claim never crosses teams. The team comes off the claimant's own
+// credential, so a machine holding one team's token cannot see another
+// team's queue at all. A metered credential is no exception, because
+// metering decides who pays and not whose work the claimant may see.
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
 	return s.ClaimNextReadyNodeAs(ctx, claimant, holderID, lease, runnerLabels, ExecutorIdentity{})
 }
@@ -5402,19 +5407,27 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
+	placement, err = s.placementForTeam(ctx, placement, scope.team)
+	if err != nil {
+		return nil, err
+	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm)
+		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm, scope)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.bumpMismatchedNodes(ctx, mismatched); err != nil {
+		if err := s.bumpMismatchedNodes(ctx, scope, mismatched); err != nil {
 			return nil, err
 		}
 		if target == nil {
 			return nil, notFound("ready node", "")
 		}
-		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true)
+		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -5524,11 +5537,11 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter) (*claimCandidate, []nodeKey, error) {
+func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
 	for range claimScanRounds {
-		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm)
+		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -5564,9 +5577,14 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 }
 
 func (s *Store) readClaimCandidates(
-	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter,
+	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter, scope teamScope,
 ) ([]claimCandidate, error) {
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return nil, err
+	}
 	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
+	args = append(args, teamArgs...)
 	// safety: the stamped class keeps a queue of large nodes out of the scan
 	// window, so a small node behind thousands of them is still reachable.
 	classClause := ""
@@ -5586,7 +5604,7 @@ func (s *Store) readClaimCandidates(
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+classClause+keyset+`
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {
@@ -5656,9 +5674,13 @@ func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool
 
 // safety: moves the nodes this runner's labels rule out behind the clock so
 // they do not starve the queue behind them.
-func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
+func (s *Store) bumpMismatchedNodes(ctx context.Context, scope teamScope, keys []nodeKey) error {
 	if len(keys) == 0 {
 		return nil
+	}
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -5666,11 +5688,13 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 	}
 	defer rollbackOrLog(tx)
 	for _, key := range keys {
+		args := []any{time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID}
+		args = append(args, teamArgs...)
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE nodes SET ready_at = `+s.greatest()+`(?, ready_at + ?)
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`,
-			time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID,
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`+teamClause,
+			args...,
 		); err != nil {
 			return err
 		}
@@ -5681,11 +5705,18 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 // safety: returns nil when another runner took the node between the scan and
 // the award, which the caller answers by scanning again.
 func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, claimant ClaimIdentity,
-	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool, scope teamScope,
 ) (*Node, error) {
 	readyClause := ""
 	if queued {
 		readyClause = ` AND ready_at IS NOT NULL`
+	}
+	// safety: the award repeats the scan's team predicate rather than trusting
+	// it, because [Store.ClaimNamedNode] reaches this with a node the caller
+	// named and no scan behind it.
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -5697,6 +5728,11 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	}
 	now := time.Now()
 	expires := now.Add(lease)
+	awardArgs := []any{
+		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
+		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+	}
+	awardArgs = append(awardArgs, teamArgs...)
 	res, err := tx.ExecContext(
 		ctx,
 		`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
@@ -5707,9 +5743,8 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
 		    AND `+nodeNotDone+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
-		    AND `+nodeExecutionUnsealed,
-		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
-		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+		    AND `+nodeExecutionUnsealed+teamClause,
+		awardArgs...,
 	)
 	if err != nil {
 		return nil, err
@@ -7063,9 +7098,17 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 
 // ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics)
 // and records claimant as the token the claim answers to.
+//
+// The claim never crosses teams: the team comes off the claimant's own
+// credential exactly as for [Store.ClaimNextReadyNode], because a claimed
+// trigger is what a runner's whole run, and every secret it reads, rests on.
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7088,8 +7131,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
        WHERE alr.run_id = triggers.id
-         AND source_run.status NOT IN ('success','failed','cancelled'))`
+         AND source_run.status NOT IN ('success','failed','cancelled'))` + teamClause
 	args := []any{triggerStatusPending, now.UnixNano()}
+	args = append(args, teamArgs...)
 	if len(pipelines) > 0 {
 		ph := make([]string, len(pipelines))
 		for i, p := range pipelines {
@@ -7696,10 +7740,16 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 // recorded, so [Store.PrincipalHoldsTriggerClaim] can later prove the
 // claim and the writes it authorizes. A trigger id is the id of the run
 // it creates, so this claim is what the claimant's whole run rests on.
-// ErrNotFound when the trigger is not pending.
+// ErrNotFound when the trigger is not pending, and equally when it belongs
+// to a team the claimant's credential does not, so naming another team's
+// trigger id learns nothing about whether it exists.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7728,8 +7778,8 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		        SELECT 1 FROM agent_loss_retries alr
 		        JOIN runs source_run ON source_run.id = alr.source_run_id
 		        WHERE alr.run_id = triggers.id
-		          AND source_run.status NOT IN ('success','failed','cancelled'))`,
-		append(args, now.UnixNano())...)
+		          AND source_run.status NOT IN ('success','failed','cancelled'))`+teamClause,
+		append(append(args, now.UnixNano()), teamArgs...)...)
 	if err != nil {
 		return nil, err
 	}

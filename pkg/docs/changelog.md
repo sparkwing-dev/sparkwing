@@ -82,6 +82,23 @@ unlock.
   carries a `Team` field that a bearer lookup reads back, so a request can
   resolve which team its credential acts for. The `*Store` twins still write
   the `default` team, so a single-tenant install is unchanged.
+- **store:** a claim never crosses teams. The team a machine may take work for
+  comes off its own credential rather than off the request, so a laptop holding
+  one team's token cannot see, name or take another team's node. The queue scan
+  (`ClaimNextReadyNode`), the named claim (`ClaimNamedNode`), the assisted
+  offer path (`PrepareNextExecutorClaim`, `OfferExecutorClaim`) and both
+  trigger claims (`ClaimNextTriggerFor`, `ClaimSpecificTriggerFor`) all carry
+  the predicate, and a named node or trigger of another team reports
+  `ErrNotFound` rather than held, so a guessed id learns nothing. A metered
+  credential is one team's like any other: metering decides who pays, not
+  whose work a claimant sees, so a cloud runner pool claims only for the team
+  its token was minted in. A credential no token row backs claims nothing once
+  a second team is registered and reports the new `ErrClaimantHasNoTeam`; a
+  single-team install, which is every self-hosted controller, behaves exactly
+  as it did. The local-first placement hold counts only live runners of the
+  node's own team, read off each runner's token row
+  (`RunnerPresence.TokenPrefix`), so another team's laptop advertising the
+  preferred label no longer parks a node its own cloud runner could take.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

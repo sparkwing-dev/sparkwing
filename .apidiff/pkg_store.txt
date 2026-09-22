@@ -497,6 +497,7 @@ type EgressUsage struct {
 const EgressUsageRetentionMonths = 13
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
+var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
@@ -1148,6 +1149,8 @@ type RunnerPresence struct {
 	Labels []string
 
 	FreeSlots int
+
+	TokenPrefix string
 }
 const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 1_000_000_000

@@ -466,3 +466,53 @@ func TestClaimPlacement_CandidateWithUndecodableLabelsIsPassedOver(t *testing.T)
 		t.Fatal("a row whose requirements cannot be read was claimed anyway")
 	}
 }
+
+// Local first is local to the node's own team. A laptop of another team
+// advertising the preferred label can never claim this node, so letting it
+// justify a hold would park the node until the window ran out while the
+// team's cloud runner sat idle beside it.
+func TestClaimPlacement_AnotherTeamsLiveRunnerHoldsNothing(t *testing.T) {
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	bravo := tenantFor(t, st, "bravo")
+	acmeLaptop := mintTeamClaimant(t, acme, "agent:acme-laptop")
+	bravoLaptop := mintTeamClaimant(t, bravo, "agent:bravo-laptop")
+	bravoCloud := mintTeamClaimant(t, bravo, "agent:bravo-cloud")
+
+	seedTenantRun(t, bravo, "run-bravo", "demo")
+	for _, nodeID := range []string{"held", "free"} {
+		if err := st.CreateNode(context.Background(), store.Node{
+			RunID: "run-bravo", NodeID: nodeID, Status: "pending", PrefersLabels: []string{"location=local"},
+		}); err != nil {
+			t.Fatalf("CreateNode(%s): %v", nodeID, err)
+		}
+		if err := st.MarkNodeReady(context.Background(), "run-bravo", nodeID); err != nil {
+			t.Fatalf("MarkNodeReady(%s): %v", nodeID, err)
+		}
+	}
+	live := func(runners ...store.ClaimIdentity) context.Context {
+		placement := store.ClaimPlacement{Hold: time.Minute}
+		for _, r := range runners {
+			placement.Live = append(placement.Live, store.RunnerPresence{
+				Name: r.Principal, Labels: []string{"location=local"}, FreeSlots: 2, TokenPrefix: r.TokenPrefix,
+			})
+		}
+		return store.WithClaimPlacement(context.Background(), placement)
+	}
+
+	// safety: bravo's own laptop does hold the node, so the claim below is
+	// not simply a hold that never engages.
+	if n, err := st.ClaimNextReadyNode(live(bravoLaptop), bravoCloud, "agent:bravo-cloud:1",
+		time.Minute, []string{"location=cloud"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("bravo cloud claim beside a live bravo laptop = %+v, %v; want held", n, err)
+	}
+
+	n, err := st.ClaimNextReadyNode(live(acmeLaptop), bravoCloud, "agent:bravo-cloud:2",
+		time.Minute, []string{"location=cloud"})
+	if err != nil {
+		t.Fatalf("an acme laptop held bravo's node back from bravo's cloud runner: %v", err)
+	}
+	if n.RunID != "run-bravo" {
+		t.Fatalf("bravo cloud claimed %s/%s", n.RunID, n.NodeID)
+	}
+}

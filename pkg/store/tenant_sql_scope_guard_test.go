@@ -17,6 +17,21 @@ import (
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
+		"the asker is no answer; it is the read every other claim predicate is built from",
+	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
+		"a scope that is not exactly one team is refused there",
+	"(*Store).bumpMismatchedNodes":  "shares the claim scan's runtime predicate and its refusal",
+	"executorPrepareCandidateQuery": "shares the claim scan's runtime predicate and its refusal",
+	"(*Store).awardScannedNode": "the award carries the same runtime predicate; the read that follows " +
+		"it is of the row the award just proved in team",
+	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
+	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
+		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
+	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
+		"award and the read after it are of the row the scoped select just locked",
+	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
+		"read after the award is of the row the scoped update just proved in team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).countRuns":                     "shares listRuns' predicate builder and its refusal",
@@ -53,9 +68,6 @@ var unportedSQL = []string{
 	"(*Store).ArmCronSchedule",
 	"(*Store).CacheExcludedCounts",
 	"(*Store).CancelPendingTrigger",
-	"(*Store).ClaimNamedNode",
-	"(*Store).ClaimNextTriggerFor",
-	"(*Store).ClaimSpecificTriggerFor",
 	"(*Store).ClearCronOverride",
 	"(*Store).ComputeAlarmState",
 	"(*Store).ComputeUsage",
@@ -196,9 +208,7 @@ var unportedSQL = []string{
 	"(*Store).applyMigrationPostgresTx",
 	"(*Store).assertNodeMutationFenceTx",
 	"(*Store).awardBestExecutorOffer",
-	"(*Store).awardScannedNode",
 	"(*Store).buildNodeExecutionPolicyTx",
-	"(*Store).bumpMismatchedNodes",
 	"(*Store).cancelMeteredNode",
 	"(*Store).cascadeOrphanedNodes",
 	"(*Store).chargeNodeTx",
@@ -227,7 +237,6 @@ var unportedSQL = []string{
 	"(*Store).mintCSRFKey",
 	"(*Store).orphanedRunsQuery",
 	"(*Store).prepareNextExecutorClaim",
-	"(*Store).readClaimCandidates",
 	"(*Store).reapExpiredTriggers",
 	"(*Store).reapQueueExpiredRuns",
 	"(*Store).reapStalePendingRuns",
@@ -264,7 +273,6 @@ var unportedSQL = []string{
 	"duplicateTokenPrefixes",
 	"enforceNodesPerRunTx",
 	"enforceRunsPerHourTx",
-	"executorPrepareCandidateQuery",
 	"gatherRunAnnotations",
 	"getCronScheduleTx",
 	"livePrefixesForPrincipal",
@@ -292,7 +300,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 246
+const unportedSQLSize = 239
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read
