@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 51
+const expectedSchemaVersion = 52
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1999,6 +1999,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyTeamCreditStateMigrationSQLite(ctx, tx)
 	case 51:
 		return applyUserKeyTeamScopeMigrationSQLite(ctx, tx)
+	case 52:
+		return applyIdentityMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2357,6 +2359,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyTeamCreditStateMigrationPostgres(ctx, tx)
 	case 51:
 		return applyUserKeyTeamScopeMigrationPostgres(ctx, tx)
+	case 52:
+		return applyIdentityMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

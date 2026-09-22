@@ -18,9 +18,16 @@ import (
 // Session is one row in the sessions table. ID holds the raw session id the
 // caller presented; the table keys rows by its digest.
 type Session struct {
-	ID         string
-	Principal  string
-	Scopes     []string
+	ID        string
+	Principal string
+	Scopes    []string
+	// Team is the team the session acts for. A password session keeps
+	// [DefaultTeam]; an account session moves when the account switches.
+	Team Team
+	// AccountID is set on a session opened by an identity-provider sign-in.
+	// Its scopes are not stored: they come from the account's membership in
+	// Team on every request.
+	AccountID  string
 	CSRFToken  string
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
@@ -170,11 +177,10 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 	if ttl <= 0 {
 		return "", "", nil, errors.New("sessions: ttl must be positive")
 	}
-	sessBytes := make([]byte, SessionIDLen)
-	if _, err := rand.Read(sessBytes); err != nil {
+	rawSession, err = newSessionID()
+	if err != nil {
 		return "", "", nil, err
 	}
-	rawSession = base64.RawURLEncoding.EncodeToString(sessBytes)
 
 	csrfToken, err = s.deriveCSRFToken(rawSession)
 	if err != nil {
@@ -201,6 +207,14 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 	return rawSession, csrfToken, sess, nil
 }
 
+func newSessionID() (string, error) {
+	b := make([]byte, SessionIDLen)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
 // LookupSession resolves a raw session id; bumps last_used_at on hit.
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error) {
 	if rawSession == "" {
@@ -213,18 +227,18 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	row := s.queryRowNoCtx(`
-        SELECT principal, scopes,
+        SELECT principal, scopes, team, account_id,
                created_at, expires_at, last_used_at
           FROM sessions
          WHERE hash = ?
     `, digest)
 
 	var sess Session
-	var scopes string
+	var scopes, team string
 	var lastUsed sql.NullInt64
 	var created, expires int64
 	if err := row.Scan(
-		&sess.Principal, &scopes,
+		&sess.Principal, &scopes, &team, &sess.AccountID,
 		&created, &expires, &lastUsed,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -234,6 +248,7 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 	}
 	sess.ID = rawSession
 	sess.Scopes = splitScopes(scopes)
+	sess.Team = Team(team)
 	sess.CreatedAt = time.Unix(created, 0).UTC()
 	sess.ExpiresAt = time.Unix(expires, 0).UTC()
 	if lastUsed.Valid {

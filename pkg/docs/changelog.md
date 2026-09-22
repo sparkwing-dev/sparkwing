@@ -22,6 +22,34 @@ unlock.
 
 ### Added
 
+- **controller:** Google sign-in, users and teams. `POST
+  /api/v1/auth/oauth/google/start` and `/exchange` run a PKCE flow for the
+  dashboard, verify the ID token against Google's signing keys (issuer,
+  audience, expiry, `email_verified`) and open a session. A new Google identity
+  joins an existing user only when both sides hold the email verified. A user
+  with no team gets a personal space whose slug comes from the email's local
+  part, with the smallest free integer appended on a collision. `GET
+  /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
+  signed-in user; the active team is stored on the user, so the next sign-in
+  returns to it. `GET /api/v1/capabilities` answers unauthenticated with
+  `teams.enabled` and `auth.providers`. Every authenticated route now accepts
+  `Authorization: Session <id>`: a password session acts in the `default` team
+  with its user's scopes, and a Google session takes its scopes from the user's
+  role in the session's team on every request (reader: `runs.read`,
+  `logs.read`, `triggers.read`; editor adds `runs.write`, `runs.control`,
+  `approvals.write`; owner adds the new `team.admin`). No role grants `admin`.
+  `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
+  `accounts`, `identities`, `memberships` and `invitations` tables and is
+  additive.
+- **controller:** hosting more than one team needs a signed license
+  (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
+  controller verifies its Ed25519 signature against a public key built into the
+  binary and checks its expiry. Without a valid multi-team license the
+  controller holds one team, refuses `POST /api/v1/teams`, reports
+  `teams.enabled: false` and offers no Google sign-in; a local install needs no
+  change. Google sign-in reads `--google-client-id`
+  (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
+  callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it

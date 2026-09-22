@@ -29,6 +29,19 @@ type Principal struct {
 	Scopes      []string  // exact-string set membership
 	TokenPrefix string    // non-secret prefix for audit
 	Authed      time.Time // when this request authenticated
+	// Team is the team the request acts for: the token's team, or the
+	// session's. Tenant-scoped handlers read it from here and never from the
+	// request.
+	Team store.Team
+	// Role is the account's role in Team, resolved from the membership on
+	// this request. Empty for a token, a password session, or an account
+	// that is no longer a member of Team.
+	Role string
+	// AccountID is set when a signed-in account's session authenticated
+	// the request.
+	AccountID string
+
+	session string
 }
 
 // HasScope reports whether the principal carries the named scope.
@@ -70,7 +83,14 @@ const (
 	// Any principal with this scope can resolve any approval. Reads
 	// are covered by runs.read.
 	ScopeApprovalsWrite = "approvals.write"
-	ScopeAdmin          = "admin"
+	// ScopeTeamAdmin gates administering the principal's own team: its
+	// members, invitations, roles, name, and every runner token it holds.
+	// A team owner holds it. It reaches no other team and no deployment
+	// setting, which is what ScopeAdmin is for.
+	ScopeTeamAdmin = "team.admin"
+	// ScopeAdmin is the deployment operator's scope. No team membership
+	// grants it.
+	ScopeAdmin = "admin"
 )
 
 var allScopes = []string{
@@ -85,7 +105,28 @@ var allScopes = []string{
 	ScopeRunsState,
 	ScopeSecretsRead,
 	ScopeApprovalsWrite,
+	ScopeTeamAdmin,
 	ScopeAdmin,
+}
+
+// safety: the table is the whole grant a membership carries, and ScopeAdmin
+// is on no row, so no role reaches a deployment setting.
+var roleScopes = map[store.Role][]string{
+	store.RoleReader: {ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead},
+	store.RoleEditor: {
+		ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead,
+		ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite,
+	},
+	store.RoleOwner: {
+		ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead,
+		ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite, ScopeTeamAdmin,
+	},
+}
+
+// ScopesForRole returns the scopes a membership at role carries, or none for
+// an unknown role.
+func ScopesForRole(role store.Role) []string {
+	return slices.Clone(roleScopes[role])
 }
 
 func validateScopes(scopes []string) error {
@@ -343,6 +384,7 @@ func (a *Authenticator) verify(raw, key, client string, now time.Time) (*Princip
 		Scopes:      tok.Scopes,
 		TokenPrefix: tok.Prefix,
 		Authed:      now,
+		Team:        tok.Team,
 	}
 
 	// safety: an Invalidate that landed during this read must win, or the revoked row is re-cached for a full TTL.

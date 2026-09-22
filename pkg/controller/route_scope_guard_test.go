@@ -22,6 +22,11 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"GET /metrics":                      true,
 		"POST /webhooks/github/{pipeline}":  true,
 		"/":                                 true,
+		// safety: a signed-out browser draws the sign-in page from it; it reports only teams and providers.
+		"GET /api/v1/capabilities": true,
+		// safety: sign-in has no session yet; both answer 404 without a license and a Google client.
+		"POST /api/v1/auth/oauth/google/start":    true,
+		"POST /api/v1/auth/oauth/google/exchange": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {
@@ -33,6 +38,12 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 	anyAuthenticated := map[string]bool{
 		"GET /api/v1/auth/whoami": true,
 		"GET /api/v1/services":    true,
+		// safety: these act on the caller's own memberships, so accountPrincipal inside each handler
+		// is the gate, and it refuses every caller that is not a signed-in account.
+		"GET /api/v1/me":                       true,
+		"POST /api/v1/me/active-team":          true,
+		"POST /api/v1/teams":                   true,
+		"POST /api/v1/invitations/{id}/accept": true,
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "server.go", nil, 0)

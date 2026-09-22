@@ -15,8 +15,11 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/auth/bootstrap-needed` | `public` |
 | `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |
+| `POST` | `/api/v1/auth/oauth/google/exchange` | `public` |
+| `POST` | `/api/v1/auth/oauth/google/start` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
+| `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/compute-limits` | `runs.read` |
 | `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
@@ -51,6 +54,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
+| `GET` | `/api/v1/me` | `authenticated` |
+| `POST` | `/api/v1/me/active-team` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
@@ -142,6 +147,7 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
+| `POST` | `/api/v1/teams` | `authenticated` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

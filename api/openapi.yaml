@@ -82,6 +82,8 @@ tags:
     description: Local-account CRUD + bootstrap.
   - name: auth
     description: Login / logout / session + introspection.
+  - name: teams
+    description: Signed-in users, their teams, memberships, invitations and runner tokens.
   - name: secrets
     description: Named secret material.
   - name: agents
@@ -2162,6 +2164,16 @@ paths:
                     type: string
                     description: Token the dashboard echoes on each state-changing request.
                   expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  team:
+                    type: string
+                    description: Team the session acts for. `default` for a password session.
+                  role:
+                    type: string
+                    enum: [owner, editor, reader]
+                    description: The signed-in user's role in `team`, read from the membership on this request. Absent for a password session or a user no longer in `team`.
+                  user_id:
+                    type: string
+                    description: Signed-in user behind an identity-provider session. Absent for a password session.
 
   /api/v1/auth/whoami:
     get:
@@ -2185,6 +2197,13 @@ paths:
                   token_prefix:
                     type: string
                     description: Prefix of the bearer token that answered, absent for a session or anonymous principal.
+                  team:
+                    type: string
+                    description: Team the request acts for, from the token or the session. Absent for an anonymous principal.
+                  role:
+                    type: string
+                    enum: [owner, editor, reader]
+                    description: The signed-in user's role in `team`. Absent for a token or a password session.
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/auth/bootstrap-needed:
@@ -4097,6 +4116,205 @@ paths:
           description: >-
             Another claim holds the node, the node or its run finished, or its placement is pinned.
 
+  /api/v1/capabilities:
+    get:
+      x-sparkwing-scope: public
+      tags: [teams]
+      summary: Report whether this controller hosts teams and which sign-in providers it offers.
+      description: >-
+        Unauthenticated, because a signed-out browser draws the sign-in page from it. `teams.enabled` is true only when the controller holds a valid multi-team license. `auth.providers` lists `google` only when that license is present and a Google client is configured.
+      security: []
+      responses:
+        "200":
+          description: Capabilities.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.capabilitiesResp
+                type: object
+                required: [teams, auth]
+                properties:
+                  teams:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesTeams
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean}
+                  auth:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesAuth
+                    type: object
+                    required: [providers]
+                    properties:
+                      providers:
+                        type: array
+                        items: {type: string, enum: [google]}
+
+  /api/v1/auth/oauth/google/start:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Begin a Google sign-in and return the authorization URL with its state and PKCE verifier.
+      description: >-
+        The controller stores nothing. The caller keeps `state` and `verifier` in a short-lived `__Host-` cookie on the browser that started the flow and checks `state` against it at the callback. `redirect_uri` must be on the controller's `--oauth-redirect-uris` allowlist. Answers 404 unless Google sign-in is offered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthStartReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, description: "Dashboard callback URL, such as https://app.example.com/auth/google/callback."}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthStartResp
+                type: object
+                required: [authorize_url, state, verifier]
+                properties:
+                  authorize_url: {type: string}
+                  state: {type: string}
+                  verifier: {type: string, description: PKCE code verifier. The authorize URL carries only its S256 challenge.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/auth/oauth/google/exchange:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Finish a Google sign-in and open a session.
+      description: >-
+        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. The session opens in the user's active team.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthExchangeReq
+              type: object
+              required: [code, verifier, redirect_uri]
+              properties:
+                code: {type: string}
+                verifier: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthExchangeResp
+                type: object
+                required: [session_id, csrf_token, expires_at, user, active_team]
+                properties:
+                  session_id: {type: string, description: "Send as `Authorization: Session <id>`."}
+                  csrf_token: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  user: {$ref: "#/components/schemas/IdentityUser"}
+                  active_team:
+                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
+                    nullable: true
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Google has not verified the account's email address.
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {description: Google could not be reached.}
+
+  /api/v1/me:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Describe the signed-in user, the active team, every membership, and open invitations.
+      description: "Needs an identity-provider session (`Authorization: Session <id>`); a bearer token answers 401."
+      responses:
+        "200":
+          description: The signed-in user.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.meResp
+                type: object
+                required: [user, active_team, memberships, invitations]
+                properties:
+                  user: {$ref: "#/components/schemas/IdentityUser"}
+                  active_team:
+                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
+                    nullable: true
+                    description: Null when the user is no longer a member of the session's team.
+                  memberships:
+                    type: array
+                    items: {$ref: "#/components/schemas/TeamRef"}
+                  invitations:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.invitationRefJSON
+                      type: object
+                      required: [id, team_slug, team_display_name, role]
+                      properties:
+                        id: {type: string}
+                        team_slug: {type: string}
+                        team_display_name: {type: string}
+                        role: {type: string, enum: [owner, editor, reader]}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/me/active-team:
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Switch the session to another team the user belongs to.
+      description: >-
+        Records the team as the user's sticky team, so the next sign-in returns to it. A team the user is not in answers 404, the same as a team that does not exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.activeTeamReq
+              type: object
+              required: [slug]
+              properties:
+                slug: {type: string}
+      responses:
+        "204": {description: Switched.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/teams:
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Create a team with the caller as owner and switch to it.
+      description: >-
+        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default` and `api` answer 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.createTeamReq
+              type: object
+              required: [slug]
+              properties:
+                slug: {type: string}
+                display_name: {type: string, description: Free text. Defaults to the slug.}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Team"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The slug is taken.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4178,6 +4396,30 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    IdentityUser:
+      x-sparkwing-go-type: pkg/controller.userJSONBody
+      type: object
+      required: [id, email, name]
+      properties:
+        id: {type: string}
+        email: {type: string, description: The email Google verified.}
+        name: {type: string}
+    TeamRef:
+      x-sparkwing-go-type: pkg/controller.teamRefJSON
+      type: object
+      required: [slug, display_name, role]
+      properties:
+        slug: {type: string}
+        display_name: {type: string}
+        role: {type: string, enum: [owner, editor, reader]}
+    Team:
+      x-sparkwing-go-type: pkg/controller.teamJSON
+      type: object
+      required: [slug, display_name, role]
+      properties:
+        slug: {type: string}
+        display_name: {type: string}
+        role: {type: string, enum: [owner, editor, reader], description: The caller's role in the team.}
     LiveLogRead:
       x-sparkwing-go-type: pkg/controller.LiveLogRead
       type: object

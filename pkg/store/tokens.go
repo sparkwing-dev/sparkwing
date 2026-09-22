@@ -72,12 +72,18 @@ type Token struct {
 	// Metered marks a token the operator mints for a runner credits pay
 	// for. Only the operator sets it; a runner's own labels never do.
 	Metered bool
+	// CreatedBy names the account that minted the token from a team's
+	// settings, which lets that account revoke it. Empty for a token an
+	// operator minted.
+	CreatedBy string
 }
 
 // TokenOptions carries the fields a mint sets beyond the required ones.
 type TokenOptions struct {
 	// Metered marks the minted token as one whose claims cost credits.
 	Metered bool
+	// CreatedBy names the account minting the token.
+	CreatedBy string
 }
 
 // IsValid reports whether the token is usable at `now`.
@@ -268,13 +274,14 @@ func insertTokenRow(
 		metered = 1
 	}
 	if _, err := e.ExecContext(ctx, `
-        INSERT INTO tokens (team, hash, prefix, principal, kind, scopes, created_at, expires_at, metered)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tokens (team, hash, prefix, principal, kind, scopes, created_at, expires_at, metered, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
 		string(team), hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
 		now.UTC().Unix(),
 		expiresUnix(expires),
 		metered,
+		opts.CreatedBy,
 	); err != nil {
 		return nil, fmt.Errorf("tokens: insert: %w", err)
 	}
@@ -288,6 +295,7 @@ func insertTokenRow(
 		CreatedAt: now.UTC(),
 		ExpiresAt: expires,
 		Metered:   opts.Metered,
+		CreatedBy: opts.CreatedBy,
 	}, nil
 }
 
