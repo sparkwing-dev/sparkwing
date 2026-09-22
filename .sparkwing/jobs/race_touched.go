@@ -40,10 +40,11 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 	for _, module := range mapKeys(targets) {
 		pkgs := targets[module]
 		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
-		// safety: go test's default 10-minute budget is per package binary and
-		// pkg/controller under the race detector outlives it on a one-core
-		// hosted runner; the pipeline's own timeout still bounds the step.
-		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
+		// safety: this catches a hang, and the gate's own execution deadline is
+		// what bounds the step. pkg/controller legitimately races for 24
+		// minutes, so a 30-minute limit left a fifth of a margin and a loaded
+		// box spent it, failing work that was only slow.
+		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout 45m "+strings.Join(pkgs, " "))
 		script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
 		if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
