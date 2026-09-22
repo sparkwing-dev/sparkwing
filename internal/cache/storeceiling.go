@@ -35,7 +35,14 @@ var storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
 
 // safety: the caller-writable trees are the ones a pipeline can grow without
 // bound; the git mirrors grow with the repositories an operator registered.
-func storeDirs() []string { return []string{artifactsDir, cacheDir, uploadsDir} }
+// Every team tree is caller-writable, bins included.
+func storeDirs() []string {
+	dirs := []string{artifactsDir, cacheDir, uploadsDir}
+	if _, err := os.Stat(teamsDir); err == nil {
+		dirs = append(dirs, teamsDir)
+	}
+	return dirs
+}
 
 func measureStore(ctx context.Context) {
 	err := storeCeiling.ReconcileWith(ctx, func(ctx context.Context) (objectguard.Usage, error) {

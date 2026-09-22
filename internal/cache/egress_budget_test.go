@@ -22,13 +22,16 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	saved := struct {
 		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir string
 		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken        string
+		teamsDir                                                    string
 	}{
 		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir,
 		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken,
+		teamsDir,
 	}
 	t.Cleanup(func() {
 		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.archDir, saved.artifactsDir, saved.binsDir, saved.cacheDir
 		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken = saved.uploadsDir, saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
+		teamsDir = saved.teamsDir
 	})
 
 	root := t.TempDir()

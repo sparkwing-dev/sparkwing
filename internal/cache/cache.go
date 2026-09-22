@@ -171,6 +171,7 @@ func New(cfg Config) (*Server, error) {
 	binsDir = filepath.Join(cfg.DataDir, "bins")
 	cacheDir = filepath.Join(cfg.DataDir, "cache")
 	uploadsDir = filepath.Join(cfg.DataDir, "uploads")
+	teamsDir = filepath.Join(cfg.DataDir, "teams")
 	namesFile = filepath.Join(cfg.DataDir, "repo-names.json")
 	proxyDir = cfg.ProxyDir
 	proxyCacheTTL = cfg.ProxyCacheTTL
@@ -202,7 +203,7 @@ func New(cfg Config) (*Server, error) {
 		"and the whole store at %d bytes / %d objects (0 means no cap)",
 		maxArtifactBytes, maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
 
-	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
+	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, teamsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("cache: mkdir %s: %w", d, err)
 		}
@@ -237,21 +238,21 @@ func New(cfg Config) (*Server, error) {
 
 	s.mux.HandleFunc("/archive", requireToken(metered(egress.ClassArtifact, handleArchive)))
 	s.mux.HandleFunc("/repos", requireToken(handleRepos))
-	s.mux.HandleFunc("/artifacts/", requireToken(metered(egress.ClassArtifact, handleArtifacts)))
+	s.mux.HandleFunc("/artifacts/", requireCaller(metered(egress.ClassArtifact, handleArtifacts)))
 	s.mux.HandleFunc("/file", requireToken(metered(egress.ClassArtifact, handleFile)))
 	s.mux.HandleFunc("/tree-hash", requireToken(handleTreeHash))
 	s.mux.HandleFunc("/branch-contains", requireToken(handleBranchContains))
-	s.mux.HandleFunc("/bin/", requireToken(metered(egress.ClassArtifact, handleBin)))
-	s.mux.HandleFunc("/cache/", requireToken(metered(egress.ClassArtifact, handleCache)))
+	s.mux.HandleFunc("/bin/", requireCaller(metered(egress.ClassArtifact, handleBin)))
+	s.mux.HandleFunc("/cache/", requireCaller(metered(egress.ClassArtifact, handleCache)))
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
 	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
-	s.mux.HandleFunc("/git/register", requireToken(handleGitRegister))
+	s.mux.HandleFunc("/git/register", requireCaller(handleGitRegister))
 	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
-	s.mux.HandleFunc("/git/", requireToken(metered(egress.ClassGit, handleGit)))
+	s.mux.HandleFunc("/git/", requireCaller(metered(egress.ClassGit, handleGit)))
 
 	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
 	s.mux.HandleFunc("/stats", handleProxyStats)
