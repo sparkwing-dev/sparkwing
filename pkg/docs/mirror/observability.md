@@ -727,6 +727,7 @@ unlimited until an operator sets one.
 | `--egress-max-downloads` | yes | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
 | `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
+| `--egress-daily-cap-bytes` | yes | yes | yes | Bytes the process may send in a UTC day. Past it, every download it serves answers `429` until the day rolls, whoever asks. The per-principal budgets bound one caller; this bounds the month's bill at 31 times the cap however many principals share it. |
 
 The controller's two concurrency caps are also supplied as a set by
 `--limits-profile`, which a hosted controller runs with instead of naming

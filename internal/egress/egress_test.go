@@ -757,3 +757,43 @@ func TestStateRollsEachPrincipalsDayWithTheProcesss(t *testing.T) {
 		t.Fatalf("the month was rolled with the day: %+v", state.Top)
 	}
 }
+
+func TestDailyCapRefusesEveryPrincipalUntilTheDayRolls(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T10:00:00Z")
+	m.Record("alice", egress.ClassArtifact, 600)
+	m.Record("bob", egress.ClassLog, 399)
+	if err := m.Check("carol"); err != nil {
+		t.Fatalf("Check one byte under the process cap = %v, want nil", err)
+	}
+	m.Record("bob", egress.ClassLog, 1)
+
+	for _, who := range []string{"alice", "bob", "carol"} {
+		var budget *egress.BudgetError
+		err := m.Check(who)
+		if !errors.As(err, &budget) || !budget.ProcessWide {
+			t.Fatalf("Check(%s) at the process cap = %v, want a process-wide *BudgetError", who, err)
+		}
+		if !errors.Is(err, egress.ErrBudgetExceeded) {
+			t.Errorf("Check(%s): the cap refusal does not match ErrBudgetExceeded", who)
+		}
+		if budget.UsedBytes != 1000 || budget.LimitBytes != 1000 || budget.Principal != who {
+			t.Fatalf("refusal = %+v, want %s refused at 1000 of 1000", budget, who)
+		}
+		if budget.RetryAfter != 14*time.Hour {
+			t.Errorf("RetryAfter = %s, want the 14h until the UTC day rolls", budget.RetryAfter)
+		}
+		for _, want := range []string{"daily cap", who, egress.FlagDailyCapBytes} {
+			if !strings.Contains(budget.Error(), want) {
+				t.Errorf("refusal message %q does not name %q", budget.Error(), want)
+			}
+		}
+	}
+
+	*clock = at(t, "2026-09-14T00:00:00Z")
+	if err := m.Check("alice"); err != nil {
+		t.Fatalf("Check after the day rolled = %v, want nil", err)
+	}
+	if state := m.State(); state.DailyCapBytes != 1000 || state.GlobalMonthBytes != 1000 {
+		t.Fatalf("state after the roll = %+v, want the cap reported and the month kept", state)
+	}
+}

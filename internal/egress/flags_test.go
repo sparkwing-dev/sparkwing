@@ -197,3 +197,37 @@ func TestBind_NamedReportsEitherChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestBindReadsTheDailyCapOnEveryService(t *testing.T) {
+	for _, tc := range []struct {
+		svc      egress.Service
+		surfaces egress.Surfaces
+	}{
+		{egress.ServiceController, egress.ControllerSurfaces},
+		{egress.ServiceLogs, egress.LogsSurfaces},
+		{egress.ServiceCache, egress.CacheSurfaces},
+	} {
+		env := envOf(map[string]string{egress.EnvName(tc.svc, egress.EnvDailyCapBytes): "700"})
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		read := egress.Bind(fs, env, tc.svc, tc.surfaces)
+		if err := fs.Parse(nil); err != nil {
+			t.Fatal(err)
+		}
+		cfg, named, err := read()
+		if err != nil {
+			t.Fatalf("%s: read = %v, want nil", tc.svc, err)
+		}
+		if cfg.GlobalDailyCapBytes != 700 || !named.DailyCapBytes || !cfg.Budgeted() {
+			t.Fatalf("%s: cap from the environment = %d named %v, want 700 named", tc.svc, cfg.GlobalDailyCapBytes, named.DailyCapBytes)
+		}
+
+		fs = flag.NewFlagSet("test", flag.ContinueOnError)
+		read = egress.Bind(fs, envOf(nil), tc.svc, tc.surfaces)
+		if err := fs.Parse([]string{"--egress-daily-cap-bytes=-1"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := read(); err == nil || !strings.Contains(err.Error(), egress.FlagDailyCapBytes) {
+			t.Fatalf("%s: a negative cap read as %v, want a refusal naming %s", tc.svc, err, egress.FlagDailyCapBytes)
+		}
+	}
+}

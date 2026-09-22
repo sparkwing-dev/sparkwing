@@ -22,6 +22,12 @@ unlock.
 
 ### Added
 
+- **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
+  the cache refuses every download a process serves once it has sent that many
+  bytes in the UTC day, answering `429` with a `Retry-After` naming the day
+  roll. The per-principal budgets bound one caller and are multiplied by every
+  account or token a caller mints; this is the backstop that bounds the month.
+  Unlimited by default.
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
