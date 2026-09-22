@@ -202,11 +202,18 @@ func (s *Server) openWebhookSecret(pipeline, repo, stored string) (string, error
 	if s.secretsCipher == nil {
 		return "", errors.New("the binding is encrypted and no secrets key is configured")
 	}
-	return openSecret(s.secretsCipher, webhookSecretBinding(pipeline, repo), stored)
+	binding := webhookSecretBinding(pipeline, repo)
+	if !secrets.IsBound(stored) {
+		return openLegacySecret(s.secretsCipher, binding, stored)
+	}
+	return openSecret(s.secretsCipher, binding, stored)
 }
 
+// safety: these routes read and write the default team's bindings, so that is
+// the team the envelope is sealed to. Bindings are not resealed at startup, so
+// one sealed before team binding still opens here.
 func webhookSecretBinding(pipeline, repo string) secretBinding {
-	return secretBinding{Name: "github-webhook/" + pipeline, Scope: repo, Masked: true}
+	return secretBinding{Team: store.DefaultTeam, Name: "github-webhook/" + pipeline, Scope: repo, Masked: true}
 }
 
 // safety: bound means a stored binding names this pipeline and repository,

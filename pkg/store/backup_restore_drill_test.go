@@ -94,7 +94,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		"DEPLOY_TOKEN": "ghp-drill-deploy",
 		"NPM_TOKEN":    "npm-drill-publish",
 	} {
-		sealed, err := cipher.SealBound(name, "", false, true, plain)
+		sealed, err := cipher.SealBound(string(store.DefaultTeam), name, "", false, true, plain)
 		if err != nil {
 			t.Fatalf("seal %s: %v", name, err)
 		}
@@ -162,7 +162,7 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		if err != nil {
 			t.Fatalf("read secret %s: %v", sec.Name, err)
 		}
-		plain, err := cipher.OpenBound(row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
+		plain, err := cipher.OpenBound(string(store.DefaultTeam), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value)
 		if err != nil {
 			t.Fatalf("open secret %s: %v", sec.Name, err)
 		}
@@ -364,7 +364,7 @@ func drillSQLiteWithoutKey(t *testing.T) {
 		if !secrets.IsEncrypted(row.Value) {
 			t.Fatalf("secret %s restored unsealed", sec.Name)
 		}
-		if _, err := wrong.OpenBound(row.Name, row.Pipeline, row.Shared, row.Masked, row.Value); err == nil {
+		if _, err := wrong.OpenBound(string(store.DefaultTeam), row.Name, row.Pipeline, row.Shared, row.Masked, row.Value); err == nil {
 			t.Fatalf("secret %s opened under a key the install never used", sec.Name)
 		}
 	}

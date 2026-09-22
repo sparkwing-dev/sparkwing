@@ -302,6 +302,28 @@ unlock.
 
 ### Security
 
+- **controller:** stored secrets are sealed to their team, and a multi-team
+  controller needs a key. A controller whose license allows more than one team
+  refuses to start without `SPARKWING_SECRETS_KEY` or `--secrets-key-file`,
+  because without one every team's secrets sat in the database as plaintext.
+  A single-team install still starts without a key. A new `enc:v3:` envelope
+  adds the owning team to the additional authenticated data beside the name,
+  pipeline, shared and masked flags, so one team's ciphertext copied into
+  another team's row no longer opens. Every start with a key reseals the table
+  before serving: plaintext rows are sealed and `enc:v1:`/`enc:v2:` envelopes
+  are resealed with their team, in batches, each write conditional on the
+  value it replaces, with the counts logged. An older envelope outside the
+  `default` team is left alone and refused, since only the `default` team ever
+  held one. Reads open only `enc:v3:`, so a row is no longer rebound on first
+  read. The start is refused, before anything is written, when the key opens
+  none of a sample of the envelopes already stored. See
+  [security.md](docs/security.md#secrets-at-rest).
+- **controller (Breaking):** `controller.BoundCipher` takes the owning team.
+  `SealBound` and `OpenBound` gain a leading `team` argument, and a new
+  optional `controller.LegacyCipher` opens envelopes sealed before team
+  binding so the startup reseal can bring them forward. See the
+  [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
+
 - **store:** a key a user or a client chooses is unique per team
   Seven primary keys were global across the deployment while every part of
   them came from a user: `secrets (name, pipeline)`,

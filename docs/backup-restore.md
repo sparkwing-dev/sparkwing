@@ -16,8 +16,10 @@ restores a controller that starts and still cannot do its job.
 - **The secrets key**, `SPARKWING_SECRETS_KEY` or the file behind
   `--secrets-key-file`. Secret values are sealed in the database under
   it. Restoring the database without the key restores rows nothing can
-  open, and the controller cannot tell you that until a run asks for a
-  value. During a key rotation the same is true of
+  open. Started with some other key, the controller refuses to start
+  once that key opens none of the values it samples; started with no key,
+  it starts and answers each read of a sealed value with an error.
+  During a key rotation the same is true of
   `SPARKWING_SECRETS_PREVIOUS_KEY`.
 - **The controller's own start-up configuration**: its flags and the
   rest of its environment, including `GITHUB_WEBHOOK_SECRET`,

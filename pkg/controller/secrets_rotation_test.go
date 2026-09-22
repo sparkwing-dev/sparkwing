@@ -73,7 +73,7 @@ func TestSecrets_PreviousKeyOpensValuesSealedUnderIt(t *testing.T) {
 	}
 	srv, st := newSecretsTestServer(t, rotating)
 
-	sealed, err := oldCipher.SealBound("TOKEN", "", false, true, "supersecret")
+	sealed, err := oldCipher.SealBound("default", "TOKEN", "", false, true, "supersecret")
 	if err != nil {
 		t.Fatalf("SealBound: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSecrets_PreviousKeyOpensValuesSealedUnderIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
-	if _, err := currentOnly.OpenBound("TOKEN", "", false, true, row.Value); err == nil {
+	if _, err := currentOnly.OpenBound("default", "TOKEN", "", false, true, row.Value); err == nil {
 		t.Fatal("the stored value already opens under the current key alone; the fallback proved nothing")
 	}
 }
@@ -117,7 +117,7 @@ func TestSecrets_RotateReencryptsUnderTheCurrentKey(t *testing.T) {
 		{name: "REGION", value: "us-east-1", shared: true},
 	}
 	for _, row := range rows {
-		sealed, serr := oldCipher.SealBound(row.name, row.pipeline, row.shared, row.masked, row.value)
+		sealed, serr := oldCipher.SealBound("default", row.name, row.pipeline, row.shared, row.masked, row.value)
 		if serr != nil {
 			t.Fatalf("SealBound(%s/%s): %v", row.name, row.pipeline, serr)
 		}
@@ -139,7 +139,7 @@ func TestSecrets_RotateReencryptsUnderTheCurrentKey(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetSecretRow(%s/%s): %v", row.name, row.pipeline, err)
 		}
-		plain, oerr := currentOnly.OpenBound(row.name, row.pipeline, row.shared, row.masked, stored.Value)
+		plain, oerr := currentOnly.OpenBound("default", row.name, row.pipeline, row.shared, row.masked, stored.Value)
 		if oerr != nil {
 			t.Fatalf("secret %s/%s does not open under the current key alone: %v", row.name, row.pipeline, oerr)
 		}
@@ -219,8 +219,8 @@ func TestSecrets_RotateSkipsARowThatOpensUnderNoKey(t *testing.T) {
 	}
 	srv, st := newSecretsTestServer(t, rotating)
 
-	good, _ := oldCipher.SealBound("GOOD", "", false, true, "readable")
-	lost, _ := stray.SealBound("LOST", "deploy-web", false, true, "unreachable")
+	good, _ := oldCipher.SealBound("default", "GOOD", "", false, true, "readable")
+	lost, _ := stray.SealBound("default", "LOST", "deploy-web", false, true, "unreachable")
 	// safety: a plaintext value that opens with the envelope prefix is indistinguishable from a lost envelope.
 	const impostor = "enc:v1:not-really-an-envelope"
 	rows := []store.Secret{
@@ -257,7 +257,7 @@ func TestSecrets_RotateSkipsARowThatOpensUnderNoKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
-	if plain, oerr := currentOnly.OpenBound("GOOD", "", false, true, rotatedRow.Value); oerr != nil || plain != "readable" {
+	if plain, oerr := currentOnly.OpenBound("default", "GOOD", "", false, true, rotatedRow.Value); oerr != nil || plain != "readable" {
 		t.Fatalf("the readable row did not rotate: value=%q err=%v", plain, oerr)
 	}
 	for name, want := range map[string]string{"LOST": lost, "IMPOSTOR": impostor} {

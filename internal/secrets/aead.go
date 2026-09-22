@@ -13,9 +13,21 @@ import (
 )
 
 const (
-	envelopePrefix      = "enc:v1:"
-	envelopePrefixBound = "enc:v2:"
+	envelopePrefix       = "enc:v1:"
+	envelopePrefixLegacy = "enc:v2:"
+	// BoundPrefix starts every envelope sealed to the team that owns its row.
+	// A stored value without it is plaintext or predates team binding.
+	BoundPrefix = "enc:v3:"
 )
+
+// safety: the v3 binding opens with a label no v2 binding can spell, so an
+// envelope relabelled from one version to the other never authenticates.
+const boundAADLabel = "sparkwing/secret/v3\x00"
+
+// ErrLegacyEnvelope is what [Cipher.OpenBound] returns for an envelope sealed
+// before the owning team joined the binding. Only [Cipher.OpenLegacy] opens
+// one, and the controller calls that once, to reseal it at startup.
+var ErrLegacyEnvelope = errors.New("secrets cipher: envelope predates team binding and must be resealed")
 
 const KeySize = chacha20poly1305.KeySize
 
@@ -66,12 +78,14 @@ func (c *Cipher) Seal(plain string) (string, error) {
 }
 
 // SealBound seals plain with the row fields that decide access to the
-// secret as additional authenticated data: its name, its owning
-// scope (the owning pipeline, empty for an unscoped secret), whether an unscoped row
-// answers every run, and whether the value is redacted in run output.
-// The envelope opens only under that same combination.
-func (c *Cipher) SealBound(name, scope string, shared, masked bool, plain string) (string, error) {
-	return c.seal(plain, envelopePrefixBound, boundAAD(name, scope, shared, masked))
+// secret as additional authenticated data: the team that owns the row, its
+// name, its owning scope (the owning pipeline, empty for an unscoped
+// secret), whether an unscoped row answers every run, and whether the value
+// is redacted in run output. The envelope opens only under that same
+// combination, so one team's envelope copied into another team's row does
+// not open.
+func (c *Cipher) SealBound(team, name, scope string, shared, masked bool, plain string) (string, error) {
+	return c.seal(plain, BoundPrefix, boundAAD(team, name, scope, shared, masked))
 }
 
 func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
@@ -88,24 +102,47 @@ func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
 }
 
 func (c *Cipher) Open(envelope string) (string, error) {
-	if strings.HasPrefix(envelope, envelopePrefixBound) {
-		return "", errors.New("secrets cipher: envelope is bound to a secret name and scope; open it with those")
+	if strings.HasPrefix(envelope, BoundPrefix) || strings.HasPrefix(envelope, envelopePrefixLegacy) {
+		return "", errors.New("secrets cipher: envelope is bound to a secret's row; open it with that binding")
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
-// OpenBound decrypts an envelope sealed for this combination of name,
-// scope, shared and masked. Envelopes written before binding carry no
-// additional data and open unchanged.
-func (c *Cipher) OpenBound(name, scope string, shared, masked bool, envelope string) (string, error) {
-	if strings.HasPrefix(envelope, envelopePrefixBound) {
-		return c.open(envelope, envelopePrefixBound, boundAAD(name, scope, shared, masked))
+// OpenBound decrypts an envelope sealed by [Cipher.SealBound] for this
+// combination of team, name, scope, shared and masked. It refuses an
+// envelope sealed before team binding with [ErrLegacyEnvelope].
+func (c *Cipher) OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error) {
+	if strings.HasPrefix(envelope, BoundPrefix) {
+		return c.open(envelope, BoundPrefix, boundAAD(team, name, scope, shared, masked))
+	}
+	if IsEncrypted(envelope) {
+		return "", ErrLegacyEnvelope
+	}
+	return "", errors.New("secrets cipher: value is not sealed")
+}
+
+// OpenLegacy decrypts an envelope sealed before the team joined the binding:
+// one bound to name, scope, shared and masked alone, or one bound to nothing.
+// Such an envelope can be moved between teams undetected, so its only caller
+// is the one that reseals it under [Cipher.SealBound].
+func (c *Cipher) OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error) {
+	if strings.HasPrefix(envelope, envelopePrefixLegacy) {
+		return c.open(envelope, envelopePrefixLegacy, legacyAAD(name, scope, shared, masked))
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
 // safety: length prefixes keep one field from spelling another, so the binding needs no name rule to hold.
-func boundAAD(name, scope string, shared, masked bool) []byte {
+func boundAAD(team, name, scope string, shared, masked bool) []byte {
+	aad := make([]byte, 0, len(boundAADLabel)+26+len(team)+len(name)+len(scope))
+	aad = append(aad, boundAADLabel...)
+	aad = appendBoundField(aad, team)
+	aad = appendBoundField(aad, name)
+	aad = appendBoundField(aad, scope)
+	return append(aad, boundFlag(shared), boundFlag(masked))
+}
+
+func legacyAAD(name, scope string, shared, masked bool) []byte {
 	aad := make([]byte, 0, 18+len(name)+len(scope))
 	aad = appendBoundField(aad, name)
 	aad = appendBoundField(aad, scope)
@@ -156,15 +193,15 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 }
 
 func IsEncrypted(v string) bool {
-	return strings.HasPrefix(v, envelopePrefix) || IsBound(v)
+	return strings.HasPrefix(v, envelopePrefix) || strings.HasPrefix(v, envelopePrefixLegacy) || IsBound(v)
 }
 
-// IsBound reports whether v is an envelope sealed to the row it
-// belongs to. An encrypted value that is not bound predates binding
-// and can still be moved onto another row, so operators can find such
-// rows and readers can rebind them.
+// IsBound reports whether v is an envelope sealed to the team and row it
+// belongs to. An encrypted value that is not bound predates team binding
+// and can be moved onto another team's row, so the controller reseals every
+// such row when it starts with a key.
 func IsBound(v string) bool {
-	return strings.HasPrefix(v, envelopePrefixBound)
+	return strings.HasPrefix(v, BoundPrefix)
 }
 
 func DecodeKey(s string) ([]byte, error) {
