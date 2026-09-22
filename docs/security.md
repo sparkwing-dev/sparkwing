@@ -375,6 +375,10 @@ poll, which is what it served before profiles existed.
 | `--requests-per-minute-alarm` | 5000 | 5000 |
 | `--egress-max-log-streams` | 50 | 10 |
 | `--egress-max-downloads` | 20 | 5 |
+| `--max-runs-per-principal-hour` | 600 | 60 |
+| `--shed-queue-depth` | 5000 | 1000 |
+| `--egress-monthly-bytes` | 100 GiB | 5 GiB |
+| `--egress-daily-cap-bytes` | 200 GiB | 20 GiB |
 | Idle-poll enforcement | on | on |
 
 The claim budgets are worked from the cadence the shipped claim loop
@@ -392,6 +396,11 @@ so the free tier carries one such runner and the paid tier several under
 one token. The alarm is what one controller pod is sized to serve. The
 egress caps are the concurrency one team is expected to read logs and
 artifacts at.
+The run cap bounds the pending triggers one principal can queue when no
+runner claims them, and the shed depth is the fleet's backstop behind it.
+The egress byte budgets bound the bill a free account can run up with no
+compute at all: one principal's month, and the controller's day however
+many principals share it, which caps a month at 31 times the daily figure.
 
 A profile fills a guard only where the command line and the environment
 named none, and a guard the operator named wins whatever its value,

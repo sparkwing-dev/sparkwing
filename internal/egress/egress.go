@@ -17,6 +17,9 @@
 // daily threshold refuses nothing; it raises an alarm the health route
 // reports and the log carries at warn level, because the bill an
 // operator needs to see early is the process's, not one principal's.
+// The global daily cap does refuse: past it every download on the process
+// is refused until the UTC day rolls, which is the backstop that bounds the
+// bill when many principals each stay inside their own budget.
 //
 // Enforcement needs a principal the meter can tell apart. A service that
 // authenticates one shared token, or that serves with auth off, resolves
@@ -104,9 +107,23 @@ type BudgetError struct {
 	RetryAfter time.Duration
 	// Flag names the flag that raises the budget on the refusing service.
 	Flag string
+	// ProcessWide marks a refusal by the global daily cap, which counts the
+	// whole process's bytes today rather than this principal's month, so
+	// UsedBytes and LimitBytes are the process's.
+	ProcessWide bool
 }
 
 func (e *BudgetError) Error() string {
+	if e.ProcessWide {
+		flag := e.Flag
+		if flag == "" {
+			flag = FlagDailyCapBytes
+		}
+		return fmt.Sprintf(
+			"egress daily cap reached: this service has sent %s today, its %s cap, so this %s download by %s is refused until the UTC day rolls, in %s. "+
+				"Raise it with %s on the serving process, or wait out the reset",
+			FormatBytes(e.UsedBytes), FormatBytes(e.LimitBytes), e.Class, e.Principal, roundWait(e.RetryAfter), flag)
+	}
 	flag := e.Flag
 	if flag == "" {
 		flag = FlagMonthlyBytes
@@ -177,6 +194,11 @@ type Config struct {
 	// GlobalDailyAlarmBytes raises the alarm once the process has sent
 	// this many bytes in a UTC day. It refuses nothing. Zero is off.
 	GlobalDailyAlarmBytes int64
+	// GlobalDailyCapBytes refuses every download on the process once it has
+	// sent this many bytes in a UTC day, whoever asks. It bounds a month's
+	// bill at thirty-one times this figure however many principals share it.
+	// Zero is off.
+	GlobalDailyCapBytes int64
 	// MaxStreamsPerPrincipal caps concurrent live log streams per
 	// principal. Zero is unlimited.
 	MaxStreamsPerPrincipal int
@@ -196,7 +218,7 @@ type Config struct {
 
 // Budgeted reports whether any budget in this configuration applies.
 func (c Config) Budgeted() bool {
-	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyAlarmBytes > 0 ||
+	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyAlarmBytes > 0 || c.GlobalDailyCapBytes > 0 ||
 		c.MaxStreamsPerPrincipal > 0 || c.MaxDownloadsPerPrincipal > 0
 }
 
@@ -238,6 +260,7 @@ type PrincipalState struct {
 type State struct {
 	MonthlyBytesPerPrincipal int64     `json:"monthly_bytes_per_principal"`
 	DailyAlarmBytes          int64     `json:"daily_alarm_bytes"`
+	DailyCapBytes            int64     `json:"daily_cap_bytes,omitempty"`
 	MaxStreamsPerPrincipal   int       `json:"max_streams_per_principal"`
 	MaxDownloadsPerPrincipal int       `json:"max_downloads_per_principal"`
 	Month                    string    `json:"month"`
@@ -362,17 +385,30 @@ func (m *Meter) WithPersistence() *Meter {
 func (m *Meter) Config() Config { return m.cfg }
 
 // Check reports whether principal may start another download. It
-// returns a *BudgetError when the monthly budget is spent and nil
-// otherwise, including when no budget applies.
+// returns a *BudgetError when the process's daily cap or the principal's
+// monthly budget is spent and nil otherwise, including when no budget
+// applies.
 func (m *Meter) Check(principal string) error {
-	if m == nil || m.cfg.PerPrincipalMonthlyBytes <= 0 {
+	if m == nil || (m.cfg.PerPrincipalMonthlyBytes <= 0 && m.cfg.GlobalDailyCapBytes <= 0) {
 		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now().UTC()
 	key, st := m.counters(principal, now)
-	if st.monthBytes < m.cfg.PerPrincipalMonthlyBytes {
+	if m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes {
+		m.refused++
+		return &BudgetError{
+			Principal:   key,
+			LimitBytes:  m.cfg.GlobalDailyCapBytes,
+			UsedBytes:   m.dayBytes,
+			Month:       m.month,
+			RetryAfter:  untilNextDay(now),
+			Flag:        m.cfg.Flags.orDefault().DailyCapBytes,
+			ProcessWide: true,
+		}
+	}
+	if m.cfg.PerPrincipalMonthlyBytes <= 0 || st.monthBytes < m.cfg.PerPrincipalMonthlyBytes {
 		return nil
 	}
 	m.refused++
@@ -402,11 +438,26 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 	m.monthBytes += n
 	m.dayBytes += n
 	raised := m.raiseAlarmLocked(now)
+	capped := m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes &&
+		m.dayBytes-n < m.cfg.GlobalDailyCapBytes
 	// safety: every value the log line needs is copied under the lock,
 	// because reading the principal map again after the unlock races the
 	// next Record's write to it.
 	day, total := m.day, m.dayBytes
+	principalDay := st.dayBytes
 	m.mu.Unlock()
+
+	// safety: the cap refuses everyone, so the line that says it closed names
+	// the principal whose bytes crossed it and what that principal sent today.
+	if capped {
+		m.logger.Warn("egress daily cap reached",
+			"day", day,
+			"day_bytes", total,
+			"cap_bytes", m.cfg.GlobalDailyCapBytes,
+			"principal", key,
+			"principal_day_bytes", principalDay,
+			"class", string(class))
+	}
 
 	if raised {
 		m.logger.Warn("egress daily alarm",
@@ -636,6 +687,7 @@ func (m *Meter) State() State {
 	out := State{
 		MonthlyBytesPerPrincipal: m.cfg.PerPrincipalMonthlyBytes,
 		DailyAlarmBytes:          m.cfg.GlobalDailyAlarmBytes,
+		DailyCapBytes:            m.cfg.GlobalDailyCapBytes,
 		MaxStreamsPerPrincipal:   m.cfg.MaxStreamsPerPrincipal,
 		MaxDownloadsPerPrincipal: m.cfg.MaxDownloadsPerPrincipal,
 		Month:                    m.month,
@@ -808,6 +860,14 @@ func (m *Meter) raiseAlarmLocked(now time.Time) bool {
 	m.alarm = true
 	m.alarmSince = now
 	return true
+}
+
+func untilNextDay(now time.Time) time.Duration {
+	next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+	if wait := next.Sub(now); wait > 0 {
+		return wait
+	}
+	return time.Second
 }
 
 func untilNextMonth(now time.Time) time.Duration {

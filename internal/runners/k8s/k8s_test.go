@@ -393,7 +393,16 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "done"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	// safety: a done node refuses a named claim, and a refused claim creates no
+	// Job, so this controller predates the route and the Job runs unfenced.
+	controllerHandler := controller.New(st, nil).Handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/nodes/build/claim") {
+			controller.WriteUnsupportedRoute(w, r)
+			return
+		}
+		controllerHandler.ServeHTTP(w, r)
+	}))
 	defer srv.Close()
 
 	kcli := fake.NewSimpleClientset()
@@ -1129,6 +1138,24 @@ func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T
 		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
+			*job.Spec.ActiveDeadlineSeconds, want)
+	}
+}
+
+func TestBuildJob_ADeclaredTimeoutCannotOutliveTheCeiling(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "forever", func(context.Context) error { return nil }).Timeout(30 * 24 * time.Hour)
+	req := runner.Request{RunID: "run-1", NodeID: "forever", Node: node}
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	if want := int64(MaxDeclaredJobActiveDeadline.Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want the %s ceiling (%d)",
+			*job.Spec.ActiveDeadlineSeconds, MaxDeclaredJobActiveDeadline, want)
+	}
+	operator := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 48 * time.Hour}}
+	job = operator.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	if want := int64((48 * time.Hour).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want the operator's longer deadline (%d)",
 			*job.Spec.ActiveDeadlineSeconds, want)
 	}
 }
