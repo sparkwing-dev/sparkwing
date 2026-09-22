@@ -94,13 +94,15 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 		}
 		measured = true
 		peakCores, peakMem := samplePeaks(samples)
-		_ = t.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
+		if err := t.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeMetricSpan(samples),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     true,
-		})
-		s.emitNodeDrift(ctx, run, n.NodeID)
+		}); err != nil {
+			s.logger.Warn("fold node profile", "run_id", run.ID, "node_id", n.NodeID, "err", err)
+		}
+		s.emitNodeDrift(ctx, t, run, n.NodeID)
 		runPeakCores = maxF(runPeakCores, peakCores)
 		if peakMem > runPeakMem {
 			runPeakMem = peakMem
@@ -109,17 +111,19 @@ func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *stor
 	if !measured {
 		return
 	}
-	_ = t.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
+	if err := t.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
 		Duration:        runDuration(run),
 		PeakCores:       runPeakCores,
 		PeakMemoryBytes: runPeakMem,
 		CPUMeasured:     true,
-	})
-	s.emitNodeDrift(ctx, run, "")
+	}); err != nil {
+		s.logger.Warn("fold run profile", "run_id", run.ID, "err", err)
+	}
+	s.emitNodeDrift(ctx, t, run, "")
 }
 
-func (s *Server) emitNodeDrift(ctx context.Context, run *store.Run, nodeID string) {
-	prof, err := s.store.GetPipelineProfile(ctx, run.Pipeline, nodeID)
+func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.Run, nodeID string) {
+	prof, err := t.GetPipelineProfile(ctx, run.Pipeline, nodeID)
 	if err != nil || prof == nil {
 		return
 	}

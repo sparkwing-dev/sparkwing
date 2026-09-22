@@ -62,25 +62,9 @@ SELECT run_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expir
 
 // ListConcurrencyStates returns the admission picture for every one of t's
 // concurrency keys with a live holder or waiter, in lexical key order.
-func (t *Tenant) ListConcurrencyStates(ctx context.Context) (_ []*ConcurrencyState, err error) {
-	rows, err := t.s.query(ctx,
-		`SELECT key FROM concurrency_holders WHERE team = ?
-		 UNION SELECT key FROM concurrency_waiters WHERE team = ?
-		 ORDER BY key`, string(t.team), string(t.team))
+func (t *Tenant) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error) {
+	keys, err := t.liveConcurrencyKeys(ctx)
 	if err != nil {
-		return nil, err
-	}
-	var keys []string
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		keys = append(keys, k)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	states := make([]*ConcurrencyState, 0, len(keys))
@@ -145,4 +129,24 @@ func (t *Tenant) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCh
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (t *Tenant) liveConcurrencyKeys(ctx context.Context) (_ []string, err error) {
+	rows, err := t.s.query(ctx,
+		`SELECT key FROM concurrency_holders WHERE team = ?
+		 UNION SELECT key FROM concurrency_waiters WHERE team = ?
+		 ORDER BY key`, string(t.team), string(t.team))
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
 }

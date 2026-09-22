@@ -453,11 +453,15 @@ func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 			t.Errorf("a reader cancelled a run: %d %s", code, body)
 		}
 		for _, r := range []struct{ method, path string }{
-			{"POST", "/api/v1/secrets"}, {"GET", "/api/v1/secrets"},
-			{"GET", "/api/v1/secrets/deploy-key"}, {"DELETE", "/api/v1/secrets/deploy-key"},
+			{"POST", "/api/v1/secrets"},
+			{"GET", "/api/v1/secrets"},
+			{"GET", "/api/v1/secrets/deploy-key"},
+			{"DELETE", "/api/v1/secrets/deploy-key"},
 			{"POST", "/api/v1/secrets/rotate"},
-			{"POST", "/api/v1/tokens"}, {"GET", "/api/v1/tokens"},
-			{"GET", "/api/v1/tokens/swu_x"}, {"DELETE", "/api/v1/tokens/swu_x"},
+			{"POST", "/api/v1/tokens"},
+			{"GET", "/api/v1/tokens"},
+			{"GET", "/api/v1/tokens/swu_x"},
+			{"DELETE", "/api/v1/tokens/swu_x"},
 			{"POST", "/api/v1/tokens/swu_x/rotate"},
 		} {
 			if code, body := f.do(r.method, r.path, f.editorA, map[string]any{}); code != http.StatusForbidden {
