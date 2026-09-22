@@ -58,6 +58,8 @@ func RunNodeCommand(args []string) error {
 	// rely on the supervisor rather than the killed node to record the outcome.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	ctx, abandon := context.WithCancelCause(ctx)
+	defer abandon(nil)
 
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	var runOpts []RunNodeOption
@@ -93,13 +95,18 @@ func RunNodeCommand(args []string) error {
 				defer wg.Done()
 				heartbeatDispatchedClaim(hbCtx,
 					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken),
-					runID, nodeID, fence, lease, slog.Default())
+					runID, nodeID, fence, lease, abandon, slog.Default())
 			}()
 		}
 	}
 
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID,
 		holderID, token, NewJSONRenderer(), slog.Default(), nil, runOpts...)
+	// safety: a step that swallows its cancellation must still leave the pod
+	// failing, so the Job ends rather than being retried as a success.
+	if cause := context.Cause(ctx); errors.Is(cause, errClaimAbandoned) {
+		return cause
+	}
 	if err != nil {
 		return err
 	}
@@ -140,24 +147,50 @@ func dispatchedNodeClaim() (store.NodeClaimFence, time.Duration, error) {
 	}, lease, nil
 }
 
+// errClaimAbandoned ends a dispatched node whose claim the controller will
+// no longer renew.
+var errClaimAbandoned = errors.New("run-node: the controller no longer renews this node's claim, so the node stopped")
+
+// safety: the controller refuses a renewal when the team's credits run out,
+// the claim was reaped, or the node was cancelled, and a pod that kept going
+// would bill compute until the Job deadline. A controller unreachable for a
+// whole lease has let the claim lapse, so the pod stops then too.
 func heartbeatDispatchedClaim(
 	ctx context.Context,
 	ctrl *client.Client,
 	runID, nodeID string,
 	fence store.NodeClaimFence,
 	lease time.Duration,
+	abandon context.CancelCauseFunc,
 	logger *slog.Logger,
 ) {
 	ctx = store.WithNodeClaimFence(ctx, fence)
 	t := time.NewTicker(store.DispatchedHeartbeatInterval)
 	defer t.Stop()
+	lastOK := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := ctrl.HeartbeatNodeClaim(ctx, runID, nodeID, fence.HolderID, lease, nil); err != nil {
-				logger.Debug("run-node: claim heartbeat failed",
+			err := ctrl.HeartbeatNodeClaim(ctx, runID, nodeID, fence.HolderID, lease, nil)
+			switch {
+			case err == nil:
+				lastOK = time.Now()
+			case ctx.Err() != nil:
+				return
+			case errors.Is(err, store.ErrLockHeld):
+				logger.Error("run-node: the controller refused the claim renewal; stopping the node",
+					"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID)
+				abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))
+				return
+			case time.Since(lastOK) >= lease:
+				logger.Error("run-node: the controller was unreachable for the whole claim lease; stopping the node",
+					"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID, "err", err)
+				abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))
+				return
+			default:
+				logger.Warn("run-node: claim heartbeat failed",
 					"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID, "err", err)
 			}
 		}
