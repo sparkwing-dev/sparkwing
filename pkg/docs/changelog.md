@@ -20,23 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **store:** the backup drill skips a Postgres client older than the server
-  instead of failing
-  Its comment claimed `SPARKWING_PG_BIN` names a client at least as new as the
-  server, and nothing checked. The pre-release lane runs an embedded Postgres
-  17 and takes whatever `pg_dump` the runner has, which is 16 on the hosted
-  image, so the drill failed the lane rather than reporting an environment it
-  could not run in. The conformance lane keeps its no-skip guard, so the drill
-  still has one place it must actually run.
-- **wingd:** an admission refusal is counted in the events window before the
-  refusal is sent, not after
-  A caller that had its answer could query the window and find the rejection it
-  had just been told about missing, because `rejectInvalid` replied first and
-  recorded last. The hosted gate caught it as a count of 2 where 3 were
-  expected.
-
 ### Added
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
@@ -44,31 +27,6 @@ unlock.
   and says what rollback means at each stage of an upgrade. The store suite
   runs the same procedure end to end for SQLite and, against a configured
   server, for PostgreSQL.
-### Fixed
-
-- **config:** every config write from a command under its own `SPARKWING_HOME`
-  is refused, not sent to the machine's config
-  The profiles fix in v0.60.0 left the rest of this class alone.
-  `sparkwing secrets set|delete`, `sparkwing version hold --set|--clear`,
-  `sparkwing fleet init` and the repo registry all resolved
-  `~/.config/sparkwing/` whatever home the command ran under, so a drill under
-  a scratch `SPARKWING_HOME` reached the operator's own files and nothing in
-  the invocation said it would. `SPARKWING_HOME` still does not move them,
-  because what lives there is machine-wide and outlives any one home; each
-  write now fails naming both paths and the value that keeps it inside the
-  home. The local secret stores had no per-file override at all and now answer
-  to `SPARKWING_SECRETS` (masked) and `SPARKWING_CONFIG_ENV` (`--plain`);
-  `version-hold` has none, and `SPARKWING_VERSION_HOLD` holds one shell without
-  writing it. A command with no `SPARKWING_HOME`, or one whose
-  `SPARKWING_HOME` is the operator's own `~/.sparkwing`, writes where it always
-  did.
-
-- **wingd:** an admission refusal is counted in the events window before the
-  refusal is sent, not after
-  A caller that had its answer could query the window and find the rejection it
-  had just been told about missing, because `rejectInvalid` replied first and
-  recorded last. The hosted gate caught it as a count of 2 where 3 were
-  expected.
 
 ### Changed
 
@@ -127,6 +85,39 @@ unlock.
   client reads `__Host-sw_csrf` before `sw_csrf`.
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
+
+### Fixed
+
+- **store:** the backup drill skips a Postgres client older than the server
+  instead of failing
+  Its comment claimed `SPARKWING_PG_BIN` names a client at least as new as the
+  server, and nothing checked. The pre-release lane runs an embedded Postgres
+  17 and takes whatever `pg_dump` the runner has, which is 16 on the hosted
+  image, so the drill failed the lane rather than reporting an environment it
+  could not run in. The conformance lane keeps its no-skip guard, so the drill
+  still has one place it must actually run.
+- **wingd:** an admission refusal is counted in the events window before the
+  refusal is sent, not after
+  A caller that had its answer could query the window and find the rejection it
+  had just been told about missing, because `rejectInvalid` replied first and
+  recorded last. The hosted gate caught it as a count of 2 where 3 were
+  expected.
+- **config:** every config write from a command under its own `SPARKWING_HOME`
+  is refused, not sent to the machine's config
+  The profiles fix in v0.60.0 left the rest of this class alone.
+  `sparkwing secrets set|delete`, `sparkwing version hold --set|--clear`,
+  `sparkwing fleet init` and the repo registry all resolved
+  `~/.config/sparkwing/` whatever home the command ran under, so a drill under
+  a scratch `SPARKWING_HOME` reached the operator's own files and nothing in
+  the invocation said it would. `SPARKWING_HOME` still does not move them,
+  because what lives there is machine-wide and outlives any one home; each
+  write now fails naming both paths and the value that keeps it inside the
+  home. The local secret stores had no per-file override at all and now answer
+  to `SPARKWING_SECRETS` (masked) and `SPARKWING_CONFIG_ENV` (`--plain`);
+  `version-hold` has none, and `SPARKWING_VERSION_HOLD` holds one shell without
+  writing it. A command with no `SPARKWING_HOME`, or one whose
+  `SPARKWING_HOME` is the operator's own `~/.sparkwing`, writes where it always
+  did.
 
 ### Security
 
