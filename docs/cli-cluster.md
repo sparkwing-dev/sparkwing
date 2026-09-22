@@ -258,6 +258,7 @@ the paid grant's reference. Requires the admin scope.
 | `--amount N` | Credits to add, negative on a reversal; 100 credits is one dollar (required) |
 | `--reference REF` | Payment id or operator note recorded with the grant; granting the same one twice returns the first grant |
 | `--reverses REF` | Reference of the paid grant a reversal takes back |
+| `--team SLUG` | Team whose balance the grant funds; required on a multi-team controller |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples

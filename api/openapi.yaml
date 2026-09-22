@@ -3796,7 +3796,7 @@ paths:
 
   /api/v1/webhooks/github/bindings:
     delete:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: admin or team.admin
       tags: [webhooks]
       summary: Disconnect one repository from one pipeline.
       description: |
@@ -3824,7 +3824,7 @@ paths:
               schema: {$ref: "#/components/schemas/GitHubWebhookDisconnectResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: admin or team.admin
       tags: [webhooks]
       summary: Connect one repository to one pipeline.
       description: |
@@ -4322,7 +4322,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: nodes.claim` or `triggers.claim
+      x-sparkwing-scope: nodes.claim or triggers.claim
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -4335,7 +4335,20 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim
+      x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/credits/teams/{team}:
+    parameters:
+      - in: path
+        name: team
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: admin
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -5140,6 +5153,7 @@ components:
         amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit, and one grant may not exceed 10^15."}
         reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
+        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller; defaults to the default team otherwise."}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object

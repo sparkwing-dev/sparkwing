@@ -226,6 +226,10 @@ type createGrantReq struct {
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
 	Reverses    string `json:"reverses,omitempty"`
+	// Team names the team whose balance the grant funds. The operator names
+	// it because the grant route is the operator's, so the caller's own team
+	// is never the one a payment was for.
+	Team string `json:"team,omitempty"`
 }
 
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +237,34 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.writeCreditState(w, r, tenant)
+}
+
+// handleTeamCreditsShow is the operator's read of one team's balance by slug.
+func (s *Server) handleTeamCreditsShow(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
+	if !ok {
+		return
+	}
+	s.writeCreditState(w, r, tenant)
+}
+
+// namedTenant resolves a team the operator names, answering 404 for one that
+// is not registered.
+func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
+	t, err := s.tenantForTeam(r.Context(), store.Team(slug))
+	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+		writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", slug))
+		return nil, false
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "team handle", err)
+		return nil, false
+	}
+	return t, true
+}
+
+func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant *store.Tenant) {
 	state, err := tenant.CreditState(r.Context(), creditsBurnWindow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -336,11 +368,25 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	// safety: on a controller serving several teams an unnamed grant would fund
+	// whichever team the operator's token acts for, which is never the team a
+	// payment was for, so the team is required there.
+	if req.Team == "" && s.MultiTeam() {
+		writeError(w, http.StatusBadRequest, errors.New("team is required: name the team whose balance the grant funds"))
+		return
+	}
+	if req.Team == "" {
+		req.Team = string(store.DefaultTeam)
+	}
+	tenant, ok := s.namedTenant(w, r, req.Team)
+	if !ok {
+		return
+	}
 	who := authwire.AnonymousPrincipal
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		who = p.Name
 	}
-	res, err := s.store.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
+	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who,
 	})
@@ -360,7 +406,7 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, creditGrantToJSON(res.Grant))
 		return
 	}
-	s.logger.Info("credits granted",
+	s.logger.Info("credits granted", "team", string(tenant.Team()),
 		"kind", res.Grant.Kind, "amount_micro", res.Grant.AmountMicro,
 		"reference", res.Grant.Reference, "reverses", res.Grant.Reverses, "by", who)
 	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))

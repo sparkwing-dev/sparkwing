@@ -36,6 +36,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/credits/history` | `runs.read` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
 | `PUT` | `/api/v1/credits/settings` | `admin` |
+| `GET` | `/api/v1/credits/teams/{team}` | `admin` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.control` |
 | `PUT` | `/api/v1/crons/repos` | `runs.control` |
@@ -168,8 +169,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/users` | `admin` |
 | `POST` | `/api/v1/users` | `admin` |
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
-| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
-| `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
+| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` or `team.admin` |
+| `POST` | `/api/v1/webhooks/github/bindings` | `admin` or `team.admin` |
 | `GET` | `/metrics` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |
 
