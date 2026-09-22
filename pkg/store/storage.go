@@ -644,7 +644,11 @@ func (s *Store) chargeStorageTx(
 		return err
 	}
 	if rate > 0 && bytes > 0 {
-		if err := refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, principal, bytes); err != nil {
+		team, err := creditTeamForRunTx(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		if err := refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, team, principal, bytes); err != nil {
 			return err
 		}
 	}

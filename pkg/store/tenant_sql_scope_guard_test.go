@@ -60,9 +60,7 @@ var unportedSQL = []string{
 	"(*Store).CreateSession",
 	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
-	"(*Store).CreditBalanceMicro",
 	"(*Store).CreditLedgerTotals",
-	"(*Store).CreditState",
 	"(*Store).DeleteCronSchedule",
 	"(*Store).DeleteCronSchedulesForRepo",
 	"(*Store).DeleteGitHubWebhookBinding",
@@ -152,7 +150,6 @@ var unportedSQL = []string{
 	"(*Store).PutGitHubWebhookBinding",
 	"(*Store).ReapExpiredNodeClaims",
 	"(*Store).RecordContention",
-	"(*Store).RecordCreditGrant",
 	"(*Store).RecordEgressUsage",
 	"(*Store).RecordProfileObservation",
 	"(*Store).RecordWaitObservation",
@@ -243,7 +240,6 @@ var unportedSQL = []string{
 	"(*Store).markNodeReady",
 	"(*Store).mergeAgentLossRetryTx",
 	"(*Store).mintCSRFKey",
-	"(*Store).oldestRetainedRuns",
 	"(*Store).orphanedRunsQuery",
 	"(*Store).prepareNextExecutorClaim",
 	"(*Store).readClaimCandidates",
@@ -281,16 +277,13 @@ var unportedSQL = []string{
 	"applyMigrationSQLite",
 	"backfillAgentLossRetryNodeSourcesTx",
 	"backfillRunAnnotationRollup",
-	"billableRetainedBytesTx",
 	"bridgeLegacyFleetSQLite",
 	"claimedExecutorOffer",
 	"clearCreditExhaustionAnchorTx",
 	"createTriggerTx",
-	"creditBalanceTx",
 	"creditExhaustionAnchorTx",
 	"creditGrantByReferenceTx",
 	"cronFireAlreadyRecorded",
-	"dropSpentStorageWatermarkTx",
 	"duplicateGrantReferences",
 	"duplicateTokenPrefixes",
 	"enforceNodesPerRunTx",
@@ -298,8 +291,6 @@ var unportedSQL = []string{
 	"executorPrepareCandidateQuery",
 	"gatherRunAnnotations",
 	"getCronScheduleTx",
-	"insertCreditChargeTx",
-	"insertStorageChargeTx",
 	"insertTokenRow",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
@@ -310,8 +301,6 @@ var unportedSQL = []string{
 	"persistAgentLossRetryNodeSourceTx",
 	"principalMetered",
 	"recentPaidGrantsMicro",
-	"refundRateTx",
-	"refundUnstartedReservationTx",
 	"rehashSessions",
 	"rewriteLegacyInheritedHolderMarkers",
 	"runElapsedSecondsTx",
@@ -350,7 +339,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 321
+const unportedSQLSize = 310
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

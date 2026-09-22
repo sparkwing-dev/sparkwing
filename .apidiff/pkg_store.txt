@@ -209,7 +209,9 @@ const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
 type CreditCharge struct {
-	ID          string
+	ID string
+
+	Team        Team
 	RunID       string
 	NodeID      string
 	TokenPrefix string
@@ -243,7 +245,9 @@ const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
 const CreditClaimFloorSeconds = 60
 type CreditGrant struct {
-	ID          string
+	ID string
+
+	Team        Team
 	Kind        string
 	AmountMicro int64
 	Reference   string
@@ -1419,7 +1423,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
-) (_ CreditGrantResult, err error)
+) (CreditGrantResult, error)
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
@@ -1517,10 +1521,18 @@ type Tenant struct {
 }
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
+func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
+func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
+func (t *Tenant) GrantCredits(
+	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
+) (*CreditGrant, error)
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
+func (t *Tenant) RecordCreditGrant(
+	ctx context.Context, req CreditGrantRequest,
+) (CreditGrantResult, error)
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func TierQuota(tier string) (StorageQuota, bool)

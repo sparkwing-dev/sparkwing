@@ -86,6 +86,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// older binary keeps writing the migrated database and its inserts land
 	// in that team.
 	49: {teamColumn},
+	// safety: v50 adds the per-team credit exhaustion marker with a default,
+	// and moves the deployment-wide stamp into it, so an older binary keeps
+	// writing the migrated database and simply never stamps the column.
+	50: {teamsCreditExhaustedCols},
 }
 
 func columnSpecMaps() []map[string]string {

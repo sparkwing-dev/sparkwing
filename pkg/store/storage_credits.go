@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 )
 
@@ -40,7 +41,10 @@ const (
 
 	// safety: the watermark is per team and a team need not hold a quota row
 	// to hold bytes, so it lives here rather than beside a quota that may not
-	// exist; a row here is created by the first pass that sees the team.
+	// exist; a row here is created by the first pass that sees the team. The
+	// key names the team as well as the principal, because two teams may both
+	// label a token `ci` and a shared watermark would bill one and skip the
+	// other.
 	metaKeyStorageChargedThroughPrefix = "storage_charged_through/"
 )
 
@@ -108,6 +112,21 @@ func (s *Store) StorageRetainedBytes(ctx context.Context, principal string) (int
 	return bytes.Int64, nil
 }
 
+// safety: the sweep measures one team's bytes under one principal, because
+// two teams may both label a token `ci` and expiring on their combined total
+// would take runs off the team that stayed inside the ceiling.
+func (s *Store) retainedBytesFor(ctx context.Context, h storageHolder) (int64, error) {
+	var bytes sql.NullInt64
+	err := s.queryRow(ctx, `
+SELECT SUM(u.bytes)
+  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
+ WHERE r.team = ? AND u.principal = ?`, string(h.team), h.principal).Scan(&bytes)
+	if err != nil {
+		return 0, err
+	}
+	return bytes.Int64, nil
+}
+
 // SetStorageAllowance records how many retained bytes a team asked to keep and
 // answers the quota it is held to afterwards. Zero keeps everything. The
 // allowance is the ceiling the sweep expires oldest-first down to, so raising
@@ -136,9 +155,9 @@ ON CONFLICT (principal) DO UPDATE SET
 // safety: the balance and the write that grows the team's bytes share one
 // transaction, so a refused write is never recorded.
 func refuseStorageGrowthOnEmptyBalanceTx(
-	ctx context.Context, tx *storeTx, principal string, bytes int64,
+	ctx context.Context, tx *storeTx, team Team, principal string, bytes int64,
 ) error {
-	balance, err := creditBalanceTx(ctx, tx)
+	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil || balance > 0 {
 		return err
 	}
@@ -189,20 +208,21 @@ func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (Stora
 	if err != nil {
 		return out, err
 	}
-	teams, err := s.retainingPrincipals(ctx)
+	holders, err := s.retainingPrincipals(ctx)
 	if err != nil {
 		return out, err
 	}
-	for _, principal := range teams {
+	for _, holder := range holders {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		charge, err := s.chargeOneTeamStorage(ctx, principal, rate, free, now)
+		charge, err := s.chargeOneTeamStorage(ctx, holder.team, holder.principal, rate, free, now)
 		if errors.Is(err, errStorageChargeRaced) {
 			continue
 		}
 		if err != nil {
-			return out, fmt.Errorf("storage: charge team %s: %w", principal, err)
+			return out, fmt.Errorf("storage: charge team %s principal %s: %w",
+				holder.team, holder.principal, err)
 		}
 		if charge != nil {
 			out.Charges = append(out.Charges, *charge)
@@ -212,29 +232,41 @@ func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (Stora
 	return out, nil
 }
 
-// safety: the teams worth billing are the ones holding bytes, not the ones
+// safety: a pass bills and keeps a watermark for this pair rather than for a
+// principal alone, because two teams may both label a token `ci` and one
+// watermark for the pair would bill one of them and skip the other.
+type storageHolder struct {
+	team      Team
+	principal string
+}
+
+// safety: the holders worth billing are the ones holding bytes, not the ones
 // holding a quota row; a team with retained bytes and no quota row would
-// otherwise store without ever paying for it.
-func (s *Store) retainingPrincipals(ctx context.Context) (_ []string, err error) {
-	rows, err := s.query(ctx,
-		`SELECT principal FROM storage_run_usage GROUP BY principal ORDER BY principal ASC`)
+// otherwise store without ever paying for it. The team comes off the run the
+// bytes belong to, because that is the row the tenant key is written on.
+func (s *Store) retainingPrincipals(ctx context.Context) (_ []storageHolder, err error) {
+	rows, err := s.query(ctx, `
+SELECT r.team, u.principal
+  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
+ GROUP BY r.team, u.principal
+ ORDER BY r.team ASC, u.principal ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	var out []string
+	var out []storageHolder
 	for rows.Next() {
-		var principal string
-		if err := rows.Scan(&principal); err != nil {
+		var h storageHolder
+		if err := rows.Scan(&h.team, &h.principal); err != nil {
 			return nil, err
 		}
-		out = append(out, principal)
+		out = append(out, h)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) chargeOneTeamStorage(
-	ctx context.Context, principal string, rate, free int64, now time.Time,
+	ctx context.Context, team Team, principal string, rate, free int64, now time.Time,
 ) (_ *CreditCharge, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -244,12 +276,12 @@ func (s *Store) chargeOneTeamStorage(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return nil, err
 	}
-	stamped, err := creditSettingRawTx(ctx, tx, storageChargedThroughKey(principal))
+	stamped, err := creditSettingRawTx(ctx, tx, storageChargedThroughKey(team, principal))
 	if err != nil {
 		return nil, err
 	}
 	if stamped == "" {
-		if err := stampStorageChargedThroughTx(ctx, tx, principal, "", now.UnixNano()); err != nil {
+		if err := stampStorageChargedThroughTx(ctx, tx, team, principal, "", now.UnixNano()); err != nil {
 			return nil, err
 		}
 		return nil, tx.Commit()
@@ -262,11 +294,11 @@ func (s *Store) chargeOneTeamStorage(
 	// safety: the watermark moves the whole gap whether or not the truncated
 	// amount is worth a micro-credit, so an interval is never billed twice;
 	// what truncation forgives is at most one micro-credit per team per pass.
-	if err := stampStorageChargedThroughTx(ctx, tx, principal,
+	if err := stampStorageChargedThroughTx(ctx, tx, team, principal,
 		stamped, through+gap*int64(time.Second)); err != nil {
 		return nil, err
 	}
-	billable, held, err := billableRetainedBytesTx(ctx, tx, principal, free, now)
+	billable, held, err := billableRetainedBytesTx(ctx, tx, team, principal, free, now)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +318,7 @@ func (s *Store) chargeOneTeamStorage(
 		return nil, tx.Commit()
 	}
 	charge, err := insertStorageChargeTx(ctx, tx, storageCharge{
-		Principal: principal, Bytes: billable,
+		Team: team, Principal: principal, Bytes: billable,
 		Seconds: seconds, AmountMicro: amount, NowNS: now.UnixNano(),
 	})
 	if err != nil {
@@ -300,13 +332,13 @@ func (s *Store) chargeOneTeamStorage(
 // off the run's creation, which never moves, and not off the usage row, whose
 // timestamp every charged write pushes forward.
 func billableRetainedBytesTx(
-	ctx context.Context, tx *storeTx, principal string, free int64, now time.Time,
+	ctx context.Context, tx *storeTx, team Team, principal string, free int64, now time.Time,
 ) (int64, int64, error) {
 	var retained, oldest sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `
 SELECT SUM(u.bytes), MIN(NULLIF(r.created_at, 0))
   FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- WHERE u.principal = ?`, principal).
+ WHERE r.team = ? AND u.principal = ?`, string(team), principal).
 		Scan(&retained, &oldest); err != nil {
 		return 0, 0, err
 	}
@@ -329,9 +361,9 @@ SELECT SUM(u.bytes), MIN(NULLIF(r.created_at, 0))
 // read, so two controllers passing at once bill one interval once whatever
 // either one's clock says.
 func stampStorageChargedThroughTx(
-	ctx context.Context, tx *storeTx, principal, from string, to int64,
+	ctx context.Context, tx *storeTx, team Team, principal, from string, to int64,
 ) error {
-	key := storageChargedThroughKey(principal)
+	key := storageChargedThroughKey(team, principal)
 	if from == "" {
 		res, err := tx.ExecContext(ctx, `
                 INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
@@ -366,11 +398,54 @@ func storageWatermarkWon(res sql.Result) error {
 	return nil
 }
 
-func storageChargedThroughKey(principal string) string {
-	return metaKeyStorageChargedThroughPrefix + principal
+func storageChargedThroughKey(team Team, principal string) string {
+	return metaKeyStorageChargedThroughPrefix + string(team) + "/" + principal
+}
+
+// safety: the watermark key gains the team in the migration that starts
+// reading it that way, because a key left in the old shape reads as a team
+// that has never been billed and the next pass forgives the interval since
+// the last one.
+func backfillStorageWatermarkTeamTx(ctx context.Context, tx *storeTx) error {
+	// safety: the keys are read out before any of them is rewritten, because
+	// SQLite runs one statement at a time on the connection a transaction
+	// holds and a write issued mid-scan would fail.
+	old, err := storageWatermarkKeysTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, key := range old {
+		principal := strings.TrimPrefix(key, metaKeyStorageChargedThroughPrefix)
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE sparkwing_meta SET key = ? WHERE key = ?`,
+			storageChargedThroughKey(DefaultTeam, principal), key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storageWatermarkKeysTx(ctx context.Context, tx *storeTx) (_ []string, err error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT key FROM sparkwing_meta WHERE key LIKE ?`,
+		metaKeyStorageChargedThroughPrefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		out = append(out, key)
+	}
+	return out, rows.Err()
 }
 
 type storageCharge struct {
+	Team        Team
 	Principal   string
 	Bytes       int64
 	Seconds     int64
@@ -386,14 +461,15 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, principal, kind,
+        INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind,
                 seconds, amount_micro, storage_bytes, charged_at)
-        VALUES (?, '', '', '', ?, ?, ?, ?, ?, ?)`,
-		id, c.Principal, CreditChargeStorage, c.Seconds, c.AmountMicro, c.Bytes, c.NowNS); err != nil {
+        VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, ?)`,
+		string(c.Team), id, c.Principal, CreditChargeStorage,
+		c.Seconds, c.AmountMicro, c.Bytes, c.NowNS); err != nil {
 		return nil, fmt.Errorf("credits: insert storage charge: %w", err)
 	}
 	return &CreditCharge{
-		ID: id, Principal: c.Principal, Kind: CreditChargeStorage,
+		ID: id, Team: c.Team, Principal: c.Principal, Kind: CreditChargeStorage,
 		Seconds: c.Seconds, AmountMicro: c.AmountMicro, StorageBytes: c.Bytes,
 		ChargedAt: time.Unix(0, c.NowNS).UTC(),
 	}, nil
@@ -409,7 +485,7 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 // retention window releases nothing, so nothing drains there.
 func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error) {
 	var out StorageAllowanceSweep
-	teams, err := s.retainingPrincipals(ctx)
+	holders, err := s.retainingPrincipals(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -417,24 +493,35 @@ func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (Stora
 	if err != nil {
 		return out, err
 	}
-	for _, principal := range teams {
+	for _, h := range holders {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		quota, err := s.StorageQuotaFor(ctx, principal)
+		quota, err := s.StorageQuotaFor(ctx, h.principal)
 		if err != nil {
 			return out, err
 		}
 		if quota.AllowanceBytes > 0 {
-			if err := s.expireAboveCeiling(ctx, principal, quota.AllowanceBytes, time.Time{}, &out); err != nil {
-				return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", principal, err)
+			if err := s.expireAboveCeiling(ctx, h, quota.AllowanceBytes, time.Time{}, &out); err != nil {
+				return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", h.team, err)
 			}
 		}
 		if !drain {
 			continue
 		}
-		if err := s.expireAboveCeiling(ctx, principal, cutoff.free, cutoff.before, &out); err != nil {
-			return out, fmt.Errorf("storage: drain team %s to the free allowance: %w", principal, err)
+		// safety: the drain is non-payment, so it is judged against the
+		// balance of the team holding the bytes; a funded neighbor must not
+		// keep an unfunded team's cache alive, and an unfunded neighbor must
+		// not drain a funded team's.
+		balance, err := s.creditBalanceMicro(ctx, h.team)
+		if err != nil {
+			return out, err
+		}
+		if balance > 0 {
+			continue
+		}
+		if err := s.expireAboveCeiling(ctx, h, cutoff.free, cutoff.before, &out); err != nil {
+			return out, fmt.Errorf("storage: drain team %s to the free allowance: %w", h.team, err)
 		}
 	}
 	return out, nil
@@ -446,15 +533,12 @@ type storageDrain struct {
 }
 
 // safety: the drain reaches below the ceiling the customer chose, so it runs
-// only while the ledger cannot pay the rent, and only over runs the retention
-// window has already released.
+// only where storage is priced at all and only over runs the retention window
+// has already released. Whether a given team cannot pay the rent is read per
+// team by the caller, because one team's balance says nothing about another's.
 func (s *Store) storageDrainTarget(ctx context.Context, now time.Time) (bool, storageDrain, error) {
 	rate, err := s.StorageRateMicroPerGBDay(ctx)
 	if err != nil || rate <= 0 {
-		return false, storageDrain{}, err
-	}
-	balance, err := s.CreditBalanceMicro(ctx)
-	if err != nil || balance > 0 {
 		return false, storageDrain{}, err
 	}
 	settings, err := s.StorageSettings(ctx)
@@ -472,13 +556,13 @@ func (s *Store) storageDrainTarget(ctx context.Context, now time.Time) (bool, st
 // opposite things on the two passes: a team named no allowance, or a spent
 // balance leaves nothing free.
 func (s *Store) expireAboveCeiling(
-	ctx context.Context, principal string, ceiling int64, before time.Time, out *StorageAllowanceSweep,
+	ctx context.Context, h storageHolder, ceiling int64, before time.Time, out *StorageAllowanceSweep,
 ) error {
-	retained, err := s.StorageRetainedBytes(ctx, principal)
+	retained, err := s.retainedBytesFor(ctx, h)
 	if err != nil || retained <= ceiling {
 		return err
 	}
-	runs, err := s.oldestRetainedRuns(ctx, principal, before)
+	runs, err := s.oldestRetainedRuns(ctx, h, before)
 	if err != nil {
 		return err
 	}
@@ -486,7 +570,7 @@ func (s *Store) expireAboveCeiling(
 		if retained <= ceiling {
 			return nil
 		}
-		events, err := s.expireRunStorage(ctx, principal, run.id)
+		events, err := s.expireRunStorage(ctx, h.principal, run.id)
 		if err != nil {
 			return err
 		}
@@ -507,19 +591,19 @@ type retainedRun struct {
 // zero cutoff means the customer's own ceiling rather than the drain, so the
 // age bound applies only when one was given.
 func (s *Store) oldestRetainedRuns(
-	ctx context.Context, principal string, before time.Time,
+	ctx context.Context, h storageHolder, before time.Time,
 ) (_ []retainedRun, err error) {
 	query := `
 SELECT u.run_id, u.bytes
   FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- WHERE u.principal = ? AND r.` + runTerminalIn + ` AND r.created_at < ?
+ WHERE r.team = ? AND u.principal = ? AND r.` + runTerminalIn + ` AND r.created_at < ?
  ORDER BY r.created_at ASC, u.run_id ASC
  LIMIT ?`
 	bound := int64(math.MaxInt64)
 	if !before.IsZero() {
 		bound = before.UnixNano()
 	}
-	rows, err := s.query(ctx, query, principal, bound, storageAllowanceSweepMaxRuns)
+	rows, err := s.query(ctx, query, string(h.team), h.principal, bound, storageAllowanceSweepMaxRuns)
 	if err != nil {
 		return nil, err
 	}
@@ -551,12 +635,16 @@ func (s *Store) expireRunStorage(ctx context.Context, principal, runID string) (
 	if err != nil {
 		return 0, err
 	}
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
 		principal, runID); err != nil {
 		return 0, err
 	}
-	if err := dropSpentStorageWatermarkTx(ctx, tx, principal); err != nil {
+	if err := dropSpentStorageWatermarkTx(ctx, tx, team, principal); err != nil {
 		return 0, err
 	}
 	return events, tx.Commit()
@@ -565,10 +653,12 @@ func (s *Store) expireRunStorage(ctx context.Context, principal, runID string) (
 // safety: a team holding nothing keeps no watermark, so the next bytes it
 // stores are billed from the pass that sees them and sparkwing_meta does not
 // accumulate a key for every team that ever stored.
-func dropSpentStorageWatermarkTx(ctx context.Context, tx *storeTx, principal string) error {
+func dropSpentStorageWatermarkTx(ctx context.Context, tx *storeTx, team Team, principal string) error {
 	var left int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM storage_run_usage WHERE principal = ?`, principal).
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*)
+  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
+ WHERE r.team = ? AND u.principal = ?`, string(team), principal).
 		Scan(&left); err != nil {
 		return err
 	}
@@ -576,6 +666,6 @@ func dropSpentStorageWatermarkTx(ctx context.Context, tx *storeTx, principal str
 		return nil
 	}
 	_, err := tx.ExecContext(ctx,
-		`DELETE FROM sparkwing_meta WHERE key = ?`, storageChargedThroughKey(principal))
+		`DELETE FROM sparkwing_meta WHERE key = ?`, storageChargedThroughKey(team, principal))
 	return err
 }

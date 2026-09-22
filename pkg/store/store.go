@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 49
+const expectedSchemaVersion = 50
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1988,6 +1988,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyRepoGrantsNothingMigrationSQLite(ctx, tx)
 	case 49:
 		return applyTenantKeyMigrationSQLite(ctx, tx)
+	case 50:
+		return applyTeamCreditStateMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2342,6 +2344,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyRepoGrantsNothingMigrationPostgres(ctx, tx)
 	case 49:
 		return applyTenantKeyMigrationPostgres(ctx, tx)
+	case 50:
+		return applyTeamCreditStateMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -6022,7 +6026,11 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 			return nil, err
 		}
 		for _, pair := range unstarted {
-			if _, err := refundUnstartedReservationTx(ctx, tx, pair[0], pair[1], now); err != nil {
+			team, err := creditTeamForRunTx(ctx, tx, pair[0])
+			if err != nil {
+				return nil, err
+			}
+			if _, err := refundUnstartedReservationTx(ctx, tx, team, pair[0], pair[1], now); err != nil {
 				return nil, err
 			}
 		}
