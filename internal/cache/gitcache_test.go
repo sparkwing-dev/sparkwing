@@ -752,7 +752,7 @@ func TestHandleBinDigest(t *testing.T) {
 		t.Errorf("PUT Digest = %q, want %q", got, wantDigest)
 	}
 
-	meta, err := readBinMeta(hash)
+	meta, err := readBinMeta(binsDir, hash)
 	if err != nil {
 		t.Fatalf("readBinMeta: %v", err)
 	}
@@ -805,7 +805,7 @@ func TestHandleBinDigestForUnattestedBlob(t *testing.T) {
 	if !bytes.Equal(w.Body.Bytes(), body) {
 		t.Errorf("GET body = %q, want %q", w.Body.Bytes(), body)
 	}
-	meta, err := readBinMeta(hash)
+	meta, err := readBinMeta(binsDir, hash)
 	if err != nil {
 		t.Fatalf("readBinMeta: %v", err)
 	}
@@ -1134,7 +1134,7 @@ func TestHandleBinFailedPutLeavesNoSidecar(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("PUT status = %d, want 500", w.Code)
 	}
-	if _, err := os.Stat(binMetaPath(hash)); !os.IsNotExist(err) {
+	if _, err := os.Stat(binMetaPath(binsDir, hash)); !os.IsNotExist(err) {
 		t.Fatalf("failed PUT left a sidecar attesting bytes that were never stored: %v", err)
 	}
 	entries, err := os.ReadDir(binsDir)
@@ -1182,7 +1182,7 @@ func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
 			t.Fatal(err)
 		}
 		onDisk := sha256.Sum256(blob)
-		meta, err := readBinMeta(hash)
+		meta, err := readBinMeta(binsDir, hash)
 		if err != nil {
 			t.Fatalf("readBinMeta: %v", err)
 		}

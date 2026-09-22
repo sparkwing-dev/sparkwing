@@ -382,6 +382,30 @@ or dot characters, and refuses to repoint a name that is already registered to
 a different repository unless the request carries the token. Registering the
 same name to the same URL stays idempotent.
 
+### Cache grants
+
+A multi-team controller gives runners a cache grant instead of the cache's
+token. `POST /api/v1/runs/<run>/cache-grant` answers `{grant, team,
+expires_at}`: a bearer the controller signs with its own cache token, naming
+the run's team and valid for six hours. The cache verifies it without calling
+the controller and confines the request to that team:
+
+- `/bin/...`, `/cache/...` and `/artifacts/...` read and write the team's own
+  tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
+  see or replace each other's bytes. A team's bins count toward the store
+  ceiling.
+- `/git/register` and `/git/<name>/...` reach only an `https` repository
+  registered under the name `repo-<sha256 of the URL>`, the name runners
+  already derive. The mirrors are shared, so a grant never clones through the
+  cache's SSH key and cannot squat a name another team's runner will clone.
+- Every other route (`/sync/...`, `/git/refresh`, `/archive`, `/file`,
+  `/tree-hash`, `/branch-contains`, `/repos`, `/upload`, `/uploads/...`,
+  `/admin/...`) refuses a grant with 401.
+
+The operator token keeps its unscoped access, and a cache started with
+`--allow-unauthenticated` accepts no grants because it has no key to verify
+them with.
+
 Every response carries `X-Content-Type-Options: nosniff`, and artifact
 downloads carry `Content-Type: application/octet-stream` with
 `Content-Disposition: attachment`, so a stored HTML or SVG artifact cannot
