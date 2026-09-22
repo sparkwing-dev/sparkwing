@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,14 +13,24 @@ import (
 // safety: dropping the column and its index is what makes reopening the
 // database run the migration against the shape the previous binary left
 // behind.
-func downgradeTenantKeyToV48(t *testing.T, db *sql.DB) {
+func downgradeTenantKeyToV48(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
+	db := st.DB()
+	// safety: the team leads seven primary keys since v51, and a key
+	// column cannot be dropped, so the keys go back first.
+	for table, key := range store.UserKeyTablesForTest() {
+		if err := store.RekeyForTest(ctx, st, table, key); err != nil {
+			t.Fatalf("narrow %s back to the v49 key: %v", table, err)
+		}
+	}
 	stmts := []string{`DROP INDEX idx_runs_team_started`}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)
 	}
-	stmts = append(stmts, `DROP TABLE teams`, `DELETE FROM sparkwing_schema_version WHERE version >= 49`)
+	stmts = append(stmts, `DROP TABLE teams`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 49`,
+		`DELETE FROM sparkwing_requirements WHERE name = 'team-scoped-user-keys'`)
 	for _, q := range stmts {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -59,7 +68,7 @@ func TestSchemaV49BackfillsAnExistingSingleTenantInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeTenantKeyToV48(t, st.DB())
+	downgradeTenantKeyToV48(t, st)
 	// safety: the older binary names no team anywhere, so the seed does not either.
 	for _, q := range []string{
 		`INSERT INTO runs (id, pipeline, status, started_at) VALUES ('run-old', 'build', 'success', 1)`,

@@ -39,6 +39,7 @@ type executorPrepareCandidate struct {
 }
 
 type executorPreparePlan struct {
+	team     string
 	pipeline string
 	raw      []byte
 }
@@ -439,7 +440,7 @@ func (s *Store) loadExecutorPreparePlans(ctx context.Context, candidates []execu
 		args = append(args, runID)
 	}
 	rows, err := s.query(ctx, `
-SELECT id, pipeline, plan_json FROM runs
+SELECT id, team, pipeline, plan_json FROM runs
  WHERE COALESCE(LENGTH(plan_json), 0) <= ? AND id IN (`+
 		strings.TrimSuffix(strings.Repeat("?,", len(runIDs)), ",")+`)`, args...)
 	if err != nil {
@@ -450,7 +451,7 @@ SELECT id, pipeline, plan_json FROM runs
 	for rows.Next() {
 		var runID string
 		var plan executorPreparePlan
-		if err := rows.Scan(&runID, &plan.pipeline, &plan.raw); err != nil {
+		if err := rows.Scan(&runID, &plan.team, &plan.pipeline, &plan.raw); err != nil {
 			return nil, err
 		}
 		plans[runID] = plan
@@ -461,11 +462,15 @@ SELECT id, pipeline, plan_json FROM runs
 func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []executorPrepareCandidate,
 	plans map[string]executorPreparePlan,
 ) (map[string]*PipelineProfile, error) {
-	type profileIdentity struct{ pipeline, nodeID string }
+	// safety: the team is part of the identity because it leads the
+	// profile key, and the prepare scan crosses teams by construction;
+	// without it two teams sharing a pipeline name would be served one
+	// team's measurements for both.
+	type profileIdentity struct{ team, pipeline, nodeID string }
 	identities := make(map[profileIdentity]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		if plan, ok := plans[candidate.runID]; ok {
-			identities[profileIdentity{pipeline: plan.pipeline, nodeID: candidate.nodeID}] = struct{}{}
+			identities[profileIdentity{team: plan.team, pipeline: plan.pipeline, nodeID: candidate.nodeID}] = struct{}{}
 		}
 	}
 	ordered := make([]profileIdentity, 0, len(identities))
@@ -473,6 +478,9 @@ func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []ex
 		ordered = append(ordered, identity)
 	}
 	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].team != ordered[j].team {
+			return ordered[i].team < ordered[j].team
+		}
 		if ordered[i].pipeline != ordered[j].pipeline {
 			return ordered[i].pipeline < ordered[j].pipeline
 		}
@@ -482,13 +490,13 @@ func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []ex
 		return map[string]*PipelineProfile{}, nil
 	}
 	var predicate strings.Builder
-	args := make([]any, 0, len(ordered)*2)
+	args := make([]any, 0, len(ordered)*3)
 	for i, identity := range ordered {
 		if i != 0 {
 			predicate.WriteString(" OR ")
 		}
-		predicate.WriteString("(pipeline = ? AND node_id = ?)")
-		args = append(args, identity.pipeline, identity.nodeID)
+		predicate.WriteString("(team = ? AND pipeline = ? AND node_id = ?)")
+		args = append(args, identity.team, identity.pipeline, identity.nodeID)
 	}
 	rows, err := s.query(ctx, `SELECT pipeline, node_id, `+profileColumns+`
   FROM pipeline_profiles WHERE `+predicate.String(), args...)

@@ -13,9 +13,17 @@ import (
 // had ever run them back to back. v48 renames `runs.repo` and `secrets.repo`
 // and v49 adds the tenant key to both tables, and a deployment upgrading
 // across the pair runs them in one open.
-func downgradeToV47(t *testing.T, db *sql.DB) {
+func downgradeToV47(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
+	db := st.DB()
+	// safety: the team leads seven primary keys since v51, and a key
+	// column cannot be dropped, so the keys go back first.
+	for table, key := range store.UserKeyTablesForTest() {
+		if err := store.RekeyForTest(ctx, st, table, key); err != nil {
+			t.Fatalf("narrow %s back to the v49 key: %v", table, err)
+		}
+	}
 	stmts := []string{`DROP INDEX IF EXISTS idx_runs_team_started`}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)
@@ -37,7 +45,7 @@ func downgradeToV47(t *testing.T, db *sql.DB) {
 	}
 	stmts = append(stmts,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 48`,
-		`DELETE FROM sparkwing_requirements WHERE name IN ('pipeline-scoped-secrets','declared-run-repo')`,
+		`DELETE FROM sparkwing_requirements WHERE name IN ('pipeline-scoped-secrets','declared-run-repo','team-scoped-user-keys')`,
 	)
 	for _, q := range stmts {
 		if _, err := db.ExecContext(ctx, q); err != nil {
@@ -74,7 +82,7 @@ func TestSchemaV47ReachesTheNewestVersionInOneOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	downgradeToV47(t, st.DB())
+	downgradeToV47(t, st)
 	if got := readSchemaVersion(t, st.DB()); got != 47 {
 		t.Fatalf("schema version after the downgrade = %d, want 47", got)
 	}
@@ -99,6 +107,9 @@ func TestSchemaV47ReachesTheNewestVersionInOneOpen(t *testing.T) {
 	}
 	defer func() { _ = up.Close() }()
 
+	// safety: the assertion is that the ladder composed from v47 to the
+	// head in one open, not that the head is still 49, because a later
+	// migration must not silently stop being covered by this test.
 	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
 		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}

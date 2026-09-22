@@ -147,6 +147,12 @@ func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
 // Team reports which team t is scoped to.
 func (t *Tenant) Team() Team { return t.team }
 
+// safety: the un-ported *Store surface reads and writes through this
+// handle, because a caller predating the tenant key has no team to offer
+// and the migration put every existing row in this one. It skips the
+// registry read, which the migration's own registration makes redundant.
+func (s *Store) defaultTenant() *Tenant { return &Tenant{s: s, team: DefaultTeam} }
+
 // Operator is the unscoped view of the store. It does not embed *Store,
 // because an embedded *Store would hand every method on the store to
 // anything holding an operator and the unscoped surface would grow by

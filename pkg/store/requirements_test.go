@@ -234,6 +234,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
 		"pipeline-scoped-secrets",
+		"team-scoped-user-keys",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
 		t.Fatalf("requirements unknown to a pre-fleet binary = %v, want %v", got, want)
@@ -283,6 +284,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		"pipeline-scoped-secrets",
 		"repo-scoped-secrets",
 		"session-token-digest",
+		"team-scoped-user-keys",
 		"unique-token-prefix",
 	}
 	if got, err := ro.Requirements(context.Background()); err != nil || !reflect.DeepEqual(got, wantListed) {

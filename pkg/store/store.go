@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 50
+const expectedSchemaVersion = 51
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1837,6 +1837,7 @@ var migrationRequirements = map[int][]string{
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
+	51: {teamScopedUserKeysRequirement},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -1845,6 +1846,12 @@ const (
 	pipelineScopedSecretsRequirement = "pipeline-scoped-secrets"
 	declaredRunRepoRequirement       = "declared-run-repo"
 )
+
+// safety: v51 moves the team into seven primary keys, so a binary
+// predating it names a conflict target that no longer has a unique index
+// behind it and every upsert on those tables fails; the requirement is
+// what makes it refuse the store instead.
+const teamScopedUserKeysRequirement = "team-scoped-user-keys"
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
 func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
@@ -1990,6 +1997,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyTenantKeyMigrationSQLite(ctx, tx)
 	case 50:
 		return applyTeamCreditStateMigrationSQLite(ctx, tx)
+	case 51:
+		return applyUserKeyTeamScopeMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2346,6 +2355,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyTenantKeyMigrationPostgres(ctx, tx)
 	case 50:
 		return applyTeamCreditStateMigrationPostgres(ctx, tx)
+	case 51:
+		return applyUserKeyTeamScopeMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

@@ -1364,17 +1364,23 @@ func (s *Store) executorNodeCharge(ctx context.Context, tx *storeTx, n *Node) (E
 // credit ledger can price a node by the same cpu figure the scheduler sizes it
 // by, inside the claim transaction that is already open.
 func nodeChargeTx(ctx context.Context, q rowQuerier, runID, nodeID string) (ExecutorResource, error) {
-	var pipeline string
+	var team, pipeline string
 	var plan []byte
-	if err := q.QueryRowContext(ctx, `SELECT pipeline, plan_json FROM runs WHERE id = ?`, runID).Scan(&pipeline, &plan); err != nil {
+	if err := q.QueryRowContext(ctx,
+		`SELECT team, pipeline, plan_json FROM runs WHERE id = ?`, runID,
+	).Scan(&team, &pipeline, &plan); err != nil {
 		return ExecutorResource{}, err
 	}
 	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
 		return pin, nil
 	}
+	// safety: the team comes off the run rather than off the caller,
+	// because this runs on the claim path, which is cross-team by
+	// construction; without it a pipeline name two teams share prices
+	// one team's node off the other's measurements.
 	row := q.QueryRowContext(ctx, `
 SELECT `+profileColumns+`
-  FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, nodeID)
+  FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`, team, pipeline, nodeID)
 	profile, err := scanProfile(row, pipeline, nodeID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ExecutorResource{}, err

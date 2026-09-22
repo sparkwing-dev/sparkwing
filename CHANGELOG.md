@@ -153,6 +153,28 @@ unlock.
 
 ### Security
 
+- **store:** a key a user or a client chooses is unique per team
+  Seven primary keys were global across the deployment while every part of
+  them came from a user: `secrets (name, pipeline)`,
+  `github_webhook_bindings (pipeline, repo)`,
+  `pipeline_profiles (pipeline, node_id)`, and the four concurrency tables
+  keyed on a concurrency key authored in pipeline YAML. One team naming
+  `DEPLOY_KEY`, or a pipeline named `ci`, took that name from every other
+  team. `concurrency_cache` was worse than a collision: its read returned
+  `output_ref`, `origin_run_id` and `origin_node_id`, so two teams that
+  authored one concurrency key and hashed the same inputs were handed
+  pointers into each other's outputs. Schema 51 rebuilds all seven keys to
+  lead with the team, and the secrets, webhook-binding, capacity-profile and
+  concurrency families read and write through `*store.Tenant`. Rebuild and
+  backfill are one migration, because these lookups answer a miss with a
+  default rather than an error and a version between the two would read as
+  "nothing configured". A binary predating v51 names conflict targets that no
+  longer have a unique index behind them, so v51 declares the
+  `team-scoped-user-keys` requirement and such a binary refuses the store
+  instead of failing every upsert. `tokens.hash` and `tokens.token_prefix`
+  stay globally unique, because they are system-generated secrets and a
+  collision there is a security bug rather than a namespace question.
+
 - **controller:** a run's repository is metadata and grants nothing (Breaking)
   A run's repository was a free-text field its submitter typed, and three
   checks read it as proof of which repository the caller was working in: the
