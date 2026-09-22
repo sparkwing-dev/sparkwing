@@ -136,8 +136,8 @@ func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at
 func ageExhaustionStamp(t *testing.T, st *store.Store, at time.Time) {
 	t.Helper()
 	if _, err := st.DB().Exec(
-		`UPDATE sparkwing_meta SET value = ? WHERE key = 'credit_exhausted_at'`,
-		at.UnixNano()); err != nil {
+		`UPDATE teams SET credit_exhausted_at = ? WHERE name = ?`,
+		at.UnixNano(), string(store.DefaultTeam)); err != nil {
 		t.Fatalf("age the exhaustion stamp: %v", err)
 	}
 }
@@ -716,7 +716,7 @@ func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testi
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
 	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 6 {
+	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 3 {
 		t.Fatalf("the good half of a refused write changed prices: %+v", view)
 	}
 }
@@ -732,7 +732,7 @@ func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
 	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 6 {
+	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 3 {
 		t.Fatalf("the good half of a refused write changed prices: %+v", view)
 	}
 }

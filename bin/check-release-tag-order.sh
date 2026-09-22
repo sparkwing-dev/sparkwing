@@ -10,6 +10,15 @@ if [ -z "$candidate" ]; then
   exit 2
 fi
 
+# safety: an empty tag list makes any candidate the first release, so a caller
+# that piped nothing would be told its downgrade is fine. A terminal on stdin
+# is that caller.
+if [ -t 0 ]; then
+  echo "usage: check-release-tag-order.sh <vX.Y.Z> < existing-tags" >&2
+  echo "check-release-tag-order: no tag list on stdin; the tags this repository already carries arrive there, one per line or as git ls-remote --tags output" >&2
+  exit 2
+fi
+
 semver_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
 
 core_of() {

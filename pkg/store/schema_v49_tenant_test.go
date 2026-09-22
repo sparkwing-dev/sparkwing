@@ -17,7 +17,7 @@ func downgradeTenantKeyToV48(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	db := st.DB()
-	// safety: the team leads seven primary keys since v50, and a key
+	// safety: the team leads seven primary keys since v51, and a key
 	// column cannot be dropped, so the keys go back first.
 	for table, key := range store.UserKeyTablesForTest() {
 		if err := store.RekeyForTest(ctx, st, table, key); err != nil {

@@ -17,7 +17,7 @@ func downgradeToV47(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	db := st.DB()
-	// safety: the team leads seven primary keys since v50, and a key
+	// safety: the team leads seven primary keys since v51, and a key
 	// column cannot be dropped, so the keys go back first.
 	for table, key := range store.UserKeyTablesForTest() {
 		if err := store.RekeyForTest(ctx, st, table, key); err != nil {
@@ -72,10 +72,10 @@ func columnReadable(t *testing.T, db *sql.DB, table, column string) bool {
 	return rows.Err() == nil
 }
 
-// A v47 store reaches v49 in one open, running v48 and then v49. The ladder
-// refuses a gap, so the pair either composes or no deployment on v47 can
-// upgrade at all.
-func TestSchemaV47ReachesV49InOneOpen(t *testing.T) {
+// A v47 store reaches the newest version in one open, running v48, v49 and
+// every version since. The ladder refuses a gap, so they either compose or no
+// deployment on v47 can upgrade at all.
+func TestSchemaV47ReachesTheNewestVersionInOneOpen(t *testing.T) {
 	ctx := context.Background()
 	target := storetest.New(t)
 	st, err := target.TryOpen()
@@ -103,7 +103,7 @@ func TestSchemaV47ReachesV49InOneOpen(t *testing.T) {
 
 	up, err := target.TryOpen()
 	if err != nil {
-		t.Fatalf("upgrade v47 to v49: %v", err)
+		t.Fatalf("upgrade v47 to the newest version: %v", err)
 	}
 	defer func() { _ = up.Close() }()
 
@@ -114,7 +114,8 @@ func TestSchemaV47ReachesV49InOneOpen(t *testing.T) {
 		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
 	if store.ExpectedSchemaVersion() < 49 {
-		t.Fatalf("ExpectedSchemaVersion = %d, want at least 49", store.ExpectedSchemaVersion())
+		t.Fatalf("ExpectedSchemaVersion = %d, want at least the tenant key's 49",
+			store.ExpectedSchemaVersion())
 	}
 
 	if !columnReadable(t, up.DB(), "runs", "declared_repo") {

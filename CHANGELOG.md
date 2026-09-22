@@ -46,6 +46,111 @@ unlock.
   `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
+
+- **docs:** A backup, restore and upgrade runbook for self-hosted controllers
+  Covers both database shapes, names what a restore needs beside the database,
+  and says what rollback means at each stage of an upgrade. The store suite
+  runs the same procedure end to end for SQLite and, against a configured
+  server, for PostgreSQL.
+
+### Changed
+
+- **runner:** a node queues when the Kubernetes fleet is full instead of failing
+  A pod no node would take failed its node after five minutes, whatever the
+  reason, so an hour busy enough to fill the runner pool turned ordinary builds
+  into failures. The runner now measures the pod's requests against the
+  `allocatable` of the pool machines its own node selector admits. A machine of
+  that shape is running and merely busy, so the node queues for up to nine
+  minutes with `status_detail` reading `queued: the runner fleet is full`, a
+  `capacity_queued` event opening the wait, and the run starting the moment a
+  machine frees; the wait ends in `queue_timeout` with a
+  `capacity_queue_timeout` event. No machine in the pool could hold the pod
+  even when empty, so waiting cures nothing and the five-minute failure stands.
+- **controller + runner:** the default credit rate table stops at the 8-core class
+  The 16, 32 and 64-core entries are gone from the default ladder, and the
+  `large` cpu band the classes above 8 cores selected goes with them: one
+  `sparkwing.dev/cpu-band: small` pool now serves every class above the warm
+  one. No pool could schedule a 64-core pod, so choosing that class reserved a
+  team's credits and failed five minutes later. A node pinned above 8 cores is
+  refused when its class is chosen, naming the largest class still priced. A
+  rate table an operator stored keeps every class it names, so a cluster
+  provisioned for the larger classes is unaffected.
+
+
+- **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
+  `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
+  and response fields are `pipeline`, and the `?repo=` query parameter on
+  `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
+  `CreateSecretForRepo`, `GetSecretForRepo` and `DeleteSecretForRepo` are
+  `CreateSecretForPipeline`, `GetSecretForPipeline` and
+  `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
+  `secrets.pipeline` and keeps every stored value, so a row scoped to a
+  repository slug survives the upgrade, answers no run, and is re-keyed to a
+  pipeline by an admin.
+
+- **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
+  `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
+  repository a submitter typed grants nothing and the name should say so.
+  A run still serializes the field as `repo` and the `?repo=` list filter is
+  unchanged, because a CLI and a controller version independently and the
+  run-create decoder refuses an unknown field.
+- **web (Breaking):** the dashboard's session and CSRF cookies carry the
+  `__Host-` prefix
+  Host-only scoping stops a sibling host under the same registrable domain
+  reading these cookies and does nothing to stop one writing a same-named
+  cookie with a `Domain` attribute and a longer `Path`, which sorts first in
+  the `Cookie` header and is the one the server reads. A browser refuses a
+  `__Host-` cookie that carries `Domain`, which is that write. The CSRF token
+  is an HMAC of the session id rather than independent state, so a planted
+  session carries its own matching token and that layer does not catch the
+  swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
+  `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
+  See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
+  Summary: every signed-in browser signs in once more, and a custom browser
+  client reads `__Host-sw_csrf` before `sw_csrf`.
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
+
+### Fixed
+
+- **store:** the credit balance and credit exhaustion are per team. The balance
+  summed every grant and every charge on the controller with no team predicate,
+  so one team spending its grants emptied the balance every other team claimed
+  against, and a funded team silently paid for an unfunded one's compute. A
+  balance is now one team's grants less that team's charges, the claim
+  reservation, the heartbeat charge, the storage-growth refusal and the
+  non-payment storage drain each read the balance of the team that owns the
+  work, and a grant reference, which is a payment id, is refused rather than
+  honored when a second team replays it. Schema 50 moves `credit_exhausted_at`
+  out of `sparkwing_meta` onto a `credit_exhausted_at` column on the team's
+  registry row, because the bag is the deployment's and a team column on it
+  would make the session CSRF key per team; the same migration carries the
+  existing stamp onto the `default` team and moves each
+  `storage_charged_through/<principal>` watermark to
+  `storage_charged_through/<team>/<principal>`. The deployment-wide settings
+  stay in the bag: the rate, the rate table, the grace period, the charge cap,
+  the warm cpu class and the storage rate are one operator's price list and
+  policy for the whole controller. `Tenant` gains `CreditBalanceMicro`,
+  `CreditState`, `GrantCredits` and `RecordCreditGrant`; their `*Store` twins
+  read the `default` team, which is the only team a local or single-tenant
+  install has, so its behavior is unchanged and it is asked for no new
+  configuration.
+
+- **store:** the backup drill skips a Postgres client older than the server
+  instead of failing
+  Its comment claimed `SPARKWING_PG_BIN` names a client at least as new as the
+  server, and nothing checked. The pre-release lane runs an embedded Postgres
+  17 and takes whatever `pg_dump` the runner has, which is 16 on the hosted
+  image, so the drill failed the lane rather than reporting an environment it
+  could not run in. The conformance lane keeps its no-skip guard, so the drill
+  still has one place it must actually run.
+- **wingd:** an admission refusal is counted in the events window before the
+  refusal is sent, not after
+  A caller that had its answer could query the window and find the rejection it
+  had just been told about missing, because `rejectInvalid` replied first and
+  recorded last. The hosted gate caught it as a count of 2 where 3 were
+  expected.
+
 ### Security
 
 - **store:** a key a user or a client chooses is unique per team
@@ -58,13 +163,13 @@ unlock.
   team. `concurrency_cache` was worse than a collision: its read returned
   `output_ref`, `origin_run_id` and `origin_node_id`, so two teams that
   authored one concurrency key and hashed the same inputs were handed
-  pointers into each other's outputs. Schema 50 rebuilds all seven keys to
+  pointers into each other's outputs. Schema 51 rebuilds all seven keys to
   lead with the team, and the secrets, webhook-binding, capacity-profile and
   concurrency families read and write through `*store.Tenant`. Rebuild and
   backfill are one migration, because these lookups answer a miss with a
   default rather than an error and a version between the two would read as
-  "nothing configured". A binary predating v50 names conflict targets that no
-  longer have a unique index behind them, so v50 declares the
+  "nothing configured". A binary predating v51 names conflict targets that no
+  longer have a unique index behind them, so v51 declares the
   `team-scoped-user-keys` requirement and such a binary refuses the store
   instead of failing every upsert. `tokens.hash` and `tokens.token_prefix`
   stay globally unique, because they are system-generated secrets and a
@@ -91,37 +196,6 @@ unlock.
   submission and the Git cache refresh. Add `runs.control` to operator and
   dashboard tokens; runner tokens neither had it nor need it.
 
-### Changed
-
-- **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
-  `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
-  and response fields are `pipeline`, and the `?repo=` query parameter on
-  `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
-  `CreateSecretForRepo`, `GetSecretForRepo` and `DeleteSecretForRepo` are
-  `CreateSecretForPipeline`, `GetSecretForPipeline` and
-  `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
-  `secrets.pipeline` and keeps every stored value, so a row scoped to a
-  repository slug survives the upgrade, answers no run, and is re-keyed to a
-  pipeline by an admin.
-
-- **api:** a run serializes `declared_repo` where it serialized `repo` (Breaking)
-  `store.Run.Repo` is `store.Run.DeclaredRepo` and `store.RunFilter.Repos` is
-  `store.RunFilter.DeclaredRepos`. The `?repo=` list filter is unchanged.
-- **web (Breaking):** the dashboard's session and CSRF cookies carry the
-  `__Host-` prefix
-  Host-only scoping stops a sibling host under the same registrable domain
-  reading these cookies and does nothing to stop one writing a same-named
-  cookie with a `Domain` attribute and a longer `Path`, which sorts first in
-  the `Cookie` header and is the one the server reads. A browser refuses a
-  `__Host-` cookie that carries `Domain`, which is that write. The CSRF token
-  is an HMAC of the session id rather than independent state, so a planted
-  session carries its own matching token and that layer does not catch the
-  swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
-  `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
-  See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
-  Summary: every signed-in browser signs in once more, and a custom browser
-  client reads `__Host-sw_csrf` before `sw_csrf`.
-
 ## [v0.60.0] - 2026-09-21
 ### Added
 
@@ -135,6 +209,20 @@ unlock.
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.59.0, so a fresh scaffold compiles against that release.
+
+### Fixed
+
+- **config:** a profiles write from a command under its own `SPARKWING_HOME` is
+  refused, not sent to the machine's config
+  `sparkwing configure profiles add|set|remove|duplicate` and `sparkwing cloud
+  enroll` resolved `~/.config/sparkwing/profiles.yaml` whatever home the command
+  ran under, so a drill under a scratch `SPARKWING_HOME` edited the operator's
+  own profiles and nothing in the invocation said it would. `SPARKWING_HOME`
+  still does not move the file, because a profile is a machine-wide connection
+  that outlives any one home; the write now fails naming both paths and the
+  `SPARKWING_PROFILES` value that keeps it inside the home. A command with no
+  `SPARKWING_HOME`, or one whose `SPARKWING_HOME` is the operator's own
+  `~/.sparkwing`, writes where it always did.
 
 ## [v0.59.0] - 2026-09-21
 ### Added
@@ -159,6 +247,24 @@ unlock.
   forwarded only alongside `--sw-mode`, so `sparkwing run <pipeline>
   --sw-workers=3` accepted the flag and ran at one worker per CPU with no
   diagnostic.
+
+- **checks:** four gates that could report success without judging anything
+  now refuse instead. `bin/check-shell.sh` fails when it finds no tracked
+  script rather than passing on an empty list; `bin/check-release-tag-order.sh`
+  refuses a terminal on stdin rather than calling any candidate the first
+  release tag; `bin/check-release-binary-vulnerabilities.sh` no longer waives
+  GO-2026-5932 when `go list -deps` fails, because an unreadable dependency
+  list is not proof the package is unreachable; and
+  `bin/check-release-schema-parity.sh` exits 2 with real usage on a bad
+  argument list, where `--help` had printed its own shell source under a zero
+  exit since the header comment it read was removed. A new
+  `bin/check-release-schema-parity-test.sh` holds those refusals, and
+  `pre-release` runs it.
+
+- **checks:** `pre-commit` and `pre-push` warn when the scope they judge holds
+  no Go file. Both tiers run every step and pass every one of them on an empty
+  scope, and that verdict was indistinguishable from a full pass. The warning
+  names the scope it read, so a push judged against an empty range says so.
 
 ## [v0.58.0] - 2026-09-20
 ### Added

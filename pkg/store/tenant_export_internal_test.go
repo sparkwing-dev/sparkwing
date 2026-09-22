@@ -10,7 +10,7 @@ import (
 // before the tenant key was added.
 func TenantTablesForTest() []string { return slices.Clone(tenantTables) }
 
-// UserKeyTablesForTest names the tables v50 rebuilds, with the key each
+// UserKeyTablesForTest names the tables v51 rebuilds, with the key each
 // one carried before it.
 func UserKeyTablesForTest() map[string][]string {
 	return map[string][]string{
@@ -25,7 +25,7 @@ func UserKeyTablesForTest() map[string][]string {
 }
 
 // RekeyForTest puts one table's primary key back to key, so a migration
-// test can reproduce the shape v49 left behind and run v50 over rows
+// test can reproduce the shape v49 left behind and run v51 over rows
 // that already exist. It is the widening helper driven backwards, so the
 // test cannot pass against a rebuild the migration does not perform.
 func RekeyForTest(ctx context.Context, s *Store, table string, key []string) error {
@@ -34,7 +34,7 @@ func RekeyForTest(ctx context.Context, s *Store, table string, key []string) err
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	spec := teamScopedKey{table: table, key: key, replaceIndexes: preV50Indexes[table]}
+	spec := teamScopedKey{table: table, key: key, replaceIndexes: preV51Indexes[table]}
 	if s.dialect == DialectPostgres {
 		err = widenPrimaryKeyPostgres(ctx, tx, spec)
 	} else {
@@ -46,9 +46,9 @@ func RekeyForTest(ctx context.Context, s *Store, table string, key []string) err
 	return tx.Commit()
 }
 
-// safety: names the index definitions v50 replaced, so a test rekeying a
+// safety: names the index definitions v51 replaced, so a test rekeying a
 // table backwards leaves no index standing on a column it drops next.
-var preV50Indexes = map[string]map[string]string{
+var preV51Indexes = map[string]map[string]string{
 	"concurrency_holders": {
 		"idx_concurrency_holders_key_claimed": `CREATE INDEX IF NOT EXISTS idx_concurrency_holders_key_claimed
     ON concurrency_holders(key, claimed_at)`,
@@ -59,7 +59,7 @@ var preV50Indexes = map[string]map[string]string{
 	},
 }
 
-// ApplyUserKeyMigrationForTest runs v50 against s as the ladder would.
+// ApplyUserKeyMigrationForTest runs v51 against s as the ladder would.
 func ApplyUserKeyMigrationForTest(ctx context.Context, s *Store) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {

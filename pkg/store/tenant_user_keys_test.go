@@ -11,14 +11,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A row written before v50 has to survive the rebuild. Several lookups
+// A row written before v51 has to survive the rebuild. Several lookups
 // on these tables answer a miss with a default rather than an error --
 // no pin, no floor, no binding -- so a rebuild that dropped the rows
 // would read as "nothing configured" and pass a suite that only ever
 // writes after migrating. The narrowing here is the widening helper run
 // backwards, so the test cannot pass against a migration that does not
 // rebuild.
-func TestSchemaV50CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
+func TestSchemaV51CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 
@@ -56,17 +56,17 @@ func TestSchemaV50CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
 	}
 
 	if err := store.ApplyUserKeyMigrationForTest(ctx, st); err != nil {
-		t.Fatalf("apply v50: %v", err)
+		t.Fatalf("apply v51: %v", err)
 	}
 
 	for _, table := range tables {
 		var rows int
 		q := storetest.Rebind(st, `SELECT COUNT(*) FROM `+table+` WHERE team = ?`)
 		if err := st.DB().QueryRowContext(ctx, q, string(store.DefaultTeam)).Scan(&rows); err != nil {
-			t.Fatalf("count %s after v50: %v", table, err)
+			t.Fatalf("count %s after v51: %v", table, err)
 		}
 		if rows != 1 {
-			t.Errorf("%s has %d rows in the default team after v50, want the seeded 1", table, rows)
+			t.Errorf("%s has %d rows in the default team after v51, want the seeded 1", table, rows)
 		}
 	}
 
@@ -76,24 +76,24 @@ func TestSchemaV50CarriesPreExistingRowsThroughTheRebuild(t *testing.T) {
 	}
 	profile, err := tn.GetPipelineProfile(ctx, "ci", "build")
 	if err != nil {
-		t.Fatalf("GetPipelineProfile after v50: %v", err)
+		t.Fatalf("GetPipelineProfile after v51: %v", err)
 	}
 	if profile == nil || profile.PinnedCores != 4 {
-		t.Errorf("profile after v50 = %+v, want the pre-existing pin of 4 cores", profile)
+		t.Errorf("profile after v51 = %+v, want the pre-existing pin of 4 cores", profile)
 	}
 	binding, err := tn.GetGitHubWebhookBinding(ctx, "ci", "acme/app")
 	if err != nil {
-		t.Fatalf("GetGitHubWebhookBinding after v50: %v", err)
+		t.Fatalf("GetGitHubWebhookBinding after v51: %v", err)
 	}
 	if binding.HookID != 7 {
-		t.Errorf("binding after v50 = %+v, want the pre-existing hook 7", binding)
+		t.Errorf("binding after v51 = %+v, want the pre-existing hook 7", binding)
 	}
 	secret, err := tn.GetSecretRow("DEPLOY_KEY", "ci")
 	if err != nil {
-		t.Fatalf("GetSecretRow after v50: %v", err)
+		t.Fatalf("GetSecretRow after v51: %v", err)
 	}
 	if secret.Value != "v" {
-		t.Errorf("secret after v50 = %+v, want the pre-existing value", secret)
+		t.Errorf("secret after v51 = %+v, want the pre-existing value", secret)
 	}
 }
 
