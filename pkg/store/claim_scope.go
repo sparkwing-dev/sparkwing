@@ -21,22 +21,18 @@ func (s *Store) claimScope(ctx context.Context, claimant ClaimIdentity) (teamSco
 		return oneTeam(DefaultTeam), nil
 	}
 	var team string
-	var metered int64
 	err := s.queryRow(ctx,
-		`SELECT team, metered FROM tokens WHERE prefix = ?`, claimant.TokenPrefix).Scan(&team, &metered)
+		`SELECT team FROM tokens WHERE prefix = ?`, claimant.TokenPrefix).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.soleTeamScope(ctx)
 	}
 	if err != nil {
 		return teamScope{}, err
 	}
-	// safety: a metered token is the operator's own pool, which is what
-	// [Store.ClaimNamedNode] already holds the cpu-class ladder against. That
-	// pool is the overflow every team's queue drains onto, so it is the one
-	// claimant that reads across teams; every other credential is one team's.
-	if metered != 0 {
-		return allTeams(), nil
-	}
+	// safety: metering is billing, not reach. A metered credential is one
+	// team's like any other, because an admin flips the flag on any token and
+	// a cloud runner hands its token to the pipeline code it executes, so a
+	// credential that read every team's queue would be every team's secrets.
 	scoped := NormalizeTeam(Team(team))
 	if scoped == "" {
 		return teamScope{}, ErrClaimantHasNoTeam
@@ -68,9 +64,6 @@ func (s *Store) assertClaimantOwnsNode(ctx context.Context, claimant ClaimIdenti
 	if err != nil {
 		return err
 	}
-	if scope.all {
-		return nil
-	}
 	var found string
 	err = s.queryRow(ctx,
 		`SELECT node_id FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
@@ -81,15 +74,20 @@ func (s *Store) assertClaimantOwnsNode(ctx context.Context, claimant ClaimIdenti
 	return err
 }
 
-// safety: refuses a scope carrying neither a team nor the all-teams flag,
-// because the zero value would otherwise render as an empty predicate and
-// hand one claimant the whole deployment's queue.
+// safety: a claim is always one team's. The all-teams scope is refused
+// rather than rendered as an empty predicate, so no claimant can be handed
+// the whole deployment's queue, and neither can the zero value.
 func claimTeamWhere(scope teamScope, column string) (string, []any, error) {
-	if scope.all {
-		return "", nil, nil
-	}
-	if scope.team == "" {
+	if scope.all || scope.team == "" {
 		return "", nil, ErrClaimantHasNoTeam
 	}
 	return " AND " + column + " = ?", []any{string(scope.team)}, nil
+}
+
+func (s *Store) claimTeamClause(ctx context.Context, claimant ClaimIdentity, column string) (string, []any, error) {
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return "", nil, err
+	}
+	return claimTeamWhere(scope, column)
 }

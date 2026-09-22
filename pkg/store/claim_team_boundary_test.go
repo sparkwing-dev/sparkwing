@@ -139,3 +139,140 @@ func TestClaimFailsClosedForAnUnplaceableCredentialOnAMultiTeamDeployment(t *tes
 			claimed, err)
 	}
 }
+
+func mintTeamClaimant(t *testing.T, tn *store.Tenant, principal string) store.ClaimIdentity {
+	t.Helper()
+	_, tok, err := tn.CreateToken(context.Background(), principal, store.TokenKindRunner,
+		[]string{"triggers.claim", "nodes.claim", "runs.state"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("CreateToken(%s): %v", principal, err)
+	}
+	return store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+}
+
+func requireTriggerStatus(t *testing.T, st *store.Store, id, want string) {
+	t.Helper()
+	got, err := st.GetTrigger(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetTrigger(%s): %v", id, err)
+	}
+	if got.Status != want {
+		t.Fatalf("trigger %s is %q, want %q", id, got.Status, want)
+	}
+}
+
+// A claimed trigger is the run a runner executes and the secrets it reads,
+// so a laptop holding one team's runner token must not reach another team's
+// trigger by the queue or by naming its id. The other team's trigger is the
+// oldest, so a queue claim with no team predicate takes it first.
+func TestTriggerClaimRefusesAnotherTeamsTrigger(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	alpha := tenantFor(t, st, "alpha")
+	bravo := tenantFor(t, st, "bravo")
+
+	if err := bravo.CreateTrigger(ctx, store.Trigger{
+		ID: "trg-bravo", Pipeline: "deploy", CreatedAt: time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateTrigger(bravo): %v", err)
+	}
+	if err := alpha.CreateTrigger(ctx, store.Trigger{
+		ID: "trg-alpha", Pipeline: "deploy", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateTrigger(alpha): %v", err)
+	}
+	laptop := mintTeamClaimant(t, alpha, "agent:alpha-laptop")
+
+	claimed, err := st.ClaimNextTriggerFor(ctx, laptop, time.Minute, nil, nil)
+	if err != nil {
+		t.Fatalf("claiming this team's own trigger: %v", err)
+	}
+	if claimed.ID != "trg-alpha" {
+		t.Fatalf("an alpha runner token claimed trigger %s, which belongs to bravo", claimed.ID)
+	}
+	if rest, err := st.ClaimNextTriggerFor(ctx, laptop, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after its own queue drained the alpha runner claimed %+v (err %v), want not found", rest, err)
+	}
+
+	named, err := st.ClaimSpecificTriggerFor(ctx, "trg-bravo", laptop, time.Minute)
+	if err == nil {
+		t.Fatalf("an alpha runner named bravo's trigger and was given it: %+v", named)
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("named trigger claim across teams returned %v, want not found", err)
+	}
+	requireTriggerStatus(t, st, "trg-bravo", "pending")
+
+	// safety: bravo's own runner still takes it, so the refusal above cannot
+	// be read as the trigger being unclaimable.
+	bravoRunner := mintTeamClaimant(t, bravo, "agent:bravo-laptop")
+	if got, err := st.ClaimSpecificTriggerFor(ctx, "trg-bravo", bravoRunner, time.Minute); err != nil || got.ID != "trg-bravo" {
+		t.Fatalf("bravo's runner claiming its own trigger = %+v, %v", got, err)
+	}
+}
+
+// Metering decides who pays, not whose work a claimant sees. An admin can
+// flip any token to metered, and a cloud runner hands its token to the
+// pipeline code it executes, so a metered credential that read every team's
+// queue would give each team's code every other team's nodes and secrets.
+func TestMeteredTokenClaimsOnlyItsOwnTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	seedTenantRun(t, acme, "run-acme", "demo")
+	seedReadyNode(t, st, "run-acme", "build")
+
+	// safety: both teams can pay, so a claim across the boundary is refused
+	// for being across it and never for an empty balance.
+	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_home", "admin"); err != nil {
+		t.Fatalf("GrantCredits: %v", err)
+	}
+	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_acme", "admin"); err != nil {
+		t.Fatalf("GrantCredits(acme): %v", err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-home", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun(run-home): %v", err)
+	}
+	seedReadyNode(t, st, "run-home", "build")
+
+	pool := meteredClaimant(t, st, "agent:cloud")
+	claimed, err := st.ClaimNextReadyNode(ctx, pool, "pod-1", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("a metered token claiming its own team's node: %v", err)
+	}
+	if claimed.RunID != "run-home" {
+		t.Fatalf("a metered token claimed %s/%s, which belongs to another team", claimed.RunID, claimed.NodeID)
+	}
+	if rest, err := st.ClaimNextReadyNode(ctx, pool, "pod-2", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after its own queue drained a metered token claimed %+v (err %v), want not found", rest, err)
+	}
+	if named, err := st.ClaimNamedNode(ctx, pool, "run-acme", "build", "pod-3",
+		time.Minute, store.NamedClaimOptions{}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a metered token named another team's node and got %+v (err %v), want not found", named, err)
+	}
+
+	// safety: flipping the flag afterwards is the admin endpoint's move, and
+	// it must not widen what an existing team credential reaches either.
+	laptop := mintTeamClaimant(t, acme, "agent:acme-laptop")
+	if err := st.SetTokenMetered(ctx, laptop.TokenPrefix, true); err != nil {
+		t.Fatalf("SetTokenMetered: %v", err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-home-2", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun(run-home-2): %v", err)
+	}
+	seedReadyNode(t, st, "run-home-2", "build")
+	got, err := st.ClaimNextReadyNode(ctx, laptop, "acme-laptop", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("an acme token flipped to metered claiming its own node: %v", err)
+	}
+	if got.RunID != "run-acme" {
+		t.Fatalf("an acme token flipped to metered claimed %s/%s, which belongs to another team", got.RunID, got.NodeID)
+	}
+	if rest, err := st.ClaimNextReadyNode(ctx, laptop, "acme-laptop", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after acme's queue drained its flipped token claimed %+v (err %v), want not found", rest, err)
+	}
+}

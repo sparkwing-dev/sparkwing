@@ -36,8 +36,8 @@ type NamedClaimOptions struct {
 //
 // Naming a node is not a way past the team boundary: the award carries the
 // claimant's own team, so a named node of another team is refused exactly as
-// an unnamed one is. The operator's metered pool reads every team, which is
-// what lets it dispatch the overflow of all of them.
+// an unnamed one is. A metered credential is no exception: metering decides
+// who pays, not whose work the claimant may see.
 //
 // claimant is the authenticated token the claim answers to, exactly as for
 // [Store.ClaimNextReadyNode]: a metered token reserves credits here, and

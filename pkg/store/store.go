@@ -5384,8 +5384,8 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 //
 // The claim never crosses teams. The team comes off the claimant's own
 // credential, so a machine holding one team's token cannot see another
-// team's queue at all; the operator's metered pool is the exception, and
-// reads every team because it is the overflow they all drain onto.
+// team's queue at all. A metered credential is no exception, because
+// metering decides who pays and not whose work the claimant may see.
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
 	return s.ClaimNextReadyNodeAs(ctx, claimant, holderID, lease, runnerLabels, ExecutorIdentity{})
 }
@@ -7090,9 +7090,17 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 
 // ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics)
 // and records claimant as the token the claim answers to.
+//
+// The claim never crosses teams: the team comes off the claimant's own
+// credential exactly as for [Store.ClaimNextReadyNode], because a claimed
+// trigger is what a runner's whole run, and every secret it reads, rests on.
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7115,8 +7123,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
        WHERE alr.run_id = triggers.id
-         AND source_run.status NOT IN ('success','failed','cancelled'))`
+         AND source_run.status NOT IN ('success','failed','cancelled'))` + teamClause
 	args := []any{triggerStatusPending, now.UnixNano()}
+	args = append(args, teamArgs...)
 	if len(pipelines) > 0 {
 		ph := make([]string, len(pipelines))
 		for i, p := range pipelines {
@@ -7723,10 +7732,16 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 // recorded, so [Store.PrincipalHoldsTriggerClaim] can later prove the
 // claim and the writes it authorizes. A trigger id is the id of the run
 // it creates, so this claim is what the claimant's whole run rests on.
-// ErrNotFound when the trigger is not pending.
+// ErrNotFound when the trigger is not pending, and equally when it belongs
+// to a team the claimant's credential does not, so naming another team's
+// trigger id learns nothing about whether it exists.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7755,8 +7770,8 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		        SELECT 1 FROM agent_loss_retries alr
 		        JOIN runs source_run ON source_run.id = alr.source_run_id
 		        WHERE alr.run_id = triggers.id
-		          AND source_run.status NOT IN ('success','failed','cancelled'))`,
-		append(args, now.UnixNano())...)
+		          AND source_run.status NOT IN ('success','failed','cancelled'))`+teamClause,
+		append(append(args, now.UnixNano()), teamArgs...)...)
 	if err != nil {
 		return nil, err
 	}
