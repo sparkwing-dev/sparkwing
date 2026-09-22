@@ -87,6 +87,12 @@ unlock.
   (`OfferExecutorClaim`) is refused as not found before the attestation check,
   whose refusals would otherwise confirm that the node exists.
   `ClaimReadyNodeForExecutorWithReservation` carries the same team predicate.
+- **store:** rows that hang off a run (events, approvals, debug pauses, node
+  steps, metrics, dispatches, execution attempts, claim offers and agent-loss
+  retry records) take the run's team in the statement that writes them. A
+  runner holding another team's trigger can now mutate that run's nodes,
+  events and attempts: its fence was checked in the default team and every
+  such write was refused as held by another holder.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

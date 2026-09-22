@@ -153,6 +153,11 @@ func (t *Tenant) Team() Team { return t.team }
 // handle, because a caller predating the tenant key has no team to offer
 // and the migration put every existing row in this one. It skips the
 // registry read, which the migration's own registration makes redundant.
+// safety: a row that belongs to a run takes the run's team in the statement
+// that writes it, so no caller can hand it another; a row whose run is gone
+// lands where every pre-tenant row did.
+const runTeamSQL = `COALESCE((SELECT team FROM runs WHERE id = ?), '` + string(DefaultTeam) + `')`
+
 func (s *Store) defaultTenant() *Tenant { return &Tenant{s: s, team: DefaultTeam} }
 
 // Operator is the unscoped view of the store. It does not embed *Store,

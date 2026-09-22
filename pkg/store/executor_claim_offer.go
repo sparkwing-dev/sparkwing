@@ -705,10 +705,10 @@ func (s *Store) recordExecutorOfferAt(ctx context.Context, claimant ClaimIdentit
 
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_claim_offers
-       (claim_token_prefix, claim_principal, holder_id, run_id, node_id,
+       (team, claim_token_prefix, claim_principal, holder_id, run_id, node_id,
         executor_name, membership_id, worker_id, executor_kind, reservation_id,
         resource_digest, slot, base_priority, effective_priority, offered_at, last_seen_at, lease_ns)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
        run_id = excluded.run_id, node_id = excluded.node_id,
        executor_name = excluded.executor_name, membership_id = excluded.membership_id,
@@ -717,7 +717,7 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
        slot = excluded.slot, base_priority = excluded.base_priority,
        effective_priority = excluded.effective_priority, offered_at = excluded.offered_at,
        last_seen_at = excluded.last_seen_at, lease_ns = excluded.lease_ns`,
-		claimant.TokenPrefix, claimant.Principal, offer.HolderID, offer.RunID, offer.NodeID,
+		offer.RunID, claimant.TokenPrefix, claimant.Principal, offer.HolderID, offer.RunID, offer.NodeID,
 		offer.ExecutorName, membership.MembershipID, membership.WorkerID, membership.Kind, offer.ReservationID,
 		offer.ResourceDigest, offer.Slot, membership.RegisteredBasePriority, membership.EffectivePriority,
 		offeredAt, now.UnixNano(), int64(offer.Lease)); err != nil {

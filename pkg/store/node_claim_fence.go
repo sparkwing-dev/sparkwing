@@ -177,7 +177,7 @@ func (s *Store) assertNodeMutationFenceTx(ctx context.Context, tx *storeTx, runI
 			runID, nodeID, fence.HolderID, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, time.Now().UnixNano()).Scan(&held)
 	} else if _, triggerOK := TriggerClaimFenceFromContext(ctx); triggerOK {
-		if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+		if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 			return err
 		}
 		err = tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
@@ -222,6 +222,18 @@ func (s *Store) execNodeMutation(ctx context.Context, runID, nodeID, query strin
 
 // safety: the fence reads a tenant-owned table, so it takes the team of the
 // handle that is mutating rather than matching an id across every team.
+// safety: a node, event or attempt path has no tenant handle to say which
+// team it acts in, so a trigger holder's fence is checked in the run's own
+// team; the default team there refused every trigger holder of any other
+// team, while the fence itself still binds the claim to its holder.
+func (s *Store) assertRunMutationFenceInRunsTeamTx(ctx context.Context, tx *storeTx, runID string) error {
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	return s.assertRunMutationFenceTx(ctx, tx, team, runID)
+}
+
 func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
