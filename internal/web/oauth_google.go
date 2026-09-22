@@ -205,7 +205,10 @@ func postControllerJSON(ctx context.Context, controllerURL, path, clientIP strin
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if err != nil {
+			return fmt.Errorf("controller %s: %d", path, resp.StatusCode)
+		}
 		return fmt.Errorf("controller %s: %d: %s", path, resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
@@ -227,8 +230,16 @@ var signedInTmpl = template.Must(template.New("signed-in").Parse(`<!doctype html
 `))
 
 func renderSignedIn(w http.ResponseWriter, next string) {
+	var page bytes.Buffer
+	if err := signedInTmpl.Execute(&page, next); err != nil {
+		http.Error(w, "signed in; continue to "+next, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = signedInTmpl.Execute(w, next)
+	// safety: the session cookies are already set; a client that went away mid-page signs in on its next request.
+	if _, err := page.WriteTo(w); err != nil {
+		return
+	}
 }
