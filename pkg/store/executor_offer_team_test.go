@@ -89,3 +89,53 @@ func TestAssistedExecutorStaysInItsCredentialsTeam(t *testing.T) {
 		t.Fatalf("an acme executor offering for another team's node got %v, want not found", err)
 	}
 }
+
+// The reservation claim names its node outright, so it carries the team
+// predicate itself: an executor enrolled on one team's credential that names
+// another team's node is told it does not exist.
+func TestExecutorReservationClaimRefusesAnotherTeamsNode(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	_, tok, err := acme.CreateToken(ctx, "runner-fleet", store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	if err := st.EnrollExecutor(ctx, tok.Prefix, store.Executor{
+		Name: "acme-worker", Kind: "agent", Location: "cloud", Principal: tok.Principal,
+		Capabilities: []string{"linux"}, BasePriority: 10, PriorityCeiling: 20, MaxConcurrent: 2,
+		Budget: store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30},
+	}); err != nil {
+		t.Fatalf("EnrollExecutor: %v", err)
+	}
+	if err := st.HeartbeatExecutor(ctx, identity, "acme-worker",
+		store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30}, 0, time.Now()); err != nil {
+		t.Fatalf("HeartbeatExecutor: %v", err)
+	}
+	seedExecutorNode(t, st, "run-home", 1, "linux")
+	if err := acme.CreateRun(ctx, store.Run{ID: "run-acme", Pipeline: "executor-test", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-acme", NodeID: "work", Status: "pending", NeedsLabels: []string{"linux"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-acme", "work"); err != nil {
+		t.Fatal(err)
+	}
+
+	claim := func(runID, reservation string, slot int) (*store.Node, error) {
+		summary, err := st.SchedulingSummary(ctx, runID, "work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.ClaimReadyNodeForExecutorWithReservation(ctx, identity, "acme-worker", runID, "work",
+			"executor:acme-worker:"+reservation, time.Minute, reservation, slot, summary.ResourceDigest)
+	}
+	if n, err := claim("run-home", "reservation-home", 0); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an acme executor claimed another team's node: %+v, %v", n, err)
+	}
+	if n, err := claim("run-acme", "reservation-acme", 1); err != nil || n == nil || n.RunID != "run-acme" {
+		t.Fatalf("an acme executor claiming its own team's node = %+v, %v", n, err)
+	}
+}

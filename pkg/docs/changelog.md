@@ -86,6 +86,7 @@ unlock.
 - **store:** an assisted executor's offer for another team's node
   (`OfferExecutorClaim`) is refused as not found before the attestation check,
   whose refusals would otherwise confirm that the node exists.
+  `ClaimReadyNodeForExecutorWithReservation` carries the same team predicate.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
