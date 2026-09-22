@@ -195,7 +195,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 	return result.RunID, nil
 }
 
-func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error) {
+func (l cronLauncher) Active(ctx context.Context, _ store.CronSchedule, runID string, staleAfter time.Duration) (bool, error) {
 	if _, err := orchestrator.ReconcileOrphanedLocalRuns(ctx, l.store, 0); err != nil {
 		return false, err
 	}

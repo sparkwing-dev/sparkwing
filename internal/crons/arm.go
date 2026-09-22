@@ -135,7 +135,7 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 			return report, fmt.Errorf("%s: %w", d.DisplayName(), rerr)
 		}
 		hadPin := s.pinnedBefore(ctx, d.ID())
-		stored, created, aerr := s.Store.ArmCronSchedule(ctx, row, now)
+		stored, created, aerr := s.schedules().ArmCronSchedule(ctx, row, now)
 		if aerr != nil {
 			return report, aerr
 		}
@@ -237,7 +237,7 @@ func (s *Service) rebaseOverride(
 	override := *stored.Override
 	was := override.Base
 	override.Base = stored.Declaration()
-	if err := s.Store.SetCronOverride(ctx, stored.ID, override, now); err != nil {
+	if err := s.schedules().SetCronOverride(ctx, stored.ID, override, now); err != nil {
 		return nil, fmt.Errorf("%s: rebase the override onto the new declaration: %w", DisplayName(stored), err)
 	}
 	stored.Override = &override
@@ -256,7 +256,7 @@ func (s *Service) withdrawUndeclared(
 			keep[d.ID()] = true
 		}
 	}
-	existing, err := s.Store.ListCronSchedules(ctx)
+	existing, err := s.schedules().ListCronSchedules(ctx)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func (s *Service) withdrawUndeclared(
 		if sched.RepoPath != root || keep[sched.ID] || !sched.Declared {
 			continue
 		}
-		if err := s.Store.SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
+		if err := s.schedules().SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
 			return err
 		}
 		report.Withdrawn++
@@ -301,7 +301,7 @@ func (s *Service) pin(id, head string, proof Proof) (store.CronLock, error) {
 }
 
 func (s *Service) pinnedBefore(ctx context.Context, id string) bool {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	return err == nil && sched.LockedBinary != ""
 }
 
@@ -410,10 +410,10 @@ func scheduleRow(d Declared, lock store.CronLock, armedBy string, now time.Time)
 
 // Disarm deletes one schedule, its history and its pinned binary.
 func (s *Service) Disarm(ctx context.Context, id string) error {
-	if _, err := s.Store.GetCronSchedule(ctx, id); err != nil {
+	if _, err := s.schedules().GetCronSchedule(ctx, id); err != nil {
 		return err
 	}
-	if err := s.Store.DeleteCronSchedule(ctx, id); err != nil {
+	if err := s.schedules().DeleteCronSchedule(ctx, id); err != nil {
 		return err
 	}
 	return s.removePin(id)
@@ -426,11 +426,11 @@ func (s *Service) DisarmRepo(ctx context.Context, repoRoot string) (int, error) 
 	if err != nil {
 		return 0, fmt.Errorf("resolve %s: %w", repoRoot, err)
 	}
-	rows, err := s.Store.ListCronSchedules(ctx)
+	rows, err := s.schedules().ListCronSchedules(ctx)
 	if err != nil {
 		return 0, err
 	}
-	removed, err := s.Store.DeleteCronSchedulesForRepo(ctx, root)
+	removed, err := s.schedules().DeleteCronSchedulesForRepo(ctx, root)
 	if err != nil {
 		return 0, err
 	}
@@ -450,7 +450,7 @@ func (s *Service) DisarmRepo(ctx context.Context, repoRoot string) (int, error) 
 // checkout's HEAD. The schedule then runs that binary until it is re-pinned or
 // unlocked, whatever the checkout does afterward.
 func (s *Service) Lock(ctx context.Context, id string, prove Prover) (store.CronSchedule, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return store.CronSchedule{}, err
 	}
@@ -466,26 +466,26 @@ func (s *Service) Lock(ctx context.Context, id string, prove Prover) (store.Cron
 	if err != nil {
 		return store.CronSchedule{}, fmt.Errorf("%s: %w", DisplayName(sched), err)
 	}
-	if err := s.Store.SetCronScheduleLock(ctx, sched.ID, lock, s.now()); err != nil {
+	if err := s.schedules().SetCronScheduleLock(ctx, sched.ID, lock, s.now()); err != nil {
 		return store.CronSchedule{}, err
 	}
-	return s.Store.GetCronSchedule(ctx, sched.ID)
+	return s.schedules().GetCronSchedule(ctx, sched.ID)
 }
 
 // Unlock drops a schedule's pin and its pinned binary, so every later fire
 // compiles the checkout again.
 func (s *Service) Unlock(ctx context.Context, id string) (store.CronSchedule, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return store.CronSchedule{}, err
 	}
-	if err := s.Store.SetCronScheduleLock(ctx, sched.ID, store.CronLock{}, s.now()); err != nil {
+	if err := s.schedules().SetCronScheduleLock(ctx, sched.ID, store.CronLock{}, s.now()); err != nil {
 		return store.CronSchedule{}, err
 	}
 	if err := s.removePin(sched.ID); err != nil {
 		return store.CronSchedule{}, err
 	}
-	return s.Store.GetCronSchedule(ctx, sched.ID)
+	return s.schedules().GetCronSchedule(ctx, sched.ID)
 }
 
 // RefreshReport says what one pass over the armed repositories changed.
@@ -545,7 +545,7 @@ func sameArgs(a, b map[string]string) bool {
 // still in the store, so a repository that declares it again republishes it and
 // it fires once more, as long as it follows the checkout.
 func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
-	stored, err := s.Store.ListCronSchedules(ctx)
+	stored, err := s.schedules().ListCronSchedules(ctx)
 	if err != nil {
 		return RefreshReport{}, err
 	}
@@ -607,7 +607,7 @@ func (s *Service) refreshOne(
 		if !sched.Declared {
 			return
 		}
-		if err := s.Store.SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
+		if err := s.schedules().SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 			return
 		}
@@ -625,7 +625,7 @@ func (s *Service) refreshOne(
 	if republished(sched, row) {
 		return
 	}
-	if _, _, err := s.Store.ArmCronSchedule(ctx, row, now); err != nil {
+	if _, _, err := s.schedules().ArmCronSchedule(ctx, row, now); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 		return
 	}

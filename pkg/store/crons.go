@@ -59,7 +59,10 @@ const defaultCronFireLimit = 50
 // after the withdrawal. What actually runs is [CronSchedule.Effective],
 // which lays Override over the declaration.
 type CronSchedule struct {
-	ID       string `json:"id"`
+	ID string `json:"id"`
+	// Team owns the schedule and every run it fires. It stays off the wire,
+	// because a caller only ever reads its own team's schedules.
+	Team     Team   `json:"-"`
 	RepoPath string `json:"repo_path"`
 	Pipeline string `json:"pipeline"`
 	// Name distinguishes several schedules of one pipeline;
@@ -228,11 +231,22 @@ const cronScheduleOverrideColumns = `override_cron, override_tz, override_overla
        override_args, override_base, override_set_at`
 
 const cronScheduleColumns = cronScheduleInsertColumns + `,
-       ` + cronScheduleOverrideColumns
+       ` + cronScheduleOverrideColumns + `, team`
 
 var cronScheduleInsertPlaceholders = placeholders(strings.Count(cronScheduleInsertColumns, ",") + 1)
 
 const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, detail, args`
+
+// ErrCronScheduleTaken reports an arm whose repository, pipeline and name
+// another team already holds. The unique index on those three columns
+// predates the tenant key and spans every team, so the second team is
+// refused rather than handed the first team's row.
+var ErrCronScheduleTaken = errors.New("store: another team has armed a schedule for this repository, pipeline and name")
+
+// ArmCronSchedule records the declaration in the default team.
+func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error) {
+	return s.defaultTenant().ArmCronSchedule(ctx, sched, now)
+}
 
 // ArmCronSchedule records the declaration on a host, returning the
 // stored row and whether it was created. A schedule is keyed by
@@ -245,8 +259,9 @@ const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, d
 // [CronScheduleDefaultName], an empty Overlap means CronOverlapSkip, and
 // an empty Where means CronWhereLocal. A row that recorded no ArmedBy takes
 // the one this arming carries, so a schedule armed before the host recorded
-// an owner gains one on its next push.
-func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
+// an owner gains one on its next push. A key another team holds is
+// [ErrCronScheduleTaken].
+func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
 	}
@@ -269,7 +284,7 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 	if err != nil {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: %w", err)
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return CronSchedule{}, false, err
 	}
@@ -278,8 +293,8 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 	var id string
 	err = tx.QueryRowContext(ctx,
 		`SELECT id FROM cron_schedules
-          WHERE repo_path = ? AND pipeline = ? AND schedule_name = ?`+tx.forUpdate(),
-		sched.RepoPath, sched.Pipeline, sched.Name).Scan(&id)
+          WHERE team = ? AND repo_path = ? AND pipeline = ? AND schedule_name = ?`+tx.forUpdate(),
+		string(t.team), sched.RepoPath, sched.Pipeline, sched.Name).Scan(&id)
 	created = errors.Is(err, sql.ErrNoRows)
 	if err != nil && !created {
 		return CronSchedule{}, false, err
@@ -290,9 +305,13 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 		if armedAt.IsZero() {
 			armedAt = now
 		}
+		// safety: the id and the (repo_path, pipeline, schedule_name) index both
+		// span every team, so a key another team holds fails this insert rather
+		// than reaching an update that would rewrite their row.
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO cron_schedules (`+cronScheduleInsertColumns+`)
-VALUES (`+cronScheduleInsertPlaceholders+`)`,
+INSERT INTO cron_schedules (team, `+cronScheduleInsertColumns+`)
+VALUES (?, `+cronScheduleInsertPlaceholders+`)`,
+			string(t.team),
 			id, sched.RepoPath, sched.Pipeline, sched.Name, sched.Cron, sched.TZ, sched.Overlap,
 			int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
 			sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
@@ -301,6 +320,10 @@ VALUES (`+cronScheduleInsertPlaceholders+`)`,
 			nullNanos(sched.LastFiredAt), sched.LastRunID, sched.LastOutcome,
 			nullNanos(sched.NextDueAt),
 		); err != nil {
+			if isUniqueViolation(err) {
+				return CronSchedule{}, false, fmt.Errorf("%w: %s %s/%s", ErrCronScheduleTaken,
+					sched.RepoPath, sched.Pipeline, sched.Name)
+			}
 			return CronSchedule{}, false, err
 		}
 	} else if _, err := tx.ExecContext(ctx, `
@@ -309,14 +332,14 @@ UPDATE cron_schedules
        locked_ref = ?, locked_binary = ?, locked_digest = ?, declared = 1,
        armed_by = CASE WHEN armed_by = '' THEN ? ELSE armed_by END,
        updated_at = ?, next_due_at = ?
- WHERE id = ?`,
+ WHERE team = ? AND id = ?`,
 		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
 		sched.LockedRef, sched.LockedBinary, sched.LockedDigest, sched.ArmedBy,
-		now.UnixNano(), nullNanos(sched.NextDueAt), id,
+		now.UnixNano(), nullNanos(sched.NextDueAt), string(t.team), id,
 	); err != nil {
 		return CronSchedule{}, false, err
 	}
-	stored, err = getCronScheduleTx(ctx, tx, id)
+	stored, err = getCronScheduleTx(ctx, tx, t.team, id)
 	if err != nil {
 		return CronSchedule{}, false, err
 	}
@@ -326,12 +349,32 @@ UPDATE cron_schedules
 	return stored, created, nil
 }
 
-// ListCronSchedules returns every schedule armed on this host, ordered
+// ListCronSchedules returns the default team's schedules.
+func (s *Store) ListCronSchedules(ctx context.Context) ([]CronSchedule, error) {
+	return s.defaultTenant().ListCronSchedules(ctx)
+}
+
+// ListCronSchedules returns every schedule armed in t's team, ordered
 // by repository path, pipeline, then schedule name.
-func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error) {
-	rows, err := s.query(ctx, `SELECT `+cronScheduleColumns+`
+func (t *Tenant) ListCronSchedules(ctx context.Context) ([]CronSchedule, error) {
+	return t.s.listCronSchedules(ctx, `SELECT `+cronScheduleColumns+`
   FROM cron_schedules
- ORDER BY repo_path, pipeline, schedule_name`)
+ WHERE team = ?
+ ORDER BY repo_path, pipeline, schedule_name`, string(t.team))
+}
+
+// ListCronSchedulesAcrossTeams returns every team's schedules, each
+// carrying its team, ordered by repository path, pipeline, then schedule
+// name. The controller's tick reads it and launches each schedule in its
+// own team.
+func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error) {
+	return o.s.listCronSchedules(ctx, `SELECT `+cronScheduleColumns+`
+  FROM cron_schedules
+ ORDER BY repo_path, pipeline, schedule_name, team`)
+}
+
+func (s *Store) listCronSchedules(ctx context.Context, query string, args ...any) (out []CronSchedule, err error) {
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -346,59 +389,91 @@ func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err 
 	return out, rows.Err()
 }
 
-// GetCronSchedule returns one schedule, or an error wrapping
-// [ErrNotFound] when the id is unknown.
+// GetCronSchedule returns one of the default team's schedules.
 func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error) {
-	sched, err := scanCronSchedule(s.queryRow(ctx,
-		`SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE id = ?`, id).Scan)
+	return s.defaultTenant().GetCronSchedule(ctx, id)
+}
+
+// GetCronSchedule returns one schedule, or an error wrapping
+// [ErrNotFound] when the id is unknown in t's team.
+func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error) {
+	sched, err := scanCronSchedule(t.s.queryRow(ctx,
+		`SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team = ? AND id = ?`,
+		string(t.team), id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CronSchedule{}, notFound("cron schedule", id)
 	}
 	return sched, err
 }
 
+// SetCronSchedulePaused pauses or resumes one of the default team's schedules.
+func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error {
+	return s.defaultTenant().SetCronSchedulePaused(ctx, id, paused, now)
+}
+
 // SetCronSchedulePaused pauses or resumes a schedule. A paused
 // schedule still advances its cursor, so resuming does not replay the
 // instants that passed while it was paused.
-func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error {
-	return s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules SET paused = ?, updated_at = ? WHERE id = ?`,
-		boolToInt(paused), now.UnixNano(), id)
+func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error {
+	return t.s.updateCronSchedule(ctx, id,
+		`UPDATE cron_schedules SET paused = ?, updated_at = ? WHERE team = ? AND id = ?`,
+		boolToInt(paused), now.UnixNano(), string(t.team), id)
+}
+
+// SetCronScheduleDeclared records, in the default team, whether the
+// repository still declares a schedule.
+func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error {
+	return s.defaultTenant().SetCronScheduleDeclared(ctx, id, declared, now)
 }
 
 // SetCronScheduleDeclared records whether the repository still
 // declares this schedule.
-func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error {
-	return s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules SET declared = ?, updated_at = ? WHERE id = ?`,
-		boolToInt(declared), now.UnixNano(), id)
+func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error {
+	return t.s.updateCronSchedule(ctx, id,
+		`UPDATE cron_schedules SET declared = ?, updated_at = ? WHERE team = ? AND id = ?`,
+		boolToInt(declared), now.UnixNano(), string(t.team), id)
+}
+
+// SetCronScheduleNextDue republishes a default-team schedule's next instant.
+func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error {
+	return s.defaultTenant().SetCronScheduleNextDue(ctx, id, next, now)
 }
 
 // SetCronScheduleNextDue republishes the next matching instant, nil
 // when the expression never matches again.
-func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error {
-	return s.updateCronSchedule(ctx, id,
-		`UPDATE cron_schedules SET next_due_at = ?, updated_at = ? WHERE id = ?`,
-		nullNanos(next), now.UnixNano(), id)
+func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error {
+	return t.s.updateCronSchedule(ctx, id,
+		`UPDATE cron_schedules SET next_due_at = ?, updated_at = ? WHERE team = ? AND id = ?`,
+		nullNanos(next), now.UnixNano(), string(t.team), id)
+}
+
+// SetCronScheduleLock pins or unpins one of the default team's schedules.
+func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error {
+	return s.defaultTenant().SetCronScheduleLock(ctx, id, lock, now)
 }
 
 // SetCronScheduleLock pins a schedule to a commit and the pipeline
 // binary built from it, so an updated checkout cannot change what an
 // unattended run executes. A zero [CronLock] unlocks the schedule,
 // which then follows the checkout again.
-func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error {
-	return s.updateCronSchedule(ctx, id,
+func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error {
+	return t.s.updateCronSchedule(ctx, id,
 		`UPDATE cron_schedules
             SET locked_ref = ?, locked_binary = ?, locked_digest = ?, updated_at = ?
-          WHERE id = ?`,
-		lock.Ref, lock.Binary, lock.Digest, now.UnixNano(), id)
+          WHERE team = ? AND id = ?`,
+		lock.Ref, lock.Binary, lock.Digest, now.UnixNano(), string(t.team), id)
+}
+
+// SetCronOverride replaces the host's edit of a default-team schedule.
+func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error {
+	return s.defaultTenant().SetCronOverride(ctx, id, o, now)
 }
 
 // SetCronOverride replaces this host's edit of the declaration whole:
 // every field the override leaves unset returns to what the repository
 // declares. Base and SetAt come from the argument, and SetAt defaults
 // to now when it is zero.
-func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error {
+func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error {
 	if o.Overlap != "" && o.Overlap != CronOverlapSkip && o.Overlap != CronOverlapQueue {
 		return fmt.Errorf("SetCronOverride: unknown overlap policy %q", o.Overlap)
 	}
@@ -422,41 +497,53 @@ func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, 
 	if o.CatchUp != nil {
 		catchUp = int64(*o.CatchUp)
 	}
-	return s.updateCronSchedule(ctx, id,
+	return t.s.updateCronSchedule(ctx, id,
 		`UPDATE cron_schedules
             SET override_cron = ?, override_tz = ?, override_overlap = ?,
                 override_catch_up_ns = ?, override_args = ?, override_base = ?,
                 override_set_at = ?, updated_at = ?
-          WHERE id = ?`,
+          WHERE team = ? AND id = ?`,
 		o.Cron, o.TZ, o.Overlap, catchUp, overrideArgs, string(base),
-		setAt.UnixNano(), now.UnixNano(), id)
+		setAt.UnixNano(), now.UnixNano(), string(t.team), id)
+}
+
+// ClearCronOverride drops the host's edit of a default-team schedule.
+func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error {
+	return s.defaultTenant().ClearCronOverride(ctx, id, now)
 }
 
 // ClearCronOverride drops this host's edit, returning the schedule to
 // what the repository declares.
-func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error {
-	return s.updateCronSchedule(ctx, id,
+func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error {
+	return t.s.updateCronSchedule(ctx, id,
 		`UPDATE cron_schedules
             SET override_cron = NULL, override_tz = NULL, override_overlap = NULL,
                 override_catch_up_ns = NULL, override_args = NULL, override_base = NULL,
                 override_set_at = NULL, updated_at = ?
-          WHERE id = ?`,
-		now.UnixNano(), id)
+          WHERE team = ? AND id = ?`,
+		now.UnixNano(), string(t.team), id)
+}
+
+// DeleteCronSchedule disarms one of the default team's schedules.
+func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error {
+	return s.defaultTenant().DeleteCronSchedule(ctx, id)
 }
 
 // DeleteCronSchedule disarms one schedule and drops its fire history,
-// leaving every sibling schedule of the same pipeline armed. An unknown
-// id is an error wrapping [ErrNotFound].
-func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error) {
-	tx, err := s.beginTx(ctx)
+// leaving every sibling schedule of the same pipeline armed. An id
+// unknown in t's team is an error wrapping [ErrNotFound].
+func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_fires WHERE schedule_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM cron_fires WHERE team = ? AND schedule_id = ?`, string(t.team), id); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM cron_schedules WHERE id = ?`, id)
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM cron_schedules WHERE team = ? AND id = ?`, string(t.team), id)
 	if err != nil {
 		return err
 	}
@@ -470,21 +557,30 @@ func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error) {
 	return tx.Commit()
 }
 
+// DeleteCronSchedulesForRepo disarms the default team's schedules of one
+// repository checkout.
+func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error) {
+	return s.defaultTenant().DeleteCronSchedulesForRepo(ctx, repoPath)
+}
+
 // DeleteCronSchedulesForRepo disarms every schedule of one repository
-// checkout and returns how many rows went, so a caller can report an
-// uninstall that found nothing.
-func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error) {
-	tx, err := s.beginTx(ctx)
+// checkout in t's team and returns how many rows went, so a caller can
+// report an uninstall that found nothing.
+func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error) {
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM cron_fires
-          WHERE schedule_id IN (SELECT id FROM cron_schedules WHERE repo_path = ?)`, repoPath); err != nil {
+          WHERE team = ?
+            AND schedule_id IN (SELECT id FROM cron_schedules WHERE team = ? AND repo_path = ?)`,
+		string(t.team), string(t.team), repoPath); err != nil {
 		return 0, err
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM cron_schedules WHERE repo_path = ?`, repoPath)
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM cron_schedules WHERE team = ? AND repo_path = ?`, string(t.team), repoPath)
 	if err != nil {
 		return 0, err
 	}
@@ -498,6 +594,11 @@ func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string)
 	return int(affected), nil
 }
 
+// ResolveCronDue advances one of the default team's schedules past a due instant.
+func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error {
+	return s.defaultTenant().ResolveCronDue(ctx, id, cursor, next, fire, now)
+}
+
 // ResolveCronDue advances the schedule past one due instant: the cursor
 // moves forward to cursor, the next match to next, and fire, when given,
 // joins the schedule's history. The cursor only ever moves forward, so a
@@ -507,7 +608,7 @@ func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string)
 // A fired outcome also stamps last_fired_at, last_run_id and
 // last_outcome; every other outcome stamps last_outcome alone, leaving
 // the last successful launch on the row. fire.ID is minted when empty.
-func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {
+func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {
 	if fire != nil && fire.Outcome == "" {
 		return fmt.Errorf("ResolveCronDue: fire outcome required")
 	}
@@ -520,7 +621,7 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 			return fmt.Errorf("ResolveCronDue: %w", err)
 		}
 	}
-	tx, err := s.beginTx(ctx)
+	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -528,7 +629,8 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 
 	var exists string
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT id FROM cron_schedules WHERE id = ?`+tx.forUpdate(), id).Scan(&exists); {
+		`SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(),
+		string(t.team), id).Scan(&exists); {
 	case errors.Is(err, sql.ErrNoRows):
 		return notFound("cron schedule", id)
 	case err != nil:
@@ -538,31 +640,31 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 	// safety: `crons run` resolves outside the tick lock, so a stale cursor must
 	// never pull a concurrent tick's newer one backwards onto instants it
 	// already resolved.
-	advance := "cursor_at = " + s.greatest() + "(cursor_at, ?)"
-	update := `UPDATE cron_schedules SET ` + advance + `, next_due_at = ?, updated_at = ? WHERE id = ?`
-	args := []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), id}
+	advance := "cursor_at = " + t.s.greatest() + "(cursor_at, ?)"
+	update := `UPDATE cron_schedules SET ` + advance + `, next_due_at = ?, updated_at = ? WHERE team = ? AND id = ?`
+	args := []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), string(t.team), id}
 	if fire != nil {
 		if fire.Outcome == CronOutcomeFired {
 			update = `UPDATE cron_schedules
                          SET ` + advance + `, next_due_at = ?, updated_at = ?,
                              last_fired_at = ?, last_run_id = ?, last_outcome = ?
-                       WHERE id = ?`
+                       WHERE team = ? AND id = ?`
 			args = []any{
 				cursor.UnixNano(), nullNanos(next), now.UnixNano(),
-				fire.DecidedAt.UnixNano(), fire.RunID, fire.Outcome, id,
+				fire.DecidedAt.UnixNano(), fire.RunID, fire.Outcome, string(t.team), id,
 			}
 		} else {
 			update = `UPDATE cron_schedules
                          SET ` + advance + `, next_due_at = ?, updated_at = ?, last_outcome = ?
-                       WHERE id = ?`
-			args = []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), fire.Outcome, id}
+                       WHERE team = ? AND id = ?`
+			args = []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), fire.Outcome, string(t.team), id}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, update, args...); err != nil {
 		return err
 	}
 	if fire != nil {
-		recorded, derr := cronFireAlreadyRecorded(ctx, tx, id, *fire)
+		recorded, derr := cronFireAlreadyRecorded(ctx, tx, t.team, id, *fire)
 		if derr != nil {
 			return derr
 		}
@@ -577,19 +679,19 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 			}
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO cron_fires (`+cronFireColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			fireID, id, fire.DueAt.UnixNano(), fire.DecidedAt.UnixNano(),
+			`INSERT INTO cron_fires (team, `+cronFireColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			string(t.team), fireID, id, fire.DueAt.UnixNano(), fire.DecidedAt.UnixNano(),
 			fire.Outcome, fire.RunID, fire.Detail, fireArgs); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM cron_fires
-              WHERE schedule_id = ?
+              WHERE team = ? AND schedule_id = ?
                 AND id NOT IN (SELECT id FROM cron_fires
-                                WHERE schedule_id = ?
+                                WHERE team = ? AND schedule_id = ?
                                 ORDER BY decided_at DESC, id DESC
                                 LIMIT ?)`,
-			id, id, maxCronFiresPerSchedule); err != nil {
+			string(t.team), id, string(t.team), id, maxCronFiresPerSchedule); err != nil {
 			return err
 		}
 	}
@@ -600,31 +702,36 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 // key, so the second must not write a second fired row for it. Only a fired
 // outcome and only the same run: `crons run` repeats an instant on purpose and
 // reaches a run of its own.
-func cronFireAlreadyRecorded(ctx context.Context, tx *storeTx, scheduleID string, fire CronFire) (bool, error) {
+func cronFireAlreadyRecorded(ctx context.Context, tx *storeTx, team Team, scheduleID string, fire CronFire) (bool, error) {
 	if fire.Outcome != CronOutcomeFired || fire.RunID == "" {
 		return false, nil
 	}
 	var n int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM cron_fires
-          WHERE schedule_id = ? AND due_at = ? AND run_id = ? AND outcome = ?`,
-		scheduleID, fire.DueAt.UnixNano(), fire.RunID, CronOutcomeFired).Scan(&n); err != nil {
+          WHERE team = ? AND schedule_id = ? AND due_at = ? AND run_id = ? AND outcome = ?`,
+		string(team), scheduleID, fire.DueAt.UnixNano(), fire.RunID, CronOutcomeFired).Scan(&n); err != nil {
 		return false, err
 	}
 	return n > 0, nil
 }
 
+// ListCronFires returns a default-team schedule's resolved instants.
+func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) ([]CronFire, error) {
+	return s.defaultTenant().ListCronFires(ctx, scheduleID, limit)
+}
+
 // ListCronFires returns a schedule's resolved instants newest first.
 // A limit of zero or less reads the newest 50.
-func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error) {
+func (t *Tenant) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error) {
 	if limit <= 0 {
 		limit = defaultCronFireLimit
 	}
-	rows, err := s.query(ctx, `SELECT `+cronFireColumns+`
+	rows, err := t.s.query(ctx, `SELECT `+cronFireColumns+`
   FROM cron_fires
- WHERE schedule_id = ?
+ WHERE team = ? AND schedule_id = ?
  ORDER BY decided_at DESC, id DESC
- LIMIT ?`, scheduleID, limit)
+ LIMIT ?`, string(t.team), scheduleID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -726,9 +833,9 @@ func (s *Store) updateCronSchedule(ctx context.Context, id, query string, args .
 	return nil
 }
 
-func getCronScheduleTx(ctx context.Context, tx *storeTx, id string) (CronSchedule, error) {
+func getCronScheduleTx(ctx context.Context, tx *storeTx, team Team, id string) (CronSchedule, error) {
 	sched, err := scanCronSchedule(tx.QueryRowContext(ctx,
-		`SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE id = ?`, id).Scan)
+		`SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team = ? AND id = ?`, string(team), id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CronSchedule{}, notFound("cron schedule", id)
 	}
@@ -742,6 +849,7 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	var args string
 	var lastFiredNS, nextDueNS, overrideCatchUpNS, overrideSetNS sql.NullInt64
 	var overrideCron, overrideTZ, overrideOverlap, overrideArgs, overrideBase sql.NullString
+	var team string
 	if err := scan(
 		&sched.ID, &sched.RepoPath, &sched.Pipeline, &sched.Name,
 		&sched.Cron, &sched.TZ, &sched.Overlap, &catchUpNS, &sched.Where, &sched.GitBranch, &args,
@@ -750,10 +858,11 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 		&armedNS, &sched.ArmedBy, &updatedNS, &cursorNS,
 		&lastFiredNS, &sched.LastRunID, &sched.LastOutcome, &nextDueNS,
 		&overrideCron, &overrideTZ, &overrideOverlap, &overrideCatchUpNS,
-		&overrideArgs, &overrideBase, &overrideSetNS,
+		&overrideArgs, &overrideBase, &overrideSetNS, &team,
 	); err != nil {
 		return CronSchedule{}, err
 	}
+	sched.Team = Team(team)
 	sched.CatchUp = time.Duration(catchUpNS)
 	sched.Paused = paused != 0
 	sched.Declared = declared != 0

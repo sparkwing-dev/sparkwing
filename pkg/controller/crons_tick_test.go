@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -201,26 +203,91 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	launcher := cronLauncher{server: New(st, nil)}
+	sched := store.CronSchedule{Team: store.DefaultTeam}
 
-	fresh, err := launcher.Active(ctx, "run_old", 4*time.Hour)
+	fresh, err := launcher.Active(ctx, sched, "run_old", 4*time.Hour)
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
 	if !fresh {
 		t.Error("a run queued inside the window is not active")
 	}
-	stale, err := launcher.Active(ctx, "run_old", time.Minute)
+	stale, err := launcher.Active(ctx, sched, "run_old", time.Minute)
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
 	if stale {
 		t.Error("a run nothing claimed for two hours still reads as active")
 	}
-	missing, err := launcher.Active(ctx, "run_gone", time.Minute)
+	missing, err := launcher.Active(ctx, sched, "run_gone", time.Minute)
 	if err != nil {
 		t.Fatalf("Active on a missing run: %v", err)
 	}
 	if missing {
 		t.Error("a run the store does not hold reads as active")
+	}
+}
+
+// The tick evaluates every team's schedules, and a schedule team B armed
+// launches its run, its trigger and its history in team B.
+func TestCronTick_AScheduleFiresInTheTeamThatArmedIt(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	if err := st.AsOperator().CreateTeam(ctx, "team-b"); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	tenantB, err := st.ForTeam(ctx, "team-b")
+	if err != nil {
+		t.Fatalf("ForTeam team-b: %v", err)
+	}
+	tenantDefault, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatalf("ForTeam default: %v", err)
+	}
+	report, err := (&crons.Service{Store: st, Schedules: tenantB}).ArmPushed(ctx, crons.ArmPush{
+		RepoURL: "https://github.com/acme/widgets.git",
+		Branch:  "main",
+		SHA:     "0123456789abcdef0123456789abcdef01234567",
+		Entries: []crons.Declared{{
+			Pipeline: "nightly",
+			Name:     store.CronScheduleDefaultName,
+			Trigger: pipelines.ScheduleTrigger{
+				Name: store.CronScheduleDefaultName, Cron: "* * * * *",
+				Where: pipelines.ScheduleWhereController,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ArmPushed: %v", err)
+	}
+	id := report.Schedules[0].ID
+
+	srv := New(st, nil).WithDispatcher(&countingDispatcher{})
+	srv.cronNow = func() time.Time { return time.Now().Add(2 * time.Minute) }
+	srv.cronTickOnce(ctx)
+
+	sched, err := tenantB.GetCronSchedule(ctx, id)
+	if err != nil {
+		t.Fatalf("team B's schedule: %v", err)
+	}
+	if sched.LastRunID == "" || sched.LastOutcome != store.CronOutcomeFired {
+		t.Fatalf("the tick did not fire team B's schedule: outcome %q run %q", sched.LastOutcome, sched.LastRunID)
+	}
+	if _, err := tenantB.GetRun(ctx, sched.LastRunID); err != nil {
+		t.Errorf("team B cannot read the run its schedule fired: %v", err)
+	}
+	if _, err := tenantDefault.GetRun(ctx, sched.LastRunID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("default team GetRun of team B's fired run = %v, want ErrNotFound", err)
+	}
+	fires, err := tenantB.ListCronFires(ctx, id, 0)
+	if err != nil || !slices.ContainsFunc(fires, func(f store.CronFire) bool { return f.RunID == sched.LastRunID }) {
+		t.Errorf("team B's fire history = %+v (err %v), want the fired run in it", fires, err)
+	}
+	if _, err := st.GetCronSchedule(ctx, id); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("the default team reads team B's schedule: %v", err)
 	}
 }
