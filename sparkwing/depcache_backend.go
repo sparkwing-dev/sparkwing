@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -42,7 +43,7 @@ func selectDepCacheBackend() depCacheBackend {
 }
 
 func depCacheToken() string {
-	if t := os.Getenv("SPARKWING_CACHE_TOKEN"); t != "" {
+	if t := authwire.CacheBearerFromEnv(); t != "" {
 		return t
 	}
 	return os.Getenv("SPARKWING_AGENT_TOKEN")

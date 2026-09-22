@@ -16,3 +16,26 @@ fill `X-CSRF-Token` reads `__Host-sw_csrf` first and falls back to `sw_csrf`,
 because a deployment running `SPARKWING_WEB_INSECURE_COOKIES=1` drops the
 prefix along with `Secure`. See [auth.md](../auth.md#dashboard-authorization) for
 the cookie contract.
+
+## Runners carry a cache grant instead of the cache token
+
+A runner no longer reads `SPARKWING_CACHE_TOKEN`. After each claim it asks the
+controller's `POST /api/v1/runs/<run>/cache-grant` for a grant naming the
+run's team, and the run's cache traffic carries that grant. The token let any
+team's pipeline read and replace every other team's cached binaries, which the
+other team's launcher then executed.
+
+- Delete `cache_token` from `agent.yaml`; the agent refuses to load a file
+  that still carries it. The installer no longer writes it.
+- The runner-bundle chart no longer sets `SPARKWING_CACHE_TOKEN` on the runner.
+  A runner deployed by hand should drop it too, because the pipeline binary
+  can read its launcher's environment.
+- The controller must hold the cache's token (`SPARKWING_CACHE_TOKEN` on the
+  controller) to mint grants. Until it does, or on a controller that predates
+  the route, runs go without the binary cache and compile instead.
+- The pipeline binary a trigger runs no longer inherits the launcher's whole
+  environment. It gets the Go toolchain, proxy, locale and Kubernetes service
+  variables, `AWS_REGION`, `SPARKWING_*` and `OTEL_*` settings that are not
+  credentials, and the run's own `SPARKWING_AGENT_TOKEN` and
+  `SPARKWING_CACHE_GRANT`. A pipeline that relied on another launcher variable
+  should receive it as a secret instead.

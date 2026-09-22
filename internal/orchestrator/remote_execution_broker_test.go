@@ -27,6 +27,8 @@ import (
 func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
 	private := []string{
 		"SPARKWING_AGENT_TOKEN=parent-token",
+		"SPARKWING_CACHE_TOKEN=operator-cache-token",
+		"SPARKWING_CACHE_GRANT=swcg1.stale-grant",
 		"SPARKWING_RUN_HANDLE_FILE=/tmp/parent-run.json",
 		"SPARKWING_ONLY=outer",
 		remoteExecutionCapabilityEnv + "=stale-capability",
@@ -276,7 +278,7 @@ func TestClaimedRegisteredNodeRunsOnlyInIsolatedChild(t *testing.T) {
 	previous := runNodeIsolatedFn
 	t.Cleanup(func() { runNodeIsolatedFn = previous })
 	called := false
-	runNodeIsolatedFn = func(_ context.Context, controllerURL, logsURL, runID, nodeID, token string, _ *slog.Logger) (runner.Result, error) {
+	runNodeIsolatedFn = func(_ context.Context, controllerURL, logsURL, runID, nodeID, token, _ string, _ *slog.Logger) (runner.Result, error) {
 		called = true
 		if controllerURL != server.URL || logsURL != "" || runID != "run-isolated" || nodeID != "build" || token != "parent-token" {
 			t.Fatalf("isolated call = %q %q %q %q %q", controllerURL, logsURL, runID, nodeID, token)

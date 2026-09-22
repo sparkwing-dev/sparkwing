@@ -62,7 +62,7 @@ func runAgentCLI(args []string) error {
 	}
 	return RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL: cfg.Controller, LogsURL: cfg.Logs, GitcacheURL: cfg.Gitcache,
-		CacheToken: cfg.CacheToken, Token: cfg.Token, HolderPrefix: prefix,
+		Token: cfg.Token, HolderPrefix: prefix,
 		Labels: cfg.Labels, MaxConcurrent: cfg.MaxConcurrent, PollInterval: cfg.Poll,
 		Lease: cfg.Lease, HeartbeatInterval: cfg.Heartbeat, SourceName: "agent",
 		LocalAdmission: cfg.LocalAdmission != nil && *cfg.LocalAdmission, LocalReserve: cfg.LocalReserve,

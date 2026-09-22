@@ -302,8 +302,8 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
 `--working-tree` replaces step 2 with a mandatory synthetic-commit bundle
 seed. The trigger is not admitted if that upload fails. Off-cluster runners can
 read source through the controller's authenticated Git proxy, so they need only
-outbound HTTPS; a private direct cache remains an alternative, uses only
-`SPARKWING_CACHE_TOKEN` for writes, and never receives the controller bearer.
+outbound HTTPS; a private direct cache remains an alternative, receives only
+the run's cache grant, and never receives the controller bearer.
 Login-enabled dashboard ingress exposes the
 same machine-bearer proxy path without browser-session authentication.
 

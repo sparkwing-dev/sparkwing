@@ -30,7 +30,6 @@ type Config struct {
 	Controller    string        `yaml:"controller"`
 	Logs          string        `yaml:"logs"`
 	Gitcache      string        `yaml:"gitcache"`
-	CacheToken    string        `yaml:"cache_token"`
 	Profile       string        `yaml:"profile"`
 	Token         string        `yaml:"token"`
 	MaxConcurrent int           `yaml:"max_concurrent"`

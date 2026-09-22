@@ -97,10 +97,10 @@ func RunNodeOnce(
 					"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 					runID, nodeID)
 			}
-			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
+			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 				runID, nodeID, token, logger)
 		}
-		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, logger)
+		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
 	}
 	if shouldRunRemote(trigger, cfg.brokeredChild) {
 		if controllerURL == "" {
@@ -108,7 +108,7 @@ func RunNodeOnce(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 				runID, nodeID)
 		}
-		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
+		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 			runID, nodeID, token, logger)
 	}
 

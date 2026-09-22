@@ -10,11 +10,12 @@ import (
 	"maps"
 	"math"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -814,9 +815,10 @@ func (r *Runner) buildJob(
 	if r.cfg.AgentToken != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})
 	}
-	// safety: the pod reads and writes the cache's guarded /bin/ routes, which reject the controller bearer.
-	if tok := bincache.CacheToken(); tok != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_TOKEN", Value: tok})
+	// safety: the pod runs the team's code, so of the cache credentials it gets only
+	// the run's grant, which opens that team's trees and no other's.
+	if grant := os.Getenv(authwire.CacheGrantEnv); grant != "" {
+		env = append(env, corev1.EnvVar{Name: authwire.CacheGrantEnv, Value: grant})
 	}
 	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 	env = append(env, claimFenceEnv(fence)...)

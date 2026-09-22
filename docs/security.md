@@ -615,7 +615,8 @@ permits only registration and upload-pack reads. A login-enabled dashboard
 exposes those paths to machine bearers without accepting browser sessions:
 the mount rejects a request carrying no bearer before it extends the half-hour
 stream deadline or proxies anything, and caps concurrent Git streams. A
-direct cache uses the separately configured `cache_token` instead.
+direct cache receives the run's cache grant instead, which opens only that
+team's blob trees.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's

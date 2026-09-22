@@ -199,9 +199,11 @@ the exception and keeps an `admin` token. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. The same Secret becomes the runner's
-`SPARKWING_CACHE_TOKEN` and the cache's `SPARKWING_API_TOKEN`, so both sides of
-the binary and dependency cache share one bearer. Once a Secret name is
+receive a second service bearer. The same Secret becomes the cache's
+`SPARKWING_API_TOKEN`. The runner holds no cache token: for each claimed run
+it asks the controller for a cache grant, which the cache accepts only when
+the controller signs it with that same token, and it hands the run only that
+grant. Once a Secret name is
 configured, its key and the Secret itself are required.
 
 A cache-enabled install without that Secret fails at render time. Set

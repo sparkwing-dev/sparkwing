@@ -124,7 +124,8 @@ removes that bearer before contacting the internal cache. The unscoped
 private while a workstation or server uses outbound HTTPS only. The dashboard
 ingress exposes these routes to machine bearers without accepting browser
 session credentials. A direct cache URL over a LAN, VPN, or tailnet remains
-supported through `agent.yaml` `gitcache` and `cache_token`.
+supported through `agent.yaml` `gitcache`; the agent reaches it with a
+per-run [cache grant](#cache-grants).
 
 ## On-Demand Fetch
 
@@ -374,8 +375,9 @@ Authorization: Bearer <SPARKWING_API_TOKEN>
 Every caller presents the token, in-cluster ones included. Reaching the
 cache through the k8s Service rather than the ingress proves nothing about
 the caller, so requests to those endpoints without a valid bearer get 401
-wherever they come from. Runners and the controller read the token from
-`SPARKWING_CACHE_TOKEN`.
+wherever they come from. The controller and an operator's own shell read the
+token from `SPARKWING_CACHE_TOKEN`; runners never hold it and present a cache
+grant instead.
 
 `POST /git/register` accepts a `name` of 1-64 alphanumeric, dash, underscore,
 or dot characters, and refuses to repoint a name that is already registered to
@@ -553,8 +555,9 @@ when `SPARKWING_GITCACHE` is empty, so a chart-deployed runner already
 names its cache. With neither set, sparkwing auto-detects a cache on
 `localhost:18090` and falls back to a direct clone when none answers.
 
-A clone through a named cache carries `SPARKWING_CACHE_TOKEN` as its
-bearer, so a cache that guards its git routes still serves it. The bearer
+A clone through a named cache carries the run's `SPARKWING_CACHE_GRANT`, or
+else `SPARKWING_CACHE_TOKEN`, as its bearer, so a cache that guards its git
+routes still serves it. The bearer
 travels in the environment as a cache-scoped header, never on the command
 line, and never goes to the auto-detected cache: only an operator naming
 the cache in one of those two variables authorizes sending a credential to
