@@ -4147,7 +4147,7 @@ paths:
                     properties:
                       providers:
                         type: array
-                        items: {type: string, enum: [google]}
+                        items: {type: string, enum: [google, github]}
 
   /api/v1/auth/oauth/google/start:
     post:
@@ -4564,6 +4564,84 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/auth/oauth/github/start:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Begin a GitHub sign-in and return the authorization URL with its state and PKCE verifier.
+      description: >-
+        Mirrors the Google start. The authorize URL asks for `read:user user:email` only. `redirect_uri` must be on the `--oauth-redirect-uris` allowlist. Answers 404 unless GitHub sign-in is offered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthStartReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthStartResp
+                type: object
+                required: [authorize_url, state, verifier]
+                properties:
+                  authorize_url: {type: string}
+                  state: {type: string}
+                  verifier: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/auth/oauth/github/exchange:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Finish a GitHub sign-in and open a session.
+      description: >-
+        Redeems `code`, reads the account's numeric id, which keys the identity so a renamed login keeps its account, and the primary email GitHub has verified from `/user/emails`; the profile's public email is never used. A GitHub identity joins an existing user only when that user holds the same email verified and has no other GitHub identity. Otherwise it behaves as the Google exchange.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthExchangeReq
+              type: object
+              required: [code, verifier, redirect_uri]
+              properties:
+                code: {type: string}
+                verifier: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthExchangeResp
+                type: object
+                required: [session_id, csrf_token, expires_at, user, active_team]
+                properties:
+                  session_id: {type: string}
+                  csrf_token: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  user: {$ref: "#/components/schemas/IdentityUser"}
+                  active_team:
+                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
+                    nullable: true
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: The GitHub account has no primary email address GitHub has verified.
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {description: GitHub could not be reached.}
 
 components:
   securitySchemes:

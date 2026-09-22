@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -16,7 +17,7 @@ import (
 )
 
 type identityConfig struct {
-	google       *googleauth.Client
+	providers    map[string]signInProvider
 	redirectURIs []string
 	license      *license.License
 }
@@ -26,8 +27,25 @@ type identityConfig struct {
 // it derived from the browser's Host, so this list is the check that the
 // code is sent back to a dashboard this deployment runs.
 func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server {
-	s.identity.google = client
-	s.identity.redirectURIs = slices.Clone(redirectURIs)
+	return s.withProvider(store.ProviderGoogle, googleProvider{client}, redirectURIs)
+}
+
+// WithGitHubSignIn offers GitHub sign-in through client, under the same
+// redirect allowlist rule as [Server.WithGoogleSignIn].
+func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server {
+	return s.withProvider(store.ProviderGitHub, githubProvider{client}, redirectURIs)
+}
+
+func (s *Server) withProvider(name string, p signInProvider, redirectURIs []string) *Server {
+	if s.identity.providers == nil {
+		s.identity.providers = map[string]signInProvider{}
+	}
+	s.identity.providers[name] = p
+	for _, u := range redirectURIs {
+		if !slices.Contains(s.identity.redirectURIs, u) {
+			s.identity.redirectURIs = append(s.identity.redirectURIs, u)
+		}
+	}
 	return s
 }
 
@@ -44,10 +62,16 @@ func (s *Server) MultiTeam() bool {
 }
 
 func (s *Server) signInProviders() []string {
-	if s.identity.google == nil || !s.MultiTeam() {
-		return []string{}
+	out := []string{}
+	if !s.MultiTeam() {
+		return out
 	}
-	return []string{store.ProviderGoogle}
+	for _, name := range []string{store.ProviderGoogle, store.ProviderGitHub} {
+		if _, ok := s.identity.providers[name]; ok {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 type capabilitiesTeams struct {
@@ -208,12 +232,12 @@ func (s *Server) redirectAllowed(uri string) bool {
 	return uri != "" && slices.Contains(s.identity.redirectURIs, uri)
 }
 
-func (s *Server) googleOffered(w http.ResponseWriter) bool {
-	if s.identity.google != nil && s.MultiTeam() {
-		return true
+func (s *Server) offered(w http.ResponseWriter, name string) (signInProvider, bool) {
+	if p, ok := s.identity.providers[name]; ok && s.MultiTeam() {
+		return p, true
 	}
-	writeError(w, http.StatusNotFound, errors.New("google sign-in is not enabled on this controller"))
-	return false
+	writeError(w, http.StatusNotFound, errors.New(name+" sign-in is not enabled on this controller"))
+	return nil, false
 }
 
 type oauthStartReq struct {
@@ -229,7 +253,16 @@ type oauthStartResp struct {
 // safety: nothing is stored; the dashboard's __Host- cookie proves the same browser finishes the flow,
 // and the redirect allowlist is this controller's own check.
 func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
-	if !s.googleOffered(w) {
+	s.oauthStart(w, r, store.ProviderGoogle)
+}
+
+func (s *Server) handleGitHubStart(w http.ResponseWriter, r *http.Request) {
+	s.oauthStart(w, r, store.ProviderGitHub)
+}
+
+func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, name string) {
+	provider, ok := s.offered(w, name)
+	if !ok {
 		return
 	}
 	var req oauthStartReq
@@ -252,7 +285,7 @@ func (s *Server) handleGoogleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, oauthStartResp{
-		AuthorizeURL: s.identity.google.AuthorizeURL(state, verifier, req.RedirectURI),
+		AuthorizeURL: provider.AuthorizeURL(state, verifier, req.RedirectURI),
 		State:        state,
 		Verifier:     verifier,
 	})
@@ -284,10 +317,19 @@ type oauthExchangeResp struct {
 	ActiveTeam *teamRefJSON `json:"active_team"`
 }
 
-// safety: the verifier binds the code to the flow that started it, so a code injected into another
-// browser's callback fails at Google, because that browser holds another verifier.
 func (s *Server) handleGoogleExchange(w http.ResponseWriter, r *http.Request) {
-	if !s.googleOffered(w) {
+	s.oauthExchange(w, r, store.ProviderGoogle)
+}
+
+func (s *Server) handleGitHubExchange(w http.ResponseWriter, r *http.Request) {
+	s.oauthExchange(w, r, store.ProviderGitHub)
+}
+
+// safety: the verifier binds the code to the flow that started it, so a code injected into another
+// browser's callback fails at the provider, because that browser holds another verifier.
+func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name string) {
+	provider, ok := s.offered(w, name)
+	if !ok {
 		return
 	}
 	var req oauthExchangeReq
@@ -303,25 +345,22 @@ func (s *Server) handleGoogleExchange(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
 		return
 	}
-	claims, err := s.identity.google.Exchange(r.Context(), req.Code, req.Verifier, req.RedirectURI)
+	profile, err := provider.SignIn(r.Context(), req.Code, req.Verifier, req.RedirectURI)
 	switch {
-	case errors.Is(err, googleauth.ErrUnverified):
-		writeError(w, http.StatusForbidden, errors.New("google has not verified this account's email address"))
+	case errors.Is(err, errSignInUnverified):
+		writeError(w, http.StatusForbidden, errors.New(name+" has not verified this account's email address"))
 		return
-	case errors.Is(err, googleauth.ErrRejected):
-		s.logger.Info("google sign-in rejected", "reason", err.Error())
+	case errors.Is(err, errSignInRejected):
+		s.logger.Info("sign-in rejected", "provider", name, "reason", err.Error())
 		writeError(w, http.StatusUnauthorized, errors.New("that sign-in could not be verified; start again"))
 		return
 	case err != nil:
-		s.logger.Warn("google sign-in failed", "error", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("google could not be reached to finish the sign-in"))
+		s.logger.Warn("sign-in failed", "provider", name, "error", err.Error())
+		writeError(w, http.StatusBadGateway, errors.New(name+" could not be reached to finish the sign-in"))
 		return
 	}
 	now := time.Now().UTC()
-	res, err := s.store.ResolveSignIn(r.Context(), store.SignInProfile{
-		Provider: store.ProviderGoogle, Subject: claims.Subject, Email: claims.Email,
-		EmailVerified: claims.EmailVerified, Name: claims.Name, GivenName: claims.GivenName,
-	}, now)
+	res, err := s.store.ResolveSignIn(r.Context(), profile, now)
 	if err != nil {
 		s.writeInternalError(w, r, "sign-in resolve", err)
 		return
@@ -332,7 +371,7 @@ func (s *Server) handleGoogleExchange(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "session create", err)
 		return
 	}
-	s.logger.Info("signed in", "account", acct.ID, "provider", store.ProviderGoogle,
+	s.logger.Info("signed in", "account", acct.ID, "provider", name,
 		"new_account", res.NewAccount, "linked", res.Linked, "personal_team", string(res.PersonalTeam))
 	active, err := s.teamRef(r.Context(), acct.ActiveTeam, acct.ID)
 	if err != nil {

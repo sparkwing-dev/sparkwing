@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
+	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
@@ -30,6 +32,7 @@ type identityFixture struct {
 	url    string
 	store  *store.Store
 	google *googletest.Issuer
+	github *githubtest.Server
 	admin  string
 }
 
@@ -66,17 +69,19 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 		t.Fatal(err)
 	}
 	iss := googletest.New(t)
+	gh := githubtest.New(t)
 	key := o.key
 	if key == nil {
 		key, _ = licensetest.NewKey(t)
 	}
 	srv := controller.New(st, nil).EnableAuthFromStore().
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
-		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect})
+		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
+		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect})
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, admin: admin}
+	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin}
 }
 
 func (f *identityFixture) call(method, path, auth string, body, out any) int {
@@ -191,4 +196,35 @@ func splitLicense(t *testing.T, raw string) (payload, sig []byte) {
 		t.Fatal(err)
 	}
 	return payload, sig
+}
+
+func (f *identityFixture) githubExchange(p githubtest.Person, out any) int {
+	f.t.Helper()
+	var start struct {
+		AuthorizeURL string `json:"authorize_url"`
+		Verifier     string `json:"verifier"`
+	}
+	if code := f.call("POST", "/api/v1/auth/oauth/github/start", "",
+		map[string]string{"redirect_uri": dashRedirect}, &start); code != http.StatusOK {
+		f.t.Fatalf("github start = %d", code)
+	}
+	return f.call("POST", "/api/v1/auth/oauth/github/exchange", "", map[string]string{
+		"code": f.github.Code(p, start.Verifier, dashRedirect), "verifier": start.Verifier, "redirect_uri": dashRedirect,
+	}, out)
+}
+
+func (f *identityFixture) signInGitHub(p githubtest.Person) exchangeBody {
+	f.t.Helper()
+	var out exchangeBody
+	if status := f.githubExchange(p, &out); status != http.StatusOK {
+		f.t.Fatalf("github exchange = %d", status)
+	}
+	return out
+}
+
+func ghPerson(id int64, login, email string) githubtest.Person {
+	return githubtest.Person{
+		ID: id, Login: login, Name: login + " Test",
+		Emails: []githubtest.Email{{Email: email, Primary: true, Verified: true}},
+	}
 }

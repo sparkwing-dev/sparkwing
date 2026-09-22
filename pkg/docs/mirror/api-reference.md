@@ -15,6 +15,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/auth/bootstrap-needed` | `public` |
 | `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |
+| `POST` | `/api/v1/auth/oauth/github/exchange` | `public` |
+| `POST` | `/api/v1/auth/oauth/github/start` | `public` |
 | `POST` | `/api/v1/auth/oauth/google/exchange` | `public` |
 | `POST` | `/api/v1/auth/oauth/google/start` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |

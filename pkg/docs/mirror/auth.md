@@ -554,9 +554,17 @@ audience, expiry, `email_verified`) and opens a session. The dashboard keeps
 the state and verifier in a `__Host-` cookie and checks the state at its
 callback, which is what proves the same browser finished the flow.
 
+GitHub sign-in works the same way through `POST /api/v1/auth/oauth/github/start`
+and `/exchange`, configured with `--github-client-id` and
+`SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
+It asks for `read:user user:email` only, keys the identity on GitHub's numeric
+account id so a renamed login keeps its account, and trusts only the primary
+email GitHub has verified, never the profile's public email.
+
 A Google identity joins an existing user only when Google and that user both
 hold the email verified, and never when that user already has a different
-Google identity: a second Google account on one address is a recycled address
+identity from the same provider; a GitHub identity joins a Google user the same
+way. A second account from one provider on one address is a recycled address
 or another person, so it gets its own user and the first user's claim on the
 address is withdrawn. A user's email follows what Google asserts at each
 sign-in. A user with no team gets a personal space: a team

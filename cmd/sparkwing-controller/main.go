@@ -230,6 +230,9 @@ func run(args []string) error {
 	googleClientID := fs.String("google-client-id", os.Getenv("SPARKWING_GOOGLE_CLIENT_ID"),
 		"Google OAuth client id for dashboard sign-in; the secret comes from "+
 			"SPARKWING_GOOGLE_CLIENT_SECRET. Offered only with a multi-team license.")
+	githubClientID := fs.String("github-client-id", os.Getenv("SPARKWING_GITHUB_CLIENT_ID"),
+		"GitHub OAuth app client id for dashboard sign-in; the secret comes from "+
+			"SPARKWING_GITHUB_CLIENT_SECRET. Offered only with a multi-team license.")
 	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
 		"comma-separated dashboard callback URLs a sign-in may return to, "+
 			"such as https://app.example.com/auth/google/callback")
@@ -427,6 +430,8 @@ func run(args []string) error {
 		LicenseFile:        *licenseFile,
 		GoogleClientID:     *googleClientID,
 		GoogleClientSecret: os.Getenv("SPARKWING_GOOGLE_CLIENT_SECRET"),
+		GitHubClientID:     *githubClientID,
+		GitHubClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
 		RedirectURIs:       *oauthRedirectURIs,
 	}, slog.Default()); err != nil {
 		return err
