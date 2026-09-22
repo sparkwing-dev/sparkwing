@@ -54,6 +54,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/gitcache/refresh` | `admin` or `team.admin` |
 | `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
+| `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `GET` | `/api/v1/me` | `authenticated` |
 | `POST` | `/api/v1/me/active-team` | `authenticated` |
@@ -150,6 +151,16 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
+| `PATCH` | `/api/v1/team` | `team.admin` |
+| `GET` | `/api/v1/team/invitations` | `team.admin` |
+| `POST` | `/api/v1/team/invitations` | `team.admin` |
+| `DELETE` | `/api/v1/team/invitations/{id}` | `team.admin` |
+| `GET` | `/api/v1/team/members` | `runs.read` |
+| `DELETE` | `/api/v1/team/members/{user_id}` | `runs.read` |
+| `PATCH` | `/api/v1/team/members/{user_id}` | `team.admin` |
+| `GET` | `/api/v1/team/runner-tokens` | `runs.write` |
+| `POST` | `/api/v1/team/runner-tokens` | `runs.write` |
+| `DELETE` | `/api/v1/team/runner-tokens/{prefix}` | `runs.write` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |

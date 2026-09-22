@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -28,7 +30,13 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
 		t.Fatal(err)
 	}
-	ctrl := controller.New(st, nil).EnableAuthFromStore()
+	pub, priv := licensetest.NewKey(t)
+	grant := licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMultiTeam}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	ctrl := controller.New(st, nil).EnableAuthFromStore().
+		WithLicense(license.Resolve(grant, pub, time.Now(), nil))
 	cts := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(cts.Close)
 

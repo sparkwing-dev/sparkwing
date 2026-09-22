@@ -1,7 +1,10 @@
 package controller_test
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -81,19 +84,67 @@ func TestSecondSignInReturnsToTheSameAccountAndTeam(t *testing.T) {
 	}
 }
 
-// A new credential whose provider verifies the same address joins the human
-// who already holds it verified, and does not grow a second personal space.
-func TestANewIdentityWithTheSameVerifiedEmailLinks(t *testing.T) {
+// A second Google subject on an address is a recycled address or another
+// person, so it never joins the account that held the address first.
+func TestASecondGoogleSubjectOnTheSameEmailGetsItsOwnAccount(t *testing.T) {
 	f := newIdentityFixture(t)
 	first := f.signIn(person("g-carol-1", "carol@example.com", "Carol"))
 	second := f.signIn(person("g-carol-2", "carol@example.com", "Carol"))
-	if second.User.ID != first.User.ID {
-		t.Fatalf("a second identity on the same verified address made a new account")
+	if second.User.ID == first.User.ID {
+		t.Fatal("a second Google subject on the same address signed in to the first account")
 	}
-	var me meBody
-	f.call("GET", "/api/v1/me", sessionAuth(second.SessionID), nil, &me)
-	if len(me.Memberships) != 1 {
-		t.Fatalf("linking created another team: %+v", me.Memberships)
+	if second.ActiveTeam == nil || second.ActiveTeam.Slug == first.ActiveTeam.Slug {
+		t.Fatalf("second subject landed in %+v", second.ActiveTeam)
+	}
+}
+
+// A user who lost their membership keeps a session for switching teams, and
+// that session passes no route that admits any authenticated caller.
+func TestARolelessSessionCannotReadServices(t *testing.T) {
+	f := newIdentityFixture(t)
+	s := f.signIn(person("g-l", "lena@example.com", "Lena"))
+	if code := f.call("GET", "/api/v1/services", sessionAuth(s.SessionID), nil, nil); code == http.StatusForbidden || code == http.StatusUnauthorized {
+		t.Fatalf("services with a role = %d", code)
+	}
+	if _, err := f.store.DB().Exec(`DELETE FROM memberships WHERE account_id = ?`, s.User.ID); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("GET", "/api/v1/services", sessionAuth(s.SessionID), nil, nil); code != http.StatusForbidden {
+		t.Fatalf("services with no role = %d, want 403", code)
+	}
+	if code := f.call("GET", "/api/v1/me", sessionAuth(s.SessionID), nil, nil); code != http.StatusOK {
+		t.Fatalf("/me with no role = %d, want 200", code)
+	}
+}
+
+// Accounts exist only under a multi-team license, so their sessions stop
+// authenticating when a controller over the same store runs without one.
+func TestAccountSessionsStopWithoutALicense(t *testing.T) {
+	f := newIdentityFixture(t)
+	s := f.signIn(person("g-u", "una@example.com", "Una"))
+	bare := controller.New(f.store, nil).EnableAuthFromStore()
+	ts := httptest.NewServer(bare.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { _ = bare.Shutdown(context.Background()) })
+	unlicensed := &identityFixture{t: t, url: ts.URL, store: f.store}
+	if code := unlicensed.call("GET", "/api/v1/auth/whoami", sessionAuth(s.SessionID), nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("account session on an unlicensed controller = %d, want 401", code)
+	}
+	if code := unlicensed.call("GET", "/api/v1/auth/session", sessionAuth(s.SessionID), nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("auth/session on an unlicensed controller = %d, want 401", code)
+	}
+}
+
+func TestTeamCreationIsCappedPerUser(t *testing.T) {
+	f := newIdentityFixture(t)
+	s := sessionAuth(f.signIn(person("g-c", "cap@example.com", "Cap")).SessionID)
+	for i := 2; i <= store.MaxCreatedTeams; i++ {
+		if code := f.call("POST", "/api/v1/teams", s, map[string]string{"slug": fmt.Sprintf("cap-team-%d", i)}, nil); code != http.StatusCreated {
+			t.Fatalf("team %d = %d", i, code)
+		}
+	}
+	if code := f.call("POST", "/api/v1/teams", s, map[string]string{"slug": "cap-overflow"}, nil); code != http.StatusForbidden {
+		t.Fatalf("team past the cap = %d, want 403", code)
 	}
 }
 

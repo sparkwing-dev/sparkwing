@@ -114,6 +114,11 @@ func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time
 		p.Scopes = sess.Scopes
 		return p, nil
 	}
+	// safety: an account exists only under a multi-team license, so a session it opened stops
+	// authenticating the moment the license is gone or expires, not only new sign-ins.
+	if !s.MultiTeam() {
+		return nil, errAccountSessionsDisabled
+	}
 	p.AccountID = sess.AccountID
 	role, err := s.memberRole(ctx, sess.Team, sess.AccountID)
 	if err != nil {
@@ -173,6 +178,22 @@ func (s *Server) teamMember(w http.ResponseWriter, r *http.Request, min store.Ro
 		return nil, nil, false
 	}
 	return p, t, true
+}
+
+var errAccountSessionsDisabled = errors.New("sign-in is not enabled on this controller")
+
+// safety: an account that lost its membership keeps a session so it can switch teams, and that session
+// must not pass a route that admits any authenticated caller.
+func refuseRoleless(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := PrincipalFromContext(r.Context()); ok && p.AccountID != "" && p.Role == "" {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "forbidden", Principal: p.label(), Message: "you are not a member of the active team",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func randomURLToken() (string, error) {
@@ -492,7 +513,7 @@ func writeIdentityError(w http.ResponseWriter, s *Server, r *http.Request, op st
 		errors.Is(err, store.ErrInvitationOpen):
 		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn),
-		errors.Is(err, store.ErrEmailMismatch):
+		errors.Is(err, store.ErrEmailMismatch), errors.Is(err, store.ErrTeamLimit):
 		writeError(w, http.StatusForbidden, err)
 	case errors.Is(err, store.ErrInvitationClosed):
 		writeError(w, http.StatusGone, err)

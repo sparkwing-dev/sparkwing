@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -59,7 +60,9 @@ func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
 		"runs/run-team-a/state.ndjson":     []byte("team-a-state"),
 		"artifacts/manifests/" + digestHex: []byte("team-a-manifest"),
 	}}
-	srv := controller.New(st, nil).EnableAuthFromStore().WithArtifactStore(art)
+	raw, pub := multiTeamLicense(t)
+	srv := controller.New(st, nil).EnableAuthFromStore().WithArtifactStore(art).
+		WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

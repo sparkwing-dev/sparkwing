@@ -28,6 +28,24 @@ const (
 // later read as unknown.
 func (r Role) Valid() bool { return r.rank() > 0 }
 
+// safety: the most recent provider assertion owns an address, so another account's verified claim on
+// it is withdrawn before this one takes it.
+func claimEmailTx(ctx context.Context, tx *storeTx, accountID, email string, at int64) error {
+	if err := releaseEmailTx(ctx, tx, email, accountID, at); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx,
+		`UPDATE accounts SET email = ?, email_verified = 1, updated_at = ? WHERE id = ?`, email, at, accountID)
+	return err
+}
+
+func releaseEmailTx(ctx context.Context, tx *storeTx, email, keepID string, at int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE accounts SET email_verified = 0, updated_at = ?
+		WHERE email = ? AND email_verified = 1 AND id <> ?`, at, email, keepID)
+	return err
+}
+
 // safety: an unknown role ranks below every real one, so a row holding one grants nothing.
 func (r Role) rank() int {
 	switch r {
@@ -60,10 +78,22 @@ const (
 
 // safety: each would take a hostname the platform answers on, and default is every single-team install's key.
 var reservedSlugs = map[string]bool{
-	"www": true, "api": true, "console": true, "docs": true, "status": true,
-	"admin": true, "mail": true, "smtp": true, "ns1": true,
+	"www": true, "api": true, "app": true, "console": true, "docs": true, "status": true,
+	"admin": true, "mail": true, "smtp": true, "ns1": true, "login": true, "auth": true,
+	"demo": true, "sparkwing": true, "cache": true, "logs": true,
 	string(DefaultTeam): true,
 }
+
+// safety: demo-* names the hosts the operator stands up for demonstrations.
+const reservedSlugPrefix = "demo-"
+
+func isReservedSlug(slug string) bool {
+	return reservedSlugs[slug] || strings.HasPrefix(slug, reservedSlugPrefix)
+}
+
+// MaxCreatedTeams bounds how many teams one user can create, their personal
+// space included, because each team is a tenant the deployment pays to hold.
+const MaxCreatedTeams = 10
 
 // Identity errors. Callers map these onto status codes.
 var (
@@ -78,6 +108,7 @@ var (
 	ErrEmailMismatch    = errors.New("store: invitation is addressed to another email")
 	ErrInvitationOpen   = errors.New("store: that address already has an open invitation")
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
+	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
 )
 
 // Account is one human, what the API calls a user. Email is the address the
@@ -287,7 +318,7 @@ func ValidateSlug(slug string) error {
 			return fmt.Errorf("%w: a slug holds only lowercase letters, digits and hyphens", ErrInvalidSlug)
 		}
 	}
-	if reservedSlugs[slug] {
+	if isReservedSlug(slug) {
 		return fmt.Errorf("%w: %q is reserved", ErrInvalidSlug, slug)
 	}
 	return nil
@@ -312,12 +343,15 @@ func slugBase(email string) string {
 	if len(base) > maxSlugLen {
 		base = strings.TrimRight(base[:maxSlugLen], "-")
 	}
-	if len(base) < minSlugLen || reservedSlugs[base] {
+	if len(base) < minSlugLen || isReservedSlug(base) {
 		base = strings.TrimRight(truncate(base, maxSlugLen-len("-space")), "-")
 		if base == "" {
 			base = "personal"
 		}
 		base += "-space"
+		if isReservedSlug(base) {
+			base = strings.TrimRight(truncate("space-"+base, maxSlugLen), "-")
+		}
 	}
 	return base
 }
@@ -330,20 +364,20 @@ func truncate(s string, n int) string {
 }
 
 // safety: the suffix is the smallest free count from 2, never random noise, so the name still reads as
-// the person's.
-func freeSlug(ctx context.Context, tx *storeTx, base string) (string, error) {
-	for n := 1; n < 10000; n++ {
+// the person's. Each candidate is claimed by an insert that skips a taken name, so concurrent sign-ins
+// sharing a local part each land on their own slug instead of failing.
+func createPersonalTeamTx(ctx context.Context, tx *storeTx, accountID, base, displayName string, now time.Time) (Team, error) {
+	for n := 1; n < 1000; n++ {
 		candidate := base
 		if n > 1 {
 			suffix := "-" + strconv.Itoa(n)
 			candidate = strings.TrimRight(truncate(base, maxSlugLen-len(suffix)), "-") + suffix
 		}
-		var found string
-		err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name = ?`, candidate).Scan(&found)
-		if errors.Is(err, sql.ErrNoRows) {
-			return candidate, nil
+		err := createTeamTx(ctx, tx, accountID, Team(candidate), displayName, now)
+		if err == nil {
+			return Team(candidate), nil
 		}
-		if err != nil {
+		if !errors.Is(err, ErrSlugTaken) {
 			return "", err
 		}
 	}
@@ -384,13 +418,13 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Tim
 	case !p.EmailVerified || !LooksLikeEmail(p.Email):
 		return SignInResult{}, ErrUnverifiedEmail
 	}
-	// safety: two first sign-ins for one address race on the verified-email
-	// index; the loser rolls back and its retry takes the linking path the
-	// winner created, rather than failing a person who did nothing wrong.
+	// safety: concurrent first sign-ins race on the verified-email index and on a personal slug; the
+	// loser rolls back and its retry re-reads what the winner wrote, rather than failing a person
+	// who did nothing wrong.
 	var last error
-	for range 2 {
+	for range 5 {
 		res, err := s.resolveSignInOnce(ctx, p, now)
-		if err == nil || !isUniqueViolation(err) {
+		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken)) {
 			return res, err
 		}
 		last = err
@@ -418,10 +452,31 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, now time
 			p.Email, boolInt(p.EmailVerified), p.Provider, p.Subject); err != nil {
 			return SignInResult{}, fmt.Errorf("identity: refresh: %w", err)
 		}
+		// safety: the account's address is its linking and invitation key, so it follows what the
+		// provider asserts now; an address left behind would let whoever holds it next walk in.
+		if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
+			return SignInResult{}, err
+		}
 	case errors.Is(err, sql.ErrNoRows):
 		// safety: rule 2, the account side must hold this address verified too.
 		err = tx.QueryRowContext(ctx,
 			`SELECT id FROM accounts WHERE email = ? AND email_verified = 1`, p.Email).Scan(&accountID)
+		if err == nil {
+			var sameProvider int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM identities WHERE account_id = ? AND provider = ?`,
+				accountID, p.Provider).Scan(&sameProvider); err != nil {
+				return SignInResult{}, err
+			}
+			// safety: one provider account per human, so a second subject from the same provider on this
+			// address is a recycled address or another person; it gets a fresh account, never this one.
+			if sameProvider > 0 {
+				if err := releaseEmailTx(ctx, tx, p.Email, "", at); err != nil {
+					return SignInResult{}, err
+				}
+				accountID, err = "", sql.ErrNoRows
+			}
+		}
 		switch {
 		case err == nil:
 			res.Linked = true
@@ -455,14 +510,11 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, now time
 		return SignInResult{}, err
 	}
 	if members == 0 {
-		slug, err := freeSlug(ctx, tx, slugBase(p.Email))
+		slug, err := createPersonalTeamTx(ctx, tx, accountID, slugBase(p.Email), personalDisplayName(p), now)
 		if err != nil {
 			return SignInResult{}, err
 		}
-		if err := createTeamTx(ctx, tx, accountID, Team(slug), personalDisplayName(p), now); err != nil {
-			return SignInResult{}, err
-		}
-		res.PersonalTeam = Team(slug)
+		res.PersonalTeam = slug
 	}
 	if err := settleActiveTeamTx(ctx, tx, accountID, at); err != nil {
 		return SignInResult{}, err
@@ -556,6 +608,13 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 		return TeamInfo{}, err
 	}
 	defer rollbackOrLog(tx)
+	var created int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE created_by = ?`, accountID).Scan(&created); err != nil {
+		return TeamInfo{}, err
+	}
+	if created >= MaxCreatedTeams {
+		return TeamInfo{}, ErrTeamLimit
+	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, now); err != nil {
 		return TeamInfo{}, err
 	}
@@ -913,10 +972,6 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string) er
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team = ? AND account_id = ?`,
-		string(t.team), subjectID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE team = ? AND account_id = ?`,
 		string(t.team), subjectID); err != nil {
 		return err
 	}

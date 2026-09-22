@@ -26,7 +26,9 @@ unlock.
   /api/v1/auth/oauth/google/start` and `/exchange` run a PKCE flow for the
   dashboard, verify the ID token against Google's signing keys (issuer,
   audience, expiry, `email_verified`) and open a session. A new Google identity
-  joins an existing user only when both sides hold the email verified. A user
+  joins an existing user only when both sides hold the email verified and that
+  user has no other Google identity; a user's email follows what Google
+  asserts at each sign-in. One user creates at most ten teams. A user
   with no team gets a personal space whose slug comes from the email's local
   part, with the smallest free integer appended on a collision. `GET
   /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
@@ -41,12 +43,24 @@ unlock.
   `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
   `accounts`, `identities`, `memberships` and `invitations` tables and is
   additive.
+- **controller:** team administration for signed-in users. `PATCH
+  /api/v1/team` renames the active team; `GET`, `PATCH` and `DELETE
+  /api/v1/team/members[/{user_id}]` list members, change roles and remove a
+  member or leave; `GET`, `POST` and `DELETE /api/v1/team/invitations` manage
+  seven-day, single-use invitations whose answer carries an `accept_url`, and
+  `POST /api/v1/invitations/{id}/accept` joins only when the signed-in user's
+  verified email is the invited address. `POST`, `GET` and `DELETE
+  /api/v1/team/runner-tokens` mint, list and revoke runner tokens bound to the
+  active team; an editor mints and revokes their own, an owner revokes any.
+  Every `/team` route acts on the session's team, and another team's id
+  answers 404. Nobody grants a role above their own and the last owner stays.
 - **controller:** hosting more than one team needs a signed license
   (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
   controller verifies its Ed25519 signature against a public key built into the
   binary and checks its expiry. Without a valid multi-team license the
   controller holds one team, refuses `POST /api/v1/teams`, reports
-  `teams.enabled: false` and offers no Google sign-in; a local install needs no
+  `teams.enabled: false`, offers no Google sign-in and refuses sessions a
+  Google sign-in opened; a local install needs no
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
@@ -296,6 +310,28 @@ unlock.
   did.
 
 ### Security
+
+- **controller:** stored secrets are sealed to their team, and a multi-team
+  controller needs a key. A controller whose license allows more than one team
+  refuses to start without `SPARKWING_SECRETS_KEY` or `--secrets-key-file`,
+  because without one every team's secrets sat in the database as plaintext.
+  A single-team install still starts without a key. A new `enc:v3:` envelope
+  adds the owning team to the additional authenticated data beside the name,
+  pipeline, shared and masked flags, so one team's ciphertext copied into
+  another team's row no longer opens. Every start with a key reseals the table
+  before serving: plaintext rows are sealed and `enc:v1:`/`enc:v2:` envelopes
+  are resealed with their team, in batches, each write conditional on the
+  value it replaces, with the counts logged. An older envelope outside the
+  `default` team is left alone and refused, since only the `default` team ever
+  held one. Reads open only `enc:v3:`, so a row is no longer rebound on first
+  read. The start is refused, before anything is written, when the key opens
+  none of a sample of the envelopes already stored. See
+  [security.md](docs/security.md#secrets-at-rest).
+- **controller (Breaking):** `controller.BoundCipher` takes the owning team.
+  `SealBound` and `OpenBound` gain a leading `team` argument, and a new
+  optional `controller.LegacyCipher` opens envelopes sealed before team
+  binding so the startup reseal can bring them forward. See the
+  [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
 
 - **store:** a key a user or a client chooses is unique per team
   Seven primary keys were global across the deployment while every part of

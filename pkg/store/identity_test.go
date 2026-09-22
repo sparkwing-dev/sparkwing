@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -220,5 +221,92 @@ func TestIdentityUserWithNoTeamGetsAFreshSpace(t *testing.T) {
 	again := signIn(t, st, "n", "nomad@example.com")
 	if again.PersonalTeam != "nomad-2" || again.Account.ActiveTeam != "nomad-2" {
 		t.Fatalf("sign-in with no team = %+v", again)
+	}
+}
+
+func TestIdentityRecycledEmailNeverLinksIntoTheOldAccount(t *testing.T) {
+	st := storetest.Open(t)
+	alice := signIn(t, st, "s-alice", "alice@corp.example")
+	moved := signIn(t, st, "s-alice", "alice.smith@corp.example")
+	if moved.Account.ID != alice.Account.ID || moved.Account.Email != "alice.smith@corp.example" {
+		t.Fatalf("a returning identity's address did not follow the provider: %+v", moved.Account)
+	}
+	newcomer := signIn(t, st, "s-newcomer", "alice@corp.example")
+	if newcomer.Account.ID == alice.Account.ID || newcomer.Linked {
+		t.Fatal("a new subject on Alice's old address linked into Alice's account")
+	}
+}
+
+func TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	first := signIn(t, st, "s-1", "shared@corp.example")
+	second := signIn(t, st, "s-2", "shared@corp.example")
+	if second.Account.ID == first.Account.ID || second.Linked || !second.NewAccount {
+		t.Fatalf("second subject = %+v", second)
+	}
+	old, err := st.Account(ctx, first.Account.ID)
+	if err != nil || old.EmailVerified {
+		t.Fatalf("the first account still holds the address verified: %+v, %v", old, err)
+	}
+	owner := signIn(t, st, "s-o", "owner@corp.example")
+	inv, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "shared@corp.example", store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AcceptInvitation(ctx, first.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrEmailMismatch) {
+		t.Fatalf("the account that lost the address accepted its invitation: %v", err)
+	}
+}
+
+func TestIdentityConcurrentFirstSignInsShareALocalPart(t *testing.T) {
+	st := storetest.Open(t)
+	const n = 8
+	errs := make(chan error, n)
+	slugs := make(chan store.Team, n)
+	for i := range n {
+		go func() {
+			res, err := st.ResolveSignIn(context.Background(),
+				googleProfile(fmt.Sprintf("s-%d", i), fmt.Sprintf("sam@host%d.example", i)), time.Now())
+			errs <- err
+			slugs <- res.PersonalTeam
+		}()
+	}
+	seen := map[store.Team]bool{}
+	for range n {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent sign-in: %v", err)
+		}
+		slug := <-slugs
+		if seen[slug] {
+			t.Errorf("slug %s handed out twice", slug)
+		}
+		seen[slug] = true
+	}
+}
+
+func TestIdentityTeamCreationIsCapped(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "busy@example.com")
+	for i := 2; i <= store.MaxCreatedTeams; i++ {
+		if _, err := st.CreateTeam(ctx, u.Account.ID, store.Team(fmt.Sprintf("busy-team-%d", i)), "", time.Now()); err != nil {
+			t.Fatalf("team %d: %v", i, err)
+		}
+	}
+	if _, err := st.CreateTeam(ctx, u.Account.ID, "one-too-many", "", time.Now()); !errors.Is(err, store.ErrTeamLimit) {
+		t.Fatalf("team past the cap = %v, want ErrTeamLimit", err)
+	}
+}
+
+func TestIdentityReservedSlugs(t *testing.T) {
+	for _, slug := range []string{"app", "login", "auth", "sparkwing", "cache", "logs", "demo", "demo-acme", "default"} {
+		if err := store.ValidateSlug(slug); !errors.Is(err, store.ErrInvalidSlug) {
+			t.Errorf("ValidateSlug(%q) = %v, want ErrInvalidSlug", slug, err)
+		}
+	}
+	st := storetest.Open(t)
+	if res := signIn(t, st, "s", "demo-user@example.com"); store.ValidateSlug(string(res.PersonalTeam)) != nil {
+		t.Fatalf("personal slug %q is itself reserved", res.PersonalTeam)
 	}
 }

@@ -41,9 +41,9 @@ const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
 
-	SealBound(name, scope string, shared, masked bool, plain string) (string, error)
+	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
 
-	OpenBound(name, scope string, shared, masked bool, envelope string) (string, error)
+	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
 type CacheGrantResponse struct {
 	Grant     string
@@ -120,6 +120,9 @@ type GitHubWebhookDisconnectResponse struct {
 	HookID      int64
 }
 const IdleClaimPollJitterFactor = 1.25
+type LegacyCipher interface {
+	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
+}
 func LimitsProfile(name string) (LimitsProfileValues, error)
 const LimitsProfileCloud = "cloud"
 const LimitsProfileCloudFree = "cloud-free"
@@ -255,6 +258,7 @@ func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) MultiTeam() bool
 func (s *Server) RegisteredRoute(r *http.Request) bool
+func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server

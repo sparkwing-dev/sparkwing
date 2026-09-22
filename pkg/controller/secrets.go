@@ -49,9 +49,16 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	if req.Masked != nil {
 		masked = *req.Masked
 	}
+	// safety: the envelope is sealed to the team the row is written into, so
+	// resolving the tenant once serves both and they cannot drift apart.
+	tn, err := s.store.ForTeam(r.Context(), store.DefaultTeam)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	stored := req.Value
 	if s.secretsCipher != nil {
-		binding := secretBinding{Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
+		binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
 		sealed, sErr := sealSecret(s.secretsCipher, binding, req.Value)
 		if sErr != nil {
 			writeError(w, http.StatusInternalServerError, sErr)
@@ -59,7 +66,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		}
 		stored = sealed
 	}
-	if err := s.store.CreateOrReplaceSecret(store.Secret{
+	if err := tn.CreateOrReplaceSecret(store.Secret{
 		Name:      req.Name,
 		Value:     stored,
 		Principal: principal,
@@ -89,19 +96,15 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plain := sec.Value
-	bound := secrets.IsBound(sec.Value)
 	if s.secretsCipher != nil {
-		opened, oerr := openSecret(s.secretsCipher, bindingForRow(sec), plain)
+		opened, oerr := openSecret(s.secretsCipher, bindingForRow(tn.Team(), sec), plain)
 		if oerr != nil {
-			s.logger.Error("secret read: open envelope", "name", sec.Name, "pipeline", sec.Pipeline, "err", oerr)
+			s.logger.Error("secret read: open envelope", "team", tn.Team(), "name", sec.Name, "pipeline", sec.Pipeline, "err", oerr)
 			// safety: the cipher's own text names the row's storage state, which a reader that cannot open it may not learn.
 			writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: stored value did not open"))
 			return
 		}
 		plain = opened
-		if !bound {
-			bound = s.rebindSecret(tn, sec, plain)
-		}
 	} else if secrets.IsEncrypted(plain) {
 		writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: encrypted value but no key configured"))
 		return
@@ -113,31 +116,10 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		Pipeline:  sec.Pipeline,
 		Masked:    sec.Masked,
 		Shared:    sec.Shared,
-		Bound:     bound,
+		Bound:     secrets.IsBound(sec.Value),
 		CreatedAt: sec.CreatedAt.Unix(),
 		UpdatedAt: sec.UpdatedAt.Unix(),
 	})
-}
-
-// safety: an envelope written before binding is substitutable, so a successful read reseals it in place,
-// in the team it was read from; resealing through the default team would copy one team's value into another's row.
-func (s *Server) rebindSecret(tn *store.Tenant, sec *store.Secret, plain string) bool {
-	if _, ok := s.secretsCipher.(BoundCipher); !ok {
-		return false
-	}
-	sealed, err := sealSecret(s.secretsCipher, bindingForRow(sec), plain)
-	if err != nil {
-		s.logger.Error("secret rebind: seal", "name", sec.Name, "pipeline", sec.Pipeline, "err", err)
-		return false
-	}
-	row := *sec
-	row.Value = sealed
-	if err := tn.CreateOrReplaceSecret(row, sec.UpdatedAt); err != nil {
-		s.logger.Error("secret rebind: store", "name", sec.Name, "pipeline", sec.Pipeline, "err", err)
-		return false
-	}
-	s.logger.Info("secret envelope rebound", "name", sec.Name, "pipeline", sec.Pipeline)
-	return true
 }
 
 // safety: a non-admin reader's standing is the pipeline of a run it holds live
@@ -272,20 +254,15 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	skipped := []secretsRotateSkip{}
-	total, err := s.store.RotateSecretValues(r.Context(), func(sec store.Secret) (string, error) {
-		binding := bindingForRow(&sec)
-		plain := sec.Value
-		if secrets.IsEncrypted(plain) {
-			opened, oerr := openSecret(s.secretsCipher, binding, plain)
-			if oerr != nil {
-				// safety: one unreadable row must not cost every other row its rotation, so it keeps its bytes.
-				s.logger.Error("secret rotate: open envelope", "name", sec.Name, "pipeline", sec.Pipeline, "err", oerr)
-				skipped = append(skipped, secretsRotateSkip{Name: sec.Name, Pipeline: sec.Pipeline})
-				return sec.Value, nil
-			}
-			plain = opened
+	total, err := s.store.RotateSecretValues(r.Context(), func(team store.Team, sec store.Secret) (string, error) {
+		sealed, rerr := s.resealStoredSecret(team, sec)
+		if rerr != nil {
+			// safety: one unreadable row must not cost every other row its rotation, so it keeps its bytes.
+			s.logger.Error("secret rotate: open envelope", "team", team, "name", sec.Name, "pipeline", sec.Pipeline, "err", rerr)
+			skipped = append(skipped, secretsRotateSkip{Name: sec.Name, Pipeline: sec.Pipeline})
+			return sec.Value, nil
 		}
-		return sealSecret(s.secretsCipher, binding, plain)
+		return sealed, nil
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
