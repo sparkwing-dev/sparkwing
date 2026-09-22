@@ -22,6 +22,14 @@ unlock.
 
 ### Added
 
+- **web:** Sign in with Google on a multi-team controller
+  When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
+  provider, the sign-in page offers Google. `GET /auth/google/start` and
+  `GET /auth/google/callback` run the flow on the dashboard host with the state
+  and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
+  whose state does not match that cookie is refused. The nav shows the active
+  team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
+
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -188,6 +196,14 @@ unlock.
   did.
 
 ### Security
+
+- **web:** a signed-in dashboard reaches the controller as that user
+  Under `--require-login` the proxy and the dashboard's own run reads sent the
+  web pod's service token, so on a multi-team controller every browser read
+  with a credential that spans every team. They now send
+  `Authorization: Session <id>` for the browser's own session; the service
+  token keeps the logs service and the health probe. The controller must
+  accept session credentials on the routes the dashboard proxies.
 
 - **store:** a key a user or a client chooses is unique per team
   Seven primary keys were global across the deployment while every part of

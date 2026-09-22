@@ -60,6 +60,10 @@ const loginHTML = `<!doctype html>
     .err { background: #5a1d1d; border: 1px solid #f85149; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.85rem; color: #ffa198; margin-bottom: 1rem; }
     .note { background: #0d2a4a; border: 1px solid #1f6feb; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.8rem; color: #a5d6ff; margin-bottom: 1rem; line-height: 1.35; }
     .footer { margin-top: 1.25rem; font-size: 0.75rem; color: #6e7681; text-align: center; }
+    .google { display: flex; align-items: center; justify-content: center; gap: 0.6rem; width: 100%; padding: 0.6rem; background: #f0f6fc; color: #1f2328; border-radius: 4px; font-size: 0.95rem; font-weight: 500; text-decoration: none; box-sizing: border-box; }
+    .google:hover { background: #ffffff; }
+    .or { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; font-size: 0.75rem; color: #6e7681; }
+    .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid #30363d; }
   </style>
 </head>
 <body>
@@ -81,8 +85,15 @@ const loginHTML = `<!doctype html>
   <form class="card" method="POST" action="/login">
     <h1>Sparkwing</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+    {{if .Google}}
+    <a class="google" href="/auth/google/start?next={{.Next}}">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Sign in with Google
+    </a>
+    <div class="or">or use a password</div>
+    {{end}}
     <label for="username">Username</label>
-    <input id="username" name="username" type="text" autocomplete="username" autofocus required>
+    <input id="username" name="username" type="text" autocomplete="username" {{if not .Google}}autofocus {{end}}required>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <input type="hidden" name="next" value="{{.Next}}">
@@ -101,6 +112,7 @@ type loginPageData struct {
 	Next      string
 	CSRFToken string
 	Bootstrap bool
+	Google    bool
 }
 
 func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
@@ -123,6 +135,7 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 			clearSessionCookies(w, cookiesSecure(opts))
 		}
 		data.Bootstrap = controllerBootstrapNeeded(r.Context(), controllerURL)
+		data.Google = googleSignInOffered(r.Context(), controllerURL)
 		renderLoginPage(w, r, data, http.StatusOK, cookiesSecure(opts))
 	}
 }
@@ -141,7 +154,10 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 
 		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
-			data := loginPageData{Error: "Invalid username or password.", Next: next}
+			data := loginPageData{
+				Error: "Invalid username or password.", Next: next,
+				Google: googleSignInOffered(r.Context(), controllerURL),
+			}
 			renderLoginPage(w, r, data, http.StatusUnauthorized, cookiesSecure(opts))
 			return
 		}

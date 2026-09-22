@@ -244,7 +244,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	services := append(defaultServices(opts, opts.LogsURL), opts.ExtraServices...)
 	authedMux.HandleFunc("/api/v1/health/services", healthServicesHandler(services, opts.Token))
 
-	authedMux.HandleFunc("GET /api/v1/capabilities", CapabilitiesHandler(opts.Backend))
+	authedMux.HandleFunc("GET /api/v1/capabilities", dashboardCapabilitiesHandler(opts))
 	authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler())
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles", capacityProfilesHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
@@ -252,11 +252,11 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	if opts.LogsURL != "" {
 		authedMux.Handle("/api/v1/logs/",
 			logsProxyAllowList(withLogsIdentityHeader(
-				controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))))
+				controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), false))))
 	}
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/",
-			proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts))))
+			proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts), true)))
 	} else {
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
@@ -289,8 +289,10 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.Handle("POST /login/bootstrap",
 		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
+	router.HandleFunc("GET /auth/google/start", googleStartHandler(opts))
+	router.HandleFunc("GET /auth/google/callback", googleCallbackHandler(opts))
 	if opts.ControllerURL != "" {
-		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false))
+		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false))
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)
 		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
@@ -598,7 +600,10 @@ func jsStringLiteral(s string) string {
 	return strings.ReplaceAll(literal, "\u2029", `\u2029`)
 }
 
-func controllerProxy(controllerURL, token string, loginRequired bool) http.Handler {
+// safety: on a multi-team controller one service bearer reads every team, so a
+// signed-in browser reaches the controller only as its own session. The logs
+// service authenticates bearers alone, so forwardSession stays off for it.
+func controllerProxy(controllerURL, token string, loginRequired, forwardSession bool) http.Handler {
 	u, err := url.Parse(controllerURL)
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -614,7 +619,9 @@ func controllerProxy(controllerURL, token string, loginRequired bool) http.Handl
 			if loginRequired {
 				pr.Out.Header.Del("Authorization")
 			}
-			if token != "" {
+			if id := sessionIDFromContext(pr.In.Context()); forwardSession && id != "" {
+				pr.Out.Header.Set("Authorization", sessionAuthorization(id))
+			} else if token != "" {
 				pr.Out.Header.Set("Authorization", "Bearer "+token)
 			}
 		},

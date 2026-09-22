@@ -39,7 +39,7 @@ func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handle
 			csrfError(w)
 			return
 		}
-		r = r.WithContext(contextWithWebPrincipal(r.Context(), sess))
+		r = r.WithContext(contextWithWebPrincipal(r.Context(), sess, cookie.Value))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -101,16 +101,57 @@ type webPrincipal struct {
 	Name      string
 	Scopes    []string
 	ExpiresAt time.Time
+
+	sessionID string
 }
 
 type webPrincipalCtxKey struct{}
 
-func contextWithWebPrincipal(ctx context.Context, sess *sessionResp) context.Context {
+func contextWithWebPrincipal(ctx context.Context, sess *sessionResp, sessionID string) context.Context {
 	return context.WithValue(ctx, webPrincipalCtxKey{}, &webPrincipal{
 		Name:      sess.Principal,
 		Scopes:    sess.Scopes,
 		ExpiresAt: time.Unix(sess.ExpiresAt, 0).UTC(),
+		sessionID: sessionID,
 	})
+}
+
+func sessionIDFromContext(ctx context.Context) string {
+	if p, ok := WebPrincipalFromContext(ctx); ok {
+		return p.sessionID
+	}
+	return ""
+}
+
+// SessionForwardingTransport sends a request made on behalf of a signed-in
+// browser with that browser's own controller session, replacing whatever
+// Authorization an inner client set. A request whose context carries no
+// session goes out unchanged. Wrap the transport of any controller client the
+// dashboard calls while serving a request, for example:
+//
+//	hc := &http.Client{Transport: web.SessionForwardingTransport(http.DefaultTransport)}
+//	c := client.NewWithToken(controllerURL, hc, serviceToken)
+func SessionForwardingTransport(base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return sessionForwardingTransport{base: base}
+}
+
+type sessionForwardingTransport struct{ base http.RoundTripper }
+
+func (t sessionForwardingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	id := sessionIDFromContext(req.Context())
+	if id == "" {
+		return t.base.RoundTrip(req)
+	}
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", sessionAuthorization(id))
+	return t.base.RoundTrip(req)
+}
+
+func sessionAuthorization(sessionID string) string {
+	return "Session " + sessionID
 }
 
 func WebPrincipalFromContext(ctx context.Context) (*webPrincipal, bool) {

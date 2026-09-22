@@ -130,7 +130,7 @@ func TestTheViewerIdentityAlsoRidesTheContext(t *testing.T) {
 	req = req.WithContext(contextWithWebPrincipal(req.Context(), &sessionResp{
 		Principal: "alice",
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
-	}))
+	}, "session-alice"))
 	withViewerIdentity(newViewerTabs(), inner).ServeHTTP(httptest.NewRecorder(), req)
 	if want := ViewerIdentityPrefix + "alice"; got != want {
 		t.Fatalf("context identity = %q, want %q", got, want)

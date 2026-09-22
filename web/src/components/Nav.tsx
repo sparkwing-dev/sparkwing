@@ -6,6 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { readCSRFCookie } from "@/lib/csrfCookie";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
+import TeamSwitcher from "@/components/TeamSwitcher";
 
 type Tab = { href: string; label: string; external?: boolean };
 
@@ -47,6 +48,7 @@ export default function Nav() {
         sparkwing
       </Link>
       <VersionPill />
+      <TeamSwitcher />
       <div className="flex items-center gap-1 flex-1 ml-4">
         {tabs.map((tab) => {
           const active = tab.external

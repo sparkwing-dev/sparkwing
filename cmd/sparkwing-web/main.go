@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -128,12 +130,13 @@ func run(args []string) error {
 		if *logsURL != "" {
 			logStore = sparkwinglogs.New(*logsURL, nil, *token)
 		}
-		var c *client.Client
-		if *token != "" {
-			c = client.NewWithToken(*controllerURL, nil, *token)
-		} else {
-			c = client.New(*controllerURL, nil)
+		// safety: the backend reads runs, nodes and events while serving a browser, so a
+		// signed-in request reaches the controller as its own session, not the service token.
+		hc := &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: web.SessionForwardingTransport(otelutil.WrapTransport(nil)),
 		}
+		c := client.NewWithToken(*controllerURL, hc, *token)
 		opts := web.HandlerOptions{
 			Backend:           backend.NewClientBackend(c, logStore),
 			Paths:             paths,

@@ -444,7 +444,7 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 		t.Fatalf("upstream requests = %+v, want the controller mutation only", requests)
 	}
 	for _, got := range requests {
-		if got.body != `{"action":"cancel"}` || got.authorization != "Bearer service-token" ||
+		if got.body != `{"action":"cancel"}` || got.authorization != "Session session-1" ||
 			got.cookie != "" || got.csrf != "" {
 			t.Errorf("upstream credential boundary = %+v", got)
 		}
