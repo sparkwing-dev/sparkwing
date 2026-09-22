@@ -476,14 +476,17 @@ func TestController_ListPausesAlias(t *testing.T) {
 }
 
 func TestController_ValidationErrors(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
+	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 
 	mustPostJSON(t, base+"/api/v1/runs",
 		map[string]any{"pipeline": "only-pipeline"},
 		http.StatusBadRequest)
 
-	mustPostJSON(t, base+"/api/v1/runs/none/finish",
+	if err := st.CreateRun(context.Background(), store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	mustPostJSON(t, base+"/api/v1/runs/run-1/finish",
 		map[string]any{},
 		http.StatusBadRequest)
 }

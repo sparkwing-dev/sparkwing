@@ -2270,6 +2270,7 @@ the paid grant's reference. Requires the admin scope.`,
 		{Name: "amount", Argument: "N", Desc: "Credits to add, negative on a reversal; 100 credits is one dollar", Required: true, Group: "Input"},
 		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant; granting the same one twice returns the first grant", Group: "Input"},
 		{Name: "reverses", Argument: "REF", Desc: "Reference of the paid grant a reversal takes back", Group: "Input"},
+		{Name: "team", Argument: "SLUG", Desc: "Team whose balance the grant funds; required on a multi-team controller", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{

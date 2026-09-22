@@ -479,11 +479,11 @@ status reporting.
 
 ## Secrets at rest
 
-Encryption at rest is **opt-in and off by default.** Configure a master
-key and secret values are encrypted with an XChaCha20-Poly1305 AEAD
-cipher (`internal/secrets`) before they hit the database. With no key
-configured the controller stores secret values as plaintext and logs a
-warning at startup. Provide the key via:
+Configure a master key and secret values are encrypted with an
+XChaCha20-Poly1305 AEAD cipher (`internal/secrets`), under a fresh random
+nonce per value, before they reach the database. The key is 32 random
+bytes, base64-encoded; generate one with `openssl rand -base64 32`.
+Provide it via:
 
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key, or
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key.
@@ -494,20 +494,45 @@ renders the flag, because an environment entry is readable through
 clears either variable from its own environment as soon as it reads it,
 so a value supplied that way does not outlive startup.
 
-Each envelope is bound to the fields of the row that decide who may
-read it: the secret name, the owning repository (empty for an unscoped
-secret), whether an unscoped row is shared with every run, and whether
-the value is masked in run output. Anyone with database write access
-who copies a ciphertext onto another name, into another repository, or
-onto the unscoped row, or who edits a row to widen its own access, gets
-a value that fails to open rather than one that answers there.
+A controller whose license allows more than one team refuses to start
+without a key, because it holds other people's credentials. A
+single-team install, a laptop controller included, still starts without
+one: it stores secret values as plaintext and logs a warning at startup.
+Nothing generates a key on its own; losing the key loses every value
+sealed under it, so it is backed up beside the database (see
+[backup-restore.md](backup-restore.md)).
 
-Values sealed before binding (`enc:v1:` envelopes) still open, and they
-are still substitutable until they are rebound. `sparkwing secrets list`
-reports `BOUND false` for them (`"bound": false` on the API), and the
-controller reseals such a row into a bound envelope the first time it
-is read, so rows migrate as they are used. Re-setting a secret rebinds
-it as well.
+Each envelope (`enc:v3:`) is bound, as additional authenticated data, to
+the fields of the row that decide who may read it: the team that owns
+the row, the secret name, the owning pipeline (empty for an unscoped
+secret), whether an unscoped row is shared with every run, and whether
+the value is masked in run output. Anyone with database write access who
+copies a ciphertext into another team's row, onto another name, into
+another pipeline or onto the unscoped row, or who edits a row to widen
+its own access, gets a value that fails to open rather than one that
+answers there. A read that fails to open answers `500`, never an empty
+value.
+
+Every start with a key reseals the table before the controller serves a
+request. A row held as plaintext, because it was written while the
+controller ran without a key, is sealed. An envelope from before team
+binding (`enc:v1:`, bound to nothing, or `enc:v2:`, bound to the row but
+not its team) is opened and resealed with its team. Those older envelopes
+were only ever written into the `default` team, so one found in any other
+team was copied there: it is left as it is, logged, and refused on read.
+The pass walks the table in batches, writes a row only if it still holds
+the value the pass read, and logs how many rows it resealed and skipped,
+so a restart repeats nothing. Reads open only `enc:v3:` envelopes, so an
+older envelope written into a row after the pass does not open either.
+
+Before it writes anything, the pass opens a sample of the envelopes
+already stored. If the key opens none of them, it is not the key the
+table was sealed under, and the controller refuses to start instead of
+sealing plaintext rows under it.
+
+`sparkwing secrets list` reports `BOUND true` for a row sealed to its
+team (`"bound"` on the API) and `false` for one that is plaintext or an
+older envelope.
 
 A stored envelope carries no key id, so the controller opens it by
 trying the keys it holds. Name the key values were sealed under before
@@ -520,11 +545,9 @@ A value that does not open under the current key is tried against that
 one, which keeps every value readable across a key change. Close the
 window with `sparkwing secrets rotate --profile <name>`
 (`POST /api/v1/secrets/rotate`, admin): it opens every row with the keys
-the controller holds and writes it back sealed and bound under the
-current key, in one transaction, so the rotation lands for the whole
-table or for none of it. The same command turns encryption on for a
-database that already holds plaintext values, which come out encrypted
-with no re-set by hand.
+the controller holds and writes it back sealed and bound to its team
+under the current key, in one transaction, so the rotation lands for the
+whole table or for none of it.
 
 A row that opens under neither key keeps the bytes it had and is named
 in the response, which is what a value written as plaintext before

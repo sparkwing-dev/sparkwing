@@ -1190,6 +1190,13 @@ type Secret struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+type SecretResealCounts struct {
+	Resealed int
+
+	Skipped int
+
+	Raced int
+}
 type Session struct {
 	ID        string
 	Principal string
@@ -1541,6 +1548,7 @@ func (s *Store) RequirementSkew(ctx context.Context) (*SkewError, error)
 func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error)
 func (s *Store) Requirements(ctx context.Context) ([]string, error)
 func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, error)
+func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetExecutorLiveness(ctx context.Context) error
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
@@ -1553,12 +1561,13 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Tim
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
-func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error)
+func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunnerCapFor(ctx context.Context, now time.Time) (RunnerCap, error)
+func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
@@ -1630,6 +1639,10 @@ type TeamInfo struct {
 	CreatedBy   string
 }
 func (t TeamInfo) Label() string
+type TeamSecret struct {
+	Team   Team
+	Secret Secret
+}
 type Tenant struct {
 }
 func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)

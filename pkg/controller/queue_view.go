@@ -8,7 +8,11 @@ import (
 )
 
 func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request) {
-	states, err := s.store.ListConcurrencyStates(r.Context())
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	states, err := tenant.ListConcurrencyStates(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

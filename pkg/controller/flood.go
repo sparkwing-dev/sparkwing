@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // FloodPolicy bounds how many runs a burst of webhook deliveries or API
@@ -121,6 +122,12 @@ func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, 
 // the fallback the budget is keyed on rather than every such delivery sharing one.
 func (s *Server) floodKey(r *http.Request, fallback string) string {
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		// safety: a signed-up team mints as many tokens as it likes, so its
+		// submissions share one bucket; the operator's own team keeps one per
+		// token, which is what a self-hosted install has always had.
+		if team := store.NormalizeTeam(p.Team); team != "" && team != store.DefaultTeam {
+			return "team:" + string(team)
+		}
 		if p.TokenPrefix != "" {
 			return "token:" + p.TokenPrefix
 		}

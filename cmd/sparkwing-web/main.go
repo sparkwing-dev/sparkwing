@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
@@ -128,7 +127,7 @@ func run(args []string) error {
 		}
 		var logStore storage.LogStore
 		if *logsURL != "" {
-			logStore = sparkwinglogs.New(*logsURL, nil, *token)
+			logStore = web.DurableLogStore(*logsURL, *token)
 		}
 		// safety: the backend reads runs, nodes and events while serving a browser, so a
 		// signed-in request reaches the controller as its own session, not the service token.

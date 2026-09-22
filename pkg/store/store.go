@@ -3655,6 +3655,17 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
 
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
+}
+
+// UpdatePlanSnapshot records the plan of one of t's runs. The trigger fence a
+// runner's request carries is checked in t's team, so an orchestrator of any
+// team can record the plan of the run it holds.
+func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	return t.s.updatePlanSnapshot(ctx, t.team, runID, snapshot)
+}
+
+func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string, snapshot []byte) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -3663,16 +3674,18 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(snapshot)
 	planHash := "sha256:" + hex.EncodeToString(sum[:])
-	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (run_id, plan_hash)
-SELECT id, ? FROM runs WHERE id = ? ON CONFLICT(run_id) DO NOTHING`, planHash, runID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (team, run_id, plan_hash)
+SELECT team, id, ? FROM runs WHERE team = ? AND id = ?
+ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
+ WHERE run_definition_plans.team = excluded.team`, planHash, string(team), runID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
+	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE team = ? AND id = ?`, snapshot, string(team), runID)
 	if err != nil {
 		return err
 	}
@@ -4006,11 +4019,28 @@ func prefixUpperBound(prefix string) (string, bool) {
 // GetLatestRun returns the newest run for pipeline matching statuses
 // within maxAge. ErrNotFound on miss.
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return s.getLatestRun(ctx, allTeams(), pipeline, statuses, maxAge)
+}
+
+// GetLatestRun returns t's newest run for pipeline matching statuses within
+// maxAge. ErrNotFound on miss.
+func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
+}
+
+func (s *Store) getLatestRun(ctx context.Context, scope teamScope, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if pipeline == "" {
 		return nil, errors.New("GetLatestRun: pipeline is required")
 	}
 	where := "WHERE pipeline = ?"
 	args := []any{pipeline}
+	if !scope.all {
+		if scope.team == "" {
+			return nil, ErrNoTeam
+		}
+		where += " AND team = ?"
+		args = append(args, string(scope.team))
+	}
 	if len(statuses) > 0 {
 		ph := make([]string, len(statuses))
 		for i, st := range statuses {
@@ -7927,6 +7957,16 @@ const (
 // with the limit unfilled is logged, since the caller cannot tell that
 // from a genuinely empty result.
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
+	return s.listTriggers(ctx, allTeams(), f)
+}
+
+// ListTriggers returns t's triggers newest-first, filtered by f, with the
+// same paging and repo matching as [Store.ListTriggers].
+func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
+	return t.s.listTriggers(ctx, oneTeam(t.team), f)
+}
+
+func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilter) ([]*Trigger, error) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 20
@@ -7941,6 +7981,13 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 		} else {
 			where += " AND " + clause
 		}
+	}
+	if !scope.all {
+		if scope.team == "" {
+			return nil, ErrNoTeam
+		}
+		addClause("team = ?")
+		args = append(args, string(scope.team))
 	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {

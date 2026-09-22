@@ -409,6 +409,7 @@ func runCreditsGrant(args []string) error {
 	amount := fs.Int64("amount", 0, "credits to add, or to take back as a negative number on a reversal (100 credits = one dollar)")
 	reference := fs.String("reference", "", "payment id or operator note recorded with the grant")
 	reverses := fs.String("reverses", "", "reference of the paid grant a reversal takes back")
+	team := fs.String("team", "", "slug of the team whose balance the grant funds; required on a multi-team controller")
 	if err := parseAndCheck(cmdCreditsGrant, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -437,6 +438,9 @@ func runCreditsGrant(args []string) error {
 	}
 	if *reverses != "" {
 		body["reverses"] = *reverses
+	}
+	if *team != "" {
+		body["team"] = *team
 	}
 	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/credits/grants", body)
 	if err != nil {

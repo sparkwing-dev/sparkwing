@@ -9,6 +9,10 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 )
 
 func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handler) http.Handler {
@@ -157,4 +161,20 @@ func sessionAuthorization(sessionID string) string {
 func WebPrincipalFromContext(ctx context.Context) (*webPrincipal, bool) {
 	p, ok := ctx.Value(webPrincipalCtxKey{}).(*webPrincipal)
 	return p, ok
+}
+
+func logsProxy(opts HandlerOptions) http.Handler {
+	return logsProxyAllowList(withLogsIdentityHeader(
+		controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), true)))
+}
+
+// DurableLogStore reads a logs service on behalf of the signed-in browser
+// whose request is being served. The logs service asks the controller whether
+// the caller's team owns each run, so a read made with the dashboard's own
+// token would answer for the operator's team instead of the user's. The client
+// has no overall timeout, because a log stream stays open.
+func DurableLogStore(logsURL, token string) storage.LogStore {
+	return sparkwinglogs.New(logsURL, &http.Client{
+		Transport: SessionForwardingTransport(otelutil.WrapTransport(nil)),
+	}, token)
 }

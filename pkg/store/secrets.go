@@ -293,9 +293,10 @@ func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now 
 // keeps its value, including updated_at: the secret did not change, only
 // the bytes it is stored as. Returns the number of rows rewritten.
 //
-// reseal sees the row as stored, which for an encrypted table means the
-// envelope in Secret.Value; returning an error abandons the rotation.
-func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (string, error)) (rotated int, err error) {
+// reseal sees the owning team and the row as stored, which for an
+// encrypted table means the envelope in Secret.Value; returning an error
+// abandons the rotation.
+func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error) {
 	if reseal == nil {
 		return 0, errors.New("secrets: reseal function required")
 	}
@@ -312,7 +313,7 @@ func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (str
 	}
 
 	for _, row := range current {
-		value, rerr := reseal(row.Secret)
+		value, rerr := reseal(Team(row.team), row.Secret)
 		if rerr != nil {
 			return 0, rerr
 		}
@@ -330,6 +331,135 @@ func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Secret) (str
 		return 0, err
 	}
 	return len(current), nil
+}
+
+// SecretResealCounts is what one [Store.ResealSecrets] pass did.
+type SecretResealCounts struct {
+	// Resealed rows now hold what reseal returned for them.
+	Resealed int
+	// Skipped rows are ones reseal refused; they keep their stored value.
+	Skipped int
+	// Raced rows changed between the read and the write, so the pass left
+	// them to whoever changed them.
+	Raced int
+}
+
+// ResealSecrets walks every team's secret rows whose stored value does not
+// begin with sealedPrefix, batchSize rows at a time in (team, name,
+// pipeline) order, and stores what reseal returns for each. A row reseal
+// errors on keeps its value and is counted skipped, so one unreadable row
+// does not hold back the rest. Each write names the value it replaces, so a
+// row rewritten meanwhile by a request or another controller keeps that
+// newer value. Running it again finds only the rows an earlier pass
+// skipped, which makes it safe to run on every start.
+//
+// Unlike [Store.RotateSecretValues] it holds no transaction across the
+// table, because each row it touches moves from a state every reader
+// refuses to one every reader accepts, and a large table would otherwise
+// be locked for the whole pass.
+func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error) {
+	var counts SecretResealCounts
+	if reseal == nil {
+		return counts, errors.New("secrets: reseal function required")
+	}
+	if sealedPrefix == "" {
+		return counts, errors.New("secrets: sealed prefix required")
+	}
+	if batchSize < 1 {
+		return counts, errors.New("secrets: batch size must be at least 1")
+	}
+	var after *teamSecret
+	for {
+		batch, err := s.secretsNotSealed(ctx, sealedPrefix, after, batchSize)
+		if err != nil {
+			return counts, err
+		}
+		for i := range batch {
+			row := &batch[i]
+			value, rerr := reseal(Team(row.team), row.Secret)
+			if rerr != nil {
+				counts.Skipped++
+				continue
+			}
+			res, err := s.exec(ctx,
+				`UPDATE secrets SET value = ? WHERE team = ? AND name = ? AND pipeline = ? AND value = ?`,
+				value, row.team, row.Secret.Name, row.Secret.Pipeline, row.Secret.Value)
+			if err != nil {
+				return counts, err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return counts, err
+			}
+			if n == 0 {
+				counts.Raced++
+				continue
+			}
+			counts.Resealed++
+		}
+		if len(batch) < batchSize {
+			return counts, nil
+		}
+		after = &batch[len(batch)-1]
+	}
+}
+
+func (s *Store) secretsNotSealed(ctx context.Context, sealedPrefix string, after *teamSecret, limit int) (_ []teamSecret, err error) {
+	q := `
+        SELECT team, name, value, principal, pipeline, masked, shared, created_at, updated_at
+          FROM secrets
+         WHERE substr(value, 1, ?) <> ?`
+	args := []any{len(sealedPrefix), sealedPrefix}
+	if after != nil {
+		q += `
+           AND (team > ? OR (team = ? AND (name > ? OR (name = ? AND pipeline > ?))))`
+		args = append(args, after.team, after.team, after.Secret.Name, after.Secret.Name, after.Secret.Pipeline)
+	}
+	q += `
+         ORDER BY team, name, pipeline
+         LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	return scanTeamSecretRows(rows)
+}
+
+// TeamSecret is a secret row together with the team that owns it, for the
+// few readers that walk every team at once.
+type TeamSecret struct {
+	Team   Team
+	Secret Secret
+}
+
+// SampleSealedSecrets returns up to limit rows, from any team, whose stored
+// value begins with sealedPrefix. A controller opens them to prove its key
+// is the one the table was sealed under before it seals anything more.
+func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error) {
+	if sealedPrefix == "" || limit < 1 {
+		return nil, errors.New("secrets: sample needs a prefix and a positive limit")
+	}
+	rows, err := s.query(ctx, `
+        SELECT team, name, value, principal, pipeline, masked, shared, created_at, updated_at
+          FROM secrets
+         WHERE substr(value, 1, ?) = ?
+         ORDER BY updated_at DESC, team, name, pipeline
+         LIMIT ?`, len(sealedPrefix), sealedPrefix, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	scanned, err := scanTeamSecretRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TeamSecret, 0, len(scanned))
+	for _, row := range scanned {
+		out = append(out, TeamSecret{Team: Team(row.team), Secret: row.Secret})
+	}
+	return out, nil
 }
 
 // safety: the team is not a field of [Secret], because that is the shape
@@ -350,6 +480,10 @@ func selectSecretsTx(ctx context.Context, tx *storeTx) (secs []teamSecret, err e
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
+	return scanTeamSecretRows(rows)
+}
+
+func scanTeamSecretRows(rows *sql.Rows) ([]teamSecret, error) {
 	var out []teamSecret
 	for rows.Next() {
 		var row teamSecret

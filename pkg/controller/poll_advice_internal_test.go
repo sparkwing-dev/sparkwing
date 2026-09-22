@@ -85,7 +85,11 @@ func TestClaimPollAdvice_WorkArrivingClearsTheAdvice(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed trigger: %v", err)
 	}
-	if err := srv.admitTrigger(context.Background(), triggerIntake{
+	tenant, err := srv.store.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.admitTrigger(context.Background(), tenant, triggerIntake{
 		RunID: "run-admitted", Pipeline: "build", Source: "api", At: time.Now(),
 	}); err != nil {
 		t.Fatalf("admit trigger: %v", err)

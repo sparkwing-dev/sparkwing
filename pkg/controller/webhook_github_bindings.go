@@ -106,6 +106,10 @@ func (s *Server) handleConnectGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, errors.New("secret is required"))
 		return
 	}
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	stored, err := s.sealWebhookSecret(pipeline, repo, req.Secret)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -115,18 +119,18 @@ func (s *Server) handleConnectGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		Pipeline: pipeline, Repo: repo, Secret: stored,
 		Events: req.Events, HookID: req.HookID,
 	}
-	if err := s.store.PutGitHubWebhookBinding(r.Context(), binding); err != nil {
+	if err := tenant.PutGitHubWebhookBinding(r.Context(), binding); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	saved, err := s.store.GetGitHubWebhookBinding(r.Context(), pipeline, repo)
+	saved, err := tenant.GetGitHubWebhookBinding(r.Context(), pipeline, repo)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.logger.Info("github webhook binding stored",
 		"pipeline", pipeline, "repo", repo, "hook_id", req.HookID,
-		"events", strings.Join(req.Events, ","), "encrypted", s.secretsCipher != nil)
+		"events", strings.Join(req.Events, ","), "encrypted", s.secretsCipher != nil, "team", tenant.Team())
 	writeJSON(w, http.StatusCreated, GitHubWebhookBindingResponse{
 		Pipeline:    saved.Pipeline,
 		Repo:        saved.Repo,
@@ -145,11 +149,15 @@ func (s *Server) handleDisconnectGitHubWebhook(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	var hookID int64
-	if existing, err := s.store.GetGitHubWebhookBinding(r.Context(), pipeline, repo); err == nil {
+	if existing, err := tenant.GetGitHubWebhookBinding(r.Context(), pipeline, repo); err == nil {
 		hookID = existing.HookID
 	}
-	removed, err := s.store.DeleteGitHubWebhookBinding(r.Context(), pipeline, repo)
+	removed, err := tenant.DeleteGitHubWebhookBinding(r.Context(), pipeline, repo)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -202,11 +210,18 @@ func (s *Server) openWebhookSecret(pipeline, repo, stored string) (string, error
 	if s.secretsCipher == nil {
 		return "", errors.New("the binding is encrypted and no secrets key is configured")
 	}
-	return openSecret(s.secretsCipher, webhookSecretBinding(pipeline, repo), stored)
+	binding := webhookSecretBinding(pipeline, repo)
+	if !secrets.IsBound(stored) {
+		return openLegacySecret(s.secretsCipher, binding, stored)
+	}
+	return openSecret(s.secretsCipher, binding, stored)
 }
 
+// safety: these routes read and write the default team's bindings, so that is
+// the team the envelope is sealed to. Bindings are not resealed at startup, so
+// one sealed before team binding still opens here.
 func webhookSecretBinding(pipeline, repo string) secretBinding {
-	return secretBinding{Name: "github-webhook/" + pipeline, Scope: repo, Masked: true}
+	return secretBinding{Team: store.DefaultTeam, Name: "github-webhook/" + pipeline, Scope: repo, Masked: true}
 }
 
 // safety: bound means a stored binding names this pipeline and repository,
@@ -214,14 +229,24 @@ func webhookSecretBinding(pipeline, repo string) secretBinding {
 // secret narrower than the shared one exists, so an unresolved secret
 // answers 401 rather than reading out the binding table.
 type githubWebhookResolution struct {
+	candidates []githubWebhookCandidate
+	bound      bool
+	scoped     bool
+}
+
+// githubWebhookCandidate is a secret that may have signed a delivery and the
+// team a delivery it verifies runs in.
+type githubWebhookCandidate struct {
 	secret string
-	bound  bool
-	scoped bool
+	team   store.Team
 }
 
 // safety: the stored bindings only add. A pipeline the document leaves
 // unchecked stays unchecked, so connecting one repository cannot start
-// refusing deliveries an existing install already accepts.
+// refusing deliveries an existing install already accepts. A stored binding
+// that names the repository shuts out the document's secrets for it, as it did
+// before bindings carried a team, and the document and the shared secret
+// belong to the team every pre-tenant row was migrated into.
 func (s *Server) resolveGitHubWebhook(ctx context.Context, pipeline, repo string) githubWebhookResolution {
 	res := githubWebhookResolution{scoped: s.githubWebhookHasScopedSecret()}
 	for _, b := range s.storedGitHubBindings(ctx, pipeline) {
@@ -232,23 +257,46 @@ func (s *Server) resolveGitHubWebhook(ctx context.Context, pipeline, repo string
 		plain, err := s.openWebhookSecret(pipeline, b.Repo, b.Secret)
 		if err != nil {
 			s.logger.Error("github webhook binding unreadable",
-				"pipeline", pipeline, "repo", b.Repo, "err", err)
+				"pipeline", pipeline, "repo", b.Repo, "team", b.Team, "err", err)
 			continue
 		}
-		res.secret = plain
+		res.candidates = append(res.candidates, githubWebhookCandidate{secret: plain, team: b.Team})
 		res.bound = true
 	}
-	if res.secret == "" {
-		res.secret = s.githubWebhookSecretFor(pipeline, repo)
+	if len(res.candidates) == 0 {
+		if secret := s.githubWebhookSecretFor(pipeline, repo); secret != "" {
+			res.candidates = append(res.candidates, githubWebhookCandidate{secret: secret, team: store.DefaultTeam})
+		}
 	}
 	return res
+}
+
+// verifiedGitHubTeam reports the team whose secret signed the delivery. The
+// signature is the only credential a delivery carries, so it is what picks the
+// team; a signature two teams' secrets both verify names no one team and is
+// refused rather than handed to whichever was read first.
+func (s *Server) verifiedGitHubTeam(res githubWebhookResolution, signature string, body []byte, pipeline string) (store.Team, bool) {
+	var team store.Team
+	verified := false
+	for _, c := range res.candidates {
+		if !verifyGitHubSignature(signature, body, c.secret) {
+			continue
+		}
+		if verified && c.team != team {
+			s.logger.Error("github webhook refused",
+				"pipeline", pipeline, "reason", "the signature verifies against more than one team's binding")
+			return "", false
+		}
+		team, verified = c.team, true
+	}
+	return team, verified
 }
 
 func (s *Server) storedGitHubBindings(ctx context.Context, pipeline string) []store.GitHubWebhookBinding {
 	if s.store == nil {
 		return nil
 	}
-	bindings, err := s.store.ListGitHubWebhookBindings(ctx, pipeline)
+	bindings, err := s.store.AsOperator().ListGitHubWebhookBindingsAcrossTeams(ctx, pipeline)
 	if err != nil {
 		// safety: a store that cannot answer leaves the document in charge
 		// rather than refusing deliveries it has always accepted.

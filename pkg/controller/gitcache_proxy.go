@@ -120,7 +120,12 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "the cache serves only a run a signed webhook delivery created", http.StatusForbidden)
 		return false
 	}
-	bindings, err := s.store.ListGitHubWebhookBindings(r.Context(), trigger.Pipeline)
+	tenant, err := s.tenantFor(r)
+	if err != nil {
+		http.Error(w, "resolve claimed run source", http.StatusForbidden)
+		return false
+	}
+	bindings, err := tenant.ListGitHubWebhookBindings(r.Context(), trigger.Pipeline)
 	if err != nil {
 		s.logger.Error("gitcache proxy: list webhook bindings", "run_id", runID, "err", err)
 		http.Error(w, "resolve claimed run source", http.StatusForbidden)

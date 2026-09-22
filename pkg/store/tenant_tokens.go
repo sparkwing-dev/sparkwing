@@ -8,14 +8,19 @@ import (
 	"time"
 )
 
-// ErrAdminScopeOnTeamToken reports a team mint naming the deployment
-// operator's scope, which no team's token may carry.
+// OperatorScope is the deployment operator's scope. A membership never
+// grants it, so no token minted through a [Tenant] carries it; the
+// operator's own tokens are minted through *Store.
+const OperatorScope = "admin"
+
+// ErrAdminScopeOnTeamToken reports a team mint naming [OperatorScope],
+// which no team's token may carry.
 var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
 
 // safety: admin is the deployment operator's scope, and a membership never grants it, so no path that
-// mints into a team may either; the operator's own tokens are minted through *Store.
+// mints into a team may either, the default team included; the operator's own tokens are minted through *Store.
 func refuseAdminScope(scopes []string) error {
-	if slices.ContainsFunc(scopes, func(s string) bool { return strings.TrimSpace(s) == "admin" }) {
+	if slices.ContainsFunc(scopes, func(s string) bool { return strings.TrimSpace(s) == OperatorScope }) {
 		return ErrAdminScopeOnTeamToken
 	}
 	return nil

@@ -108,6 +108,31 @@ unlock.
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
+- **cache:** the cache accepts a cache grant, a bearer a multi-team
+  controller signs with the cache token it already holds, so a runner need not
+  hold the cache's token. A grant names one run's team, lasts six hours, and is
+  verified offline. A grant reads and writes only its team's `/bin/`,
+  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, clones
+  only public `https` mirrors under their URL-derived name, and is refused on
+  seeding, refresh, archive, upload and admin routes. A team's bins count
+  toward the store ceiling. The operator token is unchanged.
+- **web:** Sign in with Google on a multi-team controller
+  When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
+  provider, the sign-in page offers Google. `GET /auth/google/start` and
+  `GET /auth/google/callback` run the flow on the dashboard host with the state
+  and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
+  whose state does not match that cookie is refused. The nav shows the active
+  team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
+
+- **web:** team pages on a multi-team controller
+  `/team` lists members, invites by email with a copyable accept link, revokes
+  pending invitations, changes roles and removes members; `/team/machines`
+  mints a runner token for the active team, shows it and its
+  `sparkwing-runner` command once, and lists and revokes tokens; `/team/new`
+  creates a team and `/invitations` accepts one. Controls follow the member's
+  role and the controller decides every request. A local install shows none of
+  them.
+
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -379,6 +404,27 @@ unlock.
 
 ### Security
 
+- **controller:** stored secrets are sealed to their team, and a multi-team
+  controller needs a key. A controller whose license allows more than one team
+  refuses to start without `SPARKWING_SECRETS_KEY` or `--secrets-key-file`,
+  because without one every team's secrets sat in the database as plaintext.
+  A single-team install still starts without a key. A new `enc:v3:` envelope
+  adds the owning team to the additional authenticated data beside the name,
+  pipeline, shared and masked flags, so one team's ciphertext copied into
+  another team's row no longer opens. Every start with a key reseals the table
+  before serving: plaintext rows are sealed and `enc:v1:`/`enc:v2:` envelopes
+  are resealed with their team, in batches, each write conditional on the
+  value it replaces, with the counts logged. An older envelope outside the
+  `default` team is left alone and refused, since only the `default` team ever
+  held one. Reads open only `enc:v3:`, so a row is no longer rebound on first
+  read. The start is refused, before anything is written, when the key opens
+  none of a sample of the envelopes already stored. See
+  [security.md](docs/security.md#secrets-at-rest).
+- **controller (Breaking):** `controller.BoundCipher` takes the owning team.
+  `SealBound` and `OpenBound` gain a leading `team` argument, and a new
+  optional `controller.LegacyCipher` opens envelopes sealed before team
+  binding so the startup reseal can bring them forward. See the
+  [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
 - **web:** a signed-in dashboard reaches the controller as that user
   Under `--require-login` the proxy and the dashboard's own run reads sent the
   web pod's service token, so on a multi-team controller every browser read

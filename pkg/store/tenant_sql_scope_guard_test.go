@@ -36,7 +36,11 @@ var reviewedUnscopedSQL = map[string]string{
 		"read after the award is of the row the scoped update just proved in team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).countRuns":                     "shares listRuns' predicate builder and its refusal",
+	"(*Store).countRuns": "shares listRuns' predicate builder and its refusal",
+	"(*Store).listTriggers": "the team predicate comes from its scope at run time; " +
+		"a scope with no team and no all-teams flag is refused there",
+	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
+		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).CountConcurrencyCache":         "an ops gauge of the whole table, which is what the ceiling is set against",
 	"(*Store).CountDeadLocalConcurrency":     "the dry run of that repair, and has to count what it would remove",
 	"(*Store).ListConcurrencyStates":         "enumerates the deployment's live keys with their teams and reads each through that team's handle",
@@ -49,11 +53,17 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).sweepOrphanedConcurrencyCache": "drops memos whose origin run is gone anywhere on the deployment",
 	"rewriteLegacyInheritedHolderMarkers":    "a v27 migration, and the team column arrives in v49",
 	"selectSecretsTx":                        "reads every team's secret so one key rotation reseals the whole table, and rewrites each row under its own team",
+	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
+	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"settleActiveTeamTx":                     "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":            "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail":       "lists the invitations addressed to one verified email from every team that sent one",
 	"(*Store).AcceptInvitation":              "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
+		"binding of the pipeline is a candidate until its secret verifies the signature",
+	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
+		"launches each one through its own team's handle",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -67,10 +77,8 @@ var unportedSQL = []string{
 	"(*Store).AppendEventOnce",
 	"(*Store).AppendNodeAnnotation",
 	"(*Store).AppendStepAnnotation",
-	"(*Store).ArmCronSchedule",
 	"(*Store).CacheExcludedCounts",
 	"(*Store).CancelPendingTrigger",
-	"(*Store).ClearCronOverride",
 	"(*Store).ComputeAlarmState",
 	"(*Store).ComputeUsage",
 	"(*Store).ConsumeNodeBounce",
@@ -86,8 +94,6 @@ var unportedSQL = []string{
 	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
 	"(*Store).CreditLedgerTotals",
-	"(*Store).DeleteCronSchedule",
-	"(*Store).DeleteCronSchedulesForRepo",
 	"(*Store).DeleteRun",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
@@ -107,8 +113,6 @@ var unportedSQL = []string{
 	"(*Store).FinishTriggerAtGeneration",
 	"(*Store).GetActiveDebugPause",
 	"(*Store).GetApproval",
-	"(*Store).GetCronSchedule",
-	"(*Store).GetLatestRun",
 	"(*Store).GetNode",
 	"(*Store).GetNodeDispatch",
 	"(*Store).GetRun",
@@ -119,8 +123,6 @@ var unportedSQL = []string{
 	"(*Store).ListApprovalsForRun",
 	"(*Store).ListCreditCharges",
 	"(*Store).ListCreditGrants",
-	"(*Store).ListCronFires",
-	"(*Store).ListCronSchedules",
 	"(*Store).ListDebugPauses",
 	"(*Store).ListEgressUsage",
 	"(*Store).ListEventsAfter",
@@ -135,11 +137,9 @@ var unportedSQL = []string{
 	"(*Store).ListPendingApprovals",
 	"(*Store).ListPendingTriggersForParent",
 	"(*Store).ListRunRetryTree",
-	"(*Store).ListRunTrends",
 	"(*Store).ListSpawnedChildrenByRun",
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
-	"(*Store).ListTriggers",
 	"(*Store).ListUsers",
 	"(*Store).LookupSession",
 	"(*Store).LookupToken",
@@ -167,15 +167,9 @@ var unportedSQL = []string{
 	"(*Store).RequeueUnstartedClaim",
 	"(*Store).ResetNodeForAutoRetry",
 	"(*Store).ResolveApproval",
-	"(*Store).ResolveCronDue",
 	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
 	"(*Store).RunExceedsWallClock",
-	"(*Store).SetCronOverride",
-	"(*Store).SetCronScheduleDeclared",
-	"(*Store).SetCronScheduleLock",
-	"(*Store).SetCronScheduleNextDue",
-	"(*Store).SetCronSchedulePaused",
 	"(*Store).SetNodeArtifactManifest",
 	"(*Store).SetNodeArtifactManifestCharged",
 	"(*Store).SetNodeStatus",
@@ -201,7 +195,6 @@ var unportedSQL = []string{
 	"(*Store).TriggerExecutionAttemptIsLive",
 	"(*Store).UpdateNodeActivity",
 	"(*Store).UpdateNodeDeps",
-	"(*Store).UpdatePlanSnapshot",
 	"(*Store).ValidateExecutorClaimReservation",
 	"(*Store).VerifyUser",
 	"(*Store).WriteNodeDispatch",
@@ -269,13 +262,11 @@ var unportedSQL = []string{
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
 	"creditGrantByReferenceTx",
-	"cronFireAlreadyRecorded",
 	"duplicateGrantReferences",
 	"duplicateTokenPrefixes",
 	"enforceNodesPerRunTx",
 	"enforceRunsPerHourTx",
 	"gatherRunAnnotations",
-	"getCronScheduleTx",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
 	"loadExecutorUsageTx",
@@ -301,7 +292,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 238
+const unportedSQLSize = 219
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

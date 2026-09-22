@@ -436,9 +436,8 @@ func run(args []string) error {
 	}, slog.Default()); err != nil {
 		return err
 	}
-	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
-	if cipher != nil {
-		srv = srv.WithSecretsCipher(cipher)
+	if err := configureSecrets(ctx, srv, cipher); err != nil {
+		return err
 	}
 	if *bucketMeasurePages < 1 {
 		return fmt.Errorf("--bucket-measure-pages must be at least 1; a measurement that lists nothing can only be incomplete")
@@ -640,6 +639,26 @@ func envTruthy(name string) bool {
 	default:
 		return false
 	}
+}
+
+// safety: a multi-team controller holds other people's credentials, so it
+// refuses to start rather than store them as plaintext; a single-team
+// install keeps starting without a key, as it always has.
+func configureSecrets(ctx context.Context, srv *controller.Server, cipher *secrets.Cipher) error {
+	if cipher == nil {
+		if srv.MultiTeam() {
+			return errors.New("the license allows more than one team, so stored secrets must be encrypted: " +
+				"set SPARKWING_SECRETS_KEY or --secrets-key-file to a base64-encoded 32-byte key " +
+				"(generate one with `openssl rand -base64 32`)")
+		}
+		return nil
+	}
+	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
+	srv.WithSecretsCipher(cipher)
+	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func loadSecretsCipher(keyFile, previousKeyFile string) (*secrets.Cipher, error) {

@@ -54,7 +54,7 @@ type RunTrend struct {
 
 // ListRunTrends returns every run in the requested window and whether all of
 // its nodes completed from cached or already-satisfied work.
-func (s *Store) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error) {
+func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error) {
 	query := `
 SELECT id, pipeline, status, created_at, started_at, finished_at
      , CASE
@@ -68,14 +68,14 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
          THEN 1 ELSE 0
        END AS all_cached
   FROM runs
- WHERE started_at >= ?`
-	args := []any{since.UnixNano()}
+ WHERE team = ? AND started_at >= ?`
+	args := []any{string(t.team), since.UnixNano()}
 	if pipeline != "" {
 		query += " AND pipeline = ?"
 		args = append(args, pipeline)
 	}
 	query += " ORDER BY started_at ASC"
-	rows, err := s.query(ctx, query, args...)
+	rows, err := t.s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

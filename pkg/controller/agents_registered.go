@@ -8,7 +8,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func (s *Server) registeredAgents(ctx context.Context, now time.Time) ([]Agent, error) {
+// safety: an executor enrolls with the deployment and serves every team, so it
+// is listed to all of them, but only the caller's own runs appear as its jobs.
+func (s *Server) registeredAgents(ctx context.Context, t *store.Tenant, now time.Time) ([]Agent, error) {
 	executors, err := s.store.ListExecutors(ctx)
 	if err != nil {
 		return nil, err
@@ -17,10 +19,23 @@ func (s *Server) registeredAgents(ctx context.Context, now time.Time) ([]Agent, 
 	if err != nil {
 		return nil, err
 	}
+	var seen []string
+	for _, activity := range active {
+		seen = append(seen, activity.RunIDs...)
+	}
+	owned, err := t.OwnedRunIDs(ctx, seen)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Agent, 0, len(executors))
 	for _, e := range executors {
 		activity := active[e.Name]
-		jobs := activity.RunIDs
+		var jobs []string
+		for _, id := range activity.RunIDs {
+			if owned[id] {
+				jobs = append(jobs, id)
+			}
+		}
 		status := "idle"
 		lastSeen := ""
 		if e.LastSeen.IsZero() || now.Sub(e.LastSeen) > store.ExecutorRegistrationActiveWindow {

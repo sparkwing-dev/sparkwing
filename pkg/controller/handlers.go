@@ -136,7 +136,15 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	// safety: the per-principal guards measure the authenticated caller, so the
 	// principal comes from the token rather than anything the body asserts.
 	runCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)
-	if err := s.store.CreateRun(runCtx, body); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.CreateRun(runCtx, body); err != nil {
+		if errors.Is(err, store.ErrIDOwnedByAnotherTeam) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -195,7 +203,11 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("status is required"))
 		return
 	}
-	run, runErr := s.store.GetRun(r.Context(), runID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	run, runErr := tenant.GetRun(r.Context(), runID)
 	pipeline := ""
 	if runErr == nil && run != nil {
 		pipeline = run.Pipeline
@@ -203,7 +215,11 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: runID, Pipeline: pipeline, Outcome: body.Status,
 	})
-	if err := s.store.FinishRun(r.Context(), runID, body.Status, body.Error); err != nil {
+	if err := tenant.FinishRun(r.Context(), runID, body.Status, body.Error); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -211,9 +227,9 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if runErr == nil && run != nil {
 		observeRunFinish(run.Pipeline, body.Status, time.Since(run.StartedAt))
-		refreshed, rerr := s.store.GetRun(follow, runID)
+		refreshed, rerr := tenant.GetRun(follow, runID)
 		if rerr == nil {
-			s.foldRunProfiles(follow, refreshed)
+			s.foldRunProfiles(follow, tenant, refreshed)
 		}
 	}
 	s.reportGitHubCommitStatus(follow, runID, body.Status)
@@ -228,7 +244,11 @@ func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.UpdatePlanSnapshot(r.Context(), runID, snapshot); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.UpdatePlanSnapshot(r.Context(), runID, snapshot); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -241,7 +261,11 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, parseErr)
 		return
 	}
-	runs, err := s.store.ListRuns(r.Context(), filter)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	runs, err := tenant.ListRuns(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -385,7 +409,11 @@ func executorClaimPreparationForResponse(preparation *store.ExecutorClaimPrepara
 
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	run, err := s.store.GetRun(r.Context(), runID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	run, err := tenant.GetRun(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -452,7 +480,11 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
 		}
 		maxAge = d
 	}
-	run, err := s.store.GetLatestRun(r.Context(), name, statuses, maxAge)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	run, err := tenant.GetLatestRun(r.Context(), name, statuses, maxAge)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -811,6 +843,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeTriggerParent(w, r, body.ParentRunID, body.ParentNodeID) {
 		return
 	}
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
@@ -821,7 +857,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("ancestor walk: %w", err))
 			return
 		}
-		parent, perr := s.store.GetRun(r.Context(), body.ParentRunID)
+		parent, perr := tenant.GetRun(r.Context(), body.ParentRunID)
 		if perr != nil {
 			if errors.Is(perr, store.ErrNotFound) {
 				writeError(w, http.StatusBadRequest, fmt.Errorf("parent_run_id %s not found", body.ParentRunID))
@@ -895,7 +931,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.admitTrigger(triggerCtx, intake); err != nil {
+	if err := s.admitTrigger(triggerCtx, tenant, intake); err != nil {
 		release()
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
@@ -950,10 +986,10 @@ type triggerIntake struct {
 // safety: every path that starts a run on this controller writes its three rows
 // here -- the trigger, the pending run, the dispatch -- so an HTTP submission
 // and a schedule the controller fired land identically.
-func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
+func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIntake) error {
 	// safety: the trigger and the run it names are written together, so a guard
 	// that refuses the run leaves no trigger behind for a worker to claim.
-	if err := s.store.CreateTriggerWithRun(ctx, store.Trigger{
+	if err := t.CreateTriggerWithRun(ctx, store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
 		Args:           in.Args,
@@ -1107,7 +1143,11 @@ func (s *Server) handleListTriggers(w http.ResponseWriter, r *http.Request) {
 			filter.Limit = min(n, store.MaxRunListLimit)
 		}
 	}
-	trigs, err := s.store.ListTriggers(r.Context(), filter)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	trigs, err := tenant.ListTriggers(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1125,6 +1165,22 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 	pipeline := q.Get("pipeline")
 	if parentRunID == "" || parentNodeID == "" || pipeline == "" {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("parent_run_id, parent_node_id, pipeline are all required"))
+		return
+	}
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	// safety: the parent is named in the query, outside the path the team
+	// boundary reads, so it is proven in the caller's team here; another team's
+	// parent answers as having spawned nothing.
+	owned, err := tenant.OwnsRun(r.Context(), parentRunID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !owned {
+		writeJSON(w, http.StatusOK, map[string]string{"run_id": ""})
 		return
 	}
 	id, err := s.store.FindSpawnedChildTriggerID(r.Context(), parentRunID, parentNodeID, pipeline)
@@ -1167,12 +1223,15 @@ func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Reque
 		lease = store.DefaultLeaseDuration
 	}
 	t, err := s.store.ClaimSpecificTriggerFor(r.Context(), r.PathValue("id"), claimIdentity(r), lease)
+	if writeClaimTeamRefusal(w, err) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim trigger", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -1226,13 +1285,16 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
+	if writeClaimTeamRefusal(w, err) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.writeClaimPollAdvice(w)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim next trigger", err)
 		return
 	}
 	s.recordQueueActivity(time.Now())
@@ -1575,6 +1637,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
 			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
 		})
+		if writeClaimTeamRefusal(w, err) {
+			return
+		}
 		if err != nil {
 			if s.writeCreditsRefusal(w, r, err) {
 				return
@@ -1598,7 +1663,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeInternalError(w, r, "claim node", err)
 			return
 		}
 		if result.Node == nil {
@@ -1619,7 +1684,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim node", err)
 		return
 	}
 	if body.Capacity != nil && (body.Capacity.MaxConcurrent < 0 || body.Capacity.ActiveClaims < 0) {
@@ -1631,6 +1696,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
 	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
 		claimIdentity(r), body.HolderID, lease, body.Labels)
+	if writeClaimTeamRefusal(w, err) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.writeClaimPollAdvice(w)
@@ -1646,7 +1714,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		if s.writeClaimComputeLimitRefusal(w, r, err) {
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim node", err)
 		return
 	}
 	s.runnerPresence.awarded(claimer)
@@ -1679,6 +1747,9 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
 		body.HolderID, time.Duration(body.LeaseSecs)*time.Second,
 		store.NamedClaimOptions{SizesToClass: body.SizesToClass})
+	if writeClaimTeamRefusal(w, err) {
+		return
+	}
 	// safety: the flag is what admits a class the queue would refuse, and only
 	// the operator's own pool token may set it, so every use is on the record.
 	if body.SizesToClass && err == nil {
@@ -1701,7 +1772,7 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim named node", err)
 		return
 	}
 	writeClaimedNode(w, r, s, n)
@@ -1924,6 +1995,9 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 	} else {
 		preparation, err = s.store.PrepareNextExecutorClaim(ctx, claimIdentity(r), body.ExecutorName)
 	}
+	if writeClaimTeamRefusal(w, err) {
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -1936,7 +2010,7 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusForbidden, store.ErrExecutorCredentialMismatch)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "prepare node claim", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, executorClaimPreparationForResponse(preparation, sink.Load()))
@@ -1981,7 +2055,7 @@ func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "finalize ready node", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {
@@ -2252,7 +2326,11 @@ func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	if _, err := s.store.GetRun(r.Context(), runID); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if _, err := tenant.GetRun(r.Context(), runID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -2260,7 +2338,7 @@ func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if err := s.store.TouchRunHeartbeat(r.Context(), runID); err != nil {
+	if err := tenant.TouchRunHeartbeat(r.Context(), runID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

@@ -205,13 +205,17 @@ func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	registered, err := s.registeredAgents(r.Context(), time.Now())
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	registered, err := s.registeredAgents(r.Context(), tenant, time.Now())
 	if err != nil {
 		s.writeInternalError(w, r, "list registered agents", err)
 		return
 	}
 	windowStart := time.Now().Add(-1 * time.Hour)
-	claims, err := s.store.ListLegacyAgentClaims(r.Context(), windowStart)
+	claims, err := tenant.ListLegacyAgentClaims(r.Context(), windowStart)
 	if err != nil {
 		s.writeInternalError(w, r, "list legacy agent claims", err)
 		return

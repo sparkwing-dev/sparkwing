@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -21,6 +22,11 @@ func newBudgetServer(t *testing.T, b controller.RequestBudget) string {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	// safety: a route scoped to a run answers 404 at the team boundary before its
+	// budget when the run is missing, so the budgets are measured against a real one.
+	if err := st.CreateRun(context.Background(), store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	ts := httptest.NewServer(controller.New(st, nil).WithRequestBudget(b).Handler())
 	t.Cleanup(ts.Close)
 	return ts.URL

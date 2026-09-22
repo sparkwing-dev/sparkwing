@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -195,7 +196,10 @@ func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 		t.Errorf("after list: hook calls=%d want 1", got)
 	}
 
-	resp2, err := http.Get(srv.URL + "/api/v1/runs/nonexistent")
+	if err := s.CreateRun(context.Background(), store.Run{ID: "run-reconciled", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	resp2, err := http.Get(srv.URL + "/api/v1/runs/run-reconciled")
 	if err != nil {
 		t.Fatal(err)
 	}

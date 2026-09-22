@@ -250,9 +250,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
-		authedMux.Handle("/api/v1/logs/",
-			logsProxyAllowList(withLogsIdentityHeader(
-				controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), false))))
+		authedMux.Handle("/api/v1/logs/", logsProxy(opts))
 	}
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/",
@@ -601,8 +599,8 @@ func jsStringLiteral(s string) string {
 }
 
 // safety: on a multi-team controller one service bearer reads every team, so a
-// signed-in browser reaches the controller only as its own session. The logs
-// service authenticates bearers alone, so forwardSession stays off for it.
+// signed-in browser reaches the controller and the logs service only as its
+// own session; the logs service resolves that session through the controller.
 func controllerProxy(controllerURL, token string, loginRequired, forwardSession bool) http.Handler {
 	u, err := url.Parse(controllerURL)
 	if err != nil {

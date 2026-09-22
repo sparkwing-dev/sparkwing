@@ -34,7 +34,7 @@ func (o Override) Empty() bool {
 // one, so an override that would stop the schedule evaluating is refused here
 // rather than at the next tick.
 func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (Row, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return Row{}, err
 	}
@@ -71,10 +71,10 @@ func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (
 	if perr != nil {
 		return Row{}, fmt.Errorf("%s: this override does not evaluate: %w", DisplayName(sched), perr)
 	}
-	if err := s.Store.SetCronOverride(ctx, sched.ID, override, now); err != nil {
+	if err := s.schedules().SetCronOverride(ctx, sched.ID, override, now); err != nil {
 		return Row{}, err
 	}
-	if err := s.Store.SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now), now); err != nil {
+	if err := s.schedules().SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now), now); err != nil {
 		return Row{}, err
 	}
 	return s.reload(ctx, sched.ID)
@@ -83,17 +83,17 @@ func (s *Service) SetOverride(ctx context.Context, id string, fields Override) (
 // ClearOverride drops this host's edit, returning the schedule to what the
 // repository declares.
 func (s *Service) ClearOverride(ctx context.Context, id string) (Row, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return Row{}, err
 	}
 	now := s.now()
-	if err := s.Store.ClearCronOverride(ctx, id, now); err != nil {
+	if err := s.schedules().ClearCronOverride(ctx, id, now); err != nil {
 		return Row{}, err
 	}
 	sched.Override = nil
 	if eval, perr := prepare(sched); perr == nil {
-		if err := s.Store.SetCronScheduleNextDue(ctx, id, eval.nextAfter(now), now); err != nil {
+		if err := s.schedules().SetCronScheduleNextDue(ctx, id, eval.nextAfter(now), now); err != nil {
 			return Row{}, err
 		}
 	}
@@ -101,7 +101,7 @@ func (s *Service) ClearOverride(ctx context.Context, id string) (Row, error) {
 }
 
 func (s *Service) reload(ctx context.Context, id string) (Row, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return Row{}, err
 	}

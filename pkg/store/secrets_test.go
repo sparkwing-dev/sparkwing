@@ -85,7 +85,7 @@ func TestRotateSecretValues_RewritesEveryRowInOneTransaction(t *testing.T) {
 		}
 	}
 
-	rotated, err := s.RotateSecretValues(context.Background(), func(sec store.Secret) (string, error) {
+	rotated, err := s.RotateSecretValues(context.Background(), func(_ store.Team, sec store.Secret) (string, error) {
 		return "new:" + strings.TrimPrefix(sec.Value, "old:"), nil
 	})
 	if err != nil {
@@ -133,7 +133,7 @@ func TestRotateSecretValues_LeavesEveryRowOnFailure(t *testing.T) {
 	}
 
 	boom := errors.New("cannot open")
-	if _, err := s.RotateSecretValues(context.Background(), func(sec store.Secret) (string, error) {
+	if _, err := s.RotateSecretValues(context.Background(), func(_ store.Team, sec store.Secret) (string, error) {
 		if sec.Name == "second" {
 			return "", boom
 		}
@@ -155,7 +155,7 @@ func TestRotateSecretValues_LeavesEveryRowOnFailure(t *testing.T) {
 
 func TestRotateSecretValues_EmptyTable(t *testing.T) {
 	s := storetest.Open(t)
-	rotated, err := s.RotateSecretValues(context.Background(), func(store.Secret) (string, error) {
+	rotated, err := s.RotateSecretValues(context.Background(), func(store.Team, store.Secret) (string, error) {
 		t.Fatal("reseal called on an empty table")
 		return "", nil
 	})
