@@ -1322,8 +1322,8 @@ func TestBuildJob_PlacesEachClassOnItsCPUBand(t *testing.T) {
 				if tol := bandToleration(pod); tol != nil {
 					t.Fatalf("toleration = %#v, want none for a warm-pool class", tol)
 				}
-				if pod.Affinity != nil {
-					t.Fatalf("affinity = %#v, want none for a warm-pool class", pod.Affinity)
+				if pod.Affinity.NodeAffinity != nil {
+					t.Fatalf("node affinity = %#v, want none for a warm-pool class", pod.Affinity.NodeAffinity)
 				}
 				return
 			}
@@ -1339,8 +1339,8 @@ func TestBuildJob_PlacesEachClassOnItsCPUBand(t *testing.T) {
 				tol.Operator != corev1.TolerationOpEqual {
 				t.Fatalf("toleration = %#v, want %s NoSchedule on Equal", tol, tc.band)
 			}
-			if pod.Affinity != nil {
-				t.Fatalf("affinity = %#v, want none: one pool serves every class", pod.Affinity)
+			if pod.Affinity.NodeAffinity != nil {
+				t.Fatalf("node affinity = %#v, want none: one pool serves every class", pod.Affinity.NodeAffinity)
 			}
 		})
 	}

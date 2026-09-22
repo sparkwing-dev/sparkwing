@@ -1851,6 +1851,8 @@ type Trigger struct {
 	WebhookDelivery string
 
 	WebhookReplayKey string
+
+	Team Team
 }
 func (t Trigger) IsFinished() bool
 type TriggerClaimFence struct {

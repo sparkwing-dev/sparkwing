@@ -59,6 +59,10 @@ type Config struct {
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
 
+	// Team owns the run whose nodes this runner places. Its Jobs carry
+	// [TeamLabel] and never share a node with another team's Jobs.
+	Team string
+
 	CPURequest    string
 	CPULimit      string
 	MemoryRequest string
@@ -843,6 +847,7 @@ func (r *Runner) buildJob(
 		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolumeName, MountPath: "/tmp"}},
 	}
 
+	team := TeamLabelValue(r.cfg.Team)
 	band := cpuBand(class.Cores)
 	selector := bandNodeSelector(r.cfg.NodeSelector, band)
 	placed := ""
@@ -859,6 +864,7 @@ func (r *Runner) buildJob(
 		AutomountServiceAccountToken: boolPtr(false),
 		NodeSelector:                 selector,
 		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
+		Affinity:                     teamAntiAffinity(team),
 		Containers:                   []corev1.Container{container},
 		Volumes: []corev1.Volume{{
 			Name:         scratchVolumeName,
@@ -882,6 +888,7 @@ func (r *Runner) buildJob(
 		"app.kubernetes.io/managed-by": r.labelInstance,
 		"sparkwing.dev/run-id":         sanitizeK8sName(truncate(req.RunID, 63)),
 		"sparkwing.dev/node-id":        sanitizeK8sName(truncate(req.NodeID, 63)),
+		TeamLabel:                      team,
 	}
 
 	ttl := r.cfg.TTLSecondsAfterFinished
