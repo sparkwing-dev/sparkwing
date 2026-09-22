@@ -98,6 +98,9 @@ unlock.
   `store.InsufficientCreditsError` now names (`RunID`, `NodeID`), instead of
   on the oldest waiting node on the controller, which could be another team's.
   `Store.OldestWaitingReadyNode` is removed.
+- **store:** an assisted executor's offer takes its run's row lock before the
+  run's event-sequence lock, the order a deadline round takes them in, so an
+  offer and a claim round on one run no longer deadlock on PostgreSQL.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

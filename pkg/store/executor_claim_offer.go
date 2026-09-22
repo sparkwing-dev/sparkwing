@@ -731,6 +731,14 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
 		if err != nil {
 			return ExecutorClaimOfferResult{}, err
 		}
+		// safety: a deadline round holds the run's row lock and then takes its
+		// event-sequence lock, so the offer takes them in the same order; event
+		// first and award second deadlocked the two on Postgres.
+		var lockedRun string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(),
+			offer.RunID).Scan(&lockedRun); err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
 		if _, err := appendEventTx(ctx, tx, offer.RunID, offer.NodeID, "executor_offer_received",
 			executorOfferEventFor(summary, membership, executor.Location, n.OfferPriorityTarget, offer.Slot), now); err != nil {
 			return ExecutorClaimOfferResult{}, err
