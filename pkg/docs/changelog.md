@@ -131,6 +131,14 @@ unlock.
 
 ### Fixed
 
+- **runners/k8s:** a Kubernetes fallback Job is no longer created when the
+  controller refuses the node's named claim. The claim is where the credit check
+  lives, and a refusal such as `402 insufficient credits` was logged and the Job
+  created anyway, unfenced and uncharged, so a team with no credits ran cloud
+  compute. The node now fails with `credits_exhausted` (or the refusal it got);
+  only a controller that predates the route still runs the Job unfenced. A
+  node's declared timeout now stretches its Job's deadline to at most 24 hours,
+  or the operator's `--k8s-job-deadline` when that is longer.
 - **store:** the credit balance and credit exhaustion are per team. The balance
   summed every grant and every charge on the controller with no team predicate,
   so one team spending its grants emptied the balance every other team claimed

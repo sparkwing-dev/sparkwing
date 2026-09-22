@@ -95,7 +95,8 @@ type Config struct {
 	FleetFullWait time.Duration
 
 	// JobActiveDeadline bounds a fallback Job whose node declared no timeout.
-	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it.
+	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it
+	// up to the longer of this and [MaxDeclaredJobActiveDeadline].
 	JobActiveDeadline time.Duration
 }
 
@@ -142,7 +143,10 @@ func (r *Runner) AdvertisedLabels() []string {
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	res := r.resolveResources(ctx, req)
-	fence, class, claimed := r.claimNode(ctx, req, name)
+	fence, class, claimed, refused := r.claimNode(ctx, req, name)
+	if refused != nil {
+		return r.refuseUnclaimedJob(ctx, req, refused)
+	}
 	if claimed {
 		// safety: the dispatcher reached here holding the run's trigger claim,
 		// and the controller refuses a request that carries both identities.
@@ -498,12 +502,19 @@ const DefaultJobActiveDeadline = 6 * time.Hour
 // rather than vanishing with the pod Kubernetes deleted.
 const jobDeadlineSlack = 10 * time.Minute
 
-// safety: a controller that does not carry the targeted-claim route, or a node
-// some other holder already took, leaves the Job running exactly as it did
-// before the fence existed rather than failing the node here.
+// MaxDeclaredJobActiveDeadline is the longest a node's declared timeout can
+// stretch its Job's deadline, unless the operator configured a longer one. A
+// pod whose dispatcher died stops heartbeating and so stops being charged, and
+// the timeout is the pipeline author's to choose.
+const MaxDeclaredJobActiveDeadline = 24 * time.Hour
+
+// safety: only a controller that does not carry the targeted-claim route leaves
+// the Job running unfenced, as it did before the fence existed. Any refusal from
+// a controller that does is returned, because the claim is where the credit
+// check lives and an unfenced Job would run on compute nobody paid for.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
-) (store.NodeClaimFence, store.CPUClass, bool) {
+) (store.NodeClaimFence, store.CPUClass, bool, error) {
 	holderID := "k8s-job:" + jobName
 	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true)
 	// safety: only the operator's metered pool may claim it sizes a node to its
@@ -515,17 +526,33 @@ func (r *Runner) claimNode(
 	if errors.Is(err, client.ErrControllerLacksRoute) {
 		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
 			"run_id", req.RunID, "node_id", req.NodeID)
-		return store.NodeClaimFence{}, store.CPUClass{}, false
+		return store.NodeClaimFence{}, store.CPUClass{}, false, nil
 	}
 	if err != nil {
-		r.logger.Warn("k8s: claiming the node for its Job failed",
+		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",
 			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
-		return store.NodeClaimFence{}, store.CPUClass{}, false
+		return store.NodeClaimFence{}, store.CPUClass{}, false, err
 	}
 	return store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, true
+	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, true, nil
+}
+
+const eventClaimRefused = "job_claim_refused"
+
+// safety: a node another holder took is that holder's to finish, so only the
+// other refusals fail it here; the dispatcher still learns this Job never ran.
+func (r *Runner) refuseUnclaimedJob(ctx context.Context, req runner.Request, refused error) runner.Result {
+	msg := fmt.Sprintf("K8sRunner: the controller refused this node's claim, so no Job was created: %v", refused)
+	if !errors.Is(refused, store.ErrLockHeld) {
+		reason := store.FailureUnknown
+		if errors.Is(refused, store.ErrInsufficientCredits) {
+			reason = store.FailureCreditsExhausted
+		}
+		r.failNode(ctx, req, msg, reason, eventClaimRefused)
+	}
+	return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 }
 
 // safety: this is a wall-clock backstop for a pod Kubernetes would otherwise
@@ -539,7 +566,7 @@ func (r *Runner) jobActiveDeadline(req runner.Request) *int64 {
 	}
 	if req.Node != nil {
 		if declared := req.Node.TimeoutDuration(); declared > 0 {
-			deadline = declared + jobDeadlineSlack
+			deadline = min(declared+jobDeadlineSlack, max(deadline, MaxDeclaredJobActiveDeadline))
 		}
 	}
 	secs := int64(deadline.Seconds())
