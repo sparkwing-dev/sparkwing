@@ -78,6 +78,11 @@ unlock.
   `PipelinesForClaimant` and return a `store.ClaimedRun` carrying the run's
   team beside its pipeline. A legacy envelope resealed on read is written back
   into the team it was read from.
+- **controller:** a manual retry (`POST /api/v1/runs/{id}/retry`, `sparkwing
+  runs retry`) files its trigger and pending run in the source run's team
+  through the new `Store.CreateRetryWithRun`, rather than in the default
+  team, where the team that asked could not see it and the default team's
+  runners could claim it.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
