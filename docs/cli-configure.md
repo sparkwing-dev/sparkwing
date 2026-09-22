@@ -307,6 +307,15 @@ annotations. Auto-populated when you run 'sparkwing run <pipeline>'
 in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
 disable).
 
+The registry lives at $SPARKWING_REPOS (if set), else
+$XDG_CONFIG_HOME/sparkwing/repos.yaml, else
+~/.config/sparkwing/repos.yaml. SPARKWING_HOME does not move it; it
+is the state, cache and logs root, and a registered checkout is a
+machine-wide fact that outlives any one home. A write from a command
+running under a home of its own is refused rather than sent to the
+machine's registry: set SPARKWING_REPOS to a path inside that home
+to keep it there.
+
 ### Subcommands
 
 - `list` -- List registered checkouts and their pipelines

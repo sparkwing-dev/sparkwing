@@ -9,8 +9,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -97,37 +97,18 @@ var ErrNoProfile = errors.New("no profile configured")
 
 var ErrProfileNotFound = errors.New("profile not found")
 
+// PathEnv names the profiles file, the way SPARKWING_HOME names the state root.
+const PathEnv = "SPARKWING_PROFILES"
+
 // DefaultPath reports the profiles file: $SPARKWING_PROFILES when set, else
 // profiles.yaml in [fssecure.ConfigDir]. SPARKWING_HOME does not move it,
 // because a profile is a machine-wide connection the operator keeps while runs
-// come and go; [ErrOutsideSandboxHome] is how a write says so.
+// come and go; [configguard.ErrOutsideSandboxHome] is how a write says so.
 func DefaultPath() (string, error) {
-	if v := os.Getenv("SPARKWING_PROFILES"); v != "" {
+	if v := os.Getenv(PathEnv); v != "" {
 		return v, nil
 	}
 	return fssecure.ConfigFile("profiles.yaml")
-}
-
-// ErrOutsideSandboxHome reports a profiles write refused because it would have
-// landed in the operator's config directory while the command ran under a
-// sparkwing home of its own.
-var ErrOutsideSandboxHome = errors.New("profiles write would leave the sparkwing home")
-
-// safety: a command under a scratch home is expected to stay there, and
-// silently editing the operator's own profiles is found only by accident. An
-// explicit SPARKWING_PROFILES is the operator naming the file, so it passes.
-func guardSandboxWrite(path string) error {
-	if os.Getenv("SPARKWING_PROFILES") != "" {
-		return nil
-	}
-	home, ok := paths.SandboxHome()
-	if !ok || fssecure.UnderDir(home, path) {
-		return nil
-	}
-	return fmt.Errorf("%w: this command runs under the sparkwing home %s, but profiles live at %s, "+
-		"which SPARKWING_HOME does not move. Point SPARKWING_PROFILES at %s to keep the write inside this home, "+
-		"or clear SPARKWING_HOME to edit the machine's profiles on purpose",
-		ErrOutsideSandboxHome, home, path, filepath.Join(home, "profiles.yaml"))
 }
 
 func Load(path string) (*Config, error) {
@@ -176,10 +157,10 @@ func (p *Profile) validateSurfaceFields() error {
 	return nil
 }
 
-// Save writes cfg to path. It refuses a path outside the sparkwing home in use;
-// see [guardSandboxWrite].
+// Save writes cfg to path. It refuses a path outside the sparkwing home in
+// use; see [configguard.GuardWrite].
 func Save(path string, cfg *Config) error {
-	if err := guardSandboxWrite(path); err != nil {
+	if err := configguard.GuardWrite("profiles", PathEnv, path); err != nil {
 		return err
 	}
 	dir := filepath.Dir(path)

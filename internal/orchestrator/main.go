@@ -145,7 +145,7 @@ func Main() {
 		DryRun:                    dryRunFromEnv(),
 		LocalOnly:                 os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		Fleet:                     os.Getenv("SPARKWING_FLEET") == "1",
-		FleetConfigPath:           os.Getenv("SPARKWING_FLEET_CONFIG"),
+		FleetConfigPath:           os.Getenv(fleet.PathEnv),
 		FleetSourceRoot:           os.Getenv("SPARKWING_FLEET_SOURCE_ROOT"),
 		FleetSourceBundle:         os.Getenv("SPARKWING_FLEET_SOURCE_BUNDLE"),
 		FleetSourceSHA:            os.Getenv("SPARKWING_FLEET_SOURCE_SHA"),

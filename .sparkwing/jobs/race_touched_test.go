@@ -51,14 +51,47 @@ func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
 	}
 }
 
-func TestRacePackageOrderStartsStoreInTheFirstWave(t *testing.T) {
-	packages := []string{"./internal/orchestrator", "./pkg/controller", "./pkg/controller/client", "./pkg/store"}
-	want := []string{"./pkg/store", "./internal/orchestrator", "./pkg/controller", "./pkg/controller/client"}
-	if got := racePackageOrder(packages); !reflect.DeepEqual(got, want) {
-		t.Fatalf("racePackageOrder = %v, want %v", got, want)
+func TestGateRaceTargetsDeferTheStore(t *testing.T) {
+	targets := map[string][]string{
+		".":          {"./internal/orchestrator", "./pkg/store"},
+		".sparkwing": {"./jobs"},
 	}
-	if !reflect.DeepEqual(packages, []string{"./internal/orchestrator", "./pkg/controller", "./pkg/controller/client", "./pkg/store"}) {
-		t.Fatalf("racePackageOrder mutated its input: %v", packages)
+	kept, deferred := raceTargetsForGate(targets)
+	want := map[string][]string{
+		".":          {"./internal/orchestrator"},
+		".sparkwing": {"./jobs"},
+	}
+	if !reflect.DeepEqual(kept, want) {
+		t.Errorf("raceTargetsForGate kept %v, want %v", kept, want)
+	}
+	if !reflect.DeepEqual(deferred, []string{"./pkg/store"}) {
+		t.Errorf("deferred %v, want [./pkg/store]", deferred)
+	}
+}
+
+// A module holding nothing but the store drops out rather than running an
+// empty race command that would report success over no packages.
+func TestGateRaceTargetsDropAModuleLeftEmpty(t *testing.T) {
+	kept, deferred := raceTargetsForGate(map[string][]string{".": {"./pkg/store"}})
+	if len(kept) != 0 {
+		t.Errorf("raceTargetsForGate kept %v, want nothing", kept)
+	}
+	if !reflect.DeepEqual(deferred, []string{"./pkg/store"}) {
+		t.Errorf("deferred %v, want [./pkg/store]", deferred)
+	}
+}
+
+// safety: the gate stops racing the store only because pre-release starts. A
+// release that dropped the step would ship a store race nothing looked for.
+func TestPreReleaseRacesTheStore(t *testing.T) {
+	var found string
+	for _, check := range preReleaseChecks() {
+		if check.id == "race-store" {
+			found = check.id
+		}
+	}
+	if found == "" {
+		t.Fatal("pre-release has no race-store check; the gate defers pkg/store to it")
 	}
 }
 

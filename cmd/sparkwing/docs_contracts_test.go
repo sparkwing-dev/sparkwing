@@ -102,7 +102,6 @@ var undocumentedEnvVars = []string{
 	"SPARKWING_ONLY",
 	"SPARKWING_PROFILE",
 	"SPARKWING_REF",
-	"SPARKWING_REPOS",
 	"SPARKWING_RUNNER_CONTROLLER_URL",
 	"SPARKWING_RUNNER_IMAGE",
 	"SPARKWING_RUNNER_LOGS_URL",
@@ -275,6 +274,110 @@ func TestEnvVarWalkFollowsEnvHelpersToTheirCallSites(t *testing.T) {
 	}
 }
 
+func TestEnvVarWalkResolvesSameNamedConstantsPerPackage(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module fake\n\ngo 1.26\n")
+	write("internal/fleet/fleet.go", "package fleet\n\nimport \"os\"\n\n"+
+		"const PathEnv = \"SPARKWING_FLEET_CONFIG\"\n\nvar a = os.Getenv(PathEnv)\n")
+	write("internal/repos/repos.go", "package repos\n\nimport \"os\"\n\n"+
+		"const PathEnv = \"SPARKWING_REPOS\"\n\nvar b = os.Getenv(PathEnv)\n")
+	write("main.go", "package main\n\nimport (\n\t\"os\"\n\n\tf \"fake/internal/fleet\"\n"+
+		"\t\"fake/internal/repos\"\n\t\"example.com/outside\"\n)\n\n"+
+		"var c = os.Getenv(f.PathEnv)\n"+
+		"var d = os.Getenv(repos.PathEnv)\n"+
+		"var e = os.Getenv(outside.PathEnv)\n")
+
+	runSnapshotGit(t, root, "init", "--quiet")
+	runSnapshotGit(t, root, "add", "-A")
+	names, dynamic, err := envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "SPARKWING_FLEET_CONFIG,SPARKWING_REPOS"
+	if got := strings.Join(names, ","); got != want {
+		t.Errorf("envVarsRead found %q, want %q", got, want)
+	}
+	if len(dynamic) != 1 || !strings.Contains(dynamic[0], "outside.PathEnv") {
+		t.Errorf("dynamic reads %v, want only the constant outside this module", dynamic)
+	}
+}
+
+func writeFixtureModule(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for rel, body := range files {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runSnapshotGit(t, root, "init", "--quiet")
+	runSnapshotGit(t, root, "add", "-A")
+}
+
+// Two directories whose packages share a name used to leave the qualifier
+// pointing at whichever import came last, so a read of one package's constant
+// recorded the other package's value.
+func TestEnvVarWalkRefusesAQualifierTwoImportsAnswerTo(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureModule(t, root, map[string]string{
+		"go.mod":          "module fake\n\ngo 1.26\n",
+		"internal/a/x.go": "package beta\n\nconst K = \"SPARKWING_FROM_A\"\n",
+		"internal/b/y.go": "package beta\n\nconst K = \"SPARKWING_FROM_B\"\n",
+		"main.go": "package main\n\nimport (\n\t\"os\"\n\n\t\"fake/internal/b\"\n" +
+			"\t\"fake/internal/a\"\n)\n\nvar a = os.Getenv(beta.K)\n",
+	})
+	names, dynamic, err := envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 0 {
+		t.Errorf("envVarsRead resolved %v through a qualifier two imports answer to", names)
+	}
+	if len(dynamic) != 1 || !strings.Contains(dynamic[0], "beta.K") {
+		t.Errorf("dynamic reads %v, want the ambiguous qualifier alone", dynamic)
+	}
+}
+
+// A directory whose files disagree on the package name used to take whichever
+// name the file walk reached last, which is map order.
+func TestEnvVarWalkRefusesADisputedPackageName(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureModule(t, root, map[string]string{
+		"go.mod":                "module fake\n\ngo 1.26\n",
+		"internal/dup/alpha.go": "package alpha\n\nconst K = \"SPARKWING_ALPHA\"\n",
+		"internal/dup/beta.go":  "package beta\n",
+		"main.go": "package main\n\nimport (\n\t\"os\"\n\n\t\"fake/internal/dup\"\n)\n\n" +
+			"var a = os.Getenv(alpha.K)\n",
+	})
+	// safety: the old shape answered out of map order, so one run proves
+	// nothing about the next.
+	for range 10 {
+		names, dynamic, err := envVarsRead(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(names) != 0 {
+			t.Fatalf("envVarsRead resolved %v through a disputed directory", names)
+		}
+		if len(dynamic) != 1 || !strings.Contains(dynamic[0], "alpha.K") {
+			t.Fatalf("dynamic reads %v, want the unresolvable qualifier alone", dynamic)
+		}
+	}
+}
+
 func allDocsText(t *testing.T) string {
 	t.Helper()
 	var documentText strings.Builder
@@ -336,6 +439,7 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 		parsedFiles[path] = file
 	}
 	constantValues := stringConstants(parsedFiles)
+	importedDirs := importQualifiers(root, parsedFiles)
 
 	helpers := envHelpers(parsedFiles)
 	forwardedSites := forwardedReads(parsedFiles)
@@ -345,6 +449,11 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			rel = path
+		}
+		scope := constantScope{
+			dir:       filepath.Dir(path),
+			qualifier: importedDirs[path],
+			values:    constantValues,
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -358,7 +467,7 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 			if forwardedSites[call.Pos()] {
 				return true
 			}
-			v, ok := staticString(call.Args[argumentIndex], constantValues)
+			v, ok := staticString(call.Args[argumentIndex], scope)
 			if !ok {
 				dynamic = append(dynamic, fmt.Sprintf("%s: %s", rel, exprText(fileSet, call.Args[argumentIndex])))
 				return true
@@ -409,9 +518,21 @@ files:
 	return out, nil
 }
 
-func stringConstants(files map[string]*ast.File) map[string]string {
-	values := map[string]map[string]bool{}
-	for _, file := range files {
+type constantKey struct {
+	dir  string
+	name string
+}
+
+type constantScope struct {
+	dir       string
+	qualifier map[string]string
+	values    map[constantKey]string
+}
+
+func stringConstants(files map[string]*ast.File) map[constantKey]string {
+	values := map[constantKey]map[string]bool{}
+	for path, file := range files {
+		dir := filepath.Dir(path)
 		for _, decl := range file.Decls {
 			gen, ok := decl.(*ast.GenDecl)
 			if !ok || (gen.Tok != token.CONST && gen.Tok != token.VAR) {
@@ -434,27 +555,99 @@ func stringConstants(files map[string]*ast.File) map[string]string {
 					if err != nil {
 						continue
 					}
-					if values[name.Name] == nil {
-						values[name.Name] = map[string]bool{}
+					key := constantKey{dir: dir, name: name.Name}
+					if values[key] == nil {
+						values[key] = map[string]bool{}
 					}
-					values[name.Name][v] = true
+					values[key][v] = true
 				}
 			}
 		}
 	}
-	out := map[string]string{}
-	for name, vs := range values {
+	out := map[constantKey]string{}
+	for key, vs := range values {
 		if len(vs) != 1 {
 			continue
 		}
 		for v := range vs {
-			out[name] = v
+			out[key] = v
 		}
 	}
 	return out
 }
 
-func staticString(arg ast.Expr, constantValues map[string]string) (string, bool) {
+func importQualifiers(root string, files map[string]*ast.File) map[string]map[string]string {
+	module := moduleName(root)
+	// safety: map order decides nothing here. A directory whose files disagree
+	// on the package name is dropped, so an import of it resolves to no
+	// qualifier and its reads stay dynamic, rather than resolving to whichever
+	// file the range reached last.
+	packageNames := map[string]string{}
+	disputed := map[string]bool{}
+	for path, file := range files {
+		dir := filepath.Dir(path)
+		if seen, ok := packageNames[dir]; ok && seen != file.Name.Name {
+			disputed[dir] = true
+			continue
+		}
+		packageNames[dir] = file.Name.Name
+	}
+	for dir := range disputed {
+		delete(packageNames, dir)
+	}
+	out := make(map[string]map[string]string, len(files))
+	for path, file := range files {
+		if module == "" {
+			continue
+		}
+		qualifiers := map[string]string{}
+		for _, spec := range file.Imports {
+			importPath, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				continue
+			}
+			rel, inModule := strings.CutPrefix(importPath, module)
+			if !inModule || (rel != "" && !strings.HasPrefix(rel, "/")) {
+				continue
+			}
+			dir := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(rel, "/")))
+			name := packageNames[dir]
+			if spec.Name != nil {
+				name = spec.Name.Name
+			}
+			if name == "" || name == "_" || name == "." {
+				continue
+			}
+			// safety: two imports answering to one qualifier name would leave
+			// the reads of one of them reading the other's constants, so
+			// neither resolves.
+			if seen, ok := qualifiers[name]; ok && seen != dir {
+				qualifiers[name] = ""
+				continue
+			}
+			if _, poisoned := qualifiers[name]; !poisoned {
+				qualifiers[name] = dir
+			}
+		}
+		out[path] = qualifiers
+	}
+	return out
+}
+
+func moduleName(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+func staticString(arg ast.Expr, scope constantScope) (string, bool) {
 	switch e := arg.(type) {
 	case *ast.BasicLit:
 		if e.Kind != token.STRING {
@@ -463,10 +656,22 @@ func staticString(arg ast.Expr, constantValues map[string]string) (string, bool)
 		v, err := strconv.Unquote(e.Value)
 		return v, err == nil
 	case *ast.Ident:
-		v, ok := constantValues[e.Name]
+		v, ok := scope.values[constantKey{dir: scope.dir, name: e.Name}]
 		return v, ok
 	case *ast.SelectorExpr:
-		v, ok := constantValues[e.Sel.Name]
+		pkg, ok := e.X.(*ast.Ident)
+		if !ok {
+			return "", false
+		}
+		// safety: this reads the syntax alone, so it cannot tell an import
+		// qualifier from a local variable, field or parameter of the same name;
+		// a local shadowing an imported package resolves to that package's
+		// constant. No site in this module shadows one.
+		dir, ok := scope.qualifier[pkg.Name]
+		if !ok || dir == "" {
+			return "", false
+		}
+		v, ok := scope.values[constantKey{dir: dir, name: e.Sel.Name}]
 		return v, ok
 	}
 	return "", false

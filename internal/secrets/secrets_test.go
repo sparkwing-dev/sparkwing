@@ -11,8 +11,17 @@ import (
 	"testing"
 )
 
+// safety: the dotenv writers refuse a store outside the sparkwing home unless
+// the operator named the file, and a test binary's home is the test sandbox.
+func storeIn(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv(SecretsPathEnv, filepath.Join(dir, "secrets.env"))
+	t.Setenv(ConfigPathEnv, filepath.Join(dir, "config.env"))
+}
+
 func TestDotenvSource_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
+	storeIn(t, dir)
 	path := filepath.Join(dir, "secrets.env")
 
 	if err := WriteDotenvEntry(path, "TOKEN", "abc123"); err != nil {
@@ -51,6 +60,7 @@ func TestDotenvSource_RoundTrip(t *testing.T) {
 
 func TestDotenvSource_PlainAndMasked(t *testing.T) {
 	dir := t.TempDir()
+	storeIn(t, dir)
 	secretsPath := filepath.Join(dir, "secrets.env")
 	configPath := filepath.Join(dir, "config.env")
 	if err := WriteDotenvEntry(secretsPath, "TOKEN", "abc123"); err != nil {
@@ -109,6 +119,7 @@ func TestDotenvSource_MalformedLineErrors(t *testing.T) {
 
 func TestDeleteDotenvEntry(t *testing.T) {
 	dir := t.TempDir()
+	storeIn(t, dir)
 	path := filepath.Join(dir, "secrets.env")
 	if err := WriteDotenvEntry(path, "X", "1"); err != nil {
 		t.Fatalf("write: %v", err)
@@ -224,7 +235,9 @@ var awkwardDotenvValues = map[string]string{
 }
 
 func TestDotenvEntry_RoundTripsAwkwardValues(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secrets.env")
+	dir := t.TempDir()
+	storeIn(t, dir)
+	path := filepath.Join(dir, "secrets.env")
 	for name, want := range awkwardDotenvValues {
 		if err := WriteDotenvEntry(path, name, want); err != nil {
 			t.Fatalf("write %s: %v", name, err)
@@ -243,7 +256,9 @@ func TestDotenvEntry_RoundTripsAwkwardValues(t *testing.T) {
 }
 
 func TestDotenvEntry_UnrelatedWritesDoNotReEscape(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secrets.env")
+	dir := t.TempDir()
+	storeIn(t, dir)
+	path := filepath.Join(dir, "secrets.env")
 	const want = `"json string"`
 	if err := WriteDotenvEntry(path, "DQUOTE", want); err != nil {
 		t.Fatalf("write: %v", err)

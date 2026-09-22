@@ -11,8 +11,16 @@ import (
 	"time"
 )
 
+// safety: Save refuses a registry outside the sparkwing home unless the
+// operator named the file, and a test binary's home is the test sandbox.
+func savedAt(t *testing.T, path string) string {
+	t.Helper()
+	t.Setenv(PathEnv, path)
+	return path
+}
+
 func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "repos.yaml")
+	path := savedAt(t, filepath.Join(t.TempDir(), "repos.yaml"))
 	const writers = 24
 
 	var wg sync.WaitGroup
@@ -58,7 +66,7 @@ func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
 
 func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "repos.yaml")
+	path := savedAt(t, filepath.Join(dir, "repos.yaml"))
 	for i := range 5 {
 		if err := Save(path, &Config{Repos: []*Entry{{Path: fmt.Sprintf("/r%d", i)}}}); err != nil {
 			t.Fatal(err)
@@ -77,7 +85,7 @@ func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 
 func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "repos.yaml")
+	path := savedAt(t, filepath.Join(dir, "repos.yaml"))
 	good := &Config{Repos: []*Entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
 	if err := Save(path, good); err != nil {
 		t.Fatal(err)
@@ -126,7 +134,7 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 	}
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "repos.yaml")
+	path := savedAt(t, filepath.Join(dir, "repos.yaml"))
 	good := &Config{Repos: []*Entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
 	if err := Save(path, good); err != nil {
 		t.Fatal(err)

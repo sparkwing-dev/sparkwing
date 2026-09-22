@@ -15,9 +15,18 @@ import (
 
 func WatchedFiles(home string) []string {
 	dir := fssecure.ConfigDirIn(home)
+	// safety: admission.yaml, agent.yaml and budget have no writer, so they are
+	// here to catch one appearing rather than to watch a known write.
 	return []string{
-		filepath.Join(dir, "repos.yaml"),
+		filepath.Join(dir, "admission.yaml"),
+		filepath.Join(dir, "agent.yaml"),
+		filepath.Join(dir, "budget"),
+		filepath.Join(dir, "config.env"),
+		filepath.Join(dir, "fleet.yaml"),
 		filepath.Join(dir, "profiles.yaml"),
+		filepath.Join(dir, "repos.yaml"),
+		filepath.Join(dir, "secrets.env"),
+		filepath.Join(dir, "version-hold"),
 	}
 }
 

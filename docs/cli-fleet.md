@@ -34,6 +34,12 @@ client confirms belongs to this machine. Tailscale supplies transport, not
 Sparkwing authorization: only explicitly enrolled helpers receive credentials,
 and no peer discovery occurs.
 
+SPARKWING_HOME does not move fleet.yaml; it is the state, cache and
+logs root, and the fleet policy is machine-wide. A write from a
+command running under a home of its own is refused rather than sent
+to the machine's policy: set SPARKWING_FLEET_CONFIG to a path inside
+that home to keep it there.
+
 ### Flags
 
 | Flag | Description |

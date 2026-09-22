@@ -146,6 +146,9 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "gofmt", run: checkPreReleaseGofmt},
 		{id: "lint", run: runGolangciLint},
 		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
+		// safety: the gate cannot finish this one inside its budget, so the
+		// release boundary is where a store race is caught before it ships.
+		{id: "race-store", run: preReleaseShell("go test -race -count=1 -timeout 75m ./pkg/store/...")},
 		{id: "store-postgres", run: checkPreReleaseStorePostgres},
 		{id: "chaos", run: preReleaseShell("go test -count=1 -run TestChaos_CI ./internal/chaos")},
 		{id: "release-vulnerability", run: runReleaseBinaryVulnerabilityScan},

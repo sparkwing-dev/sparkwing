@@ -83,6 +83,12 @@ overrides the file for a shell or a whole fleet. Releases beyond the
 hold still show in 'sparkwing version' so the operator sees what is
 being deferred.
 
+SPARKWING_HOME does not move this file; it is the state, cache and
+logs root, and the hold is machine-wide even though the toolchains it
+governs live under that root. A --set or --clear from a command
+running under a home of its own is refused rather than applied to the
+machine's hold: set SPARKWING_VERSION_HOLD to hold that shell alone.
+
 ### Flags
 
 | Flag | Description |
