@@ -355,6 +355,9 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.cronRepoWithinCaps(w, r, svc, repoURL, len(entries)) {
+		return
+	}
 	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{
 		RepoURL: repoURL,
 		Branch:  body.Branch,
@@ -506,6 +509,9 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "cron:"+sched.ID), cronTriggerSource) {
+		return
+	}
 	runID, err := svc.RunNow(r.Context(), sched.ID)
 	if err != nil {
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {
@@ -653,4 +659,36 @@ func cronRunStatus(ctx context.Context, tenant *store.Tenant, runID string) stri
 		return ""
 	}
 	return run.Status
+}
+
+// safety: every schedule is a stream of runs the team pays for and the
+// controller evaluates each minute, so a push is bounded per repository and a
+// team's repositories are bounded in count. Re-pushing a repository the team
+// already arms replaces its schedules and does not count as another.
+const (
+	maxCronSchedulesPerRepo = 20
+	maxCronReposPerTeam     = 10
+)
+
+func (s *Server) cronRepoWithinCaps(w http.ResponseWriter, r *http.Request, svc *crons.Service, repoURL string, entries int) bool {
+	if entries > maxCronSchedulesPerRepo {
+		writeError(w, http.StatusBadRequest, fmt.Errorf(
+			"a repository may declare at most %d schedules; this push declares %d", maxCronSchedulesPerRepo, entries))
+		return false
+	}
+	rows, err := svc.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("list cron schedules: %w", err))
+		return false
+	}
+	repos := map[string]bool{}
+	for _, row := range rows {
+		repos[row.RepoPath] = true
+	}
+	if !repos[repoURL] && len(repos) >= maxCronReposPerTeam {
+		writeError(w, http.StatusConflict, fmt.Errorf(
+			"this team already schedules %d repositories, the most it may; disarm one first", len(repos)))
+		return false
+	}
+	return true
 }

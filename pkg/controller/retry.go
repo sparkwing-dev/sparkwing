@@ -27,6 +27,9 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	srcID := r.PathValue("id")
 	full := r.URL.Query().Get("full") == "1"
+	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "retry:"+srcID), "retry") {
+		return
+	}
 	// safety: a retry creates a run, so the hourly guard measures the principal
 	// that asked for it exactly as a direct create does.
 	retryCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)

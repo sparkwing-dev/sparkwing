@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -142,4 +143,33 @@ func TestControllerCrons_RunNowLaunchesInTheSchedulesTeam(t *testing.T) {
 	if _, err := tenantDefault.GetRun(ctx, launched.RunID); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("default team GetRun of team B's scheduled run = %v, want ErrNotFound", err)
 	}
+}
+
+func TestControllerCrons_ATeamsSchedulesAreCapped(t *testing.T) {
+	f := newCronsFixture(t)
+	writerB := teamToken(t, teamTenant(t, f.store, teamB), controller.ScopeRunsRead, controller.ScopeRunsControl)
+
+	many := cronPushBody()
+	var entries []map[string]any
+	for i := range 21 {
+		entries = append(entries, map[string]any{"pipeline": fmt.Sprintf("p%d", i), "cron": "0 3 * * *"})
+	}
+	many["schedules"] = entries
+	if got := f.status(http.MethodPut, "/api/v1/crons/repos", writerB, many); got != http.StatusBadRequest {
+		t.Errorf("a push of 21 schedules = %d want 400", got)
+	}
+
+	for i := range 10 {
+		body := cronPushBody()
+		body["repo_url"] = fmt.Sprintf("https://github.com/acme/repo-%d.git", i)
+		f.call(http.MethodPut, "/api/v1/crons/repos", writerB, body, http.StatusOK, nil)
+	}
+	eleventh := cronPushBody()
+	eleventh["repo_url"] = "https://github.com/acme/repo-10.git"
+	if got := f.status(http.MethodPut, "/api/v1/crons/repos", writerB, eleventh); got != http.StatusConflict {
+		t.Errorf("an eleventh repository = %d want 409", got)
+	}
+	again := cronPushBody()
+	again["repo_url"] = "https://github.com/acme/repo-3.git"
+	f.call(http.MethodPut, "/api/v1/crons/repos", writerB, again, http.StatusOK, nil)
 }
