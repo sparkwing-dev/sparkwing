@@ -55,8 +55,12 @@ func detectRuntime() RuntimeConfig {
 func walkUpToProject(start string) string {
 	dir := start
 	for {
-		marker := filepath.Join(dir, ".sparkwing")
-		if info, err := os.Stat(marker); err == nil && info.IsDir() {
+		// safety: the marker is the config file, not the directory holding it.
+		// The machine's own state lives in ~/.sparkwing, so a bare directory
+		// name makes a home directory answer as the project root for anything
+		// running beneath it. The CLI resolves the same way and says so.
+		marker := filepath.Join(dir, ".sparkwing", "sparkwing.yaml")
+		if info, err := os.Stat(marker); err == nil && !info.IsDir() {
 			return dir
 		}
 		parent := filepath.Dir(dir)

@@ -44,6 +44,9 @@ func TestWalkUpToProject_FindsMarker(t *testing.T) {
 	if err := os.MkdirAll(root+"/.sparkwing", 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(root+"/.sparkwing/sparkwing.yaml", []byte("pipelines: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	got := walkUpToProject(root + "/sub/deep")
 	if got != root {
 		t.Fatalf("walkUpToProject = %q, want %q", got, root)
@@ -55,6 +58,21 @@ func TestWalkUpToProject_ReturnsEmptyWhenNoProject(t *testing.T) {
 	got := walkUpToProject(root)
 	if got != "" {
 		t.Fatalf("walkUpToProject = %q in a project-less dir, want empty", got)
+	}
+}
+
+// A home directory holds the machine's own state in ~/.sparkwing, so anything
+// running beneath one used to resolve the home as its project root.
+func TestWalkUpToProject_IgnoresAStateDirectoryWithNoConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(root+"/.sparkwing/cache", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root+"/work", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := walkUpToProject(root + "/work"); got != "" {
+		t.Fatalf("walkUpToProject = %q under a state directory, want empty", got)
 	}
 }
 
