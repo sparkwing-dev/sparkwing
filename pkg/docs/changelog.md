@@ -54,6 +54,17 @@ unlock.
   carries a `Team` field that a bearer lookup reads back, so a request can
   resolve which team its credential acts for. The `*Store` twins still write
   the `default` team, so a single-tenant install is unchanged.
+- **store:** a claim never crosses teams. The team a machine may take work for
+  comes off its own credential rather than off the request, so a laptop holding
+  one team's token cannot see, name or take another team's node. The queue scan
+  (`ClaimNextReadyNode`), the named claim (`ClaimNamedNode`) and the assisted
+  offer path (`PrepareNextExecutorClaim`, `OfferExecutorClaim`) all carry the
+  predicate, and a named node of another team reports `ErrNotFound` rather than
+  held, so a guessed run id learns nothing. The operator's metered pool reads
+  every team, because it is the overflow every team's queue drains onto. A
+  credential no token row backs claims nothing once a second team is registered
+  and reports the new `ErrClaimantHasNoTeam`; a single-team install, which is
+  every self-hosted controller, behaves exactly as it did.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
