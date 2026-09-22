@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+	"github.com/sparkwing-dev/sparkwing/internal/jwks/jwkstest"
 )
 
 // Issuer is the fake. Its Issuer URL is what ID tokens name in iss.
@@ -26,8 +26,7 @@ type Issuer struct {
 	ClientID     string
 	ClientSecret string
 
-	key        *rsa.PrivateKey
-	kid        string
+	signer     *jwkstest.Signer
 	mu         sync.Mutex
 	codes      map[string]grant
 	keyFetches int
@@ -53,13 +52,9 @@ type Person struct {
 // New starts an issuer and stops it when t ends.
 func New(t testing.TB) *Issuer {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
 	iss := &Issuer{
 		ClientID: "client-123.apps.googleusercontent.com", ClientSecret: "shh",
-		key: key, kid: "test-key", codes: map[string]grant{},
+		signer: jwkstest.NewSigner(t, "test-key"), codes: map[string]grant{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /token", iss.handleToken)
@@ -88,7 +83,7 @@ func (i *Issuer) Code(p Person, verifier, redirectURI string) string {
 // CodeWith is Code with claim overrides, which is how a test builds a token
 // with the wrong audience, issuer or expiry. A nil value deletes the claim.
 func (i *Issuer) CodeWith(p Person, verifier, redirectURI string, override map[string]any) string {
-	return i.code(p, verifier, redirectURI, override, i.key)
+	return i.code(p, verifier, redirectURI, override, i.signer.Key)
 }
 
 // CodeSignedBy issues a code whose ID token is signed by a key the issuer does
@@ -103,7 +98,7 @@ func (i *Issuer) CodeSignedBy(signer *rsa.PrivateKey, p Person, verifier, redire
 // token naming another algorithm or an unpublished key id.
 func (i *Issuer) IDToken(t testing.TB, p Person, claims, head map[string]any) string {
 	t.Helper()
-	token, err := i.sign(i.key, head, i.claims(p, claims))
+	token, err := i.sign(i.signer.Key, head, i.claims(p, claims))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +179,9 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id_token": token})
 }
 
+// sign is jwkstest's SignWith with a JOSE header a test can override.
 func (i *Issuer) sign(key *rsa.PrivateKey, headOverride, claims map[string]any) (string, error) {
-	head, err := json.Marshal(overridden(map[string]any{"alg": "RS256", "kid": i.kid, "typ": "JWT"}, headOverride))
+	head, err := json.Marshal(overridden(map[string]any{"alg": "RS256", "kid": i.signer.Kid, "typ": "JWT"}, headOverride))
 	if err != nil {
 		return "", err
 	}
@@ -215,15 +211,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-func (i *Issuer) handleCerts(w http.ResponseWriter, _ *http.Request) {
+func (i *Issuer) handleCerts(w http.ResponseWriter, r *http.Request) {
 	i.mu.Lock()
 	i.keyFetches++
 	i.mu.Unlock()
-	pub := i.key.PublicKey
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{
-		"kty": "RSA", "kid": i.kid, "alg": "RS256", "use": "sig",
-		"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-	}}})
+	i.signer.ServeKeys(w, r)
 }

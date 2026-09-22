@@ -98,6 +98,21 @@ unlock.
   open invitations and 100 invitations created a day (429), and a withdrawn
   invitation still counts toward the day. `store.Tenant` refuses to mint a
   token carrying `admin` on every path.
+- **controller:** GitHub Actions runners. A team owner binds a repository by
+  its GitHub repository id and owner id with `POST
+  /api/v1/team/github-runners` (`GET` lists bindings and renders the workflow,
+  `DELETE .../{repository_id}` unbinds and revokes). `POST
+  /api/v1/runners/github/exchange` trades a workflow job's GitHub ID token
+  (audience: the controller's external URL) and the team slug the workflow
+  names for a one-hour runner credential; both the binding and the named team
+  must match, and a team holds at most 20 live credentials. The credential
+  claims nodes and triggers, and reaches runs, only of the team's runs for
+  that repository, and every other route answers 403. The bindings table is a
+  step of schema 52. See [GitHub Actions runners](docs/github-actions-runners.md).
+- **sparkwing-runner:** `runner --github-actions --team <slug>` exchanges the
+  job's ID token, advertises the `github-actions` label and stops claiming ten
+  minutes before its credential expires. `--idle-exit <duration>` ends the
+  loop once no node has been held for that long.
 - **controller:** hosting more than one team needs a signed license
   (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
   controller verifies its Ed25519 signature against a public key built into the

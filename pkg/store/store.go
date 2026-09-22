@@ -5570,6 +5570,8 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
+	ghScope, scoped := githubRunnerScopeFrom(ctx)
+	admitted := map[string]bool{}
 	for range claimScanRounds {
 		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
@@ -5580,6 +5582,15 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 			if !labelsSatisfied(n.needs, labels.hard) {
 				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
 				continue
+			}
+			if scoped {
+				ok, err := ghScope.admitsRun(ctx, s, n.runID, admitted)
+				if err != nil {
+					return nil, nil, err
+				}
+				if !ok {
+					continue
+				}
 			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
 			if err != nil {
@@ -5622,6 +5633,12 @@ func (s *Store) readClaimCandidates(
 		classClause = ` AND credit_cpu_class <= ?`
 		args = append(args, warm.warmCores)
 	}
+	scopeClause := ""
+	if ghScope, ok := githubRunnerScopeFrom(ctx); ok {
+		var scopeArgs []any
+		scopeClause, scopeArgs = ghScope.nodeClause()
+		args = append(args, scopeArgs...)
+	}
 	keyset := ""
 	if after != nil {
 		keyset = ` AND (ready_at > ? OR (ready_at = ? AND (run_id > ? OR (run_id = ? AND node_id > ?))))`
@@ -5634,7 +5651,7 @@ func (s *Store) readClaimCandidates(
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+keyset+`
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+scopeClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {
@@ -7180,6 +7197,12 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		sel += " AND trigger_source IN (" + strings.Join(ph, ",") + ")"
 	}
+	scope, scoped := githubRunnerScopeFrom(ctx)
+	if scoped {
+		clause, scopeArgs := scope.triggerClause("")
+		sel += clause
+		args = append(args, scopeArgs...)
+	}
 	sel += `
  ORDER BY created_at ASC
  LIMIT 1` + s.forUpdateSkipLocked()
@@ -7208,6 +7231,18 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 			return nil, notFound("claimable trigger", "")
 		}
 		return nil, err
+	}
+	if scoped {
+		env, decoded := decodeTriggerEnv(envJSON)
+		t.TriggerEnv = env
+		// safety: the oldest trigger stays pending for other workers, and this
+		// scope reports an empty queue until one of them takes it.
+		if !decoded || !TriggerNamesGitHubRepo(&t, scope.Repo) {
+			if commitErr := tx.Commit(); commitErr != nil {
+				return nil, commitErr
+			}
+			return nil, notFound("claimable trigger", "")
+		}
 	}
 
 	expires := now.Add(lease)

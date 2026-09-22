@@ -29,6 +29,8 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /api/v1/auth/oauth/google/exchange": true,
 		"POST /api/v1/auth/oauth/github/start":    true,
 		"POST /api/v1/auth/oauth/github/exchange": true,
+		// safety: a GitHub Actions job proves itself with its signed ID token; it answers 404 without an external URL.
+		"POST /api/v1/runners/github/exchange": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {

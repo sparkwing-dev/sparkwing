@@ -37,6 +37,14 @@ type PoolLoopConfig struct {
 
 	MaxClaims int
 
+	// IdleExit ends the loop once no node has been held for this long, so a
+	// runner on metered minutes stops paying for an empty queue. Zero polls
+	// until cancelled.
+	IdleExit time.Duration
+	// ClaimUntil stops new claims at this instant and ends the loop once the
+	// nodes already held finish. Zero never stops.
+	ClaimUntil time.Time
+
 	SourceName string
 
 	LocalAdmission bool
@@ -137,6 +145,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		"holder_prefix", cfg.HolderPrefix,
 		"labels", cfg.Labels,
 		"auth", cfg.Token != "",
+		"idle_exit", cfg.IdleExit,
 	)
 
 	advisor, _ := claimer.(client.PollAdvisor)
@@ -155,6 +164,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// the log says so once rather than on every poll.
 	limitLogged := false
 	shed := client.NewShedLog(client.ShedWarnInterval)
+	idleSince := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
@@ -180,6 +190,17 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			}
 		}
 
+		// safety: checked after the slot wait, because a node that held the
+		// only slot may have run past the deadline.
+		if !cfg.ClaimUntil.IsZero() && !time.Now().Before(cfg.ClaimUntil) {
+			<-sem
+			if sharedSlots != nil {
+				<-sharedSlots
+			}
+			logger.Info(cfg.SourceName+" credential is near expiry; finishing held nodes and exiting",
+				"claimed", claimed)
+			return nil
+		}
 		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
 		report := currentCapacity(ctx, provider)
 		// safety: the loop holds one slot for the claim it is about to make, so
@@ -236,10 +257,20 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 				<-sharedSlots
 			}
 			observeClaimOutcome("empty")
+			// safety: a slot still held means a node is running, and the
+			// runner stays until it finishes however long the queue is empty.
+			if len(sem) > 0 {
+				idleSince = time.Now()
+			} else if cfg.IdleExit > 0 && time.Since(idleSince) >= cfg.IdleExit {
+				logger.Info(cfg.SourceName+" queue empty; exiting",
+					"idle", time.Since(idleSince).Round(time.Second), "claimed", claimed)
+				return nil
+			}
 			sleepOrCancel(ctx, idlePoll())
 			continue
 		}
 		observeClaimOutcome("claimed")
+		idleSince = time.Now()
 		creditsLogged = false
 		limitLogged = false
 		claimed++
@@ -342,9 +373,18 @@ func runRunnerCLI(args []string, version string) error {
 		"route claimed nodes through this box's local admission daemon (for a runner on a box that also runs local pipelines; off for in-cluster pods)")
 	localReserve := fs.String("local-reserve", os.Getenv("SPARKWING_LOCAL_RESERVE"),
 		"host capacity held back from advertised headroom in the daemon budget grammar, e.g. 2,4gb or 10% (env: SPARKWING_LOCAL_RESERVE)")
+	githubActions := fs.Bool("github-actions", false,
+		"run inside a GitHub Actions job: exchange the job's ID token for a credential that claims only this repository's work, "+
+			"advertise the github-actions label, and stop claiming before the credential expires")
+	team := fs.String("team", os.Getenv("SPARKWING_TEAM"),
+		"team slug whose work this GitHub Actions job runs; the team's owner must have bound this repository (env: SPARKWING_TEAM)")
+	idleExit := fs.Duration("idle-exit", 0,
+		"exit once no node has been held for this long (0 = poll until stopped)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	if *controllerURL == "" {
 		fs.Usage()
 		return errors.New("--controller is required")
@@ -361,6 +401,39 @@ func runRunnerCLI(args []string, version string) error {
 	}
 	if !*claimNodes && !*alsoClaimTriggers {
 		return errors.New("--claim-nodes=false requires --also-claim-triggers")
+	}
+	if *idleExit < 0 {
+		return errors.New("--idle-exit must not be negative")
+	}
+	var claimUntil time.Time
+	if *githubActions {
+		if *alsoClaimTriggers || !*claimNodes {
+			return errors.New("--github-actions claims this repository's nodes; drop --also-claim-triggers and --claim-nodes=false")
+		}
+		cred, err := githubActionsCredential(context.Background(), &http.Client{Timeout: githubExchangeTimeout},
+			*controllerURL, *team)
+		if err != nil {
+			return fmt.Errorf("--github-actions: %w", err)
+		}
+		*token = cred.Token
+		for _, l := range cred.Labels {
+			labels = withLabel(labels, l)
+		}
+		claimUntil = githubClaimDeadline(cred)
+		if !explicit["holder-prefix"] {
+			*holderPrefix = "github-actions:" + cred.Repository + ":" + os.Getenv("GITHUB_RUN_ID")
+		}
+		// safety: the job itself is the unit that restarts, so the pod-restart
+		// claim budget would only end a job early.
+		if !explicit["max-claims-before-restart"] {
+			*maxClaims = 0
+		}
+		if !explicit["metrics-addr"] {
+			*metricsAddr = ""
+		}
+		slog.Default().Info("github actions runner credential issued",
+			"team", cred.Team, "repository", cred.Repository,
+			"expires_at", time.Unix(cred.ExpiresAt, 0).UTC(), "claim_until", claimUntil.UTC())
 	}
 
 	identity := buildinfo.Read("sparkwing-runner", version)
@@ -457,6 +530,8 @@ func runRunnerCLI(args []string, version string) error {
 		Lease:             *lease,
 		HeartbeatInterval: *heartbeat,
 		MaxClaims:         *maxClaims,
+		IdleExit:          *idleExit,
+		ClaimUntil:        claimUntil,
 		SourceName:        "pool runner",
 		LocalAdmission:    *localAdmission,
 		LocalReserve:      *localReserve,

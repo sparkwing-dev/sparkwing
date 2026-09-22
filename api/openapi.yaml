@@ -4682,6 +4682,41 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "502": {description: GitHub could not be reached.}
 
+  /api/v1/runners/github/exchange:
+    post:
+      x-sparkwing-scope: public
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/team/github-runners:
+    get:
+      x-sparkwing-scope: runs.read
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+    post:
+      x-sparkwing-scope: team.admin
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/team/github-runners/{repository_id}:
+    parameters:
+      - in: path
+        name: repository_id
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: team.admin
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
 components:
   securitySchemes:
     bearerToken:
