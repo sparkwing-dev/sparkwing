@@ -73,13 +73,16 @@ func controllerIdentityCapabilities(ctx context.Context, controllerURL, sessionI
 	return out, nil
 }
 
-func googleSignInOffered(ctx context.Context, controllerURL string) bool {
+// safety: a single-team controller offers no provider, so its sign-in page stays password-only.
+func withSignInProviders(ctx context.Context, controllerURL string, data loginPageData) loginPageData {
 	if controllerURL == "" {
-		return false
+		return data
 	}
 	caps, err := controllerIdentityCapabilities(ctx, controllerURL, "")
 	if err != nil || caps.Teams == nil || !caps.Teams.Enabled || caps.Auth == nil {
-		return false
+		return data
 	}
-	return slices.Contains(caps.Auth.Providers, "google")
+	data.Google = slices.Contains(caps.Auth.Providers, "google")
+	data.GitHub = slices.Contains(caps.Auth.Providers, "github")
+	return data
 }

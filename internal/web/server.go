@@ -289,8 +289,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.Handle("POST /login/bootstrap",
 		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
-	router.HandleFunc("GET /auth/google/start", googleStartHandler(opts))
-	router.HandleFunc("GET /auth/google/callback", googleCallbackHandler(opts))
+	router.HandleFunc("GET /auth/{provider}/start", oauthStartHandler(opts))
+	router.HandleFunc("GET /auth/{provider}/callback", oauthCallbackHandler(opts))
 	if opts.ControllerURL != "" {
 		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false))
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)

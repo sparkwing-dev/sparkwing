@@ -19,14 +19,23 @@ import (
 
 // safety: the flow cookie is what proves the browser finishing a sign-in is the
 // one that started it; without it a callback URL someone else arranged would sign
-// this browser in as them. Lax because Google returns with a cross-site top-level GET.
+// this browser in as them. Lax because the provider returns with a cross-site top-level GET.
 const oauthFlowCookieName = hostPrefix + "sw_oauth"
 
 const oauthFlowTTL = 10 * time.Minute
 
-const googleCallbackPath = "/auth/google/callback"
+type oauthProvider struct {
+	Name  string
+	Label string
+}
+
+var oauthProviders = map[string]oauthProvider{
+	"google": {Name: "google", Label: "Google"},
+	"github": {Name: "github", Label: "GitHub"},
+}
 
 type oauthFlow struct {
+	Provider string `json:"provider"`
 	State    string `json:"state"`
 	Verifier string `json:"verifier"`
 	Next     string `json:"next"`
@@ -42,23 +51,36 @@ type oauthExchangeResp struct {
 	SessionID string `json:"session_id"`
 }
 
-func googleStartHandler(opts HandlerOptions) http.HandlerFunc {
+func oauthProviderFrom(w http.ResponseWriter, r *http.Request, opts HandlerOptions) (oauthProvider, string, bool) {
+	w.Header().Set("Cache-Control", "no-store")
+	provider, ok := oauthProviders[r.PathValue("provider")]
+	if !ok {
+		http.NotFound(w, r)
+		return oauthProvider{}, "", false
+	}
+	controllerURL := authControllerURL(opts)
+	if controllerURL == "" {
+		http.Error(w, "sign-in needs a controller session backend", http.StatusNotFound)
+		return oauthProvider{}, "", false
+	}
+	return provider, controllerURL, true
+}
+
+func oauthStartHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		controllerURL := authControllerURL(opts)
-		if controllerURL == "" {
-			http.Error(w, "sign-in needs a controller session backend", http.StatusNotFound)
+		provider, controllerURL, ok := oauthProviderFrom(w, r, opts)
+		if !ok {
 			return
 		}
 		next := safeNext(r.URL.Query().Get("next"))
-		start, err := controllerGoogleStart(r.Context(), controllerURL, oauthRedirectURI(r))
+		start, err := controllerOAuthStart(r.Context(), controllerURL, provider.Name, oauthRedirectURI(r, provider.Name))
 		if err != nil {
-			renderLoginPage(w, r, loginPageData{
-				Next: next, Google: true, Error: "Google sign-in is unavailable right now.",
-			}, http.StatusBadGateway, cookiesSecure(opts))
+			renderLoginPage(w, r, withSignInProviders(r.Context(), controllerURL, loginPageData{
+				Next: next, Error: provider.Label + " sign-in is unavailable right now.",
+			}), http.StatusBadGateway, cookiesSecure(opts))
 			return
 		}
-		value, err := json.Marshal(oauthFlow{State: start.State, Verifier: start.Verifier, Next: next})
+		value, err := json.Marshal(oauthFlow{Provider: provider.Name, State: start.State, Verifier: start.Verifier, Next: next})
 		if err != nil {
 			http.Error(w, "could not start sign-in", http.StatusInternalServerError)
 			return
@@ -68,48 +90,44 @@ func googleStartHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-func googleCallbackHandler(opts HandlerOptions) http.HandlerFunc {
+func oauthCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		controllerURL := authControllerURL(opts)
-		if controllerURL == "" {
-			http.Error(w, "sign-in needs a controller session backend", http.StatusNotFound)
+		provider, controllerURL, ok := oauthProviderFrom(w, r, opts)
+		if !ok {
 			return
 		}
 		secure := cookiesSecure(opts)
 		query := r.URL.Query()
-		refuse := func(status int, message string) {
-			renderLoginPage(w, r, loginPageData{Next: "/", Google: true, Error: message}, status, secure)
-		}
 		if query.Get("error") != "" {
-			refuse(http.StatusUnauthorized, "Google sign-in was not completed.")
+			refuseOAuth(w, r, controllerURL, secure, http.StatusUnauthorized, provider.Label+" sign-in was not completed.")
 			return
 		}
 		flow, ok := readOAuthFlow(r, secure)
 		if !ok {
-			refuse(http.StatusBadRequest, "This sign-in was not started in this browser. Start again.")
+			refuseOAuth(w, r, controllerURL, secure, http.StatusBadRequest, "This sign-in was not started in this browser. Start again.")
 			return
 		}
-		// safety: the cookie survives a mismatch, so one forged callback cannot discard a sign-in this browser has in flight.
-		if !constantTimeEqual(query.Get("state"), flow.State) {
-			refuse(http.StatusBadRequest, "This sign-in could not be verified. Start again.")
+		// safety: the cookie survives a mismatch, so one forged callback cannot discard a sign-in this browser has in
+		// flight. The provider is part of the match, so a code from one provider never meets another's verifier.
+		if !constantTimeEqual(query.Get("state"), flow.State) || flow.Provider != provider.Name {
+			refuseOAuth(w, r, controllerURL, secure, http.StatusBadRequest, "This sign-in could not be verified. Start again.")
 			return
 		}
 		setOAuthFlowCookie(w, "", -1, secure)
 		code := query.Get("code")
 		if code == "" {
-			refuse(http.StatusBadRequest, "Google sign-in was not completed.")
+			refuseOAuth(w, r, controllerURL, secure, http.StatusBadRequest, provider.Label+" sign-in was not completed.")
 			return
 		}
-		exchanged, err := controllerGoogleExchange(r.Context(), controllerURL, code, flow.Verifier,
-			oauthRedirectURI(r), ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
+		exchanged, err := controllerOAuthExchange(r.Context(), controllerURL, provider.Name, code, flow.Verifier,
+			oauthRedirectURI(r, provider.Name), ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
-			refuse(http.StatusBadGateway, "Google sign-in could not be completed.")
+			refuseOAuth(w, r, controllerURL, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return
 		}
 		sess, err := controllerResolveSession(r.Context(), controllerURL, exchanged.SessionID)
 		if err != nil {
-			refuse(http.StatusBadGateway, "Google sign-in could not be completed.")
+			refuseOAuth(w, r, controllerURL, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return
 		}
 		setSessionCookies(w, &loginResp{SessionID: exchanged.SessionID, CSRFToken: sess.CSRFToken}, secure)
@@ -117,15 +135,20 @@ func googleCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
+func refuseOAuth(w http.ResponseWriter, r *http.Request, controllerURL string, secure bool, status int, message string) {
+	renderLoginPage(w, r, withSignInProviders(r.Context(), controllerURL,
+		loginPageData{Next: "/", Error: message}), status, secure)
+}
+
 // safety: the scheme follows the TLS evidence the CSRF origin check trusts, and
-// the host is the one the browser used, so Google returns to the dashboard the
-// sign-in started on; Google refuses any redirect URI not registered for the client.
-func oauthRedirectURI(r *http.Request) string {
+// the host is the one the browser used, so the provider returns to the dashboard the
+// sign-in started on; a provider refuses any redirect URI not registered for the client.
+func oauthRedirectURI(r *http.Request, provider string) string {
 	scheme := "http"
 	if requestOverTLSFrom(r.Context()) {
 		scheme = "https"
 	}
-	return (&url.URL{Scheme: scheme, Host: r.Host, Path: googleCallbackPath}).String()
+	return (&url.URL{Scheme: scheme, Host: r.Host, Path: "/auth/" + provider + "/callback"}).String()
 }
 
 func setOAuthFlowCookie(w http.ResponseWriter, value string, maxAge int, secure bool) {
@@ -150,15 +173,15 @@ func readOAuthFlow(r *http.Request, secure bool) (oauthFlow, bool) {
 		return oauthFlow{}, false
 	}
 	var flow oauthFlow
-	if err := json.Unmarshal(raw, &flow); err != nil || flow.State == "" || flow.Verifier == "" {
+	if err := json.Unmarshal(raw, &flow); err != nil || flow.Provider == "" || flow.State == "" || flow.Verifier == "" {
 		return oauthFlow{}, false
 	}
 	return flow, true
 }
 
-func controllerGoogleStart(ctx context.Context, controllerURL, redirectURI string) (*oauthStartResp, error) {
+func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirectURI string) (*oauthStartResp, error) {
 	var out oauthStartResp
-	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/google/start", "",
+	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/start", "",
 		map[string]string{"redirect_uri": redirectURI}, &out); err != nil {
 		return nil, err
 	}
@@ -172,9 +195,9 @@ func controllerGoogleStart(ctx context.Context, controllerURL, redirectURI strin
 	return &out, nil
 }
 
-func controllerGoogleExchange(ctx context.Context, controllerURL, code, verifier, redirectURI, clientIP string) (*oauthExchangeResp, error) {
+func controllerOAuthExchange(ctx context.Context, controllerURL, provider, code, verifier, redirectURI, clientIP string) (*oauthExchangeResp, error) {
 	var out oauthExchangeResp
-	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/google/exchange", clientIP,
+	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/exchange", clientIP,
 		map[string]string{"code": code, "verifier": verifier, "redirect_uri": redirectURI}, &out); err != nil {
 		return nil, err
 	}
@@ -215,7 +238,7 @@ func postControllerJSON(ctx context.Context, controllerURL, path, clientIP strin
 }
 
 // safety: the session cookie is SameSite=Strict, and a browser withholds it from
-// the redirect that ends a navigation Google started. A page on this origin that
+// the redirect that ends a navigation the provider started. A page on this origin that
 // moves on by itself makes the next request same-site, so the cookie rides it.
 var signedInTmpl = template.Must(template.New("signed-in").Parse(`<!doctype html>
 <html lang="en">

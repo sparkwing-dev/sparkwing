@@ -60,8 +60,12 @@ const loginHTML = `<!doctype html>
     .err { background: #5a1d1d; border: 1px solid #f85149; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.85rem; color: #ffa198; margin-bottom: 1rem; }
     .note { background: #0d2a4a; border: 1px solid #1f6feb; border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.8rem; color: #a5d6ff; margin-bottom: 1rem; line-height: 1.35; }
     .footer { margin-top: 1.25rem; font-size: 0.75rem; color: #6e7681; text-align: center; }
-    .google { display: flex; align-items: center; justify-content: center; gap: 0.6rem; width: 100%; padding: 0.6rem; background: #f0f6fc; color: #1f2328; border-radius: 4px; font-size: 0.95rem; font-weight: 500; text-decoration: none; box-sizing: border-box; }
-    .google:hover { background: #ffffff; }
+    .idp { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box; border-radius: 4px; font-family: Roboto, arial, sans-serif; font-size: 14px; font-weight: 500; line-height: 20px; letter-spacing: 0.25px; text-decoration: none; margin-bottom: 0.6rem; }
+    .idp svg { width: 20px; height: 20px; flex: none; }
+    .gsi { background: #131314; border: 1px solid #8e918f; color: #e3e3e3; }
+    .gsi:hover { background: #1f1f20; }
+    .gh { background: #24292f; border: 1px solid #57606a; color: #ffffff; }
+    .gh:hover { background: #2f363d; }
     .or { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; font-size: 0.75rem; color: #6e7681; }
     .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid #30363d; }
   </style>
@@ -86,14 +90,20 @@ const loginHTML = `<!doctype html>
     <h1>Sparkwing</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     {{if .Google}}
-    <a class="google" href="/auth/google/start?next={{.Next}}">
-      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
-      Sign in with Google
+    <a class="idp gsi" href="/auth/google/start?next={{.Next}}">
+      <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+      <span>Sign in with Google</span>
     </a>
-    <div class="or">or use a password</div>
     {{end}}
+    {{if .GitHub}}
+    <a class="idp gh" href="/auth/github/start?next={{.Next}}">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>Sign in with GitHub</span>
+    </a>
+    {{end}}
+    {{if or .Google .GitHub}}<div class="or">or use a password</div>{{end}}
     <label for="username">Username</label>
-    <input id="username" name="username" type="text" autocomplete="username" {{if not .Google}}autofocus {{end}}required>
+    <input id="username" name="username" type="text" autocomplete="username" {{if not (or .Google .GitHub)}}autofocus {{end}}required>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <input type="hidden" name="next" value="{{.Next}}">
@@ -113,6 +123,7 @@ type loginPageData struct {
 	CSRFToken string
 	Bootstrap bool
 	Google    bool
+	GitHub    bool
 }
 
 func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
@@ -135,7 +146,7 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 			clearSessionCookies(w, cookiesSecure(opts))
 		}
 		data.Bootstrap = controllerBootstrapNeeded(r.Context(), controllerURL)
-		data.Google = googleSignInOffered(r.Context(), controllerURL)
+		data = withSignInProviders(r.Context(), controllerURL, data)
 		renderLoginPage(w, r, data, http.StatusOK, cookiesSecure(opts))
 	}
 }
@@ -154,10 +165,8 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 
 		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
-			data := loginPageData{
-				Error: "Invalid username or password.", Next: next,
-				Google: googleSignInOffered(r.Context(), controllerURL),
-			}
+			data := withSignInProviders(r.Context(), controllerURL,
+				loginPageData{Error: "Invalid username or password.", Next: next})
 			renderLoginPage(w, r, data, http.StatusUnauthorized, cookiesSecure(opts))
 			return
 		}
