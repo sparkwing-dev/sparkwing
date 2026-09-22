@@ -151,9 +151,9 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 
 func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
-	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'gate'\n        run: npm ci --ignore-scripts --prefix web"
+	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'gate'\n        run: pnpm install --frozen-lockfile --ignore-scripts --dir web"
 	requireWorkflowText(t, body, install)
-	if got := strings.Count(body, "npm ci --ignore-scripts --prefix web"); got != 1 {
+	if got := strings.Count(body, "pnpm install --frozen-lockfile --ignore-scripts --dir web"); got != 1 {
 		t.Fatalf("dashboard dependency install count = %d, want 1", got)
 	}
 	installAt := strings.Index(body, install)
@@ -161,7 +161,7 @@ func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	if gateAt < 0 || installAt > gateAt {
 		t.Fatal("dashboard dependencies are not installed before the canonical broad gate")
 	}
-	if strings.Contains(body, "npm --prefix web run lint") {
+	if strings.Contains(body, "pnpm --dir web run lint") {
 		t.Fatal("hosted workflow bypasses the canonical frontend-lint step")
 	}
 }

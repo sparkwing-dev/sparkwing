@@ -21,6 +21,18 @@ const environmentNames = new Set([
   "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL", "TZ", "LANG", "LC_ALL",
 ]);
 
+// safety: pnpm varies the key order of nested config objects between runs, so a
+// shallow sort would key the cache on ordering rather than on configuration.
+function ordered(value) {
+  if (Array.isArray(value)) return value.map(ordered);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b, "en"))
+      .map(([key, entry]) => [key, ordered(entry)]));
+  }
+  return value;
+}
+
 function add(hash, label, value) {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
   hash.update(JSON.stringify([label, bytes.length]));
@@ -68,17 +80,17 @@ function inputs() {
     add(hash, name, fs.readFileSync(path.join(root, "bin", name)));
   }
   add(hash, "node", JSON.stringify([process.version, process.platform, process.arch]));
-  const npm = execFileSync("npm", ["--version"], {
+  const pnpm = execFileSync("pnpm", ["--version"], {
     cwd: web, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-  if (!npm) throw new Error("npm version missing");
-  add(hash, "npm", npm);
-  const config = JSON.parse(execFileSync("npm", ["config", "list", "--json"], {
+  if (!pnpm) throw new Error("pnpm version missing");
+  add(hash, "pnpm", pnpm);
+  const config = JSON.parse(execFileSync("pnpm", ["config", "list", "--json"], {
     cwd: web, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
   }));
-  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("npm config unavailable");
-  if (config["node-options"] || config["script-shell"]) throw new Error("external npm hooks are not reusable");
-  add(hash, "npm-config", JSON.stringify(Object.entries(config).sort(([a], [b]) => a.localeCompare(b, "en"))));
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("pnpm config unavailable");
+  if (config["node-options"] || config["script-shell"]) throw new Error("external pnpm hooks are not reusable");
+  add(hash, "pnpm-config", JSON.stringify(ordered(config)));
   for (const name of Object.keys(process.env)) {
     if (name.startsWith("NEXT_") || /^npm_config_/i.test(name)) environmentNames.add(name);
   }
