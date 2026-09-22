@@ -137,6 +137,14 @@ type LimitsProfileValues struct {
 
 	MaxDownloadsPerPrincipal int
 
+	RunsPerPrincipalHour int
+
+	ShedQueueDepth int
+
+	EgressMonthlyBytesPerPrincipal int64
+
+	EgressDailyCapBytes int64
+
 	EnforceIdleClaimPoll bool
 }
 type LiveLogRead struct {
