@@ -31,6 +31,12 @@ unlock.
   seeding, refresh, archive, upload and admin routes. A team's bins count
   toward the store ceiling. The operator token is unchanged.
 
+- **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
+  the cache refuses every download a process serves once it has sent that many
+  bytes in the UTC day, answering `429` with a `Retry-After` naming the day
+  roll. The per-principal budgets bound one caller and are multiplied by every
+  account or token a caller mints; this is the backstop that bounds the month.
+  Unlimited by default.
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -125,6 +131,12 @@ unlock.
 
 ### Changed
 
+- **controller:** the `cloud` and `cloud-free` limits profiles now also set
+  `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
+  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
+  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
+  with a profile previously left run creation and egress bytes unlimited. A
+  flag or environment variable the operator names still wins.
 - **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
   replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
   dependencies allowed to run build scripts, and the local build, dev server and
@@ -211,6 +223,14 @@ unlock.
   Postgres broke the deadlock after a second by aborting one side. The round
   now locks the run `FOR NO KEY UPDATE`.
 
+- **runners/k8s:** a Kubernetes fallback Job is no longer created when the
+  controller refuses the node's named claim. The claim is where the credit check
+  lives, and a refusal such as `402 insufficient credits` was logged and the Job
+  created anyway, unfenced and uncharged, so a team with no credits ran cloud
+  compute. The node now fails with `credits_exhausted` (or the refusal it got);
+  only a controller that predates the route still runs the Job unfenced. A
+  node's declared timeout now stretches its Job's deadline to at most 24 hours,
+  or the operator's `--k8s-job-deadline` when that is longer.
 - **store:** the credit balance and credit exhaustion are per team. The balance
   summed every grant and every charge on the controller with no team predicate,
   so one team spending its grants emptied the balance every other team claimed
