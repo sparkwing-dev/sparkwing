@@ -57,9 +57,8 @@ func TestClaimRefusesAnotherTeamsNodeAtTheHeadOfTheQueue(t *testing.T) {
 	seedTenantRun(t, foreign, "run-acme", "demo")
 	seedReadyNode(t, st, "run-acme", "build")
 	if got := nodeTeam(t, st, "run-acme", "build"); got != "acme" {
-		t.Skipf("the nodes writer puts a node of an acme run in team %q, so this boundary "+
-			"cannot be proven through real writers yet; it goes green when the nodes "+
-			"INSERT carries the run's team", got)
+		t.Fatalf("the nodes writer put a node of an acme run in team %q, so the "+
+			"boundary below would be proven against the wrong team", got)
 	}
 
 	// safety: a node the claimant may take, so a refusal cannot be read as an
@@ -96,9 +95,8 @@ func TestNamedClaimRefusesAnotherTeamsNode(t *testing.T) {
 	seedTenantRun(t, foreign, "run-acme", "demo")
 	seedReadyNode(t, st, "run-acme", "build")
 	if got := nodeTeam(t, st, "run-acme", "build"); got != "acme" {
-		t.Skipf("the nodes writer puts a node of an acme run in team %q, so this boundary "+
-			"cannot be proven through real writers yet; it goes green when the nodes "+
-			"INSERT carries the run's team", got)
+		t.Fatalf("the nodes writer put a node of an acme run in team %q, so the "+
+			"boundary below would be proven against the wrong team", got)
 	}
 
 	claimant := mintClaimant(t, st, "agent:laptop")
