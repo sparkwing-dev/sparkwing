@@ -107,13 +107,18 @@ file. Other syntax and workflow checks remain active.
   two minutes to print its stored status and the last 500 log lines from the
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
-  build. The race command starts `pkg/store` first when selected and can run
-  two package binaries while each keeps `GOMAXPROCS=1`. Lint waits for both Go
-  suites. The conditional PostgreSQL suite waits for the full Go suite, then
-  uses its released one-core slot while the race suite continues. The
-  store-first race order applies on every host; machines with one to three or
-  more than four logical CPUs retain their existing dependency schedule and
-  Go parallelism. A Go step's own parallelism depends on who else holds the
+  build. The race command can run two package binaries while each keeps
+  `GOMAXPROCS=1`. Lint waits for both Go suites. The conditional PostgreSQL
+  suite waits for the full Go suite, then uses its released one-core slot while
+  the race suite continues. Machines with one to three or more than four
+  logical CPUs retain their existing dependency schedule and Go parallelism.
+  `pkg/store` is not among the gate's race targets. It measures 2148 s under
+  the race detector against the step's 1800 s budget, and the cost is spread
+  over 828 tests rather than a few, so there is nothing to trim that fits it:
+  the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
+  Left in, the step always times out, which is a check that cannot pass.
+  `pre-release` runs it instead, as `race-store`, where nothing bounds it to
+  30 minutes and no release ships past it. A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries
   one gate and is discarded after it, so it holds nothing back for a neighbor
@@ -265,7 +270,9 @@ file. Other syntax and workflow checks remain active.
   whose Go files changed (staged, or since origin/main when nothing is
   staged), so a change never reaches main without the race detector having
   seen its own package, and runs `store-postgres` when that change touches
-  `pkg/store`. Unit and ESLint run in parallel; the production build then
+  `pkg/store`. `pkg/store` itself is the one exception to that race rule: it
+  cannot finish inside the step's budget, so `pre-release` races it and the
+  gate names the deferral in its log rather than skipping it silently. Unit and ESLint run in parallel; the production build then
   feeds the browser suite.
 - **Gating beside other agents:** run independent checks concurrently in separate
   development worktrees when CPU and memory headroom allow. Use `sparkwing run`
@@ -291,11 +298,14 @@ file. Other syntax and workflow checks remain active.
   so it is invisible to `sparkwing queue` and the dashboard and contends with
   every other run on the OS. It is not a way around a full queue. It does not
   move the user config directory, which answers to `XDG_CONFIG_HOME` and the
-  per-file overrides (`SPARKWING_PROFILES`, `SPARKWING_REPOS`), because a
-  profile is a machine-wide connection that outlives any one home. A profiles
-  write from a command running under a home of its own is refused rather than
-  sent to the machine's config; set `SPARKWING_PROFILES=DIR/profiles.yaml` to
-  keep it inside that home.
+  per-file overrides, because what lives there is machine-wide and outlives any
+  one home. Every config write from a command running under a home of its own
+  is refused rather than sent to the machine's config, naming both paths and
+  the value that keeps the write inside the home: `SPARKWING_PROFILES` for
+  `profiles.yaml`, `SPARKWING_REPOS` for `repos.yaml`, `SPARKWING_SECRETS` and
+  `SPARKWING_CONFIG_ENV` for the local secret stores, `SPARKWING_FLEET_CONFIG`
+  for `fleet.yaml`. No variable moves `version-hold`; `SPARKWING_VERSION_HOLD`
+  holds one shell without writing it.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil
   returned after an error was observed, and work started on a context that is

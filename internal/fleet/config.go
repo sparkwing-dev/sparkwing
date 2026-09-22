@@ -17,12 +17,17 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const Filename = "fleet.yaml"
+
+// PathEnv names the fleet config, the way SPARKWING_HOME names the state root.
+// SPARKWING_HOME does not move the file.
+const PathEnv = "SPARKWING_FLEET_CONFIG"
 
 var executorNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
@@ -81,6 +86,9 @@ func Load(path string, tailscaleIPs TailscaleIPs) (Config, error) {
 // existing operator policy.
 func Create(path string, cfg Config, tailscaleIPs TailscaleIPs) error {
 	if err := cfg.validate(tailscaleIPs); err != nil {
+		return err
+	}
+	if err := configguard.GuardWrite("the fleet config", PathEnv, path); err != nil {
 		return err
 	}
 	if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {

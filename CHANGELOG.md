@@ -19,6 +19,7 @@ unlock.
 ---
 
 ## [Unreleased]
+
 ### Added
 
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
@@ -150,6 +151,22 @@ unlock.
   had just been told about missing, because `rejectInvalid` replied first and
   recorded last. The hosted gate caught it as a count of 2 where 3 were
   expected.
+- **config:** every config write from a command under its own `SPARKWING_HOME`
+  is refused, not sent to the machine's config
+  The profiles fix in v0.60.0 left the rest of this class alone.
+  `sparkwing secrets set|delete`, `sparkwing version hold --set|--clear`,
+  `sparkwing fleet init` and the repo registry all resolved
+  `~/.config/sparkwing/` whatever home the command ran under, so a drill under
+  a scratch `SPARKWING_HOME` reached the operator's own files and nothing in
+  the invocation said it would. `SPARKWING_HOME` still does not move them,
+  because what lives there is machine-wide and outlives any one home; each
+  write now fails naming both paths and the value that keeps it inside the
+  home. The local secret stores had no per-file override at all and now answer
+  to `SPARKWING_SECRETS` (masked) and `SPARKWING_CONFIG_ENV` (`--plain`);
+  `version-hold` has none, and `SPARKWING_VERSION_HOLD` holds one shell without
+  writing it. A command with no `SPARKWING_HOME`, or one whose
+  `SPARKWING_HOME` is the operator's own `~/.sparkwing`, writes where it always
+  did.
 
 ### Security
 

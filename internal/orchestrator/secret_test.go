@@ -42,12 +42,24 @@ func init() {
 	register("secret-reader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &secretReaderPipe{} })
 }
 
+// safety: the dotenv writers refuse a store outside the sparkwing home unless
+// the operator named the file, and a test binary's home is the test sandbox.
+func seedLocalSecret(t *testing.T, path, name, value string) string {
+	t.Helper()
+	if path == "" {
+		path = filepath.Join(t.TempDir(), "secrets.env")
+	}
+	t.Setenv(secrets.SecretsPathEnv, path)
+	if err := secrets.WriteDotenvEntry(path, name, value); err != nil {
+		t.Fatalf("seed %s: %v", name, err)
+	}
+	return path
+}
+
 func TestSecret_ResolvesFromDotenvSource(t *testing.T) {
 	dir := t.TempDir()
 	dotenvPath := filepath.Join(dir, "secrets.env")
-	if err := secrets.WriteDotenvEntry(dotenvPath, "TOKEN", "abc123"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedLocalSecret(t, dotenvPath, "TOKEN", "abc123")
 
 	observedToken = ""
 	p := newPaths(t)
@@ -69,9 +81,7 @@ func TestSecret_ResolvesFromDotenvSource(t *testing.T) {
 func TestSecret_MissingNameFailsTheJob(t *testing.T) {
 	dir := t.TempDir()
 	dotenvPath := filepath.Join(dir, "secrets.env")
-	if err := secrets.WriteDotenvEntry(dotenvPath, "OTHER", "1"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedLocalSecret(t, dotenvPath, "OTHER", "1")
 
 	observedToken = "before"
 	p := newPaths(t)
@@ -155,9 +165,7 @@ func init() {
 func TestSecret_MaskerRedactsResolvedValues(t *testing.T) {
 	dir := t.TempDir()
 	dotenvPath := filepath.Join(dir, "secrets.env")
-	if err := secrets.WriteDotenvEntry(dotenvPath, "TOKEN", "supersecret"); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedLocalSecret(t, dotenvPath, "TOKEN", "supersecret")
 
 	cap := &captureLogger{}
 	p := newPaths(t)

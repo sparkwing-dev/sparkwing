@@ -59,10 +59,7 @@ func init() {
 
 func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 	p := newPaths(t)
-	dotenv := t.TempDir() + "/secrets.env"
-	if err := secrets.WriteDotenvEntry(dotenv, "DEPLOY_TOKEN", excerptSecretValue); err != nil {
-		t.Fatalf("seed secret: %v", err)
-	}
+	dotenv := seedLocalSecret(t, "", "DEPLOY_TOKEN", excerptSecretValue)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 		Pipeline:     "excerpt-fail",
