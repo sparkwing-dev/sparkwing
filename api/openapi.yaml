@@ -4315,6 +4315,254 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The slug is taken.}
 
+  /api/v1/invitations/{id}/accept:
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Accept an invitation and switch the session to its team.
+      description: >-
+        The signed-in user's verified email must equal the invited address; any other user answers 403. A used or expired invitation answers 410. Invitations live seven days.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Joined.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Already a member.}
+        "410": {description: The invitation is used or expired.}
+
+  /api/v1/team:
+    patch:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Rename the active team.
+      description: Changes the display name. The slug is the tenant key and stays.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.renameTeamReq
+              type: object
+              required: [display_name]
+              properties:
+                display_name: {type: string}
+      responses:
+        "200":
+          description: Renamed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Team"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/members:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the active team's members.
+      responses:
+        "200":
+          description: Members.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.memberJSON
+                  type: object
+                  required: [user_id, email, name, role]
+                  properties:
+                    user_id: {type: string}
+                    email: {type: string}
+                    name: {type: string}
+                    role: {type: string, enum: [owner, editor, reader]}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/members/{user_id}:
+    patch:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Change a member's role.
+      description: >-
+        Nobody grants a role above their own or re-roles someone who outranks them, and the last owner cannot be demoted. A user who is not a member of the active team answers 404.
+      parameters:
+        - {name: user_id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.setRoleReq
+              type: object
+              required: [role]
+              properties:
+                role: {type: string, enum: [owner, editor, reader]}
+      responses:
+        "204": {description: Changed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Remove a member, or leave the team when `user_id` is the caller.
+      description: >-
+        Removing another member needs the owner role. The last owner cannot leave. The removed user's sessions lose every scope in the team on their next request.
+      parameters:
+        - {name: user_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/invitations:
+    get:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List the active team's open invitations.
+      responses:
+        "200":
+          description: Open invitations.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.invitationJSON
+                  type: object
+                  required: [id, email, role, expires_at]
+                  properties:
+                    id: {type: string}
+                    email: {type: string}
+                    role: {type: string, enum: [owner, editor, reader]}
+                    expires_at: {type: integer, format: int64, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Invite an email address to the active team.
+      description: >-
+        Nothing is mailed. The answer carries `accept_url`, a dashboard link built from the origin of the first `--oauth-redirect-uris` entry, which the inviter hands on. The role cannot exceed the inviter's own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.inviteReq
+              type: object
+              required: [email, role]
+              properties:
+                email: {type: string}
+                role: {type: string, enum: [owner, editor, reader]}
+      responses:
+        "201":
+          description: Invited.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.inviteResp
+                type: object
+                required: [id, accept_url]
+                properties:
+                  id: {type: string}
+                  accept_url: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The address is already a member or already has an open invitation.}
+
+  /api/v1/team/invitations/{id}:
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Withdraw an open invitation.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Withdrawn.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/runner-tokens:
+    get:
+      x-sparkwing-scope: runs.write
+      tags: [teams]
+      summary: List the active team's live runner tokens.
+      description: Needs the editor role.
+      responses:
+        "200":
+          description: Runner tokens.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.runnerTokenJSON
+                  type: object
+                  required: [prefix, name, created_by, created_at, last_used_at]
+                  properties:
+                    prefix: {type: string}
+                    name: {type: string}
+                    created_by: {type: string, description: User id of the minter; empty for an operator-minted token.}
+                    created_at: {type: integer, format: int64, description: Unix seconds.}
+                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [teams]
+      summary: Mint a runner token for the active team.
+      description: >-
+        Needs the editor role. The token carries the runner scope set the CLI's `runners add` mints and belongs to the active team. The plaintext is returned once, with a `sparkwing-runner` command that connects a machine.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.runnerTokenReq
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, description: "1 to 63 letters, digits, '-', '_' or '.'."}
+      responses:
+        "201":
+          description: Minted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.runnerTokenResp
+                type: object
+                required: [token, prefix, command]
+                properties:
+                  token: {type: string}
+                  prefix: {type: string}
+                  command: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/runner-tokens/{prefix}:
+    delete:
+      x-sparkwing-scope: runs.write
+      tags: [teams]
+      summary: Revoke one of the active team's runner tokens.
+      description: An owner revokes any of the team's runner tokens; an editor revokes only the ones they minted.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   securitySchemes:
     bearerToken:

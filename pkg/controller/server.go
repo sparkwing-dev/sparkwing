@@ -1004,6 +1004,17 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
 	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
 	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
+	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
+	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
+	mux.Handle("GET /api/v1/team/members", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListMembers)))
+	mux.Handle("PATCH /api/v1/team/members/{user_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetMemberRole)))
+	mux.Handle("DELETE /api/v1/team/members/{user_id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRemoveMember)))
+	mux.Handle("GET /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListInvitations)))
+	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
+	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
+	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
+	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
+	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
 
 	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
 	mux.Handle("GET /api/v1/services", http.HandlerFunc(s.handleServices))

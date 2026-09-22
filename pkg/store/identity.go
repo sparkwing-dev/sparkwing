@@ -916,10 +916,6 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string) er
 		string(t.team), subjectID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE team = ? AND account_id = ?`,
-		string(t.team), subjectID); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 

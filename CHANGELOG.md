@@ -41,6 +41,17 @@ unlock.
   `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
   `accounts`, `identities`, `memberships` and `invitations` tables and is
   additive.
+- **controller:** team administration for signed-in users. `PATCH
+  /api/v1/team` renames the active team; `GET`, `PATCH` and `DELETE
+  /api/v1/team/members[/{user_id}]` list members, change roles and remove a
+  member or leave; `GET`, `POST` and `DELETE /api/v1/team/invitations` manage
+  seven-day, single-use invitations whose answer carries an `accept_url`, and
+  `POST /api/v1/invitations/{id}/accept` joins only when the signed-in user's
+  verified email is the invited address. `POST`, `GET` and `DELETE
+  /api/v1/team/runner-tokens` mint, list and revoke runner tokens bound to the
+  active team; an editor mints and revokes their own, an owner revokes any.
+  Every `/team` route acts on the session's team, and another team's id
+  answers 404. Nobody grants a role above their own and the last owner stays.
 - **controller:** hosting more than one team needs a signed license
   (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
   controller verifies its Ed25519 signature against a public key built into the
