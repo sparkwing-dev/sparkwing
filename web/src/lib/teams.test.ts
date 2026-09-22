@@ -136,3 +136,90 @@ describe("getMe", () => {
     assert.equal(await teams.getMe(), null);
   });
 });
+
+describe("team administration calls", () => {
+  it("invites with email and role and returns the accept link", async () => {
+    respond = () =>
+      new Response(
+        JSON.stringify({
+          id: "inv1",
+          accept_url: "https://d.example/invitations?id=inv1",
+        }),
+        { status: 201 },
+      );
+    const inv = await teams.inviteMember("new@example.com", "editor");
+    assert.equal(inv.accept_url, "https://d.example/invitations?id=inv1");
+    assert.equal(calls[0].url, "/api/v1/team/invitations");
+    assert.equal(calls[0].method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      email: "new@example.com",
+      role: "editor",
+    });
+    assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+  });
+
+  it("escapes path segments so an id cannot reach another route", async () => {
+    await teams.revokeRunnerToken("swr_a/../../tokens");
+    await teams.removeMember("u 1");
+    await teams.acceptInvitation("inv?x=1");
+    assert.deepEqual(
+      calls.map((c) => `${c.method} ${c.url}`),
+      [
+        "DELETE /api/v1/team/runner-tokens/swr_a%2F..%2F..%2Ftokens",
+        "DELETE /api/v1/team/members/u%201",
+        "POST /api/v1/invitations/inv%3Fx%3D1/accept",
+      ],
+    );
+    for (const c of calls) {
+      assert.equal(c.headers.get("X-CSRF-Token"), "session-csrf");
+    }
+  });
+
+  it("creates a team with slug and display name", async () => {
+    respond = () =>
+      new Response(JSON.stringify({ slug: "acme", display_name: "Acme" }), {
+        status: 201,
+      });
+    const team = await teams.createTeam("acme", "Acme");
+    assert.equal(team.slug, "acme");
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      slug: "acme",
+      display_name: "Acme",
+    });
+  });
+
+  it("reads a list whether or not the controller wraps it", async () => {
+    const rows = [{ user_id: "u1", email: "a@x", name: "A", role: "owner" }];
+    respond = () => new Response(JSON.stringify(rows), { status: 200 });
+    assert.deepEqual(await teams.listMembers(), rows);
+    respond = () =>
+      new Response(JSON.stringify({ members: rows }), { status: 200 });
+    assert.deepEqual(await teams.listMembers(), rows);
+    assert.deepEqual(teams.asList(null, "members"), []);
+  });
+});
+
+describe("runnerConnectCommand", () => {
+  const minted = { token: "swr_secret", prefix: "swr_sec", command: "" };
+
+  it("prefers the command the controller composed", () => {
+    assert.equal(
+      teams.runnerConnectCommand(
+        {
+          ...minted,
+          command: "sparkwing-runner runner --controller https://c",
+        },
+        "box",
+      ),
+      "sparkwing-runner runner --controller https://c",
+    );
+  });
+
+  it("falls back to the runner command with the token in the environment", () => {
+    const cmd = teams.runnerConnectCommand(minted, "Korey's laptop");
+    assert.equal(
+      cmd,
+      `SPARKWING_AGENT_TOKEN=swr_secret sparkwing-runner runner --controller ${teams.controllerURLPlaceholder} --holder-prefix 'Korey'\\''s laptop'`,
+    );
+  });
+});

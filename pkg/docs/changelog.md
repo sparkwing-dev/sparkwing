@@ -30,6 +30,15 @@ unlock.
   whose state does not match that cookie is refused. The nav shows the active
   team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
 
+- **web:** team pages on a multi-team controller
+  `/team` lists members, invites by email with a copyable accept link, revokes
+  pending invitations, changes roles and removes members; `/team/machines`
+  mints a runner token for the active team, shows it and its
+  `sparkwing-runner` command once, and lists and revokes tokens; `/team/new`
+  creates a team and `/invitations` accepts one. Controls follow the member's
+  role and the controller decides every request. A local install shows none of
+  them.
+
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { type Role, switchTeam } from "@/lib/teams";
 import { useTeamState } from "@/lib/useTeam";
@@ -133,6 +134,33 @@ export default function TeamSwitcher() {
                   <RolePill role={m.role} />
                 )}
               </button>
+            ))}
+          </div>
+          {me.invitations.length > 0 ? (
+            <Link
+              href="/invitations"
+              onClick={() => setOpen(false)}
+              className="flex items-center justify-between px-3 py-2 text-sm border-t border-[var(--border)] bg-amber-500/10 text-amber-200 hover:bg-amber-500/20"
+            >
+              <span>Pending invitations</span>
+              <span className="text-xs">{me.invitations.length}</span>
+            </Link>
+          ) : null}
+          <div className="py-1 border-t border-[var(--border)]">
+            {[
+              { href: "/team", label: "Members and settings" },
+              { href: "/team/machines", label: "Connect a machine" },
+              { href: "/team/new", label: "Create a team" },
+            ].map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                role="menuitem"
+                onClick={() => setOpen(false)}
+                className="block px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
+              >
+                {item.label}
+              </Link>
             ))}
           </div>
         </div>

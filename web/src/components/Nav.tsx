@@ -7,6 +7,7 @@ import { type Approval, getPendingApprovals } from "@/lib/api";
 import { readCSRFCookie } from "@/lib/csrfCookie";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import TeamSwitcher from "@/components/TeamSwitcher";
+import { useTeamState } from "@/lib/useTeam";
 
 type Tab = { href: string; label: string; external?: boolean };
 
@@ -21,12 +22,19 @@ const tabs: Tab[] = [
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];
 
+const teamTab: Tab = { href: "/team", label: "Team" };
+
 const APPROVALS_POLL_MS = 10_000;
 
 export default function Nav() {
   const pathname = usePathname();
   const [pending, setPending] = useState<Approval[]>([]);
   const [open, setOpen] = useState(false);
+  const team = useTeamState();
+  const visibleTabs =
+    team.status === "ready"
+      ? [...tabs.slice(0, -1), teamTab, tabs[tabs.length - 1]]
+      : tabs;
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +58,7 @@ export default function Nav() {
       <VersionPill />
       <TeamSwitcher />
       <div className="flex items-center gap-1 flex-1 ml-4">
-        {tabs.map((tab) => {
+        {visibleTabs.map((tab) => {
           const active = tab.external
             ? false
             : tab.href === "/"

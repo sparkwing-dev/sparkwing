@@ -141,3 +141,167 @@ export async function getMe(): Promise<Me | null> {
 export async function switchTeam(slug: string): Promise<void> {
   await send("POST", "/api/v1/me/active-team", "Switch team", { slug });
 }
+
+export interface Team {
+  slug: string;
+  display_name: string;
+}
+
+export interface Member {
+  user_id: string;
+  email: string;
+  name: string;
+  role: Role;
+}
+
+export interface TeamInvitation {
+  id: string;
+  email: string;
+  role: Role;
+  expires_at?: string;
+  accept_url?: string;
+}
+
+export interface CreatedInvitation {
+  id: string;
+  accept_url: string;
+}
+
+export interface RunnerToken {
+  prefix: string;
+  name?: string;
+  created_by?: string;
+  created_at?: string;
+  last_used_at?: string;
+}
+
+export interface MintedRunnerToken {
+  token: string;
+  prefix: string;
+  command: string;
+}
+
+// A list route may answer with a bare array or wrap it under one key; both read
+// the same so the page does not break on either spelling.
+export function asList<T>(body: unknown, key: string): T[] {
+  if (Array.isArray(body)) return body as T[];
+  if (body && typeof body === "object") {
+    const inner = (body as Record<string, unknown>)[key];
+    if (Array.isArray(inner)) return inner as T[];
+  }
+  return [];
+}
+
+const seg = encodeURIComponent;
+
+export async function createTeam(
+  slug: string,
+  displayName: string,
+): Promise<Team> {
+  const res = await send("POST", "/api/v1/teams", "Create team", {
+    slug,
+    display_name: displayName,
+  });
+  return (await res.json()) as Team;
+}
+
+export async function renameTeam(displayName: string): Promise<void> {
+  await send("PATCH", "/api/v1/team", "Rename team", {
+    display_name: displayName,
+  });
+}
+
+export async function listMembers(): Promise<Member[]> {
+  const res = await send("GET", "/api/v1/team/members", "List members");
+  return asList<Member>(await res.json(), "members");
+}
+
+export async function changeMemberRole(
+  userID: string,
+  role: Role,
+): Promise<void> {
+  await send("PATCH", `/api/v1/team/members/${seg(userID)}`, "Change role", {
+    role,
+  });
+}
+
+export async function removeMember(userID: string): Promise<void> {
+  await send("DELETE", `/api/v1/team/members/${seg(userID)}`, "Remove member");
+}
+
+export async function listInvitations(): Promise<TeamInvitation[]> {
+  const res = await send("GET", "/api/v1/team/invitations", "List invitations");
+  return asList<TeamInvitation>(await res.json(), "invitations");
+}
+
+export async function inviteMember(
+  email: string,
+  role: Role,
+): Promise<CreatedInvitation> {
+  const res = await send("POST", "/api/v1/team/invitations", "Invite", {
+    email,
+    role,
+  });
+  return (await res.json()) as CreatedInvitation;
+}
+
+export async function revokeInvitation(id: string): Promise<void> {
+  await send(
+    "DELETE",
+    `/api/v1/team/invitations/${seg(id)}`,
+    "Revoke invitation",
+  );
+}
+
+export async function acceptInvitation(id: string): Promise<void> {
+  await send(
+    "POST",
+    `/api/v1/invitations/${seg(id)}/accept`,
+    "Accept invitation",
+  );
+}
+
+export async function listRunnerTokens(): Promise<RunnerToken[]> {
+  const res = await send("GET", "/api/v1/team/runner-tokens", "List machines");
+  return asList<RunnerToken>(await res.json(), "tokens");
+}
+
+export async function mintRunnerToken(
+  name: string,
+): Promise<MintedRunnerToken> {
+  const res = await send(
+    "POST",
+    "/api/v1/team/runner-tokens",
+    "Connect a machine",
+    { name },
+  );
+  return (await res.json()) as MintedRunnerToken;
+}
+
+export async function revokeRunnerToken(prefix: string): Promise<void> {
+  await send(
+    "DELETE",
+    `/api/v1/team/runner-tokens/${seg(prefix)}`,
+    "Revoke machine token",
+  );
+}
+
+// The controller composes the connect command because only it knows the URL a
+// machine reaches it on. Without one, the same command carries a placeholder the
+// reader fills in, and the page says so.
+export const controllerURLPlaceholder = "<controller-url>";
+
+export function runnerConnectCommand(
+  minted: MintedRunnerToken,
+  name: string,
+): string {
+  if (minted.command) return minted.command;
+  const quoted = (s: string) =>
+    /^[A-Za-z0-9._:/@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+  return [
+    `SPARKWING_AGENT_TOKEN=${quoted(minted.token)}`,
+    "sparkwing-runner runner",
+    `--controller ${controllerURLPlaceholder}`,
+    `--holder-prefix ${quoted(name)}`,
+  ].join(" ");
+}
