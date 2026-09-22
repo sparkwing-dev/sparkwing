@@ -22,6 +22,12 @@ unlock.
 
 ### Added
 
+- **runner:** Kubernetes runner Jobs carry a `sparkwing.dev/team` label and a
+  required pod anti-affinity on `kubernetes.io/hostname` that refuses any node
+  running another team's Job, so different teams' Jobs never share a node
+  while one team's Jobs still pack together. A claimed or fetched trigger now
+  reports its `team`. See [Runner Job placement](docs/security.md#runner-job-placement).
+
 - **cache:** the cache accepts a cache grant, a bearer a multi-team
   controller signs with the cache token it already holds, so a runner need not
   hold the cache's token. A grant names one run's team, lasts six hours, and is

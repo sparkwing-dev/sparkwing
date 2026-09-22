@@ -118,7 +118,11 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		PollInterval:       time.Second,
 	}
 	logger := slog.Default()
-	return func(_ Backends, _ *store.Trigger) runner.Runner {
+	return func(_ Backends, trigger *store.Trigger) runner.Runner {
+		runCfg := runnerCfg
+		if trigger != nil {
+			runCfg.Team = string(trigger.Team)
+		}
 		httpClient := &http.Client{Timeout: 30 * time.Second}
 		var ctrl *client.Client
 		if cfg.AgentToken != "" {
@@ -126,6 +130,6 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		} else {
 			ctrl = client.New(cfg.ControllerURL, httpClient)
 		}
-		return k8srunner.New(kcli, ctrl, runnerCfg, logger)
+		return k8srunner.New(kcli, ctrl, runCfg, logger)
 	}, nil
 }

@@ -692,6 +692,26 @@ it can run dockerd and pre-pull images into a warm PVC. It is
 short-lived, single-container, and the only privileged workload
 sparkwing creates. See [warm-pool.md](warm-pool.md).
 
+## Runner Job placement
+
+The Kubernetes runner keeps each team's Jobs on nodes of their own, because a
+node also carries state that team code can reach, such as a Docker daemon. Every
+Job and its pod carry the label `sparkwing.dev/team` with the run's team, and
+every pod requires, on `kubernetes.io/hostname`, that no pod in any namespace
+with that label and a different value runs on its node. Jobs of one team still
+share nodes; a Job of another team waits for, or makes an autoscaler such as
+Karpenter provision, a node with no other team's Job on it.
+
+The label value is the team name when it is a DNS label (lowercase letters,
+digits and inner hyphens, at most 63 characters) and does not start with
+`sha256-`. Any other name becomes `sha256-` and the first 40 hex digits of the
+SHA-256 of the name. A run whose trigger names no team is labeled `default`.
+
+The runner that creates these Jobs runs the team's pipeline binary, so the
+placement holds against a mistake, not against a pipeline that talks to the
+Kubernetes API itself. Enforcing it against team code takes an admission policy
+that refuses a runner pod without the label and the term.
+
 ## Verified self-update
 
 `sparkwing update` proves the bytes it installs are the release's bytes
