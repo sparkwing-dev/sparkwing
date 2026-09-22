@@ -50,7 +50,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
-| `POST` | `/api/v1/gitcache/refresh` | `runs.write` |
+| `POST` | `/api/v1/gitcache/refresh` | `admin` or `team.admin` |
 | `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
@@ -80,6 +80,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
+| `POST` | `/api/v1/runs/{id}/cache-grant` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
 | `GET` | `/api/v1/runs/{id}/debug-pauses` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
@@ -90,6 +91,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `nodes.claim` |

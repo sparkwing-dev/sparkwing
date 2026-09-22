@@ -200,3 +200,22 @@ func writeClaimTeamRefusal(w http.ResponseWriter, err error) bool {
 func handleRunLogAccess(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// runTeam answers the team of the run a request names, and refuses unless it
+// is the caller's own. The team boundary has already answered another team's
+// run 404; this repeats the check because a grant it feeds opens that team's
+// namespace in the shared cache.
+func (s *Server) runTeam(r *http.Request) (store.Team, error) {
+	t, err := s.tenantFor(r)
+	if err != nil {
+		return "", err
+	}
+	owned, err := t.OwnsRun(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return "", err
+	}
+	if !owned {
+		return "", runNotFound(r.PathValue("id"))
+	}
+	return t.Team(), nil
+}

@@ -46,6 +46,10 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		}
 		return res.Account, tn
 	}
+	forDefault, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
 	alice, teamA := signIn("alice")
 	_, teamB := signIn("bob")
 	mint := func(tn *store.Tenant, name string, scopes ...string) string {
@@ -55,10 +59,13 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		}
 		return "Bearer " + raw
 	}
-	writerA := mint(teamA, "a-writer", controller.ScopeAdmin, controller.ScopeLogsWrite)
+	// safety: the operator's admin token appends without a runner's claim, and
+	// only the operator's own team may hold that scope.
+	writerA := mint(forDefault, "operator", controller.ScopeAdmin, controller.ScopeLogsWrite)
 	readerA := mint(teamA, "a-reader", controller.ScopeLogsRead)
 	readerB := mint(teamB, "b-reader", controller.ScopeLogsRead)
-	adminB := mint(teamB, "b-admin", controller.ScopeAdmin, controller.ScopeLogsRead, controller.ScopeLogsWrite)
+	everyB := mint(teamB, "b-every", controller.ScopeLogsRead, controller.ScopeLogsWrite,
+		controller.ScopeRunsRead, controller.ScopeTeamAdmin)
 	writerB := mint(teamB, "b-writer", controller.ScopeLogsWrite)
 	rawSession, _, _, err := st.CreateAccountSession(ctx, alice, teamA.Team(), time.Hour, now)
 	if err != nil {
@@ -113,7 +120,7 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 				t.Errorf("GET %s as %s = %d without its own log: %s", path, own.name, code, body)
 			}
 		}
-		for _, other := range []struct{ name, auth string }{{"team B reader", readerB}, {"team B admin", adminB}} {
+		for _, other := range []struct{ name, auth string }{{"team B reader", readerB}, {"team B token with every team scope", everyB}} {
 			if code, body := call("GET", path, other.auth, ""); code != http.StatusNotFound || strings.Contains(body, secret) {
 				t.Errorf("GET %s as %s = %d want 404: %s", path, other.name, code, body)
 			}

@@ -863,7 +863,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
+	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRefresh), ScopeTeamAdmin))
+	mux.Handle("POST /api/v1/runs/{id}/cache-grant", requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
@@ -1037,8 +1038,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
-	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook)))
-	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook)))
+	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook), ScopeTeamAdmin))
+	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook), ScopeTeamAdmin))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)

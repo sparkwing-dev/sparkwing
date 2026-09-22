@@ -29,8 +29,8 @@ type tenancyFixture struct {
 
 	ownerA, ownerB   string
 	readerA, editorA string
-	// everyScopeB is a team B bearer carrying every scope, admin included, so
-	// a refusal it gets is the team boundary's and not a missing scope.
+	// everyScopeB is a team B bearer carrying every scope a team's token may
+	// hold, so a refusal it gets is the team boundary's and not a missing scope.
 	everyScopeB string
 	runnerB     string
 
@@ -43,7 +43,6 @@ var everyScope = []string{
 	controller.ScopeNodesClaim, controller.ScopeLogsRead, controller.ScopeLogsWrite,
 	controller.ScopeTriggersRead, controller.ScopeTriggersClaim, controller.ScopeRunsState,
 	controller.ScopeSecretsRead, controller.ScopeApprovalsWrite, controller.ScopeTeamAdmin,
-	controller.ScopeAdmin,
 }
 
 func newTenancyFixture(t *testing.T, st *store.Store) *tenancyFixture {
@@ -263,14 +262,40 @@ func cancelRequests(t *testing.T, st *store.Store) int {
 	return n
 }
 
+// The orchestrator of a webhook trigger creates the run under its trigger
+// claim, and the run lands in the team the claim was made in.
 func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		ctx := context.Background()
-		code, body := f.do("POST", "/api/v1/runs", f.everyScopeB, map[string]any{
-			"id": "run-by-b", "pipeline": "build-b", "status": "running",
-		})
-		if code != http.StatusCreated {
-			t.Fatalf("POST /runs as team B = %d: %s", code, body)
+		if err := f.teamB.CreateTrigger(ctx, store.Trigger{
+			ID: "run-by-b", Pipeline: "build-b", TriggerSource: "api", CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		code, body := f.do("POST", "/api/v1/triggers/claim", f.runnerB, map[string]any{})
+		if code != http.StatusOK {
+			t.Fatalf("claim as team B's runner = %d: %s", code, body)
+		}
+		var claimed store.Trigger
+		if err := json.Unmarshal([]byte(body), &claimed); err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequestWithContext(ctx, "POST", f.url+"/api/v1/runs", strings.NewReader(
+			`{"id":"run-by-b","pipeline":"build-b","status":"running"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", f.runnerB)
+		req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("POST /runs under team B's trigger claim = %d: %s", resp.StatusCode, raw)
 		}
 		if _, err := f.teamB.GetRun(ctx, "run-by-b"); err != nil {
 			t.Errorf("the run team B created is not in team B: %v", err)
@@ -475,6 +500,14 @@ func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 // No membership reaches a route gated on admin, the deployment operator's
 // scope. The admin routes are read from server.go and asked about team A's own
 // run, so the refusal is the scope's and not the team boundary's.
+// safety: these admin routes also admit team.admin because each acts only on
+// the caller's own team: its webhook bindings, and a cache refresh.
+var ownerAlsoAdmitted = map[string]bool{
+	"POST /api/v1/webhooks/github/bindings":   true,
+	"DELETE /api/v1/webhooks/github/bindings": true,
+	"POST /api/v1/gitcache/refresh":           true,
+}
+
 func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 	for _, role := range []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner} {
 		for _, s := range controller.ScopesForRole(role) {
@@ -496,6 +529,9 @@ func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 			for _, member := range []struct{ name, auth string }{
 				{"owner", f.ownerA}, {"editor", f.editorA}, {"reader", f.readerA},
 			} {
+				if member.name == "owner" && ownerAlsoAdmitted[pattern] {
+					continue
+				}
 				code, body := f.do(method, path, member.auth, map[string]any{})
 				if code == http.StatusNotFound && strings.Contains(body, controller.UnsupportedRouteError) {
 					continue

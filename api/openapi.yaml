@@ -2431,7 +2431,7 @@ paths:
 
   /api/v1/gitcache/refresh:
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: admin or team.admin
       tags: [gitcache]
       summary: Refresh the cache's mirror of a repository.
       description: |
@@ -4314,6 +4314,32 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The slug is taken.}
+
+  /api/v1/runs/{id}/cache-grant:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim` or `triggers.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/log-access:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
 
 components:
   securitySchemes:

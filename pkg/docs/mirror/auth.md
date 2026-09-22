@@ -335,7 +335,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
-| `runs.write`      | POST `/api/v1/triggers`, `/gitcache/refresh`: starting new work |
+| `runs.write`      | POST `/api/v1/triggers`: starting new work. `/gitcache/refresh` fetches any repository with the operator's cache credential, so it takes `admin` or `team.admin` |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |

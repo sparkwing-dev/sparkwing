@@ -40,7 +40,7 @@ func TestGitHubWebhookBinding_ADeliveryRunsInTheTeamWhoseSecretSignedIt(t *testi
 	st := openSQLiteBindingStore(t)
 	f := newBindingFixture(t, st, nil)
 	tenantB := teamTenant(t, st, teamB)
-	adminB := teamToken(t, tenantB, controller.ScopeAdmin)
+	adminB := teamToken(t, tenantB, controller.ScopeTeamAdmin)
 
 	const secretB = "team-b-webhook-secret-fixture"
 	if got := postBinding(t, f.server.URL, adminB, controller.GitHubWebhookBindingRequest{
