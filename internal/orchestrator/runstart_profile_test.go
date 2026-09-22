@@ -29,6 +29,9 @@ func TestBuildRunInvocation_ProfileSetButNoChainOmits(t *testing.T) {
 
 func TestBuildRunInvocation_LocalOnlyReportsEffectiveBackends(t *testing.T) {
 	t.Setenv("SPARKWING_ALLOW", "")
+	// safety: the reproducer names every flag the environment implies, so a
+	// variable this test does not clear becomes an argument it did not expect.
+	t.Setenv("SPARKWING_NO_UPDATE", "")
 	t.Setenv("SPARKWING_PROFILE", "dead-profile")
 	t.Setenv("SPARKWING_SECRETS_PROFILE", "dead-secrets")
 	opts := Options{
