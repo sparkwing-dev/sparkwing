@@ -1231,7 +1231,7 @@ func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim trigger", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -1294,7 +1294,7 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim next trigger", err)
 		return
 	}
 	s.recordQueueActivity(time.Now())
@@ -1663,7 +1663,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeInternalError(w, r, "claim node", err)
 			return
 		}
 		if result.Node == nil {
@@ -1684,7 +1684,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim node", err)
 		return
 	}
 	if body.Capacity != nil && (body.Capacity.MaxConcurrent < 0 || body.Capacity.ActiveClaims < 0) {
@@ -1714,7 +1714,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		if s.writeClaimComputeLimitRefusal(w, r, err) {
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim node", err)
 		return
 	}
 	s.runnerPresence.awarded(claimer)
@@ -1772,7 +1772,7 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "claim named node", err)
 		return
 	}
 	writeClaimedNode(w, r, s, n)
@@ -2010,7 +2010,7 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusForbidden, store.ErrExecutorCredentialMismatch)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "prepare node claim", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, executorClaimPreparationForResponse(preparation, sink.Load()))
@@ -2055,7 +2055,7 @@ func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeInternalError(w, r, "finalize ready node", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {
