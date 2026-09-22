@@ -71,6 +71,13 @@ unlock.
   node's own team, read off each runner's token row
   (`RunnerPresence.TokenPrefix`), so another team's laptop advertising the
   preferred label no longer parks a node its own cloud runner could take.
+- **controller:** a runner's secret read resolves in the team of the run it
+  holds, so a runner holding one team's run reads that team's pipeline and
+  shared rows rather than the default team's. `Store.ClaimedRunFor` and
+  `Store.ClaimedRunsFor` replace `PipelineForClaimedRun` and
+  `PipelinesForClaimant` and return a `store.ClaimedRun` carrying the run's
+  team beside its pipeline. A legacy envelope resealed on read is written back
+  into the team it was read from.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

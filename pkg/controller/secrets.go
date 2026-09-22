@@ -84,7 +84,7 @@ func (s *Server) validateSecretName(name, pipeline string) error {
 }
 
 func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
-	sec, ok := s.readSecretForCaller(w, r, r.PathValue("name"))
+	sec, tn, ok := s.readSecretForCaller(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
@@ -100,7 +100,7 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		}
 		plain = opened
 		if !bound {
-			bound = s.rebindSecret(sec, plain)
+			bound = s.rebindSecret(tn, sec, plain)
 		}
 	} else if secrets.IsEncrypted(plain) {
 		writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: encrypted value but no key configured"))
@@ -119,8 +119,9 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// safety: an envelope written before binding is substitutable, so a successful read reseals it in place.
-func (s *Server) rebindSecret(sec *store.Secret, plain string) bool {
+// safety: an envelope written before binding is substitutable, so a successful read reseals it in place,
+// in the team it was read from; resealing through the default team would copy one team's value into another's row.
+func (s *Server) rebindSecret(tn *store.Tenant, sec *store.Secret, plain string) bool {
 	if _, ok := s.secretsCipher.(BoundCipher); !ok {
 		return false
 	}
@@ -131,7 +132,7 @@ func (s *Server) rebindSecret(sec *store.Secret, plain string) bool {
 	}
 	row := *sec
 	row.Value = sealed
-	if err := s.store.CreateOrReplaceSecret(row, sec.UpdatedAt); err != nil {
+	if err := tn.CreateOrReplaceSecret(row, sec.UpdatedAt); err != nil {
 		s.logger.Error("secret rebind: store", "name", sec.Name, "pipeline", sec.Pipeline, "err", err)
 		return false
 	}
@@ -142,7 +143,10 @@ func (s *Server) rebindSecret(sec *store.Secret, plain string) bool {
 // safety: a non-admin reader's standing is the pipeline of a run it holds live
 // work in, because a run's repository is a string its submitter typed and
 // naming one proves nothing about owning it.
-func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, name string) (*store.Secret, bool) {
+//
+// safety: a claimant's read resolves in the claimed run's team, so a runner
+// holding one team's run reads that team's rows and never the default team's.
+func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, name string) (*store.Secret, *store.Tenant, bool) {
 	q := r.URL.Query()
 	runID := q.Get("run")
 	p, authed := PrincipalFromContext(r.Context())
@@ -153,20 +157,31 @@ func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, nam
 				pipeline = run.Pipeline
 			}
 		}
-		sec, err := s.store.GetSecretForPipeline(name, pipeline)
-		return sec, reportSecretRead(w, sec, err)
+		tn, err := s.store.ForTeam(r.Context(), store.DefaultTeam)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return nil, nil, false
+		}
+		sec, err := tn.GetSecretForPipeline(name, pipeline)
+		return sec, tn, reportSecretRead(w, sec, err)
 	}
-	pipeline, refused := s.pipelineForClaimingReader(r, runID)
+	claimed, refused := s.claimedRunForReader(r, runID)
 	if refused != "" {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "claim_required",
 			Principal: p.label(),
 			Message:   refused,
 		})
-		return nil, false
+		return nil, nil, false
 	}
-	sec, err := s.store.GetSecretForRun(name, pipeline)
-	return sec, reportSecretRead(w, sec, err)
+	tn, err := s.store.ForTeam(r.Context(), claimed.Team)
+	if err != nil {
+		s.logger.Error("secret read: resolve the claimed run's team", "team", claimed.Team, "err", err)
+		writeError(w, http.StatusInternalServerError, errors.New("resolve the claimed run's team"))
+		return nil, nil, false
+	}
+	sec, err := tn.GetSecretForRun(name, claimed.Pipeline)
+	return sec, tn, reportSecretRead(w, sec, err)
 }
 
 func reportSecretRead(w http.ResponseWriter, sec *store.Secret, err error) bool {
@@ -184,32 +199,32 @@ func reportSecretRead(w http.ResponseWriter, sec *store.Secret, err error) bool 
 	return true
 }
 
-func (s *Server) pipelineForClaimingReader(r *http.Request, runID string) (pipeline, refused string) {
+func (s *Server) claimedRunForReader(r *http.Request, runID string) (claimed store.ClaimedRun, refused string) {
 	claimant := claimIdentity(r)
 	now := time.Now()
 	if runID != "" {
-		pipeline, err := s.store.PipelineForClaimedRun(r.Context(), runID, claimant, now)
+		claimed, err := s.store.ClaimedRunFor(r.Context(), runID, claimant, now)
 		if errors.Is(err, store.ErrNotFound) {
-			return "", "run " + runID + " is not claimed by this principal"
+			return store.ClaimedRun{}, "run " + runID + " is not claimed by this principal"
 		}
 		if err != nil {
 			s.logger.Error("secret read: resolve claimed run", "run_id", runID, "err", err)
-			return "", "resolve the caller's claimed pipeline"
+			return store.ClaimedRun{}, "resolve the caller's claimed pipeline"
 		}
-		return pipeline, ""
+		return claimed, ""
 	}
-	pipelines, err := s.store.PipelinesForClaimant(r.Context(), claimant, now)
+	runs, err := s.store.ClaimedRunsFor(r.Context(), claimant, now)
 	if err != nil {
 		s.logger.Error("secret read: resolve claim pipeline", "err", err)
-		return "", "resolve the caller's claimed pipeline"
+		return store.ClaimedRun{}, "resolve the caller's claimed pipeline"
 	}
-	switch len(pipelines) {
+	switch len(runs) {
 	case 0:
-		return "", "this principal holds no live claim, so no pipeline names its secrets"
+		return store.ClaimedRun{}, "this principal holds no live claim, so no pipeline names its secrets"
 	case 1:
-		return pipelines[0], ""
+		return runs[0], ""
 	default:
-		return "", "this principal holds claims in more than one pipeline; name the run with ?run=<id>"
+		return store.ClaimedRun{}, "this principal holds claims in more than one pipeline; name the run with ?run=<id>"
 	}
 }
 
