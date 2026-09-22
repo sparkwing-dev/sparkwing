@@ -188,7 +188,27 @@ type Launcher interface {
 	// a schedule forever. A run that has sat unclaimed for longer than
 	// staleAfter is not active either: nothing is going to pick it up, and an
 	// overlap policy of skip would otherwise wedge the schedule for good.
-	Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
+	// sched is the schedule that fired the run, whose team owns it.
+	Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
+}
+
+// ScheduleStore is the schedule rows a [Service] reads and writes: a
+// [store.Store], whose methods address the default team, or a
+// [store.Tenant], whose methods address that tenant's team alone.
+type ScheduleStore interface {
+	ArmCronSchedule(ctx context.Context, sched store.CronSchedule, now time.Time) (store.CronSchedule, bool, error)
+	ListCronSchedules(ctx context.Context) ([]store.CronSchedule, error)
+	GetCronSchedule(ctx context.Context, id string) (store.CronSchedule, error)
+	SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
+	SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
+	SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
+	SetCronScheduleLock(ctx context.Context, id string, lock store.CronLock, now time.Time) error
+	SetCronOverride(ctx context.Context, id string, o store.CronOverride, now time.Time) error
+	ClearCronOverride(ctx context.Context, id string, now time.Time) error
+	DeleteCronSchedule(ctx context.Context, id string) error
+	DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
+	ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *store.CronFire, now time.Time) error
+	ListCronFires(ctx context.Context, scheduleID string, limit int) ([]store.CronFire, error)
 }
 
 // Service evaluates schedules against one home's runs store.
@@ -201,6 +221,12 @@ type Launcher interface {
 type Service struct {
 	Store    *store.Store
 	Launcher Launcher
+
+	// Schedules scopes every schedule read and write to one team. Nil
+	// reads and writes the default team through Store, except that
+	// [Service.Tick] then evaluates every team's schedules, each through
+	// its own team.
+	Schedules ScheduleStore
 
 	// Now reads the clock. Nil means [time.Now].
 	Now func() time.Time
@@ -244,6 +270,13 @@ func sideOrLocal(where string) string {
 		return store.CronWhereLocal
 	}
 	return where
+}
+
+func (s *Service) schedules() ScheduleStore {
+	if s.Schedules != nil {
+		return s.Schedules
+	}
+	return s.Store
 }
 
 func (s *Service) now() time.Time {
@@ -544,7 +577,7 @@ const checkoutReadTimeout = 10 * time.Second
 // pipeline then schedule name, including the ones the repository no longer
 // declares.
 func (s *Service) List(ctx context.Context) ([]Row, error) {
-	stored, err := s.Store.ListCronSchedules(ctx)
+	stored, err := s.schedules().ListCronSchedules(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -559,11 +592,11 @@ func (s *Service) List(ctx context.Context) ([]Row, error) {
 // Show returns one schedule and its most recent resolved instants, newest
 // first. A fires count of zero or less reads the store's default page.
 func (s *Service) Show(ctx context.Context, id string, fires int) (Row, []store.CronFire, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return Row{}, nil, err
 	}
-	history, err := s.Store.ListCronFires(ctx, id, fires)
+	history, err := s.schedules().ListCronFires(ctx, id, fires)
 	if err != nil {
 		return Row{}, nil, err
 	}
@@ -573,14 +606,14 @@ func (s *Service) Show(ctx context.Context, id string, fires int) (Row, []store.
 // Pause stops a schedule firing. Its cursor still advances on each tick, so
 // resuming does not replay the instants that passed while it was paused.
 func (s *Service) Pause(ctx context.Context, id string) error {
-	return s.Store.SetCronSchedulePaused(ctx, id, true, s.now())
+	return s.schedules().SetCronSchedulePaused(ctx, id, true, s.now())
 }
 
 // Resume lets a paused schedule fire again from its next due instant. The
 // cursor moves to now before the pause clears, so a host whose timer was off
 // for the whole pause still does not replay it.
 func (s *Service) Resume(ctx context.Context, id string) error {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -589,17 +622,17 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 	if eval, perr := prepare(sched); perr == nil {
 		next = eval.nextAfter(now)
 	}
-	if err := s.Store.ResolveCronDue(ctx, id, now, next, nil, now); err != nil {
+	if err := s.schedules().ResolveCronDue(ctx, id, now, next, nil, now); err != nil {
 		return err
 	}
-	return s.Store.SetCronSchedulePaused(ctx, id, false, now)
+	return s.schedules().SetCronSchedulePaused(ctx, id, false, now)
 }
 
 // Upcoming returns the next n instants a schedule matches after now, in the
 // zone it is read in. It returns fewer than n when the expression stops
 // matching within the evaluator's horizon.
 func (s *Service) Upcoming(ctx context.Context, id string, n int) ([]time.Time, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -614,7 +647,7 @@ func (s *Service) Upcoming(ctx context.Context, id string, n int) ([]time.Time, 
 // and whether or not it is paused, and records the launch in its history. The
 // cursor does not move: a manual run is not one of the cadence's due instants.
 func (s *Service) RunNow(ctx context.Context, id string) (string, error) {
-	sched, err := s.Store.GetCronSchedule(ctx, id)
+	sched, err := s.schedules().GetCronSchedule(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -640,7 +673,7 @@ func (s *Service) RunNow(ctx context.Context, id string) (string, error) {
 		Detail:    "run now",
 		Args:      sched.Effective().Args,
 	}
-	if err := s.Store.ResolveCronDue(ctx, id, sched.CursorAt, next, fire, now); err != nil {
+	if err := s.schedules().ResolveCronDue(ctx, id, sched.CursorAt, next, fire, now); err != nil {
 		return runID, fmt.Errorf("run %s launched but its fire could not be recorded: %w", runID, err)
 	}
 	return runID, nil
@@ -660,9 +693,9 @@ func (s *Service) Resolve(ctx context.Context, name string) (store.CronSchedule,
 		return store.CronSchedule{}, errors.New("crons: a schedule name is required")
 	}
 	if strings.HasPrefix(trimmed, ScheduleIDPrefix) {
-		return s.Store.GetCronSchedule(ctx, trimmed)
+		return s.schedules().GetCronSchedule(ctx, trimmed)
 	}
-	stored, err := s.Store.ListCronSchedules(ctx)
+	stored, err := s.schedules().ListCronSchedules(ctx)
 	if err != nil {
 		return store.CronSchedule{}, err
 	}

@@ -56,6 +56,10 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).AccountMemberships":            "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail":       "lists the invitations addressed to one verified email from every team that sent one",
 	"(*Store).AcceptInvitation":              "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
+		"binding of the pipeline is a candidate until its secret verifies the signature",
+	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
+		"launches each one through its own team's handle",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes
@@ -69,10 +73,8 @@ var unportedSQL = []string{
 	"(*Store).AppendEventOnce",
 	"(*Store).AppendNodeAnnotation",
 	"(*Store).AppendStepAnnotation",
-	"(*Store).ArmCronSchedule",
 	"(*Store).CacheExcludedCounts",
 	"(*Store).CancelPendingTrigger",
-	"(*Store).ClearCronOverride",
 	"(*Store).ComputeAlarmState",
 	"(*Store).ComputeUsage",
 	"(*Store).ConsumeNodeBounce",
@@ -88,8 +90,6 @@ var unportedSQL = []string{
 	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
 	"(*Store).CreditLedgerTotals",
-	"(*Store).DeleteCronSchedule",
-	"(*Store).DeleteCronSchedulesForRepo",
 	"(*Store).DeleteRun",
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
@@ -109,7 +109,6 @@ var unportedSQL = []string{
 	"(*Store).FinishTriggerAtGeneration",
 	"(*Store).GetActiveDebugPause",
 	"(*Store).GetApproval",
-	"(*Store).GetCronSchedule",
 	"(*Store).GetNode",
 	"(*Store).GetNodeDispatch",
 	"(*Store).GetRun",
@@ -120,8 +119,6 @@ var unportedSQL = []string{
 	"(*Store).ListApprovalsForRun",
 	"(*Store).ListCreditCharges",
 	"(*Store).ListCreditGrants",
-	"(*Store).ListCronFires",
-	"(*Store).ListCronSchedules",
 	"(*Store).ListDebugPauses",
 	"(*Store).ListEgressUsage",
 	"(*Store).ListEventsAfter",
@@ -166,15 +163,9 @@ var unportedSQL = []string{
 	"(*Store).RequeueUnstartedClaim",
 	"(*Store).ResetNodeForAutoRetry",
 	"(*Store).ResolveApproval",
-	"(*Store).ResolveCronDue",
 	"(*Store).RevokeNodeReady",
 	"(*Store).RevokeToken",
 	"(*Store).RunExceedsWallClock",
-	"(*Store).SetCronOverride",
-	"(*Store).SetCronScheduleDeclared",
-	"(*Store).SetCronScheduleLock",
-	"(*Store).SetCronScheduleNextDue",
-	"(*Store).SetCronSchedulePaused",
 	"(*Store).SetNodeArtifactManifest",
 	"(*Store).SetNodeArtifactManifestCharged",
 	"(*Store).SetNodeStatus",
@@ -267,13 +258,11 @@ var unportedSQL = []string{
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
 	"creditGrantByReferenceTx",
-	"cronFireAlreadyRecorded",
 	"duplicateGrantReferences",
 	"duplicateTokenPrefixes",
 	"enforceNodesPerRunTx",
 	"enforceRunsPerHourTx",
 	"gatherRunAnnotations",
-	"getCronScheduleTx",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
 	"loadExecutorUsageTx",
@@ -299,7 +288,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 234
+const unportedSQLSize = 219
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

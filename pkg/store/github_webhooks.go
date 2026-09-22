@@ -33,6 +33,8 @@ var githubWebhookBindingsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT"
 // subscribes to, and the id of that webhook. The controller reads it to
 // verify a delivery; `sparkwing cluster webhooks connect` writes it.
 type GitHubWebhookBinding struct {
+	// Team owns the binding, and a delivery its secret verifies runs there.
+	Team      Team
 	Pipeline  string
 	Repo      string
 	Secret    string
@@ -98,8 +100,8 @@ func (s *Store) ListGitHubWebhookBindings(ctx context.Context, pipeline string) 
 
 // ListGitHubWebhookBindings returns t's bindings for one pipeline, or
 // all of t's bindings when pipeline is empty, ordered by repository.
-func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) (_ []GitHubWebhookBinding, err error) {
-	query := `SELECT pipeline, repo, secret, events, hook_id, created_at, updated_at
+func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error) {
+	query := `SELECT team, pipeline, repo, secret, events, hook_id, created_at, updated_at
               FROM github_webhook_bindings WHERE team = ?`
 	args := []any{string(t.team)}
 	if pipeline = strings.TrimSpace(pipeline); pipeline != "" {
@@ -107,7 +109,22 @@ func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string)
 		args = append(args, pipeline)
 	}
 	query += ` ORDER BY pipeline, repo`
-	rows, err := t.s.query(ctx, query, args...)
+	return t.s.listGitHubWebhookBindings(ctx, query, args...)
+}
+
+// ListGitHubWebhookBindingsAcrossTeams returns every team's bindings for
+// one pipeline, each carrying its team, ordered by repository then team.
+// An unauthenticated delivery names no team, so the binding whose secret
+// verifies its signature is what decides the team it runs in.
+func (o *Operator) ListGitHubWebhookBindingsAcrossTeams(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error) {
+	return o.s.listGitHubWebhookBindings(ctx, `
+        SELECT team, pipeline, repo, secret, events, hook_id, created_at, updated_at
+        FROM github_webhook_bindings WHERE pipeline = ?
+        ORDER BY repo, team`, strings.TrimSpace(pipeline))
+}
+
+func (s *Store) listGitHubWebhookBindings(ctx context.Context, query string, args ...any) (_ []GitHubWebhookBinding, err error) {
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list github webhook bindings: %w", err)
 	}
@@ -135,7 +152,7 @@ func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo stri
 // when the repository is not connected to that pipeline in t's team.
 func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (*GitHubWebhookBinding, error) {
 	row := t.s.queryRow(ctx, `
-        SELECT pipeline, repo, secret, events, hook_id, created_at, updated_at
+        SELECT team, pipeline, repo, secret, events, hook_id, created_at, updated_at
         FROM github_webhook_bindings WHERE team = ? AND pipeline = ? AND repo = ?`,
 		string(t.team), strings.TrimSpace(pipeline), NormalizeGitHubWebhookRepo(repo))
 	b, err := scanGitHubWebhookBinding(row)
@@ -171,19 +188,21 @@ func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo 
 
 func scanGitHubWebhookBinding(row rowScanner) (GitHubWebhookBinding, error) {
 	var (
-		b                     GitHubWebhookBinding
-		events                string
-		created, updated      int64
-		hookID                int64
-		pipeline, repo, value string
+		b                    GitHubWebhookBinding
+		events               string
+		created, updated     int64
+		hookID               int64
+		team, pipeline, repo string
+		value                string
 	)
-	if err := row.Scan(&pipeline, &repo, &value, &events, &hookID, &created, &updated); err != nil {
+	if err := row.Scan(&team, &pipeline, &repo, &value, &events, &hookID, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return b, err
 		}
 		return b, fmt.Errorf("scan github webhook binding: %w", err)
 	}
 	b = GitHubWebhookBinding{
+		Team:      Team(team),
 		Pipeline:  pipeline,
 		Repo:      repo,
 		Secret:    value,

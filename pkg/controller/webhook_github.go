@@ -202,8 +202,8 @@ func githubWebhookReplayKey(pipeline string, body []byte) string {
 	return hex.EncodeToString(sum.Sum(nil))
 }
 
-func (s *Server) writeGitHubDuplicate(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) {
-	existing, err := s.store.FindTriggerByWebhookReplay(
+func (s *Server) writeGitHubDuplicate(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, pipeline, delivery string, body []byte) {
+	existing, err := tenant.FindTriggerByWebhookReplay(
 		r.Context(), githubWebhookReplayKey(pipeline, body), delivery)
 	if err != nil || existing == nil {
 		writeError(w, http.StatusConflict, errors.New("delivery already accepted"))
@@ -259,7 +259,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	rawRepo := githubPayloadRepo(body)
 	claimedRepo, repoWellFormed := normalizeGitHubRepo(rawRepo)
 	resolved := s.resolveGitHubWebhook(r.Context(), pipeline, claimedRepo)
-	if resolved.secret == "" {
+	if len(resolved.candidates) == 0 {
 		// safety: answering 503 only for a slug that has no secret of its own would read out the secret table.
 		if resolved.scoped {
 			writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
@@ -270,7 +270,8 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !verifyGitHubSignature(r.Header.Get("X-Hub-Signature-256"), body, resolved.secret) {
+	team, verified := s.verifiedGitHubTeam(resolved, r.Header.Get("X-Hub-Signature-256"), body, pipeline)
+	if !verified {
 		writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
 		return
 	}
@@ -302,11 +303,17 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		writeJSON(w, http.StatusOK, map[string]string{"status": "pong"})
 		return
-	case "push":
-		s.handleGitHubPush(w, r, pipeline, delivery, body)
-		return
-	case "pull_request":
-		s.handleGitHubPullRequest(w, r, pipeline, delivery, body)
+	case "push", "pull_request":
+		tenant, err := s.tenantForTeam(r.Context(), team)
+		if err != nil {
+			s.writeInternalError(w, r, "github webhook team handle", err)
+			return
+		}
+		if event == "push" {
+			s.handleGitHubPush(w, r, tenant, pipeline, delivery, body)
+		} else {
+			s.handleGitHubPullRequest(w, r, tenant, pipeline, delivery, body)
+		}
 		return
 	default:
 		s.logger.Info("github webhook ignored",
@@ -318,7 +325,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) {
+func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, pipeline, delivery string, body []byte) {
 	var payload githubPushPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode push payload: %w", err))
@@ -363,14 +370,14 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		Repo:   payload.Repository.FullName,
 	}
 
-	if s.githubDeliveryAlreadyRan(w, r, pipeline, delivery, body) {
+	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
 	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github push") {
 		return
 	}
 
-	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
+	if err := tenant.CreateTrigger(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
 		TriggerSource:   trigger.Source,
@@ -387,7 +394,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		CreatedAt:        time.Now(),
 	}); err != nil {
 		if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
-			s.writeGitHubDuplicate(w, r, pipeline, delivery, body)
+			s.writeGitHubDuplicate(w, r, tenant, pipeline, delivery, body)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
@@ -448,7 +455,7 @@ var defaultPullRequestActions = map[string]struct{}{
 	"reopened":    {},
 }
 
-func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) {
+func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, pipeline, delivery string, body []byte) {
 	var payload githubPullRequestPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode pull_request payload: %w", err))
@@ -491,14 +498,14 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	}
 	trigger.PullRequest = sparkwing.PullRequestFromEnv(triggerEnv)
 
-	if s.githubDeliveryAlreadyRan(w, r, pipeline, delivery, body) {
+	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
 	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github pull_request") {
 		return
 	}
 
-	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
+	if err := tenant.CreateTrigger(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
 		TriggerSource:   trigger.Source,
@@ -515,7 +522,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		CreatedAt:        time.Now(),
 	}); err != nil {
 		if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
-			s.writeGitHubDuplicate(w, r, pipeline, delivery, body)
+			s.writeGitHubDuplicate(w, r, tenant, pipeline, delivery, body)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
@@ -558,8 +565,8 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 
 // safety: a redelivery is answered with the run it already started before
 // anything is charged, so GitHub retrying a timeout never spends the cap.
-func (s *Server) githubDeliveryAlreadyRan(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) bool {
-	existing, err := s.store.FindTriggerByWebhookReplay(
+func (s *Server) githubDeliveryAlreadyRan(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, pipeline, delivery string, body []byte) bool {
+	existing, err := tenant.FindTriggerByWebhookReplay(
 		r.Context(), githubWebhookReplayKey(pipeline, body), delivery)
 	if err != nil || existing == nil {
 		return false

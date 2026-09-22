@@ -48,7 +48,7 @@ func (f *fakeLauncher) Launch(_ context.Context, s store.CronSchedule, due time.
 	return id, nil
 }
 
-func (f *fakeLauncher) Active(_ context.Context, runID string, staleAfter time.Duration) (bool, error) {
+func (f *fakeLauncher) Active(_ context.Context, _ store.CronSchedule, runID string, staleAfter time.Duration) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.staleAfter = append(f.staleAfter, staleAfter)

@@ -27,7 +27,7 @@ func (l *recordingLauncher) Launch(_ context.Context, s store.CronSchedule, due 
 	return id, nil
 }
 
-func (l *recordingLauncher) Active(_ context.Context, runID string, _ time.Duration) (bool, error) {
+func (l *recordingLauncher) Active(_ context.Context, _ store.CronSchedule, runID string, _ time.Duration) (bool, error) {
 	return l.active[runID], nil
 }
 
@@ -598,14 +598,14 @@ func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	fresh, err := launcher.Active(ctx, runID, time.Hour)
+	fresh, err := launcher.Active(ctx, sched, runID, time.Hour)
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
 	if !fresh {
 		t.Error("a run queued a moment ago is not active")
 	}
-	stale, err := launcher.Active(ctx, runID, time.Nanosecond)
+	stale, err := launcher.Active(ctx, sched, runID, time.Nanosecond)
 	if err != nil {
 		t.Fatalf("Active: %v", err)
 	}
