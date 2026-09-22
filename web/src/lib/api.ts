@@ -71,7 +71,18 @@ function endSession() {
   window.location.assign(loginUrlFor(pathname || "/", search || ""));
 }
 
-export function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+// A route whose refusal answers a question about the caller, such as /me for an
+// operator signed in with a password, passes speaksForSession: false so its 401
+// never reads as the dashboard session ending, which would reload in a loop.
+export interface AuthFetchOptions {
+  speaksForSession?: boolean;
+}
+
+export function authFetch(
+  url: string,
+  opts: RequestInit = {},
+  { speaksForSession = true }: AuthFetchOptions = {},
+): Promise<Response> {
   if (_sessionEnded) {
     return Promise.reject(new Error("session ended -- sign in again"));
   }
@@ -92,6 +103,9 @@ export function authFetch(url: string, opts: RequestInit = {}): Promise<Response
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;
         setConnectionStatus("ok");
+        return res;
+      }
+      if (!speaksForSession && [401, 403, 404].includes(res.status)) {
         return res;
       }
       if (res.status === 401 && sessionMode()) {
@@ -1201,18 +1215,15 @@ export interface CronHealth {
 
 export type CronState = "armed" | "paused" | "undeclared";
 
-export type CronOutcome = "" | "fired" | "skipped_overlap" | "missed" | "failed";
+export type CronOutcome =
+  "" | "fired" | "skipped_overlap" | "missed" | "failed";
 
 // Where a schedule is evaluated. This dashboard reads one host's store, so
 // every row it serves is local.
 export type CronWhere = "local" | "controller";
 
 export type CronLockState =
-  | "follows"
-  | "pinned"
-  | "ahead"
-  | "dirty"
-  | "missing";
+  "follows" | "pinned" | "ahead" | "dirty" | "missing";
 
 export interface CronLock {
   // Ref, binary and digest are empty while a schedule follows the checkout.

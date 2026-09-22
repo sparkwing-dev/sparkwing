@@ -50,6 +50,18 @@ export function assignableRoles(role: Role | undefined): Role[] {
     .sort((a, b) => roleRank[b] - roleRank[a]);
 }
 
+export const lastOwnerNote = "A team needs an owner - promote someone first";
+
+// The controller refuses to demote or remove the last owner; the page says so
+// before the click rather than after it.
+export function isLastOwner(
+  members: { user_id: string; role: Role }[],
+  userID: string,
+): boolean {
+  const owners = members.filter((m) => m.role === "owner");
+  return owners.length === 1 && owners[0].user_id === userID;
+}
+
 // The store keys tenants by slug and uses it in hostnames, so it is DNS-safe.
 export function teamSlugProblem(slug: string): string | null {
   if (slug.length < 2 || slug.length > 40) return "Use 2 to 40 characters.";
@@ -128,13 +140,30 @@ export async function getCapabilities(): Promise<Capabilities | null> {
   }
 }
 
-export async function getMe(): Promise<Me | null> {
+export type MeResult =
+  { kind: "member"; me: Me } | { kind: "operator" } | { kind: "unavailable" };
+
+// A password-signed-in operator holds no team identity, and the controller
+// refuses /me for that session; the refusal means "no account", not "signed out".
+export async function getMe(): Promise<MeResult> {
   try {
-    const res = await authFetch("/api/v1/me");
-    if (!res.ok) return null;
-    return (await res.json()) as Me;
+    const res = await authFetch("/api/v1/me", {}, { speaksForSession: false });
+    if ([401, 403, 404].includes(res.status)) return { kind: "operator" };
+    if (!res.ok) return { kind: "unavailable" };
+    const body = (await res.json()) as Partial<Me> & { operator?: boolean };
+    if (!body.user || !body.active_team || body.operator) {
+      return { kind: "operator" };
+    }
+    return {
+      kind: "member",
+      me: {
+        ...(body as Me),
+        memberships: body.memberships ?? [],
+        invitations: body.invitations ?? [],
+      },
+    };
   } catch {
-    return null;
+    return { kind: "unavailable" };
   }
 }
 

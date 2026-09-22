@@ -44,6 +44,15 @@ unlock.
   and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
   whose state does not match that cookie is refused. The nav shows the active
   team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
+- **web:** Sign in with Google or GitHub on a multi-team controller
+  When `GET /api/v1/capabilities` reports `teams.enabled`, the sign-in page
+  offers each provider `auth.providers` lists, `google` with Google's standard
+  dark button and `github` beside it. `GET /auth/<provider>/start` and
+  `GET /auth/<provider>/callback` run the flow on the dashboard host with the
+  provider, state and PKCE verifier in a short-lived `__Host-sw_oauth` cookie,
+  and a callback whose state or provider does not match that cookie is refused.
+  The nav shows the active team and your role and switches teams. See
+  [auth](docs/auth.md#google-and-github-sign-in).
 
 - **web:** team pages on a multi-team controller
   `/team` lists members, invites by email with a copyable accept link, revokes
@@ -339,6 +348,14 @@ unlock.
 
 ### Fixed
 
+- **web:** a password-signed-in operator no longer reloads the dashboard forever
+  The controller refuses `GET /api/v1/me` for an operator session, which holds
+  no team identity, and the dashboard read that `401` as its own session ending
+  and sent the tab to sign-in, which sent it straight back. A refused `/me` now
+  means "no team": the team switcher and team pages stay hidden and nothing
+  reloads. The members page also disables Leave, demote and remove on a team's
+  last owner, naming why.
+
 - **store:** minted tokens, created nodes and created triggers record the team
   that owns them. Schema 49 put a `team` column on all three tables and no
   writer set it, so every row landed on the `default` team whatever team it was
@@ -449,6 +466,13 @@ unlock.
   optional `controller.LegacyCipher` opens envelopes sealed before team
   binding so the startup reseal can bring them forward. See the
   [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
+- **controller:** a multi-team controller never offers the first-admin web signup
+  With an active multi-team license, `GET /api/v1/auth/bootstrap-needed` answers
+  `false` and the unauthenticated first-user `POST /api/v1/users` answers `403`,
+  so the first visitor to an internet-facing controller cannot make themselves
+  its operator. Provision the operator with `--bootstrap-admin-token-file` or
+  `SPARKWING_BOOTSTRAP_ADMIN_TOKEN`. A single-team install keeps the signup.
+
 - **web:** a signed-in dashboard reaches the controller as that user
   Under `--require-login` the proxy and the dashboard's own run reads sent the
   web pod's service token, so on a multi-team controller every browser read

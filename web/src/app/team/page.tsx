@@ -23,6 +23,8 @@ import {
   canManageTeam,
   changeMemberRole,
   inviteMember,
+  isLastOwner,
+  lastOwnerNote,
   listInvitations,
   listMembers,
   removeMember,
@@ -112,6 +114,7 @@ function Members({ me }: { me: Me }) {
           <ul>
             {members.map((m) => {
               const self = m.user_id === me.user.id;
+              const lastOwner = isLastOwner(members, m.user_id);
               return (
                 <li
                   key={m.user_id}
@@ -138,7 +141,8 @@ function Members({ me }: { me: Me }) {
                       aria-label={`Role for ${m.email}`}
                       className={`${inputClass} py-1 text-xs`}
                       value={m.role}
-                      disabled={busy !== null}
+                      disabled={busy !== null || lastOwner}
+                      title={lastOwner ? lastOwnerNote : undefined}
                       onChange={(e) =>
                         run(
                           m.user_id,
@@ -161,7 +165,8 @@ function Members({ me }: { me: Me }) {
                     <button
                       type="button"
                       className={quietButtonClass}
-                      disabled={busy !== null}
+                      disabled={busy !== null || lastOwner}
+                      title={lastOwner ? lastOwnerNote : undefined}
                       onClick={() => leave(m)}
                     >
                       Leave
@@ -170,7 +175,8 @@ function Members({ me }: { me: Me }) {
                     <button
                       type="button"
                       className={dangerButtonClass}
-                      disabled={busy !== null}
+                      disabled={busy !== null || lastOwner}
+                      title={lastOwner ? lastOwnerNote : undefined}
                       onClick={() => {
                         if (
                           window.confirm(

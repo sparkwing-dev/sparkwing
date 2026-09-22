@@ -7,6 +7,7 @@ export type TeamState =
   | { status: "loading" }
   | { status: "single-team" }
   | { status: "ready"; me: Me }
+  | { status: "operator" }
   | { status: "unavailable" };
 
 let loaded: Promise<TeamState> | null = null;
@@ -16,7 +17,8 @@ async function readTeamState(): Promise<TeamState> {
   const caps = await getCapabilities();
   if (!teamsEnabled(caps)) return { status: "single-team" };
   const me = await getMe();
-  return me ? { status: "ready", me } : { status: "unavailable" };
+  if (me.kind === "member") return { status: "ready", me: me.me };
+  return { status: me.kind };
 }
 
 // One read per page load is shared by the nav and the page beneath it.
