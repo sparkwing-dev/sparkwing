@@ -76,15 +76,36 @@ func TestHostedCIProvesThePostgresSuitesRanAgainstARealDatabase(t *testing.T) {
 		"SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
 		`--health-cmd "pg_isready -U postgres"`,
 		"go test ./pkg/store ./internal/backend ./internal/orchestrator",
-		"go test -v -count=1 -run 'Postgres|Pg' ./pkg/store ./internal/backend ./internal/orchestrator",
+		"go test -v -count=1 -run 'Postgres|Pg|BackupRestoreDrill' ./pkg/store ./internal/backend ./internal/orchestrator",
 		`grep -q -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log"`,
 		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
 		"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
 	)
 	proveAt := strings.Index(job, "- name: Prove the Postgres-gated tests did not skip")
-	failAt := strings.Index(job, "exit 1")
+	failAt := strings.LastIndex(job, "exit 1")
 	if proveAt < 0 || failAt < proveAt {
 		t.Fatal("the lane reports a Postgres skip without failing on it")
+	}
+}
+
+// The backup drill dumps and restores a live database, so it needs client
+// binaries at least as new as the service. Without them its Postgres
+// subtest skips, and a skip is what the no-skip step exists to catch.
+func TestHostedCIGivesTheBackupDrillAPostgres17Client(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/ci.yaml")
+	job := workflowJob(t, body, "postgres")
+	requireWorkflowText(t, job,
+		"SPARKWING_PG_BIN: /usr/lib/postgresql/17/bin",
+		"https://www.postgresql.org/media/keys/ACCC4CF8.asc",
+		"apt-get install -y --no-install-recommends postgresql-client-17",
+		`major="$("$SPARKWING_PG_BIN/pg_dump" --version | awk '{print $3}' | cut -d. -f1)"`,
+		"BackupRestoreDrill",
+	)
+	installAt := strings.Index(job, "- name: Install a Postgres 17 client")
+	versionAt := strings.Index(job, "- name: Prove the client is no older than the server")
+	suitesAt := strings.Index(job, "- name: Run the Postgres conformance suites")
+	if installAt < 0 || versionAt < installAt || suitesAt < versionAt {
+		t.Fatal("the lane runs the Postgres suites before it has a client of a proven version")
 	}
 }
 

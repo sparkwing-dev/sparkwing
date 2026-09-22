@@ -1,9 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+usage: check-release-schema-parity.sh --asset <binary> [--reference <binary>] [--repo <dir>]
+
+Asserts a built release asset embeds the same runs-store schema version as the
+tagged source compiles. A version string must imply identical code across both
+install paths, the GitHub-Release binary and `go install ...@tag`, so an asset
+built from a different commit than the tag can ship a schema the tag never had.
+
+  --asset      the release binary whose embedded schema is verified. Required.
+  --reference  a binary independently compiled from the tagged tree. When
+               omitted, one is built from --repo via `go build ./cmd/sparkwing`.
+  --repo       the checkout the reference is built from. Defaults to the
+               repository this script lives in.
+EOF
+}
+
 die() {
   echo "schema-parity: $*" >&2
   exit 1
+}
+
+# safety: an argument this script cannot act on leaves it with nothing to
+# verify, and a check that verified nothing must not answer like one that
+# passed. Exit 2 separates that from a parity failure at 1.
+usage_die() {
+  echo "schema-parity: $*" >&2
+  usage >&2
+  exit 2
 }
 
 ASSET=""
@@ -12,16 +38,16 @@ REPO=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --asset) ASSET="${2:-}"; shift 2 ;;
-    --reference) REFERENCE="${2:-}"; shift 2 ;;
-    --repo) REPO="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-    *) die "unknown flag: $1 (see --help)" ;;
+    --asset) [[ $# -ge 2 ]] || usage_die "--asset needs a value"; ASSET="$2"; shift 2 ;;
+    --reference) [[ $# -ge 2 ]] || usage_die "--reference needs a value"; REFERENCE="$2"; shift 2 ;;
+    --repo) [[ $# -ge 2 ]] || usage_die "--repo needs a value"; REPO="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage_die "unknown flag: $1" ;;
   esac
 done
 
 command -v jq >/dev/null 2>&1 || die "jq is required"
-[[ -n "$ASSET" ]] || die "--asset is required"
+[[ -n "$ASSET" ]] || usage_die "--asset is required"
 [[ -x "$ASSET" ]] || die "asset is not an executable file: $ASSET"
 
 embedded_schema() {

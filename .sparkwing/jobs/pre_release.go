@@ -152,6 +152,7 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "shell-portability", run: preReleaseShell("bash bin/check-shell-test.sh")},
 		{id: "hosted-mutation-guard", run: preReleaseShell("bash bin/check-hosted-gate-clean-test.sh")},
 		{id: "vulnerability-script", run: preReleaseShell("bash bin/check-release-binary-vulnerabilities-test.sh")},
+		{id: "schema-parity-script", run: preReleaseShell("bash bin/check-release-schema-parity-test.sh")},
 		{id: "changelog-script", run: preReleaseShell("bash bin/check-changelog-test.sh")},
 		{id: "installer-report", run: preReleaseShell("bash bin/install-test.sh")},
 		{id: "service-installer", run: preReleaseShell("bash bin/service-install-test.sh")},

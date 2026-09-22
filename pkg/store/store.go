@@ -2250,6 +2250,17 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		_, err := tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN IF EXISTS csrf_token`)
 		return err
 	case 22:
+		// safety: a store built by v1's current DDL already keys secrets on
+		// (name, pipeline), so adding (name, repo) here points the key at a
+		// second column, and v48's rename then skips because its target
+		// name is taken.
+		secretCols, err := columnsOfTable(ctx, tx, "secrets")
+		if err != nil {
+			return err
+		}
+		if secretCols["pipeline"] {
+			return nil
+		}
 		for _, stmt := range secretRepoScopePostgres {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return err
@@ -3345,7 +3356,10 @@ type Run struct {
 	// "my-app"). It is metadata for display and filtering, and it
 	// grants nothing, because no step proves the submitter owns the
 	// repository it names.
-	DeclaredRepo string `json:"declared_repo,omitempty"`
+	// safety: the wire name stays `repo` because a CLI and a controller
+	// version independently, and a released client sending `repo` meets a
+	// DisallowUnknownFields decoder.
+	DeclaredRepo string `json:"repo,omitempty"`
 	// RepoURL is `git remote get-url origin` at trigger time.
 	RepoURL string `json:"repo_url,omitempty"`
 	// GithubOwner/Repo: parsed when origin is github.

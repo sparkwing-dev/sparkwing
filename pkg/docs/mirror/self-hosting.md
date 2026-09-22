@@ -80,6 +80,13 @@ The controller reads the Secret as `SPARKWING_PG_URL`. Keep the DSN out of Helm
 values and command arguments. Initialize and verify the PostgreSQL data before
 starting the controller against it.
 
+### Backups and upgrades
+
+[Backup, restore, and upgrade](backup-restore.md) covers both database
+shapes: what a restore needs beside the database, how to prove a backup
+is good before relying on it, and what rollback means at each stage of a
+controller upgrade.
+
 ## Migrating from the Docker Compose example
 
 Treat the Helm installation as a new deployment. Sparkwing provides no

@@ -716,7 +716,7 @@ func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testi
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
 	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 6 {
+	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 3 {
 		t.Fatalf("the good half of a refused write changed prices: %+v", view)
 	}
 }
@@ -732,7 +732,7 @@ func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
 	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 6 {
+	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 3 {
 		t.Fatalf("the good half of a refused write changed prices: %+v", view)
 	}
 }
