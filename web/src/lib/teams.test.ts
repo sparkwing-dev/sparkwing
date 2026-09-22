@@ -5,7 +5,14 @@ type Teams = typeof import("./teams");
 let teams!: Teams;
 
 type Runtime = {
-  window?: { __SPARKWING_REQUIRE_LOGIN__?: string };
+  window?: {
+    __SPARKWING_REQUIRE_LOGIN__?: string;
+    location?: {
+      pathname: string;
+      search: string;
+      assign: (url: string) => void;
+    };
+  };
   document?: { cookie: string };
   fetch: typeof fetch;
 };
@@ -89,6 +96,19 @@ describe("role gates", () => {
   });
 });
 
+describe("isLastOwner", () => {
+  const ada = { user_id: "ada", role: "owner" as const };
+  const grace = { user_id: "grace", role: "editor" as const };
+  it("marks the sole owner and no one else", () => {
+    assert.equal(teams.isLastOwner([ada, grace], "ada"), true);
+    assert.equal(teams.isLastOwner([ada, grace], "grace"), false);
+  });
+  it("frees an owner once another owner exists", () => {
+    const linus = { user_id: "linus", role: "owner" as const };
+    assert.equal(teams.isLastOwner([ada, grace, linus], "ada"), false);
+  });
+});
+
 describe("team slugs", () => {
   it("accepts DNS-safe slugs and names what is wrong with the rest", () => {
     assert.equal(teams.teamSlugProblem("acme-ci"), null);
@@ -131,9 +151,46 @@ describe("switchTeam", () => {
 });
 
 describe("getMe", () => {
-  it("returns null rather than throwing when the controller has no /me", async () => {
-    respond = () => new Response("not found", { status: 404 });
-    assert.equal(await teams.getMe(), null);
+  it("reads a password operator's refused /me as no team, never as a signed-out session", async () => {
+    const assigned: string[] = [];
+    runtime.window = {
+      __SPARKWING_REQUIRE_LOGIN__: "true",
+      location: {
+        pathname: "/",
+        search: "",
+        assign: (url: string) => assigned.push(url),
+      },
+    };
+    const { getConnectionStatus } = await import("./api");
+    for (const status of [401, 403, 404]) {
+      respond = () => new Response("authentication required", { status });
+      assert.deepEqual(await teams.getMe(), { kind: "operator" });
+    }
+    assert.deepEqual(assigned, [], "a /me refusal sent the tab to sign-in");
+    assert.notEqual(getConnectionStatus(), "session-expired");
+
+    respond = () => new Response("[]", { status: 200 });
+    await teams.listMembers();
+    assert.equal(calls.at(-1)?.url, "/api/v1/team/members");
+  });
+
+  it("reads an operator answer from the controller as no team", async () => {
+    respond = () =>
+      new Response(JSON.stringify({ user: null, operator: true }), {
+        status: 200,
+      });
+    assert.deepEqual(await teams.getMe(), { kind: "operator" });
+  });
+
+  it("reads a member's /me", async () => {
+    const me = {
+      user: { id: "u1", email: "a@x", name: "A" },
+      active_team: { slug: "acme", display_name: "Acme", role: "owner" },
+      memberships: [],
+      invitations: [],
+    };
+    respond = () => new Response(JSON.stringify(me), { status: 200 });
+    assert.deepEqual(await teams.getMe(), { kind: "member", me });
   });
 });
 

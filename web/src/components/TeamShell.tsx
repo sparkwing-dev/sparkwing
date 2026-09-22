@@ -125,6 +125,14 @@ export default function TeamShell({
       </Notice>
     );
   }
+  if (state.status === "operator") {
+    return (
+      <Notice>
+        You are signed in as the deployment operator, which belongs to no team.
+        Sign in with Google or GitHub to manage a team.
+      </Notice>
+    );
+  }
   if (state.status === "unavailable") {
     return (
       <Notice>

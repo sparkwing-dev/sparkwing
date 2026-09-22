@@ -268,6 +268,12 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		s.handleCreateUser(w, r)
 		return
 	}
+	// safety: a multi-team controller faces the internet, so the first web visitor
+	// must not become its operator; the operator arrives through the bootstrap admin token.
+	if s.MultiTeam() {
+		writeError(w, http.StatusForbidden, errors.New("a multi-team controller provisions its operator with the bootstrap admin token, not a web signup"))
+		return
+	}
 	var req createUserReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -312,7 +318,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleBootstrapNeeded(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{
-		"needed": !s.AuthEnabled() && s.bootstrapAllowed(),
+		"needed": !s.AuthEnabled() && !s.MultiTeam() && s.bootstrapAllowed(),
 	})
 }
 
