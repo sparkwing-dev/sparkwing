@@ -63,7 +63,6 @@ var unportedSQL = []string{
 	"(*Store).CreateApproval",
 	"(*Store).CreateDebugPause",
 	"(*Store).CreateFirstUser",
-	"(*Store).CreateNode",
 	"(*Store).CreateSession",
 	"(*Store).CreateTokenIfNoneExist",
 	"(*Store).CreateUser",
@@ -253,7 +252,6 @@ var unportedSQL = []string{
 	"bridgeLegacyFleetSQLite",
 	"claimedExecutorOffer",
 	"clearCreditExhaustionAnchorTx",
-	"createTriggerTx",
 	"creditExhaustionAnchorTx",
 	"creditGrantByReferenceTx",
 	"cronFireAlreadyRecorded",
@@ -264,7 +262,6 @@ var unportedSQL = []string{
 	"executorPrepareCandidateQuery",
 	"gatherRunAnnotations",
 	"getCronScheduleTx",
-	"insertTokenRow",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
 	"loadExecutorUsageTx",
@@ -290,7 +287,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 249
+const unportedSQLSize = 246
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

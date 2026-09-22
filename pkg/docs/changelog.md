@@ -48,6 +48,13 @@ unlock.
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
 
+- **store:** the tenant handle mints tokens and writes triggers.
+  `Tenant.CreateToken`, `Tenant.CreateTokenWith`, `Tenant.CreateTrigger` and
+  `Tenant.CreateTriggerWithRun` write into the handle's team, and `store.Token`
+  carries a `Team` field that a bearer lookup reads back, so a request can
+  resolve which team its credential acts for. The `*Store` twins still write
+  the `default` team, so a single-tenant install is unchanged.
+
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
   and says what rollback means at each stage of an upgrade. The store suite
@@ -124,6 +131,16 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **store:** minted tokens, created nodes and created triggers record the team
+  that owns them. Schema 49 put a `team` column on all three tables and no
+  writer set it, so every row landed on the `default` team whatever team it was
+  created for, and a predicate reading the column answered about the `default`
+  team only. A token now carries the team it was minted for, and a rotation
+  hands that team to the replacement; a node takes the team off the run it
+  belongs to, so it cannot disagree with its run; a trigger takes the team from
+  the handle that created it. The automatic agent-loss retry copies the source
+  run's team onto the retry run and its trigger for the same reason.
 
 - **store:** the credit balance and credit exhaustion are per team. The balance
   summed every grant and every charge on the controller with no team predicate,

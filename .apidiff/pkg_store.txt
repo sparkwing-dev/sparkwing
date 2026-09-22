@@ -1526,6 +1526,14 @@ func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, no
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
+func (t *Tenant) CreateToken(
+	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
+) (string, *Token, error)
+func (t *Tenant) CreateTokenWith(
+	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
+) (string, *Token, error)
+func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error
+func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
@@ -1570,8 +1578,10 @@ func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
-	Hash       string
-	Prefix     string
+	Hash   string
+	Prefix string
+
+	Team       Team
 	Principal  string
 	Kind       string
 	Scopes     []string
