@@ -3,6 +3,7 @@ package jobs
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,14 +55,37 @@ func requireWorkflowText(t *testing.T, body string, wants ...string) {
 	}
 }
 
+// safety: an integration branch joins the list, so the contract is that main
+// is on it rather than that it is the only name.
+func requireWorkflowPushBranches(t *testing.T, body string, want ...string) {
+	t.Helper()
+	_, after, ok := strings.Cut(body, "  push:\n    branches: [")
+	if !ok {
+		t.Fatal("hosted CI has no push trigger carrying a branch list")
+	}
+	list, _, ok := strings.Cut(after, "]")
+	if !ok {
+		t.Fatal("hosted CI push branch list is unterminated")
+	}
+	have := strings.Split(list, ",")
+	for i := range have {
+		have[i] = strings.TrimSpace(have[i])
+	}
+	for _, name := range want {
+		if !slices.Contains(have, name) {
+			t.Errorf("hosted CI push branches = %v, want %s among them", have, name)
+		}
+	}
+}
+
 func TestHostedCITriggersCanonicalReadOnlyChecks(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/ci.yaml")
 	requireWorkflowText(t, body,
 		"  pull_request:\n",
-		"  push:\n    branches: [main]\n",
 		"permissions:\n  contents: read\n",
 		"uses: ./.github/workflows/canonical-gates.yaml",
 	)
+	requireWorkflowPushBranches(t, body, "main")
 	if strings.Contains(body, ": write") {
 		t.Fatal("hosted CI grants a write permission")
 	}
