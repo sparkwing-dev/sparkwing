@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
@@ -29,6 +30,11 @@ type RunnerPresence struct {
 	// that advertised no capacity reports none, so it holds nothing back: an
 	// unknown ceiling is not evidence of room.
 	FreeSlots int
+	// TokenPrefix is the credential the runner last claimed with. The store
+	// reads the runner's team off that credential's row, so a live runner of
+	// another team never holds a node back; empty is the unauthenticated
+	// local runner, which belongs to [DefaultTeam].
+	TokenPrefix string
 }
 
 // ClaimPlacement is the local-first policy applied to one legacy claim. A node
@@ -91,6 +97,71 @@ func (p ClaimPlacement) decide(needs, nodePrefers []string, runner claimLabels, 
 	default:
 		return placementDecision{reason: PlacementFallback, nodeOwned: nodeOwned}
 	}
+}
+
+// safety: another team's runner can never claim this node, so it earns no
+// hold. Its team comes off its token row, never off what it asserted, and a
+// runner whose team cannot be established holds nothing back.
+func (s *Store) placementForTeam(ctx context.Context, p ClaimPlacement, team Team) (ClaimPlacement, error) {
+	if p.Hold <= 0 || len(p.Live) == 0 {
+		return p, nil
+	}
+	teams, err := s.runnerTeams(ctx, p.Live)
+	if err != nil {
+		return ClaimPlacement{}, err
+	}
+	live := make([]RunnerPresence, 0, len(p.Live))
+	var sole *Team
+	for _, runner := range p.Live {
+		owner := teams[runner.TokenPrefix]
+		if owner == "" && sole == nil {
+			// safety: a prefix no token row backs belongs to the sole team of a
+			// single-team install, exactly as [Store.claimScope] places it.
+			scope, err := s.soleTeamScope(ctx)
+			if err != nil && !errors.Is(err, ErrClaimantHasNoTeam) {
+				return ClaimPlacement{}, err
+			}
+			sole = &scope.team
+		}
+		if owner == "" {
+			owner = *sole
+		}
+		if owner != "" && owner == team {
+			live = append(live, runner)
+		}
+	}
+	p.Live = live
+	return p, nil
+}
+
+// safety: an unauthenticated runner is the local path, which the tenant
+// migration put in [DefaultTeam]; a prefix no row backs maps to no team.
+func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (map[string]Team, error) {
+	teams := map[string]Team{"": DefaultTeam}
+	var prefixes []any
+	for _, runner := range live {
+		if _, seen := teams[runner.TokenPrefix]; !seen {
+			teams[runner.TokenPrefix] = ""
+			prefixes = append(prefixes, runner.TokenPrefix)
+		}
+	}
+	if len(prefixes) == 0 {
+		return teams, nil
+	}
+	rows, err := s.query(ctx, `SELECT prefix, team FROM tokens WHERE prefix IN (`+
+		strings.TrimSuffix(strings.Repeat("?,", len(prefixes)), ",")+`)`, prefixes...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var prefix, owner string
+		if err := rows.Scan(&prefix, &owner); err != nil {
+			return nil, err
+		}
+		teams[prefix] = NormalizeTeam(Team(owner))
+	}
+	return teams, rows.Err()
 }
 
 // safety: a runner that cannot execute the node is no reason to withhold it

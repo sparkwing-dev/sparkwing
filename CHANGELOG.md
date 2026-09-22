@@ -67,7 +67,10 @@ unlock.
   its token was minted in. A credential no token row backs claims nothing once
   a second team is registered and reports the new `ErrClaimantHasNoTeam`; a
   single-team install, which is every self-hosted controller, behaves exactly
-  as it did.
+  as it did. The local-first placement hold counts only live runners of the
+  node's own team, read off each runner's token row
+  (`RunnerPresence.TokenPrefix`), so another team's laptop advertising the
+  preferred label no longer parks a node its own cloud runner could take.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

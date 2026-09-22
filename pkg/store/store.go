@@ -5407,6 +5407,10 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
+	placement, err = s.placementForTeam(ctx, placement, scope.team)
+	if err != nil {
+		return nil, err
+	}
 
 	for range maxClaimAttempts {
 		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm, scope)

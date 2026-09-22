@@ -96,11 +96,13 @@ var ErrNoTeam = errors.New("store: team is required")
 //
 //   - Reapers and sweeps run for the deployment. An expiry sweep that
 //     only reaped one team would leave every other team's leases held.
-//   - Dispatch and claim are cross-team by construction. An executor
-//     enrolls with the deployment and is offered work from every team on
-//     it, so ClaimNextReadyNode, ClaimNextTrigger and the offer and award
-//     path cannot take a team and stay on the operator handle. The team
-//     of the work claimed comes off the row, not off the caller.
+//   - Claims stay on *Store but are never cross-team. ClaimNextReadyNode,
+//     ClaimNamedNode, ClaimNextTriggerFor, ClaimSpecificTriggerFor and the
+//     executor offer and award path take no team argument because the team
+//     comes off the claimant's own token row (claimScope), never off the
+//     caller or the request. A metered token is one team's like any other,
+//     and no credential reads every team's queue. The placement hold counts
+//     only live runners of the claim's team.
 //   - Migration reads and writes every row by definition.
 //
 // tenant_runs.go is the worked example for the scoped half.

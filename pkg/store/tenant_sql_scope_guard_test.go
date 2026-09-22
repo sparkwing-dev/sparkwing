@@ -26,6 +26,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).awardScannedNode": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
+	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
+		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"award and the read after it are of the row the scoped select just locked",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
