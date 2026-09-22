@@ -101,6 +101,12 @@ unlock.
 - **store:** an assisted executor's offer takes its run's row lock before the
   run's event-sequence lock, the order a deadline round takes them in, so an
   offer and a claim round on one run no longer deadlock on PostgreSQL.
+- **store:** stored events are capped per event and per run whether or not a
+  storage quota tier is configured: `DefaultEventLimits` allows 256 KiB per
+  event and 64 MiB per run, `Store.SetEventLimits` replaces them (zero lifts
+  a cap), and `AppendEventCharged` refuses an event past either with a
+  `StorageQuotaError` naming `event_bytes` or `event_bytes_per_run`, which the
+  controller answers with 413.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,

@@ -782,6 +782,9 @@ func (s *Store) AppendEventCharged(
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
+	if err := refuseEventOverLimitsTx(ctx, tx, principal, runID, int64(len(payload))); err != nil {
+		return 0, err
+	}
 	if err := s.chargeStorageTx(ctx, tx, principal, runID, int64(len(payload)), 0, time.Now().UTC()); err != nil {
 		return 0, err
 	}

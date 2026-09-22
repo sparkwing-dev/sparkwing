@@ -473,6 +473,7 @@ const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
+var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20}
 const DefaultLeaseDuration = 3 * time.Minute
 const DefaultTeam Team = "default"
 const DefaultWarmCPUClassCores = 2
@@ -534,6 +535,10 @@ const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
 const EventKindCreditsUnpriced = "credits_unpriced_class"
+type EventLimits struct {
+	MaxBytesPerEvent int64
+	MaxBytesPerRun   int64
+}
 type ExecutionAttempt struct {
 	RunID            string
 	NodeID           string
@@ -1176,6 +1181,8 @@ type StorageChargeSweep struct {
 }
 const StorageLimitBytesPerMonth = "bytes_per_month"
 const StorageLimitBytesPerRun = "bytes_per_run"
+const StorageLimitEventBytes = "event_bytes"
+const StorageLimitEventBytesPerRun = "event_bytes_per_run"
 const StorageLimitObjectsPerRun = "objects_per_run"
 func StorageMonth(t time.Time) string
 const StoragePrincipalMaxLen = 256
@@ -1319,6 +1326,7 @@ func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Executor) error
+func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentity, name string) (Executor, error)
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
@@ -1476,6 +1484,7 @@ func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared
 func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
 func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
+func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (s *Store) SetNodeArtifactManifestCharged(
 	ctx context.Context, principal, runID, nodeID, manifestDigest string,
