@@ -27,6 +27,19 @@ type Capabilities struct {
 	Storage  CapabilitiesStorage `json:"storage"`
 	Features []string            `json:"features"`
 	ReadOnly bool                `json:"read_only,omitempty"`
+
+	// Teams and Auth come from a controller that serves identity; a local
+	// install leaves both nil so its capabilities read as before.
+	Teams *CapabilitiesTeams `json:"teams,omitempty"`
+	Auth  *CapabilitiesAuth  `json:"auth,omitempty"`
+}
+
+type CapabilitiesTeams struct {
+	Enabled bool `json:"enabled"`
+}
+
+type CapabilitiesAuth struct {
+	Providers []string `json:"providers"`
 }
 
 type CapabilitiesStorage struct {

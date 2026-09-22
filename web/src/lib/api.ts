@@ -71,7 +71,7 @@ function endSession() {
   window.location.assign(loginUrlFor(pathname || "/", search || ""));
 }
 
-function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+export function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
   if (_sessionEnded) {
     return Promise.reject(new Error("session ended -- sign in again"));
   }

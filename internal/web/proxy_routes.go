@@ -42,6 +42,25 @@ var proxyRoutes = []proxyRoute{
 	{"DELETE /api/v1/runs/{id}", controller.ScopeAdmin},
 }
 
+// safety: a membership role, which the controller resolves on every request for the
+// session's active team, decides these routes, so the dashboard adds no scope of its own.
+var identityProxyRoutes = []proxyRoute{
+	{"GET /api/v1/me", ""},
+	{"POST /api/v1/me/active-team", ""},
+	{"POST /api/v1/teams", ""},
+	{"PATCH /api/v1/team", ""},
+	{"GET /api/v1/team/members", ""},
+	{"PATCH /api/v1/team/members/{userID}", ""},
+	{"DELETE /api/v1/team/members/{userID}", ""},
+	{"GET /api/v1/team/invitations", ""},
+	{"POST /api/v1/team/invitations", ""},
+	{"DELETE /api/v1/team/invitations/{id}", ""},
+	{"POST /api/v1/invitations/{id}/accept", ""},
+	{"GET /api/v1/team/runner-tokens", ""},
+	{"POST /api/v1/team/runner-tokens", ""},
+	{"DELETE /api/v1/team/runner-tokens/{prefix}", ""},
+}
+
 // safety: the dashboard reads logs on behalf of a browser session, so the logs bearer
 // never carries a delete or an append off the browser-facing listener.
 var logsProxyRoutes = []proxyRoute{
@@ -53,7 +72,7 @@ var logsProxyRoutes = []proxyRoute{
 
 func proxyAllowList(proxy http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	for _, route := range proxyRoutes {
+	for _, route := range append(slices.Clone(proxyRoutes), identityProxyRoutes...) {
 		mux.Handle(route.pattern, requireSessionScope(route.scope, proxy))
 	}
 	mux.HandleFunc("/api/v1/", routeNotProxied)
@@ -81,7 +100,7 @@ func routeNotProxied(w http.ResponseWriter, _ *http.Request) {
 func requireSessionScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := WebPrincipalFromContext(r.Context())
-		if !ok {
+		if !ok || scope == "" {
 			next.ServeHTTP(w, r)
 			return
 		}

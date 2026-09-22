@@ -624,6 +624,10 @@ reaches the upstream, so a signed-in tab cannot mint a token, read a secret, or
 create a user through the proxy. Both lists live in
 `internal/web/proxy_routes.go`, and a test holds each entry to the scope
 `pkg/controller/server.go` and `pkg/logs/server.go` register for that route.
+A third list forwards the identity and team routes (`/api/v1/me`,
+`/api/v1/teams`, `/api/v1/team/...`, invitation accept) with no dashboard
+scope, because a membership role decides them and the controller resolves that
+role on every request.
 
 A browser session carries the scopes of the user who signed in. The proxy
 checks them against the target route before forwarding, so an account holding
@@ -634,18 +638,43 @@ with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
 `admin` is rejected with `400`, and `sparkwing cluster users list` prints the
 scope set of every account.
 
-The web pod's own service token needs `runs.read` plus `logs.read`. Add
+Under `--require-login` the web pod reaches the controller as the signed-in
+user: the proxy and the pod's own run, node and event reads send
+`Authorization: Session <id>` for that browser's session, and never the pod's
+service token. On a multi-team controller a service token reads every team,
+so the session, which belongs to one user and one active team, is the only
+credential that keeps a browser inside its own team. The service token still
+authenticates the logs service, which accepts bearers only, and the services
+health probe.
+
+Without `--require-login` there is no session, and the web pod's own service
+token carries every request. It needs `runs.read` plus `logs.read`. Add
 `runs.control` where the UI cancels, retries, or releases a debug pause,
 `runs.write` where it submits a trigger, and `approvals.write` where it
-resolves approval gates. That token bounds what the
-proxy can reach at all; the session's scopes bound what one signed-in user
-reaches through it.
+resolves approval gates.
 
-Deleting a run from the dashboard needs `admin` on both sides, because the
-controller registers `DELETE /api/v1/runs/{id}` at `admin`: the web pod's token
-must carry `admin` and so must the signed-in account. Leave `admin` off that
-token where operators should delete runs with the CLI instead; the dashboard
-button then reports `delete needs the admin scope` and nothing is removed.
+Deleting a run from the dashboard needs `admin`, because the controller
+registers `DELETE /api/v1/runs/{id}` at `admin`: the signed-in account must
+carry it, or, without `--require-login`, the web pod's token. Without it the
+dashboard button reports `delete needs the admin scope` and nothing is removed.
+
+### Google sign-in
+
+When the controller's `GET /api/v1/capabilities` reports `teams.enabled` and
+lists `google` under `auth.providers`, the sign-in page offers "Sign in with
+Google". The flow runs through the dashboard host: `GET /auth/google/start`
+asks the controller for an authorize URL, a state and a PKCE verifier, keeps
+the state and verifier in a ten-minute `__Host-sw_oauth` cookie (`Secure`,
+`HttpOnly`, `SameSite=Lax`, `Path=/`), and redirects to Google. Google returns
+to `GET /auth/google/callback`, which refuses a callback whose `state` does
+not match that cookie, then has the controller exchange the code and sets the
+dashboard session cookies. Register
+`https://<dashboard-host>/auth/google/callback` as the OAuth client's redirect
+URI; the scheme follows the same TLS evidence as the CSRF origin check, so a
+dashboard behind a TLS-terminating proxy needs `--trusted-proxy-cidrs` or
+`--hsts`. The host is the one the browser used, so a local dashboard reached
+as `http://localhost:4343` uses `http://localhost:4343/auth/google/callback`,
+and reaching it as `127.0.0.1` sends a redirect URI Google does not recognize.
 
 `sparkwing-web --require-login` needs a controller session backend. Pass
 `--controller URL`, or select a `--profile` whose `controller.url` is set. A

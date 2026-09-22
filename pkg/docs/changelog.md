@@ -72,6 +72,22 @@ unlock.
   only public `https` mirrors under their URL-derived name, and is refused on
   seeding, refresh, archive, upload and admin routes. A team's bins count
   toward the store ceiling. The operator token is unchanged.
+- **web:** Sign in with Google on a multi-team controller
+  When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
+  provider, the sign-in page offers Google. `GET /auth/google/start` and
+  `GET /auth/google/callback` run the flow on the dashboard host with the state
+  and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
+  whose state does not match that cookie is refused. The nav shows the active
+  team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
+
+- **web:** team pages on a multi-team controller
+  `/team` lists members, invites by email with a copyable accept link, revokes
+  pending invitations, changes roles and removes members; `/team/machines`
+  mints a runner token for the active team, shows it and its
+  `sparkwing-runner` command once, and lists and revokes tokens; `/team/new`
+  creates a team and `/invitations` accepts one. Controls follow the member's
+  role and the controller decides every request. A local install shows none of
+  them.
 
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
@@ -332,6 +348,13 @@ unlock.
   optional `controller.LegacyCipher` opens envelopes sealed before team
   binding so the startup reseal can bring them forward. See the
   [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
+- **web:** a signed-in dashboard reaches the controller as that user
+  Under `--require-login` the proxy and the dashboard's own run reads sent the
+  web pod's service token, so on a multi-team controller every browser read
+  with a credential that spans every team. They now send
+  `Authorization: Session <id>` for the browser's own session; the service
+  token keeps the logs service and the health probe. The controller must
+  accept session credentials on the routes the dashboard proxies.
 
 - **store:** a key a user or a client chooses is unique per team
   Seven primary keys were global across the deployment while every part of
