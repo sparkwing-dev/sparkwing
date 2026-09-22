@@ -511,11 +511,14 @@ func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 // scope. The admin routes are read from server.go and asked about team A's own
 // run, so the refusal is the scope's and not the team boundary's.
 // safety: these admin routes also admit team.admin because each acts only on
-// the caller's own team: its webhook bindings, and a cache refresh.
+// the caller's own team: its webhook bindings, its secrets, and a cache refresh.
 var ownerAlsoAdmitted = map[string]bool{
 	"POST /api/v1/webhooks/github/bindings":   true,
 	"DELETE /api/v1/webhooks/github/bindings": true,
 	"POST /api/v1/gitcache/refresh":           true,
+	"POST /api/v1/secrets":                    true,
+	"GET /api/v1/secrets":                     true,
+	"DELETE /api/v1/secrets/{name}":           true,
 }
 
 func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
@@ -661,6 +664,43 @@ func TestTeamBoundary_ArtifactsStayWithTheirRunsTeam(t *testing.T) {
 		}
 		if code, _ := f.do("GET", blobKey, f.ownerA, nil); code != http.StatusNotFound {
 			t.Errorf("a team owner read a content-addressed key: %d", code)
+		}
+	})
+}
+
+// An owner manages its own team's secrets and none of another team's; a
+// name another team holds reads as missing.
+func TestTeamBoundary_SecretsStayWithTheirTeam(t *testing.T) {
+	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		if code, body := f.do("POST", "/api/v1/secrets", f.ownerA,
+			map[string]any{"name": "DEPLOY_KEY", "value": "team-a-secret-value"}); code != http.StatusNoContent {
+			t.Fatalf("team A owner set a secret = %d: %s", code, body)
+		}
+		code, body := f.do("GET", "/api/v1/secrets", f.ownerA, nil)
+		if code != http.StatusOK || !strings.Contains(body, "DEPLOY_KEY") {
+			t.Errorf("team A's list = %d without its secret: %s", code, body)
+		}
+		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusOK || !strings.Contains(body, "team-a-secret-value") {
+			t.Errorf("team A owner read its secret = %d: %s", code, body)
+		}
+		for _, other := range []struct{ name, auth string }{{"team B owner", f.ownerB}, {"team B token", f.everyScopeB}} {
+			if code, body := f.do("GET", "/api/v1/secrets", other.auth, nil); code != http.StatusOK || strings.Contains(body, "DEPLOY_KEY") {
+				t.Errorf("GET /secrets as %s = %d shows team A's secret: %s", other.name, code, body)
+			}
+			if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", other.auth, nil); code != http.StatusNotFound || strings.Contains(body, "team-a-secret-value") {
+				t.Errorf("GET /secrets/DEPLOY_KEY as %s = %d want 404: %s", other.name, code, body)
+			}
+			if code, body := f.do("DELETE", "/api/v1/secrets/DEPLOY_KEY", other.auth, nil); code != http.StatusNotFound {
+				t.Errorf("DELETE /secrets/DEPLOY_KEY as %s = %d want 404: %s", other.name, code, body)
+			}
+		}
+		for _, member := range []struct{ name, auth string }{{"editor", f.editorA}, {"reader", f.readerA}} {
+			if code, _ := f.do("GET", "/api/v1/secrets", member.auth, nil); code != http.StatusForbidden {
+				t.Errorf("team A %s listed secrets: %d", member.name, code)
+			}
+		}
+		if code, body := f.do("GET", "/api/v1/secrets/DEPLOY_KEY", f.ownerA, nil); code != http.StatusOK {
+			t.Errorf("team B's delete removed team A's secret: %d %s", code, body)
 		}
 	})
 }

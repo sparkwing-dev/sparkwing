@@ -37,7 +37,11 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.validateSecretName(req.Name, req.Pipeline); err != nil {
+	tn, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := validateSecretName(tn, req.Name, req.Pipeline); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -50,12 +54,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		masked = *req.Masked
 	}
 	// safety: the envelope is sealed to the team the row is written into, so
-	// resolving the tenant once serves both and they cannot drift apart.
-	tn, err := s.store.ForTeam(r.Context(), store.DefaultTeam)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
+	// one tenant serves both and they cannot drift apart.
 	stored := req.Value
 	if s.secretsCipher != nil {
 		binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
@@ -83,8 +82,8 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: the name rule guards new rows only, so a row written under an older rule can still be rotated.
-func (s *Server) validateSecretName(name, pipeline string) error {
-	if row, err := s.store.GetSecretRow(name, pipeline); err == nil && row != nil {
+func validateSecretName(tn *store.Tenant, name, pipeline string) error {
+	if row, err := tn.GetSecretRow(name, pipeline); err == nil && row != nil {
 		return nil
 	}
 	return secrets.ValidateName(name)
@@ -132,17 +131,19 @@ func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, nam
 	q := r.URL.Query()
 	runID := q.Get("run")
 	p, authed := PrincipalFromContext(r.Context())
-	if !authed || p.HasScope(ScopeAdmin) {
+	// safety: the operator and a team's owner read by name in their own team;
+	// a run they name is looked up there too, so another team's run names no
+	// pipeline and its secrets stay unread.
+	if !authed || p.HasScope(ScopeAdmin) || p.HasScope(ScopeTeamAdmin) {
+		tn, ok := s.requestTenant(w, r)
+		if !ok {
+			return nil, nil, false
+		}
 		pipeline := q.Get("pipeline")
 		if pipeline == "" && runID != "" {
-			if run, rerr := s.store.GetRun(r.Context(), runID); rerr == nil && run != nil {
+			if run, rerr := tn.GetRun(r.Context(), runID); rerr == nil && run != nil {
 				pipeline = run.Pipeline
 			}
-		}
-		tn, err := s.store.ForTeam(r.Context(), store.DefaultTeam)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return nil, nil, false
 		}
 		sec, err := tn.GetSecretForPipeline(name, pipeline)
 		return sec, tn, reportSecretRead(w, sec, err)
@@ -211,7 +212,11 @@ func (s *Server) claimedRunForReader(r *http.Request, runID string) (claimed sto
 }
 
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
-	secs, err := s.store.ListSecrets()
+	tn, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	secs, err := tn.ListSecrets()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -234,7 +239,11 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.store.DeleteSecret(name, r.URL.Query().Get("pipeline")); err != nil {
+	tn, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tn.DeleteSecret(name, r.URL.Query().Get("pipeline")); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
