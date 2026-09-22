@@ -122,6 +122,9 @@ type sessionResp struct {
 	Scopes    []string `json:"scopes"`
 	CSRFToken string   `json:"csrf_token"`
 	ExpiresAt int64    `json:"expires_at"`
+	Team      string   `json:"team,omitempty"`
+	Role      string   `json:"role,omitempty"`
+	UserID    string   `json:"user_id,omitempty"`
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -153,12 +156,26 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.ExtendSession(sess.ID, ttl, now)
 		sess.ExpiresAt = now.Add(ttl)
 	}
-	writeJSON(w, http.StatusOK, sessionResp{
+	resp := sessionResp{
 		Principal: sess.Principal,
 		Scopes:    sess.Scopes,
 		CSRFToken: sess.CSRFToken,
 		ExpiresAt: sess.ExpiresAt.Unix(),
-	})
+		Team:      string(sess.Team),
+	}
+	if sess.AccountID != "" {
+		if !s.MultiTeam() {
+			writeError(w, http.StatusUnauthorized, errAccountSessionsDisabled)
+			return
+		}
+		role, err := s.memberRole(r.Context(), sess.Team, sess.AccountID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		resp.Scopes, resp.Role, resp.UserID = ScopesForRole(role), string(role), sess.AccountID
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) sessionExpired(createdAt, now time.Time) bool {

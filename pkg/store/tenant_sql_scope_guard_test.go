@@ -47,6 +47,11 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).sweepOrphanedConcurrencyCache": "drops memos whose origin run is gone anywhere on the deployment",
 	"rewriteLegacyInheritedHolderMarkers":    "a v27 migration, and the team column arrives in v49",
 	"selectSecretsTx":                        "reads every team's secret so one key rotation reseals the whole table, and rewrites each row under its own team",
+	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
+	"settleActiveTeamTx":                     "picks the account's first team from all of its memberships when its sticky team is gone",
+	"(*Store).AccountMemberships":            "lists the teams one account belongs to, which is a question across teams by definition",
+	"(*Store).OpenInvitationsForEmail":       "lists the invitations addressed to one verified email from every team that sent one",
+	"(*Store).AcceptInvitation":              "finds an invitation by its id before the team is known; the accepting write then names that team",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes

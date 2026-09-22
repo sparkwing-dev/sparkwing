@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -232,6 +233,8 @@ var tenantTables = []string{
 	"egress_usage",
 	"events",
 	"github_webhook_bindings",
+	"invitations",
+	"memberships",
 	"node_bounces",
 	"node_claim_offers",
 	"node_dispatches",
@@ -252,12 +255,21 @@ var tenantTables = []string{
 	"users",
 }
 
+// safety: these tables are created after v49 with the team column already
+// in their schema, so the v49 ladder step that adds the column to every
+// tenant-owned table runs before they exist and skips them.
+var keyedAtCreation = []string{"invitations", "memberships"}
+
 // safety: executors is here because an executor enrolls with the deployment
 // and is offered work from every team on it, and sparkwing_meta because the
 // bag is the deployment's; the per-team keys inside that bag need a table of
-// their own rather than a column on it.
+// their own rather than a column on it. accounts and identities are here
+// because a human belongs to the deployment and reaches teams through
+// memberships, which are tenant-owned.
 var operatorTables = []string{
+	"accounts",
 	"executors",
+	"identities",
 	"sparkwing_meta",
 	"sparkwing_requirements",
 	"sparkwing_schema_version",
@@ -274,6 +286,9 @@ func applyTenantKeyMigrationSQLite(ctx context.Context, tx *storeTx) error {
 		return err
 	}
 	for _, table := range tenantTables {
+		if slices.Contains(keyedAtCreation, table) {
+			continue
+		}
 		if err := ensureColumnsSQLite(ctx, tx, table, teamColumn); err != nil {
 			return err
 		}
@@ -289,6 +304,9 @@ func applyTenantKeyMigrationPostgres(ctx context.Context, tx *storeTx) error {
 		return err
 	}
 	for _, table := range tenantTables {
+		if slices.Contains(keyedAtCreation, table) {
+			continue
+		}
 		if err := addColumnsTx(ctx, tx, table, teamColumn); err != nil {
 			return err
 		}

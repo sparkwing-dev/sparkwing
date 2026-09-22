@@ -17,7 +17,6 @@ var tablesWithNoTeamWriter = []string{
 	"egress_usage",
 	"node_bounces",
 	"run_definition_plans",
-	"sessions",
 	"storage_month_usage",
 	"storage_quotas",
 	"storage_run_usage",
@@ -25,7 +24,7 @@ var tablesWithNoTeamWriter = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const tablesWithNoTeamWriterSize = 12
+const tablesWithNoTeamWriterSize = 11
 
 // A predicate is only as real as the data under it. The scope guard beside
 // this one reads statement text, so it can prove a team predicate exists

@@ -5,10 +5,14 @@ import (
 	"slices"
 )
 
-// TenantTablesForTest names the tenant-owned tables for the external
-// test package, which needs them to reproduce the shape a store had
-// before the tenant key was added.
-func TenantTablesForTest() []string { return slices.Clone(tenantTables) }
+// TenantTablesForTest names the tenant-owned tables v49 added the key
+// to, for the external test package, which needs them to reproduce the
+// shape a store had before the tenant key was added.
+func TenantTablesForTest() []string {
+	return slices.DeleteFunc(slices.Clone(tenantTables), func(table string) bool {
+		return slices.Contains(keyedAtCreation, table)
+	})
+}
 
 // UserKeyTablesForTest names the tables v51 rebuilds, with the key each
 // one carried before it.
