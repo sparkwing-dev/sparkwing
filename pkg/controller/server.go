@@ -850,6 +850,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 

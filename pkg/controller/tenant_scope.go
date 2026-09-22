@@ -192,3 +192,11 @@ func writeClaimTeamRefusal(w http.ResponseWriter, err error) bool {
 	})
 	return true
 }
+
+// handleRunLogAccess answers the logs service, which stores every team's logs
+// under bare run ids, whether the caller may read one run's logs. The team
+// boundary in front of the mux has already answered 404 for another team's
+// run, so reaching here is the yes.
+func handleRunLogAccess(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}

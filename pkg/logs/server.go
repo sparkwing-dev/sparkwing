@@ -61,6 +61,7 @@ type Server struct {
 	authCache     sync.Map
 	authCacheTTL  time.Duration
 	authHTTP      *http.Client
+	runAccess     sync.Map
 }
 
 // New constructs a Server rooted at dir (created if absent). A nil
@@ -176,12 +177,12 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleAppend)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))
-	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))
-	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleDeleteRun)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead)))))
+	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun)))))
+	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream)))))
 
-	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))
+	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
 
 	authed := s.authMiddleware(mux)
 
@@ -203,6 +204,9 @@ type logsPrincipal struct {
 	Kind        string
 	Scopes      []string
 	TokenPrefix string
+	// credential is the Authorization header the caller sent, forwarded to
+	// the controller when a request needs it to decide for this caller.
+	credential string
 }
 
 func (p *logsPrincipal) hasScope(s string) bool {
@@ -242,7 +246,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, err := extractBearer(r)
+		raw, err := extractCredential(r)
 		if err != nil {
 			writeAuthErrorJSON(w, http.StatusUnauthorized, AuthErrorBody{
 				Error:   "unauthenticated",
@@ -298,13 +302,17 @@ func writeAuthErrorJSON(w http.ResponseWriter, status int, body AuthErrorBody) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func extractBearer(r *http.Request) (string, error) {
-	h := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if !strings.HasPrefix(h, prefix) {
-		return "", errors.New("missing bearer token")
+// extractCredential returns the caller's Authorization header: a bearer token,
+// or the session a signed-in account's dashboard forwards. The controller is
+// what resolves either, so the header travels to it unchanged.
+func extractCredential(r *http.Request) (string, error) {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	for _, scheme := range []string{"Bearer ", "Session "} {
+		if strings.HasPrefix(h, scheme) && strings.TrimSpace(strings.TrimPrefix(h, scheme)) != "" {
+			return h, nil
+		}
 	}
-	return strings.TrimSpace(strings.TrimPrefix(h, prefix)), nil
+	return "", errors.New("missing bearer token")
 }
 
 func (s *Server) authenticate(ctx context.Context, raw string) (*logsPrincipal, error) {
@@ -350,13 +358,13 @@ type whoamiResp struct {
 	TokenPrefix string   `json:"token_prefix"`
 }
 
-func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, error) {
+func (s *Server) whoami(ctx context.Context, credential string) (*logsPrincipal, error) {
 	url := strings.TrimRight(s.controllerURL, "/") + "/api/v1/auth/whoami"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.Header.Set("Authorization", credential)
 	resp, err := s.authHTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("whoami: %w", err)
@@ -378,6 +386,7 @@ func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, e
 		Kind:        body.Kind,
 		Scopes:      body.Scopes,
 		TokenPrefix: body.TokenPrefix,
+		credential:  credential,
 	}, nil
 }
 
@@ -709,7 +718,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int
 	if p != nil && p.hasScope(scopeAdmin) {
 		return 0, nil
 	}
-	raw, err := extractBearer(r)
+	credential, err := extractCredential(r)
 	if err != nil {
 		return http.StatusUnauthorized, err
 	}
@@ -720,7 +729,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int
 	if err != nil {
 		return http.StatusBadGateway, err
 	}
-	req.Header.Set("Authorization", "Bearer "+raw)
+	req.Header.Set("Authorization", credential)
 	for _, name := range []string{
 		"X-Sparkwing-Claim-Holder",
 		"X-Sparkwing-Claim-Membership",
