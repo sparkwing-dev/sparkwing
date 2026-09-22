@@ -488,6 +488,7 @@ type EgressUsage struct {
 }
 const EgressUsageRetentionMonths = 13
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
+var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")

@@ -117,8 +117,11 @@ func TestAssistedPrepareSkipsUnsealedAndSixtyFourIneligiblePoliciesBeforeDecode(
 		t.Fatalf("binding selected %q, want eligible", sink.Load().NodeID)
 	}
 	statements := recorder.snapshot()
-	if len(statements) != 10 {
-		t.Fatalf("prepare statements = %d, want fixed snapshot count 10:\n%s", len(statements), strings.Join(statements, "\n---\n"))
+	// safety: the count is fixed against queue depth, not frozen forever. Two
+	// of these read the claim's team, and the second only fires for a
+	// credential no token row backs, which is what this fixture holds.
+	if len(statements) != 12 {
+		t.Fatalf("prepare statements = %d, want fixed snapshot count 12:\n%s", len(statements), strings.Join(statements, "\n---\n"))
 	}
 	if full := countFullPolicyReads(statements); full != 1 {
 		t.Fatalf("full policy reads = %d, want only the selected candidate", full)
@@ -199,7 +202,11 @@ func TestAssistedPrepareCandidateRangesUseIndexWithoutTempSort(t *testing.T) {
 		executorPrepareAfterCursor,
 		executorPrepareThroughCursor,
 	} {
-		query, args := executorPrepareCandidateQuery("", "helper", now, rangeKind, cursor, executorPrepareCandidateLimit)
+		query, args, err := executorPrepareCandidateQuery("", "helper", now, rangeKind, cursor,
+			executorPrepareCandidateLimit, oneTeam(DefaultTeam))
+		if err != nil {
+			t.Fatal(err)
+		}
 		rows, err := st.query(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
 		if err != nil {
 			t.Fatal(err)

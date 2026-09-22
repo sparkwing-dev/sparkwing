@@ -48,6 +48,18 @@ unlock.
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
 
+- **store:** a claim never crosses teams. The team a machine may take work for
+  comes off its own credential rather than off the request, so a laptop holding
+  one team's token cannot see, name or take another team's node. The queue scan
+  (`ClaimNextReadyNode`), the named claim (`ClaimNamedNode`) and the assisted
+  offer path (`PrepareNextExecutorClaim`, `OfferExecutorClaim`) all carry the
+  predicate, and a named node of another team reports `ErrNotFound` rather than
+  held, so a guessed run id learns nothing. The operator's metered pool reads
+  every team, because it is the overflow every team's queue drains onto. A
+  credential no token row backs claims nothing once a second team is registered
+  and reports the new `ErrClaimantHasNoTeam`; a single-team install, which is
+  every self-hosted controller, behaves exactly as it did.
+
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
   and says what rollback means at each stage of an upgrade. The store suite
