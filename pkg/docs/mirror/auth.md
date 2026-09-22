@@ -543,6 +543,12 @@ verifies it against a public key compiled into the binary and reads it from
 wrongly signed license is logged at startup and leaves the controller holding
 one team; it never stops the controller starting.
 
+A multi-team controller always requires authentication. A request with no
+credential would act as the operator of `default`, so the license turns token
+auth on even while the tokens table is empty, and such a request gets 401. With
+no token yet, only Google sign-in sessions are accepted; supply the first admin
+token with `--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`).
+
 With the license and a Google OAuth client (`--google-client-id`,
 `SPARKWING_GOOGLE_CLIENT_SECRET`, and the dashboard callbacks in
 `--oauth-redirect-uris`), the dashboard offers Google sign-in. The controller

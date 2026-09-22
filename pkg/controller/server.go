@@ -753,25 +753,46 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server {
 // tokens table IF the table has any non-revoked rows. Empty table =
 // auth stays disabled (pass-through), and the server logs a loud
 // warning so an operator has a signal that every endpoint is open.
+// A multi-team controller is the exception: see requireAuthForTeams.
 //
 // The tokens-table check happens ONCE at startup: a fresh row added
 // via POST /api/v1/tokens takes effect on the next controller restart.
 func (s *Server) EnableAuthFromStore() *Server {
-	if !s.tokensTableNonEmpty() {
+	if !s.tokensTableNonEmpty() && !s.MultiTeam() {
 		s.auth = nil
 		s.logger.Warn("controller serving unauthenticated: tokens table is empty, every endpoint is open; mint an admin token and restart to enable auth")
 		return s
 	}
-	s.auth = NewAuthenticator(s.store, 60*time.Second).
+	if !s.tokensTableNonEmpty() {
+		s.logger.Warn("multi-team controller requires authentication with an empty tokens table: " +
+			"only signed-in sessions are accepted until an admin token exists; supply one with " +
+			"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN)")
+	}
+	s.auth = s.storeAuthenticator()
+	return s
+}
+
+func (s *Server) storeAuthenticator() *Authenticator {
+	return NewAuthenticator(s.store, 60*time.Second).
 		WithTrustedProxyCIDRs(s.loginLimit.trusted).
 		WithLogger(s.logger)
-	return s
+}
+
+// safety: a request with no credential acts as the operator of the default
+// team, which on a multi-team controller is every other team's operator too,
+// so the multi-team license turns token auth on whatever the tokens table
+// holds. It runs again when the handler is built because the license may be
+// installed after EnableAuthFromStore.
+func (s *Server) requireAuthForTeams() {
+	if s.auth == nil && s.store != nil && s.MultiTeam() {
+		s.auth = s.storeAuthenticator()
+	}
 }
 
 // AuthEnabled reports whether the controller is enforcing bearer-token
 // auth. False means every endpoint is served unauthenticated -- either
-// laptop-local mode (auth never wired) or a cluster whose tokens table
-// was empty at startup.
+// laptop-local mode (auth never wired) or a single-team cluster whose
+// tokens table was empty at startup.
 func (s *Server) AuthEnabled() bool {
 	return s.auth != nil
 }
@@ -816,6 +837,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //   - When the Authenticator is disabled, middleware + requireScope are
 //     pass-through.
 func (s *Server) Handler() http.Handler {
+	s.requireAuthForTeams()
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux)))))
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",

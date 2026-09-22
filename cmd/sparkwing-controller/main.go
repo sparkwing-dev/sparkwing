@@ -385,7 +385,6 @@ func run(args []string) error {
 
 	srv := controller.New(st, nil).
 		WithTrustedProxyCIDRs(trustedProxyCIDRs).
-		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
@@ -421,6 +420,9 @@ func run(args []string) error {
 	}, slog.Default()); err != nil {
 		return err
 	}
+	// The license decides whether an empty tokens table may serve
+	// unauthenticated, so auth is resolved after it is installed.
+	srv.EnableAuthFromStore()
 	if err := configureSecrets(ctx, srv, cipher); err != nil {
 		return err
 	}
@@ -434,12 +436,8 @@ func run(args []string) error {
 		}
 		srv = srv.WithBucketUsage(bucketStore)
 	}
-	if *requireAuth && !srv.AuthEnabled() {
-		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
-			"the tokens table is empty; supply the first admin token with " +
-			"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN), or " +
-			"mint one with the controller started unauthenticated and restart " +
-			"with --require-auth")
+	if err := checkRequireAuth(st, *requireAuth); err != nil {
+		return err
 	}
 	if *poolEnabled {
 		if *poolNamespace == "" {
@@ -595,6 +593,28 @@ func splitCSV(s string) []string {
 		return nil
 	}
 	return out
+}
+
+// checkRequireAuth refuses a --require-auth start with no live token. It asks
+// the tokens table rather than whether auth is on, because a multi-team
+// license turns auth on with an empty table and --require-auth promises a
+// token an operator can use.
+func checkRequireAuth(st *store.Store, requireAuth bool) error {
+	if !requireAuth {
+		return nil
+	}
+	toks, err := st.ListTokens("", false)
+	if err != nil {
+		return fmt.Errorf("--require-auth: read the tokens table: %w", err)
+	}
+	if len(toks) > 0 {
+		return nil
+	}
+	return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
+		"the tokens table is empty; supply the first admin token with " +
+		"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN), or " +
+		"mint one with the controller started unauthenticated and restart " +
+		"with --require-auth")
 }
 
 func envTruthy(name string) bool {
