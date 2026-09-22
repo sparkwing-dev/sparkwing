@@ -220,18 +220,23 @@ func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
 }
 
 func TestOneBudgetDoesNotRefuseAnotherPrincipal(t *testing.T) {
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
+	art := &fakeArtifactStore{objects: map[string][]byte{"runs/r1/k": bytes.Repeat([]byte("x"), 100)}}
 	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 50}, art)
+	// safety: only the operator reads a key that names no run, so the CLI
+	// token fetches an artifact of a run its team owns.
+	if err := f.store.CreateRun(context.Background(), store.Run{ID: "r1", Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
 
-	f.spend(t, "/api/v1/artifacts/k", f.adminToken)
+	f.spend(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.adminToken)
 
-	if got := f.get(t, "/api/v1/artifacts/k", f.adminToken).status; got != http.StatusTooManyRequests {
+	if got := f.get(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.adminToken).status; got != http.StatusTooManyRequests {
 		t.Fatalf("the spent principal = %d, want 429", got)
 	}
 
 	// safety: the runner and CLI fetch paths must keep working while
 	// another principal is over budget.
-	other := f.get(t, "/api/v1/artifacts/k", f.reader)
+	other := f.get(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.reader)
 	if other.status != http.StatusOK || len(other.body) != 100 {
 		t.Fatalf("a CLI token fetching = %d with %d bytes, want 200 and 100", other.status, len(other.body))
 	}
@@ -241,7 +246,7 @@ func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	art := &fakeArtifactStore{objects: map[string][]byte{"k": []byte("payload")}}
+	art := &fakeArtifactStore{objects: map[string][]byte{"runs/r1/k": []byte("payload")}}
 	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 1 << 20, MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4}, art)
 	seedLiveLog(t, f, "r1", "n1", "hello\n")
 
@@ -253,7 +258,7 @@ func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
 		t.Fatalf("runner log read = %d, body %q", runnerLogs.status, runnerLogs.body)
 	}
 
-	artifact := f.get(t, "/api/v1/artifacts/k", f.reader)
+	artifact := f.get(t, "/api/v1/artifacts/runs%2Fr1%2Fk", f.reader)
 	if artifact.status != http.StatusOK || string(artifact.body) != "payload" {
 		t.Fatalf("CLI artifact fetch = %d, body %q", artifact.status, artifact.body)
 	}
