@@ -284,6 +284,10 @@ func run(args []string) error {
 		RequestsPerMinuteAlarm:    *requestsPerMinuteAlarm,
 		MaxLogStreamsPerPrincipal: egressCfg.MaxStreamsPerPrincipal,
 		MaxDownloadsPerPrincipal:  egressCfg.MaxDownloadsPerPrincipal,
+		RunsPerPrincipalHour:      *maxRunsPerPrincipalHour,
+		ShedQueueDepth:            *shedQueueDepth,
+		EgressMonthlyBytes:        egressCfg.PerPrincipalMonthlyBytes,
+		EgressDailyCapBytes:       egressCfg.GlobalDailyCapBytes,
 	}, guardsNamed{
 		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
 		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
@@ -291,9 +295,15 @@ func run(args []string) error {
 		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
 		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
 		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
+		RunsPerPrincipalHour:      fs.Changed("max-runs-per-principal-hour"),
+		ShedQueueDepth:            fs.Changed("shed-queue-depth"),
+		EgressMonthlyBytes:        egressNamed.MonthlyBytes,
+		EgressDailyCapBytes:       egressNamed.DailyCapBytes,
 	})
 	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
+	egressCfg.PerPrincipalMonthlyBytes = guards.EgressMonthlyBytes
+	egressCfg.GlobalDailyCapBytes = guards.EgressDailyCapBytes
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
 			*liveLogNodeKB, *liveLogTotalMB)
@@ -387,8 +397,8 @@ func run(args []string) error {
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
 		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
 		WithFloodPolicy(controller.FloodPolicy{
-			RunsPerPrincipalHour: *maxRunsPerPrincipalHour,
-			ShedQueueDepth:       *shedQueueDepth,
+			RunsPerPrincipalHour: guards.RunsPerPrincipalHour,
+			ShedQueueDepth:       guards.ShedQueueDepth,
 			DedupeWindow:         *triggerDedupeWindow,
 		}).
 		WithRequestBudget(controller.RequestBudget{
@@ -465,6 +475,10 @@ type guardValues struct {
 	RequestsPerMinuteAlarm    int
 	MaxLogStreamsPerPrincipal int
 	MaxDownloadsPerPrincipal  int
+	RunsPerPrincipalHour      int
+	ShedQueueDepth            int
+	EgressMonthlyBytes        int64
+	EgressDailyCapBytes       int64
 	EnforceIdleClaimPoll      bool
 }
 
@@ -477,6 +491,10 @@ type guardsNamed struct {
 	RequestsPerMinuteAlarm    bool
 	MaxLogStreamsPerPrincipal bool
 	MaxDownloadsPerPrincipal  bool
+	RunsPerPrincipalHour      bool
+	ShedQueueDepth            bool
+	EgressMonthlyBytes        bool
+	EgressDailyCapBytes       bool
 }
 
 // safety: zero is a documented value on every guard here, unlimited, so what
@@ -500,6 +518,18 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	}
 	if !named.MaxDownloadsPerPrincipal {
 		set.MaxDownloadsPerPrincipal = profile.MaxDownloadsPerPrincipal
+	}
+	if !named.RunsPerPrincipalHour {
+		set.RunsPerPrincipalHour = profile.RunsPerPrincipalHour
+	}
+	if !named.ShedQueueDepth {
+		set.ShedQueueDepth = profile.ShedQueueDepth
+	}
+	if !named.EgressMonthlyBytes {
+		set.EgressMonthlyBytes = profile.EgressMonthlyBytesPerPrincipal
+	}
+	if !named.EgressDailyCapBytes {
+		set.EgressDailyCapBytes = profile.EgressDailyCapBytes
 	}
 	set.EnforceIdleClaimPoll = profile.EnforceIdleClaimPoll
 	return set

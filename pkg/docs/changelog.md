@@ -62,6 +62,12 @@ unlock.
 
 ### Changed
 
+- **controller:** the `cloud` and `cloud-free` limits profiles now also set
+  `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
+  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
+  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
+  with a profile previously left run creation and egress bytes unlimited. A
+  flag or environment variable the operator names still wins.
 - **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
   replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
   dependencies allowed to run build scripts, and the local build, dev server and
