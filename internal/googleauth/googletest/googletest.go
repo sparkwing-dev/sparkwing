@@ -4,13 +4,9 @@
 package googletest
 
 import (
-	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -18,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+	"github.com/sparkwing-dev/sparkwing/internal/jwks/jwkstest"
 )
 
 // Issuer is the fake. Its Issuer URL is what ID tokens name in iss.
@@ -26,11 +23,10 @@ type Issuer struct {
 	ClientID     string
 	ClientSecret string
 
-	key   *rsa.PrivateKey
-	kid   string
-	mu    sync.Mutex
-	codes map[string]grant
-	srv   *httptest.Server
+	signer *jwkstest.Signer
+	mu     sync.Mutex
+	codes  map[string]grant
+	srv    *httptest.Server
 }
 
 type grant struct {
@@ -52,17 +48,13 @@ type Person struct {
 // New starts an issuer and stops it when t ends.
 func New(t testing.TB) *Issuer {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
 	iss := &Issuer{
 		ClientID: "client-123.apps.googleusercontent.com", ClientSecret: "shh",
-		key: key, kid: "test-key", codes: map[string]grant{},
+		signer: jwkstest.NewSigner(t, "test-key"), codes: map[string]grant{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /token", iss.handleToken)
-	mux.HandleFunc("GET /certs", iss.handleCerts)
+	mux.HandleFunc("GET /certs", iss.signer.ServeKeys)
 	iss.srv = httptest.NewServer(mux)
 	iss.URL = iss.srv.URL
 	t.Cleanup(iss.srv.Close)
@@ -87,7 +79,7 @@ func (i *Issuer) Code(p Person, verifier, redirectURI string) string {
 // CodeWith is Code with claim overrides, which is how a test builds a token
 // with the wrong audience, issuer or expiry. A nil value deletes the claim.
 func (i *Issuer) CodeWith(p Person, verifier, redirectURI string, override map[string]any) string {
-	return i.code(p, verifier, redirectURI, override, i.key)
+	return i.code(p, verifier, redirectURI, override, i.signer.Key)
 }
 
 // CodeSignedBy issues a code whose ID token is signed by a key the issuer does
@@ -146,30 +138,12 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 		refuse("redirect_uri_mismatch")
 		return
 	}
-	token, err := i.sign(g.signer, g.claims)
+	token, err := i.signer.SignWith(g.signer, g.claims)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id_token": token})
-}
-
-func (i *Issuer) sign(key *rsa.PrivateKey, claims map[string]any) (string, error) {
-	head, err := json.Marshal(map[string]string{"alg": "RS256", "kid": i.kid, "typ": "JWT"})
-	if err != nil {
-		return "", err
-	}
-	body, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-	signing := base64.RawURLEncoding.EncodeToString(head) + "." + base64.RawURLEncoding.EncodeToString(body)
-	digest := sha256.Sum256([]byte(signing))
-	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", err
-	}
-	return signing + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -183,14 +157,4 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if _, err := w.Write(body); err != nil {
 		return
 	}
-}
-
-func (i *Issuer) handleCerts(w http.ResponseWriter, _ *http.Request) {
-	pub := i.key.PublicKey
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{
-		"kty": "RSA", "kid": i.kid, "alg": "RS256", "use": "sig",
-		"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-	}}})
 }
