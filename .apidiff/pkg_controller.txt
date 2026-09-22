@@ -45,6 +45,11 @@ type BoundCipher interface {
 
 	OpenBound(name, scope string, shared, masked bool, envelope string) (string, error)
 }
+type CacheGrantResponse struct {
+	Grant     string
+	Team      string
+	ExpiresAt time.Time
+}
 type Cipher interface {
 	Seal(plain string) (string, error)
 

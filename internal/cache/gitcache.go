@@ -1117,7 +1117,7 @@ type binMeta struct {
 	WrittenAt string `json:"written_at"`
 }
 
-func binMetaPath(hash string) string { return filepath.Join(binsDir, hash+".meta.json") }
+func binMetaPath(dir, hash string) string { return filepath.Join(dir, hash+".meta.json") }
 
 func writingPrincipal(r *http.Request) string {
 	token := bearerToken(r)
@@ -1129,9 +1129,9 @@ func writingPrincipal(r *http.Request) string {
 	return "token:" + hex.EncodeToString(sum[:])[:12]
 }
 
-func readBinMeta(hash string) (binMeta, error) {
+func readBinMeta(dir, hash string) (binMeta, error) {
 	var meta binMeta
-	data, err := os.ReadFile(binMetaPath(hash))
+	data, err := os.ReadFile(binMetaPath(dir, hash))
 	if err != nil {
 		return meta, err
 	}
@@ -1144,12 +1144,12 @@ func readBinMeta(hash string) (binMeta, error) {
 	return meta, nil
 }
 
-func writeBinMeta(hash string, meta binMeta) error {
+func writeBinMeta(dir, hash string, meta binMeta) error {
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(binsDir, "meta-*.tmp")
+	tmp, err := os.CreateTemp(dir, "meta-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -1163,39 +1163,38 @@ func writeBinMeta(hash string, meta binMeta) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Rename(tmpPath, binMetaPath(hash)); err != nil {
+	if err := os.Rename(tmpPath, binMetaPath(dir, hash)); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}
 	return nil
 }
 
-func createBinMeta(hash string, meta binMeta) error {
+func createBinMeta(dir, hash string, meta binMeta) error {
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(binMetaPath(hash), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(binMetaPath(dir, hash), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		_ = os.Remove(binMetaPath(hash))
-		return err
+		return errors.Join(err, os.Remove(binMetaPath(dir, hash)))
 	}
 	return f.Close()
 }
 
 var binKeyLocks sync.Map
 
-func binKeyLock(hash string) *sync.Mutex {
-	mu, _ := binKeyLocks.LoadOrStore(hash, &sync.Mutex{})
+func binKeyLock(path string) *sync.Mutex {
+	mu, _ := binKeyLocks.LoadOrStore(path, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
 
-func binDigest(hash string, f *os.File) (string, error) {
-	if meta, err := readBinMeta(hash); err == nil {
+func binDigest(dir, hash string, f *os.File) (string, error) {
+	if meta, err := readBinMeta(dir, hash); err == nil {
 		return meta.SHA256, nil
 	}
 	h := sha256.New()
@@ -1212,7 +1211,7 @@ func binDigest(hash string, f *os.File) (string, error) {
 	}
 	meta := binMeta{SHA256: digest, Size: info.Size(), Principal: "unknown", WrittenAt: info.ModTime().UTC().Format(time.RFC3339)}
 	// safety: never replace a sidecar an upload wrote while this read was hashing the older blob.
-	if err := createBinMeta(hash, meta); err != nil && !errors.Is(err, fs.ErrExist) {
+	if err := createBinMeta(dir, hash, meta); err != nil && !errors.Is(err, fs.ErrExist) {
 		// #nosec G706 -- the blob hash is pattern-validated
 		log.Printf("warning: bin meta write %s: %v", hash, err)
 	}
@@ -1229,9 +1228,10 @@ func setBinDigestHeaders(w http.ResponseWriter, digest string) error {
 	return nil
 }
 
-func openBinForRead(hash, path string) (*os.File, string, error) {
+func openBinForRead(dir, hash string) (*os.File, string, error) {
+	path := filepath.Join(dir, hash)
 	// safety: an upload replaces the blob by rename, so the fd and its digest must be taken under one lock.
-	mu := binKeyLock(hash)
+	mu := binKeyLock(path)
 	mu.Lock()
 	defer mu.Unlock()
 	// #nosec G703 -- the blob path is built from a pattern-validated hash
@@ -1239,7 +1239,7 @@ func openBinForRead(hash, path string) (*os.File, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	digest, err := binDigest(hash, f)
+	digest, err := binDigest(dir, hash, f)
 	if err != nil {
 		f.Close()
 		return nil, "", err
@@ -1258,18 +1258,20 @@ func (w *binUploadWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func handleBin(w http.ResponseWriter, r *http.Request) {
+func handleBin(w http.ResponseWriter, r *http.Request) { withBlobDirs(serveBin)(w, r) }
+
+func serveBin(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
 	if !validBinHash.MatchString(hash) {
 		http.Error(w, "invalid hash", http.StatusBadRequest)
 		return
 	}
 
-	path := filepath.Join(binsDir, hash)
+	path := filepath.Join(d.bins, hash)
 
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		f, digest, err := openBinForRead(hash, path)
+		f, digest, err := openBinForRead(d.bins, hash)
 		if err != nil {
 			if os.IsNotExist(err) {
 				http.Error(w, "not found", http.StatusNotFound)
@@ -1297,8 +1299,14 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case http.MethodPut:
+		if d.tenant {
+			if err := storeCeiling.Allow(); err != nil {
+				http.Error(w, err.Error(), http.StatusInsufficientStorage)
+				return
+			}
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
-		tmpFile, err := os.CreateTemp(binsDir, "bin-*.tmp")
+		tmpFile, err := os.CreateTemp(d.bins, "bin-*.tmp")
 		if err != nil {
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
@@ -1334,13 +1342,14 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		digest := hex.EncodeToString(sum.Sum(nil))
 		principal := writingPrincipal(r)
 
-		mu := binKeyLock(hash)
+		mu := binKeyLock(path)
 		mu.Lock()
 		defer mu.Unlock()
 
 		// safety: record the digest before the blob so a torn write serves a mismatch the client discards.
 		meta := binMeta{SHA256: digest, Size: n, Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
-		if err := writeBinMeta(hash, meta); err != nil {
+		storeBytes, storeObjects := storeDelta(path, n)
+		if err := writeBinMeta(d.bins, hash, meta); err != nil {
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin meta write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
@@ -1350,13 +1359,18 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		err = os.Rename(tmpPath, path)
 		if err != nil {
 			// #nosec G703 -- a pattern-validated hash; a digest with no blob would brick every later read
-			_ = os.Remove(binMetaPath(hash))
+			if rmErr := os.Remove(binMetaPath(d.bins, hash)); rmErr != nil && !os.IsNotExist(rmErr) {
+				err = errors.Join(err, rmErr)
+			}
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
 		// #nosec G706 -- the blob hash is pattern-validated
+		if d.tenant {
+			storeCeiling.Record(storeBytes, storeObjects)
+		}
 		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, n, digest, principal)
 		if err := setBinDigestHeaders(w, digest); err != nil {
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
@@ -1365,10 +1379,10 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 
 	case http.MethodDelete:
-		mu := binKeyLock(hash)
+		mu := binKeyLock(path)
 		mu.Lock()
 		defer mu.Unlock()
-		for _, target := range []string{path, binMetaPath(hash)} {
+		for _, target := range []string{path, binMetaPath(d.bins, hash)} {
 			// #nosec G703 -- each path is built from the pattern-validated hash
 			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 				http.Error(w, "delete error", http.StatusInternalServerError)
@@ -1384,14 +1398,16 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 
 var validCacheKey = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
-func handleCache(w http.ResponseWriter, r *http.Request) {
+func handleCache(w http.ResponseWriter, r *http.Request) { withBlobDirs(serveCache)(w, r) }
+
+func serveCache(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	key := strings.TrimPrefix(r.URL.Path, "/cache/")
 	if !validCacheKey.MatchString(key) {
 		http.Error(w, "invalid cache key: must be 1-128 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
 		return
 	}
 
-	path := filepath.Join(cacheDir, key+".tar.gz")
+	path := filepath.Join(d.cache, key+".tar.gz")
 
 	switch r.Method {
 	case http.MethodHead:
@@ -1442,7 +1458,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 			r.Body = http.MaxBytesReader(w, r.Body, maxCacheArchiveBytes)
 		}
 
-		tmpFile, err := os.CreateTemp(cacheDir, "upload-*.tmp")
+		tmpFile, err := os.CreateTemp(d.cache, "upload-*.tmp")
 		if err != nil {
 			http.Error(w, "failed to create temp file", http.StatusInternalServerError)
 			return
@@ -1509,7 +1525,9 @@ var (
 	maxCacheArchiveBytes = DefaultMaxCacheArchiveBytes
 )
 
-func handleArtifacts(w http.ResponseWriter, r *http.Request) {
+func handleArtifacts(w http.ResponseWriter, r *http.Request) { withBlobDirs(serveArtifacts)(w, r) }
+
+func serveArtifacts(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) == 0 || parts[0] == "" {
@@ -1525,19 +1543,19 @@ func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodPost:
-		artifactUpload(w, r, jobID)
+		artifactUpload(w, r, d.artifacts, jobID)
 	case http.MethodGet:
 		if r.URL.Query().Has("glob") {
-			artifactDownload(w, r, jobID)
+			artifactDownload(w, r, d.artifacts, jobID)
 		} else {
-			artifactList(w, r, jobID)
+			artifactList(w, r, d.artifacts, jobID)
 		}
 	default:
 		http.Error(w, "GET or POST only", http.StatusMethodNotAllowed)
 	}
 }
 
-func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
+func artifactUpload(w http.ResponseWriter, r *http.Request, root, jobID string) {
 	if err := storeCeiling.Allow(); err != nil {
 		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
@@ -1566,12 +1584,12 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		}
 	}
 
-	jobDir := filepath.Join(artifactsDir, jobID)
+	jobDir := filepath.Join(root, jobID)
 	dest := filepath.Join(jobDir, artifactPath)
-	absRoot, _ := filepath.Abs(artifactsDir)
+	absRoot, rootErr := filepath.Abs(root)
 	absDest, _ := filepath.Abs(dest)
 	// safety: contain against the artifacts root, not the job directory a job ID could have moved.
-	if !strings.HasPrefix(absDest, absRoot+string(filepath.Separator)) {
+	if rootErr != nil || !strings.HasPrefix(absDest, absRoot+string(filepath.Separator)) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
@@ -1632,9 +1650,9 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 	writeJSONBody(w, r, map[string]any{"path": artifactPath, "size": n})
 }
 
-func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
+func artifactDownload(w http.ResponseWriter, r *http.Request, root, jobID string) {
 	glob := r.URL.Query().Get("glob")
-	jobDir := filepath.Join(artifactsDir, jobID)
+	jobDir := filepath.Join(root, jobID)
 
 	// #nosec G703 -- the job directory is built from a pattern-validated job ID
 	_, err := os.Stat(jobDir)
@@ -1695,8 +1713,8 @@ func attachmentDisposition(name string) string {
 	return "attachment; filename=" + strconv.Quote(strings.ReplaceAll(name, `"`, ""))
 }
 
-func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
-	jobDir := filepath.Join(artifactsDir, jobID)
+func artifactList(w http.ResponseWriter, r *http.Request, root, jobID string) {
+	jobDir := filepath.Join(root, jobID)
 
 	// #nosec G703 -- the job directory is built from a pattern-validated job ID
 	_, err := os.Stat(jobDir)
@@ -2286,6 +2304,11 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if callerFrom(r).team != "" && !grantMayUseMirror(name, repoURL) {
+		http.Error(w, "a cache grant registers only a public https repository under its derived name", http.StatusForbidden)
+		return
+	}
+
 	hash := repoHash(repoURL)
 
 	repoNamesMu.Lock()
@@ -2442,6 +2465,10 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 
 	name := parts[0]
 	rest := parts[1]
+	if callerFrom(r).team != "" && !grantMayReadMirror(name) {
+		http.Error(w, fmt.Sprintf("repo %q not registered", name), http.StatusNotFound)
+		return
+	}
 
 	bareRepo, err := resolveGitRepo(name)
 	if err != nil {

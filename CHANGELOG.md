@@ -50,6 +50,15 @@ unlock.
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
+- **cache:** the cache accepts a cache grant, a bearer a multi-team
+  controller signs with the cache token it already holds, so a runner need not
+  hold the cache's token. A grant names one run's team, lasts six hours, and is
+  verified offline. A grant reads and writes only its team's `/bin/`,
+  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, clones
+  only public `https` mirrors under their URL-derived name, and is refused on
+  seeding, refresh, archive, upload and admin routes. A team's bins count
+  toward the store ceiling. The operator token is unchanged.
+
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
