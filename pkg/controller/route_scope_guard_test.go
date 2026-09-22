@@ -27,6 +27,8 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		// safety: sign-in has no session yet; both answer 404 without a license and a Google client.
 		"POST /api/v1/auth/oauth/google/start":    true,
 		"POST /api/v1/auth/oauth/google/exchange": true,
+		// safety: a GitHub Actions job proves itself with its signed ID token; it answers 404 without an external URL.
+		"POST /api/v1/runners/github/exchange": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {

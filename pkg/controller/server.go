@@ -116,6 +116,8 @@ type Server struct {
 	localExecution bool
 
 	identity identityConfig
+
+	githubRunners githubRunnerConfig
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -815,7 +817,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //     pass-through.
 func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(s.tokenBudgeted(unsupportedRouteFallback(mux))))
+	router.Handle("/", s.authenticated(s.githubRunnerFence(s.tokenBudgeted(unsupportedRouteFallback(mux)))))
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 }
@@ -1015,6 +1017,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
 	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
 	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
+	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
+	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
+	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
 
 	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
 	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
@@ -1061,6 +1066,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 		router.Handle("GET /metrics", metricsHandler())
 	}
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
+	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
+	router.Handle("POST /api/v1/runners/github/exchange", http.HandlerFunc(s.handleGitHubRunnerExchange))
 
 	return mux, router
 }
