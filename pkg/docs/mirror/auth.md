@@ -543,9 +543,10 @@ verifies it against a public key compiled into the binary and reads it from
 wrongly signed license is logged at startup and leaves the controller holding
 one team; it never stops the controller starting.
 
-With the license and a Google OAuth client (`--google-client-id`,
-`SPARKWING_GOOGLE_CLIENT_SECRET`, and the dashboard callbacks in
-`--oauth-redirect-uris`), the dashboard offers Google sign-in. The controller
+With the license and a Google OAuth client (`--google-client-id` or
+`SPARKWING_GOOGLE_CLIENT_ID`, `SPARKWING_GOOGLE_CLIENT_SECRET`, and the
+dashboard callbacks in `--oauth-redirect-uris` or
+`SPARKWING_OAUTH_REDIRECT_URIS`), the dashboard offers Google sign-in. The controller
 runs the server half of a PKCE flow: `POST /api/v1/auth/oauth/google/start`
 returns the authorize URL, state and verifier for a redirect URI on the
 allowlist, and `POST /api/v1/auth/oauth/google/exchange` redeems the code,
@@ -555,8 +556,8 @@ the state and verifier in a `__Host-` cookie and checks the state at its
 callback, which is what proves the same browser finished the flow.
 
 GitHub sign-in works the same way through `POST /api/v1/auth/oauth/github/start`
-and `/exchange`, configured with `--github-client-id` and
-`SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
+and `/exchange`, configured with `--github-client-id` (or
+`SPARKWING_GITHUB_CLIENT_ID`) and `SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
 It asks for `read:user user:email` only, keys the identity on GitHub's numeric
 account id so a renamed login keeps its account, and trusts only the primary
 email GitHub has verified, never the profile's public email.

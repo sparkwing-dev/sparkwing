@@ -16,7 +16,7 @@ GitHub's terms allow Actions to be used for the production, testing, deployment 
 A binding is dangerous in either direction, so an exchange needs both sides:
 
 - An **owner** of the team binds the repository by GitHub's numeric repository id and owner id. The ids survive renames, and a repository transferred to another owner stops matching.
-- The **workflow** names the team with `--team`. A team that binds a repository it does not control gets nothing, because that repository's workflows never name it.
+- The **workflow** names the team with `--team` (or `SPARKWING_TEAM`). A team that binds a repository it does not control gets nothing, because that repository's workflows never name it.
 
 The workflow stores no secret. The job requests an ID token with `permissions: id-token: write` and the controller's external URL as the audience, and `POST /api/v1/runners/github/exchange` verifies it against GitHub's published keys (issuer `https://token.actions.githubusercontent.com`, RS256, audience, expiry). The controller refuses the exchange when it has no external URL.
 
