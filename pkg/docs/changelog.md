@@ -26,7 +26,9 @@ unlock.
   /api/v1/auth/oauth/google/start` and `/exchange` run a PKCE flow for the
   dashboard, verify the ID token against Google's signing keys (issuer,
   audience, expiry, `email_verified`) and open a session. A new Google identity
-  joins an existing user only when both sides hold the email verified. A user
+  joins an existing user only when both sides hold the email verified and that
+  user has no other Google identity; a user's email follows what Google
+  asserts at each sign-in. One user creates at most ten teams. A user
   with no team gets a personal space whose slug comes from the email's local
   part, with the smallest free integer appended on a collision. `GET
   /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
@@ -57,7 +59,8 @@ unlock.
   controller verifies its Ed25519 signature against a public key built into the
   binary and checks its expiry. Without a valid multi-team license the
   controller holds one team, refuses `POST /api/v1/teams`, reports
-  `teams.enabled: false` and offers no Google sign-in; a local install needs no
+  `teams.enabled: false`, offers no Google sign-in and refuses sessions a
+  Google sign-in opened; a local install needs no
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).

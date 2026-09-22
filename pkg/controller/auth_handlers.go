@@ -164,6 +164,10 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		Team:      string(sess.Team),
 	}
 	if sess.AccountID != "" {
+		if !s.MultiTeam() {
+			writeError(w, http.StatusUnauthorized, errAccountSessionsDisabled)
+			return
+		}
 		role, err := s.memberRole(r.Context(), sess.Team, sess.AccountID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)

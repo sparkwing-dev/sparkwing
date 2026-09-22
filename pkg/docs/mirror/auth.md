@@ -555,10 +555,18 @@ the state and verifier in a `__Host-` cookie and checks the state at its
 callback, which is what proves the same browser finished the flow.
 
 A Google identity joins an existing user only when Google and that user both
-hold the email verified. A user with no team gets a personal space: a team
+hold the email verified, and never when that user already has a different
+Google identity: a second Google account on one address is a recycled address
+or another person, so it gets its own user and the first user's claim on the
+address is withdrawn. A user's email follows what Google asserts at each
+sign-in. A user with no team gets a personal space: a team
 whose only member is its owner, slugged from the email's local part, with the
 smallest free integer appended on a collision. The user's active team is
-stored on the user, so the next sign-in returns to it.
+stored on the user, so the next sign-in returns to it. One user creates at
+most ten teams, the personal space included, and slugs such as `default`,
+`app`, `api`, `auth`, `login`, `admin` and anything starting `demo-` are
+reserved. Without the license, sessions opened by a Google sign-in stop
+authenticating as well as new sign-ins.
 
 A membership carries one role, and the role decides the session's scopes on
 every request, so a demotion or removal bites on the user's next request:

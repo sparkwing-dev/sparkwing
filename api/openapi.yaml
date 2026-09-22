@@ -4189,7 +4189,7 @@ paths:
       tags: [auth]
       summary: Finish a Google sign-in and open a session.
       description: >-
-        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. The session opens in the user's active team.
+        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified and that user has no other Google identity. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. The session opens in the user's active team.
       security: []
       requestBody:
         required: true
@@ -4292,7 +4292,7 @@ paths:
       tags: [teams]
       summary: Create a team with the caller as owner and switch to it.
       description: >-
-        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default` and `api` answer 400.
+        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default`, `api` and anything starting `demo-` answer 400. One user creates at most ten teams; the eleventh answers 403.
       requestBody:
         required: true
         content:

@@ -530,6 +530,7 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrStorageQuota = errors.New("storage quota exceeded")
+var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
@@ -755,6 +756,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxCreatedTeams = 10
 const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditMaxChargeSeconds = 86_400
 const MaxCreditRateMicro = 1_000_000_000_000
