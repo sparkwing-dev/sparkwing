@@ -114,6 +114,8 @@ type Server struct {
 	storage storageSample
 
 	localExecution bool
+
+	identity identityConfig
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -999,8 +1001,23 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 
+	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
+	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
+	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
+	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
+	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
+	mux.Handle("GET /api/v1/team/members", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListMembers)))
+	mux.Handle("PATCH /api/v1/team/members/{user_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetMemberRole)))
+	mux.Handle("DELETE /api/v1/team/members/{user_id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRemoveMember)))
+	mux.Handle("GET /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListInvitations)))
+	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
+	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
+	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
+	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
+	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
+
 	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
-	mux.Handle("GET /api/v1/services", http.HandlerFunc(s.handleServices))
+	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
 
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
@@ -1037,6 +1054,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
+	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
+	router.Handle("POST /api/v1/auth/oauth/google/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleStart)))
+	router.Handle("POST /api/v1/auth/oauth/google/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange)))
 	if s.metricsAddr == "" {
 		router.Handle("GET /metrics", metricsHandler())
 	}
@@ -1076,11 +1096,15 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authenticated(next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
-	if s.peerPrincipal == nil {
-		return byToken
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
+		// safety: a session is resolved even while bearer auth is off, because
+		// a signed-in account's team and role come only from its session and a
+		// request carrying one must not fall through as an anonymous caller.
+		if raw := extractSessionHeader(r); raw != "" {
+			s.serveSession(w, r, raw, next)
+			return
+		}
+		if s.peerPrincipal == nil || r.Header.Get("Authorization") != "" {
 			byToken.ServeHTTP(w, r)
 			return
 		}

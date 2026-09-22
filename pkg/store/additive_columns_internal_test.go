@@ -90,6 +90,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// and moves the deployment-wide stamp into it, so an older binary keeps
 	// writing the migrated database and simply never stamps the column.
 	50: {teamsCreditExhaustedCols},
+	// safety: v52 adds the identity tables and three columns with defaults,
+	// so an older binary keeps writing sessions, tokens and teams it never
+	// tags with an account.
+	52: {teamIdentityCols, sessionAccountCols, tokenCreatorCols},
 }
 
 func columnSpecMaps() []map[string]string {

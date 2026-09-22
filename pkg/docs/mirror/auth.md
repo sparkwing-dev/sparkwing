@@ -345,6 +345,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
+| `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
@@ -530,6 +531,66 @@ it to resolve tokens against the controller. It shows as `public` in
 from `requireScope` wrappers -- there, `public` means no scope check,
 not no authentication.
 
+## Teams and sign-in
+
+A controller holds one team, `default`, unless it runs with a signed
+multi-team license. The license is one line,
+`base64url(payload).base64url(signature)`, where the payload is JSON naming
+`features` (`multi-team`), `issued_to`, `issued_at` and `expires_at` (RFC
+3339), and the signature is Ed25519 over those payload bytes. The controller
+verifies it against a public key compiled into the binary and reads it from
+`--license-file` or from `SPARKWING_LICENSE`. A missing, malformed, expired or
+wrongly signed license is logged at startup and leaves the controller holding
+one team; it never stops the controller starting.
+
+With the license and a Google OAuth client (`--google-client-id`,
+`SPARKWING_GOOGLE_CLIENT_SECRET`, and the dashboard callbacks in
+`--oauth-redirect-uris`), the dashboard offers Google sign-in. The controller
+runs the server half of a PKCE flow: `POST /api/v1/auth/oauth/google/start`
+returns the authorize URL, state and verifier for a redirect URI on the
+allowlist, and `POST /api/v1/auth/oauth/google/exchange` redeems the code,
+verifies the ID token (signature against Google's published keys, issuer,
+audience, expiry, `email_verified`) and opens a session. The dashboard keeps
+the state and verifier in a `__Host-` cookie and checks the state at its
+callback, which is what proves the same browser finished the flow.
+
+A Google identity joins an existing user only when Google and that user both
+hold the email verified, and never when that user already has a different
+Google identity: a second Google account on one address is a recycled address
+or another person, so it gets its own user and the first user's claim on the
+address is withdrawn. A user's email follows what Google asserts at each
+sign-in. A user with no team gets a personal space: a team
+whose only member is its owner, slugged from the email's local part, with the
+smallest free integer appended on a collision. The user's active team is
+stored on the user, so the next sign-in returns to it. One user creates at
+most ten teams, the personal space included, and slugs such as `default`,
+`app`, `api`, `auth`, `login`, `admin` and anything starting `demo-` are
+reserved. Without the license, sessions opened by a Google sign-in stop
+authenticating as well as new sign-ins.
+
+A membership carries one role, and the role decides the session's scopes on
+every request, so a demotion or removal bites on the user's next request:
+
+| Role     | Scopes                                                                 |
+|----------|------------------------------------------------------------------------|
+| `reader` | `runs.read`, `logs.read`, `triggers.read`                              |
+| `editor` | reader, plus `runs.write`, `runs.control`, `approvals.write`; mints runner tokens for the team |
+| `owner`  | editor, plus `team.admin`                                              |
+
+No role grants `admin`, which stays the deployment operator's scope. Nobody
+grants a role above their own, and a team keeps at least one owner. An
+invitation names an email and a role, expires after seven days, is used once,
+and is accepted only by a signed-in user whose verified email is that address.
+Every `/api/v1/team/...` route acts on the caller's active team, taken from the
+session and never from the request, and an id belonging to another team
+answers 404.
+
+A runner token minted from team settings carries the runner scope set and
+belongs to the team that minted it. A team holds at most 10 live runner tokens,
+at most 50 open invitations, and creates at most 100 invitations a day;
+withdrawing an invitation still counts toward that day. No token minted into a
+team carries `admin`.
+
 ## Unauthenticated endpoints
 
 Routes registered on the controller's outer router are matched before
@@ -538,7 +599,9 @@ the health and metrics probes (k8s httpGet probes and Prometheus
 scrapes can't carry `Authorization`), the service-discovery endpoint
 the runner uses to find the cache pod, the browser session endpoints
 the dashboard uses to establish, validate, and end a session (login,
-logout, session), the bootstrap probe, and the GitHub webhook, which
+logout, session, and the Google sign-in start and exchange), the
+capabilities report a signed-out dashboard draws its sign-in page from,
+the bootstrap probe, and the GitHub webhook, which
 is HMAC-verified instead of bearer-authenticated. The logs service
 opens its health and metrics probes the same way. Every registered
 route is listed in

@@ -54,6 +54,52 @@ unlock.
   role and the controller decides every request. A local install shows none of
   them.
 
+- **controller:** Google sign-in, users and teams. `POST
+  /api/v1/auth/oauth/google/start` and `/exchange` run a PKCE flow for the
+  dashboard, verify the ID token against Google's signing keys (issuer,
+  audience, expiry, `email_verified`) and open a session. A new Google identity
+  joins an existing user only when both sides hold the email verified and that
+  user has no other Google identity; a user's email follows what Google
+  asserts at each sign-in. One user creates at most ten teams. A user
+  with no team gets a personal space whose slug comes from the email's local
+  part, with the smallest free integer appended on a collision. `GET
+  /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
+  signed-in user; the active team is stored on the user, so the next sign-in
+  returns to it. `GET /api/v1/capabilities` answers unauthenticated with
+  `teams.enabled` and `auth.providers`. Every authenticated route now accepts
+  `Authorization: Session <id>`: a password session acts in the `default` team
+  with its user's scopes, and a Google session takes its scopes from the user's
+  role in the session's team on every request (reader: `runs.read`,
+  `logs.read`, `triggers.read`; editor adds `runs.write`, `runs.control`,
+  `approvals.write`; owner adds the new `team.admin`). No role grants `admin`.
+  `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
+  `accounts`, `identities`, `memberships` and `invitations` tables and is
+  additive.
+- **controller:** team administration for signed-in users. `PATCH
+  /api/v1/team` renames the active team; `GET`, `PATCH` and `DELETE
+  /api/v1/team/members[/{user_id}]` list members, change roles and remove a
+  member or leave; `GET`, `POST` and `DELETE /api/v1/team/invitations` manage
+  seven-day, single-use invitations whose answer carries an `accept_url`, and
+  `POST /api/v1/invitations/{id}/accept` joins only when the signed-in user's
+  verified email is the invited address. `POST`, `GET` and `DELETE
+  /api/v1/team/runner-tokens` mint, list and revoke runner tokens bound to the
+  active team; an editor mints and revokes their own, an owner revokes any.
+  Every `/team` route acts on the session's team, and another team's id
+  answers 404. Nobody grants a role above their own and the last owner stays.
+  A team holds at most 10 live runner tokens (the next mint answers 409), 50
+  open invitations and 100 invitations created a day (429), and a withdrawn
+  invitation still counts toward the day. `store.Tenant` refuses to mint a
+  token carrying `admin` on every path.
+- **controller:** hosting more than one team needs a signed license
+  (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
+  controller verifies its Ed25519 signature against a public key built into the
+  binary and checks its expiry. Without a valid multi-team license the
+  controller holds one team, refuses `POST /api/v1/teams`, reports
+  `teams.enabled: false`, offers no Google sign-in and refuses sessions a
+  Google sign-in opened; a local install needs no
+  change. Google sign-in reads `--google-client-id`
+  (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
+  callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it

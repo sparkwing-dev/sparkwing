@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -222,6 +223,16 @@ func run(args []string) error {
 			"listing is the only enumeration the ceiling costs; 0 measures once at "+
 			"startup and never again (env: SPARKWING_OBJECT_STORE_BUCKET_RECONCILE)")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceController, egress.ControllerSurfaces)
+	licenseFile := fs.String("license-file", "",
+		"file holding the signed license that unlocks multi-team hosting. "+
+			"Empty reads the license text from SPARKWING_LICENSE; without a "+
+			"valid license the controller holds one team.")
+	googleClientID := fs.String("google-client-id", os.Getenv("SPARKWING_GOOGLE_CLIENT_ID"),
+		"Google OAuth client id for dashboard sign-in; the secret comes from "+
+			"SPARKWING_GOOGLE_CLIENT_SECRET. Offered only with a multi-team license.")
+	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
+		"comma-separated dashboard callback URLs a sign-in may return to, "+
+			"such as https://app.example.com/auth/google/callback")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -412,6 +423,14 @@ func run(args []string) error {
 		WithIdleClaimPoll(*idleClaimPoll).
 		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 		WithEgressMeter(egress.New(egressCfg))
+	if err := configureIdentity(srv, identityFlags{
+		LicenseFile:        *licenseFile,
+		GoogleClientID:     *googleClientID,
+		GoogleClientSecret: os.Getenv("SPARKWING_GOOGLE_CLIENT_SECRET"),
+		RedirectURIs:       *oauthRedirectURIs,
+	}, slog.Default()); err != nil {
+		return err
+	}
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
