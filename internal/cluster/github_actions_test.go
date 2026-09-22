@@ -1,0 +1,120 @@
+package cluster
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+func TestGitHubActionsCredentialAsksForTheControllerAudienceAndNamesTheTeam(t *testing.T) {
+	expires := time.Now().Add(time.Hour).Unix()
+	var ctrlURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer request-secret" || r.URL.Query().Get("audience") != ctrlURL {
+			http.Error(w, "bad request", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"value": "id-token"})
+	})
+	mux.HandleFunc("POST /api/v1/runners/github/exchange", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["id_token"] != "id-token" || body["team"] != "acme" {
+			http.Error(w, "bad exchange", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(githubCredential{
+			Token: "swr_x", Team: "acme", Repository: "acme/widgets", ExpiresAt: expires, Labels: []string{"github-actions"},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	ctrlURL = srv.URL
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token?api-version=2.0")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-secret")
+
+	cred, err := githubActionsCredential(context.Background(), srv.Client(), srv.URL+"/", "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred.Token != "swr_x" || cred.Repository != "acme/widgets" {
+		t.Fatalf("credential = %+v", cred)
+	}
+	if left := time.Until(githubClaimDeadline(cred)); left > 50*time.Minute || left < 49*time.Minute {
+		t.Fatalf("claims stop %s from now, want ten minutes before the credential expires", left)
+	}
+	if _, err := githubActionsCredential(context.Background(), srv.Client(), srv.URL, "other"); err == nil ||
+		!strings.Contains(err.Error(), "400") {
+		t.Fatalf("exchange for a team the controller refuses = %v, want its 400", err)
+	}
+}
+
+func TestGitHubActionsCredentialNeedsTheIDTokenPermission(t *testing.T) {
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+	_, err := githubActionsCredential(context.Background(), http.DefaultClient, "http://ctrl", "acme")
+	if err == nil || !strings.Contains(err.Error(), "id-token: write") {
+		t.Fatalf("err = %v, want a pointer at the workflow permission", err)
+	}
+}
+
+func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
+	responses := []claimResp{{node: fakeNode("a")}}
+	for range 100000 {
+		responses = append(responses, claimResp{})
+	}
+	stub := &stubClaimer{responses: responses}
+	release := make(chan struct{})
+	exec := func(ctx context.Context, n *store.Node, holderID string) { <-release }
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://stub", HolderPrefix: "test", MaxConcurrent: 2,
+		PollInterval: time.Millisecond, IdleExit: 20 * time.Millisecond, SourceName: "test runner",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger())
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+	before := stub.calls.Load()
+	time.Sleep(40 * time.Millisecond)
+	if after := stub.calls.Load(); after == before {
+		t.Fatal("the loop stopped polling while a node was still held")
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the loop did not exit after the held node finished and the queue stayed empty")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the loop ran until cancelled instead of exiting when idle")
+	}
+}
+
+func TestRunPoolLoop_ClaimUntilStopsNewClaims(t *testing.T) {
+	stub := &stubClaimer{responses: []claimResp{{node: fakeNode("a")}}}
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://stub", HolderPrefix: "test", MaxConcurrent: 1,
+		PollInterval: time.Millisecond, ClaimUntil: time.Now().Add(-time.Second), SourceName: "test runner",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runPoolLoop(ctx, cfg, stub, func(context.Context, *store.Node, string) {}, nil, discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.calls.Load(); got != 0 || ctx.Err() != nil {
+		t.Fatalf("claims after the deadline = %d (ctx %v), want none and a prompt exit", got, ctx.Err())
+	}
+}
