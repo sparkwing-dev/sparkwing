@@ -6517,6 +6517,10 @@ type Trigger struct {
 	// the unique constraint, and [Store.FindTriggerByWebhookReplay]
 	// resolves a collision to the trigger that won it.
 	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
+	// Team owns the trigger and the run it becomes. A claim and a read
+	// return it so the runner that executes the run can place its work
+	// on nodes no other team's work shares.
+	Team Team `json:"team,omitempty"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -7069,7 +7073,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team
   FROM triggers
  WHERE status = ? AND available_at <= ?
    AND NOT EXISTS (
@@ -7107,7 +7111,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery,
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team,
 	)
 	if parent.Valid {
 		t.ParentRunID = parent.String
@@ -7783,12 +7787,12 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery)
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("trigger", id)

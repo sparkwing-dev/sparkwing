@@ -4511,6 +4511,10 @@ components:
           type: string
           description: >-
             Digest of the material the webhook signature covered. Unique across the store, so re-sending an accepted body is refused however its delivery id reads.
+        team:
+          type: string
+          description: >-
+            The team that owns the trigger and its run. A Kubernetes runner labels the run's Job pods with it and keeps them off nodes that run another team's Jobs.
     TriggerRequest:
       x-sparkwing-go-type: pkg/controller.triggerReq
       type: object
