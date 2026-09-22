@@ -136,7 +136,7 @@ func (s *Store) placementForTeam(ctx context.Context, p ClaimPlacement, team Tea
 
 // safety: an unauthenticated runner is the local path, which the tenant
 // migration put in [DefaultTeam]; a prefix no row backs maps to no team.
-func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (map[string]Team, error) {
+func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (_ map[string]Team, err error) {
 	teams := map[string]Team{"": DefaultTeam}
 	var prefixes []any
 	for _, runner := range live {
@@ -153,7 +153,7 @@ func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (map[str
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	for rows.Next() {
 		var prefix, owner string
 		if err := rows.Scan(&prefix, &owner); err != nil {
