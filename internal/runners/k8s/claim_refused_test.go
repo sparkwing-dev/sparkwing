@@ -32,10 +32,16 @@ func TestRunNode_RefusedClaimCreatesNoJob(t *testing.T) {
 		wantFailed bool
 		wantReason string
 	}{
-		{"insufficient credits", http.StatusPaymentRequired,
-			`{"error":"insufficient credits: balance 0, need 60"}`, true, store.FailureCreditsExhausted},
-		{"server error", http.StatusInternalServerError, `{"error":"boom"}`, true, store.FailureUnknown},
-		{"another holder", http.StatusForbidden, `{"error":"held"}`, false, ""},
+		{
+			name: "insufficient credits", status: http.StatusPaymentRequired,
+			body:       `{"error":"insufficient credits: balance 0, need 60"}`,
+			wantFailed: true, wantReason: store.FailureCreditsExhausted,
+		},
+		{
+			name: "server error", status: http.StatusInternalServerError,
+			body: `{"error":"boom"}`, wantFailed: true, wantReason: store.FailureUnknown,
+		},
+		{name: "another holder", status: http.StatusForbidden, body: `{"error":"held"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
