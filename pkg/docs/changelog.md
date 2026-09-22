@@ -41,6 +41,45 @@ unlock.
   role and the controller decides every request. A local install shows none of
   them.
 
+- **controller:** Google sign-in, users and teams. `POST
+  /api/v1/auth/oauth/google/start` and `/exchange` run a PKCE flow for the
+  dashboard, verify the ID token against Google's signing keys (issuer,
+  audience, expiry, `email_verified`) and open a session. A new Google identity
+  joins an existing user only when both sides hold the email verified. A user
+  with no team gets a personal space whose slug comes from the email's local
+  part, with the smallest free integer appended on a collision. `GET
+  /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
+  signed-in user; the active team is stored on the user, so the next sign-in
+  returns to it. `GET /api/v1/capabilities` answers unauthenticated with
+  `teams.enabled` and `auth.providers`. Every authenticated route now accepts
+  `Authorization: Session <id>`: a password session acts in the `default` team
+  with its user's scopes, and a Google session takes its scopes from the user's
+  role in the session's team on every request (reader: `runs.read`,
+  `logs.read`, `triggers.read`; editor adds `runs.write`, `runs.control`,
+  `approvals.write`; owner adds the new `team.admin`). No role grants `admin`.
+  `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
+  `accounts`, `identities`, `memberships` and `invitations` tables and is
+  additive.
+- **controller:** team administration for signed-in users. `PATCH
+  /api/v1/team` renames the active team; `GET`, `PATCH` and `DELETE
+  /api/v1/team/members[/{user_id}]` list members, change roles and remove a
+  member or leave; `GET`, `POST` and `DELETE /api/v1/team/invitations` manage
+  seven-day, single-use invitations whose answer carries an `accept_url`, and
+  `POST /api/v1/invitations/{id}/accept` joins only when the signed-in user's
+  verified email is the invited address. `POST`, `GET` and `DELETE
+  /api/v1/team/runner-tokens` mint, list and revoke runner tokens bound to the
+  active team; an editor mints and revokes their own, an owner revokes any.
+  Every `/team` route acts on the session's team, and another team's id
+  answers 404. Nobody grants a role above their own and the last owner stays.
+- **controller:** hosting more than one team needs a signed license
+  (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
+  controller verifies its Ed25519 signature against a public key built into the
+  binary and checks its expiry. Without a valid multi-team license the
+  controller holds one team, refuses `POST /api/v1/teams`, reports
+  `teams.enabled: false` and offers no Google sign-in; a local install needs no
+  change. Google sign-in reads `--google-client-id`
+  (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
+  callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -66,6 +105,13 @@ unlock.
   `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
   fails on any statement touching a tenant-owned table without a team
   predicate, in a `WHERE` or in an `ON CONFLICT`.
+
+- **store:** the tenant handle mints tokens and writes triggers.
+  `Tenant.CreateToken`, `Tenant.CreateTokenWith`, `Tenant.CreateTrigger` and
+  `Tenant.CreateTriggerWithRun` write into the handle's team, and `store.Token`
+  carries a `Team` field that a bearer lookup reads back, so a request can
+  resolve which team its credential acts for. The `*Store` twins still write
+  the `default` team, so a single-tenant install is unchanged.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
@@ -143,6 +189,16 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **store:** minted tokens, created nodes and created triggers record the team
+  that owns them. Schema 49 put a `team` column on all three tables and no
+  writer set it, so every row landed on the `default` team whatever team it was
+  created for, and a predicate reading the column answered about the `default`
+  team only. A token now carries the team it was minted for, and a rotation
+  hands that team to the replacement; a node takes the team off the run it
+  belongs to, so it cannot disagree with its run; a trigger takes the team from
+  the handle that created it. The automatic agent-loss retry copies the source
+  run's team onto the retry run and its trigger for the same reason.
 
 - **store:** the credit balance and credit exhaustion are per team. The balance
   summed every grant and every charge on the controller with no team predicate,

@@ -180,6 +180,8 @@ type whoamiResp struct {
 	Kind        string   `json:"kind"`
 	Scopes      []string `json:"scopes"`
 	TokenPrefix string   `json:"token_prefix,omitempty"`
+	Team        string   `json:"team,omitempty"`
+	Role        string   `json:"role,omitempty"`
 }
 
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
@@ -197,5 +199,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		Kind:        p.Kind,
 		Scopes:      p.Scopes,
 		TokenPrefix: p.TokenPrefix,
+		Team:        string(p.Team),
+		Role:        p.Role,
 	})
 }

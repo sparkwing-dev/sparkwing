@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 51
+const expectedSchemaVersion = 52
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1999,6 +1999,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyTeamCreditStateMigrationSQLite(ctx, tx)
 	case 51:
 		return applyUserKeyTeamScopeMigrationSQLite(ctx, tx)
+	case 52:
+		return applyIdentityMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2357,6 +2359,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyTeamCreditStateMigrationPostgres(ctx, tx)
 	case 51:
 		return applyUserKeyTeamScopeMigrationPostgres(ctx, tx)
+	case 52:
+		return applyIdentityMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3447,7 +3451,7 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, t); err != nil {
+	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
 		return err
 	}
 	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
@@ -4294,7 +4298,13 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, n.RunID); err != nil {
+	// safety: the team comes off the run rather than off the caller, so a node
+	// cannot land in a team its run does not belong to.
+	team, err := creditTeamForRunTx(ctx, tx, n.RunID)
+	if err != nil {
+		return err
+	}
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, n.RunID); err != nil {
 		return err
 	}
 	// safety: this transaction takes the compute-guard key alone; a later edit
@@ -4352,7 +4362,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		bodyRequirementsHash = persisted.BodyRequirementsHash
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_labels,
+INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
 			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
@@ -4360,7 +4370,7 @@ INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_lab
 			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 			       execution_body_requirements_json, execution_body_requirements_hash,
 			       seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
@@ -4371,7 +4381,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
-		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
+		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
 		n.AvoidCoordinatorID, n.RunID,
 		n.AvoidExecutorKind, n.RunID,
@@ -6608,13 +6618,15 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, t); err != nil {
+	// safety: the unscoped twin writes [DefaultTeam], the team the migration
+	// put every pre-tenant row in.
+	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
+func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status
@@ -6635,12 +6647,12 @@ func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
 	}
 	_, err := tx.ExecContext(
 		ctx, `
-INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
+INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
 		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
 		              idempotency_key, webhook_delivery, webhook_replay_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
 		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
