@@ -7,19 +7,19 @@
 // total, so an operator can see both who spent the month's egress and
 // how much left this process today.
 //
-// Three budgets act on those counters. A principal past its monthly byte
-// budget is refused before the next download starts, which is the cap
-// that stops one tenant turning a CI product into a file host. A
-// principal at its concurrency cap is refused one more simultaneous
-// download or live log stream, which bounds how far a burst can carry a
-// principal past the byte budget: the overshoot a meter can never
-// prevent is the concurrency cap times the largest object. The global
-// daily threshold refuses nothing; it raises an alarm the health route
-// reports and the log carries at warn level, because the bill an
+// Four budgets act on those counters. A principal past its monthly byte
+// budget is refused before the next download starts, and a download
+// already under way stops at it, which is the cap that stops one tenant
+// turning a CI product into a file host. A principal at its concurrency
+// cap is refused one more simultaneous download or live log stream. The
+// global daily threshold refuses nothing; it raises an alarm the health
+// route reports and the log carries at warn level, because the bill an
 // operator needs to see early is the process's, not one principal's.
 // The global daily cap does refuse: past it every download on the process
-// is refused until the UTC day rolls, which is the backstop that bounds the
-// bill when many principals each stay inside their own budget.
+// is refused, and every one under way stops, until the UTC day rolls,
+// which is the backstop that bounds the bill when many principals each
+// stay inside their own budget. Both byte budgets are charged as bytes are
+// written, so parallel downloads cannot carry the total past either.
 //
 // Enforcement needs a principal the meter can tell apart. A service that
 // authenticates one shared token, or that serves with auth off, resolves
@@ -41,7 +41,6 @@ import (
 	"net"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 )
@@ -203,8 +202,8 @@ type Config struct {
 	// principal. Zero is unlimited.
 	MaxStreamsPerPrincipal int
 	// MaxDownloadsPerPrincipal caps concurrent metered downloads per
-	// principal, which is what bounds how far one burst carries a
-	// principal past PerPrincipalMonthlyBytes. Zero is unlimited.
+	// principal. A pool sharing one bearer is one principal, so the cap
+	// is sized for the pool. Zero is unlimited.
 	MaxDownloadsPerPrincipal int
 	// Flags names the flags this service spells its budgets with, so a
 	// refusal tells the operator which one to raise. The zero value uses
@@ -389,7 +388,7 @@ func (m *Meter) Config() Config { return m.cfg }
 // monthly budget is spent and nil otherwise, including when no budget
 // applies.
 func (m *Meter) Check(principal string) error {
-	if m == nil || (m.cfg.PerPrincipalMonthlyBytes <= 0 && m.cfg.GlobalDailyCapBytes <= 0) {
+	if m == nil || !m.cfg.bytesBounded() {
 		return nil
 	}
 	m.mu.Lock()
@@ -398,20 +397,32 @@ func (m *Meter) Check(principal string) error {
 	key, st := m.counters(principal, now)
 	if m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes {
 		m.refused++
-		return &BudgetError{
-			Principal:   key,
-			LimitBytes:  m.cfg.GlobalDailyCapBytes,
-			UsedBytes:   m.dayBytes,
-			Month:       m.month,
-			RetryAfter:  untilNextDay(now),
-			Flag:        m.cfg.Flags.orDefault().DailyCapBytes,
-			ProcessWide: true,
-		}
+		return m.dailyCapErrorLocked(key, now)
 	}
 	if m.cfg.PerPrincipalMonthlyBytes <= 0 || st.monthBytes < m.cfg.PerPrincipalMonthlyBytes {
 		return nil
 	}
 	m.refused++
+	return m.monthlyErrorLocked(key, st, now)
+}
+
+func (c Config) bytesBounded() bool {
+	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyCapBytes > 0
+}
+
+func (m *Meter) dailyCapErrorLocked(key string, now time.Time) *BudgetError {
+	return &BudgetError{
+		Principal:   key,
+		LimitBytes:  m.cfg.GlobalDailyCapBytes,
+		UsedBytes:   m.dayBytes,
+		Month:       m.month,
+		RetryAfter:  untilNextDay(now),
+		Flag:        m.cfg.Flags.orDefault().DailyCapBytes,
+		ProcessWide: true,
+	}
+}
+
+func (m *Meter) monthlyErrorLocked(key string, st *principalCounters, now time.Time) *BudgetError {
 	return &BudgetError{
 		Principal:  key,
 		LimitBytes: m.cfg.PerPrincipalMonthlyBytes,
@@ -422,27 +433,48 @@ func (m *Meter) Check(principal string) error {
 	}
 }
 
-// Record adds n bytes served to principal through class. It is called
-// as the bytes reach the client, so a download already in flight
-// finishes and its cost lands on the budget that refuses the next one.
+// Record adds n bytes served to principal through class, whatever the
+// budgets say.
 func (m *Meter) Record(principal string, class Class, n int64) {
-	if m == nil || n <= 0 {
+	if m == nil {
 		return
+	}
+	m.charge(principal, class, n, false)
+}
+
+// safety: the bytes are charged before they are written, so writers racing
+// for the last of a budget cannot each see room and together pass it.
+func (m *Meter) charge(principal string, class Class, n int64, bounded bool) (int64, *BudgetError) {
+	if n <= 0 {
+		return 0, nil
 	}
 	m.mu.Lock()
 	now := m.now().UTC()
 	key, st := m.counters(principal, now)
-	st.monthBytes += n
-	st.dayBytes += n
-	st.dirty = true
-	m.monthBytes += n
-	m.dayBytes += n
+	allowed := n
+	var refusal *BudgetError
+	if bounded && m.cfg.GlobalDailyCapBytes > 0 && m.cfg.GlobalDailyCapBytes-m.dayBytes < allowed {
+		allowed = max(m.cfg.GlobalDailyCapBytes-m.dayBytes, 0)
+		refusal = m.dailyCapErrorLocked(key, now)
+	}
+	if bounded && m.cfg.PerPrincipalMonthlyBytes > 0 && m.cfg.PerPrincipalMonthlyBytes-st.monthBytes < allowed {
+		allowed = max(m.cfg.PerPrincipalMonthlyBytes-st.monthBytes, 0)
+		refusal = m.monthlyErrorLocked(key, st, now)
+	}
+	if refusal != nil {
+		m.refused++
+	}
+	st.monthBytes += allowed
+	st.dayBytes += allowed
+	st.dirty = st.dirty || allowed > 0
+	m.monthBytes += allowed
+	m.dayBytes += allowed
 	raised := m.raiseAlarmLocked(now)
-	capped := m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes &&
-		m.dayBytes-n < m.cfg.GlobalDailyCapBytes
+	capped := allowed > 0 && m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes &&
+		m.dayBytes-allowed < m.cfg.GlobalDailyCapBytes
 	// safety: every value the log line needs is copied under the lock,
 	// because reading the principal map again after the unlock races the
-	// next Record's write to it.
+	// next charge's write to it.
 	day, total := m.day, m.dayBytes
 	principalDay := st.dayBytes
 	m.mu.Unlock()
@@ -467,18 +499,45 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 			"principal", key,
 			"class", string(class))
 	}
+	return allowed, refusal
 }
 
-// Serve returns a ResponseWriter that records what the handler actually
-// sends against principal. Bytes count only on a 2xx response to a
-// request whose method carries a body, because net/http discards what a
-// handler writes to a HEAD and an error body is not the download the
-// budget is for. It preserves the flush, hijack, and deadline control a
-// streaming handler reaches for.
+// Serve returns a ResponseWriter that charges what the handler sends to
+// principal. Bytes count only on a 2xx response to a request whose method
+// carries a body, because net/http discards what a handler writes to a
+// HEAD and an error body is not the download the budget is for. A write
+// that would pass the daily cap or principal's monthly budget sends only
+// what is left and returns a *BudgetError, so a response already under way
+// stops at the budget rather than finishing past it. It preserves the
+// flush, hijack, and deadline control a streaming handler reaches for.
+//
+// A route serves through [Meter.Handle], which also aborts a response the
+// budget cut short.
 func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
 	if m == nil {
 		return w
 	}
+	_, out := m.serve(w, r, principal, class)
+	return out
+}
+
+// Handle runs next with a writer from [Meter.Serve]. When the budget cut
+// the response short it aborts the connection with [http.ErrAbortHandler],
+// so the client sees a failed transfer rather than a chunked body that
+// ends cleanly with bytes missing. A nil meter runs next unmetered.
+func (m *Meter) Handle(w http.ResponseWriter, r *http.Request, principal string, class Class, next http.Handler) {
+	if m == nil {
+		next.ServeHTTP(w, r)
+		return
+	}
+	counting, out := m.serve(w, r, principal, class)
+	next.ServeHTTP(out, r)
+	if counting.cut {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class) (*countingWriter, http.ResponseWriter) {
 	counting := &countingWriter{
 		ResponseWriter: w,
 		meter:          m,
@@ -494,13 +553,13 @@ func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, 
 	hijacker, canHijack := w.(http.Hijacker)
 	switch {
 	case canFlush && canHijack:
-		return &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}
+		return counting, &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}
 	case canFlush:
-		return &flushingWriter{countingWriter: counting, flusher: flusher}
+		return counting, &flushingWriter{countingWriter: counting, flusher: flusher}
 	case canHijack:
-		return &hijackingWriter{countingWriter: counting, hijacker: hijacker}
+		return counting, &hijackingWriter{countingWriter: counting, hijacker: hijacker}
 	default:
-		return counting
+		return counting, counting
 	}
 }
 
@@ -509,33 +568,6 @@ func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, 
 // producing bytes nobody is charged for.
 func Bodyless(r *http.Request) bool {
 	return r != nil && r.Method == http.MethodHead
-}
-
-// SlotIdentity returns the name a concurrency slot is counted under: the
-// pod behind the request where one is named, and the principal where
-// none is. Byte budgets always key on the principal, because the bill is
-// the team's; only the concurrency caps key on the pod, because holding
-// a response open is the pod's doing.
-//
-// The identity is cooperative. A caller that invents a pod name gets its
-// own slots, so these caps bound an honest pool's burst rather than a
-// caller working around them; the byte budget, which no header can move,
-// is what bounds that one.
-//
-// headers are tried in order; a caller passes the ones its own protocol
-// already carries, most specific first. A pool shares one bearer, so the
-// principal alone cannot tell twenty pods apart and a concurrency cap
-// keyed on it would refuse nineteen of them at once.
-func SlotIdentity(r *http.Request, principal string, headers ...string) string {
-	if r == nil {
-		return principal
-	}
-	for _, header := range headers {
-		if v := strings.TrimSpace(r.Header.Get(header)); v != "" {
-			return principal + "/" + v
-		}
-	}
-	return principal
 }
 
 // Open reserves one of principal's slots and returns the release the
@@ -910,6 +942,8 @@ type countingWriter struct {
 	bodyless bool
 	status   int
 	wrote    bool
+	// cut reports that a budget stopped a write short.
+	cut bool
 }
 
 func (w *countingWriter) WriteHeader(code int) {
@@ -922,9 +956,16 @@ func (w *countingWriter) WriteHeader(code int) {
 
 func (w *countingWriter) Write(p []byte) (int, error) {
 	w.wrote = true
-	n, err := w.ResponseWriter.Write(p)
-	if w.charges() {
-		w.meter.Record(w.principal, w.class, int64(n))
+	if !w.charges() {
+		return w.ResponseWriter.Write(p)
+	}
+	allowed, refusal := w.meter.charge(w.principal, w.class, int64(len(p)), true)
+	n, err := w.ResponseWriter.Write(p[:allowed])
+	if refusal != nil {
+		w.cut = true
+		if err == nil {
+			return n, refusal
+		}
 	}
 	return n, err
 }

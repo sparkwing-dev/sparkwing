@@ -48,7 +48,7 @@ func metered(class egress.Class, next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		next(egressMeter.Serve(w, r, cacheEgressPrincipal(r), class), r)
+		egressMeter.Handle(w, r, cacheEgressPrincipal(r), class, next)
 	}
 }
 

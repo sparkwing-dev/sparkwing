@@ -159,6 +159,16 @@ unlock.
 
 ### Fixed
 
+- **egress:** the daily cap and the monthly budget are hard byte caps. They
+  were checked once before a response started, so parallel downloads begun
+  just under a cap each finished past it. Bytes are now charged as they are
+  written, a write past either budget sends only what is left, and the
+  controller, logs service and cache abort the cut response so the client
+  sees a failed transfer. The download and log-stream concurrency caps key on
+  the authenticated principal alone; they had keyed on the caller's
+  `X-Sparkwing-Runner` or claim-holder header, so a caller multiplied its
+  slots by naming pods. A pool behind one bearer now shares its caps, so size
+  `--egress-max-downloads` and `--egress-max-log-streams` for the pool.
 - **run-node:** a Kubernetes pod stops its node when the controller refuses
   the claim renewal, which is how a cancellation for exhausted credits, a
   reaped claim, or a cancelled node reaches it. The refusal was logged and the

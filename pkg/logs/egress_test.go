@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -67,7 +66,9 @@ func readLog(t *testing.T, h http.Handler, token, path string) *httptest.Respons
 }
 
 func TestLogReadsCountAgainstThePrincipalsBudget(t *testing.T) {
-	s, h := newEgressLogsServer(t, egress.Config{PerPrincipalMonthlyBytes: 20})
+	// safety: the budget is exactly one read of the log, because a read
+	// that would pass it is cut and aborted rather than finished.
+	s, h := newEgressLogsServer(t, egress.Config{PerPrincipalMonthlyBytes: 31})
 	appendLog(t, h, "alice", "r1", "n1", strings.Repeat("x", 30)+"\n")
 
 	first := readLog(t, h, "alice", "/api/v1/logs/r1/n1")
@@ -288,12 +289,11 @@ func TestARefusedReadIsNotCharged(t *testing.T) {
 	}
 }
 
-// safety: the pod-keyed slot is only worth having if a shipped client
-// actually sends the header. This drives logs.Client itself, not a
-// hand-built request, and holds each pod's stream open so the cap is
-// really contended; removing the identity plumbing reds it.
-func TestShippedClientsGiveEachPodItsOwnSlot(t *testing.T) {
-	s, h := newEgressLogsServer(t, egress.Config{MaxStreamsPerPrincipal: 1})
+// safety: the runner identity is a header the caller writes, so a slot
+// keyed on it let one bearer hold as many streams as it named pods. This
+// drives logs.Client itself, the way a pool's pods reach the service.
+func TestPodsUnderOneBearerShareItsStreamSlots(t *testing.T) {
+	_, h := newEgressLogsServer(t, egress.Config{MaxStreamsPerPrincipal: 1})
 	appendLog(t, h, "alice", "r1", "n1", "hello\n")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -301,49 +301,15 @@ func TestShippedClientsGiveEachPodItsOwnSlot(t *testing.T) {
 	pod := func(name string) *Client {
 		return NewClientWithToken(srv.URL, nil, "alice").WithRunnerIdentity(name)
 	}
-	open := func(t *testing.T, c *Client) io.ReadCloser {
-		t.Helper()
-		body, err := c.Stream(t.Context(), "r1", "n1")
-		if err != nil {
-			t.Fatalf("stream: %v", err)
-		}
-		t.Cleanup(func() { _ = body.Close() })
-		return body
+	body, err := pod("pool-runner-0").Stream(t.Context(), "r1", "n1")
+	if err != nil {
+		t.Fatalf("stream: %v", err)
 	}
+	t.Cleanup(func() { _ = body.Close() })
 
-	// safety: every pod of the pool holds a stream at once under a cap of
-	// one; keyed on the shared principal this refuses all but the first.
-	const pods = 8
-	for i := range pods {
-		open(t, pod(fmt.Sprintf("pool-runner-%d", i)))
-	}
-	if got := s.egress.State().Principals; got < pods {
-		t.Fatalf("the meter tracks %d identities, want one per pod", got)
-	}
-
-	// safety: the cap still bites within one pod, so it is a cap and not
-	// merely unreachable.
-	if _, err := pod("pool-runner-0").Stream(t.Context(), "r1", "n1"); err == nil {
-		t.Fatal("one pod's second simultaneous stream was admitted past the cap of one")
-	}
-
-	// safety: bytes stay on the team however many pods spent them.
-	state := s.egress.State()
-	for _, p := range state.Top {
-		if strings.Contains(p.Principal, "/") && p.MonthBytes != 0 {
-			t.Errorf("byte total %d was keyed on the pod %q; the bill is the team's", p.MonthBytes, p.Principal)
-		}
-	}
-
-	// safety: a client that names no pod falls back to the shared
-	// principal, which is what the pod-keyed slot exists to avoid.
-	bare := NewClientWithToken(srv.URL, nil, "alice")
-	if got := bare.RunnerIdentity(); got != "" {
-		t.Fatalf("an unnamed client reports identity %q", got)
-	}
-	open(t, bare)
-	if _, err := bare.Stream(t.Context(), "r1", "n1"); err == nil {
-		t.Fatal("a second unnamed stream was admitted; unnamed clients must share one slot")
+	if second, err := pod("pool-runner-1").Stream(t.Context(), "r1", "n1"); err == nil {
+		_ = second.Close()
+		t.Fatal("a second pod under the same bearer was admitted past the principal's cap of one")
 	}
 }
 
