@@ -159,6 +159,13 @@ unlock.
 
 ### Fixed
 
+- **run-node:** a Kubernetes pod stops its node when the controller refuses
+  the claim renewal, which is how a cancellation for exhausted credits, a
+  reaped claim, or a cancelled node reaches it. The refusal was logged and the
+  step ran on, billing compute until the Job deadline of up to 24 hours. The
+  node's process group is now killed within one renewal period, `run-node`
+  exits non-zero, and the Job ends. A controller unreachable for a whole claim
+  lease stops the node the same way.
 - **runners/k8s:** a Kubernetes fallback Job is no longer created when the
   controller refuses the node's named claim. The claim is where the credit check
   lives, and a refusal such as `402 insufficient credits` was logged and the Job
