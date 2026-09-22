@@ -47,11 +47,10 @@ func DefaultConfigPath() (string, error) {
 // secret written into the operator's real store is found only by accident.
 // Which variable moves this file depends on which of the two stores it is.
 func guardSandboxWrite(path string) error {
-	override := SecretsPathEnv
 	if plain, err := DefaultConfigPath(); err == nil && plain == path {
-		override = ConfigPathEnv
+		return configguard.GuardWrite("the local secret store", ConfigPathEnv, path)
 	}
-	return configguard.GuardWrite("the local secret store", override, path)
+	return configguard.GuardWrite("the local secret store", SecretsPathEnv, path)
 }
 
 type DotenvSource struct {
