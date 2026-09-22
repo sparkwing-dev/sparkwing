@@ -280,7 +280,7 @@ func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &claimed); err != nil {
 			t.Fatal(err)
 		}
-		req, err := http.NewRequestWithContext(ctx, "POST", f.url+"/api/v1/runs", strings.NewReader(
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url+"/api/v1/runs", strings.NewReader(
 			`{"id":"run-by-b","pipeline":"build-b","status":"running"}`))
 		if err != nil {
 			t.Fatal(err)
