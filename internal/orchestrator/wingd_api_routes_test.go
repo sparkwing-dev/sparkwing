@@ -155,6 +155,10 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/team/runner-tokens",
 	"DELETE /api/v1/team/runner-tokens/{prefix}",
 	"POST /api/v1/teams",
+	"POST /api/v1/runners/github/exchange",
+	"GET /api/v1/team/github-runners",
+	"POST /api/v1/team/github-runners",
+	"DELETE /api/v1/team/github-runners/{repository_id}",
 }
 
 func TestEveryControllerRouteIsClassified(t *testing.T) {

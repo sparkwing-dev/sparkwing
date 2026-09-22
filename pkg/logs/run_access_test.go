@@ -54,10 +54,6 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		}
 		return res.Account, tn
 	}
-	forDefault, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
 	alice, teamA := signIn("alice")
 	_, teamB := signIn("bob")
 	mint := func(tn *store.Tenant, name string, scopes ...string) string {
@@ -68,8 +64,13 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		return "Bearer " + raw
 	}
 	// safety: the operator's admin token appends without a runner's claim, and
-	// only the operator's own team may hold that scope.
-	writerA := mint(forDefault, "operator", controller.ScopeAdmin, controller.ScopeLogsWrite)
+	// only the operator's own mint through *Store may carry that scope.
+	rawOperator, _, err := st.CreateToken("operator", store.TokenKindUser,
+		[]string{controller.ScopeAdmin, controller.ScopeLogsWrite}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writerA := "Bearer " + rawOperator
 	readerA := mint(teamA, "a-reader", controller.ScopeLogsRead)
 	readerB := mint(teamB, "b-reader", controller.ScopeLogsRead)
 	everyB := mint(teamB, "b-every", controller.ScopeLogsRead, controller.ScopeLogsWrite,

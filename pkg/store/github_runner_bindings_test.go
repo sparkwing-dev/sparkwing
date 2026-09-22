@@ -123,7 +123,7 @@ func TestGitHubRunnerScopeClaimsOnlyItsRepositorysNodes(t *testing.T) {
 	githubWork(t, st, acme, "run-widgets", "Acme/Widgets", nil)
 
 	ctx := store.WithGitHubRunnerScope(context.Background(), store.GitHubRunnerScope{Team: "acme", Repo: widgets})
-	id := store.ClaimIdentity{Principal: "github:42:Acme/Widgets", TokenPrefix: "swr_aaaaaaaa"}
+	id := githubClaimant(t, acme, "github:42:Acme/Widgets")
 	n, err := st.ClaimNextReadyNode(ctx, id, "gh-1", time.Minute, nil)
 	if err != nil || n.RunID != "run-widgets" {
 		t.Fatalf("claim = %+v, %v; want run-widgets", n, err)
@@ -143,7 +143,7 @@ func TestGitHubRunnerScopeClaimsOnlyItsRepositorysTriggers(t *testing.T) {
 	githubWork(t, st, acme, "run-gadgets", "acme/gadgets", nil)
 	githubWork(t, st, other, "run-other-widgets", "acme/widgets", nil)
 	ctx := store.WithGitHubRunnerScope(context.Background(), store.GitHubRunnerScope{Team: "acme", Repo: widgets})
-	id := store.ClaimIdentity{Principal: "github:42:Acme/Widgets", TokenPrefix: "swr_aaaaaaaa"}
+	id := githubClaimant(t, acme, "github:42:Acme/Widgets")
 	if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("claim = %+v, %v; want nothing", tr, err)
 	}
@@ -159,7 +159,7 @@ func TestGitHubRunnerScopeLeavesATriggerNamingAnotherRepositoryInItsEnv(t *testi
 	acme := teamHandle(t, st, "acme")
 	githubWork(t, st, acme, "run-forged-env", "acme/widgets", map[string]string{"GITHUB_REPOSITORY": "acme/gadgets"})
 	ctx := store.WithGitHubRunnerScope(context.Background(), store.GitHubRunnerScope{Team: "acme", Repo: widgets})
-	id := store.ClaimIdentity{Principal: "github:42:acme/widgets", TokenPrefix: "swr_aaaaaaaa"}
+	id := githubClaimant(t, acme, "github:42:acme/widgets")
 	if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("claim = %+v, %v; want nothing", tr, err)
 	}
@@ -191,4 +191,15 @@ func TestTriggerNamesGitHubRepoAcceptsEverySpellingOfTheRepository(t *testing.T)
 			t.Errorf("%s accepted", name)
 		}
 	}
+}
+
+// githubClaimant mints the runner credential a GitHub Actions job claims
+// with, because a claim takes its team off the token row its prefix names.
+func githubClaimant(t *testing.T, team *store.Tenant, principal string) store.ClaimIdentity {
+	t.Helper()
+	_, tok, err := team.CreateToken(context.Background(), principal, store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store.ClaimIdentity{Principal: principal, TokenPrefix: tok.Prefix}
 }
