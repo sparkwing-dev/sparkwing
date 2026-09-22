@@ -12,7 +12,11 @@ import (
 
 func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	runs, err := s.store.ListRunRetryTree(r.Context(), id)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	runs, err := tenant.ListRunRetryTree(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
