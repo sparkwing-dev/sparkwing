@@ -136,6 +136,14 @@ unlock.
   read the `default` team, which is the only team a local or single-tenant
   install has, so its behavior is unchanged and it is asked for no new
   configuration.
+- **sdk:** a project root is a directory holding `.sparkwing/sparkwing.yaml`,
+  not one holding a `.sparkwing` directory
+  The machine's own state lives in `~/.sparkwing`, so a pipeline running
+  anywhere beneath a home directory with no nearer project resolved
+  `sparkwing.WorkDir()` to that home, and `Path` and `ReadFile` then answered
+  against it instead of refusing. The CLI already resolved the stricter marker
+  and says so when it finds none. A real project is unaffected, because a
+  project without that file is not one the CLI will run either.
 
 - **store:** the backup drill skips a Postgres client older than the server
   instead of failing
