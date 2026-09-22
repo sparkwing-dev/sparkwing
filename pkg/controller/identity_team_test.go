@@ -1,11 +1,13 @@
 package controller_test
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type member struct {
@@ -320,5 +322,18 @@ func TestReaderCannotMintRunnerTokens(t *testing.T) {
 	owner := f.user("o2", "owen@example.com")
 	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": "x; rm -rf /"}, nil); code != http.StatusBadRequest {
 		t.Fatalf("shell-unsafe runner name = %d, want 400", code)
+	}
+}
+
+func TestRunnerTokensAreCappedPerTeam(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner := f.user("o", "olga@example.com")
+	for i := range store.MaxRunnerTokensPerTeam {
+		if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": fmt.Sprintf("box%d", i)}, nil); code != http.StatusCreated {
+			t.Fatalf("mint %d = %d", i, code)
+		}
+	}
+	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": "box-extra"}, nil); code != http.StatusConflict {
+		t.Fatalf("mint past the cap = %d, want 409", code)
 	}
 }

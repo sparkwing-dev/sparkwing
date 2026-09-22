@@ -54,6 +54,10 @@ unlock.
   active team; an editor mints and revokes their own, an owner revokes any.
   Every `/team` route acts on the session's team, and another team's id
   answers 404. Nobody grants a role above their own and the last owner stays.
+  A team holds at most 10 live runner tokens (the next mint answers 409), 50
+  open invitations and 100 invitations created a day (429), and a withdrawn
+  invitation still counts toward the day. `store.Tenant` refuses to mint a
+  token carrying `admin` on every path.
 - **controller:** hosting more than one team needs a signed license
   (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
   controller verifies its Ed25519 signature against a public key built into the

@@ -173,7 +173,7 @@ func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if err := t.DeleteInvitation(r.Context(), r.PathValue("id")); err != nil {
+	if err := t.DeleteInvitation(r.Context(), r.PathValue("id"), time.Now()); err != nil {
 		writeIdentityError(w, s, r, "delete invitation", err)
 		return
 	}
@@ -245,8 +245,11 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, errors.New("name is 1 to 63 letters, digits, '-', '_' or '.'"))
 		return
 	}
-	raw, tok, err := t.CreateTokenWith(r.Context(), runnerPrincipalPrefix+name, store.TokenKindRunner,
-		runnerTokenScopes, 0, time.Now().UTC(), store.TokenOptions{CreatedBy: p.AccountID})
+	raw, tok, err := t.CreateRunnerToken(r.Context(), runnerPrincipalPrefix+name, runnerTokenScopes, p.AccountID, time.Now().UTC())
+	if errors.Is(err, store.ErrRunnerTokenLimit) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		s.writeInternalError(w, r, "mint runner token", err)
 		return

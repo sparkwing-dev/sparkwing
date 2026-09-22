@@ -495,6 +495,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrComputeLimit = errors.New("compute limit reached")
@@ -516,6 +517,7 @@ var ErrInvalidInput = errors.New("store: invalid input")
 var ErrInvalidSlug = errors.New("store: invalid team slug")
 var ErrInvalidToken = errors.New("invalid token")
 var ErrInvitationClosed = errors.New("store: invitation is expired or already used")
+var ErrInvitationLimit = errors.New("store: this team has sent as many invitations as it may for now")
 var ErrInvitationOpen = errors.New("store: that address already has an open invitation")
 var ErrLastOwner = errors.New("store: a team keeps at least one owner")
 var ErrLockHeld = errors.New("held by another holder")
@@ -526,6 +528,7 @@ var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunNotLive = errors.New("run is not live")
+var ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
@@ -762,9 +765,12 @@ const MaxCreditMaxChargeSeconds = 86_400
 const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
+const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
+const MaxOpenInvitations = 50
 const MaxRunListLimit = 1000
+const MaxRunnerTokensPerTeam = 10
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 type Membership struct {
 	Team        Team
@@ -1614,6 +1620,9 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
+func (t *Tenant) CreateRunnerToken(
+	ctx context.Context, principal string, scopes []string, createdBy string, now time.Time,
+) (string, *Token, error)
 func (t *Tenant) CreateToken(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)
@@ -1625,7 +1634,7 @@ func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) 
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
-func (t *Tenant) DeleteInvitation(ctx context.Context, id string) error
+func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error

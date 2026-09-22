@@ -91,6 +91,14 @@ func isReservedSlug(slug string) bool {
 	return reservedSlugs[slug] || strings.HasPrefix(slug, reservedSlugPrefix)
 }
 
+// Team-wide ceilings. Every runner token multiplies each per-principal budget, and every invitation
+// may become a mail the deployment sends, so a team holds a bounded number of both.
+const (
+	MaxRunnerTokensPerTeam = 10
+	MaxInvitationsPerDay   = 100
+	MaxOpenInvitations     = 50
+)
+
 // MaxCreatedTeams bounds how many teams one user can create, their personal
 // space included, because each team is a tenant the deployment pays to hold.
 const MaxCreatedTeams = 10
@@ -109,6 +117,8 @@ var (
 	ErrInvitationOpen   = errors.New("store: that address already has an open invitation")
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
 	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
+	ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
+	ErrInvitationLimit  = errors.New("store: this team has sent as many invitations as it may for now")
 )
 
 // Account is one human, what the API calls a user. Email is the address the
@@ -221,9 +231,11 @@ CREATE TABLE IF NOT EXISTS invitations (
     created_at  INTEGER NOT NULL,
     expires_at  INTEGER NOT NULL,
     accepted_at INTEGER,
-    accepted_by TEXT NOT NULL DEFAULT ''
+    accepted_by TEXT NOT NULL DEFAULT '',
+    withdrawn_at INTEGER
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_open ON invitations(team, email) WHERE accepted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_open ON invitations(team, email)
+    WHERE accepted_at IS NULL AND withdrawn_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);
 `
 
@@ -689,7 +701,7 @@ func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []M
 // address, from every team.
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error) {
 	rows, err := s.query(ctx, invitationSelect+`
-		WHERE i.email = ? AND i.accepted_at IS NULL AND i.expires_at > ?
+		WHERE i.email = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
 		ORDER BY i.created_at`, NormalizeEmail(email), now.UTC().Unix())
 	if err != nil {
 		return nil, err
@@ -738,10 +750,10 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 
 	var team, email, role string
 	var expires int64
-	var accepted sql.NullInt64
+	var accepted, withdrawn sql.NullInt64
 	err = tx.QueryRowContext(ctx,
-		`SELECT team, email, role, expires_at, accepted_at FROM invitations WHERE id = ?`, invitationID).
-		Scan(&team, &email, &role, &expires, &accepted)
+		`SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
+		Scan(&team, &email, &role, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -757,7 +769,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 	if !acct.EmailVerified || acct.Email != email {
 		return "", ErrEmailMismatch
 	}
-	if accepted.Valid || expires <= at {
+	if accepted.Valid || withdrawn.Valid || expires <= at {
 		return "", ErrInvitationClosed
 	}
 	// safety: the update repeats the unaccepted predicate and counts what it
@@ -765,7 +777,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 	// take it.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invitations SET accepted_at = ?, accepted_by = ?
-		WHERE id = ? AND team = ? AND accepted_at IS NULL`, at, accountID, invitationID, team)
+		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, accountID, invitationID, team)
 	if err != nil {
 		return "", err
 	}
@@ -978,6 +990,67 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string) er
 	return tx.Commit()
 }
 
+// safety: counting and then inserting is a race unless the team row is locked first; Postgres
+// serializes on it and SQLite's single connection already serializes every writer.
+func (t *Tenant) lockTeamTx(ctx context.Context, tx *storeTx) error {
+	var name string
+	err := tx.QueryRowContext(ctx, `SELECT name FROM teams WHERE name = ?`+tx.forUpdate(), string(t.team)).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+// CreateRunnerToken mints a runner token for t's team, refusing once the team
+// holds [MaxRunnerTokensPerTeam] live ones. It returns the raw token once.
+func (t *Tenant) CreateRunnerToken(
+	ctx context.Context, principal string, scopes []string, createdBy string, now time.Time,
+) (string, *Token, error) {
+	if err := refuseAdminScope(scopes); err != nil {
+		return "", nil, err
+	}
+	for attempt := 1; ; attempt++ {
+		raw, tok, err := t.createRunnerTokenOnce(ctx, principal, scopes, createdBy, now)
+		if err == nil {
+			return raw, tok, nil
+		}
+		if attempt < mintAttempts && isTokenPrefixCollision(err) {
+			continue
+		}
+		return "", nil, err
+	}
+}
+
+func (t *Tenant) createRunnerTokenOnce(
+	ctx context.Context, principal string, scopes []string, createdBy string, now time.Time,
+) (string, *Token, error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return "", nil, err
+	}
+	at := now.UTC().Unix()
+	var live int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM tokens
+		WHERE team = ? AND kind = ? AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
+		string(t.team), TokenKindRunner, at, at).Scan(&live); err != nil {
+		return "", nil, err
+	}
+	if live >= MaxRunnerTokensPerTeam {
+		return "", nil, ErrRunnerTokenLimit
+	}
+	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, 0, now,
+		TokenOptions{CreatedBy: createdBy})
+	if err != nil {
+		return "", nil, err
+	}
+	return raw, tok, tx.Commit()
+}
+
 func (t *Tenant) roleTx(ctx context.Context, tx *storeTx, accountID string) (Role, error) {
 	var role string
 	err := tx.QueryRowContext(ctx,
@@ -1017,12 +1090,30 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 		return Invitation{}, err
 	}
 	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return Invitation{}, err
+	}
 	actor, err := t.roleTx(ctx, tx, actorID)
 	if err != nil {
 		return Invitation{}, err
 	}
 	if !actor.AtLeast(role) {
 		return Invitation{}, ErrRoleAboveOwn
+	}
+	at := now.UTC().Unix()
+	var open, today int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM invitations
+		WHERE team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at > ?`,
+		string(t.team), at).Scan(&open); err != nil {
+		return Invitation{}, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invitations WHERE team = ? AND created_at > ?`,
+		string(t.team), at-int64((24*time.Hour).Seconds())).Scan(&today); err != nil {
+		return Invitation{}, err
+	}
+	if open >= MaxOpenInvitations || today >= MaxInvitationsPerDay {
+		return Invitation{}, ErrInvitationLimit
 	}
 	var already int
 	if err := tx.QueryRowContext(ctx, `
@@ -1033,12 +1124,12 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 	if already > 0 {
 		return Invitation{}, ErrAlreadyMember
 	}
-	at := now.UTC().Unix()
-	// safety: an expired invitation still holds the open-invitation index, so
-	// it is cleared before a fresh one to the same address is written.
+	// safety: an expired invitation still holds the open-invitation index, so it is withdrawn before a
+	// fresh one to the same address is written; rows are kept, so the daily count stays honest.
 	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM invitations WHERE team = ? AND email = ? AND accepted_at IS NULL AND expires_at <= ?`,
-		string(t.team), email, at); err != nil {
+		UPDATE invitations SET withdrawn_at = ?
+		WHERE team = ? AND email = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at <= ?`,
+		at, string(t.team), email, at); err != nil {
 		return Invitation{}, err
 	}
 	id, err := newIdentityID()
@@ -1064,7 +1155,7 @@ func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, ro
 // Invitations lists t's open invitations.
 func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation, err error) {
 	rows, err := t.s.query(ctx, invitationSelect+`
-		WHERE i.team = ? AND i.accepted_at IS NULL AND i.expires_at > ?
+		WHERE i.team = ? AND i.accepted_at IS NULL AND i.withdrawn_at IS NULL AND i.expires_at > ?
 		ORDER BY i.created_at`, string(t.team), now.UTC().Unix())
 	if err != nil {
 		return nil, err
@@ -1077,11 +1168,14 @@ func (t *Tenant) Invitations(ctx context.Context, now time.Time) (_ []Invitation
 	return scanInvitations(rows)
 }
 
-// DeleteInvitation withdraws one of t's unaccepted invitations. An id that is
-// another team's, or already accepted, is ErrNotFound.
-func (t *Tenant) DeleteInvitation(ctx context.Context, id string) error {
-	res, err := t.s.exec(ctx, `DELETE FROM invitations WHERE team = ? AND id = ? AND accepted_at IS NULL`,
-		string(t.team), id)
+// DeleteInvitation withdraws one of t's open invitations. An id that is
+// another team's, already accepted, or already withdrawn is ErrNotFound. The
+// row stays, so a withdrawn invitation still counts toward the daily cap.
+func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error {
+	res, err := t.s.exec(ctx, `
+		UPDATE invitations SET withdrawn_at = ?
+		WHERE team = ? AND id = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`,
+		now.UTC().Unix(), string(t.team), id)
 	if err != nil {
 		return err
 	}

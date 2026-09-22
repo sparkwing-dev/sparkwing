@@ -586,7 +586,10 @@ session and never from the request, and an id belonging to another team
 answers 404.
 
 A runner token minted from team settings carries the runner scope set and
-belongs to the team that minted it.
+belongs to the team that minted it. A team holds at most 10 live runner tokens,
+at most 50 open invitations, and creates at most 100 invitations a day;
+withdrawing an invitation still counts toward that day. No token minted into a
+team carries `admin`.
 
 ## Unauthenticated endpoints
 

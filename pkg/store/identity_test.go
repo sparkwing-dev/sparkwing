@@ -165,7 +165,7 @@ func TestIdentityTeamScopedWritesMissAnotherTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ta.DeleteInvitation(ctx, inv.ID); !errors.Is(err, store.ErrNotFound) {
+	if err := ta.DeleteInvitation(ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("team a deleting team b's invitation = %v, want ErrNotFound", err)
 	}
 	_, tok, err := tb.CreateTokenWith(ctx, "agent:b", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now(),
@@ -308,5 +308,120 @@ func TestIdentityReservedSlugs(t *testing.T) {
 	st := storetest.Open(t)
 	if res := signIn(t, st, "s", "demo-user@example.com"); store.ValidateSlug(string(res.PersonalTeam)) != nil {
 		t.Fatalf("personal slug %q is itself reserved", res.PersonalTeam)
+	}
+}
+
+func TestIdentityRunnerTokenCapHoldsUnderConcurrentMints(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "mint@example.com")
+	tn := tenant(t, st, u.PersonalTeam)
+	const tries = 3 * store.MaxRunnerTokensPerTeam
+	errs := make(chan error, tries)
+	for i := range tries {
+		go func() {
+			_, _, err := tn.CreateRunnerToken(ctx, fmt.Sprintf("agent:m%d", i), []string{"nodes.claim"}, u.Account.ID, time.Now())
+			errs <- err
+		}()
+	}
+	minted := 0
+	for range tries {
+		switch err := <-errs; {
+		case err == nil:
+			minted++
+		case !errors.Is(err, store.ErrRunnerTokenLimit):
+			t.Errorf("mint: %v", err)
+		}
+	}
+	if minted != store.MaxRunnerTokensPerTeam {
+		t.Fatalf("minted %d runner tokens, want exactly %d", minted, store.MaxRunnerTokensPerTeam)
+	}
+	toks, err := tn.RunnerTokens(ctx, time.Now())
+	if err != nil || len(toks) != store.MaxRunnerTokensPerTeam {
+		t.Fatalf("team holds %d tokens (%v)", len(toks), err)
+	}
+	if err := tn.RevokeRunnerToken(ctx, toks[0].Prefix, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tn.CreateRunnerToken(ctx, "agent:again", []string{"nodes.claim"}, u.Account.ID, time.Now()); err != nil {
+		t.Fatalf("mint after a revoke freed a slot: %v", err)
+	}
+}
+
+func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "adm@example.com")
+	tn := tenant(t, st, u.PersonalTeam)
+	if _, _, err := tn.CreateTokenWith(ctx, "ops", store.TokenKindUser, []string{"runs.read", "admin"}, 0, time.Now(),
+		store.TokenOptions{}); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
+		t.Fatalf("team mint with admin = %v, want ErrAdminScopeOnTeamToken", err)
+	}
+	if _, _, err := tn.CreateToken(ctx, "ops", store.TokenKindUser, []string{" admin "}, 0, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
+		t.Fatalf("team mint with padded admin = %v, want ErrAdminScopeOnTeamToken", err)
+	}
+	if _, _, err := tn.CreateRunnerToken(ctx, "agent:x", []string{"admin"}, u.Account.ID, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
+		t.Fatalf("runner mint with admin = %v, want ErrAdminScopeOnTeamToken", err)
+	}
+}
+
+func TestIdentityOpenInvitationsAreCapped(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "host@example.com")
+	tn := tenant(t, st, u.PersonalTeam)
+	for i := range store.MaxOpenInvitations {
+		if _, err := tn.CreateInvitation(ctx, u.Account.ID, fmt.Sprintf("guest%d@example.com", i), store.RoleReader, time.Now()); err != nil {
+			t.Fatalf("invitation %d: %v", i, err)
+		}
+	}
+	if _, err := tn.CreateInvitation(ctx, u.Account.ID, "one-more@example.com", store.RoleReader, time.Now()); !errors.Is(err, store.ErrInvitationLimit) {
+		t.Fatalf("invitation past the open cap = %v, want ErrInvitationLimit", err)
+	}
+}
+
+// Withdrawing keeps the row, so create-and-withdraw cannot mail an
+// unbounded number of invitations in a day.
+func TestIdentityDailyInvitationsAreCappedThroughWithdrawals(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "host@example.com")
+	tn := tenant(t, st, u.PersonalTeam)
+	for i := range store.MaxInvitationsPerDay {
+		inv, err := tn.CreateInvitation(ctx, u.Account.ID, "victim@example.com", store.RoleReader, time.Now())
+		if err != nil {
+			t.Fatalf("invitation %d: %v", i, err)
+		}
+		if err := tn.DeleteInvitation(ctx, inv.ID, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tn.CreateInvitation(ctx, u.Account.ID, "victim@example.com", store.RoleReader, time.Now()); !errors.Is(err, store.ErrInvitationLimit) {
+		t.Fatalf("invitation past the daily cap = %v, want ErrInvitationLimit", err)
+	}
+	if _, err := tn.CreateInvitation(ctx, u.Account.ID, "victim@example.com", store.RoleReader,
+		time.Now().Add(25*time.Hour)); err != nil {
+		t.Fatalf("invitation a day later: %v", err)
+	}
+}
+
+func TestIdentityWithdrawnInvitationCannotBeAccepted(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	owner := signIn(t, st, "o", "owner@example.com")
+	x := signIn(t, st, "x", "x@example.com")
+	tn := tenant(t, st, owner.PersonalTeam)
+	inv, err := tn.CreateInvitation(ctx, owner.Account.ID, "x@example.com", store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.DeleteInvitation(ctx, inv.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrInvitationClosed) {
+		t.Fatalf("accepting a withdrawn invitation = %v, want ErrInvitationClosed", err)
+	}
+	if err := tn.DeleteInvitation(ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("withdrawing twice = %v, want ErrNotFound", err)
 	}
 }

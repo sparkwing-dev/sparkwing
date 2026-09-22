@@ -2,8 +2,24 @@ package store
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"strings"
 	"time"
 )
+
+// ErrAdminScopeOnTeamToken reports a team mint naming the deployment
+// operator's scope, which no team's token may carry.
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
+
+// safety: admin is the deployment operator's scope, and a membership never grants it, so no path that
+// mints into a team may either; the operator's own tokens are minted through *Store.
+func refuseAdminScope(scopes []string) error {
+	if slices.ContainsFunc(scopes, func(s string) bool { return strings.TrimSpace(s) == "admin" }) {
+		return ErrAdminScopeOnTeamToken
+	}
+	return nil
+}
 
 // CreateToken mints a token belonging to t's team. It returns the RAW
 // string only once; the hash is one-way.
@@ -20,6 +36,9 @@ func (t *Tenant) CreateToken(
 func (t *Tenant) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
 ) (string, *Token, error) {
+	if err := refuseAdminScope(scopes); err != nil {
+		return "", nil, err
+	}
 	for attempt := 1; ; attempt++ {
 		raw, tok, err := createTokenRow(ctx, storeExecer{s: t.s}, t.team, principal, kind, scopes, ttl, now, opts)
 		if err == nil {

@@ -517,6 +517,8 @@ func writeIdentityError(w http.ResponseWriter, s *Server, r *http.Request, op st
 		writeError(w, http.StatusForbidden, err)
 	case errors.Is(err, store.ErrInvitationClosed):
 		writeError(w, http.StatusGone, err)
+	case errors.Is(err, store.ErrInvitationLimit):
+		writeError(w, http.StatusTooManyRequests, err)
 	default:
 		s.writeInternalError(w, r, op, err)
 	}

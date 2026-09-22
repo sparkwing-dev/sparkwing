@@ -4477,6 +4477,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The address is already a member or already has an open invitation.}
+        "429": {description: The team holds 50 open invitations or has created 100 in the last day.}
 
   /api/v1/team/invitations/{id}:
     delete:
@@ -4546,6 +4547,7 @@ paths:
                   prefix: {type: string}
                   command: {type: string}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "409": {description: The team already holds 10 live runner tokens.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
