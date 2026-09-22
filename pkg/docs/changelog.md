@@ -185,6 +185,13 @@ unlock.
   belongs to, so it cannot disagree with its run; a trigger takes the team from
   the handle that created it. The automatic agent-loss retry copies the source
   run's team onto the retry run and its trigger for the same reason.
+- **controller:** on Postgres, `finalize-ready` no longer returns HTTP 500 when
+  a fanned-out run closes claim rounds while another request records an event
+  on the same run, such as a credit-refused claim. The round locked its run row
+  `FOR UPDATE`, which blocks the key-share lock every event insert takes, while
+  the event writer held the run's event sequence the round needed next;
+  Postgres broke the deadlock after a second by aborting one side. The round
+  now locks the run `FOR NO KEY UPDATE`.
 
 - **store:** the credit balance and credit exhaustion are per team. The balance
   summed every grant and every charge on the controller with no team predicate,
