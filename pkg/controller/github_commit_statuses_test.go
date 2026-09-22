@@ -862,12 +862,17 @@ func TestGitHubCommitStatusDispatchPanicReleasesReservation(t *testing.T) {
 		},
 		"repository":{"full_name":"acme/sample-app"}
 	}`)
+	tenant, err := st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		t.Fatalf("ForTeam: %v", err)
+	}
 	panicked := false
 	func() {
 		defer func() { panicked = recover() != nil }()
 		srv.handleGitHubPullRequest(
 			httptest.NewRecorder(),
 			httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)),
+			tenant,
 			"pr-gate",
 			"delivery-1",
 			body,

@@ -52,6 +52,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).AccountMemberships":            "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail":       "lists the invitations addressed to one verified email from every team that sent one",
 	"(*Store).AcceptInvitation":              "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
+		"binding of the pipeline is a candidate until its secret verifies the signature",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 }
