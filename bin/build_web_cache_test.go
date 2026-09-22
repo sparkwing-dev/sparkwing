@@ -69,7 +69,7 @@ esac
 	f := webBuildFixture{root: root, trace: trace, env: append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"), "WEB_TEST_TRACE="+trace, "NODE_ENV=production")}
 	f.write(t, "web/src/page.tsx", "first")
 	f.write(t, "web/package.json", `{"scripts":{"build":"next build"}}`)
-	f.write(t, "web/package-lock.json", `{"lockfileVersion":3}`)
+	f.write(t, "web/pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
 	return f
 }
 
@@ -168,7 +168,7 @@ func TestWebBuildReuseInvalidatesContentAndBuildInputs(t *testing.T) {
 			return nil
 		},
 		"lockfile": func(t *testing.T, f webBuildFixture) []string {
-			f.write(t, "web/package-lock.json", `{"lockfileVersion":3,"changed":true}`)
+			f.write(t, "web/pnpm-lock.yaml", "lockfileVersion: '9.0'\nimporters:\n  .: {}\n")
 			return nil
 		},
 		"configuration": func(t *testing.T, f webBuildFixture) []string {

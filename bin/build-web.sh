@@ -26,8 +26,8 @@ fi
 rm -rf "$HERE/web/out"
 (
   cd "$HERE/web"
-  npm ci --include=dev --ignore-scripts --no-audit
-  npm run build
+  pnpm install --frozen-lockfile --prefer-offline --ignore-scripts
+  pnpm run build
 )
 if [[ ! -f "$HERE/web/out/index.html" ]]; then
   echo "web build did not produce a static index.html" >&2

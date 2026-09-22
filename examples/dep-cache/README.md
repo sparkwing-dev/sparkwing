@@ -49,7 +49,7 @@ Nothing touches your real caches: the demo uses an isolated
 
 - `sparkwing.GoModules()` -- the Go module cache, keyed on `go.sum`.
 - `sparkwing.NpmCache()` -- npm's store (not `node_modules`; the store
-  survives `npm ci`), keyed on `package-lock.json`.
+  survives `pnpm install`), keyed on `pnpm-lock.yaml`.
 - `sparkwing.Dir(path, sparkwing.KeyFromFile("Gemfile.lock"))` -- any
   directory, keyed on any file.
 

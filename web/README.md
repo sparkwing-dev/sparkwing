@@ -16,9 +16,9 @@ Pages live under `src/app/` -- the dashboard home is `src/app/page.tsx`,
 with sibling routes for runs, queue, cluster, analytics and the docs guide.
 Shared UI is in `src/components/`. Edits hot-reload.
 
-Run `npm test` for the dashboard's TypeScript unit suite, `npm run lint` for
-ESLint, and `npm run build` for the production static export. Run `npm run
-test:browser:install` once to cache Chromium, then `npm run test:browser` to
+Run `pnpm test` for the dashboard's TypeScript unit suite, `pnpm run lint` for
+ESLint, and `pnpm run build` for the production static export. Run `pnpm run
+test:browser:install` once to cache Chromium, then `pnpm run test:browser` to
 rebuild the static export and exercise the dashboard smoke suite. Failed
 browser runs retain their trace, screenshot, video, and HTML report under
 `test-results/` and `playwright-report/`; the hosted pre-commit gate uploads
@@ -30,7 +30,8 @@ controller, hosted secret, or Kubernetes cluster.
 
 `sparkwing run gate` runs the unit and full ESLint suites in parallel,
 then the production build and browser smoke suite. Install the locked dashboard
-dependencies before running the local gate; hosted CI runs `npm ci` itself.
+dependencies before running the local gate; hosted CI runs `pnpm install
+--frozen-lockfile` itself.
 
 ## How this ships
 

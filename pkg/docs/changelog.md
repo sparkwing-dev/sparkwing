@@ -47,6 +47,15 @@ unlock.
 
 ### Changed
 
+- **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
+  replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
+  dependencies allowed to run build scripts, and the local build, dev server and
+  hosted workflows call pnpm. Worktrees that share a lockfile now hard-link one
+  copy of the dependency tree out of pnpm's store instead of each holding their
+  own. The security gate runs `pnpm audit`, reading the legacy report shape pnpm
+  answers in and keying its recorded pass on `web/pnpm-lock.yaml`; recorded npm
+  passes do not carry over.
+
 - **runner:** a node queues when the Kubernetes fleet is full instead of failing
   A pod no node would take failed its node after five minutes, whatever the
   reason, so an hour busy enough to fill the runner pool turned ordinary builds

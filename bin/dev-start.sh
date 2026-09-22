@@ -29,7 +29,7 @@ echo "==> starting sparkwing serve on :4343"
 sparkwing serve start
 
 echo "==> starting next dev on :3100 (log: $log_web)"
-(cd "$REPO/web" && npm run dev) >"$log_web" 2>&1 &
+(cd "$REPO/web" && pnpm run dev) >"$log_web" 2>&1 &
 echo $! >"$pid_web"
 
 sleep 2

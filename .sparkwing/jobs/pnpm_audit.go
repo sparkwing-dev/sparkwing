@@ -16,87 +16,89 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const npmAuditCommand = "npm --prefix web audit --omit=dev --audit-level=high --json"
+const pnpmAuditCommand = "pnpm --dir web audit --prod --audit-level=high --json"
 
 const (
-	npmAuditAttempts       = 3
-	npmAuditAttemptTimeout = 90 * time.Second
-	npmAuditRetryBackoff   = 3 * time.Second
+	pnpmAuditAttempts       = 3
+	pnpmAuditAttemptTimeout = 90 * time.Second
+	pnpmAuditRetryBackoff   = 3 * time.Second
 )
 
 // safety: a recorded pass proves one lockfile against the advisory database of
 // the moment it ran, so the window stays short enough that an advisory
 // published against an unchanged lockfile still fails the next day's gate.
-const npmAuditRetention = 24 * time.Hour
+const pnpmAuditRetention = 24 * time.Hour
 
-// safety: npmAuditFormat sits in the digest, so widening or narrowing the
+// safety: pnpmAuditFormat sits in the digest, so widening or narrowing the
 // recorded inputs invalidates every recorded pass instead of reusing one that a
 // different input set produced.
-const npmAuditFormat = 1
+const pnpmAuditFormat = 2
 
 // safety: a registry that could not answer is a different failure from an
 // advisory it answered with. Both fail the gate.
-var errNpmRegistryUnavailable = errors.New("advisory registry unavailable")
+var errPnpmRegistryUnavailable = errors.New("advisory registry unavailable")
 
-type npmAuditReport struct {
-	// safety: npm omits its own audit-report marker on a registry failure, so
-	// requiring it keeps a failure payload from reading as zero advisories.
-	Version  int            `json:"auditReportVersion"`
-	Message  string         `json:"message"`
-	Error    *npmAuditError `json:"error"`
-	Metadata struct {
-		Vulnerabilities map[string]int `json:"vulnerabilities"`
+// safety: pnpm answers in npm's legacy report shape, which carries no
+// report-version marker. Its metadata block stands in as the proof that the
+// payload is an audit answer, because a registry failure yields no metadata.
+type pnpmAuditReport struct {
+	Message  string          `json:"message"`
+	Error    *pnpmAuditError `json:"error"`
+	Metadata *struct {
+		Vulnerabilities   map[string]int `json:"vulnerabilities"`
+		TotalDependencies *int           `json:"totalDependencies"`
 	} `json:"metadata"`
-	Vulnerabilities map[string]struct {
-		Severity string `json:"severity"`
-	} `json:"vulnerabilities"`
+	Advisories map[string]struct {
+		ModuleName string `json:"module_name"`
+		Severity   string `json:"severity"`
+	} `json:"advisories"`
 }
 
-type npmAuditError struct {
+type pnpmAuditError struct {
 	Code    string `json:"code"`
 	Summary string `json:"summary"`
 	Detail  string `json:"detail"`
 }
 
-func (e *npmAuditError) String() string {
+func (e *pnpmAuditError) String() string {
 	if e.Code == "" {
 		return e.Summary
 	}
 	return e.Code + ": " + e.Summary
 }
 
-type npmAuditVerdict struct {
+type pnpmAuditVerdict struct {
 	// safety: the zero value must not read as a pass. Only a parsed audit
 	// report sets Answered, so a verdict that never reached the registry -- a
 	// zeroed struct from any early return -- fails the gate instead of
 	// recording a proof.
 	Answered    bool
 	Advisories  []string
-	Unavailable *npmAuditError
+	Unavailable *pnpmAuditError
 }
 
-var npmTransientCodes = map[string]bool{
+var pnpmTransientCodes = map[string]bool{
 	"EAI_AGAIN": true, "ECONNREFUSED": true, "ECONNRESET": true, "EHOSTUNREACH": true,
 	"ENETUNREACH": true, "ENOTFOUND": true, "ETIMEDOUT": true,
 	"E429": true, "E500": true, "E502": true, "E503": true, "E504": true,
 }
 
-var npmTransientMarkers = []string{
+var pnpmTransientMarkers = []string{
 	"timeout", "timed out", "socket hang up", "bad gateway",
 	"gateway time-out", "service unavailable", "network",
 	"econnreset", "enotfound", "eai_again", "etimedout", "econnrefused",
 	"502", "503", "504",
 }
 
-func npmErrorIsTransient(e *npmAuditError) bool {
+func pnpmErrorIsTransient(e *pnpmAuditError) bool {
 	if e == nil {
 		return false
 	}
-	if npmTransientCodes[strings.ToUpper(strings.TrimSpace(e.Code))] {
+	if pnpmTransientCodes[strings.ToUpper(strings.TrimSpace(e.Code))] {
 		return true
 	}
 	text := strings.ToLower(e.Summary + " " + e.Detail)
-	for _, marker := range npmTransientMarkers {
+	for _, marker := range pnpmTransientMarkers {
 		if strings.Contains(text, marker) {
 			return true
 		}
@@ -106,39 +108,44 @@ func npmErrorIsTransient(e *npmAuditError) bool {
 
 // safety: npm reports an unreachable registry in the same payload it reports
 // advisories in, so the report and not the exit code tells the two apart.
-func readNpmAuditReport(stdout string) (npmAuditVerdict, error) {
+func readPnpmAuditReport(stdout string) (pnpmAuditVerdict, error) {
 	body := strings.TrimSpace(stdout)
 	if start := strings.Index(body, "{"); start > 0 {
 		body = body[start:]
 	}
 	if body == "" {
-		return npmAuditVerdict{}, errors.New("npm audit produced no report")
+		return pnpmAuditVerdict{}, errors.New("pnpm audit produced no report")
 	}
-	var report npmAuditReport
+	var report pnpmAuditReport
 	if err := json.Unmarshal([]byte(body), &report); err != nil {
-		return npmAuditVerdict{}, fmt.Errorf("decode npm audit report: %w", err)
+		return pnpmAuditVerdict{}, fmt.Errorf("decode pnpm audit report: %w", err)
 	}
 	// safety: npm puts the reason a failed audit failed in the top-level message
 	// and leaves the error object blank, so the two are read together.
 	if report.Error != nil || report.Message != "" {
-		failure := npmAuditError{}
+		failure := pnpmAuditError{}
 		if report.Error != nil {
 			failure = *report.Error
 		}
 		if failure.Summary == "" {
 			failure.Summary = report.Message
 		}
-		return npmAuditVerdict{Answered: true, Unavailable: &failure}, nil
+		return pnpmAuditVerdict{Answered: true, Unavailable: &failure}, nil
 	}
-	if report.Version == 0 {
-		return npmAuditVerdict{}, errors.New("npm audit produced no report version, so the payload is not an audit answer")
+	if report.Metadata == nil || report.Metadata.TotalDependencies == nil {
+		return pnpmAuditVerdict{}, errors.New("pnpm audit produced no report metadata, so the payload is not an audit answer")
 	}
 
 	var advisories []string
-	for name, v := range report.Vulnerabilities {
-		if v.Severity == "high" || v.Severity == "critical" {
-			advisories = append(advisories, name+" ("+v.Severity+")")
+	for id, v := range report.Advisories {
+		if v.Severity != "high" && v.Severity != "critical" {
+			continue
 		}
+		name := v.ModuleName
+		if name == "" {
+			name = id
+		}
+		advisories = append(advisories, name+" ("+v.Severity+")")
 	}
 	sort.Strings(advisories)
 	// safety: the per-package map and the metadata counters describe the same
@@ -148,21 +155,21 @@ func readNpmAuditReport(stdout string) (npmAuditVerdict, error) {
 	if counted > len(advisories) {
 		advisories = append(advisories, fmt.Sprintf("%d further high or critical advisory the report does not name", counted-len(advisories)))
 	}
-	return npmAuditVerdict{Answered: true, Advisories: advisories}, nil
+	return pnpmAuditVerdict{Answered: true, Advisories: advisories}, nil
 }
 
 // safety: a pass is recordable only where the registry answered and named
 // nothing, so neither an advisory nor an unreachable registry is ever replayed
 // out of the proof store.
-func npmAuditOutcome(v npmAuditVerdict) (record bool, err error) {
+func pnpmAuditOutcome(v pnpmAuditVerdict) (record bool, err error) {
 	if !v.Answered {
-		return false, fmt.Errorf("npm audit: %w (no audit report was read)", errNpmRegistryUnavailable)
+		return false, fmt.Errorf("pnpm audit: %w (no audit report was read)", errPnpmRegistryUnavailable)
 	}
 	if v.Unavailable != nil {
-		return false, fmt.Errorf("npm audit: %w (%s)", errNpmRegistryUnavailable, v.Unavailable)
+		return false, fmt.Errorf("pnpm audit: %w (%s)", errPnpmRegistryUnavailable, v.Unavailable)
 	}
 	if len(v.Advisories) > 0 {
-		return false, fmt.Errorf("npm audit: %d high or critical advisory(ies) in production dependencies: %s",
+		return false, fmt.Errorf("pnpm audit: %d high or critical advisory(ies) in production dependencies: %s",
 			len(v.Advisories), strings.Join(v.Advisories, ", "))
 	}
 	return true, nil
@@ -171,8 +178,8 @@ func npmAuditOutcome(v npmAuditVerdict) (record bool, err error) {
 // safety: the retry policy is the deliverable here, and it cannot be exercised
 // against a real registry, so the one process call sits behind a seam a test
 // can replace.
-var npmAuditRunner = func(ctx context.Context) (stdout string, err error) {
-	res, runErr := sparkwing.Bash(ctx, npmAuditCommand).Capture()
+var pnpmAuditRunner = func(ctx context.Context) (stdout string, err error) {
+	res, runErr := sparkwing.Bash(ctx, pnpmAuditCommand).Capture()
 	stdout = res.Stdout
 	var execErr *sparkwing.ExecError
 	if errors.As(runErr, &execErr) {
@@ -181,44 +188,44 @@ var npmAuditRunner = func(ctx context.Context) (stdout string, err error) {
 	return stdout, runErr
 }
 
-func npmAuditOnce(ctx context.Context) (verdict npmAuditVerdict, retryable bool, err error) {
-	attemptCtx, cancel := context.WithTimeout(ctx, npmAuditAttemptTimeout)
+func pnpmAuditOnce(ctx context.Context) (verdict pnpmAuditVerdict, retryable bool, err error) {
+	attemptCtx, cancel := context.WithTimeout(ctx, pnpmAuditAttemptTimeout)
 	defer cancel()
 
-	stdout, runErr := npmAuditRunner(attemptCtx)
+	stdout, runErr := pnpmAuditRunner(attemptCtx)
 
-	verdict, parseErr := readNpmAuditReport(stdout)
+	verdict, parseErr := readPnpmAuditReport(stdout)
 	switch {
 	case parseErr == nil && verdict.Unavailable != nil:
-		return npmAuditVerdict{}, npmErrorIsTransient(verdict.Unavailable),
-			fmt.Errorf("npm audit: %w (%s)", errNpmRegistryUnavailable, verdict.Unavailable)
+		return pnpmAuditVerdict{}, pnpmErrorIsTransient(verdict.Unavailable),
+			fmt.Errorf("pnpm audit: %w (%s)", errPnpmRegistryUnavailable, verdict.Unavailable)
 	case parseErr == nil:
 		return verdict, false, nil
 	case ctx.Err() == nil && attemptCtx.Err() != nil:
-		return npmAuditVerdict{}, true, fmt.Errorf("npm audit: %w (no answer within %s)", errNpmRegistryUnavailable, npmAuditAttemptTimeout)
+		return pnpmAuditVerdict{}, true, fmt.Errorf("pnpm audit: %w (no answer within %s)", errPnpmRegistryUnavailable, pnpmAuditAttemptTimeout)
 	case runErr != nil:
-		return npmAuditVerdict{}, false, fmt.Errorf("npm audit did not run: %w", runErr)
+		return pnpmAuditVerdict{}, false, fmt.Errorf("pnpm audit did not run: %w", runErr)
 	}
-	return npmAuditVerdict{}, false, fmt.Errorf("npm audit: %w", parseErr)
+	return pnpmAuditVerdict{}, false, fmt.Errorf("pnpm audit: %w", parseErr)
 }
 
-func runNpmAudit(ctx context.Context) (npmAuditVerdict, error) {
+func runPnpmAudit(ctx context.Context) (pnpmAuditVerdict, error) {
 	var last error
-	for attempt := 1; attempt <= npmAuditAttempts; attempt++ {
-		verdict, retryable, err := npmAuditOnce(ctx)
+	for attempt := 1; attempt <= pnpmAuditAttempts; attempt++ {
+		verdict, retryable, err := pnpmAuditOnce(ctx)
 		if err == nil {
 			return verdict, nil
 		}
 		last = err
-		if !retryable || attempt == npmAuditAttempts {
+		if !retryable || attempt == pnpmAuditAttempts {
 			break
 		}
-		sparkwing.Info(ctx, "npm audit: %v; retrying (attempt %d of %d)", err, attempt+1, npmAuditAttempts)
-		if err := waitFor(ctx, npmAuditRetryBackoff*time.Duration(attempt)); err != nil {
-			return npmAuditVerdict{}, err
+		sparkwing.Info(ctx, "pnpm audit: %v; retrying (attempt %d of %d)", err, attempt+1, pnpmAuditAttempts)
+		if err := waitFor(ctx, pnpmAuditRetryBackoff*time.Duration(attempt)); err != nil {
+			return pnpmAuditVerdict{}, err
 		}
 	}
-	return npmAuditVerdict{}, last
+	return pnpmAuditVerdict{}, last
 }
 
 func waitFor(ctx context.Context, d time.Duration) error {
@@ -233,12 +240,12 @@ func waitFor(ctx context.Context, d time.Duration) error {
 }
 
 // safety: the lockfile is what npm resolves advisories against, and
-// package.json decides which of those entries --omit=dev drops, so both belong
+// package.json decides which of those entries --prod drops, so both belong
 // in the key. An .npmrc registry override and the npm version do not.
-func npmAuditDigest(root string) (string, error) {
+func pnpmAuditDigest(root string) (string, error) {
 	h := sha256.New()
-	fmt.Fprintf(h, "format=%d\ncommand=%s\n", npmAuditFormat, npmAuditCommand)
-	for _, name := range []string{"package-lock.json", "package.json"} {
+	fmt.Fprintf(h, "format=%d\ncommand=%s\n", pnpmAuditFormat, pnpmAuditCommand)
+	for _, name := range []string{"pnpm-lock.yaml", "package.json"} {
 		body, err := os.ReadFile(filepath.Join(root, "web", name))
 		if err != nil {
 			return "", fmt.Errorf("digest web/%s: %w", name, err)
@@ -249,15 +256,15 @@ func npmAuditDigest(root string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func npmAuditProofDir() (string, error) {
+func pnpmAuditProofDir() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "sparkwing", "npm-audit-proofs"), nil
+	return filepath.Join(base, "sparkwing", "pnpm-audit-proofs"), nil
 }
 
-type npmAuditProof struct {
+type pnpmAuditProof struct {
 	Format     int       `json:"format"`
 	Digest     string    `json:"digest"`
 	RecordedAt time.Time `json:"recorded_at"`
@@ -265,7 +272,7 @@ type npmAuditProof struct {
 
 // safety: reuse is fail-closed. An unreadable, unparseable, or differently
 // formatted record audits again rather than passing.
-func npmAuditProofFresh(dir, digest string, now time.Time) bool {
+func pnpmAuditProofFresh(dir, digest string, now time.Time) bool {
 	if dir == "" || digest == "" {
 		return false
 	}
@@ -273,29 +280,29 @@ func npmAuditProofFresh(dir, digest string, now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	var proof npmAuditProof
+	var proof pnpmAuditProof
 	if err := json.Unmarshal(body, &proof); err != nil {
 		return false
 	}
-	if proof.Format != npmAuditFormat || proof.Digest != digest {
+	if proof.Format != pnpmAuditFormat || proof.Digest != digest {
 		return false
 	}
 	age := now.Sub(proof.RecordedAt)
-	return age >= 0 && age < npmAuditRetention
+	return age >= 0 && age < pnpmAuditRetention
 }
 
-func recordNpmAuditProof(dir, digest string, now time.Time) error {
+func recordPnpmAuditProof(dir, digest string, now time.Time) error {
 	if dir == "" || digest == "" {
-		return errors.New("refusing to record an npm audit pass without a digest")
+		return errors.New("refusing to record an pnpm audit pass without a digest")
 	}
-	body, err := json.Marshal(npmAuditProof{Format: npmAuditFormat, Digest: digest, RecordedAt: now.UTC()})
+	body, err := json.Marshal(pnpmAuditProof{Format: pnpmAuditFormat, Digest: digest, RecordedAt: now.UTC()})
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
-	pruneNpmAuditProofs(dir, now)
+	prunePnpmAuditProofs(dir, now)
 	tmp, err := os.CreateTemp(dir, digest+".*.tmp")
 	if err != nil {
 		return err
@@ -314,14 +321,14 @@ func recordNpmAuditProof(dir, digest string, now time.Time) error {
 	return os.Rename(tmp.Name(), filepath.Join(dir, digest))
 }
 
-func pruneNpmAuditProofs(dir string, now time.Time) {
+func prunePnpmAuditProofs(dir string, now time.Time) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
 		info, err := e.Info()
-		if err != nil || now.Sub(info.ModTime()) <= npmAuditRetention {
+		if err != nil || now.Sub(info.ModTime()) <= pnpmAuditRetention {
 			continue
 		}
 		dropProofCleanupError(os.Remove(filepath.Join(dir, e.Name())))
@@ -329,11 +336,11 @@ func pruneNpmAuditProofs(dir string, now time.Time) {
 }
 
 // safety: a leftover proof cannot admit a stale pass, because reuse is keyed by
-// digest and bounded by npmAuditRetention. Naming the failure is worth it;
+// digest and bounded by pnpmAuditRetention. Naming the failure is worth it;
 // failing a security gate over it is not.
 func dropProofCleanupError(err error) {
 	if err == nil || errors.Is(err, os.ErrNotExist) {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "npm audit: could not remove a proof file: %v\n", err)
+	fmt.Fprintf(os.Stderr, "pnpm audit: could not remove a proof file: %v\n", err)
 }

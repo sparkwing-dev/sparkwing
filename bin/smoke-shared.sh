@@ -137,7 +137,7 @@ fi
 mkdir -p "$RUN_DIR" "$HOME_DIR" "$CONFIG_DIR" "$LOG_DIR" "$PID_DIR"
 
 if [ "$BUILD_WEB" = "1" ]; then
-  log "Building dashboard SPA (slow; runs npm ci + next build)"
+  log "Building dashboard SPA (slow; runs pnpm install + next build)"
   bash "$REPO/bin/build-web.sh" >"$LOG_DIR/build-web.log" 2>&1 || {
     cat "$LOG_DIR/build-web.log"
     fail "web build failed -- see $LOG_DIR/build-web.log"

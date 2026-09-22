@@ -324,9 +324,9 @@ file. Other syntax and workflow checks remain active.
   release workflow runs neither it nor CodeQL against the tagged commit; the
   run that covered that commit on main is the scan of record. CodeQL reports
   alerts; gosec, govulncheck,
-  gitleaks, and `npm audit` fail the gate. The npm scanner retries a registry
-  that times out or answers 5xx, and reuses a recorded pass for a day when
-  `web/package-lock.json` and `web/package.json` are byte-identical to the pass,
+  gitleaks, and `pnpm audit` fail the gate. The advisory scanner retries a
+  registry that times out or answers 5xx, and reuses a recorded pass for a day
+  when `web/pnpm-lock.yaml` and `web/package.json` are byte-identical to the pass,
   so an unreachable registry fails as its own error rather than as an advisory
   and an unchanged dependency set is still re-asked daily. Run the local
   pipeline when a change touches an HTTP handler, auth, file paths built from
