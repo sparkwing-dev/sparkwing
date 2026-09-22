@@ -4906,10 +4906,10 @@ func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string)
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at)
-VALUES (?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
+		runID, runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4933,12 +4933,12 @@ func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, statu
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
     finished_at = excluded.finished_at`,
-		runID, nodeID, stepID, status, now, now); err != nil {
+		runID, runID, nodeID, stepID, status, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4958,12 +4958,12 @@ func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
     finished_at = excluded.finished_at`,
-		runID, nodeID, stepID, StepSkipped, now, now); err != nil {
+		runID, runID, nodeID, stepID, StepSkipped, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5030,11 +5030,11 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 	// because the row, not the value, is what this needs.
 	var current []byte
 	if err := tx.QueryRowContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status)
-VALUES (?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status)
+VALUES (`+runTeamSQL+`,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
 RETURNING annotations_json`,
-		runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
+		runID, runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
@@ -5081,10 +5081,10 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status)
-VALUES (?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status)
+VALUES (`+runTeamSQL+`,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning); err != nil {
+		runID, runID, nodeID, stepID, StepRunning); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -6312,7 +6312,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
-	} else if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
 
@@ -6349,8 +6349,8 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO events (run_id, seq, node_id, kind, ts, payload)
-VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, at.UnixNano(), raw)
+INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
 	return seq, err
 }
 
@@ -6400,15 +6400,15 @@ type DebugPause struct {
 // CreateDebugPause inserts (or upserts) an open pause row.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
 	_, err := s.exec(ctx, `
-INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at)
-VALUES (?,?,?,?,?)
+INSERT INTO debug_pauses (team, run_id, node_id, reason, paused_at, expires_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
     paused_at = excluded.paused_at,
     expires_at = excluded.expires_at,
     released_at = NULL,
     released_by = '',
     release_kind = ''`,
-		p.RunID, p.NodeID, p.Reason,
+		p.RunID, p.RunID, p.NodeID, p.Reason,
 		p.PausedAt.UnixNano(), p.ExpiresAt.UnixNano())
 	return err
 }
@@ -8302,8 +8302,8 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO approvals (run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (?,?,?,?,?,?)
+INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id) DO UPDATE SET
     requested_at = excluded.requested_at,
     message      = excluded.message,
@@ -8313,7 +8313,7 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
     resolved_at  = NULL,
     resolution   = '',
     comment      = ''`,
-		a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
+		a.RunID, a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
 		a.Message, a.TimeoutMS, a.OnTimeout); err != nil {
 		return err
 	}

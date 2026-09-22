@@ -99,6 +99,36 @@ unlock.
   node's own team, read off each runner's token row
   (`RunnerPresence.TokenPrefix`), so another team's laptop advertising the
   preferred label no longer parks a node its own cloud runner could take.
+- **controller:** a runner's secret read resolves in the team of the run it
+  holds, so a runner holding one team's run reads that team's pipeline and
+  shared rows rather than the default team's. `Store.ClaimedRunFor` and
+  `Store.ClaimedRunsFor` replace `PipelineForClaimedRun` and
+  `PipelinesForClaimant` and return a `store.ClaimedRun` carrying the run's
+  team beside its pipeline. A legacy envelope resealed on read is written back
+  into the team it was read from.
+- **controller:** a manual retry (`POST /api/v1/runs/{id}/retry`, `sparkwing
+  runs retry`) files its trigger and pending run in the source run's team
+  through the new `Store.CreateRetryWithRun`, rather than in the default
+  team, where the team that asked could not see it and the default team's
+  runners could claim it.
+- **store:** an assisted executor's offer for another team's node
+  (`OfferExecutorClaim`) is refused as not found before the attestation check,
+  whose refusals would otherwise confirm that the node exists.
+  `ClaimReadyNodeForExecutorWithReservation` carries the same team predicate.
+- **store:** rows that hang off a run (events, approvals, debug pauses, node
+  steps, metrics, dispatches, execution attempts, claim offers and agent-loss
+  retry records) take the run's team in the statement that writes them. A
+  runner holding another team's trigger can now mutate that run's nodes,
+  events and attempts: its fence was checked in the default team and every
+  such write was refused as held by another holder.
+- **controller:** a claim refused for an empty balance records its
+  `credits_blocked` event on the node it was refused for, which
+  `store.InsufficientCreditsError` now names (`RunID`, `NodeID`), instead of
+  on the oldest waiting node on the controller, which could be another team's.
+  `Store.OldestWaitingReadyNode` is removed.
+- **store:** an assisted executor's offer takes its run's row lock before the
+  run's event-sequence lock, the order a deadline round takes them in, so an
+  offer and a claim round on one run no longer deadlock on PostgreSQL.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
@@ -186,6 +216,13 @@ unlock.
   belongs to, so it cannot disagree with its run; a trigger takes the team from
   the handle that created it. The automatic agent-loss retry copies the source
   run's team onto the retry run and its trigger for the same reason.
+- **controller:** on Postgres, `finalize-ready` no longer returns HTTP 500 when
+  a fanned-out run closes claim rounds while another request records an event
+  on the same run, such as a credit-refused claim. The round locked its run row
+  `FOR UPDATE`, which blocks the key-share lock every event insert takes, while
+  the event writer held the run's event sequence the round needed next;
+  Postgres broke the deadlock after a second by aborting one side. The round
+  now locks the run `FOR NO KEY UPDATE`.
 
 - **store:** the credit balance and credit exhaustion are per team. The balance
   summed every grant and every charge on the controller with no team predicate,

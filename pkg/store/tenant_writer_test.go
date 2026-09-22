@@ -207,4 +207,141 @@ func TestAgentLossRetryStaysInTheLostRunsTeam(t *testing.T) {
 	if got := storedTeam(t, st, `SELECT team FROM triggers WHERE id = ?`, retryID); got != "acme" {
 		t.Errorf("stored retry trigger carries team %q, want acme", got)
 	}
+	if got := storedTeam(t, st, `SELECT team FROM agent_loss_retries WHERE run_id = ?`, retryID); got != "acme" {
+		t.Errorf("stored agent-loss retry record carries team %q, want acme", got)
+	}
+}
+
+// safety: an empty table would pass a check of every row's team, so the
+// count has to be nonzero before the team says anything.
+func requireRunRowsInTeam(t *testing.T, st *store.Store, table, runID string, team store.Team) {
+	t.Helper()
+	var total, wrong int
+	if err := st.DB().QueryRowContext(context.Background(), storetest.Rebind(st,
+		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN team = ? THEN 0 ELSE 1 END), 0) FROM `+table+` WHERE run_id = ?`),
+		string(team), runID).Scan(&total, &wrong); err != nil {
+		t.Fatalf("read %s rows: %v", table, err)
+	}
+	if total == 0 {
+		t.Errorf("%s holds no row for %s, so its team was never proven", table, runID)
+	}
+	if wrong != 0 {
+		t.Errorf("%d of %d %s rows for %s carry a team other than %s", wrong, total, table, runID, team)
+	}
+}
+
+// Rows that hang off a run are written by paths no caller hands a team, so
+// each has to take its run's team in the statement that writes it, or a
+// team-scoped read of the run's approvals, events or steps finds nothing.
+func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	seedTenantRun(t, acme, "run-acme", "build")
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-acme", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-acme", "build"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+
+	if _, err := st.AppendEvent(ctx, "run-acme", "build", "custom", []byte(`{}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+	if err := st.CreateDebugPause(ctx, store.DebugPause{
+		RunID: "run-acme", NodeID: "build", Reason: "inspect", PausedAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateDebugPause: %v", err)
+	}
+	if err := st.WriteNodeDispatch(ctx, store.NodeDispatch{RunID: "run-acme", NodeID: "build", DispatchedAt: now}); err != nil {
+		t.Fatalf("WriteNodeDispatch: %v", err)
+	}
+	if err := st.AddNodeMetricSample(ctx, "run-acme", "build", store.MetricSample{TS: now, CPUMillicores: 1}); err != nil {
+		t.Fatalf("AddNodeMetricSample: %v", err)
+	}
+
+	_, tok, err := acme.CreateToken(ctx, "agent:acme", store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimant := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	n, err := st.ClaimNextReadyNode(ctx, claimant, "agent:acme:1", time.Minute, nil)
+	if err != nil {
+		t.Fatalf("ClaimNextReadyNode: %v", err)
+	}
+	ackNodeAttempt(t, st, n, claimant, 1)
+	if err := st.StartNodeStep(ctx, "run-acme", "build", "compile"); err != nil {
+		t.Fatalf("StartNodeStep: %v", err)
+	}
+	if err := st.AppendStepAnnotation(ctx, "run-acme", "build", "annotated", "note"); err != nil {
+		t.Fatalf("AppendStepAnnotation: %v", err)
+	}
+	if err := st.SetStepSummary(ctx, "run-acme", "build", "summarized", "done"); err != nil {
+		t.Fatalf("SetStepSummary: %v", err)
+	}
+	if err := st.FinishNodeStep(ctx, "run-acme", "build", "finished", store.StepPassed); err != nil {
+		t.Fatalf("FinishNodeStep: %v", err)
+	}
+	if err := st.SkipNodeStep(ctx, "run-acme", "build", "skipped"); err != nil {
+		t.Fatalf("SkipNodeStep: %v", err)
+	}
+	if err := st.CreateApproval(ctx, store.Approval{RunID: "run-acme", NodeID: "build", RequestedAt: now}); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+
+	for _, table := range []string{
+		"events", "debug_pauses", "node_dispatches", "node_metrics",
+		"node_execution_attempts", "node_steps", "approvals",
+	} {
+		requireRunRowsInTeam(t, st, table, "run-acme", "acme")
+	}
+	var steps int
+	if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
+		`SELECT COUNT(*) FROM node_steps WHERE run_id = ? AND team = ?`), "run-acme", "acme").Scan(&steps); err != nil {
+		t.Fatal(err)
+	}
+	if steps != 5 {
+		t.Errorf("acme node_steps rows = %d, want one per step writer (5)", steps)
+	}
+}
+
+// A runner holding one team's trigger runs that run's nodes in process. Its
+// fence has to be checked in the run's team, or every node, event and
+// attempt write it makes is refused as held by another holder, and the
+// attempt row it writes takes the run's team like the node claim's.
+func TestTriggerHolderMutatesItsOwnTeamsRun(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "run-acme", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	runner := mintTeamClaimant(t, acme, "agent:acme")
+	trigger, err := st.ClaimSpecificTriggerFor(ctx, "run-acme", runner, time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimSpecificTriggerFor: %v", err)
+	}
+	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: runner, ClaimGeneration: trigger.ClaimSeq})
+	if err := acme.CreateRun(fenced, store.Run{ID: "run-acme", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(fenced, store.Node{RunID: "run-acme", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.StartNode(fenced, "run-acme", "build"); err != nil {
+		t.Fatalf("StartNode: %v", err)
+	}
+	if err := st.AcknowledgeNodeExecutionStart(fenced, "run-acme", "build", runner, store.ExecutionStart{
+		ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1,
+	}); err != nil {
+		t.Fatalf("AcknowledgeNodeExecutionStart: %v", err)
+	}
+	for _, nodeID := range []string{"build", ""} {
+		if _, err := st.AppendEvent(fenced, "run-acme", nodeID, "custom", []byte(`{}`)); err != nil {
+			t.Fatalf("AppendEvent(node %q): %v", nodeID, err)
+		}
+	}
+	requireRunRowsInTeam(t, st, "node_execution_attempts", "run-acme", "acme")
+	requireRunRowsInTeam(t, st, "events", "run-acme", "acme")
 }

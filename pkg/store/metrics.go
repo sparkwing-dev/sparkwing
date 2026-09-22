@@ -42,10 +42,10 @@ func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, s
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (run_id, node_id, ts) DO NOTHING`,
-		runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
+		runID, runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
 		max(int64(sample.CPUTime), 0)); err != nil {
 		return err
 	}

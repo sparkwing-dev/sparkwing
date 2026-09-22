@@ -480,8 +480,8 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 		return "", nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_loss_retries
-    (run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, retryID, sourceRunID, rootRunID, causesJSON,
+    (team, run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?)`, retryID, retryID, sourceRunID, rootRunID, causesJSON,
 		availableAt.UnixNano(), deadline.UnixNano(), retryCount); err != nil {
 		return "", nil, nil, err
 	}

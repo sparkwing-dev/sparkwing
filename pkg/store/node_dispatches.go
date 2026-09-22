@@ -65,13 +65,13 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO node_dispatches (
-			run_id, node_id, seq, dispatched_at,
+			team, run_id, node_id, seq, dispatched_at,
 			code_version, binary_hash, runner_labels, env_json,
 			workdir, input_envelope_json, input_size_bytes, secret_redactions,
 			redacted_keys
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		d.RunID, d.NodeID, seq, d.DispatchedAt.UnixNano(),
+		d.RunID, d.RunID, d.NodeID, seq, d.DispatchedAt.UnixNano(),
 		d.CodeVersion, d.BinaryHash, d.RunnerLabels, d.EnvJSON,
 		d.Workdir, envelope, origSize, d.SecretRedactions,
 		d.RedactedKeys,

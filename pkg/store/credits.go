@@ -135,6 +135,11 @@ var ErrCreditGrantConflict = errors.New("credits: a different grant already carr
 type InsufficientCreditsError struct {
 	BalanceMicro  int64
 	RequiredMicro int64
+	// RunID and NodeID name the node the claim was refused for, which is in
+	// the claimant's own team; a record of the refusal belongs on that node
+	// and on no other team's.
+	RunID  string
+	NodeID string
 }
 
 func (e *InsufficientCreditsError) Error() string {
@@ -1554,7 +1559,7 @@ func (s *Store) reserveNodeCreditsTx(
 	// safety: an empty balance is the refusal a runner already understands, so
 	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
-		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID}
 	}
 	if unpriced != nil {
 		unpriced.RunID, unpriced.NodeID = runID, nodeID
@@ -2172,22 +2177,6 @@ func (s *Store) cancelMeteredNode(
 		return err
 	}
 	return tx.Commit()
-}
-
-// OldestWaitingReadyNode names the ready node a claim would have been given,
-// so a refusal can be recorded against the run that is waiting for it. It
-// returns empty strings when nothing is waiting.
-func (s *Store) OldestWaitingReadyNode(ctx context.Context) (runID, nodeID string, err error) {
-	err = s.queryRow(ctx, `SELECT run_id, node_id FROM nodes
-	  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
-	  ORDER BY ready_at ASC LIMIT 1`).Scan(&runID, &nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", nil
-	}
-	if err != nil {
-		return "", "", err
-	}
-	return runID, nodeID, nil
 }
 
 func newCreditID(prefix string) (string, error) {

@@ -572,13 +572,13 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 		offer.ReservationID == "" || offer.ResourceDigest == "" || offer.Slot < 0 {
 		return ExecutorClaimOfferResult{}, errors.New("executor offer requires executor, holder, node, reservation, digest, and slot")
 	}
-	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
+	// safety: the offer names its own node, so the team boundary the
+	// preparation scan drew is redrawn here, and before the attestation check,
+	// whose refusals would tell another team's executor the node exists.
+	if err := s.assertClaimantOwnsNode(ctx, claimant, offer.RunID, offer.NodeID); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
-	// safety: the offer names its own node, so the team boundary the
-	// preparation scan drew has to be redrawn here; an attestation is the
-	// wrong thing to lean on because it proves what the node is, not whose.
-	if err := s.assertClaimantOwnsNode(ctx, claimant, offer.RunID, offer.NodeID); err != nil {
+	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
 	return s.recordExecutorOfferAt(ctx, claimant, offer, now)
@@ -705,10 +705,10 @@ func (s *Store) recordExecutorOfferAt(ctx context.Context, claimant ClaimIdentit
 
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_claim_offers
-       (claim_token_prefix, claim_principal, holder_id, run_id, node_id,
+       (team, claim_token_prefix, claim_principal, holder_id, run_id, node_id,
         executor_name, membership_id, worker_id, executor_kind, reservation_id,
         resource_digest, slot, base_priority, effective_priority, offered_at, last_seen_at, lease_ns)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
        run_id = excluded.run_id, node_id = excluded.node_id,
        executor_name = excluded.executor_name, membership_id = excluded.membership_id,
@@ -717,7 +717,7 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
        slot = excluded.slot, base_priority = excluded.base_priority,
        effective_priority = excluded.effective_priority, offered_at = excluded.offered_at,
        last_seen_at = excluded.last_seen_at, lease_ns = excluded.lease_ns`,
-		claimant.TokenPrefix, claimant.Principal, offer.HolderID, offer.RunID, offer.NodeID,
+		offer.RunID, claimant.TokenPrefix, claimant.Principal, offer.HolderID, offer.RunID, offer.NodeID,
 		offer.ExecutorName, membership.MembershipID, membership.WorkerID, membership.Kind, offer.ReservationID,
 		offer.ResourceDigest, offer.Slot, membership.RegisteredBasePriority, membership.EffectivePriority,
 		offeredAt, now.UnixNano(), int64(offer.Lease)); err != nil {
@@ -729,6 +729,14 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
 	if newOffer {
 		executor, err := s.getExecutorTx(ctx, tx, offer.ExecutorName)
 		if err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+		// safety: a deadline round holds the run's row lock and then takes its
+		// event-sequence lock, so the offer takes them in the same order; event
+		// first and award second deadlocked the two on Postgres.
+		var lockedRun string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(),
+			offer.RunID).Scan(&lockedRun); err != nil {
 			return ExecutorClaimOfferResult{}, err
 		}
 		if _, err := appendEventTx(ctx, tx, offer.RunID, offer.NodeID, "executor_offer_received",
@@ -824,7 +832,7 @@ func (s *Store) awardBestExecutorOffer(ctx context.Context, tx *storeTx, runID, 
 		return nil, err
 	}
 	var lockedRun string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&lockedRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(), runID).Scan(&lockedRun); err != nil {
 		return nil, err
 	}
 	summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)

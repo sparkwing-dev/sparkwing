@@ -146,11 +146,10 @@ var unportedSQL = []string{
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
 	"(*Store).NodeExecutionAttemptIsLive",
 	"(*Store).NodeSettlement",
-	"(*Store).OldestWaitingReadyNode",
 	"(*Store).OldestWaitingReadyNodeForPrincipal",
 	"(*Store).PendingNodeBounce",
-	"(*Store).PipelineForClaimedRun",
-	"(*Store).PipelinesForClaimant",
+	"(*Store).ClaimedRunFor",
+	"(*Store).ClaimedRunsFor",
 	"(*Store).PrincipalHoldsNodeClaim",
 	"(*Store).PrincipalHoldsPipelineClaim",
 	"(*Store).PrincipalHoldsProfileClaim",
@@ -301,7 +300,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 236
+const unportedSQLSize = 235
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

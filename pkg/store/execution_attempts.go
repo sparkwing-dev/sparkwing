@@ -143,11 +143,11 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 		location = "unknown"
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_execution_attempts
-    (lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
+    (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		root, runID, nodeID, start.AttemptOrdinal, generation, coordinator, membership,
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		runID, root, runID, nodeID, start.AttemptOrdinal, generation, coordinator, membership,
 		kind, executorName, executor, location, holder, reservation, now.UnixNano()); err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return err
 	}
 	var consumed int
@@ -257,11 +257,11 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 	}
 	now := time.Now()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_execution_attempts
-    (lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
+    (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
-		root, runID, nodeID, ordinal, fence.ClaimGeneration, coordinatorID,
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
+		runID, root, runID, nodeID, ordinal, fence.ClaimGeneration, coordinatorID,
 		kind, executorName, coordinatorID, location, holder, now.UnixNano()); err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func (s *Store) finishTriggerExecutionAttempt(ctx context.Context, runID, nodeID
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)
@@ -442,7 +442,7 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return err
 	}
 	var root, status, outcome, claimed string
@@ -498,11 +498,11 @@ func (s *Store) startLocalNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	}
 	now := time.Now()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_execution_attempts
-    (lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
+    (team, lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
      coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
      holder_id, reservation_id, started_at)
-VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
-		root, runID, nodeID, ordinal, generation, coordinatorID,
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?)`,
+		runID, root, runID, nodeID, ordinal, generation, coordinatorID,
 		ExecutorKindLocal, executorID, executorID, executorLocationLocal,
 		holder, now.UnixNano()); err != nil {
 		return err
@@ -543,7 +543,7 @@ func (s *Store) finishLocalNodeExecutionAttempt(ctx context.Context, runID, node
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
+	if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)

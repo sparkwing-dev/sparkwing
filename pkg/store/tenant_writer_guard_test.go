@@ -10,21 +10,12 @@ import (
 // commit that gives it a writer, and the pinned size moves with it, so a
 // table cannot be added without a reviewer seeing the number move.
 var tablesWithNoTeamWriter = []string{
-	"agent_loss_retries",
 	"agent_loss_retry_legacy_deny_all",
 	"agent_loss_retry_node_sources",
-	"approvals",
 	"cron_fires",
 	"cron_schedules",
-	"debug_pauses",
 	"egress_usage",
-	"events",
 	"node_bounces",
-	"node_claim_offers",
-	"node_dispatches",
-	"node_execution_attempts",
-	"node_metrics",
-	"node_steps",
 	"run_definition_plans",
 	"storage_month_usage",
 	"storage_quotas",
@@ -33,7 +24,7 @@ var tablesWithNoTeamWriter = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const tablesWithNoTeamWriterSize = 20
+const tablesWithNoTeamWriterSize = 11
 
 // A predicate is only as real as the data under it. The scope guard beside
 // this one reads statement text, so it can prove a team predicate exists

@@ -262,3 +262,25 @@ func TestCreditsGrantReferenceCannotCrossTeams(t *testing.T) {
 		t.Fatalf("globex balance = %d, want 0", got)
 	}
 }
+
+// A refusal names the node it was refused for. The other team's node is the
+// oldest waiting, so a refusal that named the queue's head would put one
+// team's billing event on another team's run.
+func TestCreditRefusalNamesTheRefusedNode(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	globex := teamHandle(t, s, "globex")
+	readyTeamNode(t, s, globex, "run-globex", "build")
+	readyTeamNode(t, s, acme, "run-acme", "build")
+	acmeRunner := meteredTeamClaimant(t, acme, "agent:acme-cloud")
+
+	_, err := s.ClaimNextReadyNode(ctx, acmeRunner, "pod-a", time.Minute, nil)
+	var shortfall *store.InsufficientCreditsError
+	if !errors.As(err, &shortfall) {
+		t.Fatalf("acme's claim on an empty balance = %v, want InsufficientCreditsError", err)
+	}
+	if shortfall.RunID != "run-acme" || shortfall.NodeID != "build" {
+		t.Fatalf("refusal names %s/%s, want the refused run-acme/build", shortfall.RunID, shortfall.NodeID)
+	}
+}
