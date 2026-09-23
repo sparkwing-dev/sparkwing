@@ -576,6 +576,13 @@ unlock.
   with its team, so two teams' schedules for one repository never share an
   id; the operator's ids are unchanged.
 
+- **controller:** a signed-up team's storage is charged to its team
+  Storage quotas and monthly usage were keyed on the writing principal's name,
+  and an editor chooses a runner's name, so a team running `agent:eddie`
+  spent the quota and month of every other team's `agent:eddie`. A write from
+  any team but the operator's is now charged to `team:<slug>`; the operator's
+  team keeps one account per principal.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

@@ -311,7 +311,10 @@ What counts is what the controller commits durably: a run event is charged its
 payload bytes, and a published artifact manifest is charged one object. Live
 logs are not charged, because the controller holds them in an in-memory ring
 and stores nothing. The team charged is the one the calling token's principal
-names, never a team named in the request, and the charge is written inside the
+names, never a team named in the request. A signed-up team's writes are all
+charged to `team:<slug>`, whatever principal made them, because a team names
+its own principals and two teams can hold the same name; set its quota with
+`PUT /api/v1/storage/quotas/team:<slug>`. The charge is written inside the
 same transaction as the write it pays for, so a write that fails is not billed
 and a retry pays once.
 
