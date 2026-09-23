@@ -545,63 +545,49 @@ func bytesOf(q resource.Quantity) int64 {
 	return v
 }
 
-func TestPodResources_ABilledClassIsTheWholePodShape(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		class     store.CPUClass
-		res       capacity.Resolution
-		cfg       Config
-		wantCPU   int64
-		wantBytes int64
-	}{
-		{
-			name:      "the eight-core class",
-			class:     store.CPUClass{Cores: 8, MemoryBytes: 32 << 30},
-			res:       capacity.Resolution{Cores: 8, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
-			cfg:       defaultsCfg,
-			wantCPU:   8000,
-			wantBytes: 32 << 30,
-		},
-		{
-			name:      "a class an operator ladder priced, not the default one",
-			class:     store.CPUClass{Cores: 64, MemoryBytes: 256 << 30},
-			res:       capacity.Resolution{Cores: 3, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
-			cfg:       defaultsCfg,
-			wantCPU:   64000,
-			wantBytes: 256 << 30,
-		},
-		{
-			name:      "a ceiling never shrinks the class the claim billed",
-			class:     store.CPUClass{Cores: 8, MemoryBytes: 32 << 30},
-			res:       capacity.Resolution{Cores: 8, MemoryBytes: 32 << 30, Source: store.CostSourcePin},
-			cfg:       ceilingCfg,
-			wantCPU:   8000,
-			wantBytes: 32 << 30,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rr := podResources(tc.res, tc.class, tc.cfg)
-			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPU {
-				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPU)
-			}
-			if got := milli(rr.Limits[corev1.ResourceCPU]); got != tc.wantCPU {
-				t.Errorf("cpu limit = %dm, want the request %dm", got, tc.wantCPU)
-			}
-			if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != tc.wantBytes {
-				t.Errorf("mem request = %d, want %d", got, tc.wantBytes)
-			}
-			if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != tc.wantBytes {
-				t.Errorf("mem limit = %d, want the request %d", got, tc.wantBytes)
-			}
-		})
+func TestBuildJob_QuarterCorePinKeepsItsRequestWithTwoCoreBill(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "quarter-core"},
+		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("512Mi"),
+		}},
+	})
+	r := New(client, nil, Config{Image: "runner", CPURequest: "100m", MemoryRequest: "128Mi"}, nil)
+	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
+		capacity.Resolution{Cores: 0.25, MemoryBytes: 256 << 20, Source: store.CostSourcePin},
+		store.CPUClass{Cores: 2, MemoryBytes: 8 << 30}, store.NodeClaimFence{})
+	request := job.Spec.Template.Spec.Containers[0].Resources.Requests
+	if got := milli(request[corev1.ResourceCPU]); got != 250 {
+		t.Errorf("cpu request = %dm, want 250m for a quarter-core node", got)
+	}
+	if got := bytesOf(request[corev1.ResourceMemory]); got != 256<<20 {
+		t.Errorf("memory request = %d, want 256Mi", got)
+	}
+	if msg := r.impossibleShape(t.Context(), job); msg != "" {
+		t.Fatalf("quarter-core node rejected: %s", msg)
 	}
 }
 
-// A controller too old to price the node sends no class, and the pod keeps the
-// shape it had before classes existed.
-func TestPodResources_NoBilledClassKeepsTheBurstLimits(t *testing.T) {
+func TestImpossibleShapeFailsBeforeJobCreation(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "small"},
+		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("1Gi"),
+		}},
+	})
+	r := New(client, nil, Config{Image: "runner"}, nil)
+	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
+		capacity.Resolution{Cores: 1, MemoryBytes: 512 << 20, Source: store.CostSourcePin},
+		store.CPUClass{Cores: 2, MemoryBytes: 8 << 30}, store.NodeClaimFence{})
+	msg := r.impossibleShape(t.Context(), job)
+	if !strings.Contains(msg, "1 cpu") || !strings.Contains(msg, "allocatable") {
+		t.Fatalf("impossible shape = %q, want clear CPU and allocatable error", msg)
+	}
+}
+
+func TestPodResources_KeepsBurstLimits(t *testing.T) {
 	res := capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 4000 {
 		t.Errorf("cpu request = %dm, want 4000m", got)
 	}
@@ -613,46 +599,13 @@ func TestPodResources_NoBilledClassKeepsTheBurstLimits(t *testing.T) {
 	}
 }
 
-// A customer billed for a class the operator's ceiling forbids is told so at
-// once, rather than running smaller for the same price.
-func TestCeilingUnderClass(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		cfg   Config
-		class store.CPUClass
-		want  string
-	}{
-		{name: "no class", cfg: ceilingCfg, class: store.CPUClass{}, want: ""},
-		{name: "no ceiling", cfg: defaultsCfg, class: store.CPUClass{Cores: 64, MemoryBytes: 256 << 30}, want: ""},
-		{
-			name: "cpu ceiling under the class", cfg: ceilingCfg,
-			class: store.CPUClass{Cores: 8, MemoryBytes: 32 << 30}, want: "cpu ceiling",
-		},
-		{
-			name:  "memory ceiling under the class",
-			cfg:   Config{MemoryCeiling: 2 << 30},
-			class: store.CPUClass{Cores: 2, MemoryBytes: 8 << 30},
-			want:  "memory",
-		},
-		{
-			name:  "a ceiling above the class allows it",
-			cfg:   Config{CPUCeiling: 16, MemoryCeiling: 64 << 30},
-			class: store.CPUClass{Cores: 8, MemoryBytes: 32 << 30}, want: "",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := &Runner{cfg: tc.cfg}
-			got := r.ceilingUnderClass(tc.class)
-			if tc.want == "" {
-				if got != "" {
-					t.Fatalf("refusal = %q, want none", got)
-				}
-				return
-			}
-			if !strings.Contains(got, tc.want) {
-				t.Fatalf("refusal = %q, want it to name %q", got, tc.want)
-			}
-		})
+func TestPodResources_DefaultRequestFitsSmallNodes(t *testing.T) {
+	rr := podResources(capacity.Resolution{Source: store.CostSourceDefault}, Config{})
+	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 100 {
+		t.Errorf("cpu request = %dm, want 100m", got)
+	}
+	if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != 128<<20 {
+		t.Errorf("memory request = %d, want 128Mi", got)
 	}
 }
 
@@ -728,7 +681,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := podResources(tc.res, store.CPUClass{}, tc.cfg)
+			rr := podResources(tc.res, tc.cfg)
 			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPUReq {
 				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPUReq)
 			}
@@ -748,7 +701,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
 	for _, cores := range []float64{0.0004, 1e-9, 0.05} {
 		res := capacity.Resolution{Cores: cores, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
-		rr := podResources(res, store.CPUClass{}, defaultsCfg)
+		rr := podResources(res, defaultsCfg)
 		want := int64(capacity.MeasuredCoreFloor * 1000)
 		if got := milli(rr.Requests[corev1.ResourceCPU]); got != want {
 			t.Errorf("pin %v cores: cpu request = %dm, want the %dm floor", cores, got, want)
@@ -762,7 +715,7 @@ func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
 func TestPodResources_CeilingUnderTheFloorStillWins(t *testing.T) {
 	cfg := Config{CPURequest: "100m", MemoryRequest: "128Mi", CPUCeiling: 0.05}
 	res := capacity.Resolution{Cores: 0.0004, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, store.CPUClass{}, cfg)
+	rr := podResources(res, cfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 50 {
 		t.Errorf("cpu request = %dm, want the 50m ceiling, which outranks the core floor", got)
 	}
@@ -820,7 +773,7 @@ func TestParseCeilingRejectsWhatItCannotEnforce(t *testing.T) {
 
 func TestPodResources_MeasuredPeaksDriveRequest(t *testing.T) {
 	res := capacity.Resolution{Cores: 1.5, MemoryBytes: 3 << 30, Source: store.CostSourceMeasured}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 1500 {
 		t.Errorf("cpu request = %dm, want 1500m", got)
 	}
@@ -831,7 +784,7 @@ func TestPodResources_MeasuredPeaksDriveRequest(t *testing.T) {
 
 func TestPodResources_DefaultTierFallsBackToConfig(t *testing.T) {
 	res := capacity.Resolution{Cores: 8, Source: store.CostSourceDefault}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 100 {
 		t.Errorf("default cpu request = %dm, want 100m (config, not half-machine)", got)
 	}
@@ -845,7 +798,7 @@ func TestPodResources_DefaultTierFallsBackToConfig(t *testing.T) {
 
 func TestPodResources_PinCoresOnlyFallsBackForMemory(t *testing.T) {
 	res := capacity.Resolution{Cores: 2, Source: store.CostSourcePin}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 2000 {
 		t.Errorf("cpu request = %dm, want 2000m", got)
 	}

@@ -1155,7 +1155,7 @@ type CreditSettings struct {
 	RateTableSet bool
 	// WarmCPUClassCores is the largest cpu class a warm runner pool serves. A
 	// node above it is never offered to or claimed by a warm runner and is
-	// executed on a Kubernetes node sized to its class instead.
+	// executed by a class-routed Kubernetes Job instead.
 	WarmCPUClassCores int64
 	// GraceSeconds is how long a node that has consumed its claim reservation
 	// on an empty balance keeps running before the controller cancels it.
