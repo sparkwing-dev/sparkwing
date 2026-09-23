@@ -219,8 +219,53 @@ CREATE INDEX IF NOT EXISTS idx_credit_charges_node ON credit_charges(run_id, nod
 // safety: a payment webhook redelivers until it sees a 2xx, so the reference a
 // grant carries is the key that keeps the retry from granting twice. An empty
 // reference is an operator note rather than a payment, so it repeats freely.
+// v52 replaces this key with [creditGrantTeamReferenceIndex].
 const creditGrantReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_reference
     ON credit_grants(kind, reference) WHERE reference != ''`
+
+// safety: the reference is unique within a team, because a reference an
+// operator chose, such as a welcome grant, names a different grant in every
+// team; the grant path keeps a payment id unique across teams itself.
+const creditGrantTeamReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_team_reference
+    ON credit_grants(team, kind, reference) WHERE reference != ''`
+
+// applyTeamGrantReferenceMigration moves the grant reference key from
+// (kind, reference) to (team, kind, reference). It is a step of v52.
+func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_credit_grants_reference`); err != nil {
+		return err
+	}
+	dupes, err := duplicateTeamGrantReferences(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if len(dupes) > 0 {
+		slog.Warn("credits: grants repeat a reference within a team, so the database does not enforce the grant key; "+
+			"delete the duplicate rows and recreate the index to enforce it",
+			"references", strings.Join(dupes, ", "))
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, creditGrantTeamReferenceIndex)
+	return err
+}
+
+func duplicateTeamGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
+	rows, err := q.QueryContext(ctx, `SELECT team, kind, reference FROM credit_grants
+	  WHERE reference != '' GROUP BY team, kind, reference HAVING COUNT(*) > 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []string
+	for rows.Next() {
+		var team, kind, reference string
+		if err := rows.Scan(&team, &kind, &reference); err != nil {
+			return nil, err
+		}
+		out = append(out, team+"/"+kind+"/"+reference)
+	}
+	return out, rows.Err()
+}
 
 // safety: the runner cap sums one kind of grant over a date range on every
 // cache miss, so that pair is an index rather than a scan of the ledger.
@@ -607,7 +652,14 @@ func (s *Store) recordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
-		existing, found, err := creditGrantByReferenceTx(ctx, tx, req.Kind, req.Reference)
+		// safety: a payment id is the processor's, so one already paid to
+		// another team is a caller mistake and must not pay this team too; any
+		// other reference is the team's own name for its grant.
+		lookup := team
+		if req.Kind == CreditGrantPaid {
+			lookup = ""
+		}
+		existing, found, err := creditGrantByReferenceTx(ctx, tx, lookup, req.Kind, req.Reference)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
@@ -622,7 +674,7 @@ func (s *Store) recordCreditGrant(
 		// safety: the reversal has to find the payment inside this team,
 		// because reversing another team's grant would move credits between
 		// balances that never traded.
-		reversed, found, err := creditGrantByReferenceTx(ctx, tx, CreditGrantPaid, req.Reverses)
+		reversed, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantPaid, req.Reverses)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
@@ -676,23 +728,25 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 	return nil
 }
 
+// creditGrantByReferenceTx finds the grant of kind carrying reference in
+// team, or in any team when team is empty.
 func creditGrantByReferenceTx(
-	ctx context.Context, tx *storeTx, kind, reference string,
+	ctx context.Context, tx *storeTx, team Team, kind, reference string,
 ) (CreditGrant, bool, error) {
 	var g CreditGrant
 	var created int64
-	var team string
+	var owner string
 	err := tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, created_by, created_at
-	  FROM credit_grants WHERE kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, kind, reference).
-		Scan(&team, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
+	  FROM credit_grants WHERE (? = '' OR team = ?) AND kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), string(team), kind, reference).
+		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil
 	}
 	if err != nil {
 		return CreditGrant{}, false, err
 	}
-	g.Team = Team(team)
+	g.Team = Team(owner)
 	g.CreatedAt = time.Unix(0, created).UTC()
 	return g, true, nil
 }

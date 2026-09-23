@@ -285,6 +285,14 @@ unlock.
 
 ### Changed
 
+- **store:** a credit grant's reference is unique within its team rather than
+  across the deployment, so two teams can each hold a `free` grant named
+  `welcome`, and a repeat within a team still returns the grant already
+  written. A `paid` reference is a payment id and stays unique across teams:
+  one already paid to another team is refused with `ErrCreditGrantConflict`.
+  The v52 migration replaces the `(kind, reference)` index with
+  `(team, kind, reference)` on both dialects.
+
 - **controller:** the `cloud` and `cloud-free` limits profiles now also set
   `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
   (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and

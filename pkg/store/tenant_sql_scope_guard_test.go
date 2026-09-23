@@ -29,6 +29,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"refuseEventOverLimitsTx": "reads one run's event counters for a cap on that run; the run id " +
 		"names one team's row and the fence checked before it proves the caller holds that run",
 	"backfillRunEventUsageTx": "a v52 migration that counts every run's events onto that run's own row",
+	"duplicateTeamGrantReferences": "a v52 migration check that groups every team's grants by team to find " +
+		"the rows the per-team reference key would refuse",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
@@ -262,7 +264,6 @@ var unportedSQL = []string{
 	"claimedExecutorOffer",
 	"clearCreditExhaustionAnchorTx",
 	"creditExhaustionAnchorTx",
-	"creditGrantByReferenceTx",
 	"duplicateGrantReferences",
 	"duplicateTokenPrefixes",
 	"enforceNodesPerRunTx",
@@ -293,7 +294,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 219
+const unportedSQLSize = 218
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

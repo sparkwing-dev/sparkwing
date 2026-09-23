@@ -2006,7 +2006,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		if err := ensureColumnsSQLite(ctx, tx, "runs", runEventUsageCols); err != nil {
 			return err
 		}
-		return backfillRunEventUsageTx(ctx, tx)
+		if err := backfillRunEventUsageTx(ctx, tx); err != nil {
+			return err
+		}
+		return applyTeamGrantReferenceMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2372,7 +2375,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		if err := addColumnsTx(ctx, tx, "runs", runEventUsageCols); err != nil {
 			return err
 		}
-		return backfillRunEventUsageTx(ctx, tx)
+		if err := backfillRunEventUsageTx(ctx, tx); err != nil {
+			return err
+		}
+		return applyTeamGrantReferenceMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

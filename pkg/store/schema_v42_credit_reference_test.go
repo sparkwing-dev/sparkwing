@@ -16,6 +16,7 @@ func downgradeGrantsToV41(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
 	for _, q := range []string{
 		`DROP INDEX IF EXISTS idx_credit_grants_reference`,
+		`DROP INDEX IF EXISTS idx_credit_grants_team_reference`,
 		`ALTER TABLE credit_grants DROP COLUMN reverses`,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 42`,
 	} {
@@ -180,7 +181,7 @@ func TestSchemaV42_LeavesAStorePastTheMigrationAsItIs(t *testing.T) {
 		store.CreditGrantPaid, "pi_1", 5); err == nil {
 		t.Error("reopening dropped the grant key")
 	}
-	if _, err := reopened.DB().ExecContext(ctx, `DROP INDEX idx_credit_grants_reference`); err != nil {
+	if _, err := reopened.DB().ExecContext(ctx, `DROP INDEX idx_credit_grants_team_reference`); err != nil {
 		t.Fatalf("drop the grant key: %v", err)
 	}
 	_ = reopened.Close()
