@@ -1,7 +1,10 @@
 package sourceurl
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"testing"
@@ -201,6 +204,8 @@ func TestValidateCloneURLKeepsPublicNamesThatMerelyLookInternal(t *testing.T) {
 		"https://local-shop.com/acme/repo.git",
 		"git@internal-git.example.com:acme/repo.git",
 		"https://ip6-router.example.com/repo.git",
+		"https://kubernetes.io/repo.git",
+		"https://svc.example.com/repo.git",
 	}
 	for _, tc := range cases {
 		t.Run(tc, func(t *testing.T) {
@@ -297,5 +302,100 @@ func TestClaimedRepoNameFromURL_DistinguishesEqualBasenames(t *testing.T) {
 		if got := ClaimedRepoNameFromURL(repoURL); !registrable.MatchString(got) {
 			t.Fatalf("%q produced the unregistrable cache name %q", repoURL, got)
 		}
+	}
+}
+
+func TestValidateCloneURLRejectsSpecialPurposeAddresses(t *testing.T) {
+	cases := []string{
+		"https://224.0.0.1/repo.git",
+		"https://239.1.2.3/repo.git",
+		"https://[ff0e::1]/repo.git",
+		"https://[64:ff9b::7f00:1]/repo.git",
+		"https://[64:ff9b::a9fe:a9fe]/repo.git",
+		"https://192.0.0.170/repo.git",
+		"https://198.18.0.1/repo.git",
+		"https://198.19.255.254/repo.git",
+		"https://255.255.255.255/repo.git",
+		"https://0.1.2.3/repo.git",
+		"https://[fd00::1]/repo.git",
+		"git@100.64.0.1:repo.git",
+	}
+	for _, tc := range cases {
+		t.Run(tc, func(t *testing.T) {
+			if got, err := ValidateCloneURL(tc); err == nil {
+				t.Fatalf("ValidateCloneURL(%q) = %q, want rejection", tc, got)
+			}
+		})
+	}
+}
+
+func TestValidateCloneURLRejectsClusterInternalNames(t *testing.T) {
+	cases := []string{
+		"https://kubernetes/repo.git",
+		"https://KUBERNETES./repo.git",
+		"https://kubernetes.default/repo.git",
+		"https://kubernetes.default.svc/repo.git",
+		"https://gitea.ci.svc/repo.git",
+		"https://gitea.ci.svc.cluster.local/repo.git",
+		"git@gitea.ci.svc:repo.git",
+	}
+	for _, tc := range cases {
+		t.Run(tc, func(t *testing.T) {
+			if got, err := ValidateCloneURL(tc); err == nil {
+				t.Fatalf("ValidateCloneURL(%q) = %q, want rejection", tc, got)
+			}
+		})
+	}
+}
+
+func fakeLookup(addrs map[string][]string, fail error) Lookup {
+	return func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if fail != nil {
+			return nil, fail
+		}
+		var out []net.IPAddr
+		for _, a := range addrs[host] {
+			out = append(out, net.IPAddr{IP: net.ParseIP(a)})
+		}
+		if out == nil {
+			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+		}
+		return out, nil
+	}
+}
+
+func TestCheckResolvedHostRefusesANameThatResolvesInward(t *testing.T) {
+	lookup := fakeLookup(map[string][]string{
+		"git.example.com":    {"140.82.112.3"},
+		"inward.example.com": {"10.0.0.5"},
+		"mixed.example.com":  {"140.82.112.3", "127.0.0.1"},
+		"meta.example.com":   {"169.254.169.254"},
+		"nat64.example.com":  {"64:ff9b::a00:5"},
+		"v6.example.com":     {"2606:50c0:8000::153"},
+	}, nil)
+	for remote, wantErr := range map[string]bool{
+		"https://git.example.com/o/r.git":        false,
+		"git@git.example.com:o/r.git":            false,
+		"ssh://git@v6.example.com:2222/o/r.git":  false,
+		"https://inward.example.com/o/r.git":     true,
+		"git@inward.example.com:o/r.git":         true,
+		"ssh://git@mixed.example.com/o/r.git":    true,
+		"https://meta.example.com/o/r.git":       true,
+		"https://nat64.example.com/o/r.git":      true,
+		"https://unknown.example.com/o/r.git":    false,
+		"https://127.0.0.1/o/r.git":              true,
+		"https://[::ffff:10.0.0.1]:8443/o/r.git": true,
+	} {
+		err := CheckResolvedHost(context.Background(), remote, lookup)
+		if (err != nil) != wantErr {
+			t.Errorf("CheckResolvedHost(%q) = %v, want error %v", remote, err, wantErr)
+		}
+	}
+}
+
+func TestCheckResolvedHostFailsClosedWhenTheResolverFails(t *testing.T) {
+	lookup := fakeLookup(nil, errors.New("resolver unreachable"))
+	if err := CheckResolvedHost(context.Background(), "https://git.example.com/o/r.git", lookup); err == nil {
+		t.Fatal("a failed lookup let the fetch go ahead")
 	}
 }
