@@ -583,6 +583,26 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 	}
 }
 
+// MeteredInProcessNodesCode is the machine-readable code on the 403 a metered
+// trigger claim gets when it names no node runner that claims each node.
+const MeteredInProcessNodesCode = "metered_inprocess_nodes"
+
+// safety: credits are charged on node claims, and a trigger holder that runs
+// nodes in its own process never makes one, so a metered credential claims a
+// trigger only when it runs the nodes through k8s Jobs or warm capacity,
+// which claim each node themselves.
+func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
+	if nodeRunner == "k8s" || nodeRunner == "warm" || s.meteredTokenPrefix(r) == "" {
+		return false
+	}
+	p, _ := PrincipalFromContext(r.Context())
+	writeAuthError(w, http.StatusForbidden, authErrorBody{
+		Code: MeteredInProcessNodesCode, Principal: p.label(),
+		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s or warm",
+	})
+	return true
+}
+
 // safety: a token the operator never marked metered is never charged, so an
 // install with no metered token behaves as it did before the ledger existed.
 func (s *Server) meteredTokenPrefix(r *http.Request) string {

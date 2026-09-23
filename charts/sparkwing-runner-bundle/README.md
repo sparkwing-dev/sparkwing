@@ -145,7 +145,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
-| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
+| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. A metered token's pool needs `k8s` or `warm`; the controller refuses its `inprocess` trigger claims. | `inprocess` |
 | `runner.triggerRunner.labels` | Static capabilities every trigger-spawned Kubernetes Job advertises. | `[]` |
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |

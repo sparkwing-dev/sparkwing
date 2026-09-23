@@ -72,6 +72,22 @@ full chart hands the controller the same two as `SPARKWING_CACHE_TOKEN` and
 Grants minted before the upgrade stop verifying, and runs mint fresh ones on
 their next claim.
 
+## A metered pool runs trigger nodes through node claims
+
+Credits are charged on node claims, and a trigger holder that runs nodes in
+its own process never makes one. A metered token's trigger claim now names its
+node runner, and the controller refuses `inprocess` with `403`
+`metered_inprocess_nodes`.
+
+- Set `runner.triggerRunner.kind` to `k8s` or `warm` on a runner-bundle
+  install whose token is metered, or pass `--trigger-runner=k8s` (or `warm`)
+  to `sparkwing-runner runner`. A pool left on `inprocess` stops its trigger
+  loop with that reason and keeps claiming nodes.
+- A client that claims triggers directly sends `"node_runner": "k8s"` or
+  `"warm"` in the claim body when its token is metered.
+- A metered `k8s` or `warm` claim answers `402` while the team's balance cannot
+  cover the cheapest class's first minute, and the trigger stays pending.
+
 ## BoundCipher takes the owning team
 
 `controller.BoundCipher` binds an envelope to the team that owns its row.

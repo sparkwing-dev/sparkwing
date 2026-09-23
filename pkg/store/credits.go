@@ -1523,6 +1523,38 @@ func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
 	return rate * CreditClaimFloorSeconds, nil
 }
 
+// ErrMeteredInProcessNodes is returned when a metered credential claims a
+// trigger without naming a node runner that claims each node, such as k8s or
+// warm. Nodes a trigger holder runs in its own process hold no node claim,
+// so no credit is ever charged for them.
+var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
+
+// safety: a trigger claim reserves nothing, and the run it starts is billed
+// only on its node claims, so a metered credential is refused a trigger its
+// team cannot pay the cheapest node's first minute for. The trigger stays
+// pending, because the refusal rolls the claim back.
+func refuseMeteredTriggerClaimOnSpentBalanceTx(
+	ctx context.Context, tx *storeTx, claimant ClaimIdentity, team Team, triggerID string,
+) error {
+	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
+	if err != nil || !metered {
+		return err
+	}
+	table, err := creditRateTableTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	required := table.RateFor(1) * CreditClaimFloorSeconds
+	if balance < required {
+		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
+	}
+	return nil
+}
+
 // safety: reserving inside the claim's own transaction is what keeps concurrent
 // runners from each reading the same balance and claiming against it.
 func (s *Store) reserveNodeCreditsTx(

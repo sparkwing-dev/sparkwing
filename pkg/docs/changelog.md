@@ -291,6 +291,16 @@ unlock.
   `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
   with a profile previously left run creation and egress bytes unlimited. A
   flag or environment variable the operator names still wins.
+- **controller (Breaking):** a metered token's trigger claim names how its
+  nodes run. `POST /api/v1/triggers/claim` and `/api/v1/triggers/{id}/claim`
+  take `node_runner` (`k8s`, `warm` or `inprocess`, the default), and a
+  metered token naming `inprocess` gets `403` `metered_inprocess_nodes`,
+  because in-process nodes hold no node claim and were never charged; a
+  metered pool on the runner-bundle default ran a spent team's whole pipeline
+  free. A metered `k8s` or `warm` claim answers `402` when the team's balance
+  cannot cover the cheapest class's first minute. The trigger loop sends its
+  `--trigger-runner`, and stops with that reason when it is refused. See
+  [migration guide](docs/migrations/_unreleased.md#a-metered-pool-runs-trigger-nodes-through-node-claims).
 - **charts (Breaking):** the cache's operator token and the cache grant key are
   Secrets of their own, `cache.tokenSecret` and `cache.grantKeySecret` in the
   runner bundle, instead of the runner's `controller.tokenSecret`. The runner's

@@ -41,6 +41,20 @@ func (c *Client) WithRunnerIdentity(id string) *Client {
 	return c
 }
 
+// WithTriggerNodeRunner names how this client runs the nodes of the triggers
+// it claims: "inprocess", "k8s" or "warm". The controller refuses a metered
+// credential's trigger claim unless it names k8s or warm, because only those
+// run every node under a node claim that credits pay for. It returns the same
+// client for chaining; set it before the client serves requests.
+func (c *Client) WithTriggerNodeRunner(kind string) *Client {
+	c.triggerNodeRunner = kind
+	return c
+}
+
+// meteredInProcessNodesCode is the code the controller answers a metered
+// trigger claim with when it names no node runner that claims each node.
+const meteredInProcessNodesCode = "metered_inprocess_nodes"
+
 // RunnerIdentity reports the identity this client sends, or the empty string
 // when it sends none.
 func (c *Client) RunnerIdentity() string {

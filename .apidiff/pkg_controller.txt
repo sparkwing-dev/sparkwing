@@ -180,6 +180,7 @@ type LoopbackState interface {
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
 const MaxHonoredIdleClaimPoll = 8 * time.Second
+const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback

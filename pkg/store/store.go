@@ -7272,6 +7272,9 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 			return nil, notFound("claimable trigger", "")
 		}
 	}
+	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
+		return nil, err
+	}
 
 	expires := now.Add(lease)
 	if _, err := tx.ExecContext(
@@ -7897,12 +7900,15 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team); err != nil {
+		return nil, err
+	}
+	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

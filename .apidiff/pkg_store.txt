@@ -533,6 +533,7 @@ var ErrInvitationLimit = errors.New("store: this team has sent as many invitatio
 var ErrInvitationOpen = errors.New("store: that address already has an open invitation")
 var ErrLastOwner = errors.New("store: a team keeps at least one owner")
 var ErrLockHeld = errors.New("held by another holder")
+var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
 var ErrNoTeam = errors.New("store: team is required")
 var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")

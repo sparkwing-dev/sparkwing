@@ -1209,7 +1209,8 @@ func (s *Server) handleListPendingTriggersForParent(w http.ResponseWriter, r *ht
 }
 
 type claimSpecificTriggerReq struct {
-	LeaseNanos int64 `json:"lease_nanos,omitempty"`
+	LeaseNanos int64  `json:"lease_nanos,omitempty"`
+	NodeRunner string `json:"node_runner,omitempty"`
 }
 
 func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
@@ -1222,8 +1223,11 @@ func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Reque
 	if lease <= 0 {
 		lease = store.DefaultLeaseDuration
 	}
+	if s.refuseMeteredInProcessNodes(w, r, body.NodeRunner) {
+		return
+	}
 	t, err := s.store.ClaimSpecificTriggerFor(r.Context(), r.PathValue("id"), claimIdentity(r), lease)
-	if writeClaimTeamRefusal(w, err) {
+	if writeClaimTeamRefusal(w, err) || s.writeCreditsRefusal(w, r, err) {
 		return
 	}
 	if err != nil {
@@ -1276,6 +1280,9 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 type claimTriggerReq struct {
 	Pipelines      []string `json:"pipelines,omitempty"`
 	TriggerSources []string `json:"trigger_sources,omitempty"`
+	// NodeRunner is how the claimant runs the trigger's nodes: inprocess,
+	// k8s or warm. Empty means inprocess.
+	NodeRunner string `json:"node_runner,omitempty"`
 }
 
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
@@ -1284,8 +1291,11 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if s.refuseMeteredInProcessNodes(w, r, body.NodeRunner) {
+		return
+	}
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
-	if writeClaimTeamRefusal(w, err) {
+	if writeClaimTeamRefusal(w, err) || s.writeCreditsRefusal(w, r, err) {
 		return
 	}
 	if err != nil {
