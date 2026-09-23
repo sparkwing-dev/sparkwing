@@ -208,8 +208,6 @@ cli_verify() {
     "runs get --run $run --profile rehearsal"
     "secrets list --profile rehearsal"
     "secrets get --profile rehearsal --name REHEARSAL_V1"
-    "cluster credits show --profile rehearsal"
-    "cluster credits history --profile rehearsal"
     "cluster tokens list --profile rehearsal"
     "cluster agents list --profile rehearsal"
     "cluster users list --profile rehearsal"

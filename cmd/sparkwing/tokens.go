@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -25,7 +24,7 @@ func runTokens(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdTokens, os.Stderr)
-		return fmt.Errorf("tokens: subcommand required (create|list|revoke|lookup|rotate|set-metered)")
+		return fmt.Errorf("tokens: subcommand required (create|list|revoke|lookup|rotate)")
 	}
 	switch args[0] {
 	case "create":
@@ -38,8 +37,6 @@ func runTokens(args []string) error {
 		return runTokensLookup(args[1:])
 	case "rotate":
 		return runTokensRotate(args[1:])
-	case "set-metered":
-		return runTokensSetMetered(args[1:])
 	default:
 		PrintHelp(cmdTokens, os.Stderr)
 		return fmt.Errorf("tokens: unknown subcommand %q", args[0])
@@ -53,7 +50,6 @@ func runTokensCreate(args []string) error {
 	principal := fs.String("principal", "", "free-form label identifying the token holder")
 	scopes := fs.String("scope", "", "comma-separated scopes")
 	ttl := fs.Duration("ttl", 0, "token lifetime (0 = never expires)")
-	metered := fs.Bool("metered", false, "mark the token as one whose node claims cost credits")
 	if err := parseAndCheck(cmdTokensCreate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -76,9 +72,6 @@ func runTokensCreate(args []string) error {
 	}
 	if *ttl > 0 {
 		body["ttl_secs"] = int64((*ttl).Seconds())
-	}
-	if *metered {
-		body["metered"] = true
 	}
 	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/tokens", body)
 	if err != nil {
@@ -107,39 +100,6 @@ type tokenListItem struct {
 	Metered    bool     `json:"metered,omitempty"`
 	LastUsedAt *int64   `json:"last_used_at,omitempty"`
 	RevokedAt  *int64   `json:"revoked_at,omitempty"`
-}
-
-func runTokensSetMetered(args []string) error {
-	fs := flag.NewFlagSet(cmdTokensSetMetered.Path, flag.ContinueOnError)
-	on := addProfileFlag(fs)
-	prefix := fs.String("prefix", "", "non-secret token prefix (from 'tokens list')")
-	metered := fs.String("metered", "", "true or false")
-	if err := parseAndCheck(cmdTokensSetMetered, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if *prefix == "" {
-		return fmt.Errorf("tokens set-metered: --prefix is required")
-	}
-	want, err := strconv.ParseBool(*metered)
-	if err != nil {
-		return fmt.Errorf("tokens set-metered: --metered must be true or false")
-	}
-	prof, err := resolveProfile(*on)
-	if err != nil {
-		return err
-	}
-	if err := requireController(prof, "tokens set-metered"); err != nil {
-		return err
-	}
-	if _, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(),
-		"/api/v1/tokens/"+*prefix+"/metered", map[string]any{"metered": want}); err != nil {
-		return err
-	}
-	fmt.Printf("%s metered=%t\n", *prefix, want)
-	return nil
 }
 
 func runTokensList(args []string) error {

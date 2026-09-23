@@ -19,10 +19,9 @@ audit logs. The remaining ~35 characters carry the secret entropy.
 
 ## Metered runners
 
-A token carries a `metered` marker the operator sets, either at mint
-(`sparkwing cluster tokens create --metered`) or afterwards
-(`sparkwing cluster tokens set-metered --prefix P --metered true`). That marker
-is the only thing that decides whether the work a runner does costs credits.
+A token carries a `metered` marker that Sparkwing Cloud operators set with
+the private `sparkwing-ops` tool. That marker is the only thing that decides
+whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
@@ -125,9 +124,9 @@ its core count in credits a second: 2-core 10,000 micro-credits, 4-core 20,000,
 entry of that ladder under another name. Once a table exists that setting is
 derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
 says to write the table.
-`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=40000` sets
-the ladder and needs `admin`. A stored table this build cannot read is an error
-on every credit read rather than a silent return to the flat rate.
+Sparkwing Cloud operators set the ladder through the private `sparkwing-ops`
+tool. A stored table this build cannot read is an error on every credit read
+rather than a silent return to the flat rate.
 
 A balance belongs to a team: it is the sum of that team's grants less the sum of
 that team's charges, computed in SQL over the `credit_grants` and
@@ -142,10 +141,9 @@ a reservation a node did not use; each names the run, node, token prefix, and
 seconds it covered, and the class and rate it was billed at, so a later change
 to the table never reprices a charge already written.
 
-`sparkwing cluster credits show` prints the balance, the rate table, the charge
-cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
---amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
-lists every movement newest first.
+Sparkwing Cloud operators read balances and history, change pricing, and grant
+credits through the private `sparkwing-ops` tool. The controller's credit API
+routes remain the authority.
 
 ## Buying credits
 
@@ -186,7 +184,7 @@ at most one purchase, $500. The grant route still refuses an operator's `free`
 grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
 
 Purchases are final, so a refund is the operator's decision and is made by
-hand. `sparkwing cluster credits refund --payment <pi_...>` takes back what the
+hand. The private `sparkwing-ops` refund command takes back what the
 purchase still has on the ledger, in the team it funded, through
 `POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
 the operator then issues the money back. The controller never moves money, and
@@ -206,9 +204,8 @@ lost reverses the purchase the way a refund does and holds the team too, so a
 lost dispute holds it even when Stripe delivered the close before the open. A
 dispute won logs `alert=dispute_won` and changes nothing: the checkout service
 never releases a team, because one dispute's outcome says nothing about
-another's. The operator releases with
-`sparkwing cluster credits freeze --dispute <dp_...> --release` for one hold
-or `--team <slug> --release` for every hold on the team. Replaying any
+another's. The operator uses the private `sparkwing-ops` tool to release one
+dispute's hold or every hold on a team. Replaying any
 dispute event changes nothing, and a replayed hold never undoes a release. A
 dispute is bound to the one payment and team its first hold named: a hold or
 a lost-dispute reversal that names the same dispute for another payment is
@@ -257,18 +254,17 @@ at 333,333 micro-credits a gibibyte-day is 666,666 micro-credits, and that rate
 is 2,000 credits a gibibyte-month, the published $0.10.
 
 The charge is a `storage` row naming the team, the bytes it billed and the
-interval it covered, so `sparkwing cluster credits show` and `credits history`
-separate retained bytes from runner time. It carries no cpu class and no
+interval it covered, so the private `sparkwing-ops` credit views separate
+retained bytes from runner time. It carries no cpu class and no
 per-second rate, because neither priced it.
 
 Each team's allowance is how many retained bytes it asked to keep. The pass
 expires its oldest finished runs above the allowance before it bills, and it
 never bills for more than the allowance, so the allowance is both what a team
 keeps and the most it pays for; an allowance of zero keeps everything and caps
-nothing. Read and write one with
-`sparkwing cluster credits allowance --principal NAME --gb N`, which needs
-`admin`. Only that verb writes it: rewriting a team's quota leaves the
-allowance where it stands.
+nothing. Sparkwing Cloud operators read and write one through the private
+`sparkwing-ops` tool. Rewriting a team's quota leaves the allowance where it
+stands.
 
 An empty balance is a hard cut, the same as it is for runner time: a write that
 would grow a team's retained bytes is refused with `402` and a reason naming
