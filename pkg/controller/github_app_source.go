@@ -18,8 +18,8 @@ type SourceTokenResponse struct {
 	Token      string `json:"token"`
 	ExpiresAt  int64  `json:"expires_at"`
 	Repository string `json:"repository"`
-	// ExtraRepositories are the pipeline's declared source.extra_repos the
-	// token also reads.
+	// ExtraRepositories are the repositories a team owner listed for
+	// Repository, which the token also reads.
 	ExtraRepositories []string `json:"extra_repositories,omitempty"`
 }
 
@@ -122,8 +122,9 @@ func (f *sourceFailure) write(w http.ResponseWriter) {
 }
 
 // runAppToken mints the run's App token, read-only and restricted to repo
-// and the extra repositories, all of which one installation the run's team
-// holds must cover.
+// and the extra repositories a team owner listed for it, all of which one
+// installation the run's team holds must cover now, not only when the list
+// was set.
 func (s *Server) runAppToken(r *http.Request, src claimedRunSource, repo store.GitHubRepo, extra []store.GitHubRepo) (SourceTokenResponse, *sourceFailure) {
 	runID := src.trigger.ID
 	notCovered := func(slug string) *sourceFailure {
@@ -160,8 +161,8 @@ func (s *Server) runAppToken(r *http.Request, src claimedRunSource, repo store.G
 		if !covered || xinst.InstallationID != inst.InstallationID {
 			return SourceTokenResponse{}, &sourceFailure{
 				status: http.StatusForbidden,
-				err: errors.New("source.extra_repos names " + x.Slug() + ", which the installation covering " +
-					repo.Slug() + " does not cover"),
+				err: errors.New("the team's extra repositories for " + repo.Slug() + " name " + x.Slug() +
+					", which the installation covering it no longer covers; a team owner updates the list (Team > GitHub)"),
 			}
 		}
 		names = append(names, x.Name)

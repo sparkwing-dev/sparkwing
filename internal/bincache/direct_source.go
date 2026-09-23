@@ -133,6 +133,9 @@ type directOptions struct {
 	maxMirrors     int
 	maxMirrorBytes int64
 	cred           DirectCredential
+	// keyTmpfsOnly refuses to write a released deploy key anywhere but a
+	// tmpfs, as a cloud runner must.
+	keyTmpfsOnly bool
 }
 
 func defaultDirectOptions() directOptions {
@@ -294,7 +297,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 	var sshCommand string
 	switch {
 	case opts.cred.Kind == CredentialSSH:
-		keyDir, command, err := writeSSHCredential(opts.cred)
+		_, command, cleanup, err := writeSSHCredential(opts.cred, opts.keyTmpfsOnly)
 		if err != nil {
 			return fmt.Errorf("direct source: %w", err)
 		}
@@ -302,7 +305,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		// the runner compiles or runs anything the fetched tree names; a key
 		// that cannot be removed fails the checkout.
 		defer func() {
-			if rmErr := os.RemoveAll(keyDir); rmErr != nil {
+			if rmErr := cleanup(); rmErr != nil {
 				err = errors.Join(err, fmt.Errorf("direct source: remove the deploy key: %w", rmErr))
 			}
 		}()

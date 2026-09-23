@@ -232,24 +232,15 @@ pipelines:
 	}
 }
 
-func TestSourceExtraReposAreBoundedGitHubSlugs(t *testing.T) {
-	ok := pipelines.Config{Pipelines: []pipelines.Pipeline{{
-		Name: "build", Entrypoint: "Build",
-		Source: pipelines.Source{ExtraRepos: []string{"acme/lib", "acme/proto.go"}},
-	}}}
-	if err := ok.Validate(); err != nil {
-		t.Fatalf("valid extra repos refused: %v", err)
+// The repository's own config cannot name repositories its App token reads:
+// a team owner lists those in the controller, so a source block is refused
+// rather than silently ignored.
+func TestPipelineSourceExtraReposIsNotAConfigField(t *testing.T) {
+	_, err := pipelines.Parse(strings.NewReader("pipelines:\n  - name: build\n    entrypoint: Build\n    source:\n      extra_repos: [acme/secrets]\n"))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "source"`) {
+		t.Fatalf("a source block = %v, want an unknown-field refusal", err)
 	}
-	for name, repos := range map[string][]string{
-		"url":       {"https://github.com/acme/lib"},
-		"no owner":  {"lib"},
-		"dot dot":   {"acme/.."},
-		"too many":  {"a/1", "a/2", "a/3", "a/4", "a/5", "a/6", "a/7", "a/8", "a/9", "a/10", "a/11"},
-		"three seg": {"acme/lib/sub"},
-	} {
-		cfg := pipelines.Config{Pipelines: []pipelines.Pipeline{{Name: "build", Entrypoint: "Build", Source: pipelines.Source{ExtraRepos: repos}}}}
-		if err := cfg.Validate(); err == nil {
-			t.Errorf("%s: %v accepted", name, repos)
-		}
+	if _, err := pipelines.Parse(strings.NewReader("pipelines:\n  - name: build\n    entrypoint: Build\n")); err != nil {
+		t.Fatalf("control: the same entry without it = %v", err)
 	}
 }

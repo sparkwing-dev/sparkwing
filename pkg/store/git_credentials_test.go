@@ -17,8 +17,19 @@ func sshCredential(fingerprint string) store.GitCredential {
 	}
 }
 
-func release(runID string) store.GitCredentialRelease {
-	return store.GitCredentialRelease{RunID: runID, Runner: "runner:pool", TokenPrefix: "swr_pool"}
+// release is a release to a runner holding a live claim on runID's trigger,
+// which it creates in tn's team, for a minute from now.
+func release(t *testing.T, st *store.Store, tn *store.Tenant, runID string) store.GitCredentialRelease {
+	t.Helper()
+	ctx := context.Background()
+	if err := tn.CreateTrigger(ctx, store.Trigger{ID: runID, Pipeline: "build", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	claimant := mintTeamClaimant(t, tn, "agent:"+runID)
+	if _, err := st.ClaimSpecificTriggerFor(ctx, runID, claimant, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	return store.GitCredentialRelease{RunID: runID, Runner: "runner:pool", TokenPrefix: claimant.TokenPrefix, Claimant: claimant}
 }
 
 // An ssh credential is released only after its owner confirms the pinned
@@ -28,12 +39,13 @@ func TestGitCredentialIsReleasedOnlyOnceConfirmed(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
+	rel1 := release(t, st, acme, "run-1")
 
 	stored, err := acme.PutGitCredential(ctx, sshCredential("SHA256:one"), now)
 	if err != nil || stored.ConfirmedAt != nil || stored.Team != "acme" {
 		t.Fatalf("put = %+v, %v; want an unconfirmed acme credential", stored, err)
 	}
-	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-1"), now); !errors.Is(err, store.ErrNotFound) {
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel1, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("release of an unconfirmed credential = %v, want ErrNotFound", err)
 	}
 	if _, err := acme.ConfirmGitCredential(ctx, "gitlab.example.com", "SHA256:other", now); !errors.Is(err, store.ErrFingerprintMismatch) {
@@ -43,7 +55,7 @@ func TestGitCredentialIsReleasedOnlyOnceConfirmed(t *testing.T) {
 	if err != nil || confirmed.ConfirmedAt == nil {
 		t.Fatalf("confirm = %+v, %v", confirmed, err)
 	}
-	got, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-1"), now)
+	got, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel1, now)
 	if err != nil || got.Secret != "enc:key" || got.KnownHosts == "" {
 		t.Fatalf("release = %+v, %v", got, err)
 	}
@@ -52,7 +64,7 @@ func TestGitCredentialIsReleasedOnlyOnceConfirmed(t *testing.T) {
 		t.Fatalf("releases = %+v, %v; want one audit row", rels, err)
 	}
 	if r := rels[0]; r.Team != "acme" || r.CredentialID != stored.ID || r.RunID != "run-1" ||
-		r.Runner != "runner:pool" || r.TokenPrefix != "swr_pool" || r.Host != "gitlab.example.com" {
+		r.Runner != "runner:pool" || r.TokenPrefix != rel1.TokenPrefix || r.Host != "gitlab.example.com" {
 		t.Fatalf("audit row = %+v", r)
 	}
 }
@@ -61,13 +73,14 @@ func TestGitCredentialHTTPSIsConfirmedWhenStored(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
+	rel1 := release(t, st, acme, "run-1")
 	c, err := acme.PutGitCredential(ctx, store.GitCredential{
 		Host: "bitbucket.org", Kind: store.GitCredentialHTTPS, Username: "x-token-auth", Secret: "enc:tok",
 	}, time.Now())
 	if err != nil || c.ConfirmedAt == nil {
 		t.Fatalf("put https = %+v, %v; want confirmed", c, err)
 	}
-	if _, err := acme.ReleaseGitCredential(ctx, "bitbucket.org", release("run-1"), time.Now()); err != nil {
+	if _, err := acme.ReleaseGitCredential(ctx, "bitbucket.org", rel1, time.Now()); err != nil {
 		t.Fatalf("release = %v", err)
 	}
 }
@@ -79,6 +92,7 @@ func TestGitCredentialReplacementKeepsOnlyAConfirmedHostKey(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
+	rel2, rel3 := release(t, st, acme, "run-2"), release(t, st, acme, "run-3")
 	if _, err := acme.PutGitCredential(ctx, sshCredential("SHA256:one"), now); err != nil {
 		t.Fatal(err)
 	}
@@ -91,14 +105,14 @@ func TestGitCredentialReplacementKeepsOnlyAConfirmedHostKey(t *testing.T) {
 	if err != nil || c.ConfirmedAt == nil {
 		t.Fatalf("rotation under the same host key = %+v, %v; want still confirmed", c, err)
 	}
-	if got, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-2"), now); err != nil || got.Secret != "enc:rotated" {
+	if got, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel2, now); err != nil || got.Secret != "enc:rotated" {
 		t.Fatalf("release after rotation = %+v, %v; want the new key", got, err)
 	}
 	moved, err := acme.PutGitCredential(ctx, sshCredential("SHA256:two"), now)
 	if err != nil || moved.ConfirmedAt != nil {
 		t.Fatalf("a new host key = %+v, %v; want unconfirmed", moved, err)
 	}
-	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-3"), now); !errors.Is(err, store.ErrNotFound) {
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel3, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("release after the host key changed = %v, want ErrNotFound until confirmed", err)
 	}
 	if list, err := acme.GitCredentials(ctx); err != nil || len(list) != 1 {
@@ -113,6 +127,7 @@ func TestGitCredentialIsTheTeamsAloneAndGoneOnceDeleted(t *testing.T) {
 	ctx := context.Background()
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
 	now := time.Now()
+	rel1, rel2, relX := release(t, st, acme, "run-1"), release(t, st, acme, "run-2"), release(t, st, other, "run-x")
 	c := store.GitCredential{Host: "gitlab.example.com", Kind: store.GitCredentialHTTPS, Secret: "enc:tok"}
 	if _, err := acme.PutGitCredential(ctx, c, now); err != nil {
 		t.Fatal(err)
@@ -120,19 +135,19 @@ func TestGitCredentialIsTheTeamsAloneAndGoneOnceDeleted(t *testing.T) {
 	if _, err := other.GitCredentialForHost(ctx, "gitlab.example.com"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("another team reads acme's credential: %v", err)
 	}
-	if _, err := other.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-x"), now); !errors.Is(err, store.ErrNotFound) {
+	if _, err := other.ReleaseGitCredential(ctx, "gitlab.example.com", relX, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("another team releases acme's credential: %v", err)
 	}
 	if err := other.DeleteGitCredential(ctx, "gitlab.example.com"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("another team deletes acme's credential: %v", err)
 	}
-	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-1"), now); err != nil {
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel1, now); err != nil {
 		t.Fatalf("control: acme's release before the delete = %v", err)
 	}
 	if err := acme.DeleteGitCredential(ctx, "gitlab.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", release("run-2"), now); !errors.Is(err, store.ErrNotFound) {
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel2, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("release after delete = %v, want ErrNotFound", err)
 	}
 	if rels, err := acme.GitCredentialReleases(ctx, 10); err != nil || len(rels) != 1 {
@@ -210,41 +225,34 @@ func TestRotateGitCredentialSecretsRewritesEveryTeam(t *testing.T) {
 	}
 }
 
-// The first declaration of a run's source.extra_repos binds it; a later one
-// must name the same set, and another team cannot declare for the run.
-func TestDeclareRunExtraReposBindsTheFirstDeclaration(t *testing.T) {
+// The release re-checks the claim inside its own transaction, so a lease
+// that lapses after the caller's check, or a claimant that never held the
+// run, releases nothing and leaves no audit row.
+func TestReleaseGitCredentialRefusesAClaimThatLapsedBeforeTheCommit(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "build"}); err != nil {
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	c := store.GitCredential{Host: "gitlab.example.com", Kind: store.GitCredentialHTTPS, Secret: "enc:tok"}
+	if _, err := acme.PutGitCredential(ctx, c, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, declared, err := acme.RunExtraRepos(ctx, "run-1"); err != nil || declared {
-		t.Fatalf("before any declaration = %v, %v; want undeclared", declared, err)
+	rel := release(t, st, acme, "run-1")
+	if _, err := st.ClaimedRunFor(ctx, "run-1", rel.Claimant, now); err != nil {
+		t.Fatalf("control: the caller's own check passes = %v", err)
 	}
-	held, err := acme.DeclareRunExtraRepos(ctx, "run-1", []string{"Acme/Lib", "acme/proto", "acme/lib"})
-	if err != nil || len(held) != 2 || held[0] != "acme/lib" || held[1] != "acme/proto" {
-		t.Fatalf("declare = %v, %v; want the two repositories, folded and sorted", held, err)
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel, now); err != nil {
+		t.Fatalf("control: release under the live claim = %v", err)
 	}
-	if _, err := acme.DeclareRunExtraRepos(ctx, "run-1", []string{"acme/proto", "acme/lib"}); err != nil {
-		t.Fatalf("the same set again = %v", err)
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", rel, now.Add(2*time.Minute)); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("release once the lease lapsed = %v, want ErrClaimNotLive", err)
 	}
-	if _, err := acme.DeclareRunExtraRepos(ctx, "run-1", []string{"acme/lib", "acme/proto", "acme/secrets"}); !errors.Is(err, store.ErrExtraReposDiffer) {
-		t.Fatalf("a wider set = %v, want ErrExtraReposDiffer", err)
+	stranger := rel
+	stranger.Claimant = store.ClaimIdentity{Principal: "agent:stranger", TokenPrefix: "swr_stranger"}
+	if _, err := acme.ReleaseGitCredential(ctx, "gitlab.example.com", stranger, now); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("release to a runner that holds no claim = %v, want ErrClaimNotLive", err)
 	}
-	if _, err := other.DeclareRunExtraRepos(ctx, "run-1", []string{"acme/secrets"}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("another team's declaration = %v, want ErrNotFound", err)
-	}
-	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "run-2", Pipeline: "build"}); err != nil {
-		t.Fatal(err)
-	}
-	if held, err := acme.DeclareRunExtraRepos(ctx, "run-2", nil); err != nil || len(held) != 0 {
-		t.Fatalf("an empty declaration = %v, %v", held, err)
-	}
-	if _, declared, err := acme.RunExtraRepos(ctx, "run-2"); err != nil || !declared {
-		t.Fatalf("after an empty declaration = %v, %v; want declared", declared, err)
-	}
-	if _, err := acme.DeclareRunExtraRepos(ctx, "run-2", []string{"acme/lib"}); !errors.Is(err, store.ErrExtraReposDiffer) {
-		t.Fatalf("widening an empty declaration = %v, want ErrExtraReposDiffer", err)
+	if rels, err := acme.GitCredentialReleases(ctx, 10); err != nil || len(rels) != 1 {
+		t.Fatalf("releases = %d, %v; want only the one under the live claim", len(rels), err)
 	}
 }

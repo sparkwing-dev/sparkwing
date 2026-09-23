@@ -156,7 +156,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
-| `POST` | `/api/v1/runs/{id}/source-declaration` | `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/source-token` | `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
@@ -189,6 +188,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/team/github-app` | `runs.read` |
 | `POST` | `/api/v1/team/github-app/connect` | `team.admin` |
 | `POST` | `/api/v1/team/github-app/connect/complete` | `team.admin` |
+| `GET` | `/api/v1/team/github-app/extra-repos` | `runs.read` |
+| `PUT` | `/api/v1/team/github-app/extra-repos` | `team.admin` |
 | `DELETE` | `/api/v1/team/github-app/installations/{installation_id}` | `team.admin` |
 | `GET` | `/api/v1/team/github-app/installations/{installation_id}/repositories` | `runs.read` |
 | `DELETE` | `/api/v1/team/github-app/triggers` | `team.admin` |

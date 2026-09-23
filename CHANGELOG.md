@@ -234,16 +234,21 @@ unlock.
 - **controller:** team git credentials, a write-only secret bound to one host:
   an SSH deploy key with a pinned host key, or an HTTPS token. A team owner
   stores, replaces and deletes them with `/api/v1/team/git-credentials`; the
-  controller reads an ssh host's key when the key is stored and releases it
+  controller reads an ssh host's key when the key is stored, dialing the
+  address it checked rather than resolving the name again, and releases it
   only after an owner confirms its fingerprint. `POST
   /api/v1/runs/{id}/git-credential` releases the team's credential for the
   run's host when no App installation covers the repository, only to a runner
-  holding a live claim on the run with a token of the run's team, and only to
-  a cloud runner or a machine an owner opted in with
+  holding a live claim on the run with a token of the run's team, re-checked
+  and locked inside the release's own transaction, and only to a cloud runner
+  or a machine an owner opted in with
   `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials`. Each release
   writes an audit row, listed at `/api/v1/team/git-credentials/releases`. The
   runner writes a key to tmpfs at mode 0600 beside the pinned `known_hosts`,
   fetches with only that identity, and deletes it before compiling anything.
+  A cloud runner without a tmpfs fails the fetch rather than write the key to
+  disk, and a starting runner removes key directories a crashed one of its
+  user left behind.
   Values are sealed under the secrets key and resealed by
   `POST /api/v1/secrets/rotate`. Schema 62 adds the tables. See
   [Team git credentials](docs/git-credentials.md).
@@ -253,16 +258,16 @@ unlock.
   checking its fingerprint, delete credentials and read recent releases; the
   page points github.com users to the GitHub App. The Machines page gains an
   owner toggle for whether a machine receives the team's git credentials.
-- **config + runner:** `source.extra_repos` in a pipeline entry names up to 10
-  more GitHub repositories of the run repository's owner that the run's App
-  token also reads. The runner declares them with
-  `POST /api/v1/runs/{id}/source-declaration` before compiling anything, the
-  first declaration binds the run, and when the checkout has submodules the
-  runner checks them out with a token widened to the declared repositories,
-  rewriting ssh submodule URLs to https through `url.insteadOf`. The
-  controller mints it only when the installation covering the run's
-  repository covers each one. See
-  [Team git credentials](docs/git-credentials.md#extra-repositories).
+- **controller + web + runner:** a team owner lists, per source repository,
+  up to 10 more GitHub repositories of its owner that a run's App token also
+  reads, with `PUT /api/v1/team/github-app/extra-repos` or under **Team >
+  GitHub > Extra repositories**. Each must be covered by the installation that
+  covers the source repository when it is listed and again at every mint.
+  The git-credential answer names them in `extra_repositories`, and when the
+  checkout has submodules the runner checks them out with that credential,
+  rewriting ssh submodule URLs to https through `url.insteadOf`. The list is
+  never read from the repository, so a pull request cannot widen its own
+  token. See [Team git credentials](docs/git-credentials.md#extra-repositories).
 - **runner:** `sparkwing-runner agent --allow-repo`, and `allow_repos` in
   `agent.yaml`, make an agent claim only those repositories and fetch their
   source directly, with the credential the controller releases or else the

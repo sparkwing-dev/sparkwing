@@ -242,6 +242,7 @@ var tenantTables = []string{
 	"git_credential_machines",
 	"git_credential_releases",
 	"git_credentials",
+	"github_app_extra_repos",
 	"github_app_installations",
 	"github_app_triggers",
 	"github_runner_bindings",
@@ -277,7 +278,7 @@ var tenantTables = []string{
 // tenant-owned table runs before they exist and skips them.
 var keyedAtCreation = []string{
 	"credit_checkouts", "credit_freezes", "free_slots", "git_credential_machines", "git_credential_releases",
-	"git_credentials", "github_app_installations", "github_app_triggers",
+	"git_credentials", "github_app_extra_repos", "github_app_installations", "github_app_triggers",
 	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
 	"storage_reservations", "team_download_day", "team_storage",
 }

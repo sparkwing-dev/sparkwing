@@ -398,9 +398,6 @@ type ServicesResponse struct {
 
 	MultiTeam bool
 }
-type SourceDeclaration struct {
-	ExtraRepos []string
-}
 type SourceTokenResponse struct {
 	Token      string
 	ExpiresAt  int64

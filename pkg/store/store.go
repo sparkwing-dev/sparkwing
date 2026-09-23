@@ -2032,10 +2032,7 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 61:
 		return applyTeamStorageMigrationSQLite(ctx, tx)
 	case 62:
-		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerSourceExtraReposCols); err != nil {
-			return err
-		}
-		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTableSQLite)
+		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTableSQLite+"\n"+githubAppExtraReposTableSQLite)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2428,10 +2425,7 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 61:
 		return applyTeamStorageMigrationPostgres(ctx, tx)
 	case 62:
-		if err := addColumnsTx(ctx, tx, "triggers", triggerSourceExtraReposCols); err != nil {
-			return err
-		}
-		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTablePostgres)
+		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTablePostgres+"\n"+githubAppExtraReposTablePostgres)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

@@ -1,7 +1,6 @@
 package bincache
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,6 +48,10 @@ type DirectCredential struct {
 	// KnownHosts is the ssh host key the team's owner confirmed, the only
 	// key the fetch trusts.
 	KnownHosts string
+	// ExtraRepositories are the repositories, as owner/name, a team owner
+	// listed for the run's repository. An App token reads them too, and the
+	// runner checks out submodules only when there are some.
+	ExtraRepositories []string
 }
 
 // Empty reports the zero credential.
@@ -62,22 +65,23 @@ type gitCredentialBody struct {
 	Username   string `json:"username"`
 	Secret     string `json:"secret"`
 	KnownHosts string `json:"known_hosts"`
-	Error      string `json:"error"`
-	Message    string `json:"message"`
+	// ExtraRepositories is the team owner's list for the run's repository.
+	ExtraRepositories []string `json:"extra_repositories"`
+	Error             string   `json:"error"`
+	Message           string   `json:"message"`
 }
 
 // RequestDirectCredential asks the controller for the credential a runner
 // holding a claim on runID fetches the run's source with. The controller
 // decides which: the team's GitHub App token when an installation covers the
 // repository, else the git credential the team stored for the repository's
-// host. extraRepos names the pipeline's declared source.extra_repos, which an
-// App token also covers when the installation includes them. A controller
-// from before the route is asked for its App source token instead.
-func RequestDirectCredential(ctx context.Context, controllerURL, runnerToken, runID string, extraRepos []string) (DirectCredential, error) {
+// host. A controller from before the route is asked for its App source token
+// instead.
+func RequestDirectCredential(ctx context.Context, controllerURL, runnerToken, runID string) (DirectCredential, error) {
 	if controllerURL == "" || runID == "" {
 		return DirectCredential{}, fmt.Errorf("%w: no controller to ask", ErrNoSourceCredential)
 	}
-	cred, err := requestGitCredential(ctx, controllerURL, runnerToken, runID, extraRepos)
+	cred, err := requestGitCredential(ctx, controllerURL, runnerToken, runID)
 	if !errors.Is(err, errCredentialRouteAbsent) {
 		return cred, err
 	}
@@ -88,13 +92,9 @@ func RequestDirectCredential(ctx context.Context, controllerURL, runnerToken, ru
 	return DirectCredential{Kind: CredentialGitHubApp, Host: "github.com", Username: "x-access-token", Secret: tok}, nil
 }
 
-func requestGitCredential(ctx context.Context, controllerURL, runnerToken, runID string, extraRepos []string) (DirectCredential, error) {
+func requestGitCredential(ctx context.Context, controllerURL, runnerToken, runID string) (DirectCredential, error) {
 	endpoint := strings.TrimRight(controllerURL, "/") + "/api/v1/runs/" + neturl.PathEscape(runID) + "/git-credential"
-	payload, err := json.Marshal(map[string]any{"extra_repos": extraRepos})
-	if err != nil {
-		return DirectCredential{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader("{}"))
 	if err != nil {
 		return DirectCredential{}, err
 	}
@@ -136,7 +136,7 @@ func requestGitCredential(ctx context.Context, controllerURL, runnerToken, runID
 	}
 	cred := DirectCredential{
 		Kind: body.Kind, Host: strings.ToLower(body.Host), Username: body.Username,
-		Secret: body.Secret, KnownHosts: body.KnownHosts,
+		Secret: body.Secret, KnownHosts: body.KnownHosts, ExtraRepositories: body.ExtraRepositories,
 	}
 	if cred.Kind == CredentialGitHubApp {
 		cred.Username, cred.Secret = "x-access-token", body.Token
@@ -181,7 +181,31 @@ func (c DirectCredential) validate() error {
 	default:
 		return fmt.Errorf("the controller answered with an unknown credential kind %q", c.Kind)
 	}
+	if len(c.ExtraRepositories) > maxExtraRepositories {
+		return errors.New("the controller answered with too many extra repositories")
+	}
+	for _, repo := range c.ExtraRepositories {
+		if !validRepoSlug(repo) {
+			return fmt.Errorf("the controller answered with an unusable extra repository %q", repo)
+		}
+	}
 	return nil
+}
+
+// maxExtraRepositories is the controller's cap on an owner's list.
+const maxExtraRepositories = 10
+
+func validRepoSlug(slug string) bool {
+	owner, name, ok := strings.Cut(slug, "/")
+	if !ok || owner == "" || name == "" || len(slug) > 200 || strings.HasPrefix(owner, ".") || strings.HasPrefix(name, ".") {
+		return false
+	}
+	for _, c := range owner + name {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '.' && c != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func validCredentialHost(host string) bool {

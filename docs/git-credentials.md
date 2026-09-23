@@ -28,37 +28,34 @@ config and credentials, and only from the repositories its list names. See
 
 ## Extra repositories
 
-A pipeline whose checkout needs more of the team's private GitHub
-repositories, such as submodules, declares them in its entry of
-`.sparkwing/sparkwing.yaml`:
+A run's checkout may need more of the team's private GitHub repositories,
+such as submodules. By default a token reads only the run's repository,
+because a token for every repository of the installation would let a
+compromised pipeline read all of them.
 
-```yaml
-pipelines:
-  - name: build
-    entrypoint: Build
-    source:
-      extra_repos: [acme/proto, acme/vendor-lib]
-```
+A team owner lists the further repositories per source repository, under
+**Team > GitHub > Extra repositories** in the dashboard or with
+`PUT /api/v1/team/github-app/extra-repos {repository, extra_repos}`. At most
+10, as `owner/name`, all of the source repository's owner, and each covered
+by the installation that covers the source repository when the list is set.
+An empty list clears it. Members read the lists with
+`GET /api/v1/team/github-app/extra-repos`. The list lives in the controller
+rather than in the repository, because code in the repository, including a
+pull request's, must not widen what its own token reads.
 
-At most 10, as `owner/name`, all of the run repository's owner. By default a
-token reads only the run's repository, because a token for every repository
-of the installation would let a compromised pipeline read all of them.
-
-Right after it fetches the run's source, and before it compiles anything, the
-runner declares the list with `POST /api/v1/runs/{id}/source-declaration`.
-The first declaration binds the run: a later one naming a different set is
-refused, so pipeline code, which holds the same runner token afterwards,
-cannot widen it. When the list is not empty and the checkout has a
-`.gitmodules`, the runner asks for an App token that also reads the declared
-repositories, which the controller mints only when the installation covering
-the run's repository covers each of them, and runs
-`git submodule update --init --recursive --depth 1`. `url.insteadOf` rewrites
-a submodule's ssh URL on the credential's host to https, so the one token
-serves every submodule. When no installation covers the run, the team's
-stored github.com credential serves the submodules the same way, rewritten to
-its transport. `extra_repos` applies only to a run of a GitHub repository; a
-run of another host that declares any fails. A runner fetching with the
-machine's own credentials leaves submodules out.
+When the run's repository has a list, the controller mints the run's App
+token for it and the listed repositories together, checking again that the
+installation covering the run's repository still covers each one; a listed
+repository it no longer covers fails the request with 403 until an owner
+updates the list. The answer names the listed repositories in
+`extra_repositories`. When it names any and the checkout has a `.gitmodules`,
+the runner runs `git submodule update --init --recursive --depth 1` with the
+same credential. `url.insteadOf` rewrites a submodule's ssh URL on the
+credential's host to https, so the one token serves every submodule. When no
+installation covers the run, the team's stored github.com credential serves
+the submodules the same way, rewritten to its transport, and the answer
+still names the listed repositories. A run of another host has no list, and
+a runner fetching with the machine's own credentials leaves submodules out.
 
 ## Store a credential
 
@@ -79,7 +76,9 @@ There are two kinds:
   SHA256 fingerprint, and the credential is unusable until an owner confirms
   that fingerprint with `POST /api/v1/team/git-credentials/{host}/confirm`.
   Check it against the fingerprint your forge publishes. The controller
-  refuses a host that resolves inside its own network.
+  refuses a host that resolves inside its own network, and it dials the very
+  address it checked, so a name that resolves differently a second time
+  cannot steer the scan inward.
 - **An HTTPS token** (`kind: https`, `token`, optional `username`), such as a
   GitLab or Bitbucket access token or a fine-grained GitHub token. The
   username defaults to `x-access-token`; Bitbucket repository access tokens
@@ -98,7 +97,9 @@ A team stores at most 50 credentials.
 The controller releases a stored credential only when all of these hold:
 
 - the caller holds a live claim on a node or the trigger of the run, with a
-  runner token of the run's own team;
+  runner token of the run's own team, both when the request arrives and
+  inside the transaction that records the release, which locks the claim, so
+  a lease that lapses in between releases nothing;
 - the host of the run's repository is the credential's host;
 - the caller is a cloud runner, one whose token the operator meters, or a
   machine a team owner opted in with
@@ -120,9 +121,12 @@ minute; past that the route answers 429.
 The runner hands the credential to the one `git fetch` that needs it and to
 nothing else:
 
-- An SSH key goes to a fresh private directory on tmpfs (`/dev/shm` when the
-  machine has it) as a mode 0600 file, beside a `known_hosts` file holding only
-  the pinned entry. The fetch runs with
+- An SSH key goes to a fresh private directory on a tmpfs (`/dev/shm`, or
+  `$XDG_RUNTIME_DIR` or the temporary directory when one of those is a tmpfs)
+  as a mode 0600 file, beside a `known_hosts` file holding only the pinned
+  entry. A cloud runner, one its owner did not fence with `--allow-repo`,
+  refuses to write the key anywhere else and fails the fetch naming the
+  missing tmpfs; a fenced runner without one uses the temporary directory. The fetch runs with
   `GIT_SSH_COMMAND="ssh -i <key> -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=<pinned> ..."`,
   so no other identity, agent, ssh config or known host takes part, and a
   changed host key fails the fetch. An https remote is fetched in its ssh form.
@@ -133,7 +137,9 @@ nothing else:
   agent.
 - The runner deletes the key directory when the checkout returns, before it
   compiles or runs anything the fetched tree names. A key it cannot delete
-  fails the run.
+  fails the run. A runner that crashes mid-fetch leaves the directory behind;
+  the next runner of the same user to start removes every `sparkwing-git-*`
+  directory in those places that it owns and no live fetch holds.
 - The credential is never in an environment variable, a command line, the
   URL or `.git/config`, and the runner replaces it, and each line of a key,
   with `***` in any error text it reports.
