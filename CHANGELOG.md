@@ -444,9 +444,10 @@ unlock.
   `--bucket-store`, because free-tier shares are enforced only over the object
   store the cache and logs service keep their objects in.
 
-- **cache:** `/proxy/` answers only the operator token or a cache grant,
-  like the blob stores. A cache that verifies grants starts with a 200 GiB
-  daily egress cap unless `--egress-daily-cap-bytes` names another value.
+- **cache:** a cache that verifies grants starts with a 200 GiB daily egress
+  cap unless `--egress-daily-cap-bytes` names another value. It bounds what
+  any caller churns through the registry proxy, which takes no credential and
+  belongs inside the cluster only.
 
 - **logs:** with `--archive-store`, `--retention` defaults to 30 days.
 

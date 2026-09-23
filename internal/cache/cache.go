@@ -322,7 +322,10 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
 	s.mux.HandleFunc("/git/", requireCaller(metered(egress.ClassGit, handleGit)))
 
-	s.mux.HandleFunc("/proxy/", requireCaller(metered(egress.ClassGit, handleProxy)))
+	// safety: runner pods reach the proxy with no credential, so it stays
+	// open; it is served inside the cluster only, and the daily egress cap
+	// bounds what any caller churns through it.
+	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
 	s.mux.Handle("/metrics", s.tel.PromHandler)

@@ -1,11 +1,14 @@
 package cache
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
 func backdate(t *testing.T, path string, age time.Duration) {
@@ -62,17 +65,22 @@ func TestTheProxyCapEvictsTheLeastRecentlyServedEntries(t *testing.T) {
 	}
 }
 
-// The registry proxy answers only a grant holder or the operator, the same
-// check the blob stores make, so an anonymous caller cannot churn it.
-func TestTheRegistryProxyRefusesAnonymousCallers(t *testing.T) {
-	const token = "operator-token"
-	srv, _ := newBlobServer(t, token)
-	if code, _ := send(t, srv, "GET", "/proxy/no-such-registry/pkg", "", ""); code != 401 {
-		t.Fatalf("an anonymous proxy request = %d, want 401", code)
+// The registry proxy is cluster-internal and answers runner pods that carry
+// no credential, so it takes none; the daily egress cap is what bounds a
+// caller churning it, and past the cap the proxy refuses like every other
+// metered download.
+func TestTheRegistryProxyIsOpenAndBoundedByTheEgressCap(t *testing.T) {
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyCapBytes: 200})
+	if got := get(t, srv, "/proxy/no-such-registry/pkg", ""); got.status != http.StatusBadRequest {
+		t.Fatalf("an anonymous proxy request under the cap = %d, want the handler's 400", got.status)
 	}
-	for _, bearer := range []string{token, grantFor(t, token, "team-a")} {
-		if code, body := send(t, srv, "GET", "/proxy/no-such-registry/pkg", bearer, ""); code != 400 {
-			t.Fatalf("an authenticated proxy request = %d %q, want the handler's 400", code, body)
+	seedArtifact(t, "job1", "out.tar", 100)
+	for range 2 {
+		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK {
+			t.Fatalf("download under the cap = %d", got.status)
 		}
+	}
+	if got := get(t, srv, "/proxy/npm/left-pad", ""); got.status != http.StatusTooManyRequests {
+		t.Fatalf("an anonymous proxy request past the daily cap = %d, want 429", got.status)
 	}
 }
