@@ -116,9 +116,9 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	team, err := st.AcceptInvitation(ctx, waiting.Account.ID, inv.ID, time.Now())
-	if err != nil || team != owner.Account.ActiveTeam {
-		t.Fatalf("AcceptInvitation = %q, %v", team, err)
+	acc, err := st.AcceptInvitation(ctx, waiting.Account.ID, inv.ID, time.Now())
+	if err != nil || acc.Team != owner.Account.ActiveTeam || !acc.Admitted {
+		t.Fatalf("AcceptInvitation = %+v, %v", acc, err)
 	}
 	acct, err := st.Account(ctx, waiting.Account.ID)
 	if err != nil || acct.ActiveTeam != owner.Account.ActiveTeam || !acct.Waitlisted {
@@ -324,5 +324,151 @@ func TestSignUpInputsAreValidated(t *testing.T) {
 	}
 	if _, err := st.ApproveOldestWaitlisted(ctx, 0, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("approve zero = %v", err)
+	}
+}
+
+// safety: the migration seeds the gate row, so the first sign-ups on a fresh
+// deployment lock a row that exists rather than racing to create it.
+func TestTheMigrationSeedsTheGateRow(t *testing.T) {
+	st := storetest.Open(t)
+	var n int
+	var source string
+	if err := st.DB().QueryRowContext(context.Background(),
+		`SELECT COUNT(*), MAX(source) FROM signup_gate`).Scan(&n, &source); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || source != "default" {
+		t.Fatalf("signup_gate holds %d row(s), source %q; want the one seeded default row", n, source)
+	}
+}
+
+// Reopening restarts the windows at the moment it happened, so an admission
+// in the same second still counts toward the limit.
+func TestReopeningCountsAdmissionsInTheSameSecond(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	setLimits(t, st, store.SignUpLimits{HourlyLimit: 2})
+	reopen := time.Now().Truncate(time.Second).Add(100 * time.Millisecond)
+	if _, err := st.SetSignUpMode(ctx, store.SignUpOpen, "", "root", reopen); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		requireAdmitted(t, signUpAt(t, st, googleProfile(fmt.Sprintf("r%d", i), fmt.Sprintf("r%d@example.com", i)),
+			store.SignUpConditions{}, reopen.Add(time.Duration(i+1)*time.Millisecond)))
+	}
+	requireWaitlisted(t, signUpAt(t, st, googleProfile("r2", "r2@example.com"),
+		store.SignUpConditions{}, reopen.Add(5*time.Millisecond)), store.WaitlistReasonHourly)
+}
+
+// Concurrent sign-ups at the limit admit exactly the limit: the seeded gate
+// row serializes them, so none reads a count another is about to raise.
+func TestConcurrentSignUpsAdmitExactlyTheLimit(t *testing.T) {
+	st := storetest.Open(t)
+	const limit, n = 4, 20
+	setLimits(t, st, store.SignUpLimits{HourlyLimit: limit})
+	now := time.Now()
+	results := make(chan store.SignInResult, n)
+	errs := make(chan error, n)
+	for i := range n {
+		go func() {
+			res, err := st.ResolveSignIn(context.Background(),
+				googleProfile(fmt.Sprintf("c%d", i), fmt.Sprintf("c%d@example.com", i)), store.SignUpConditions{}, now)
+			errs <- err
+			results <- res
+		}()
+	}
+	admitted, closures := 0, 0
+	for range n {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		res := <-results
+		if res.WaitlistReason == "" {
+			admitted++
+		}
+		if res.GateClosed != nil {
+			closures++
+		}
+	}
+	if admitted != limit || closures != 1 {
+		t.Fatalf("admitted %d with %d closure(s), want %d admitted and one closure", admitted, closures, limit)
+	}
+}
+
+func invite(t *testing.T, st *store.Store, owner store.SignInResult, email string) store.Invitation {
+	t.Helper()
+	inv, err := tenant(t, st, owner.Account.ActiveTeam).CreateInvitation(
+		context.Background(), owner.Account.ID, email, store.RoleEditor, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return inv
+}
+
+// A waitlisted account that joins by invitation takes a team's scopes, so it
+// counts as an admission: a farm of invited bots trips the gate as a farm of
+// sign-ups would.
+func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	setLimits(t, st, store.SignUpLimits{HourlyLimit: 3, GitHubMinAccountDays: 7})
+	now := time.Now()
+	owner := signUpAt(t, st, googleProfile("o", "o@example.com"), store.SignUpConditions{}, now)
+	// safety: an admitted account joining a team is no new admission, the negative control.
+	member := signUpAt(t, st, googleProfile("m", "m@example.com"), store.SignUpConditions{}, now)
+	if _, err := st.AcceptInvitation(ctx, member.Account.ID, invite(t, st, owner, "m@example.com").ID, now); err != nil {
+		t.Fatal(err)
+	}
+	bots := make([]store.SignInResult, 2)
+	for i := range bots {
+		bots[i] = signUpAt(t, st, githubProfile(fmt.Sprintf("b%d", i), fmt.Sprintf("bot%d@example.com", i), now),
+			store.SignUpConditions{}, now)
+		requireWaitlisted(t, bots[i], store.WaitlistReasonGitHubAge)
+	}
+	first, err := st.AcceptInvitation(ctx, bots[0].Account.ID, invite(t, st, owner, "bot0@example.com").ID, now)
+	if err != nil || !first.Admitted || first.GateClosed != nil {
+		t.Fatalf("the third admission against a limit of 3 = %+v, %v; want it counted and the gate open", first, err)
+	}
+	second, err := st.AcceptInvitation(ctx, bots[1].Account.ID, invite(t, st, owner, "bot1@example.com").ID, now)
+	if err != nil || second.GateClosed == nil || second.GateClosed.Source != store.WaitlistReasonHourly {
+		t.Fatalf("the accept past the limit = %+v, %v; want it to close the gate", second, err)
+	}
+	requireWaitlisted(t, signUpAt(t, st, googleProfile("late", "late@example.com"), store.SignUpConditions{}, now),
+		store.WaitlistReasonHourly)
+}
+
+// A team nobody has paid for holds at most the member limit; the members it
+// already has stay, and a purchase or an operator's higher limit lifts it.
+func TestAFreeTeamHoldsAtMostTheMemberLimit(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	setLimits(t, st, store.SignUpLimits{FreeTeamMembers: 3})
+	owner := signIn(t, st, "o", "o@example.com")
+	join := func(sub, email string) error {
+		acct := signIn(t, st, sub, email)
+		_, err := st.AcceptInvitation(context.Background(), acct.Account.ID, invite(t, st, owner, email).ID, time.Now())
+		return err
+	}
+	for i := range 2 {
+		if err := join(fmt.Sprintf("j%d", i), fmt.Sprintf("j%d@example.com", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := join("full", "full@example.com"); !errors.Is(err, store.ErrTeamFull) {
+		t.Fatalf("the fourth member of a free team = %v, want ErrTeamFull", err)
+	}
+	setLimits(t, st, store.SignUpLimits{FreeTeamMembers: 4})
+	if err := join("raised", "raised@example.com"); err != nil {
+		t.Fatalf("a member under the raised limit = %v", err)
+	}
+	if err := join("full2", "full2@example.com"); !errors.Is(err, store.ErrTeamFull) {
+		t.Fatalf("the fifth member = %v, want ErrTeamFull", err)
+	}
+	if _, err := tenant(t, st, owner.Account.ActiveTeam).GrantCredits(ctx, store.CreditGrantPaid,
+		10*store.MicroCreditsPerCredit, "pi_team", "billing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := join("paid", "paid@example.com"); err != nil {
+		t.Fatalf("a member of a team that bought credits = %v", err)
 	}
 }

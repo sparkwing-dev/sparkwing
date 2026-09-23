@@ -98,9 +98,9 @@ func TestIdentityInvitationNeedsTheInvitedVerifiedEmail(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, y.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrEmailMismatch) {
 		t.Fatalf("y accepting x's invitation = %v, want ErrEmailMismatch", err)
 	}
-	team, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now())
-	if err != nil || team != owner.PersonalTeam {
-		t.Fatalf("x accepting = %s, %v", team, err)
+	acc, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now())
+	if err != nil || acc.Team != owner.PersonalTeam || acc.Admitted {
+		t.Fatalf("x accepting = %+v, %v", acc, err)
 	}
 	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("second accept = %v, want ErrInvitationClosed", err)

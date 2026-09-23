@@ -664,6 +664,12 @@ signing up again, but it holds no personal space, cannot create a team
 (`POST /api/v1/teams` answers `403`), and reaches no team route. It can accept
 an invitation: a team that invites someone vouches for them, and they join that
 team with the invited role while staying on the waitlist for everything else.
+Because one admitted user could otherwise invite a farm of waitlisted accounts
+into team scopes, each such acceptance counts toward the hourly and daily
+limits as an admission, and a team that has bought no credits holds at most
+`free_team_members` members (default 10; accepting past it answers `403`).
+Members a team already holds are never removed, and a team with purchased
+credits has no member limit.
 `GET /api/v1/me` and the sign-in exchange report `"waitlisted": true`, and the
 dashboard shows a waitlist page in place of the team views.
 
@@ -677,16 +683,22 @@ these holds:
 | `hourly_signups` | the last hour already admitted `hourly_limit` new users (default 50); the gate closes itself |
 | `daily_signups` | the last 24 hours already admitted `daily_limit` new users (default 500); the gate closes itself |
 | `free_tier_closed` | the deployment's free storage reports `closed`; the gate reopens when it does |
+| `free_tier_unreadable` | the free-tier source failed; the gate fails closed and logs `signup.free_tier_unreadable` |
 | `github_account_age` | a GitHub account younger than `github_min_account_days` (default 7), or one whose creation date GitHub did not state |
 
 A velocity closure is stored with the source `hourly_signups` or
 `daily_signups` and stays closed until an operator reopens it, so a burst that
 pauses does not reopen the gate on its own. Reopening restarts both windows
 from that moment, so the burst already dealt with does not close it again.
-Only admitted users count toward a limit, so a burst of waitlisted accounts,
-such as young GitHub accounts, does not close the gate on everyone else.
-Concurrent sign-ups can overshoot a limit by the number in flight at once. A
-limit of `0` turns its check off. Google states no account age, so the age
+Only admissions count toward a limit: new users admitted, and waitlisted users
+who accepted an invitation. A burst of waitlisted sign-ups, such as young
+GitHub accounts, does not close the gate on everyone else. Every sign-up and
+acceptance locks the one gate row before counting, so concurrent sign-ups at a
+limit admit exactly the limit. A limit of `0` turns its check off.
+
+The free-tier state comes from a source the deployment wires in. A multi-team
+controller with none logs `signup.free_tier_unwired` once at startup and
+treats the free tier as open. Google states no account age, so the age
 check applies to GitHub alone.
 
 The operator routes need the `admin` scope:
@@ -694,7 +706,7 @@ The operator routes need the `admin` scope:
 | Route | Does |
 |-------|------|
 | `GET /api/v1/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
-| `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`; fields left out keep their values |
+| `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
 | `GET /api/v1/signups/waitlist` | waitlisted users, oldest first, with the reason each was waitlisted; `?limit=` reads at most 1000 |
 | `POST /api/v1/signups/waitlist/approve` | admits `{"account_ids": [...]}` or `{"oldest": n}`, at most 1000 at a time; each admitted user without a team gets its personal space, and approving an admitted user again does nothing |
 
@@ -710,9 +722,11 @@ The controller logs `signup.velocity_warning` and counts
 users cross `hourly_warn` (default 20), which is below the hourly limit so an
 alert fires before anyone is waitlisted. It logs `signup.gate_closed` and counts
 `sparkwing_signup_gate_closed_total` when a limit closes the gate, and
-`sparkwing_signups_total` counts every new user by outcome and reason. Alert on
-any increase in the closure counter, on the warning counter, and on
-`GET /api/v1/signups` answering `"state": "waitlist"`.
+`sparkwing_signups_total` counts every new user by outcome and reason, with
+waitlisted users admitted by invitation under `admitted`/`invitation`. Alert on
+any increase in the closure counter, on the warning counter, on
+`signup.free_tier_unreadable`, and on `GET /api/v1/signups` answering
+`"state": "waitlist"`.
 
 ## Unauthenticated endpoints
 

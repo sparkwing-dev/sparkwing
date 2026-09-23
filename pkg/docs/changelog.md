@@ -28,8 +28,11 @@ unlock.
   accept an invitation. It is waitlisted when the operator sets the gate to
   `waitlist` (`PUT /api/v1/signups` or `--signup-gate=waitlist`), when the last
   hour or day already admitted 50 or 500 new users (the gate then closes itself
-  until an operator reopens it), when the free tier reports `closed`, or when a
-  GitHub account is younger than 7 days. Existing users are never gated.
+  until an operator reopens it), when the free tier reports `closed` or cannot
+  be read, or when a GitHub account is younger than 7 days. Existing users are
+  never gated. A waitlisted user who accepts an invitation counts as an
+  admission, and a team that has bought no credits holds at most 10 members
+  (`free_team_members`); existing members are never removed.
   `GET /api/v1/signups/waitlist` lists the waitlist oldest first and
   `POST /api/v1/signups/waitlist/approve` admits users by id or the oldest n.
   `sparkwing_signups_total`, `sparkwing_signup_gate_closed_total` and

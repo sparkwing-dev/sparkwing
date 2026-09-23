@@ -17,16 +17,31 @@ import (
 // out: open, throttled, or closed once it is spent.
 type FreeTierState string
 
-// The three free-tier states.
+// The free-tier states. FreeTierUnreadable is what the gate reports when the
+// source failed; it waitlists new accounts as closed does.
 const (
-	FreeTierOpen      FreeTierState = "open"
-	FreeTierThrottled FreeTierState = "throttled"
-	FreeTierClosed    FreeTierState = "closed"
+	FreeTierOpen       FreeTierState = "open"
+	FreeTierThrottled  FreeTierState = "throttled"
+	FreeTierClosed     FreeTierState = "closed"
+	FreeTierUnreadable FreeTierState = "unreadable"
 )
+
+// FreeTierSource reports how much of the deployment's free storage is left.
+// It runs on every sign-in, so it should answer from memory.
+type FreeTierSource interface {
+	SignUpFreeTier(ctx context.Context) (FreeTierState, error)
+}
+
+// FreeTierFunc adapts a function to [FreeTierSource].
+type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
+
+// SignUpFreeTier calls f.
+func (f FreeTierFunc) SignUpFreeTier(ctx context.Context) (FreeTierState, error) { return f(ctx) }
 
 type signUpConfig struct {
 	forceWaitlist bool
-	freeTier      func(context.Context) (FreeTierState, error)
+	freeTier      FreeTierSource
+	unwiredLogged atomic.Bool
 	onApproved    func(context.Context, store.Account) error
 	// safety: set while the hourly count sits above the warn threshold, so the warning fires once per
 	// crossing rather than on every sign-up.
@@ -42,12 +57,25 @@ func (s *Server) WithSignUpWaitlist(on bool) *Server {
 }
 
 // WithFreeTier installs the report of the deployment's free storage. While it
-// reports closed, new accounts are waitlisted, because a personal space holds
-// a free allowance the deployment can no longer carry. fn runs on every
-// sign-in, so it should answer from memory.
-func (s *Server) WithFreeTier(fn func(context.Context) (FreeTierState, error)) *Server {
-	s.identity.signup.freeTier = fn
+// reports closed, or fails, new accounts are waitlisted, because a personal
+// space holds a free allowance the deployment may no longer carry.
+func (s *Server) WithFreeTier(src FreeTierSource) *Server {
+	s.identity.signup.freeTier = src
 	return s
+}
+
+// CheckFreeTierSource logs signup.free_tier_unwired once when a multi-team
+// controller has no free-tier source, in which case the gate treats the free
+// tier as open. Call it at startup, after configuration.
+func (s *Server) CheckFreeTierSource() {
+	if s.identity.signup.freeTier != nil || !s.MultiTeam() {
+		return
+	}
+	if s.identity.signup.unwiredLogged.Swap(true) {
+		return
+	}
+	s.logger.Warn("signup.free_tier_unwired",
+		"detail", "no free-tier source is configured, so the sign-up gate treats the free tier as open")
 }
 
 // WithSignUpApprovalNotifier runs fn for each account an operator admits from
@@ -58,26 +86,27 @@ func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Accou
 	return s
 }
 
-// safety: a free-tier report that fails reads as open, because refusing every
-// new account over an unreadable gauge would turn a monitoring fault into an
-// outage for new users; the fault is logged so it is seen.
+// safety: a report that fails reads as unreadable, which waitlists new accounts as closed does: an
+// account held back is one approval away, while one admitted keeps a free allowance for good.
 func (s *Server) freeTierState(ctx context.Context) FreeTierState {
-	fn := s.identity.signup.freeTier
-	if fn == nil {
+	src := s.identity.signup.freeTier
+	if src == nil {
 		return FreeTierOpen
 	}
-	state, err := fn(ctx)
+	state, err := src.SignUpFreeTier(ctx)
 	if err != nil {
 		s.logger.Warn("signup.free_tier_unreadable", "error", err.Error())
-		return FreeTierOpen
+		return FreeTierUnreadable
 	}
 	return state
 }
 
 func (s *Server) signUpConditions(ctx context.Context) store.SignUpConditions {
+	free := s.freeTierState(ctx)
 	return store.SignUpConditions{
-		ForceWaitlist:  s.identity.signup.forceWaitlist,
-		FreeTierClosed: s.freeTierState(ctx) == FreeTierClosed,
+		ForceWaitlist:      s.identity.signup.forceWaitlist,
+		FreeTierClosed:     free == FreeTierClosed,
+		FreeTierUnreadable: free == FreeTierUnreadable,
 	}
 }
 
@@ -127,6 +156,7 @@ type signUpLimitsJSON struct {
 	DailyLimit           int `json:"daily_limit"`
 	HourlyWarn           int `json:"hourly_warn"`
 	GitHubMinAccountDays int `json:"github_min_account_days"`
+	FreeTeamMembers      int `json:"free_team_members"`
 }
 
 type signUpCountsJSON struct {
@@ -167,6 +197,7 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 		Limits: signUpLimitsJSON{
 			HourlyLimit: g.Limits.HourlyLimit, DailyLimit: g.Limits.DailyLimit,
 			HourlyWarn: g.Limits.HourlyWarn, GitHubMinAccountDays: g.Limits.GitHubMinAccountDays,
+			FreeTeamMembers: g.Limits.FreeTeamMembers,
 		},
 		Counts:          signUpCountsJSON{LastHour: counts.LastHour, LastDay: counts.LastDay, Waitlisted: counts.Waitlisted},
 		VelocityWarning: g.Limits.HourlyWarn > 0 && counts.LastHour > g.Limits.HourlyWarn,
@@ -177,8 +208,11 @@ func (s *Server) signUpStatus(ctx context.Context, now time.Time) (signUpStatusJ
 	if g.Mode == store.SignUpWaitlist {
 		out.Reasons = append(out.Reasons, g.Source)
 	}
-	if free == FreeTierClosed {
+	switch free {
+	case FreeTierClosed:
 		out.Reasons = append(out.Reasons, store.WaitlistReasonFreeTier)
+	case FreeTierUnreadable:
+		out.Reasons = append(out.Reasons, store.WaitlistReasonFreeTierUnreadable)
 	}
 	if len(out.Reasons) > 0 {
 		out.State = string(store.SignUpWaitlist)
@@ -202,10 +236,12 @@ type signUpSetReq struct {
 	DailyLimit           *int    `json:"daily_limit"`
 	HourlyWarn           *int    `json:"hourly_warn"`
 	GitHubMinAccountDays *int    `json:"github_min_account_days"`
+	FreeTeamMembers      *int    `json:"free_team_members"`
 }
 
 func (req signUpSetReq) limitsChanged() bool {
-	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil
+	return req.HourlyLimit != nil || req.DailyLimit != nil || req.HourlyWarn != nil || req.GitHubMinAccountDays != nil ||
+		req.FreeTeamMembers != nil
 }
 
 func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request) {
@@ -243,6 +279,7 @@ func (s *Server) handleSetSignUp(w http.ResponseWriter, r *http.Request) {
 			{req.DailyLimit, &limits.DailyLimit},
 			{req.HourlyWarn, &limits.HourlyWarn},
 			{req.GitHubMinAccountDays, &limits.GitHubMinAccountDays},
+			{req.FreeTeamMembers, &limits.FreeTeamMembers},
 		} {
 			if f.in != nil {
 				*f.out = *f.in

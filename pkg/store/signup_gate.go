@@ -36,16 +36,19 @@ const (
 	WaitlistReasonDeployment = "deployment"
 	WaitlistReasonOperator   = "operator"
 	WaitlistReasonFreeTier   = "free_tier_closed"
-	WaitlistReasonHourly     = "hourly_signups"
-	WaitlistReasonDaily      = "daily_signups"
-	WaitlistReasonGitHubAge  = "github_account_age"
+	// WaitlistReasonFreeTierUnreadable is a free-tier report that failed, which
+	// the gate treats as closed.
+	WaitlistReasonFreeTierUnreadable = "free_tier_unreadable"
+	WaitlistReasonHourly             = "hourly_signups"
+	WaitlistReasonDaily              = "daily_signups"
+	WaitlistReasonGitHubAge          = "github_account_age"
 )
 
 // WaitlistReasons lists every reason a new account can be waitlisted for.
 func WaitlistReasons() []string {
 	return []string{
 		WaitlistReasonDeployment, WaitlistReasonOperator, WaitlistReasonFreeTier,
-		WaitlistReasonHourly, WaitlistReasonDaily, WaitlistReasonGitHubAge,
+		WaitlistReasonFreeTierUnreadable, WaitlistReasonHourly, WaitlistReasonDaily, WaitlistReasonGitHubAge,
 	}
 }
 
@@ -58,6 +61,7 @@ const (
 	DefaultSignUpDailyLimit     = 500
 	DefaultSignUpHourlyWarn     = 20
 	DefaultGitHubMinAccountDays = 7
+	DefaultFreeTeamMembers      = 10
 )
 
 // SignUpLimits are the operator's thresholds. A zero limit turns that check
@@ -74,6 +78,10 @@ type SignUpLimits struct {
 	// GitHubMinAccountDays is the youngest GitHub account, in days, that a
 	// sign-up admits; a younger one is waitlisted.
 	GitHubMinAccountDays int
+	// FreeTeamMembers is the most members a team that has bought no credits
+	// may hold. An invitation past it is refused; members a team already
+	// holds are never removed.
+	FreeTeamMembers int
 }
 
 // DefaultSignUpLimits are the limits of a deployment nobody has tuned.
@@ -81,6 +89,7 @@ func DefaultSignUpLimits() SignUpLimits {
 	return SignUpLimits{
 		HourlyLimit: DefaultSignUpHourlyLimit, DailyLimit: DefaultSignUpDailyLimit,
 		HourlyWarn: DefaultSignUpHourlyWarn, GitHubMinAccountDays: DefaultGitHubMinAccountDays,
+		FreeTeamMembers: DefaultFreeTeamMembers,
 	}
 }
 
@@ -104,6 +113,9 @@ type SignUpConditions struct {
 	// FreeTierClosed reports that the free storage the deployment offers is
 	// spent, so a new personal space would hold an allowance nobody can pay for.
 	FreeTierClosed bool
+	// FreeTierUnreadable reports that the free-tier report failed. The gate
+	// fails closed on it.
+	FreeTierUnreadable bool
 }
 
 // SignUpCounts are the accounts created over the two windows the gate reads,
@@ -124,6 +136,10 @@ type WaitlistedAccount struct {
 // ErrWaitlisted refuses what a waitlisted account may not do yet.
 var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
 
+// ErrTeamFull refuses a member past the limit of a team that has bought no
+// credits.
+var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
+
 const signUpGateTableSQLite = `
 CREATE TABLE IF NOT EXISTS signup_gate (
     id                      INTEGER PRIMARY KEY CHECK (id = 1),
@@ -135,8 +151,16 @@ CREATE TABLE IF NOT EXISTS signup_gate (
     hourly_limit            INTEGER NOT NULL,
     daily_limit             INTEGER NOT NULL,
     hourly_warn             INTEGER NOT NULL,
-    github_min_account_days INTEGER NOT NULL
+    github_min_account_days INTEGER NOT NULL,
+    free_team_members       INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS signup_admissions (
+    account_id TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('signup', 'invitation')),
+    at         INTEGER NOT NULL,
+    PRIMARY KEY (account_id, kind, at)
+);
+CREATE INDEX IF NOT EXISTS idx_signup_admissions_at ON signup_admissions(at);
 CREATE INDEX IF NOT EXISTS idx_accounts_created ON accounts(created_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_waitlisted ON accounts(waitlisted_at) WHERE waitlisted_at <> 0;
 `
@@ -151,6 +175,20 @@ var accountWaitlistCols = map[string]string{
 	"waitlist_reason": "TEXT NOT NULL DEFAULT ''",
 }
 
+// safety: the gate row is seeded here, so every sign-up's SELECT ... FOR UPDATE
+// locks a row that exists; two first sign-ups racing to create it would
+// otherwise both count past a limit.
+func seedSignUpGateTx(ctx context.Context, tx *storeTx) error {
+	d := DefaultSignUpLimits()
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO signup_gate (id, mode, source, reason, set_by, updated_at,
+			hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members)
+		VALUES (1, 'open', 'default', '', '', 0, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
+		d.HourlyLimit, d.DailyLimit, d.HourlyWarn, d.GitHubMinAccountDays, d.FreeTeamMembers)
+	return err
+}
+
 func applySignUpGateMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := ensureColumnsSQLite(ctx, tx, "accounts", accountWaitlistCols); err != nil {
 		return err
@@ -160,7 +198,7 @@ func applySignUpGateMigrationSQLite(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return nil
+	return seedSignUpGateTx(ctx, tx)
 }
 
 func applySignUpGateMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -172,20 +210,21 @@ func applySignUpGateMigrationPostgres(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return nil
+	return seedSignUpGateTx(ctx, tx)
 }
 
 const signUpGateSelect = `SELECT mode, source, reason, set_by, updated_at,
-	hourly_limit, daily_limit, hourly_warn, github_min_account_days FROM signup_gate WHERE id = 1`
+	hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members FROM signup_gate WHERE id = 1`
 
-// safety: a deployment with no row is open with the default limits, because
-// nobody has had a reason to close it.
+// safety: the migration seeds the row; one missing anyway reads as open with
+// the default limits, because nobody has had a reason to close it.
 func scanSignUpGate(row rowScanner) (SignUpGate, error) {
 	var g SignUpGate
 	var mode string
 	var updated int64
 	err := row.Scan(&mode, &g.Source, &g.Reason, &g.SetBy, &updated,
-		&g.Limits.HourlyLimit, &g.Limits.DailyLimit, &g.Limits.HourlyWarn, &g.Limits.GitHubMinAccountDays)
+		&g.Limits.HourlyLimit, &g.Limits.DailyLimit, &g.Limits.HourlyWarn, &g.Limits.GitHubMinAccountDays,
+		&g.Limits.FreeTeamMembers)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SignUpGate{Mode: SignUpOpen, Source: "default", UpdatedAt: time.Unix(0, 0).UTC(), Limits: DefaultSignUpLimits()}, nil
 	}
@@ -193,7 +232,7 @@ func scanSignUpGate(row rowScanner) (SignUpGate, error) {
 		return SignUpGate{}, err
 	}
 	g.Mode = SignUpMode(mode)
-	g.UpdatedAt = time.Unix(updated, 0).UTC()
+	g.UpdatedAt = time.Unix(0, updated).UTC()
 	return g, nil
 }
 
@@ -205,14 +244,16 @@ func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error) {
 func writeSignUpGateTx(ctx context.Context, tx *storeTx, g SignUpGate) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO signup_gate (id, mode, source, reason, set_by, updated_at,
-			hourly_limit, daily_limit, hourly_warn, github_min_account_days)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET mode = excluded.mode, source = excluded.source,
 			reason = excluded.reason, set_by = excluded.set_by, updated_at = excluded.updated_at,
 			hourly_limit = excluded.hourly_limit, daily_limit = excluded.daily_limit,
-			hourly_warn = excluded.hourly_warn, github_min_account_days = excluded.github_min_account_days`,
-		string(g.Mode), g.Source, g.Reason, g.SetBy, g.UpdatedAt.UTC().Unix(),
-		g.Limits.HourlyLimit, g.Limits.DailyLimit, g.Limits.HourlyWarn, g.Limits.GitHubMinAccountDays)
+			hourly_warn = excluded.hourly_warn, github_min_account_days = excluded.github_min_account_days,
+			free_team_members = excluded.free_team_members`,
+		string(g.Mode), g.Source, g.Reason, g.SetBy, g.UpdatedAt.UnixNano(),
+		g.Limits.HourlyLimit, g.Limits.DailyLimit, g.Limits.HourlyWarn, g.Limits.GitHubMinAccountDays,
+		g.Limits.FreeTeamMembers)
 	return err
 }
 
@@ -251,7 +292,8 @@ func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setB
 // SetSignUpLimits replaces the thresholds. It leaves the mode and its
 // provenance alone.
 func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error) {
-	if limits.HourlyLimit < 0 || limits.DailyLimit < 0 || limits.HourlyWarn < 0 || limits.GitHubMinAccountDays < 0 {
+	if limits.HourlyLimit < 0 || limits.DailyLimit < 0 || limits.HourlyWarn < 0 || limits.GitHubMinAccountDays < 0 ||
+		limits.FreeTeamMembers < 0 {
 		return SignUpGate{}, fmt.Errorf("%w: sign-up limits are zero or more", ErrInvalidInput)
 	}
 	return s.updateSignUpGate(ctx, func(g *SignUpGate) error {
@@ -280,29 +322,29 @@ type signUpDecision struct {
 	tripped *SignUpGate
 }
 
-// safety: counts start no earlier than the operator last set the mode, so a reopened gate does not trip
-// on the burst it already dealt with. Only admitted accounts count: a waitlisted one holds no space, and
-// counting it would let a farm of young GitHub accounts close the gate on everyone else. The gate row
-// is locked on Postgres so two sign-ups that both cross a limit record one closure.
-func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpConditions, now time.Time) (signUpDecision, error) {
-	if c.ForceWaitlist {
-		return signUpDecision{reason: WaitlistReasonDeployment}, nil
+const (
+	admissionSignUp     = "signup"
+	admissionInvitation = "invitation"
+)
+
+func lockSignUpGateTx(ctx context.Context, tx *storeTx) (SignUpGate, error) {
+	return scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect+tx.forUpdate()))
+}
+
+func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string, now time.Time) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO signup_admissions (account_id, kind, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+		accountID, kind, now.UnixNano())
+	return err
+}
+
+// safety: g must be the row this transaction locked. The windows start no earlier than the operator last
+// set the mode, in nanoseconds, so a reopened gate does not trip on the burst it already dealt with and
+// still counts what arrives in the same second.
+func tripVelocityTx(ctx context.Context, tx *storeTx, g SignUpGate, now time.Time) (*SignUpGate, error) {
+	if g.Mode != SignUpOpen {
+		return nil, nil
 	}
-	g, err := scanSignUpGate(tx.QueryRowContext(ctx, signUpGateSelect+tx.forUpdate()))
-	if err != nil {
-		return signUpDecision{}, err
-	}
-	if g.Mode == SignUpWaitlist {
-		reason := g.Source
-		if reason == "" {
-			reason = WaitlistReasonOperator
-		}
-		return signUpDecision{reason: reason}, nil
-	}
-	if c.FreeTierClosed {
-		return signUpDecision{reason: WaitlistReasonFreeTier}, nil
-	}
-	at := now.UTC().Unix()
 	for _, w := range []struct {
 		reason string
 		limit  int
@@ -315,24 +357,54 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 		if w.limit <= 0 {
 			continue
 		}
-		since := at - int64(w.span/time.Second)
-		if g.UpdatedAt.Unix() > since {
-			since = g.UpdatedAt.Unix()
-		}
+		since := max(now.Add(-w.span).UnixNano(), g.UpdatedAt.UnixNano())
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM accounts WHERE created_at > ? AND waitlisted_at = 0`, since).Scan(&n); err != nil {
-			return signUpDecision{}, err
+			`SELECT COUNT(*) FROM signup_admissions WHERE at >= ?`, since).Scan(&n); err != nil {
+			return nil, err
 		}
 		if n < w.limit {
 			continue
 		}
 		g.Mode, g.Source, g.SetBy, g.UpdatedAt = SignUpWaitlist, w.reason, "automatic", now
-		g.Reason = fmt.Sprintf("%d admitted accounts in the last %s reached the limit of %d", n, w.label, w.limit)
+		g.Reason = fmt.Sprintf("%d admissions in the last %s reached the limit of %d", n, w.label, w.limit)
 		if err := writeSignUpGateTx(ctx, tx, g); err != nil {
-			return signUpDecision{}, err
+			return nil, err
 		}
-		return signUpDecision{reason: w.reason, tripped: &g}, nil
+		return &g, nil
+	}
+	return nil, nil
+}
+
+// safety: the gate row is locked before anything is counted, so concurrent
+// sign-ups at a limit serialize on it and admit exactly the limit. Only
+// admissions count: a waitlisted sign-up holds no space, and counting it would
+// let a farm of young GitHub accounts close the gate on everyone else.
+func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpConditions, now time.Time) (signUpDecision, error) {
+	g, err := lockSignUpGateTx(ctx, tx)
+	if err != nil {
+		return signUpDecision{}, err
+	}
+	switch {
+	case c.ForceWaitlist:
+		return signUpDecision{reason: WaitlistReasonDeployment}, nil
+	case g.Mode == SignUpWaitlist:
+		reason := g.Source
+		if reason == "" {
+			reason = WaitlistReasonOperator
+		}
+		return signUpDecision{reason: reason}, nil
+	case c.FreeTierClosed:
+		return signUpDecision{reason: WaitlistReasonFreeTier}, nil
+	case c.FreeTierUnreadable:
+		return signUpDecision{reason: WaitlistReasonFreeTierUnreadable}, nil
+	}
+	tripped, err := tripVelocityTx(ctx, tx, g, now)
+	if err != nil {
+		return signUpDecision{}, err
+	}
+	if tripped != nil {
+		return signUpDecision{reason: tripped.Source, tripped: tripped}, nil
 	}
 	if p.Provider == ProviderGitHub && g.Limits.GitHubMinAccountDays > 0 {
 		minAge := time.Duration(g.Limits.GitHubMinAccountDays) * 24 * time.Hour

@@ -487,6 +487,7 @@ const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
 var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
+const DefaultFreeTeamMembers = 10
 const DefaultGitHubMinAccountDays = 7
 const DefaultLeaseDuration = 3 * time.Minute
 const DefaultSignUpDailyLimit = 500
@@ -555,6 +556,7 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrStorageQuota = errors.New("storage quota exceeded")
+var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownTeam = errors.New("store: team is not registered")
@@ -789,6 +791,13 @@ type Invitation struct {
 	InvitedBy       string
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
+}
+type InvitationAcceptance struct {
+	Team Team
+
+	Admitted bool
+
+	GateClosed *SignUpGate
 }
 const InvocationSecretArgsKey = "secret_args"
 func IsBusyErr(err error) bool
@@ -1304,6 +1313,8 @@ type SignUpConditions struct {
 	ForceWaitlist bool
 
 	FreeTierClosed bool
+
+	FreeTierUnreadable bool
 }
 type SignUpCounts struct {
 	LastHour   int
@@ -1326,6 +1337,8 @@ type SignUpLimits struct {
 	HourlyWarn int
 
 	GitHubMinAccountDays int
+
+	FreeTeamMembers int
 }
 type SignUpMode string
 const SignUpOpen SignUpMode = "open"
@@ -1416,7 +1429,7 @@ type StorageUsage struct {
 }
 type Store struct {
 }
-func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (Team, error)
+func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
@@ -2008,6 +2021,7 @@ const WaiterStillWaiting WaiterStatus = "still_waiting"
 const WaitlistReasonDaily = "daily_signups"
 const WaitlistReasonDeployment = "deployment"
 const WaitlistReasonFreeTier = "free_tier_closed"
+const WaitlistReasonFreeTierUnreadable = "free_tier_unreadable"
 const WaitlistReasonGitHubAge = "github_account_age"
 const WaitlistReasonHourly = "hourly_signups"
 const WaitlistReasonOperator = "operator"

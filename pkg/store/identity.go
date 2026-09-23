@@ -571,6 +571,11 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 				waitlistedAt, decision.reason); err != nil {
 				return SignInResult{}, fmt.Errorf("identity: create account: %w", err)
 			}
+			if decision.reason == "" {
+				if err := recordAdmissionTx(ctx, tx, accountID, admissionSignUp, now); err != nil {
+					return SignInResult{}, fmt.Errorf("identity: record admission: %w", err)
+				}
+			}
 			res.NewAccount = true
 			res.WaitlistReason, res.GateClosed = decision.reason, decision.tripped
 		default:
@@ -816,15 +821,32 @@ func scanInvitations(rows *sql.Rows) ([]Invitation, error) {
 	return out, rows.Err()
 }
 
+// InvitationAcceptance reports what accepting an invitation did.
+type InvitationAcceptance struct {
+	Team Team
+	// Admitted is true when a waitlisted account joined, which counts toward
+	// the sign-up gate's velocity limits as an admission.
+	Admitted bool
+	// GateClosed is the gate this acceptance closed by crossing a velocity
+	// limit, or nil when it closed nothing.
+	GateClosed *SignUpGate
+}
+
 // AcceptInvitation turns an invitation into a membership and makes its team
 // the account's active one. The account's verified email must be the address
 // the invitation names: the invitation id is a bearer secret anyone it was
 // forwarded to holds, and the verified email is what proves the person
 // accepting is the person invited.
-func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (Team, error) {
+//
+// A team that has bought no credits holds at most the gate's FreeTeamMembers,
+// and a waitlisted account that joins counts as an admission, because one
+// admitted account could otherwise invite a farm of waitlisted ones into
+// team scopes while the gate holds them back.
+func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error) {
+	var none InvitationAcceptance
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	defer rollbackOrLog(tx)
 	at := now.UTC().Unix()
@@ -836,22 +858,31 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 		`SELECT team, email, role, expires_at, accepted_at, withdrawn_at FROM invitations WHERE id = ?`, invitationID).
 		Scan(&team, &email, &role, &expires, &accepted, &withdrawn)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+		return none, ErrNotFound
 	}
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	// safety: the address check runs before the expiry and use checks, so a
 	// holder of someone else's invitation learns nothing about its state.
 	if !acct.EmailVerified || acct.Email != email {
-		return "", ErrEmailMismatch
+		return none, ErrEmailMismatch
 	}
 	if accepted.Valid || withdrawn.Valid || expires <= at {
-		return "", ErrInvitationClosed
+		return none, ErrInvitationClosed
+	}
+	// safety: the gate row is locked before the member count and the admission
+	// count are read, so concurrent acceptances cannot both slip under a limit.
+	gate, err := lockSignUpGateTx(ctx, tx)
+	if err != nil {
+		return none, err
+	}
+	if err := checkTeamRoomTx(ctx, tx, Team(team), gate.Limits.FreeTeamMembers); err != nil {
+		return none, err
 	}
 	// safety: the update repeats the unaccepted predicate and counts what it
 	// changed, because two callers that both read it open would otherwise both
@@ -860,24 +891,55 @@ func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID st
 		UPDATE invitations SET accepted_at = ?, accepted_by = ?
 		WHERE id = ? AND team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, accountID, invitationID, team)
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return "", ErrInvitationClosed
+		return none, ErrInvitationClosed
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO memberships (team, account_id, role, created_at) VALUES (?, ?, ?, ?)`,
 		team, accountID, role, at); err != nil {
 		if isUniqueViolation(err) {
-			return "", ErrAlreadyMember
+			return none, ErrAlreadyMember
 		}
-		return "", err
+		return none, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET active_team = ?, updated_at = ? WHERE id = ?`, team, at, accountID); err != nil {
-		return "", err
+		return none, err
 	}
-	return Team(team), tx.Commit()
+	out := InvitationAcceptance{Team: Team(team)}
+	if acct.Waitlisted {
+		if out.GateClosed, err = tripVelocityTx(ctx, tx, gate, now); err != nil {
+			return none, err
+		}
+		if err := recordAdmissionTx(ctx, tx, accountID, admissionInvitation, now); err != nil {
+			return none, err
+		}
+		out.Admitted = true
+	}
+	return out, tx.Commit()
+}
+
+// safety: a team that has bought credits pays for what its members run, so
+// only a team without them is held to the free member limit; members it
+// already has are never removed.
+func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	var members int
+	var paid int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM memberships WHERE team = ?),
+		       COALESCE((SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind IN (?, ?)), 0)`,
+		string(team), string(team), CreditGrantPaid, CreditGrantReversal).Scan(&members, &paid); err != nil {
+		return err
+	}
+	if paid <= 0 && members >= limit {
+		return ErrTeamFull
+	}
+	return nil
 }
 
 // SetActiveTeam records team as the account's sticky team. The account must be

@@ -577,7 +577,7 @@ func writeIdentityError(w http.ResponseWriter, s *Server, r *http.Request, op st
 		errors.Is(err, store.ErrInvitationOpen):
 		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn),
-		errors.Is(err, store.ErrEmailMismatch), errors.Is(err, store.ErrTeamLimit),
+		errors.Is(err, store.ErrEmailMismatch), errors.Is(err, store.ErrTeamLimit), errors.Is(err, store.ErrTeamFull),
 		errors.Is(err, store.ErrWaitlisted):
 		writeError(w, http.StatusForbidden, err)
 	case errors.Is(err, store.ErrInvitationClosed):

@@ -4391,7 +4391,7 @@ paths:
       tags: [teams]
       summary: Accept an invitation and switch the session to its team.
       description: >-
-        The signed-in user's verified email must equal the invited address; any other user answers 403. A used or expired invitation answers 410. Invitations live seven days.
+        The signed-in user's verified email must equal the invited address; any other user answers 403. A team that has bought no credits and already holds the sign-up gate's `free_team_members` answers 403. A used or expired invitation answers 410. Invitations live seven days. A user on the sign-up waitlist may accept, and the acceptance counts toward the gate's hourly and daily limits as an admission.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -4844,7 +4844,7 @@ paths:
                   state: {type: string, enum: [open, waitlist], description: What a new user meets now.}
                   reasons:
                     type: array
-                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed]}
+                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, free_tier_unreadable]}
                     description: Every condition holding the gate at waitlist; empty while it is open.
                   mode: {type: string, enum: [open, waitlist], description: The stored mode.}
                   source: {type: string, description: "What set the stored mode: `operator`, `hourly_signups`, `daily_signups`, or `default` when nothing has."}
@@ -4852,16 +4852,17 @@ paths:
                   set_by: {type: string}
                   updated_at: {type: integer, format: int64, description: Unix seconds; the velocity windows start no earlier than this while the mode is open.}
                   deployment_waitlist: {type: boolean, description: True when the controller runs with `--signup-gate=waitlist`.}
-                  free_tier: {type: string, enum: [open, throttled, closed]}
+                  free_tier: {type: string, enum: [open, throttled, closed, unreadable], description: "`unreadable` when the free-tier source failed, which waitlists new users as `closed` does."}
                   limits:
                     x-sparkwing-go-type: pkg/controller.signUpLimitsJSON
                     type: object
-                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days]
+                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members]
                     properties:
-                      hourly_limit: {type: integer, description: New users the last hour may admit before the gate closes itself; waitlisted users do not count; 0 is off.}
+                      hourly_limit: {type: integer, description: "Admissions the last hour may hold before the gate closes itself, counting new users admitted and waitlisted users who accepted an invitation; 0 is off."}
                       daily_limit: {type: integer, description: The same bound over the last 24 hours; 0 is off.}
                       hourly_warn: {type: integer, description: Hourly count past which the controller warns; 0 is off.}
                       github_min_account_days: {type: integer, description: Youngest GitHub account a sign-up admits; 0 is off.}
+                      free_team_members: {type: integer, description: Most members a team that has bought no credits may hold; 0 is off.}
                   counts:
                     x-sparkwing-go-type: pkg/controller.signUpCountsJSON
                     type: object
@@ -4893,6 +4894,7 @@ paths:
                 daily_limit: {type: integer, minimum: 0}
                 hourly_warn: {type: integer, minimum: 0}
                 github_min_account_days: {type: integer, minimum: 0}
+                free_team_members: {type: integer, minimum: 0}
       responses:
         "200":
           description: The gate after the change.
@@ -4906,7 +4908,7 @@ paths:
                   state: {type: string, enum: [open, waitlist], description: What a new user meets now.}
                   reasons:
                     type: array
-                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed]}
+                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, free_tier_unreadable]}
                     description: Every condition holding the gate at waitlist; empty while it is open.
                   mode: {type: string, enum: [open, waitlist], description: The stored mode.}
                   source: {type: string, description: "What set the stored mode: `operator`, `hourly_signups`, `daily_signups`, or `default` when nothing has."}
@@ -4914,16 +4916,17 @@ paths:
                   set_by: {type: string}
                   updated_at: {type: integer, format: int64, description: Unix seconds; the velocity windows start no earlier than this while the mode is open.}
                   deployment_waitlist: {type: boolean, description: True when the controller runs with `--signup-gate=waitlist`.}
-                  free_tier: {type: string, enum: [open, throttled, closed]}
+                  free_tier: {type: string, enum: [open, throttled, closed, unreadable], description: "`unreadable` when the free-tier source failed, which waitlists new users as `closed` does."}
                   limits:
                     x-sparkwing-go-type: pkg/controller.signUpLimitsJSON
                     type: object
-                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days]
+                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members]
                     properties:
-                      hourly_limit: {type: integer, description: New users the last hour may admit before the gate closes itself; waitlisted users do not count; 0 is off.}
+                      hourly_limit: {type: integer, description: "Admissions the last hour may hold before the gate closes itself, counting new users admitted and waitlisted users who accepted an invitation; 0 is off."}
                       daily_limit: {type: integer, description: The same bound over the last 24 hours; 0 is off.}
                       hourly_warn: {type: integer, description: Hourly count past which the controller warns; 0 is off.}
                       github_min_account_days: {type: integer, description: Youngest GitHub account a sign-up admits; 0 is off.}
+                      free_team_members: {type: integer, description: Most members a team that has bought no credits may hold; 0 is off.}
                   counts:
                     x-sparkwing-go-type: pkg/controller.signUpCountsJSON
                     type: object

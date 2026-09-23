@@ -297,6 +297,7 @@ func initZeroSeries() {
 		principalThrottledTotal.WithLabelValues(class)
 	}
 	signUpsTotal.WithLabelValues("admitted", "none")
+	signUpsTotal.WithLabelValues("admitted", "invitation")
 	for _, reason := range store.WaitlistReasons() {
 		signUpsTotal.WithLabelValues("waitlisted", reason)
 	}
