@@ -125,7 +125,11 @@ func TestGitHubRunnerAttemptRecordsWorkflowRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := tenant.MintGitHubRunnerCredential(ctx, principal,
+	binding, err := tenant.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := tenant.MintGitHubRunnerCredential(ctx, binding, principal,
 		store.GitHubRunnerPush{Branch: "main", SHA: "abcdef", RunID: "555"},
 		[]string{"nodes.claim"}, time.Hour, time.Now())
 	if err != nil {
