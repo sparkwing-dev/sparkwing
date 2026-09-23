@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,10 @@ func ValidateDirectSource(repoURL, sha string) (string, string, error) {
 	remote, err := sourceurl.ValidateCloneURL(repoURL)
 	if err != nil {
 		return "", "", fmt.Errorf("direct source: %w", err)
+	}
+	// safety: no forge needs one, and each spelling of one would get its own mirror.
+	if strings.ContainsAny(remote, "?#") {
+		return "", "", errors.New("direct source: the remote must not carry a query or fragment")
 	}
 	if sha != "" {
 		sha = strings.ToLower(sha)
@@ -159,8 +164,27 @@ func validBranchName(ctx context.Context, branch string) bool {
 }
 
 func directMirrorPath(root, remote string) string {
-	sum := sha256.Sum256([]byte(remote))
+	sum := sha256.Sum256([]byte(directMirrorKey(remote)))
 	return filepath.Join(root, fmt.Sprintf("%x.git", sum[:16]))
+}
+
+// directMirrorKey folds the spellings every forge treats as one repository,
+// host case and a trailing ".git" or "/", so they share one mirror. The path
+// keeps its case, which some servers honor.
+func directMirrorKey(remote string) string {
+	trimPath := func(path string) string {
+		return strings.TrimSuffix(strings.TrimRight(path, "/"), ".git")
+	}
+	if u, err := url.Parse(remote); err == nil && u.Scheme != "" && u.Host != "" {
+		u.Scheme, u.Host, u.Path, u.RawPath = strings.ToLower(u.Scheme), strings.ToLower(u.Host), trimPath(u.Path), ""
+		return u.String()
+	}
+	dest, path, _ := strings.Cut(remote, ":")
+	user, host, found := strings.Cut(dest, "@")
+	if !found {
+		return strings.ToLower(dest) + ":" + trimPath(path)
+	}
+	return user + "@" + strings.ToLower(host) + ":" + trimPath(path)
 }
 
 func directCheckout(ctx context.Context, root, remote, branch, sha, dest string, opts directOptions) error {

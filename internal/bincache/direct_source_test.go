@@ -35,6 +35,9 @@ func TestValidateDirectSourceRefusesUnsafeRemotes(t *testing.T) {
 		"scp path dash":      "git@github.com:-oProxyCommand=x",
 		"empty":              "",
 		"hostless scp-alike": "github.com:o/r.git",
+		"query":              "https://github.com/o/r.git?ref=x",
+		"fragment":           "https://github.com/o/r.git#main",
+		"scp query":          "git@github.com:o/r.git?x",
 	}
 	for name, remote := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -404,5 +407,37 @@ func TestFetchPipelineSourceDirectRefusesAHostThatResolvesInward(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "resolves to 10.0.0.5") {
 			t.Fatalf("fetch of %s: err = %v, want a refusal naming the private address", remote, err)
 		}
+	}
+}
+
+func TestDirectMirrorPathSharesOneMirrorAcrossSpellings(t *testing.T) {
+	root := t.TempDir()
+	for _, group := range [][]string{
+		{"https://github.com/o/r.git", "https://GitHub.COM/o/r", "https://github.com/o/r/", "https://github.com/o/r.git/"},
+		{"git@github.com:o/r.git", "git@GITHUB.com:o/r", "git@github.com:o/r/"},
+		{"ssh://git@github.com/o/r.git", "ssh://git@GitHub.com/o/r"},
+	} {
+		want := directMirrorPath(root, group[0])
+		for _, remote := range group[1:] {
+			if got := directMirrorPath(root, remote); got != want {
+				t.Errorf("directMirrorPath(%q) = %s, want the mirror of %q", remote, got, group[0])
+			}
+		}
+	}
+	distinct := []string{
+		"https://github.com/o/r.git",
+		"https://github.com/o/R.git",
+		"https://github.com/o/r2.git",
+		"git@github.com:o/r.git",
+		"deploy@github.com:o/r.git",
+		"ssh://git@github.com:2222/o/r.git",
+	}
+	seen := map[string]string{}
+	for _, remote := range distinct {
+		path := directMirrorPath(root, remote)
+		if other, ok := seen[path]; ok {
+			t.Errorf("%q and %q share mirror %s", remote, other, path)
+		}
+		seen[path] = remote
 	}
 }
