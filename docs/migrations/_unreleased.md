@@ -49,6 +49,12 @@ other team's launcher then executed.
 - The runner-bundle chart no longer sets `SPARKWING_CACHE_TOKEN` on the runner.
   A runner deployed by hand should drop it too, because the pipeline binary
   can read its launcher's environment.
+- The operator's own runners (a runner token in the `default` team) keep
+  building private repositories the cache clones over SSH: their runs' grants
+  read and register any mirror. Point their `--gitcache` (or
+  `SPARKWING_GITCACHE_URL`) at the cache itself, not at the controller's
+  `/api/v1/gitcache` proxy, which serves only runs a signed webhook delivery
+  created.
 - The controller must hold the cache's token (`SPARKWING_CACHE_TOKEN` on the
   controller) to mint grants. Until it does, or on a controller that predates
   the route, runs go without the binary cache and compile instead.

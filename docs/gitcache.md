@@ -406,15 +406,20 @@ repository, and a grant opens the team's whole tree.
   tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
   see or replace each other's bytes. A team's bins count toward the store
   ceiling.
-- `/git/<name>/...` reads only an `https` repository the operator
-  registered under the name `repo-<sha256 of the URL>`, the name runners
-  already derive. The mirrors are shared, so a grant never reads a mirror
-  cloned through the cache's SSH key.
-- `/git/register` refuses a grant with 403. A registration clones a
-  repository onto the cache volume, so the operator, or the controller's
-  run-scoped proxy holding the operator token, registers mirrors, and a run
-  holding a grant fetches from a mirror already registered without asking.
-  The mirrors count toward the store ceiling.
+- `/git/<name>/...` with a grant for the operator's own team (`default`, a
+  slug no other team can take) reads any registered mirror, SSH origins
+  included: every mirror is the operator's, because only the operator token
+  and such a grant register one. Any other team's grant reads only an `https`
+  repository registered under the name `repo-<sha256 of the URL>`, the name
+  runners already derive, so it never reads a mirror cloned through the
+  cache's SSH key. Private repositories of other teams reach their runners
+  through the GitHub App's per-run tokens instead.
+- `/git/register` accepts the operator token and a grant for the operator's
+  own team, which is how the operator's runners register a repository on its
+  first run as they did with the operator token. It refuses any other team's
+  grant with 403, because a registration clones onto the cache volume with the
+  cache's own credentials; such a runner asks anyway and fetches from a mirror
+  already registered. The mirrors count toward the store ceiling.
 - Every other route (`/sync/...`, `/git/refresh`, `/archive`, `/file`,
   `/tree-hash`, `/branch-contains`, `/repos`, `/upload`, `/uploads/...`,
   `/admin/...`) refuses a grant with 401.

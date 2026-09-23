@@ -925,9 +925,10 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// A cache grant reads mirrors the operator registered and cannot register
-// one, so a run holding a grant fetches without asking to register.
-func TestFetchPipelineSourceWithAGrantSkipsRegistration(t *testing.T) {
+// The operator's own grants register the mirror a run needs, and the cache
+// refuses every other team's, so a grant holder asks and a refusal leaves the
+// already-registered mirror to serve the clone.
+func TestFetchPipelineSourceWithAGrantSurvivesARefusedRegistration(t *testing.T) {
 	execPath := gitExecPath(t)
 	if execPath == "" {
 		t.Skip("git --exec-path unavailable (no git-http-backend on PATH)")
@@ -938,7 +939,7 @@ func TestFetchPipelineSourceWithAGrantSkipsRegistration(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/git/register", func(w http.ResponseWriter, r *http.Request) {
 		registered = true
-		http.Error(w, "operator token required", http.StatusForbidden)
+		http.Error(w, "mirror registration takes the cache's operator token", http.StatusForbidden)
 	})
 	mux.Handle("/git/", &cgi.Handler{
 		Path: filepath.Join(execPath, "git-http-backend"),
@@ -953,8 +954,8 @@ func TestFetchPipelineSourceWithAGrantSkipsRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchPipelineSource with a grant: %v", err)
 	}
-	if registered {
-		t.Error("a grant holder asked the cache to register a mirror")
+	if !registered {
+		t.Error("a grant holder never asked the cache to register the mirror")
 	}
 	if _, err := os.Stat(filepath.Join(sparkwingDir, "marker")); err != nil {
 		t.Fatalf("fetched tree: %v", err)

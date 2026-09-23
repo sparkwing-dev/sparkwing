@@ -143,12 +143,16 @@ func TestTeamBinWritesStopAtTheStoreCeiling(t *testing.T) {
 	}
 }
 
-// The mirrors are shared, so a grant never reads a mirror the operator
-// registered from a private origin.
-func TestGrantsReadOnlyPublicMirrors(t *testing.T) {
+// The mirrors are shared, so another team's grant never reads a mirror the
+// operator registered from a private origin, while a grant for the operator's
+// own run reads it: that is how the operator's runners clone its private
+// repositories. The mirror is registered before the test starts, as one the
+// operator token registered before grants existed would be.
+func TestOnlyOperatorGrantsReadPrivateMirrors(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	grant := grantFor(t, token, "team-a")
+	operatorGrant := grantFor(t, token, authwire.OperatorTeam)
 	private := "ssh://git@github.com/acme/private.git"
 
 	repoNamesMu.Lock()
@@ -167,8 +171,41 @@ func TestGrantsReadOnlyPublicMirrors(t *testing.T) {
 	if code, _ := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", token, ""); code != http.StatusOK {
 		t.Fatalf("operator reading its own mirror = %d, want 200", code)
 	}
+	if code, body := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", operatorGrant, ""); code != http.StatusOK {
+		t.Errorf("the operator's own grant reading its private mirror = %d, want 200: %s", code, body)
+	}
 	if code, body := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", grant, ""); code != http.StatusNotFound {
-		t.Errorf("grant reading the operator's private mirror = %d, want 404: %s", code, body)
+		t.Errorf("another team's grant reading the operator's private mirror = %d, want 404: %s", code, body)
+	}
+}
+
+// A grant for the operator's own run registers the mirror its first fetch
+// needs, private origin included, as the operator token did for its runners.
+// Another team's grant still cannot, so it never reaches the cache's own
+// credentials.
+func TestOperatorGrantsRegisterPrivateMirrors(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+	private := "ssh://git@git.example.invalid/acme/private.git"
+	name := sourceurl.ClaimedRepoNameFromURL(private)
+	path := "/git/register?name=" + url.QueryEscape(name) + "&repo=" + url.QueryEscape(private)
+	t.Cleanup(func() {
+		repoNamesMu.Lock()
+		delete(repoNames, name)
+		repoNamesMu.Unlock()
+	})
+
+	if code, body := send(t, srv, http.MethodPost, path, grantFor(t, token, "team-a"), ""); code != http.StatusForbidden {
+		t.Errorf("another team's grant registering a private mirror = %d, want 403: %s", code, body)
+	}
+	if code, body := send(t, srv, http.MethodPost, path, grantFor(t, token, authwire.OperatorTeam), ""); code != http.StatusOK {
+		t.Fatalf("the operator's own grant registering a private mirror = %d, want 200: %s", code, body)
+	}
+	repoNamesMu.RLock()
+	got := repoNames[name]
+	repoNamesMu.RUnlock()
+	if got != private {
+		t.Errorf("registered %q as %q, want %q", name, got, private)
 	}
 }
 
