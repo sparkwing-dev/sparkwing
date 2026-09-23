@@ -28,6 +28,7 @@ const (
 
 type githubCommitStatusReporter struct {
 	token        string
+	tokenFor     func(context.Context, githubCommitStatus) (string, error)
 	dashboardURL string
 	apiBaseURL   string
 	httpClient   *http.Client
@@ -87,13 +88,14 @@ type githubCommitStatusRequest struct {
 }
 
 type githubCommitStatus struct {
-	Owner       string
-	Repo        string
-	SHA         string
-	Pipeline    string
-	RunID       string
-	State       string
-	Description string
+	Installation int64
+	Owner        string
+	Repo         string
+	SHA          string
+	Pipeline     string
+	RunID        string
+	State        string
+	Description  string
 }
 
 // WithGitHubCommitStatuses enables best-effort GitHub commit statuses for
@@ -165,10 +167,18 @@ func (s *Server) reserveGitHubCommitStatus(ctx context.Context, runID, runStatus
 
 func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string) (*githubCommitStatusReporter, githubCommitStatus, bool) {
 	reporter := s.githubCommitStatuses
-	if reporter == nil {
+	appReporter := s.githubAppStatusReporter()
+	if reporter == nil && appReporter == nil {
 		return nil, githubCommitStatus{}, false
 	}
 	trigger, err := s.store.GetTrigger(ctx, runID)
+	if err == nil && trigger.TriggerEnv[envGitHubAppInstallation] != "" {
+		status, ok := s.githubAppCommitStatus(ctx, trigger, runStatus)
+		return appReporter, status, ok && appReporter != nil
+	}
+	if reporter == nil {
+		return nil, githubCommitStatus{}, false
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, githubCommitStatus{}, false
 	}
@@ -595,8 +605,14 @@ func (r *githubCommitStatusReporter) post(ctx context.Context, status githubComm
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
+	token := r.token
+	if r.tokenFor != nil {
+		if token, err = r.tokenFor(ctx, status); err != nil {
+			return fmt.Errorf("installation token: %w", err)
+		}
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+r.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "sparkwing-controller")
 	req.Header.Set("X-GitHub-Api-Version", githubStatusAPIVersion)

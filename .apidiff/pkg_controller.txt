@@ -289,6 +289,7 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
+func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
@@ -318,6 +319,11 @@ type ServicesResponse struct {
 	Logs string
 
 	Dashboard string
+}
+type SourceTokenResponse struct {
+	Token      string
+	ExpiresAt  int64
+	Repository string
 }
 const StorageMaintenanceInterval = time.Hour
 type TokenRequestBudget struct {

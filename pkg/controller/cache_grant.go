@@ -65,6 +65,19 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			})
 			return
 		}
+		// safety: a grant writes the team's shared cache, which a fork's code
+		// would otherwise poison for every later run.
+		if untrusted, err := s.runUntrusted(r.Context(), team, runID); err != nil || untrusted {
+			if err != nil {
+				s.writeInternalError(w, r, "cache grant untrusted", err)
+				return
+			}
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code: "forbidden", Principal: p.label(),
+				Message: "run " + runID + " is untrusted (a pull request from a fork), so it gets no cache grant",
+			})
+			return
+		}
 		// safety: Round(0) drops the monotonic reading, so the ttl and the
 		// expiry below are both wall-clock arithmetic and cannot drift apart.
 		now := time.Now().Round(0)

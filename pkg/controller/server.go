@@ -120,6 +120,8 @@ type Server struct {
 	tenants tenantCache
 
 	githubRunners githubRunnerConfig
+
+	githubApp *githubAppState
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -892,6 +894,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// alone; the CLI's warm-up before a trigger is best-effort without it.
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/runs/{id}/cache-grant", requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/source-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceToken), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
@@ -1052,6 +1055,15 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
 	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
 	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
+	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
+	mux.Handle("POST /api/v1/team/github-app/connect", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnect)))
+	mux.Handle("POST /api/v1/team/github-app/connect/complete", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnectComplete)))
+	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
+	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
+	mux.Handle("GET /api/v1/team/github-app/triggers", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppTriggers)))
+	mux.Handle("PUT /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppTrigger)))
+	mux.Handle("DELETE /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitHubAppTrigger)))
+	mux.Handle("DELETE /api/v1/github-app/installations/{installation_id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorGitHubAppUnbind)))
 
 	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
 	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
@@ -1103,6 +1115,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 		router.Handle("GET /metrics", metricsHandler())
 	}
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
+	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
 	router.Handle("POST /api/v1/runners/github/exchange", http.HandlerFunc(s.handleGitHubRunnerExchange))
 
@@ -1324,10 +1337,13 @@ func (s *Server) drainGitHubCommitStatuses() {
 // Shutdown drains server-owned background work until ctx expires. ServeWith
 // calls Shutdown automatically; callers serving Handler directly must call it.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.githubCommitStatuses == nil {
-		return nil
+	var errs []error
+	for _, r := range []*githubCommitStatusReporter{s.githubCommitStatuses, s.githubAppStatusReporter()} {
+		if r != nil {
+			errs = append(errs, r.shutdown(ctx))
+		}
 	}
-	return s.githubCommitStatuses.shutdown(ctx)
+	return errors.Join(errs...)
 }
 
 // safety: a run-level heartbeat this old means no orchestrator is driving the

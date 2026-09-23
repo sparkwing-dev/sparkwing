@@ -22,6 +22,29 @@ unlock.
 
 ### Added
 
+- **controller:** a GitHub App connects a team to the repositories it
+  controls. A team owner connects an installation through
+  `POST /api/v1/team/github-app/connect` and `.../connect/complete`, which bind
+  it only when the signed-in account's linked GitHub user administers the
+  installation's account; an installation belongs to one team (409 for a
+  second). `POST /webhooks/github-app` verifies the App's signature, routes by
+  installation, and starts runs for the pipelines the team subscribed with
+  `PUT /api/v1/team/github-app/triggers`. A pull request from a fork runs only
+  when subscribed, and runs untrusted: no secrets, no cache grant, never on a
+  metered or GitHub Actions runner. `POST /api/v1/runs/{id}/source-token` gives
+  a claim holder a one-repository, `contents: read` installation token, and
+  App runs report commit statuses as the installation. Configure with
+  `--github-app-id`, `--github-app-slug`,
+  `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` and
+  `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`. Schema 54 adds the installation and
+  subscription tables and `triggers.untrusted`, and declares the
+  `untrusted-runs` requirement, so a binary predating it refuses the store. See
+  [GitHub App](docs/github-app.md).
+
+- **runner:** `sparkwing-runner runner --github-app-source` asks the controller
+  for a run's source token before fetching a GitHub repository directly and
+  passes it to git as an extraheader in the fetch's environment only.
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the

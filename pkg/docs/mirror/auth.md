@@ -588,7 +588,9 @@ and `/exchange`, configured with `--github-client-id` (or
 `SPARKWING_GITHUB_CLIENT_ID`) and `SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
 It asks for `read:user user:email` only, keys the identity on GitHub's numeric
 account id so a renamed login keeps its account, and trusts only the primary
-email GitHub has verified, never the profile's public email.
+email GitHub has verified, never the profile's public email. When the client id
+and secret belong to a GitHub App, that App is also how a team connects its
+repositories; see [GitHub App](github-app.md).
 
 A Google identity joins an existing user only when Google and that user both
 hold the email verified, and never when that user already has a different

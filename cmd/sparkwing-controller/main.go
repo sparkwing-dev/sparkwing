@@ -240,6 +240,13 @@ func run(args []string) error {
 	githubClientID := fs.String("github-client-id", os.Getenv("SPARKWING_GITHUB_CLIENT_ID"),
 		"GitHub OAuth app client id for dashboard sign-in; the secret comes from "+
 			"SPARKWING_GITHUB_CLIENT_SECRET. Offered only with a multi-team license.")
+	githubAppID := fs.String("github-app-id", os.Getenv("SPARKWING_GITHUB_APP_ID"),
+		"numeric id of the deployment's GitHub App. The App's client id and secret are "+
+			"--github-client-id and SPARKWING_GITHUB_CLIENT_SECRET, its private key comes from "+
+			"SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE or SPARKWING_GITHUB_APP_PRIVATE_KEY, and its "+
+			"webhook secret from SPARKWING_GITHUB_APP_WEBHOOK_SECRET")
+	githubAppSlug := fs.String("github-app-slug", os.Getenv("SPARKWING_GITHUB_APP_SLUG"),
+		"the GitHub App's name in https://github.com/apps/<slug>, where a team owner installs it")
 	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
 		"comma-separated dashboard callback URLs a sign-in may return to, "+
 			"such as https://app.example.com/auth/google/callback")
@@ -444,6 +451,14 @@ func run(args []string) error {
 		GitHubClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
 		RedirectURIs:       *oauthRedirectURIs,
 	}, slog.Default()); err != nil {
+		return err
+	}
+	if err := configureGitHubApp(srv, githubAppFlags{
+		AppID:        *githubAppID,
+		Slug:         *githubAppSlug,
+		ClientID:     *githubClientID,
+		ClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
+	}, os.Getenv); err != nil {
 		return err
 	}
 	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
