@@ -39,6 +39,9 @@ var (
 	// ErrTeamFrozen refuses deleting a team held over a disputed payment,
 	// because the hold and the ledger it points at are the dispute's record.
 	ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
+	// ErrTeamBeingDeleted refuses opening a checkout for a team whose deletion
+	// has begun, since the payment would land after the purge.
+	ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 )
 
 // LastOwnerError refuses an account deletion that would leave teams with

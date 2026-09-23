@@ -5903,7 +5903,8 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409":
-          description: The purchase, with the checkouts still open, would lift the balance above the cap.
+          description: >-
+            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`, the body below). A team whose deletion has begun also answers 409, with only `error`.
           content:
             application/json:
               schema:

@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -56,5 +57,30 @@ func TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds(t *testing.T) {
 	}
 	if _, _, err := held.RequestDeletion(ctx, owner.Account.ID, now); err != nil {
 		t.Fatalf("deleting it once the hold was released = %v", err)
+	}
+}
+
+// A handle taken before the team's deletion began cannot open a checkout
+// after it: the checkout would take a payment for a team about to be purged.
+func TestACheckoutCannotOpenOnceTheTeamIsBeingDeleted(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	owner := signIn(t, st, "o", "owner@example.com")
+	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "Acme", now); err != nil {
+		t.Fatal(err)
+	}
+	stale := tenant(t, st, "acme")
+	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
+		t.Fatalf("a checkout before the deletion = %v", err)
+	}
+	if _, _, err := stale.RequestDeletion(ctx, owner.Account.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stale.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); !errors.Is(err, store.ErrTeamBeingDeleted) {
+		t.Fatalf("a checkout on a team being deleted = %v, want ErrTeamBeingDeleted", err)
+	}
+	if n := countWhere(t, st, "credit_checkouts", fmt.Sprintf("team = 'acme' AND opened_at >= %d", now.UnixNano())); n != 0 {
+		t.Fatalf("%d checkouts left for a team being deleted", n)
 	}
 }

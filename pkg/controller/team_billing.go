@@ -183,6 +183,10 @@ func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Reques
 		if s.writeBalanceCapRefusal(w, err) {
 			return
 		}
+		if errors.Is(err, store.ErrTeamBeingDeleted) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		s.writeInternalError(w, r, "team checkout balance", err)
 		return
 	}

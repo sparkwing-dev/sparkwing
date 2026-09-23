@@ -80,6 +80,20 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	// safety: deletion takes the team row lock before it records itself, so
+	// taking it first here orders a checkout wholly before or after a
+	// deletion request; after one, the payment would outlive the team.
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return "", err
+	}
+	var deleting int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug = ? AND state = ?`,
+		string(t.team), TeamDeletionPending).Scan(&deleting); err != nil {
+		return "", err
+	}
+	if deleting > 0 {
+		return "", ErrTeamBeingDeleted
+	}
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return "", err
 	}
