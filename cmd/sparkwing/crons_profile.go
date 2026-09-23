@@ -468,7 +468,9 @@ func seedCronsSource(prof *profile.Profile, repoDir, repoURL, sha string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	services, derr := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken())
 	cancel()
-	seedTriggerSource(prof, services.CachePod, derr, repoDir, repoURL, sha)
+	if absent, err := seedTriggerSource(prof, services.CachePod, derr, repoDir, repoURL, sha); err != nil && !absent {
+		fmt.Fprintf(os.Stderr, "sparkwing crons: %v; continuing; the runner fetches the commit itself\n", err)
+	}
 }
 
 func runCronsUninstallProfile(profileName, root, format string) error {

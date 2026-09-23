@@ -25,8 +25,11 @@ import (
 const CompileLogNode = "_compile"
 
 type TriggerLoopOptions struct {
-	ControllerURL   string
-	LogsURL         string
+	ControllerURL string
+	LogsURL       string
+	// GitcacheURL is the operator's git cache. Empty means direct source: the
+	// runner fetches each trigger's repository itself with its own git
+	// credentials, and so do the node executors it starts.
 	GitcacheURL     string
 	Token           string
 	RunnerKind      string
@@ -58,9 +61,6 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	if opts.ControllerURL == "" {
 		return errors.New("TriggerLoopOptions.ControllerURL required")
 	}
-	if opts.GitcacheURL == "" {
-		return errors.New("TriggerLoopOptions.GitcacheURL required")
-	}
 	if opts.Poll <= 0 {
 		opts.Poll = time.Second
 	}
@@ -90,6 +90,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		"trigger loop started",
 		"controller", opts.ControllerURL,
 		"gitcache", opts.GitcacheURL,
+		"direct_source", opts.GitcacheURL == "",
 		"poll", opts.Poll,
 		"work_root", opts.WorkRoot,
 		"max_concurrent", opts.MaxConcurrent,
@@ -194,7 +195,8 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		Pipeline: trigger.Pipeline,
 	})
 
-	repoURL, sourceErr := triggerSourceURL(trigger)
+	direct := opts.GitcacheURL == ""
+	repoURL, sourceErr := orchestrator.TriggerSourceURL(trigger, direct)
 
 	childCtx, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()
@@ -232,7 +234,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 	sha := trigger.GitSHA
 	logger.Info("trigger loop: fetching source",
-		"run_id", trigger.ID, "repo", sourceurl.Redact(repoURL), "branch", branch, "sha", sha)
+		"run_id", trigger.ID, "repo", sourceurl.Redact(repoURL), "branch", branch, "sha", sha, "direct", direct)
 	if sha == "" {
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
@@ -240,10 +242,15 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
 	var sparkwingDir string
 	var fetchErr error
-	if workspaceSource {
+	switch {
+	case direct && workspaceSource:
+		fetchErr = bincache.ErrWorkspaceNeedsCache
+	case direct:
+		sparkwingDir, fetchErr = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir)
+	case workspaceSource:
 		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)
-	} else {
+	default:
 		sparkwingDir, fetchErr = fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)
 	}
@@ -565,23 +572,6 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 		cache: binaryCacheOutcome(fetched, compiled),
 		build: time.Since(start),
 	}, nil
-}
-
-func triggerSourceURL(trigger *store.Trigger) (string, error) {
-	if trigger == nil {
-		return "", nil
-	}
-	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
-	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
-		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
-	}
-	if repo != "" {
-		return sourceurl.ValidateCloneURL(bincache.RepoURLFromGitHub(repo))
-	}
-	if trigger.RepoURL != "" {
-		return sourceurl.ValidateCloneURL(trigger.RepoURL)
-	}
-	return "", nil
 }
 
 type triggerClaimOutcome int

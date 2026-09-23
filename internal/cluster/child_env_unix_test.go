@@ -31,25 +31,11 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 		t.Setenv(name, value)
 	}
 
-	dir := t.TempDir()
-	script := filepath.Join(dir, "pipeline")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nenv > child.env\n"), 0o755); err != nil {
-		t.Fatal(err)
+	opts := TriggerLoopOptions{
+		ControllerURL: "https://controller.example", LogsURL: "https://logs.example",
+		GitcacheURL: "http://cache.internal", Token: "runner-a",
 	}
-	opts := TriggerLoopOptions{ControllerURL: "https://controller.example", LogsURL: "https://logs.example", Token: "runner-a"}
-	if err := execHandleTrigger(context.Background(), script, dir, &store.Trigger{ID: "run-a"}, opts, "swcg1.run-a-grant", discardLogger()); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, "child.env"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if name, value, ok := strings.Cut(line, "="); ok {
-			child[name] = value
-		}
-	}
+	child := triggerChildEnvOf(t, opts)
 
 	if got, ok := child["SPARKWING_CACHE_TOKEN"]; ok {
 		t.Errorf("SPARKWING_CACHE_TOKEN=%q reached the team's code", got)
@@ -78,4 +64,37 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 			t.Errorf("child %s = %q, want %q", name, child[name], value)
 		}
 	}
+}
+
+// A direct-source runner's child starts node executors that must fetch the
+// source the same way, so no git cache URL from the launcher's shell reaches it.
+func TestDirectSourceTriggerChildGetsNoGitcache(t *testing.T) {
+	t.Setenv("SPARKWING_GITCACHE_URL", "https://operator-cache.example")
+	child := triggerChildEnvOf(t, TriggerLoopOptions{ControllerURL: "https://controller.example", Token: "runner-a"})
+	if got, ok := child["SPARKWING_GITCACHE_URL"]; ok {
+		t.Fatalf("SPARKWING_GITCACHE_URL=%q reached a direct-source child", got)
+	}
+}
+
+func triggerChildEnvOf(t *testing.T, opts TriggerLoopOptions) map[string]string {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "pipeline")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nenv > child.env\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := execHandleTrigger(context.Background(), script, dir, &store.Trigger{ID: "run-a"}, opts, "swcg1.run-a-grant", discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "child.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if name, value, ok := strings.Cut(line, "="); ok {
+			child[name] = value
+		}
+	}
+	return child
 }

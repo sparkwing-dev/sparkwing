@@ -328,7 +328,8 @@ func runRunnerCLI(args []string, version string) error {
 	claimNodes := fs.Bool("claim-nodes", true,
 		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
-		"sparkwing-cache URL for the trigger-loop (required when --also-claim-triggers is set)")
+		"the operator's git cache, which triggers and nodes fetch source through; empty fetches each run's "+
+			"repository directly with this machine's own git credentials (env: SPARKWING_GITCACHE_URL)")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
@@ -472,9 +473,6 @@ func runRunnerCLI(args []string, version string) error {
 	}
 
 	if *alsoClaimTriggers {
-		if *gitcacheURL == "" {
-			return errors.New("--also-claim-triggers requires --gitcache or SPARKWING_GITCACHE_URL")
-		}
 		// safety: without this the child rejects each claimed trigger after admission.
 		usesK8sJobs := *triggerRunnerKind == "k8s" ||
 			(*triggerRunnerKind == "warm" && *triggerRunnerImage != "")

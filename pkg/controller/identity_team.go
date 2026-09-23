@@ -268,9 +268,23 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 	s.logger.Info("runner token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)
 	writeJSON(w, http.StatusCreated, runnerTokenResp{
 		Token: raw, Prefix: tok.Prefix,
-		Command: "SPARKWING_AGENT_TOKEN=" + raw + " sparkwing-runner runner --controller " +
-			s.controllerURL(r) + " --holder-prefix " + name,
+		Command: "SPARKWING_AGENT_TOKEN=" + raw + " " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name),
 	})
+}
+
+// runnerConnectArgs is the command that turns a machine into one of the team's
+// runners: it claims triggered runs as well as their nodes, fetches each run's
+// source itself with the machine's own git credentials (there is no --gitcache,
+// since the git cache is the operator's), ships logs to the logs service the
+// controller announces, and keeps claiming until stopped. The controller serves
+// no logs route, so with no logs service announced the flag is left out and the
+// runner keeps logs on the machine.
+func runnerConnectArgs(controllerURL, logsURL, name string) string {
+	cmd := "sparkwing-runner runner --controller " + controllerURL
+	if logsURL != "" {
+		cmd += " --logs " + strings.TrimRight(logsURL, "/")
+	}
+	return cmd + " --also-claim-triggers --max-claims-before-restart 0 --holder-prefix " + name
 }
 
 func (s *Server) controllerURL(r *http.Request) string {

@@ -340,6 +340,7 @@ export function runnerConnectCommand(
     `SPARKWING_AGENT_TOKEN=${quoted(minted.token)}`,
     "sparkwing-runner runner",
     `--controller ${controllerURLPlaceholder}`,
+    "--also-claim-triggers --max-claims-before-restart 0",
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
 }
