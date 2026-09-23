@@ -1168,6 +1168,11 @@ func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if trig, err := s.store.GetTrigger(r.Context(), id); err == nil && trig.Status == "failed" {
+		if run, err := s.store.GetRun(r.Context(), id); err == nil {
+			s.logger.Warn("trigger failed", "trigger_id", id, "pipeline", trig.Pipeline, "err", run.Error)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

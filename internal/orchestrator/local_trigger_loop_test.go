@@ -612,8 +612,8 @@ func TestLocalTriggerFailure_LiveContextRecordsTheFailedRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trig.Status != "done" {
-		t.Fatalf("trigger status = %q, want done", trig.Status)
+	if trig.Status != "failed" {
+		t.Fatalf("trigger status = %q, want failed", trig.Status)
 	}
 }
 

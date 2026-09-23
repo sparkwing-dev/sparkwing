@@ -6552,6 +6552,7 @@ type Trigger struct {
 	GitBranch      string            `json:"git_branch,omitempty"`
 	GitSHA         string            `json:"git_sha,omitempty"`
 	Status         string            `json:"status"`
+	Error          string            `json:"error,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	ClaimedAt      *time.Time        `json:"claimed_at,omitempty"`
 	LeaseExpiresAt *time.Time        `json:"lease_expires_at,omitempty"`
@@ -6859,7 +6860,7 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 	return s.GetTrigger(ctx, id)
 }
 
-// FinishTriggerAtGeneration marks a trigger done only while seq is still
+// FinishTriggerAtGeneration closes a trigger only while seq is still
 // its current claim generation, reporting false when it is not.
 //
 // This is the fence a superseded dispatch meets. Once a lapsed claim has
@@ -6870,9 +6871,10 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 // current claim owns the outcome.
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
 	return s.endTriggerClaim(ctx, id, false,
-		`UPDATE triggers SET status = ?, lease_expires_at = NULL
-		  WHERE id = ? AND claim_seq = ?`,
-		triggerStatusDone, id, seq)
+		`UPDATE triggers SET status = CASE WHEN EXISTS
+		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
+		  WHERE id = ? AND claim_seq = ?`, id, seq)
 }
 
 // endTriggerClaim settles the claim's credit reservation and applies the
@@ -6908,7 +6910,9 @@ func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, 
 // that ended before this claim began says nothing about the dispatch holding it.
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
 	return s.endTriggerClaim(ctx, id, false,
-		`UPDATE triggers SET status = ?, lease_expires_at = NULL
+		`UPDATE triggers SET status = CASE WHEN EXISTS
+		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
 		  WHERE id = ? AND status = ?
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
 		    AND claimed_at IS NOT NULL
@@ -6917,7 +6921,7 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 		                   AND runs.finished_at IS NOT NULL
 		                   AND runs.finished_at > triggers.claimed_at
 		                   AND `+runTerminalIn+`)`,
-		triggerStatusDone, id, triggerStatusClaimed, time.Now().UnixNano())
+		id, triggerStatusClaimed, time.Now().UnixNano())
 }
 
 // FinishRunAtGeneration writes a run's terminal status only while seq is
@@ -7494,16 +7498,18 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// FinishTrigger marks a trigger 'done'; idempotent.
+// FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
-	query := `UPDATE triggers SET status = ?, lease_expires_at = NULL WHERE id = ?`
-	args := []any{triggerStatusDone, id}
+	query := `UPDATE triggers SET status = CASE WHEN EXISTS
+	   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+	   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL WHERE id = ?`
+	args := []any{id}
 	_, fenced := TriggerClaimFenceFromContext(ctx)
 	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
 		query += ` AND claim_principal = ? AND claim_token_prefix = ? AND claim_seq = ?
-		             AND (status = ? OR (status = ? AND lease_expires_at > ?))`
+		             AND (status IN (?, ?) OR (status = ? AND lease_expires_at > ?))`
 		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
-			fence.ClaimGeneration, triggerStatusDone, triggerStatusClaimed, time.Now().UnixNano())
+			fence.ClaimGeneration, triggerStatusDone, triggerStatusFailed, triggerStatusClaimed, time.Now().UnixNano())
 	}
 	finished, err := s.endTriggerClaim(ctx, id, false, query, args...)
 	if err != nil || !fenced || finished {
@@ -7590,9 +7596,9 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 		  AND r.started_at < ?
 		  AND EXISTS (
 		      SELECT 1 FROM triggers t
-		       WHERE t.id = r.id AND t.status = ?
+		       WHERE t.id = r.id AND t.status IN (?, ?)
 		  )
-	`, runStatusPending, cutoff, triggerStatusDone)
+	`, runStatusPending, cutoff, triggerStatusDone, triggerStatusFailed)
 	if err != nil {
 		return nil, err
 	}
@@ -7997,12 +8003,13 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
-       idempotency_key, claim_seq, webhook_delivery, team
+       idempotency_key, claim_seq, webhook_delivery, team,
+       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team)
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team, &t.Error)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("trigger", id)
@@ -8057,7 +8064,7 @@ SELECT id FROM triggers
 
 // TriggerFilter narrows ListTriggers; zero value matches all.
 type TriggerFilter struct {
-	Statuses  []string // "pending"|"claimed"|"done"
+	Statuses  []string // "pending"|"claimed"|"done"|"failed"
 	Pipelines []string
 	Repo      string // matches GITHUB_REPOSITORY in trigger_env
 	Limit     int    // <=0 = 20
@@ -8130,7 +8137,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery,
+       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
   FROM triggers`
 	const orderAndLimit = `
  ORDER BY created_at DESC, id DESC
@@ -8201,7 +8209,7 @@ func (s *Store) listTriggerPage(ctx context.Context, query string, args []any) (
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
 			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
+			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Error); err != nil {
 			return nil, err
 		}
 		t.Full = fullInt != 0

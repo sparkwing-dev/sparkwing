@@ -425,6 +425,11 @@ logs URL, node-status updates from the controller otherwise. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
 
+If the checked-out code does not define the requested pipeline, the trigger
+and run fail with an error that lists the defined pipelines. The error includes
+the repository and revision when both are known. A dispatch rejected by a
+pipeline guard leaves no run row.
+
 Add `--working-tree` to run current tracked edits and untracked non-ignored
 files remotely without committing or pushing them. Sparkwing freezes those
 bytes as a synthetic Git commit, requires the bundle seed to finish before it

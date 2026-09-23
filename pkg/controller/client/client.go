@@ -632,7 +632,7 @@ func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*Trigge
 	return &resp, nil
 }
 
-// FinishTrigger flips a trigger to 'done' after the worker's Run
+// FinishTrigger closes a trigger after the worker's Run
 // terminates. Without this the reaper re-queues the trigger and the
 // next claim fails on the UNIQUE(runs.id) constraint.
 func (c *Client) FinishTrigger(ctx context.Context, triggerID string) error {

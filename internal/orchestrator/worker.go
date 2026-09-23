@@ -94,7 +94,11 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	res, err := Run(runCtx, backends, runOpts)
 	cancelRun()
 	if err != nil {
-		logger.Error(
+		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
+			logger.Error("record failed trigger run",
+				"run_id", trigger.ID, "err", ferr)
+		}
+		logger.Warn(
 			"run failed setup",
 			"run_id", trigger.ID,
 			"err", err,
@@ -129,6 +133,25 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		"pipeline", trigger.Pipeline,
 		"status", finalStatus,
 	)
+}
+
+func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
+	if _, defined := sparkwing.Lookup(trigger.Pipeline); defined {
+		return nil
+	}
+	if _, err := state.GetRun(ctx, trigger.ID); errors.Is(err, store.ErrNotFound) {
+		if err := state.CreateRun(ctx, store.Run{
+			ID: trigger.ID, Pipeline: trigger.Pipeline, Status: "running",
+			TriggerSource: trigger.TriggerSource, GitBranch: trigger.GitBranch, GitSHA: trigger.GitSHA,
+			RepoURL:   trigger.RepoURL,
+			StartedAt: time.Now(), ParentRunID: trigger.ParentRunID,
+		}); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	return state.FinishRun(ctx, trigger.ID, "failed", cause.Error())
 }
 
 func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {

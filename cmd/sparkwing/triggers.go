@@ -39,7 +39,7 @@ func runTriggers(args []string) error {
 
 func runTriggersList(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersList.Path, flag.ContinueOnError)
-	status := fs.String("status", "", "filter by status (pending|claimed|done)")
+	status := fs.String("status", "", "filter by status (pending|claimed|done|failed)")
 	pipeline := fs.String("pipeline", "", "filter by pipeline name")
 	repo := fs.String("repo", "", "match GITHUB_REPOSITORY on trigger env, over the newest 5,000 triggers")
 	limit := fs.Int("limit", 20, "max rows")
@@ -165,6 +165,9 @@ func runTriggersGet(args []string) error {
 	fmt.Fprintf(os.Stdout, "id:         %s\n", trig.ID)
 	fmt.Fprintf(os.Stdout, "pipeline:   %s\n", trig.Pipeline)
 	fmt.Fprintf(os.Stdout, "status:     %s\n", trig.Status)
+	if trig.Error != "" {
+		fmt.Fprintf(os.Stdout, "error:      %s\n", trig.Error)
+	}
 	fmt.Fprintf(os.Stdout, "created_at: %s\n", trig.CreatedAt.UTC().Format(time.RFC3339))
 	if trig.ClaimedAt != nil {
 		fmt.Fprintf(os.Stdout, "claimed_at: %s\n", trig.ClaimedAt.UTC().Format(time.RFC3339))

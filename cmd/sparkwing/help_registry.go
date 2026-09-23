@@ -3583,7 +3583,7 @@ Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.`,
 
 var cmdTriggersList = Command{
 	Path:     "sparkwing runs triggers list",
-	Synopsis: "List pending / claimed / done triggers",
+	Synopsis: "List pending / claimed / done / failed triggers",
 	Description: `Queries GET /api/v1/triggers on the selected profile's
 controller. Empty filters return the most recent 20 entries
 across all statuses.
@@ -3596,7 +3596,7 @@ entries match the selected repository; that value is not indexed, so the
 search covers the newest 5,000 triggers matching the other filters and
 an older entry is not reported.`,
 	Flags: []FlagSpec{
-		{Name: "status", Argument: "STATUS", Desc: "Filter by status: pending | claimed | done", Group: "Filter"},
+		{Name: "status", Argument: "STATUS", Desc: "Filter by status: pending | claimed | done | failed", Group: "Filter"},
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name", Group: "Filter"},
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Maximum triggers to show", Default: "20", Group: "Output"},
