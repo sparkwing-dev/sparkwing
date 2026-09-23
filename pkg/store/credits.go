@@ -142,6 +142,10 @@ const (
 // an [InsufficientCreditsError], which wraps it and names the shortfall.
 var ErrInsufficientCredits = errors.New("insufficient credits")
 
+// ErrReversalExceedsPayment is returned when a reversal would take back more
+// than the payment it names paid, counting the reversals already written.
+var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
+
 // ErrCreditGrantConflict is returned when a grant names a kind and reference
 // another grant already carries but asks for different terms. A replay of the
 // identical request returns the stored grant instead.
@@ -610,6 +614,9 @@ type CreditGrantRequest struct {
 	Reference   string
 	Reverses    string
 	CreatedBy   string
+	// Checkout names the payment session a paid grant settles, so the
+	// checkout it opened stops counting against the balance cap.
+	Checkout string
 }
 
 // CreditGrantResult is the row the ledger holds for a request together with
@@ -630,6 +637,13 @@ func (req CreditGrantRequest) validate() error {
 		}
 		if req.AmountMicro > MaxCreditGrantMicro {
 			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
+		}
+		// safety: a paid grant is one checkout's payment, so it is bounded by
+		// the largest purchase; that bounds what a leaked grant credential can
+		// add, since the balance cap does not refuse a paid grant.
+		if req.Kind == CreditGrantPaid && req.AmountMicro > CreditPurchaseMaxCents*MicroCreditsPerCent {
+			return fmt.Errorf("credits: a paid grant is one purchase, at most %d micro-credits",
+				int64(CreditPurchaseMaxCents*MicroCreditsPerCent))
 		}
 		if req.Reverses != "" {
 			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
@@ -689,8 +703,9 @@ func grantCredits(
 // RecordCreditGrant writes req against the default team's balance and reports
 // whether it wrote a new row. It refuses a reversal whose Reverses names no
 // paid grant of that team, so a refund can only take back a payment the
-// team's ledger recorded, and a grant that would lift the balance above
-// [MaxTeamBalanceMicro] with a [CreditBalanceCapError]. A reversal may take the balance below zero; the
+// team's ledger recorded, and a free grant that would lift the balance above
+// [MaxTeamBalanceMicro] with a [CreditBalanceCapError]; a paid grant is never
+// held to the cap, because its payment already went through. A reversal may take the balance below zero; the
 // claim path then refuses that team's new metered work.
 func (s *Store) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
@@ -763,11 +778,20 @@ func (s *Store) recordCreditGrant(
 			return CreditGrantResult{}, fmt.Errorf(
 				"credits: no %s grant carries the reference %q", CreditGrantPaid, req.Reverses)
 		}
+		already, err := reversedMicroTx(ctx, tx, team, req.Reverses)
+		if err != nil {
+			return CreditGrantResult{}, err
+		}
+		if already-req.AmountMicro > reversed.AmountMicro {
+			return CreditGrantResult{}, fmt.Errorf("%w: %q paid %d micro-credits, %d are already reversed, not %d more",
+				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
+		}
 	}
-	// safety: a replay already answered above, so a payment redelivered after
-	// the balance reached the cap still returns its grant; only new credit is
-	// held to the cap.
-	if req.AmountMicro > 0 {
+	// safety: a paid grant is money that already moved, so the cap was held
+	// when its checkout opened and is not held again here; refusing it would
+	// leave a payment with no credits. Only an operator's free grant meets the
+	// cap at the ledger.
+	if req.Kind == CreditGrantFree {
 		before, err := creditBalanceTx(ctx, tx, team)
 		if err != nil {
 			return CreditGrantResult{}, err
@@ -782,6 +806,11 @@ func (s *Store) recordCreditGrant(
 		string(team), id, req.Kind, req.AmountMicro, req.Reference, req.Reverses,
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
+	}
+	if req.Kind == CreditGrantPaid {
+		if err := markCreditCheckoutPaidTx(ctx, tx, team, req.Checkout, now.UnixNano()); err != nil {
+			return CreditGrantResult{}, err
+		}
 	}
 	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
@@ -819,6 +848,15 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 			ErrCreditGrantConflict, req.Reference, stored.Reverses, req.Reverses)
 	}
 	return nil
+}
+
+// reversedMicroTx is how much of a payment the team's reversals already
+// took back, as a positive amount.
+func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, payment string) (int64, error) {
+	var sum sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
+	  WHERE team = ? AND kind = ? AND reverses = ?`, string(team), CreditGrantReversal, payment).Scan(&sum)
+	return -sum.Int64, err
 }
 
 // creditGrantByReferenceTx finds the grant of kind carrying reference in
@@ -2072,10 +2110,11 @@ func (s *Store) chargeNodeTx(
 }
 
 // expiredClaim is a started node whose claim lapsed with its charge window
-// open, and when the lease that stopped being renewed ran out.
+// open, the token that held it, and when the lease that stopped being renewed
+// ran out.
 type expiredClaim struct {
-	runID, nodeID string
-	leaseNS       int64
+	runID, nodeID, tokenPrefix string
+	leaseNS                    int64
 }
 
 // safety: the holder stopped renewing, so the node ran until its lease ran
@@ -2083,13 +2122,7 @@ type expiredClaim struct {
 // under the same per-charge cap a heartbeat is held to, before the claim that
 // anchors it is cleared.
 func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
-	var tokenPrefix string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT claim_token_prefix FROM nodes WHERE run_id = ? AND node_id = ?`,
-		claim.runID, claim.nodeID).Scan(&tokenPrefix); err != nil {
-		return err
-	}
-	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, tokenPrefix,
+	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, claim.tokenPrefix,
 		time.Unix(0, min(claim.leaseNS, nowNS)), true)
 	return err
 }

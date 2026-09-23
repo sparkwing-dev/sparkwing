@@ -45,39 +45,59 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 // errCheckoutRefused is a checkout service answer outside the success range.
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-func (c *billingCheckout) open(ctx context.Context, team string, cents int64) (string, error) {
+// checkoutSession is the payment page the checkout service opened: where to
+// send the owner, the session's id, which the paid grant names, and when
+// Stripe stops accepting payment on it.
+type checkoutSession struct {
+	URL       string
+	ID        string
+	ExpiresAt time.Time
+}
+
+func (c *billingCheckout) open(ctx context.Context, team string, cents int64) (checkoutSession, error) {
 	body, err := json.Marshal(map[string]any{"team": team, "amount_cents": cents})
 	if err != nil {
-		return "", err
+		return checkoutSession{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/internal/checkout", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return checkoutSession{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("checkout service: %w", err)
+		return checkoutSession{}, fmt.Errorf("checkout service: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
-		return "", fmt.Errorf("checkout service: read: %w", err)
+		return checkoutSession{}, fmt.Errorf("checkout service: read: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+		return checkoutSession{}, fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
 	}
 	var out struct {
-		URL string `json:"url"`
+		URL       string `json:"url"`
+		ID        string `json:"id"`
+		ExpiresAt int64  `json:"expires_at"`
 	}
 	if err := json.Unmarshal(payload, &out); err != nil {
-		return "", fmt.Errorf("checkout service: decode: %w", err)
+		return checkoutSession{}, fmt.Errorf("checkout service: decode: %w", err)
 	}
 	// safety: the browser is sent wherever this says, so only an https page
 	// is followed; a service answering anything else is misconfigured.
 	if !strings.HasPrefix(out.URL, "https://") {
-		return "", fmt.Errorf("%w: it answered a non-https checkout url", errCheckoutRefused)
+		return checkoutSession{}, fmt.Errorf("%w: it answered a non-https checkout url", errCheckoutRefused)
 	}
-	return out.URL, nil
+	// safety: the paid grant finds its checkout by the session id, and an
+	// unnamed session would count against the cap until its hold ran out.
+	if out.ID == "" {
+		return checkoutSession{}, fmt.Errorf("%w: it answered no session id", errCheckoutRefused)
+	}
+	session := checkoutSession{URL: out.URL, ID: out.ID}
+	if out.ExpiresAt > 0 {
+		session.ExpiresAt = time.Unix(out.ExpiresAt, 0)
+	}
+	return session, nil
 }

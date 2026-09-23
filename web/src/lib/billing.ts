@@ -245,13 +245,22 @@ export function purchaseProblem(
   return null;
 }
 
-function capMessage(balanceMicro: number, capMicro: number, u: Units): string {
-  const room = Math.max(0, capMicro - balanceMicro);
+function capMessage(
+  balanceMicro: number,
+  capMicro: number,
+  u: Units,
+  openMicro = 0,
+): string {
+  const room = Math.max(0, capMicro - balanceMicro - openMicro);
   const roomCents = Math.floor(room / microPerCent(u));
+  const open =
+    openMicro > 0
+      ? ` and ${fmtUSD(balanceUSD(openMicro, u))} in checkouts still open`
+      : "";
   return (
     `A team balance is capped at ${fmtUSDShort(balanceUSD(capMicro, u))}. ` +
     `The balance is ${fmtUSD(balanceUSD(balanceMicro, u))} ` +
-    `(${fmtCredits(balanceCredits(balanceMicro, u))} credits), so this team can buy ` +
+    `(${fmtCredits(balanceCredits(balanceMicro, u))} credits)${open}, so this team can buy ` +
     `up to ${fmtUSD(roomCents / 100)} more.`
   );
 }
@@ -271,6 +280,7 @@ interface ErrorBody {
   message?: string;
   code?: string;
   balance_micro?: number;
+  open_micro?: number;
   cap_micro?: number;
   amount_micro?: number;
 }
@@ -303,7 +313,12 @@ export function checkoutErrorMessage(
       typeof body.balance_micro === "number" &&
       typeof body.cap_micro === "number"
     ) {
-      return capMessage(body.balance_micro, body.cap_micro, u);
+      return capMessage(
+        body.balance_micro,
+        body.cap_micro,
+        u,
+        typeof body.open_micro === "number" ? body.open_micro : 0,
+      );
     }
     return detail || "This purchase would take the balance over its cap.";
   }

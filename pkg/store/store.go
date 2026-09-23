@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 56
+const expectedSchemaVersion = 57
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2020,6 +2020,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 			return err
 		}
 		return applyCreditUnitMigration(ctx, tx)
+	case 57:
+		return applyCreditCheckoutMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2398,6 +2400,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return applyCreditUnitMigration(ctx, tx)
+	case 57:
+		return applyCreditCheckoutMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -6067,7 +6071,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id, execution_started_at, credit_charged_through, lease_expires_at FROM nodes
+		`SELECT run_id, node_id, execution_started_at, credit_charged_through, lease_expires_at, claim_token_prefix FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
@@ -6078,10 +6082,10 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	var unstarted [][2]string
 	var lapsed []expiredClaim
 	for rows.Next() {
-		var rid, nid string
+		var rid, nid, prefix string
 		var started sql.NullInt64
 		var chargeWindow, lease int64
-		if err := rows.Scan(&rid, &nid, &started, &chargeWindow, &lease); err != nil {
+		if err := rows.Scan(&rid, &nid, &started, &chargeWindow, &lease, &prefix); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -6090,7 +6094,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		case !started.Valid && chargeWindow != 0:
 			unstarted = append(unstarted, [2]string{rid, nid})
 		case chargeWindow != 0:
-			lapsed = append(lapsed, expiredClaim{runID: rid, nodeID: nid, leaseNS: lease})
+			lapsed = append(lapsed, expiredClaim{runID: rid, nodeID: nid, tokenPrefix: prefix, leaseNS: lease})
 		}
 	}
 	_ = rows.Close()

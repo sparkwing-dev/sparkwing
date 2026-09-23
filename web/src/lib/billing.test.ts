@@ -317,6 +317,26 @@ describe("startCheckout", () => {
     });
   });
 
+  it("counts the team's open checkouts against the room left", async () => {
+    respond = () =>
+      Response.json(
+        {
+          error: "over cap",
+          code: "balance_cap",
+          balance_micro: 400_000_000_000,
+          open_micro: 60_000_000_000,
+          cap_micro: 500_000_000_000,
+          amount_micro: 50_000_000_000,
+        },
+        { status: 409 },
+      );
+    await assert.rejects(lib.startCheckout(50_000, billing), (err: Error) => {
+      assert.match(err.message, /\$600\.00 in checkouts still open/);
+      assert.match(err.message, /up to \$400\.00 more/);
+      return true;
+    });
+  });
+
   for (const [status, body, pattern] of [
     [
       400,

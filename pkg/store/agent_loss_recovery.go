@@ -133,6 +133,7 @@ type expiredAgentNode struct {
 	chargeWindowOpen                                      bool
 	invocations                                           int
 	leaseNS                                               int64
+	tokenPrefix                                           string
 }
 
 type agentLossPlan struct {
@@ -157,7 +158,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 
 	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, coordinator_id, executor_kind, claim_worker_id, executor_id, executor_location,
 	       claim_membership_id, reservation_id, required_coordinator_id, required_executor_location,
-	       execution_started_at, attempts_consumed, credit_charged_through, lease_expires_at
+	       execution_started_at, attempts_consumed, credit_charged_through, lease_expires_at, claim_token_prefix
  FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdate(), now.UnixNano())
@@ -173,7 +174,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		if err := rows.Scan(&item.runID, &item.nodeID, &item.coordinatorID, &item.executorKind,
 			&item.executorName, &item.executorID, &item.executorLocation, &item.membershipID, &item.reservationID,
 			&item.requiredCoordinatorID, &item.requiredLocation, &started, &item.invocations, &chargeWindow,
-			&item.leaseNS); err != nil {
+			&item.leaseNS, &item.tokenPrefix); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -217,7 +218,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 				}
 			} else if item.chargeWindowOpen {
 				if err := s.settleExpiredClaimTx(ctx, tx, expiredClaim{
-					runID: item.runID, nodeID: item.nodeID, leaseNS: item.leaseNS,
+					runID: item.runID, nodeID: item.nodeID, tokenPrefix: item.tokenPrefix, leaseNS: item.leaseNS,
 				}, now.UnixNano()); err != nil {
 					return nil, err
 				}

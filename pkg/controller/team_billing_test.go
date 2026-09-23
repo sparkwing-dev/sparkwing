@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -45,7 +46,9 @@ func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 		fc.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": "cs_test_1", "url": url})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "cs_test_1", "url": url, "expires_at": time.Now().Add(31 * time.Minute).Unix(),
+		})
 	}))
 	t.Cleanup(ts.Close)
 	return fc, ts.URL
@@ -96,6 +99,7 @@ type capRefusal struct {
 	Code         string `json:"code"`
 	Error        string `json:"error"`
 	BalanceMicro int64  `json:"balance_micro"`
+	OpenMicro    int64  `json:"open_micro"`
 	CapMicro     int64  `json:"cap_micro"`
 	AmountMicro  int64  `json:"amount_micro"`
 }
@@ -201,7 +205,7 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
 	f, fc := billingFixture(t)
 	owner := f.user("o", "olga@example.com")
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_big", 4_990*100*store.MicroCreditsPerCent); code != http.StatusCreated {
+	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift_big", 4_990*100*store.MicroCreditsPerCent); code != http.StatusCreated {
 		t.Fatalf("grant = %d", code)
 	}
 	var refusal capRefusal
@@ -220,6 +224,49 @@ func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
 		map[string]any{"amount_cents": 1_000}, nil); code != http.StatusOK {
 		t.Errorf("a checkout landing exactly on the cap = %d want 200", code)
 	}
+	refusal = capRefusal{}
+	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
+		map[string]any{"amount_cents": 500}, &refusal); code != http.StatusConflict ||
+		refusal.OpenMicro != 1_000*store.MicroCreditsPerCent {
+		t.Errorf("a checkout past the cap with one open = %d %+v, want 409 naming the open checkout", code, refusal)
+	}
+	if code := f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
+		"kind": "paid", "amount_micro": 1_000 * store.MicroCreditsPerCent, "reference": "pi_open",
+		"team": owner.team, "checkout": "cs_test_1",
+	}, nil); code != http.StatusCreated {
+		t.Fatalf("the open checkout's paid grant = %d", code)
+	}
+	var b teamBilling
+	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
+	if b.BalanceMicro != 5_000*100*store.MicroCreditsPerCent {
+		t.Errorf("balance after the paid checkout = %d, want the cap", b.BalanceMicro)
+	}
+}
+
+// Two owners' checkouts racing for the last room below the cap cannot both
+// open, because the cap counts the open one.
+func TestTeamBillingCheckout_ConcurrentCheckoutsCannotBothPassTheCap(t *testing.T) {
+	f, fc := billingFixture(t)
+	owner := f.user("o", "olga@example.com")
+	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift", 4_600*100*store.MicroCreditsPerCent); code != http.StatusCreated {
+		t.Fatalf("grant = %d", code)
+	}
+	codes := make([]int, 2)
+	var wg sync.WaitGroup
+	for i := range codes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			codes[i] = f.call("POST", "/api/v1/team/billing/checkout", owner.auth, map[string]any{"amount_cents": 30_000}, nil)
+		}(i)
+	}
+	wg.Wait()
+	if !(codes[0] == http.StatusOK && codes[1] == http.StatusConflict) && !(codes[0] == http.StatusConflict && codes[1] == http.StatusOK) {
+		t.Fatalf("racing checkouts = %v, want one 200 and one 409", codes)
+	}
+	if n := len(fc.calls()); n != 1 {
+		t.Errorf("the checkout service opened %d sessions, want 1", n)
+	}
 }
 
 func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
@@ -237,9 +284,19 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 		fc.status, fc.url = tc.status, tc.url
 		fc.mu.Unlock()
 		if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-			map[string]any{"amount_cents": 2_500}, nil); code != http.StatusBadGateway {
+			map[string]any{"amount_cents": 50_000}, nil); code != http.StatusBadGateway {
 			t.Errorf("%s = %d want 502", tc.name, code)
 		}
+	}
+	fc.mu.Lock()
+	fc.status, fc.url = http.StatusOK, "https://checkout.stripe.test/c/pay/cs_test_1"
+	fc.mu.Unlock()
+	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift", 4_500*100*store.MicroCreditsPerCent); code != http.StatusCreated {
+		t.Fatalf("grant = %d", code)
+	}
+	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
+		map[string]any{"amount_cents": 50_000}, nil); code != http.StatusOK {
+		t.Errorf("a checkout after failed sessions = %d want 200: a session that never opened still counts", code)
 	}
 
 	plain := newIdentityFixture(t)
@@ -258,32 +315,26 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	}
 }
 
-func TestCreditsGrant_RefusesAGrantAboveTheBalanceCap(t *testing.T) {
+// The grant route holds an operator's free grant to the cap and never a paid
+// one: a paid grant follows a verified payment, whose checkout already met it.
+func TestCreditsGrant_HoldsOnlyAFreeGrantToTheBalanceCap(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
 	capMicro := int64(5_000 * 100 * store.MicroCreditsPerCent)
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", capMicro-store.MicroCreditsPerCent); code != http.StatusCreated {
+	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift_1", capMicro-store.MicroCreditsPerCent); code != http.StatusCreated {
 		t.Fatalf("a grant one cent under the cap = %d", code)
 	}
 	var refusal capRefusal
 	if code := f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
-		"kind": "paid", "amount_micro": 2 * store.MicroCreditsPerCent, "reference": "pi_2", "team": owner.team,
+		"kind": "free", "amount_micro": 2 * store.MicroCreditsPerCent, "reference": "gift_2", "team": owner.team,
 	}, &refusal); code != http.StatusConflict || refusal.Code != "balance_cap" {
-		t.Fatalf("a grant past the cap = %d %+v want 409 balance_cap", code, refusal)
+		t.Fatalf("a free grant past the cap = %d %+v want 409 balance_cap", code, refusal)
 	}
-	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift", 2*store.MicroCreditsPerCent); code != http.StatusConflict {
-		t.Errorf("a free grant past the cap = %d want 409", code)
+	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 2*store.MicroCreditsPerCent); code != http.StatusCreated {
+		t.Errorf("a paid grant past the cap = %d want 201: the payment already went through", code)
 	}
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_3", store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Errorf("a grant landing exactly on the cap = %d want 201", code)
-	}
-	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", capMicro-store.MicroCreditsPerCent); code != http.StatusOK {
-		t.Errorf("a replayed payment at the cap = %d want 200: a webhook retry must still succeed", code)
-	}
-	if code := f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
-		"kind": "reversal", "amount_micro": -store.MicroCreditsPerCent, "reference": "re_1", "reverses": "pi_3",
-	}, nil); code != http.StatusCreated {
-		t.Errorf("a reversal at the cap = %d want 201", code)
+	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 2*store.MicroCreditsPerCent); code != http.StatusOK {
+		t.Errorf("a replayed payment = %d want 200: a webhook retry must still succeed", code)
 	}
 }
 

@@ -223,6 +223,7 @@ const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
 type CreditBalanceCapError struct {
 	BalanceMicro int64
+	OpenMicro    int64
 	AmountMicro  int64
 	CapMicro     int64
 }
@@ -283,6 +284,8 @@ type CreditGrantRequest struct {
 	Reference   string
 	Reverses    string
 	CreatedBy   string
+
+	Checkout string
 }
 type CreditGrantResult struct {
 	Grant   CreditGrant
@@ -550,6 +553,7 @@ var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
+var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunNotLive = errors.New("run is not live")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
@@ -1721,9 +1725,9 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
-func (t *Tenant) CheckCreditPurchase(ctx context.Context, amountMicro int64) error
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
@@ -1752,6 +1756,7 @@ func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
+func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) error
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
@@ -1795,6 +1800,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) MintGitHubRunnerCredential(
 	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)
+func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
 func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)

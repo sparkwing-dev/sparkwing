@@ -155,7 +155,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 	s := storetest.OpenPostgres(t)
 	ctx := context.Background()
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100_000_000_000, "invoice", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 100_000_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")

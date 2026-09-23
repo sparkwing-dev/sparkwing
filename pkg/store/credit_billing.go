@@ -12,7 +12,9 @@ import (
 // dollars, and a balance holds at most five thousand: a per-purchase limit
 // alone is defeated by buying twice, so the bound that matters is on the
 // balance. It caps both the harm of a conversion mistake and the prepaid
-// credit sitting unspent.
+// credit sitting unspent. The cap is held when a checkout opens, counting the
+// checkouts still open, because a payment that went through is granted
+// whatever the balance reads by then.
 const (
 	CreditPurchaseMinCents = 500
 	CreditPurchaseMaxCents = 50_000
@@ -22,23 +24,29 @@ const (
 	MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
 )
 
-// ErrCreditBalanceCap is returned when a grant or a purchase would lift a
-// team's balance above [MaxTeamBalanceMicro]. The refusal is a
-// [CreditBalanceCapError], which wraps it and names the figures.
+// ErrCreditBalanceCap is returned when a checkout, or an operator's free
+// grant, would lift a team's balance above [MaxTeamBalanceMicro]. The refusal
+// is a [CreditBalanceCapError], which wraps it and names the figures.
 var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 
 // CreditBalanceCapError refuses an amount that would take a team's balance
-// past the cap and says what the team holds, what it asked for, and the cap.
+// past the cap and says what the team holds, what its open checkouts may
+// still add, what it asked for, and the cap.
 type CreditBalanceCapError struct {
 	BalanceMicro int64
+	OpenMicro    int64
 	AmountMicro  int64
 	CapMicro     int64
 }
 
 func (e *CreditBalanceCapError) Error() string {
-	room := max(e.CapMicro-e.BalanceMicro, 0)
-	return fmt.Sprintf("a team holds at most $%s of credit; this team holds $%s, so at most $%s more fits, not $%s",
-		microDollars(e.CapMicro), microDollars(e.BalanceMicro), microDollars(room), microDollars(e.AmountMicro))
+	room := max(e.CapMicro-e.BalanceMicro-e.OpenMicro, 0)
+	held := fmt.Sprintf("this team holds $%s", microDollars(e.BalanceMicro))
+	if e.OpenMicro > 0 {
+		held += fmt.Sprintf(" and has $%s in open checkouts", microDollars(e.OpenMicro))
+	}
+	return fmt.Sprintf("a team holds at most $%s of credit; %s, so at most $%s more fits, not $%s",
+		microDollars(e.CapMicro), held, microDollars(room), microDollars(e.AmountMicro))
 }
 
 // Unwrap reports [ErrCreditBalanceCap].
@@ -55,25 +63,13 @@ func microDollars(micro int64) string {
 }
 
 // safety: the check runs with the balance the grant would add to, under the
-// ledger lock the grant holds, so two grants racing for the last room below
-// the cap cannot both land.
+// ledger lock the grant holds, so two free grants racing for the last room
+// below the cap cannot both land.
 func refuseAboveBalanceCap(balance, amount int64) error {
 	if amount <= 0 || balance+amount <= MaxTeamBalanceMicro {
 		return nil
 	}
 	return &CreditBalanceCapError{BalanceMicro: balance, AmountMicro: amount, CapMicro: MaxTeamBalanceMicro}
-}
-
-// CheckCreditPurchase reports whether a purchase of amountMicro fits under the
-// team's balance cap now, returning a [CreditBalanceCapError] when it does
-// not. A checkout calls it before any money moves; the grant that follows the
-// payment checks again, because two open checkouts can both pass here.
-func (t *Tenant) CheckCreditPurchase(ctx context.Context, amountMicro int64) error {
-	balance, err := t.CreditBalanceMicro(ctx)
-	if err != nil {
-		return err
-	}
-	return refuseAboveBalanceCap(balance, amountMicro)
 }
 
 // RunCreditUsage is what one run cost a team in runner time: its nodes and

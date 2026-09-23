@@ -3673,18 +3673,24 @@ paths:
         negative `amount_micro`, its own `reference` (the refund id, so
         partial refunds each land), and `reverses` naming the paid grant's
         reference. A reversal whose `reverses` matches no paid grant is
-        refused, and one that takes the balance below zero stops new
-        metered claims. A reversal may omit `team`: the payment it reverses
-        was granted to exactly one team, and the reversal lands there.
+        refused, as is one that with the reversals already written would take
+        back more than the payment paid; one that takes the balance below
+        zero stops new metered claims. A reversal may omit `team`: the
+        payment it reverses was granted to exactly one team, and the
+        reversal lands there.
 
         A replay must carry the terms it carried the first time: a request
         naming a `kind` and `reference` another grant holds under a different
         `amount_micro` or `reverses` is refused with 409.
 
-        A new `free` or `paid` grant that would lift the team's balance above
-        $5,000 is refused with 409 and `"code": "balance_cap"`, naming the
-        balance, the amount and the cap. A replay of a grant already written
-        is answered as usual, so a redelivered payment still succeeds.
+        A new `free` grant that would lift the team's balance above $5,000
+        is refused with 409 and `"code": "balance_cap"`, naming the balance,
+        the amount and the cap. A `paid` grant is never refused by the cap,
+        because its payment already went through and the cap was held when
+        its checkout opened; it is at most one purchase, $500, and names the
+        Checkout Session it settles in `checkout`. A replay of a grant
+        already written is answered as usual, so a redelivered payment still
+        succeeds.
       requestBody:
         required: true
         content:
@@ -4891,7 +4897,7 @@ paths:
       tags: [teams]
       summary: Open a Stripe Checkout page to buy credits for the active team.
       description: >-
-        An owner of the active team buys between `purchase_min_cents` and `purchase_max_cents`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase that would lift the balance above `balance_cap_micro` is refused before any session opens. Purchases are final and credits never expire.
+        An owner of the active team buys between `purchase_min_cents` and `purchase_max_cents`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
       requestBody:
         required: true
         content:
@@ -4917,17 +4923,18 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409":
-          description: The purchase would lift the balance above the cap.
+          description: The purchase, with the checkouts still open, would lift the balance above the cap.
           content:
             application/json:
               schema:
                 x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
                 type: object
-                required: [error, code, balance_micro, cap_micro, amount_micro]
+                required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
                 properties:
                   error: {type: string}
                   code: {type: string, enum: [balance_cap]}
                   balance_micro: {type: integer, format: int64}
+                  open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
                   cap_micro: {type: integer, format: int64}
                   amount_micro: {type: integer, format: int64}
         "502": {description: The checkout service or Stripe did not open a session.}
@@ -5742,6 +5749,7 @@ components:
         reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
         team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller except on a reversal, which lands in the team its payment was granted to; defaults to the default team otherwise."}
+        checkout: {type: string, description: "Checkout Session id a paid grant settles, so the checkout it opened stops counting against the team's balance cap."}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object

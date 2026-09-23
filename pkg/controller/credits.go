@@ -231,6 +231,9 @@ type createGrantReq struct {
 	// is never the one a payment was for. A reversal may leave it empty: the
 	// payment it reverses belongs to exactly one team, and that is the team.
 	Team string `json:"team,omitempty"`
+	// Checkout names the payment session a paid grant settles, so the
+	// checkout it opened stops counting against the team's balance cap.
+	Checkout string `json:"checkout,omitempty"`
 }
 
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
@@ -402,7 +405,7 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
-		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who,
+		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who, Checkout: req.Checkout,
 	})
 	if errors.Is(err, store.ErrCreditGrantConflict) {
 		writeError(w, http.StatusConflict, err)

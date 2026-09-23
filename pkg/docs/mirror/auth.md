@@ -166,12 +166,18 @@ it holds, keyed on the payment id so a redelivered webhook grants once. A
 controller with no `--billing-url` sells no credits and answers the checkout
 route with `503` and `"code": "checkout_unavailable"`.
 
-A team's balance holds at most $5,000. A purchase that would lift it past the
-cap is refused before any session opens, with `409` and
-`"code": "balance_cap"` naming the balance, the amount and the cap, and the
-grant route refuses a `free` or `paid` grant past the cap the same way, so two
-checkouts left open together cannot both land. A replay of a grant already
-written is answered as usual. A refund is issued from the Stripe dashboard and
+A team's balance holds at most $5,000, and the cap is held when a checkout
+opens. The controller adds the balance, every checkout of the team still
+open and the new purchase, and refuses the purchase before any session opens
+when they pass the cap, with `409` and `"code": "balance_cap"` naming the
+balance, the open checkouts (`open_micro`), the amount and the cap. A checkout
+counts from the moment it opens until its payment is granted or its session
+expires, about half an hour later, so two owners racing for the last room
+cannot both open one. The grant that follows a verified payment is never
+refused by the cap, because the money has already moved; the balance can pass
+the cap only by a payment settled after its session expired. A `paid` grant is
+at most one purchase, $500. The grant route still refuses an operator's `free`
+grant past the cap. A replay of a grant already written is answered as usual. A refund is issued from the Stripe dashboard and
 arrives as a `reversal` that names only the payment, which lands in the team
 the payment funded.
 

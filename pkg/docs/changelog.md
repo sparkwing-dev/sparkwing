@@ -349,10 +349,15 @@ unlock.
   execution keeps its setup billed. Schema v56 adds
   `nodes.credit_billing_from`.
 
-- **credits:** a team's balance holds at most $5,000. A checkout that would
-  lift it past the cap is refused before any session opens, and a new `free`
-  or `paid` grant past it is refused with 409 and `"code": "balance_cap"`; a
-  replay of a grant already written still succeeds.
+- **credits:** a team's balance holds at most $5,000, held when a checkout
+  opens: the balance plus the team's checkouts still open plus the purchase
+  must fit, or the checkout is refused with 409, `"code": "balance_cap"` and
+  `open_micro`. A checkout counts until its payment is granted or its session
+  expires. A `paid` grant is never refused by the cap, because its payment
+  already went through, and is at most one $500 purchase; it names its
+  Checkout Session in `checkout`. A new `free` grant past the cap is still
+  refused. A reversal may not take back more than its payment paid. Schema
+  v57 adds `credit_checkouts`.
 
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named

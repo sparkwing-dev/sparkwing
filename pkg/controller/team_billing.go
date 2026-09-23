@@ -4,12 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // teamBillingHistoryLimit is how many runs and grants the billing page lists.
 const teamBillingHistoryLimit = 50
+
+// checkoutOpenHold is how long an opened checkout counts against the balance
+// cap when the checkout service names no expiry, and the longest it counts
+// when it does. Stripe keeps a session open 31 minutes from its creation.
+const checkoutOpenHold = 35 * time.Minute
 
 type teamBillingUsageJSON struct {
 	RunID         string `json:"run_id"`
@@ -121,6 +127,7 @@ type balanceCapRefusalJSON struct {
 	Error        string `json:"error"`
 	Code         string `json:"code"`
 	BalanceMicro int64  `json:"balance_micro"`
+	OpenMicro    int64  `json:"open_micro"`
 	CapMicro     int64  `json:"cap_micro"`
 	AmountMicro  int64  `json:"amount_micro"`
 }
@@ -157,24 +164,40 @@ func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	// safety: the cap is checked here, before any money moves, because the
-	// webhook that grants is too late to refuse a payment without a refund.
-	if err := t.CheckCreditPurchase(r.Context(), req.AmountCents*store.MicroCreditsPerCent); err != nil {
+	// safety: the cap is held here, before any money moves, counting every
+	// checkout of the team still open; the grant that follows a verified
+	// payment is never refused, so a later check would strand the payment.
+	ctx := r.Context()
+	now := time.Now()
+	checkoutID, err := t.OpenCreditCheckout(ctx, req.AmountCents*store.MicroCreditsPerCent, now, checkoutOpenHold)
+	if err != nil {
 		if s.writeBalanceCapRefusal(w, err) {
 			return
 		}
 		s.writeInternalError(w, r, "team checkout balance", err)
 		return
 	}
-	url, err := s.checkout.open(r.Context(), string(t.Team()), req.AmountCents)
+	session, err := s.checkout.open(ctx, string(t.Team()), req.AmountCents)
 	if err != nil {
+		if dropErr := t.DropCreditCheckout(ctx, checkoutID); dropErr != nil {
+			s.logger.Warn("dropping an unopened checkout failed", "team", string(t.Team()), "err", dropErr)
+		}
 		s.logger.Error("opening a checkout session failed", "team", string(t.Team()),
 			"cents", req.AmountCents, "err", err)
 		writeError(w, http.StatusBadGateway, errors.New("the payment page could not be opened; try again"))
 		return
 	}
-	s.logger.Info("checkout session opened", "team", string(t.Team()), "cents", req.AmountCents)
-	writeJSON(w, http.StatusOK, teamCheckoutJSON{URL: url})
+	expires := session.ExpiresAt
+	if expires.IsZero() || expires.After(now.Add(checkoutOpenHold)) {
+		expires = now.Add(checkoutOpenHold)
+	}
+	if err := t.AttachCreditCheckout(ctx, checkoutID, session.ID, expires); err != nil {
+		s.writeInternalError(w, r, "team checkout record", err)
+		return
+	}
+	s.logger.Info("checkout session opened", "team", string(t.Team()), "cents", req.AmountCents,
+		"session", session.ID)
+	writeJSON(w, http.StatusOK, teamCheckoutJSON{URL: session.URL})
 }
 
 // writeBalanceCapRefusal answers a grant or purchase the team balance cap
@@ -186,7 +209,8 @@ func (s *Server) writeBalanceCapRefusal(w http.ResponseWriter, err error) bool {
 	}
 	writeJSON(w, http.StatusConflict, balanceCapRefusalJSON{
 		Error: capErr.Error(), Code: BalanceCapCode,
-		BalanceMicro: capErr.BalanceMicro, CapMicro: capErr.CapMicro, AmountMicro: capErr.AmountMicro,
+		BalanceMicro: capErr.BalanceMicro, OpenMicro: capErr.OpenMicro,
+		CapMicro: capErr.CapMicro, AmountMicro: capErr.AmountMicro,
 	})
 	return true
 }
