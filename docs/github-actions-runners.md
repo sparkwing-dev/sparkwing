@@ -1,6 +1,6 @@
 # GitHub Actions runners
 
-A repository's own GitHub Actions minutes can run its Sparkwing work. A workflow in the repository starts `sparkwing-runner`, which proves which repository it runs in with the job's GitHub ID token, claims only that team's nodes for that repository, and exits when the queue stays empty.
+A repository's own GitHub Actions minutes can run its Sparkwing work. A workflow in the repository starts `sparkwing-runner`, which proves which repository it runs in with the job's GitHub ID token, claims that team's triggers and nodes for the job's repository and push, and exits when the queue stays empty.
 
 Placement order for a team's work:
 
@@ -46,7 +46,7 @@ The workflow stores no secret. The job requests an ID token with `permissions: i
 
 ```yaml
 # Runs Sparkwing work for this repository on this repository's GitHub
-# Actions minutes. The controller hands the job only nodes of runs for this
+# Actions minutes. The controller hands the job only triggers and nodes for this
 # repository, and the job exits once the queue has been empty for --idle-exit.
 name: sparkwing
 on:
@@ -97,6 +97,6 @@ Every request the credential makes passes a fence that lists the routes it may u
 
 ## Runner behavior
 
-`sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims nodes only. It stops taking new nodes ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.
+`sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims both triggers and nodes. It plans claimed triggers in the job with the in-process node runner. It stops taking new work ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.
 
 A claimed node fetches its source through the controller's run-scoped Git cache, not from the job's `actions/checkout` directory.

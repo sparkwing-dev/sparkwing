@@ -424,7 +424,7 @@ func (s *Server) handleRemoveGitHubRunnerBinding(w http.ResponseWriter, r *http.
 // pushes run the team's work for that repository on GitHub Actions minutes.
 func GitHubRunnerWorkflow(controllerURL, team string) string {
 	return `# Runs Sparkwing work for this repository on this repository's GitHub
-# Actions minutes. The controller hands the job only nodes of runs for this
+# Actions minutes. The controller hands the job only triggers and nodes for this
 # repository, and the job exits once the queue has been empty for --idle-exit.
 name: sparkwing
 on:

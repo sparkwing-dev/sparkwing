@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +64,52 @@ func TestGitHubActionsCredentialNeedsTheIDTokenPermission(t *testing.T) {
 	_, err := githubActionsCredential(context.Background(), http.DefaultClient, "http://ctrl", "acme")
 	if err == nil || !strings.Contains(err.Error(), "id-token: write") {
 		t.Fatalf("err = %v, want a pointer at the workflow permission", err)
+	}
+}
+
+func TestGitHubActionsRunnerClaimsTriggersInProcess(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("SPARKWING_WARM_MODULES", "off")
+	t.Setenv("SPARKWING_TRIGGER_RUNNER", "")
+	var triggerClaims atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"value": "id-token"})
+	})
+	mux.HandleFunc("POST /api/v1/runners/github/exchange", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(githubCredential{
+			Token: "swr_x", Team: "acme", Repository: "acme/widgets",
+			ExpiresAt: time.Now().Add(time.Hour).Unix(), Labels: []string{"github-actions"},
+		})
+	})
+	mux.HandleFunc("POST /api/v1/triggers/claim", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			NodeRunner string `json:"node_runner"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NodeRunner != "inprocess" {
+			t.Errorf("trigger claim body = %+v, %v; want inprocess", body, err)
+		}
+		triggerClaims.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/v1/nodes/claim", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", srv.URL+"/token")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "request-secret")
+
+	err := runRunnerCLI([]string{
+		"--controller=" + srv.URL, "--team=acme", "--github-actions",
+		"--metrics-addr=", "--poll=10ms", "--idle-exit=100ms",
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if triggerClaims.Load() == 0 {
+		t.Fatal("Actions runner exited without claiming triggers")
 	}
 }
 

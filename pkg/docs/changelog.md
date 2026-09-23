@@ -805,6 +805,9 @@ unlock.
 
 ### Fixed
 
+- **runner:** GitHub Actions jobs claim and plan their own push's triggers in
+  process, so App-created pipelines start without a warm runner pool.
+
 - **controller:** the controller measures its `--bucket-store` whether or not
   a bucket ceiling is set. An unlimited bucket used to report 0 bytes, 0
   objects and `measurement_incomplete: false` because it was never measured.
