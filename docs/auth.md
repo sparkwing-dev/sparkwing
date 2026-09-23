@@ -691,9 +691,12 @@ is revoked. Teams the user is the only member of, their personal space
 included, are deleted as above. In teams the user shares, rows that recorded
 the user stay with the team and name `deleted user` instead: runs, triggers,
 approvals, cron schedules armed, node bounces, debug-pause releases, credit
-grants, node claims, secrets, egress usage (bytes kept, merged per month) and
-the text of event payloads. The match is on the account's email, every email
-its identities asserted, and the principal of every token it minted. Credit
+grants, node and trigger claims, secrets, egress usage (bytes kept, merged per
+month) and the text of event payloads. The match is on the account's email and
+every email its identities asserted, in every team, and on the principal of
+every token it minted, only in that token's team, because another team may
+use the same principal name for its own token; egress usage carries no team,
+so it is relabeled for the emails alone. Credit
 charges name the team, not a person, and are left as they are. A replica's
 in-memory egress counter for the address can write it back once until that
 month's rows are pruned. While the user is the last owner of a team that has

@@ -705,61 +705,85 @@ func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID stri
 	return nil
 }
 
+// principalName is a name a row may carry for a deleted account. An address
+// is the account's in every team; a token's principal is a label its team
+// chose, so it names the account only inside that team.
+type principalName struct {
+	name string
+	team string
+}
+
 // accountPrincipalNamesTx lists the names a row may carry for this account:
-// its address now and every address an identity asserted for it, and the
-// principal of every token it minted. Principal columns hold a name rather
-// than an account id, so these are what the relabel matches.
-func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []string, err error) {
+// its address now and every address an identity asserted for it, in every
+// team, and the principal of every token it minted, in that token's team.
+// Principal columns hold a name rather than an account id, so these are what
+// the relabel matches.
+func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []principalName, err error) {
+	names := []principalName{{name: acct.Email}}
+	add := func(n principalName) {
+		if n.name != "" && n.name != DeletedUserLabel && !slices.Contains(names, n) &&
+			!slices.Contains(names, principalName{name: n.name}) {
+			names = append(names, n)
+		}
+	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT email FROM identities WHERE account_id = ?
-		UNION SELECT principal FROM tokens WHERE created_by = ?`, acct.ID, acct.ID)
+		SELECT email, '' FROM identities WHERE account_id = ?
+		UNION SELECT principal, team FROM tokens WHERE created_by = ?`, acct.ID, acct.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	names := []string{acct.Email}
 	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
+		var n principalName
+		if err := rows.Scan(&n.name, &n.team); err != nil {
 			return nil, err
 		}
-		if n != "" && n != DeletedUserLabel && !slices.Contains(names, n) {
-			names = append(names, n)
-		}
+		add(n)
 	}
 	return names, rows.Err()
 }
 
-// relabelPrincipalTx replaces name with [DeletedUserLabel] in every column
-// that records who acted, in every team. Amounts on usage and billing rows
-// stay; egress usage for the name merges into the label's row for the month.
-func relabelPrincipalTx(ctx context.Context, tx *storeTx, name string) error {
+// relabelPrincipalTx replaces a name with [DeletedUserLabel] in every column
+// that records who acted, in every team for an address and in its own team
+// for a token principal. Amounts on usage and billing rows stay; egress usage
+// for an address merges into the label's row for the month.
+func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
 	label := DeletedUserLabel
+	scope, args := "", []any{label, n.name}
+	if n.team != "" {
+		scope, args = ` AND team = ?`, append(args, n.team)
+	}
 	for _, col := range []struct{ table, column string }{
 		{"runs", "created_principal"},
 		{"triggers", "trigger_user"},
+		{"triggers", "claim_principal"},
 		{"approvals", "approver"},
 		{"cron_schedules", "armed_by"},
 		{"node_bounces", "requested_by"},
 		{"debug_pauses", "released_by"},
 		{"credit_grants", "created_by"},
 		{"nodes", "claim_principal"},
+		{"node_claim_offers", "claim_principal"},
 		{"secrets", "principal"},
 	} {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`, label, name); err != nil {
+			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`+scope, args...); err != nil {
 			return fmt.Errorf("relabel %s.%s: %w", col.table, col.column, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	// safety: egress rows carry no team, so a token principal another team
+	// may share is left alone rather than merged into the label.
+	if n.team == "" {
+		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO egress_usage (principal, month, bytes, updated_at)
 		SELECT ?, month, bytes, updated_at FROM egress_usage WHERE principal = ?
 		ON CONFLICT (principal, month) DO UPDATE SET
-		    bytes = egress_usage.bytes + excluded.bytes, updated_at = excluded.updated_at`, label, name); err != nil {
-		return fmt.Errorf("relabel egress usage: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM egress_usage WHERE principal = ?`, name); err != nil {
-		return err
+		    bytes = egress_usage.bytes + excluded.bytes, updated_at = excluded.updated_at`, label, n.name); err != nil {
+			return fmt.Errorf("relabel egress usage: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM egress_usage WHERE principal = ?`, n.name); err != nil {
+			return err
+		}
 	}
 	eventsSQL := `UPDATE events SET payload = CAST(REPLACE(CAST(payload AS TEXT), ?, ?) AS BLOB)
 		WHERE payload IS NOT NULL AND instr(CAST(payload AS TEXT), ?) > 0`
@@ -767,7 +791,12 @@ func relabelPrincipalTx(ctx context.Context, tx *storeTx, name string) error {
 		eventsSQL = `UPDATE events SET payload = convert_to(replace(convert_from(payload, 'UTF8'), ?, ?), 'UTF8')
 		WHERE payload IS NOT NULL AND strpos(convert_from(payload, 'UTF8'), ?) > 0`
 	}
-	if _, err := tx.ExecContext(ctx, eventsSQL, name, label, name); err != nil {
+	eventArgs := []any{n.name, label, n.name}
+	if n.team != "" {
+		eventsSQL += ` AND team = ?`
+		eventArgs = append(eventArgs, n.team)
+	}
+	if _, err := tx.ExecContext(ctx, eventsSQL, eventArgs...); err != nil {
 		return fmt.Errorf("relabel event payloads: %w", err)
 	}
 	return nil
