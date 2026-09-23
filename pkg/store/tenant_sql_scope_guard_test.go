@@ -56,10 +56,12 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
-	"settleActiveTeamTx":                     "picks the account's first team from all of its memberships when its sticky team is gone",
-	"(*Store).AccountMemberships":            "lists the teams one account belongs to, which is a question across teams by definition",
-	"(*Store).OpenInvitationsForEmail":       "lists the invitations addressed to one verified email from every team that sent one",
-	"(*Store).AcceptInvitation":              "finds an invitation by its id before the team is known; the accepting write then names that team",
+	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
+		"queue, because a claim that settled only its own team would leave the rest pending forever",
+	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
+	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
+	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",
+	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
 	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
 		"binding of the pipeline is a candidate until its secret verifies the signature",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
