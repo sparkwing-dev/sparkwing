@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 const (
@@ -80,12 +81,12 @@ func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 	ctrl := newGrantingController(t, map[string]string{"runner-a": "team-a", "runner-b": "team-b"})
 	cacheSrv := newGrantCache(t)
 
-	grantA := requestRunCacheGrant(ctx, ctrl.URL, "runner-a", "run-a", logger)
+	grantA := orchestrator.RequestRunCacheGrant(ctx, ctrl.URL, "runner-a", "run-a", logger)
 	claims, err := authwire.VerifyCacheGrant(cacheGrantKey, grantA, time.Now())
 	if err != nil || claims.Team != "team-a" || claims.Run != "run-a" {
 		t.Fatalf("team A's grant = %+v, %v; want team-a for run-a", claims, err)
 	}
-	grantB := requestRunCacheGrant(ctx, ctrl.URL, "runner-b", "run-b", logger)
+	grantB := orchestrator.RequestRunCacheGrant(ctx, ctrl.URL, "runner-b", "run-b", logger)
 
 	pipeline := writeTrivialPipeline(t)
 	key, err := bincache.PipelineCacheKey(pipeline)
@@ -140,7 +141,7 @@ func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 func TestRequestRunCacheGrantDegradesOnAnOlderController(t *testing.T) {
 	ctrl := httptest.NewServer(http.NotFoundHandler())
 	defer ctrl.Close()
-	if grant := requestRunCacheGrant(context.Background(), ctrl.URL, "runner-a", "run-a", discardLogger()); grant != "" {
+	if grant := orchestrator.RequestRunCacheGrant(context.Background(), ctrl.URL, "runner-a", "run-a", discardLogger()); grant != "" {
 		t.Fatalf("grant = %q from a controller with no grant route", grant)
 	}
 }

@@ -229,7 +229,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	if sourceErr != nil {
 		return awaitHeartbeat(), sourceErr
 	}
-	grant := requestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
+	grant := orchestrator.RequestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
 	if repoURL == "" {
 		if BakedBinary == "" {
 			return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)

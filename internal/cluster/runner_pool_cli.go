@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -624,7 +623,7 @@ func executePooledNode(
 		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
-	grant := requestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
+	grant := orchestrator.RequestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
 	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
 		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
@@ -667,22 +666,6 @@ func failPooledNodeSetup(ctx context.Context, ctrl *client.Client, n *store.Node
 		logger.Warn(source+" could not finish the node after its setup failed; its lease will lapse",
 			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
 	}
-}
-
-// requestRunCacheGrant returns the grant a claimed run's cache traffic carries,
-// or "" when the controller mints none; the run then goes without the binary
-// and dependency caches rather than failing.
-func requestRunCacheGrant(ctx context.Context, controllerURL, token, runID string, logger *slog.Logger) string {
-	grant, err := bincache.RequestCacheGrant(ctx, controllerURL, token, runID)
-	switch {
-	case err == nil:
-		return grant
-	case errors.Is(err, bincache.ErrNoCacheGrant):
-		logger.Debug("controller mints no cache grant; running without the cache", "run_id", runID)
-	default:
-		logger.Warn("cache grant unavailable; running without the cache", "run_id", runID, "err", err)
-	}
-	return ""
 }
 
 var (
