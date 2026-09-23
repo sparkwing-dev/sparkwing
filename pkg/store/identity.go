@@ -139,6 +139,10 @@ type Account struct {
 	Name          string
 	ActiveTeam    Team
 	CreatedAt     time.Time
+	// Waitlisted is true while the account waits for admission: it holds no
+	// personal space and creates no team, but it may join a team that
+	// invites it.
+	Waitlisted bool
 }
 
 // TeamInfo is a team's registry row.
@@ -188,6 +192,9 @@ type SignInProfile struct {
 	EmailVerified bool
 	Name          string
 	GivenName     string
+	// ProviderAccountCreatedAt is when the provider account was opened, for a
+	// provider that states it; GitHub does and Google does not.
+	ProviderAccountCreatedAt time.Time
 }
 
 // SignInResult reports what a sign-in did.
@@ -199,6 +206,12 @@ type SignInResult struct {
 	Linked bool
 	// PersonalTeam names the team the sign-in created, if it created one.
 	PersonalTeam Team
+	// WaitlistReason is why a new account was placed on the waitlist, or
+	// empty when it was admitted or already existed.
+	WaitlistReason string
+	// GateClosed is the gate this sign-up closed by crossing a velocity
+	// limit, or nil when it closed nothing.
+	GateClosed *SignUpGate
 }
 
 const identityTablesSQLite = `
@@ -462,8 +475,13 @@ func personalDisplayName(p SignInProfile) string {
 // address outright, because no route here can later prove one.
 //
 // An account left holding no membership, new or returning, gets a personal
-// space: a team whose only member is its owner.
-func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Time) (SignInResult, error) {
+// space: a team whose only member is its owner. The exception is a waitlisted
+// account, which gets one only when an operator admits it.
+//
+// Only a new account meets the sign-up gate: c and the stored gate decide
+// whether it is admitted or waitlisted. An account that already exists, or an
+// identity that links to one, is never gated.
+func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
 	p.Email = NormalizeEmail(p.Email)
 	switch {
 	case p.Provider == "" || p.Subject == "":
@@ -476,7 +494,7 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Tim
 	// who did nothing wrong.
 	var last error
 	for range 5 {
-		res, err := s.resolveSignInOnce(ctx, p, now)
+		res, err := s.resolveSignInOnce(ctx, p, c, now)
 		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken)) {
 			return res, err
 		}
@@ -485,7 +503,7 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Tim
 	return SignInResult{}, last
 }
 
-func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, now time.Time) (SignInResult, error) {
+func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return SignInResult{}, err
@@ -537,13 +555,24 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, now time
 			if accountID, err = newIdentityID(); err != nil {
 				return SignInResult{}, err
 			}
+			decision, err := decideSignUpTx(ctx, tx, p, c, now)
+			if err != nil {
+				return SignInResult{}, fmt.Errorf("identity: sign-up gate: %w", err)
+			}
+			var waitlistedAt int64
+			if decision.reason != "" {
+				waitlistedAt = now.UnixNano()
+			}
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO accounts (id, email, email_verified, name, active_team, created_at, updated_at)
-				VALUES (?, ?, ?, ?, '', ?, ?)`,
-				accountID, p.Email, boolInt(p.EmailVerified), strings.TrimSpace(p.Name), at, at); err != nil {
+				INSERT INTO accounts (id, email, email_verified, name, active_team, created_at, updated_at,
+					waitlisted_at, waitlist_reason)
+				VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)`,
+				accountID, p.Email, boolInt(p.EmailVerified), strings.TrimSpace(p.Name), at, at,
+				waitlistedAt, decision.reason); err != nil {
 				return SignInResult{}, fmt.Errorf("identity: create account: %w", err)
 			}
 			res.NewAccount = true
+			res.WaitlistReason, res.GateClosed = decision.reason, decision.tripped
 		default:
 			return SignInResult{}, err
 		}
@@ -558,11 +587,14 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, now time
 	}
 
 	var members int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memberships WHERE account_id = ?`, accountID).Scan(&members); err != nil {
+	var waitlisted int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM memberships WHERE account_id = ?),
+		       COALESCE((SELECT waitlisted_at FROM accounts WHERE id = ?), 0)`,
+		accountID, accountID).Scan(&members, &waitlisted); err != nil {
 		return SignInResult{}, err
 	}
-	if members == 0 {
+	if members == 0 && waitlisted == 0 {
 		slug, err := createPersonalTeamTx(ctx, tx, accountID, slugBase(p.Email), personalDisplayName(p), now)
 		if err != nil {
 			return SignInResult{}, err
@@ -616,14 +648,14 @@ func accountTx(ctx context.Context, tx *storeTx, id string) (Account, error) {
 	return scanAccount(tx.QueryRowContext(ctx, accountSelect+` WHERE id = ?`, id))
 }
 
-const accountSelect = `SELECT id, email, email_verified, name, active_team, created_at FROM accounts`
+const accountSelect = `SELECT id, email, email_verified, name, active_team, created_at, waitlisted_at FROM accounts`
 
 func scanAccount(row *sql.Row) (Account, error) {
 	var a Account
 	var verified int
 	var active string
-	var created int64
-	if err := row.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created); err != nil {
+	var created, waitlisted int64
+	if err := row.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created, &waitlisted); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Account{}, ErrNotFound
 		}
@@ -632,6 +664,7 @@ func scanAccount(row *sql.Row) (Account, error) {
 	a.EmailVerified = verified == 1
 	a.ActiveTeam = Team(active)
 	a.CreatedAt = time.Unix(created, 0).UTC()
+	a.Waitlisted = waitlisted != 0
 	return a, nil
 }
 
@@ -662,8 +695,15 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 	}
 	defer rollbackOrLog(tx)
 	var created int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE created_by = ?`, accountID).Scan(&created); err != nil {
+	var waitlisted int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM teams WHERE created_by = ?),
+		       COALESCE((SELECT waitlisted_at FROM accounts WHERE id = ?), 0)`,
+		accountID, accountID).Scan(&created, &waitlisted); err != nil {
 		return TeamInfo{}, err
+	}
+	if waitlisted != 0 {
+		return TeamInfo{}, ErrWaitlisted
 	}
 	if created >= MaxCreatedTeams {
 		return TeamInfo{}, ErrTeamLimit
@@ -855,12 +895,13 @@ func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, 
 // CreateAccountSession opens a browser session for an account in team. The
 // session stores no scopes: they come from the account's membership on every
 // request, so a demoted account loses them on its next request rather than
-// at session expiry.
+// at session expiry. An empty team is the session of an account that belongs
+// to no team yet, such as one on the waitlist; it authorizes no team route.
 func (s *Store) CreateAccountSession(
 	ctx context.Context, acct Account, team Team, ttl time.Duration, now time.Time,
 ) (rawSession, csrfToken string, sess *Session, err error) {
-	if acct.ID == "" || team == "" {
-		return "", "", nil, errors.New("sessions: account and team required")
+	if acct.ID == "" {
+		return "", "", nil, errors.New("sessions: account required")
 	}
 	if ttl <= 0 {
 		return "", "", nil, errors.New("sessions: ttl must be positive")

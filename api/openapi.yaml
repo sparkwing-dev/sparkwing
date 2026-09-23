@@ -4213,7 +4213,7 @@ paths:
       tags: [auth]
       summary: Finish a Google sign-in and open a session.
       description: >-
-        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified and that user has no other Google identity. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. The session opens in the user's active team.
+        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified and that user has no other Google identity. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. A new user the sign-up gate waitlists gets none, and `waitlisted` says so. The session opens in the user's active team.
       security: []
       requestBody:
         required: true
@@ -4244,6 +4244,10 @@ paths:
                   active_team:
                     allOf: [{$ref: "#/components/schemas/TeamRef"}]
                     nullable: true
+                    description: Null for a new user the sign-up gate placed on the waitlist.
+                  waitlisted:
+                    type: boolean
+                    description: True while the user waits for admission; it holds no personal space and may only accept invitations.
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
@@ -4271,7 +4275,10 @@ paths:
                   active_team:
                     allOf: [{$ref: "#/components/schemas/TeamRef"}]
                     nullable: true
-                    description: Null when the user is no longer a member of the session's team.
+                    description: Null when the user is no longer a member of the session's team, or belongs to no team while on the sign-up waitlist.
+                  waitlisted:
+                    type: boolean
+                    description: True while the user waits for admission; it holds no personal space, cannot create a team, and may accept invitations.
                   memberships:
                     type: array
                     items: {$ref: "#/components/schemas/TeamRef"}
@@ -4771,6 +4778,10 @@ paths:
                   active_team:
                     allOf: [{$ref: "#/components/schemas/TeamRef"}]
                     nullable: true
+                    description: Null for a new user the sign-up gate placed on the waitlist.
+                  waitlisted:
+                    type: boolean
+                    description: True while the user waits for admission; it holds no personal space and may only accept invitations.
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
@@ -4812,6 +4823,197 @@ paths:
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
         default: {description: Undescribed.}
+
+  /api/v1/signups:
+    get:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: Read the sign-up gate and the sign-up counts alerting keys on.
+      description: >-
+        The gate decides whether a new user is admitted with a personal space or placed on the waitlist. Users that already exist are never gated.
+      responses:
+        "200":
+          description: The gate.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.signUpStatusJSON
+                type: object
+                required: [state, reasons, mode, source, reason, set_by, updated_at, deployment_waitlist, free_tier, limits, counts, velocity_warning]
+                properties:
+                  state: {type: string, enum: [open, waitlist], description: What a new user meets now.}
+                  reasons:
+                    type: array
+                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed]}
+                    description: Every condition holding the gate at waitlist; empty while it is open.
+                  mode: {type: string, enum: [open, waitlist], description: The stored mode.}
+                  source: {type: string, description: "What set the stored mode: `operator`, `hourly_signups`, `daily_signups`, or `default` when nothing has."}
+                  reason: {type: string}
+                  set_by: {type: string}
+                  updated_at: {type: integer, format: int64, description: Unix seconds; the velocity windows start no earlier than this while the mode is open.}
+                  deployment_waitlist: {type: boolean, description: True when the controller runs with `--signup-gate=waitlist`.}
+                  free_tier: {type: string, enum: [open, throttled, closed]}
+                  limits:
+                    x-sparkwing-go-type: pkg/controller.signUpLimitsJSON
+                    type: object
+                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days]
+                    properties:
+                      hourly_limit: {type: integer, description: New users the last hour may admit before the gate closes itself; waitlisted users do not count; 0 is off.}
+                      daily_limit: {type: integer, description: The same bound over the last 24 hours; 0 is off.}
+                      hourly_warn: {type: integer, description: Hourly count past which the controller warns; 0 is off.}
+                      github_min_account_days: {type: integer, description: Youngest GitHub account a sign-up admits; 0 is off.}
+                  counts:
+                    x-sparkwing-go-type: pkg/controller.signUpCountsJSON
+                    type: object
+                    required: [last_hour, last_day, waitlisted]
+                    properties:
+                      last_hour: {type: integer}
+                      last_day: {type: integer}
+                      waitlisted: {type: integer}
+                  velocity_warning: {type: boolean, description: True while the last hour's new users exceed `hourly_warn`.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: Set the sign-up gate's mode, its limits, or both.
+      description: >-
+        Fields left out keep their values. Setting the mode records the caller and the reason; setting it to `open` also restarts the hourly and daily windows, so a burst that closed the gate does not close it again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.signUpSetReq
+              type: object
+              properties:
+                mode: {type: string, enum: [open, waitlist]}
+                reason: {type: string}
+                hourly_limit: {type: integer, minimum: 0}
+                daily_limit: {type: integer, minimum: 0}
+                hourly_warn: {type: integer, minimum: 0}
+                github_min_account_days: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The gate after the change.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.signUpStatusJSON
+                type: object
+                required: [state, reasons, mode, source, reason, set_by, updated_at, deployment_waitlist, free_tier, limits, counts, velocity_warning]
+                properties:
+                  state: {type: string, enum: [open, waitlist], description: What a new user meets now.}
+                  reasons:
+                    type: array
+                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed]}
+                    description: Every condition holding the gate at waitlist; empty while it is open.
+                  mode: {type: string, enum: [open, waitlist], description: The stored mode.}
+                  source: {type: string, description: "What set the stored mode: `operator`, `hourly_signups`, `daily_signups`, or `default` when nothing has."}
+                  reason: {type: string}
+                  set_by: {type: string}
+                  updated_at: {type: integer, format: int64, description: Unix seconds; the velocity windows start no earlier than this while the mode is open.}
+                  deployment_waitlist: {type: boolean, description: True when the controller runs with `--signup-gate=waitlist`.}
+                  free_tier: {type: string, enum: [open, throttled, closed]}
+                  limits:
+                    x-sparkwing-go-type: pkg/controller.signUpLimitsJSON
+                    type: object
+                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days]
+                    properties:
+                      hourly_limit: {type: integer, description: New users the last hour may admit before the gate closes itself; waitlisted users do not count; 0 is off.}
+                      daily_limit: {type: integer, description: The same bound over the last 24 hours; 0 is off.}
+                      hourly_warn: {type: integer, description: Hourly count past which the controller warns; 0 is off.}
+                      github_min_account_days: {type: integer, description: Youngest GitHub account a sign-up admits; 0 is off.}
+                  counts:
+                    x-sparkwing-go-type: pkg/controller.signUpCountsJSON
+                    type: object
+                    required: [last_hour, last_day, waitlisted]
+                    properties:
+                      last_hour: {type: integer}
+                      last_day: {type: integer}
+                      waitlisted: {type: integer}
+                  velocity_warning: {type: boolean, description: True while the last hour's new users exceed `hourly_warn`.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/signups/waitlist:
+    get:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: List waitlisted users, oldest first.
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}, description: At most this many; defaults to 1000.}
+      responses:
+        "200":
+          description: The waitlist.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.waitlistedJSON
+                      type: object
+                      required: [id, email, name, reason, created_at, waitlisted_at]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        name: {type: string}
+                        reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
+                        created_at: {type: integer, format: int64, description: Unix seconds.}
+                        waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/signups/waitlist/approve:
+    post:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: Admit waitlisted users by id, or the oldest n.
+      description: >-
+        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. The controller runs the deployment's approval notifier for each admission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.approveWaitlistReq
+              type: object
+              description: Name exactly one of `account_ids` and `oldest`, at most 1000.
+              properties:
+                account_ids:
+                  type: array
+                  items: {type: string}
+                oldest: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: The users admitted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [approved]
+                properties:
+                  approved:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.approvedJSON
+                      type: object
+                      required: [id, email, active_team]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        active_team: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
 components:
   securitySchemes:

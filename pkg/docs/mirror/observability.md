@@ -375,6 +375,9 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
 | `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
 | `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
+| `sparkwing_signups_total` | Counter | `outcome`, `reason` | New accounts: `admitted` (reason `none`) or `waitlisted` with the reason (`deployment`, `operator`, `free_tier_closed`, `hourly_signups`, `daily_signups`, `github_account_age`) |
+| `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
+| `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
 | `sparkwing_queue_depth` | Gauge | `state` | Nodes short of a terminal outcome: `waiting`, `ready`, `claimed`, `running`, `approval_pending` |
 | `sparkwing_node_claim_wait_seconds` | Histogram | (none) | Seconds a node waited between becoming claimable and its first runner taking it |
 | `sparkwing_claim_unavailable_total` | Counter | (none) | Claim requests answered `503`, which a runner retries after the interval the response names |

@@ -98,6 +98,12 @@ var additiveColumnSources = map[int][]map[string]string{
 	// none, so an older binary keeps claiming and finishing triggers; it opens
 	// no reservation and the next claim overwrites one it left open.
 	53: {triggersCreditCols},
+	// safety: v54 to v57 hold places for changes that land beside this one.
+	54: nil, 55: nil, 56: nil, 57: nil,
+	// safety: v58 adds an account's waitlist stamp with a default of never
+	// waitlisted, so an older binary keeps creating and reading accounts; an
+	// account it creates is admitted, as it would have been before the gate.
+	58: {accountWaitlistCols},
 }
 
 func columnSpecMaps() []map[string]string {

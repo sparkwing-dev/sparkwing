@@ -20,6 +20,7 @@ type identityConfig struct {
 	providers    map[string]signInProvider
 	redirectURIs []string
 	license      *license.License
+	signup       signUpConfig
 }
 
 // WithGoogleSignIn offers Google sign-in through client. redirectURIs is the
@@ -324,6 +325,7 @@ type oauthExchangeResp struct {
 	ExpiresAt  int64        `json:"expires_at"`
 	User       userJSONBody `json:"user"`
 	ActiveTeam *teamRefJSON `json:"active_team"`
+	Waitlisted bool         `json:"waitlisted"`
 }
 
 func (s *Server) handleGoogleExchange(w http.ResponseWriter, r *http.Request) {
@@ -369,11 +371,12 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	now := time.Now().UTC()
-	res, err := s.store.ResolveSignIn(r.Context(), profile, now)
+	res, err := s.store.ResolveSignIn(r.Context(), profile, s.signUpConditions(r.Context()), now)
 	if err != nil {
 		s.writeInternalError(w, r, "sign-in resolve", err)
 		return
 	}
+	s.observeSignUp(r.Context(), name, res, now)
 	acct := res.Account
 	raw, csrf, sess, err := s.store.CreateAccountSession(r.Context(), acct, acct.ActiveTeam, sessionTTL, now)
 	if err != nil {
@@ -381,7 +384,8 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	s.logger.Info("signed in", "account", acct.ID, "provider", name,
-		"new_account", res.NewAccount, "linked", res.Linked, "personal_team", string(res.PersonalTeam))
+		"new_account", res.NewAccount, "linked", res.Linked, "personal_team", string(res.PersonalTeam),
+		"waitlisted", acct.Waitlisted)
 	active, err := s.teamRef(r.Context(), acct.ActiveTeam, acct.ID)
 	if err != nil {
 		s.writeInternalError(w, r, "sign-in team", err)
@@ -390,6 +394,7 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 	writeJSON(w, http.StatusOK, oauthExchangeResp{
 		SessionID: raw, CSRFToken: csrf, ExpiresAt: sess.ExpiresAt.Unix(),
 		User: userJSONBody{ID: acct.ID, Email: acct.Email, Name: acct.Name}, ActiveTeam: active,
+		Waitlisted: acct.Waitlisted,
 	})
 }
 
@@ -420,6 +425,7 @@ type meResp struct {
 	ActiveTeam  *teamRefJSON        `json:"active_team"`
 	Memberships []teamRefJSON       `json:"memberships"`
 	Invitations []invitationRefJSON `json:"invitations"`
+	Waitlisted  bool                `json:"waitlisted"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -433,10 +439,20 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "me account", err)
 		return
 	}
+	// safety: a session opened while the account held no team carries none, so
+	// once an approval or another device gives it one, the session follows.
+	if p.Team == "" && acct.ActiveTeam != "" {
+		if err := s.switchTeam(ctx, p, acct.ActiveTeam); err != nil && !errors.Is(err, store.ErrNotFound) {
+			s.writeInternalError(w, r, "me session team", err)
+			return
+		}
+		p.Team = acct.ActiveTeam
+	}
 	resp := meResp{
 		User:        userJSONBody{ID: acct.ID, Email: acct.Email, Name: acct.Name},
 		Memberships: []teamRefJSON{},
 		Invitations: []invitationRefJSON{},
+		Waitlisted:  acct.Waitlisted,
 	}
 	members, err := s.store.AccountMemberships(ctx, acct.ID)
 	if err != nil {
@@ -561,7 +577,8 @@ func writeIdentityError(w http.ResponseWriter, s *Server, r *http.Request, op st
 		errors.Is(err, store.ErrInvitationOpen):
 		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrLastOwner), errors.Is(err, store.ErrRoleAboveOwn),
-		errors.Is(err, store.ErrEmailMismatch), errors.Is(err, store.ErrTeamLimit):
+		errors.Is(err, store.ErrEmailMismatch), errors.Is(err, store.ErrTeamLimit),
+		errors.Is(err, store.ErrWaitlisted):
 		writeError(w, http.StatusForbidden, err)
 	case errors.Is(err, store.ErrInvitationClosed):
 		writeError(w, http.StatusGone, err)

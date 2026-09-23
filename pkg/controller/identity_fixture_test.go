@@ -37,8 +37,9 @@ type identityFixture struct {
 }
 
 type fixtureOpts struct {
-	license string
-	key     ed25519.PublicKey
+	license   string
+	key       ed25519.PublicKey
+	configure func(*controller.Server)
 }
 
 func multiTeamLicense(t *testing.T) (string, ed25519.PublicKey) {
@@ -78,6 +79,9 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect})
+	if o.configure != nil {
+		o.configure(srv)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
@@ -130,6 +134,7 @@ type exchangeBody struct {
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
 	} `json:"active_team"`
+	Waitlisted bool `json:"waitlisted"`
 }
 
 func (f *identityFixture) signIn(p googletest.Person) exchangeBody {

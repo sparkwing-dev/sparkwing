@@ -267,11 +267,13 @@ var keyedAtCreation = []string{"github_runner_bindings", "github_runner_credenti
 // bag is the deployment's; the per-team keys inside that bag need a table of
 // their own rather than a column on it. accounts and identities are here
 // because a human belongs to the deployment and reaches teams through
-// memberships, which are tenant-owned.
+// memberships, which are tenant-owned. signup_gate is the deployment's one
+// gate for new accounts.
 var operatorTables = []string{
 	"accounts",
 	"executors",
 	"identities",
+	"signup_gate",
 	"sparkwing_meta",
 	"sparkwing_requirements",
 	"sparkwing_schema_version",

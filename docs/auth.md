@@ -596,7 +596,8 @@ identity from the same provider; a GitHub identity joins a Google user the same
 way. A second account from one provider on one address is a recycled address
 or another person, so it gets its own user and the first user's claim on the
 address is withdrawn. A user's email follows what Google asserts at each
-sign-in. A user with no team gets a personal space: a team
+sign-in. A user with no team, other than one on the
+[sign-up waitlist](#sign-up-gate), gets a personal space: a team
 whose only member is its owner, slugged from the email's local part, with the
 smallest free integer appended on a collision. The user's active team is
 stored on the user, so the next sign-in returns to it. One user creates at
@@ -647,6 +648,71 @@ runner token they mint reads the secrets of every run it claims. This is the
 same model as GitHub Actions, where anyone who can push a workflow can use the
 repository's secrets. Grant `editor` only to someone you would hand those
 secrets.
+
+### Sign-up gate
+
+Every new user costs a personal space, and a personal space holds a free
+storage allowance, so the sign-up gate bounds how many a burst of new provider
+accounts can take before the operator looks. It never touches a user that
+already exists: a returning user, and a new identity that links to one, sign in
+as before in every state.
+
+A new user meets the gate at its first sign-in. The gate admits it, which
+creates its personal space, or places it on the waitlist. A waitlisted user
+still gets an account and a session, so it can be admitted later without
+signing up again, but it holds no personal space, cannot create a team
+(`POST /api/v1/teams` answers `403`), and reaches no team route. It can accept
+an invitation: a team that invites someone vouches for them, and they join that
+team with the invited role while staying on the waitlist for everything else.
+`GET /api/v1/me` and the sign-in exchange report `"waitlisted": true`, and the
+dashboard shows a waitlist page in place of the team views.
+
+A new user is waitlisted, with the reason recorded on the account, when any of
+these holds:
+
+| Reason | Condition |
+|--------|-----------|
+| `deployment` | the controller runs with `--signup-gate=waitlist` |
+| `operator` | an operator set the stored mode to `waitlist` |
+| `hourly_signups` | the last hour already admitted `hourly_limit` new users (default 50); the gate closes itself |
+| `daily_signups` | the last 24 hours already admitted `daily_limit` new users (default 500); the gate closes itself |
+| `free_tier_closed` | the deployment's free storage reports `closed`; the gate reopens when it does |
+| `github_account_age` | a GitHub account younger than `github_min_account_days` (default 7), or one whose creation date GitHub did not state |
+
+A velocity closure is stored with the source `hourly_signups` or
+`daily_signups` and stays closed until an operator reopens it, so a burst that
+pauses does not reopen the gate on its own. Reopening restarts both windows
+from that moment, so the burst already dealt with does not close it again.
+Only admitted users count toward a limit, so a burst of waitlisted accounts,
+such as young GitHub accounts, does not close the gate on everyone else.
+Concurrent sign-ups can overshoot a limit by the number in flight at once. A
+limit of `0` turns its check off. Google states no account age, so the age
+check applies to GitHub alone.
+
+The operator routes need the `admin` scope:
+
+| Route | Does |
+|-------|------|
+| `GET /api/v1/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
+| `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`; fields left out keep their values |
+| `GET /api/v1/signups/waitlist` | waitlisted users, oldest first, with the reason each was waitlisted; `?limit=` reads at most 1000 |
+| `POST /api/v1/signups/waitlist/approve` | admits `{"account_ids": [...]}` or `{"oldest": n}`, at most 1000 at a time; each admitted user without a team gets its personal space, and approving an admitted user again does nothing |
+
+An admitted user's open session moves into its new space on its next
+`GET /api/v1/me`. The controller logs `signup.approved` for each admission and
+runs the approval notifier the deployment installed, which is where a
+"you're in" email would be sent from. This build installs none and has no
+mailer, so it logs `signup.approval_not_sent` instead and the person finds
+their space at their next visit.
+
+The controller logs `signup.velocity_warning` and counts
+`sparkwing_signup_velocity_warnings_total` once each time the last hour's new
+users cross `hourly_warn` (default 20), which is below the hourly limit so an
+alert fires before anyone is waitlisted. It logs `signup.gate_closed` and counts
+`sparkwing_signup_gate_closed_total` when a limit closes the gate, and
+`sparkwing_signups_total` counts every new user by outcome and reason. Alert on
+any increase in the closure counter, on the warning counter, and on
+`GET /api/v1/signups` answering `"state": "waitlist"`.
 
 ## Unauthenticated endpoints
 

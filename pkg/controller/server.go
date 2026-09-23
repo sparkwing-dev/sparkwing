@@ -1073,6 +1073,11 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
 	mux.Handle("PUT /api/v1/compute-limits", requireScope(ScopeAdmin, http.HandlerFunc(s.handleComputeLimitsSet)))
 
+	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
+	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
+	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))
+	mux.Handle("POST /api/v1/signups/waitlist/approve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleApproveWaitlist)))
+
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
 	mux.Handle("DELETE /api/v1/users/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteUser)))

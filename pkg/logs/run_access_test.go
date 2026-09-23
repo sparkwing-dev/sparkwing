@@ -44,7 +44,7 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		res, err := st.ResolveSignIn(ctx, store.SignInProfile{
 			Provider: "google", Subject: "sub-" + name, Email: name + "@example.test",
 			EmailVerified: true, Name: name,
-		}, now)
+		}, store.SignUpConditions{}, now)
 		if err != nil {
 			t.Fatal(err)
 		}

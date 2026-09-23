@@ -82,6 +82,10 @@ type FloodPolicy struct {
 
 	DedupeWindow time.Duration
 }
+const FreeTierClosed FreeTierState = "closed"
+const FreeTierOpen FreeTierState = "open"
+type FreeTierState string
+const FreeTierThrottled FreeTierState = "throttled"
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 type GitHubWebhookBinding struct {
@@ -289,6 +293,7 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
+func (s *Server) WithFreeTier(fn func(context.Context) (FreeTierState, error)) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
@@ -310,6 +315,8 @@ func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
+func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
+func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
