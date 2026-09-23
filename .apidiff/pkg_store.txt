@@ -715,6 +715,16 @@ const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
+type FirstGreenStats struct {
+	TeamsCreated  int
+	TeamsGreen    int
+	MedianSeconds int64
+	P90Seconds    int64
+	WithinHour    int
+	WithinDay     int
+	WithinWeek    int
+	Later         int
+}
 func FormatCredits(micro int64) string
 var FreeTierQuota = StorageQuota{
 	Tier:             StorageTierFree,
@@ -1008,6 +1018,7 @@ func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSche
 func (o *Operator) ListGitHubWebhookBindingsAcrossTeams(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
+func (o *Operator) UsageMetrics(ctx context.Context, now time.Time, weeks int, exclude []Team) (*UsageMetrics, error)
 const OperatorScope = "admin"
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -1240,6 +1251,12 @@ const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 1_000_000_000
 const RunnerScaleWindow = 30 * 24 * time.Hour
 const RunnerTokenLifetime = 90 * 24 * time.Hour
+type RunsBands struct {
+	One            int
+	TwoToNine      int
+	TenToFortyNine int
+	FiftyPlus      int
+}
 type SchemaRequirement struct {
 	Name    string
 	AddedBy string
@@ -1925,6 +1942,25 @@ type UnpricedCPUClassError struct {
 }
 func (e *UnpricedCPUClassError) Error() string
 func (e *UnpricedCPUClassError) Unwrap() error
+type UsageMetrics struct {
+	Weeks      []UsageWeek
+	FirstGreen FirstGreenStats
+}
+type UsageWeek struct {
+	WeekStart time.Time
+
+	ActiveTeams int
+	Runs        int
+
+	CloudRuns     int
+	ConnectedRuns int
+
+	TeamsByRuns             RunsBands
+	MedianRunsPerActiveTeam float64
+	NewAccounts             int
+	NewTeams                int
+}
+func UsageWeekStart(at time.Time) time.Time
 type User struct {
 	Name        string
 	PWHash      string

@@ -46,6 +46,14 @@ unlock.
   suggestions show that team's pipelines, newest first; the operator's own
   session still reads the working directory's.
 
+- **controller:** `GET /api/v1/admin/usage-metrics` (`admin`) reports weekly
+  usage over `?weeks=` whole UTC weeks (default 12, at most 104): teams with a
+  run started, runs split into cloud and connected-machine, how many runs each
+  active team started, new accounts and teams, and for teams created in the
+  window the median, 90th percentile and spread of the time from creation to
+  the first successful run. It reads only the controller's own tables. The
+  default team never counts, and `exclude_team` leaves out more.
+
 - **runner:** Kubernetes runner Jobs carry a `sparkwing.dev/team` label and a
   required pod anti-affinity on `kubernetes.io/hostname` that refuses any node
   running another team's Job, so different teams' Jobs never share a node

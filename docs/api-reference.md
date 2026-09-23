@@ -7,6 +7,7 @@ Every route the controller and logs service register, with the scope each requir
 
 | Method | Path | Scope |
 |---|---|---|
+| `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
 | `PUT` | `/api/v1/agents/{name}` | `admin` |
 | `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
