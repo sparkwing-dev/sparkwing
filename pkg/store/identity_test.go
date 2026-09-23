@@ -123,6 +123,9 @@ func TestIdentityInvitationExpires(t *testing.T) {
 	if got := inv.ExpiresAt.Sub(inv.CreatedAt); got != 7*24*time.Hour {
 		t.Fatalf("invitation lives %s, want 7 days", got)
 	}
+	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, inv.ExpiresAt); !errors.Is(err, store.ErrInvitationClosed) {
+		t.Fatalf("accepting at the expiry instant = %v, want ErrInvitationClosed", err)
+	}
 	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, inv.ExpiresAt.Add(time.Second)); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("accepting after expiry = %v, want ErrInvitationClosed", err)
 	}
@@ -152,6 +155,24 @@ func TestIdentityRolesCannotEscalateOrOrphanATeam(t *testing.T) {
 	}
 	if _, err := tn.RemoveMember(ctx, ed.Account.ID, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
 		t.Fatalf("editor removing the owner = %v, want ErrRoleAboveOwn", err)
+	}
+	if _, err := tn.SetMemberRole(ctx, ed.Account.ID, owner.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
+		t.Fatalf("editor demoting the owner = %v, want ErrRoleAboveOwn", err)
+	}
+	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.Role("admin"), time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("owner granting an unknown role = %v, want ErrInvalidInput", err)
+	}
+	if _, err := tn.CreateInvitation(ctx, owner.Account.ID, "z@example.com", store.Role("admin"), time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("owner inviting at an unknown role = %v, want ErrInvalidInput", err)
+	}
+}
+
+// A row holding an unknown role grants nothing, even over another unknown role.
+func TestIdentityUnknownRolesCarryNoAuthority(t *testing.T) {
+	for _, pair := range [][2]store.Role{{"", ""}, {"admin", "admin"}, {"admin", ""}} {
+		if pair[0].AtLeast(pair[1]) {
+			t.Errorf("Role(%q).AtLeast(%q) = true", pair[0], pair[1])
+		}
 	}
 }
 
