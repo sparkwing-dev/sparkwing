@@ -251,10 +251,19 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	team, err := s.store.AcceptInvitation(r.Context(), p.AccountID, r.PathValue("id"), time.Now())
+	acc, err := s.store.AcceptInvitation(r.Context(), p.AccountID, r.PathValue("id"), time.Now())
 	if err != nil {
 		writeIdentityError(w, s, r, "accept invitation", err)
 		return
+	}
+	team := acc.Team
+	if acc.Admitted {
+		observeSignUpOutcome("admitted", "invitation")
+		s.logger.Info("signup.admitted_by_invitation", "account", p.AccountID, "team", string(team))
+	}
+	if g := acc.GateClosed; g != nil {
+		observeSignUpGateClosed(g.Source)
+		s.logger.Warn("signup.gate_closed", "source", g.Source, "reason", g.Reason)
 	}
 	if p.Team != team {
 		if err := s.store.SwitchSessionTeam(r.Context(), p.session, p.AccountID, p.Team, team); err != nil {

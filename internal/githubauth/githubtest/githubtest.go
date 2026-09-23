@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
 )
@@ -22,13 +23,16 @@ type Email struct {
 }
 
 // Person is who a code signs in as. ProfileEmail is the public address on the
-// profile, which a correct client never trusts.
+// profile, which a correct client never trusts. CreatedAt is when the account
+// was opened; zero reports an account opened a year ago, so a suite that is
+// not about account age signs in an established account.
 type Person struct {
 	ID           int64
 	Login        string
 	Name         string
 	ProfileEmail string
 	Emails       []Email
+	CreatedAt    time.Time
 }
 
 // Server is the fake.
@@ -118,7 +122,14 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": p.ID, "login": p.Login, "name": p.Name, "email": p.ProfileEmail})
+	created := p.CreatedAt
+	if created.IsZero() {
+		created = time.Now().AddDate(-1, 0, 0)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": p.ID, "login": p.Login, "name": p.Name, "email": p.ProfileEmail,
+		"created_at": created.UTC().Format(time.RFC3339),
+	})
 }
 
 func (s *Server) handleEmails(w http.ResponseWriter, r *http.Request) {

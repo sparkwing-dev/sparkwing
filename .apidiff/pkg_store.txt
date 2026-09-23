@@ -7,6 +7,8 @@ type Account struct {
 	Name          string
 	ActiveTeam    Team
 	CreatedAt     time.Time
+
+	Waitlisted bool
 }
 type AccountDeletion struct {
 	AccountID string
@@ -492,7 +494,13 @@ const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
 var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
+const DefaultFreeTeamMembers = 10
+const DefaultGitHubMinAccountDays = 7
 const DefaultLeaseDuration = 3 * time.Minute
+const DefaultSignUpDailyLimit = 500
+const DefaultSignUpHourlyLimit = 50
+const DefaultSignUpHourlyWarn = 20
+func DefaultSignUpLimits() SignUpLimits
 const DefaultTeam Team = "default"
 const DefaultWarmCPUClassCores = 2
 const DeletedUserLabel = "deleted user"
@@ -560,6 +568,7 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrStorageQuota = errors.New("storage quota exceeded")
+var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownTeam = errors.New("store: team is not registered")
@@ -567,6 +576,7 @@ var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
 var ErrUnverifiedEmail = errors.New("store: a sign-in needs a verified email")
 var ErrUserNotFound = errors.New("user not found")
+var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
 type Event struct {
 	RunID   string
 	Seq     int64
@@ -830,6 +840,13 @@ type Invitation struct {
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
 }
+type InvitationAcceptance struct {
+	Team Team
+
+	Admitted bool
+
+	GateClosed *SignUpGate
+}
 const InvocationSecretArgsKey = "secret_args"
 func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
@@ -1084,6 +1101,7 @@ var PaidTierQuota = StorageQuota{
 func ParseGitHubRepo(slug string) (GitHubRepo, bool)
 func ParseRunFilter(q url.Values) RunFilter
 func ParseRunFilterValidated(q url.Values) (RunFilter, error)
+func ParseSignUpMode(raw string) (SignUpMode, error)
 const PauseReasonAfter = "pause-after"
 const PauseReasonBefore = "pause-before"
 const PauseReasonOnFailure = "pause-on-failure"
@@ -1357,6 +1375,8 @@ type SignInProfile struct {
 	EmailVerified bool
 	Name          string
 	GivenName     string
+
+	ProviderAccountCreatedAt time.Time
 }
 type SignInResult struct {
 	Account Account
@@ -1366,7 +1386,45 @@ type SignInResult struct {
 	Linked bool
 
 	PersonalTeam Team
+
+	WaitlistReason string
+
+	GateClosed *SignUpGate
 }
+type SignUpConditions struct {
+	ForceWaitlist bool
+
+	FreeTierClosed bool
+
+	FreeTierUnreadable bool
+}
+type SignUpCounts struct {
+	LastHour   int
+	LastDay    int
+	Waitlisted int
+}
+type SignUpGate struct {
+	Mode      SignUpMode
+	Source    string
+	Reason    string
+	SetBy     string
+	UpdatedAt time.Time
+	Limits    SignUpLimits
+}
+type SignUpLimits struct {
+	HourlyLimit int
+
+	DailyLimit int
+
+	HourlyWarn int
+
+	GitHubMinAccountDays int
+
+	FreeTeamMembers int
+}
+type SignUpMode string
+const SignUpOpen SignUpMode = "open"
+const SignUpWaitlist SignUpMode = "waitlist"
 type SkewError struct {
 	DBVersion        int
 	BinaryVersion    int
@@ -1453,7 +1511,7 @@ type StorageUsage struct {
 }
 type Store struct {
 }
-func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (Team, error)
+func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
@@ -1471,6 +1529,8 @@ func (s *Store) AppendEventCharged(
 func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
+func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, now time.Time) ([]Account, error)
+func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, now time.Time) ([]Account, error)
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
@@ -1700,7 +1760,7 @@ func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, 
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error
 func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary) (ExecutorMembershipSnapshot, error)
-func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Time) (SignInResult, error)
+func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
@@ -1734,11 +1794,15 @@ func (s *Store) SetOperatorCreditSettings(
 ) (_ CreditSettings, err error)
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
+func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error)
+func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string, now time.Time) (SignUpGate, error)
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (s *Store) SetStorageAllowance(ctx context.Context, principal string, bytes int64) (StorageQuota, error)
 func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
+func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
+func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
@@ -1768,6 +1832,7 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) ValidateExecutorClaimReservation(ctx context.Context, claimant ClaimIdentity, runID, nodeID, executorName, reservationID string, slot int, resourceDigest string) error
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
+func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) (_ []WaitlistedAccount, err error)
 func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 func SupportsRunCursor(version string) bool
@@ -2084,6 +2149,19 @@ type WaiterResolution struct {
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
+const WaitlistReasonDaily = "daily_signups"
+const WaitlistReasonDeployment = "deployment"
+const WaitlistReasonFreeTier = "free_tier_closed"
+const WaitlistReasonFreeTierUnreadable = "free_tier_unreadable"
+const WaitlistReasonGitHubAge = "github_account_age"
+const WaitlistReasonHourly = "hourly_signups"
+const WaitlistReasonOperator = "operator"
+func WaitlistReasons() []string
+type WaitlistedAccount struct {
+	Account
+	WaitlistedAt time.Time
+	Reason       string
+}
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context

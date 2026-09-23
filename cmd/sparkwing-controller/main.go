@@ -270,6 +270,11 @@ func run(args []string) error {
 	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
 		"comma-separated dashboard callback URLs a sign-in may return to, "+
 			"such as https://app.example.com/auth/google/callback")
+	signUpGate := fs.String("signup-gate", string(store.SignUpOpen),
+		"open or waitlist. waitlist places every new account on the sign-up "+
+			"waitlist whatever the operator's stored setting says; open defers to "+
+			"that setting, which PUT /api/v1/signups changes. Existing accounts are "+
+			"never affected.")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -471,6 +476,7 @@ func run(args []string) error {
 		GitHubClientID:     *githubClientID,
 		GitHubClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
 		RedirectURIs:       *oauthRedirectURIs,
+		SignUpGate:         *signUpGate,
 	}, slog.Default()); err != nil {
 		return err
 	}

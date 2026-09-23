@@ -192,6 +192,45 @@ describe("getMe", () => {
     respond = () => new Response(JSON.stringify(me), { status: 200 });
     assert.deepEqual(await teams.getMe(), { kind: "member", me });
   });
+
+  it("reads a waitlisted account with no team as waitlisted, not as the operator", async () => {
+    const body = {
+      user: { id: "u2", email: "w@x", name: "W" },
+      active_team: null,
+      memberships: [],
+      invitations: [
+        {
+          id: "i1",
+          team_slug: "acme",
+          team_display_name: "Acme",
+          role: "reader",
+        },
+      ],
+      waitlisted: true,
+    };
+    respond = () => new Response(JSON.stringify(body), { status: 200 });
+    assert.deepEqual(await teams.getMe(), {
+      kind: "waitlisted",
+      me: {
+        user: body.user,
+        memberships: [],
+        invitations: body.invitations,
+        waitlisted: true,
+      },
+    });
+  });
+
+  it("reads a waitlisted account that joined a team as a member", async () => {
+    const me = {
+      user: { id: "u3", email: "j@x", name: "J" },
+      active_team: { slug: "acme", display_name: "Acme", role: "reader" },
+      memberships: [],
+      invitations: [],
+      waitlisted: true,
+    };
+    respond = () => new Response(JSON.stringify(me), { status: 200 });
+    assert.deepEqual(await teams.getMe(), { kind: "member", me });
+  });
 });
 
 describe("team administration calls", () => {

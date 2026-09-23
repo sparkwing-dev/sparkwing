@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   type Capabilities,
   type Me,
+  type WaitlistedMe,
   getCapabilities,
   getMe,
   teamsEnabled,
@@ -13,6 +14,7 @@ export type TeamState =
   | { status: "loading" }
   | { status: "single-team" }
   | { status: "ready"; me: Me; caps: Capabilities | null }
+  | { status: "waitlisted"; me: WaitlistedMe }
   | { status: "operator" }
   | { status: "unavailable" };
 
@@ -24,6 +26,7 @@ async function readTeamState(): Promise<TeamState> {
   if (!teamsEnabled(caps)) return { status: "single-team" };
   const me = await getMe();
   if (me.kind === "member") return { status: "ready", me: me.me, caps };
+  if (me.kind === "waitlisted") return { status: "waitlisted", me: me.me };
   return { status: me.kind };
 }
 

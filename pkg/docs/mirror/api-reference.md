@@ -160,6 +160,10 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |
 | `GET` | `/api/v1/secrets/{name}` | `secrets.read` or `team.admin` |
 | `GET` | `/api/v1/services` | `authenticated` |
+| `GET` | `/api/v1/signups` | `admin` |
+| `PUT` | `/api/v1/signups` | `admin` |
+| `GET` | `/api/v1/signups/waitlist` | `admin` |
+| `POST` | `/api/v1/signups/waitlist/approve` | `admin` |
 | `GET` | `/api/v1/storage` | `runs.read` |
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |

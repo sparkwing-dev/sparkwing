@@ -82,6 +82,16 @@ type FloodPolicy struct {
 
 	DedupeWindow time.Duration
 }
+const FreeTierClosed FreeTierState = "closed"
+type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
+func (f FreeTierFunc) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
+const FreeTierOpen FreeTierState = "open"
+type FreeTierSource interface {
+	SignUpFreeTier(ctx context.Context) (FreeTierState, error)
+}
+type FreeTierState string
+const FreeTierThrottled FreeTierState = "throttled"
+const FreeTierUnreadable FreeTierState = "unreadable"
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 type GitHubWebhookBinding struct {
@@ -275,6 +285,7 @@ type Server struct {
 func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
+func (s *Server) CheckFreeTierSource()
 func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
@@ -298,6 +309,7 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
+func (s *Server) WithFreeTier(src FreeTierSource) *Server
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
@@ -322,6 +334,8 @@ func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
+func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
+func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server

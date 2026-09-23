@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 55
+const expectedSchemaVersion = 58
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2015,6 +2015,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyGitHubAppMigrationSQLite(ctx, tx)
 	case 55:
 		return applyDeletionMigrationSQLite(ctx, tx)
+	// safety: v56 and v57 are allocated to billing and storage quotas, which
+	// land separately; these steps keep the ladder gapless until they do.
+	case 56, 57:
+		return nil
+	case 58:
+		return applySignUpGateMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2390,6 +2396,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyGitHubAppMigrationPostgres(ctx, tx)
 	case 55:
 		return applyDeletionMigrationPostgres(ctx, tx)
+	// safety: v56 and v57 are allocated to billing and storage quotas, which
+	// land separately; these steps keep the ladder gapless until they do.
+	case 56, 57:
+		return nil
+	case 58:
+		return applySignUpGateMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

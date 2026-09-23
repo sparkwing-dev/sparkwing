@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -44,6 +45,7 @@ type fixtureOpts struct {
 	key     ed25519.PublicKey
 	// configure adds to the server before it starts serving.
 	configure func(*controller.Server)
+	logger    *slog.Logger
 }
 
 func multiTeamLicense(t *testing.T) (string, ed25519.PublicKey) {
@@ -79,7 +81,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	if key == nil {
 		key, _ = licensetest.NewKey(t)
 	}
-	srv := controller.New(st, nil).EnableAuthFromStore().
+	srv := controller.New(st, o.logger).EnableAuthFromStore().
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect})
@@ -138,6 +140,7 @@ type exchangeBody struct {
 		DisplayName string `json:"display_name"`
 		Role        string `json:"role"`
 	} `json:"active_team"`
+	Waitlisted bool `json:"waitlisted"`
 }
 
 func (f *identityFixture) signIn(p googletest.Person) exchangeBody {

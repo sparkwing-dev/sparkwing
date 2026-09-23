@@ -6,6 +6,8 @@ import { type ReactNode, useState } from "react";
 import {
   type Capabilities,
   type Me,
+  type PendingInvitation,
+  type WaitlistedMe,
   acceptInvitation,
   renameTeam,
 } from "@/lib/teams";
@@ -85,7 +87,11 @@ export function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function InvitationsForMe({ me }: { me: Me }) {
+export function InvitationsForMe({
+  me,
+}: {
+  me: { invitations: PendingInvitation[] };
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   if (me.invitations.length === 0) return null;
   async function accept(id: string, team: string) {
@@ -129,6 +135,36 @@ export function InvitationsForMe({ me }: { me: Me }) {
   );
 }
 
+// Shown to an account the sign-up gate placed on the waitlist. It says what
+// happened and what comes next, and offers any invitation, since a team that
+// invites someone admits them to that team.
+export function WaitlistNotice({ me }: { me: WaitlistedMe }) {
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
+      <InvitationsForMe me={me} />
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
+        <h1 className="text-xl font-bold mb-3">You&apos;re on the list</h1>
+        <div className="space-y-3 text-sm text-[var(--muted)]">
+          <p>
+            We&apos;re letting new accounts in gradually, so we saved yours (
+            <span className="text-[var(--foreground)]">{me.user.email}</span>)
+            on a waitlist without a workspace for now. This also happens when
+            the GitHub account you signed in with is only a few days old.
+          </p>
+          <p>
+            Nothing else is needed from you. Once you&apos;re let in, your
+            workspace will be here the next time you open this page.
+          </p>
+          <p>
+            If a team invites you, you can join it right away; the invitation
+            shows above once it is sent to this address.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TeamShell({
   children,
 }: {
@@ -146,6 +182,9 @@ export default function TeamShell({
         one built-in team.
       </Notice>
     );
+  }
+  if (state.status === "waitlisted") {
+    return <WaitlistNotice me={state.me} />;
   }
   if (state.status === "operator") {
     return (
@@ -273,9 +312,11 @@ function TeamHeader({ me }: { me: Me }) {
           {team.slug}
         </div>
       </div>
-      <Link href="/team/new" className={quietButtonClass}>
-        New team
-      </Link>
+      {me.waitlisted ? null : (
+        <Link href="/team/new" className={quietButtonClass}>
+          New team
+        </Link>
+      )}
     </div>
   );
 }

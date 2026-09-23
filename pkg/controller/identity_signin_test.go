@@ -43,6 +43,7 @@ type meBody struct {
 		TeamSlug string `json:"team_slug"`
 		Role     string `json:"role"`
 	} `json:"invitations"`
+	Waitlisted bool `json:"waitlisted"`
 }
 
 func TestGoogleSignInCreatesAnAccountAndItsPersonalSpace(t *testing.T) {

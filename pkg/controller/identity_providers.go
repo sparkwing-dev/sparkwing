@@ -65,6 +65,7 @@ func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI 
 	return store.SignInProfile{
 		Provider: store.ProviderGitHub, Subject: p.Subject, Email: p.Email,
 		EmailVerified: true, Name: p.Name, GivenName: firstWord(given),
+		ProviderAccountCreatedAt: p.CreatedAt,
 	}, nil
 }
 

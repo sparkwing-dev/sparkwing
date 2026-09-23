@@ -19,7 +19,7 @@ func googleProfile(sub, email string) store.SignInProfile {
 
 func signIn(t *testing.T, st *store.Store, sub, email string) store.SignInResult {
 	t.Helper()
-	res, err := st.ResolveSignIn(context.Background(), googleProfile(sub, email), time.Now())
+	res, err := st.ResolveSignIn(context.Background(), googleProfile(sub, email), store.SignUpConditions{}, time.Now())
 	if err != nil {
 		t.Fatalf("ResolveSignIn(%s): %v", email, err)
 	}
@@ -55,7 +55,7 @@ func TestIdentitySignInRefusesAnUnverifiedEmail(t *testing.T) {
 	st := storetest.Open(t)
 	p := googleProfile("s1", "u@example.com")
 	p.EmailVerified = false
-	if _, err := st.ResolveSignIn(context.Background(), p, time.Now()); !errors.Is(err, store.ErrUnverifiedEmail) {
+	if _, err := st.ResolveSignIn(context.Background(), p, store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrUnverifiedEmail) {
 		t.Fatalf("ResolveSignIn = %v, want ErrUnverifiedEmail", err)
 	}
 }
@@ -98,9 +98,9 @@ func TestIdentityInvitationNeedsTheInvitedVerifiedEmail(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, y.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrEmailMismatch) {
 		t.Fatalf("y accepting x's invitation = %v, want ErrEmailMismatch", err)
 	}
-	team, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now())
-	if err != nil || team != owner.PersonalTeam {
-		t.Fatalf("x accepting = %s, %v", team, err)
+	acc, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now())
+	if err != nil || acc.Team != owner.PersonalTeam || acc.Admitted {
+		t.Fatalf("x accepting = %+v, %v", acc, err)
 	}
 	if _, err := st.AcceptInvitation(ctx, x.Account.ID, inv.ID, time.Now()); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("second accept = %v, want ErrInvitationClosed", err)
@@ -267,7 +267,7 @@ func TestIdentityConcurrentFirstSignInsShareALocalPart(t *testing.T) {
 	for i := range n {
 		go func() {
 			res, err := st.ResolveSignIn(context.Background(),
-				googleProfile(fmt.Sprintf("s-%d", i), fmt.Sprintf("sam@host%d.example", i)), time.Now())
+				googleProfile(fmt.Sprintf("s-%d", i), fmt.Sprintf("sam@host%d.example", i)), store.SignUpConditions{}, time.Now())
 			errs <- err
 			slugs <- res.PersonalTeam
 		}()
