@@ -61,6 +61,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
 		"queue, because a claim that settled only its own team would leave the rest pending forever",
+	"settleTriggerCreditsTx": "asks which team owns a trigger id and whether its claim holds a credit " +
+		"reservation; the settlement that follows is scoped to that team",
 	"settleActiveTeamTx":               "picks the account's first team from all of its memberships when its sticky team is gone",
 	"(*Store).AccountMemberships":      "lists the teams one account belongs to, which is a question across teams by definition",
 	"(*Store).OpenInvitationsForEmail": "lists the invitations addressed to one verified email from every team that sent one",

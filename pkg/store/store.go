@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 52
+const expectedSchemaVersion = 53
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2009,6 +2009,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 			return err
 		}
 		return applyTeamGrantReferenceMigration(ctx, tx)
+	case 53:
+		return ensureColumnsSQLite(ctx, tx, "triggers", triggersCreditCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2378,6 +2380,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return applyTeamGrantReferenceMigration(ctx, tx)
+	case 53:
+		return addColumnsTx(ctx, tx, "triggers", triggersCreditCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -6805,18 +6809,37 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 // caller that sees false knows its work was superseded and that the
 // current claim owns the outcome.
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	res, err := s.exec(ctx,
+	return s.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers SET status = ?, lease_expires_at = NULL
 		  WHERE id = ? AND claim_seq = ?`,
 		triggerStatusDone, id, seq)
+}
+
+// endTriggerClaim settles the claim's credit reservation and applies the
+// guarded write that ends it, in one transaction, reporting whether the guard
+// admitted the write. A refused write rolls the settlement back with it, so a
+// superseded caller cannot settle a claim it no longer holds.
+func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := settleTriggerCreditsTx(ctx, tx, id, time.Now(), refundAll); err != nil {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	if err != nil {
+	if err != nil || n == 0 {
 		return false, err
 	}
-	return n > 0, nil
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // FinishLapsedClaim closes out a claimed trigger whose lease expired and whose
@@ -6824,7 +6847,7 @@ func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq in
 // not. A re-dispatch inherits the previous attempt's terminal run row, so a run
 // that ended before this claim began says nothing about the dispatch holding it.
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
-	res, err := s.exec(ctx,
+	return s.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers SET status = ?, lease_expires_at = NULL
 		  WHERE id = ? AND status = ?
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
@@ -6835,14 +6858,6 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 		                   AND runs.finished_at > triggers.claimed_at
 		                   AND `+runTerminalIn+`)`,
 		triggerStatusDone, id, triggerStatusClaimed, time.Now().UnixNano())
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
 }
 
 // FinishRunAtGeneration writes a run's terminal status only while seq is
@@ -6929,21 +6944,13 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // no row at all reads as not started, which is also what an unclaimed
 // trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	res, err := s.exec(ctx,
+	return s.endTriggerClaim(ctx, id, true,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
 		  WHERE id = ? AND status = ?
 		    AND COALESCE((SELECT status FROM runs WHERE runs.id = triggers.id), ?) = ?`,
 		triggerStatusPending, id, triggerStatusClaimed, runStatusPending, runStatusPending)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending
@@ -6954,20 +6961,12 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 // a lease. The generation guard keeps a shutting-down consumer from
 // yanking a claim another consumer has already taken.
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	res, err := s.exec(ctx,
+	return s.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
 		  WHERE id = ? AND claim_seq = ? AND status = ?`,
 		triggerStatusPending, id, seq, triggerStatusClaimed)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
 }
 
 // TriggerClaimGeneration returns a trigger's current claim generation,
@@ -7256,7 +7255,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		return nil, notFound("claimable trigger", "")
 	}
-	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
+	if err := reserveTriggerCreditsTx(ctx, tx, claimant, t.Team, t.ID, now); err != nil {
 		return nil, err
 	}
 
@@ -7390,7 +7389,7 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM triggers
 		  WHERE status = ? AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ?`,
+		    AND lease_expires_at < ?`+tx.forUpdate(),
 		triggerStatusClaimed, now)
 	if err != nil {
 		return nil, err
@@ -7410,6 +7409,11 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	}
 	if len(ids) == 0 {
 		return nil, nil
+	}
+	for _, id := range ids {
+		if err := settleTriggerCreditsTx(ctx, tx, id, time.Unix(0, now), false); err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -7441,21 +7445,11 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
 			fence.ClaimGeneration, triggerStatusDone, triggerStatusClaimed, time.Now().UnixNano())
 	}
-	res, err := s.exec(ctx, query, args...)
-	if err != nil {
+	finished, err := s.endTriggerClaim(ctx, id, false, query, args...)
+	if err != nil || !fenced || finished {
 		return err
 	}
-	if !fenced {
-		return nil
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return ErrLockHeld
-	}
-	return nil
+	return ErrLockHeld
 }
 
 func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
@@ -7907,7 +7901,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team); err != nil {
 		return nil, err
 	}
-	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
+	if err := reserveTriggerCreditsTx(ctx, tx, claimant, t.Team, t.ID, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
