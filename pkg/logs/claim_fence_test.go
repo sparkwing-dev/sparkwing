@@ -67,6 +67,10 @@ func TestLogs_StaleNodeClaimCannotAppendAfterRetryAward(t *testing.T) {
 	if err := logClient.Append(staleCtx, "source", "build", []byte("before\n")); err != nil {
 		t.Fatal(err)
 	}
+	// The claim holder can seal a stream while its claim is current.
+	if err := logClient.Seal(staleCtx, "source", "build", logs.Seal{Stream: "holder", FinalSeq: 0}); err != nil {
+		t.Fatalf("holder seal = %v", err)
+	}
 
 	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = 'source' AND node_id = 'build'`, time.Now().Add(-time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
@@ -89,6 +93,16 @@ func TestLogs_StaleNodeClaimCannotAppendAfterRetryAward(t *testing.T) {
 
 	if err := logClient.Append(staleCtx, "source", "build", []byte("stale\n")); !errors.Is(err, logs.ErrClaimConflict) {
 		t.Fatalf("stale append = %v, want ErrClaimConflict", err)
+	}
+	if err := logClient.Seal(staleCtx, "source", "build", logs.Seal{Stream: "stale", FinalSeq: 1, Lines: 1}); !errors.Is(err, logs.ErrClaimConflict) {
+		t.Fatalf("stale seal = %v, want ErrClaimConflict", err)
+	}
+	report, err := logClient.ReadSeals(ctx, "source", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Streams) != 1 || report.Streams[0].Stream != "holder" {
+		t.Fatalf("seals after a refused one = %+v", report.Streams)
 	}
 	body, err := logClient.Read(ctx, "source", "build")
 	if err != nil {

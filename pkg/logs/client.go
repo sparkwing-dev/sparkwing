@@ -199,39 +199,17 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 		return err
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
-	if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
-		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
-		req.Header.Set(store.ClaimMembershipHeader, fence.MembershipID)
-		req.Header.Set(store.ClaimReservationHeader, fence.ReservationID)
-		req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
-	}
-	if ordinal, ok := store.ExecutionAttemptOrdinalFromContext(ctx); ok {
-		req.Header.Set(store.AttemptOrdinalHeader, fmt.Sprint(ordinal))
-	}
-	if fence, ok := store.TriggerClaimFenceFromContext(ctx); ok {
-		req.Header.Set(store.TriggerGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	setClaimHeaders(ctx, req)
+	if seq, ok := appendSequenceFromContext(ctx); ok {
+		req.Header.Set(LogStreamHeader, seq.stream)
+		req.Header.Set(LogSeqHeader, fmt.Sprint(seq.seq))
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	body, _ := io.ReadAll(resp.Body)
-	trimmed := string(bytes.TrimSpace(body))
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return &AuthError{
-			Status:  resp.StatusCode,
-			Scope:   parseMissingScope(trimmed),
-			RawBody: trimmed,
-		}
-	}
-	if resp.StatusCode == http.StatusConflict {
-		return fmt.Errorf("%w: %s", ErrClaimConflict, trimmed)
-	}
-	return fmt.Errorf("logs append %d: %s", resp.StatusCode, trimmed)
+	return writeResponseError("logs append", resp)
 }
 
 func parseMissingScope(body string) string {

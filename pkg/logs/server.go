@@ -58,6 +58,7 @@ type Server struct {
 	egress *egress.Meter
 
 	archive *archive
+	seals   sealTrackers
 
 	controllerURL string
 	authCache     sync.Map
@@ -182,6 +183,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))))
 	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))))
 	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun)), scopeLogsDelete))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, http.HandlerFunc(s.handleReadSeals)))))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))
 
 	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.withRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))))
@@ -625,6 +628,11 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	seq, numbered, err := appendSequenceFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	defer func() { _ = r.Body.Close() }()
 	reserved := int64(maxAppendRequestBytes)
@@ -690,7 +698,19 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	// safety: a numbered line counts as received once its claim is checked,
+	// even when a cap stores none of it, because the writer delivered it.
+	observe := func() error {
+		if !numbered {
+			return nil
+		}
+		return s.observeSequence(root, runID, nodeID, name, seq)
+	}
 	if len(plan.write) == 0 {
+		if err := observe(); err != nil {
+			s.storeError(w, "record log sequence", err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -772,6 +792,10 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	s.ceiling.Record(stored, objects)
 	if s.archive != nil {
 		s.archive.volume.add(team, stored)
+	}
+	if err := observe(); err != nil {
+		s.storeError(w, "record log sequence", err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
