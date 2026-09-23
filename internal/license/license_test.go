@@ -170,3 +170,16 @@ func TestResolveGrantsAValidLicense(t *testing.T) {
 		t.Fatal("a valid multi-team license resolves to nothing")
 	}
 }
+
+func TestVerifyGrantsOnlyTheListedFeatures(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	terms := multiTeamTerms()
+	terms.Features = []string{"billing"}
+	lic, err := license.Verify(licensetest.Sign(t, priv, terms), pub, now)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if lic.Allows(license.FeatureMultiTeam, now) {
+		t.Fatal("a license without multi-team allows multi-team")
+	}
+}
