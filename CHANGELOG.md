@@ -551,6 +551,14 @@ unlock.
   `POST /api/v1/team/runner-tokens` requires `repos`, and the machines page
   asks for them. See
   [migration guide](migrations/_unreleased.md#a-runner-without-the-git-cache-names-the-repositories-it-may-build).
+- **runner:** a direct-source checkout reads no system or global git config
+  and skips LFS smudging, so a fetched tree cannot name a filter driver or
+  hook that runs; the fetch refuses http redirects, hosts that resolve to
+  internal or special-purpose addresses, and cluster names, runs ssh in batch
+  mode with strict host keys and no forwarding, and gives up after ten
+  minutes. Mirrors are keyed by a normalized remote and capped at 20 and
+  10 GiB, and a `.sparkwing` symlink is refused. See
+  [Team runners fetch source themselves](docs/local-execution.md#team-runners-fetch-source-themselves).
 - **controller (Breaking):** a trigger whose `git.repo_url`,
   `GITHUB_REPOSITORY` and `github_owner`/`github_repo` name different
   repositories is refused with 400, and a runner refuses such a stored

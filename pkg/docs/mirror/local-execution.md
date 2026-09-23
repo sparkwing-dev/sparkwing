@@ -574,6 +574,23 @@ https or ssh, a remote that carries a credential, and a commit that is not a
 full hex object id. `sparkwing pipeline trigger` therefore needs a commit that
 is already pushed, and `--working-tree` needs the operator's cache.
 
+Only the fetch reads the machine's git config, for its credential helpers,
+`insteadOf` rules and ssh command. Every other git step, the checkout
+included, runs with no system or global config and with LFS smudging off, so a
+filter driver, hook or fsmonitor that the fetched tree's `.gitattributes`
+names cannot run. The fetch refuses http redirects, and ssh runs with
+`BatchMode=yes`, `StrictHostKeyChecking=yes`, `ForwardAgent=no` and
+`ClearAllForwardings=yes` appended to the machine's own ssh command. Before
+fetching, the runner resolves the host and refuses one that resolves to a
+loopback, private, link-local, CGNAT, NAT64 or other special-purpose address,
+and it refuses cluster names such as `kubernetes` and `*.svc`. git resolves
+the name again when it connects, so a name whose answer changes in between
+(DNS rebinding) is only narrowed, not stopped. A fetch gives up after ten
+minutes. The runner keeps at most 20 mirrors and 10 GiB of them, evicting the
+least recently used, and deletes a mirror that alone exceeds the size cap
+after its fetch, failing the run. A `.sparkwing` that is a symlink, or that
+resolves outside the checkout, is refused.
+
 ### Remote machine capacity
 
 `sparkwing-runner agent` runs claim mode, the mode that executes work. Its
