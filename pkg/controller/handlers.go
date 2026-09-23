@@ -83,7 +83,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	objectStore, objectStoreProblems := objectStoreHealth()
+	objectStore, objectStoreProblems := objectStoreHealth(s.bucketMeasured())
 	problems = append(problems, objectStoreProblems...)
 
 	egressState, egressProblems := s.egressHealth()

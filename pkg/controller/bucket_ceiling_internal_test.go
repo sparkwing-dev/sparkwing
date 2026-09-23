@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -78,5 +80,60 @@ func TestBucketUsageSurfacesAFailedMeasurement(t *testing.T) {
 
 	if _, err := s.bucketUsage(context.Background()); !errors.Is(err, want) {
 		t.Fatalf("bucketUsage error = %v, want it to wrap %v", err, want)
+	}
+}
+
+// A controller pointed at a bucket measures it whether or not a ceiling is
+// set, so the totals it reports are the bucket's, never zeros.
+func TestTheBucketIsMeasuredWithNoCeilingSet(t *testing.T) {
+	ceiling := objectguard.NewCeiling(objectguard.CeilingConfig{})
+	store := &measuredStore{usage: storage.StoreUsage{Bytes: 69 << 20, Objects: 412, ObservedAt: time.Now()}}
+	s := New(nil, nil).WithBucketUsage(store)
+	if ran, err := s.measureBucketLeased(context.Background(), ceiling, 0); err != nil || !ran {
+		t.Fatalf("measure = %t, %v", ran, err)
+	}
+	state := ceiling.State()
+	if state.Bytes != 69<<20 || state.Objects != 412 || state.ReconciledAt.IsZero() || state.Incomplete {
+		t.Fatalf("an unlimited bucket's state = %+v, want the measured 69 MiB in 412 objects", state)
+	}
+	if state.Enforced || state.Frozen {
+		t.Fatalf("measuring an unlimited bucket enforced or froze it: %+v", state)
+	}
+	summary, problems := objectStoreHealth(true)
+	if _, ok := summary["ceiling"]; !ok || len(problems) != 0 {
+		t.Fatalf("health with a measured bucket = %v %v, want a ceiling summary and no problem", summary, problems)
+	}
+}
+
+// A measurement that fails says so in the ceiling's state and in health,
+// rather than leaving the last totals to read as current.
+func TestAFailedBucketMeasurementReachesHealth(t *testing.T) {
+	limiter, err := objectguard.Shared()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ceiling := limiter.Ceiling()
+	saved := ceiling.State()
+	t.Cleanup(func() {
+		ceiling.Configure(objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{
+			MaxBytes: saved.MaxBytes, MaxObjects: saved.MaxObjects, WarnBytes: saved.WarnBytes, WarnObjects: saved.WarnObjects,
+		}})
+		ceiling.Observe(objectguard.Usage{})
+	})
+	ceiling.Configure(objectguard.CeilingConfig{})
+	s := New(nil, nil).WithBucketUsage(&measuredStore{err: errors.New("AccessDenied: list bucket")})
+	s.runBucketCeiling(context.Background())
+	state := ceiling.State()
+	if !state.Incomplete || !strings.Contains(state.MeasureError, "AccessDenied") {
+		t.Fatalf("state after a failed measurement = %+v, want it incomplete and naming the error", state)
+	}
+	summary, problems := objectStoreHealth(true)
+	bucket, _ := summary["ceiling"].(map[string]any)
+	if bucket["measurement_incomplete"] != true || len(problems) == 0 || !strings.Contains(strings.Join(problems, "\n"), "measure") {
+		t.Fatalf("health after a failed measurement = %v %v, want it incomplete with a problem", summary, problems)
+	}
+	// Negative control: a controller with no bucket reports none.
+	if summary, problems := objectStoreHealth(false); summary["ceiling"] != nil || len(problems) != 0 {
+		t.Fatalf("health with no bucket = %v %v", summary, problems)
 	}
 }
