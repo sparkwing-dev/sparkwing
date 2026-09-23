@@ -657,7 +657,8 @@ back as `confirm_slug`. The request closes the team in one transaction: its
 members leave it and their sessions move to another team they belong to, every
 token the team holds is revoked, open invitations are withdrawn, queued runs are
 cancelled and running ones asked to stop, and the team no longer resolves for
-any request. A background pass, once a minute, then deletes the team's logs
+any request. A background pass, once a minute and at least 30 seconds after
+the request, then deletes the team's logs
 through the logs service, its artifacts and build cache through the cache
 service, and its rows in every team-owned table, secrets included, and frees
 the slug. A pass that fails leaves the deletion pending with the error recorded

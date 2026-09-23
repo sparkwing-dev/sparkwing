@@ -91,6 +91,10 @@ func (f *identityFixture) seedRun(team store.Team, id string) {
 	}
 }
 
+// afterCacheWindow is a pass time past the window in which another replica
+// may still write through a tenant handle it cached before the request.
+func afterCacheWindow() time.Time { return time.Now().Add(time.Minute) }
+
 func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	logs, cache, ts := newStorageFakes(t)
 	f := newDeletionFixture(t, ts)
@@ -142,7 +146,11 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 		t.Fatalf("editor's active team after acme's deletion = %+v, want their own space", em.ActiveTeam)
 	}
 
-	f.srv.ProcessTeamDeletions(context.Background())
+	f.srv.ProcessTeamDeletions(context.Background(), time.Now())
+	if got := logs.seen(); len(got) != 0 {
+		t.Fatalf("a pass inside the tenant-cache window deleted logs: %v", got)
+	}
+	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
 	if got := logs.seen(); len(got) != 1 || got[0] != "DELETE /api/v1/logs/run-acme Bearer logs-admin" {
 		t.Fatalf("logs service saw %v", got)
 	}
@@ -170,7 +178,7 @@ func TestTeamDeletionWaitsOutAFailingLogsServiceAndThenFinishes(t *testing.T) {
 		t.Fatalf("delete = %d", code)
 	}
 
-	f.srv.ProcessTeamDeletions(context.Background())
+	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
 	var mine []teamDeletionBody
 	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
 	if len(mine) != 1 || mine[0].State != store.TeamDeletionPending || mine[0].Attempts != 1 || mine[0].LastError == "" {
@@ -182,7 +190,7 @@ func TestTeamDeletionWaitsOutAFailingLogsServiceAndThenFinishes(t *testing.T) {
 	}
 
 	logs.answer(http.StatusNoContent)
-	f.srv.ProcessTeamDeletions(context.Background())
+	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
 	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
 	if len(mine) != 1 || mine[0].State != store.TeamDeletionDone {
 		t.Fatalf("after the service recovered = %+v, want done", mine)

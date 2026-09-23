@@ -223,7 +223,7 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		s.ProcessTeamDeletions(ctx)
+		s.ProcessTeamDeletions(ctx, time.Now())
 		select {
 		case <-ctx.Done():
 			return
@@ -232,12 +232,13 @@ func (s *Server) runTeamDeletions(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// ProcessTeamDeletions finishes every pending team deletion once: it removes
-// each team's stored objects, then its rows. A deletion that fails stays
-// pending with the failure recorded, and the next pass retries it from the
-// start, because every step removes only what is still there. ServeWith
-// runs it on a timer; a process that serves Handler directly calls it.
-func (s *Server) ProcessTeamDeletions(ctx context.Context) {
+// ProcessTeamDeletions finishes, as of now, every pending team deletion
+// requested at least one tenant-cache lifetime earlier: it removes each
+// team's stored objects, then its rows. A deletion that fails stays pending
+// with the failure recorded, and the next pass retries it from the start,
+// because every step removes only what is still there. ServeWith runs it on
+// a timer; a process that serves Handler directly calls it.
+func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time) {
 	op := s.store.AsOperator()
 	pending, err := op.PendingTeamDeletions(ctx)
 	if err != nil {
@@ -245,6 +246,12 @@ func (s *Server) ProcessTeamDeletions(ctx context.Context) {
 		return
 	}
 	for _, d := range pending {
+		// safety: a replica may still hold a tenant handle cached before the
+		// request and write through it until the handle lapses; purging after
+		// that leaves no such row behind under a slug someone may take next.
+		if now.Sub(d.RequestedAt) < tenantCacheTTL {
+			continue
+		}
 		if err := s.purgeTeam(ctx, d.Team); err != nil {
 			s.logger.Warn("team deletion incomplete; retrying next pass", "team", string(d.Team), "err", err)
 			if rerr := op.RecordTeamDeletionFailure(ctx, d.Team, err.Error()); rerr != nil {

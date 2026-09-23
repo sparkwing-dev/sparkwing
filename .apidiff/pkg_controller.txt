@@ -272,7 +272,7 @@ func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) MultiTeam() bool
-func (s *Server) ProcessTeamDeletions(ctx context.Context)
+func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
 func (s *Server) Shutdown(ctx context.Context) error
