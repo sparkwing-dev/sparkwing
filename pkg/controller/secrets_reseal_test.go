@@ -176,6 +176,40 @@ func TestResealStoredSecrets_RefusesAKeyThatOpensNothingStored(t *testing.T) {
 	}
 }
 
+// Envelopes the probe cannot judge prove nothing about the key, so a table
+// that holds envelopes but none the probe can open or fail is refused rather
+// than resealed: the reseal would seal its plaintext rows under a key nobody
+// checked.
+func TestResealStoredSecrets_RefusesWhenNoSampledEnvelopeCanJudgeTheKey(t *testing.T) {
+	ctx := context.Background()
+	st := openSQLiteBindingStore(t)
+	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	acme, err := st.ForTeam(ctx, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightKey, _ := secrets.GenerateKey()
+	wrongKey, _ := secrets.GenerateKey()
+	right, _ := secrets.NewCipher(rightKey)
+	wrong, _ := secrets.NewCipher(wrongKey)
+	legacy, _ := right.Seal("legacy-value")
+	now := time.Now().UTC()
+	if err := acme.CreateOrReplaceSecret(store.Secret{Name: "COPIED", Value: legacy, Principal: "seed", Masked: true}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateOrReplaceSecret(store.Secret{Name: "LATER", Value: "written-without-a-key", Principal: "seed", Masked: true}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.New(st, nil).WithSecretsCipher(wrong).ResealStoredSecrets(ctx); err == nil {
+		t.Fatal("ResealStoredSecrets proceeded with a key no sampled envelope could judge")
+	}
+	if got := rawSecretRows(t, st)["default/LATER/"].value; got != "written-without-a-key" {
+		t.Fatalf("a refused reseal still rewrote the plaintext row to %.12q...", got)
+	}
+}
+
 // One team's envelope written into another team's row, by anyone who can
 // write the database, does not open for that team's runner.
 func TestSecrets_EnvelopeMovedToAnotherTeamDoesNotOpen(t *testing.T) {

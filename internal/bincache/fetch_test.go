@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -922,4 +923,40 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// A cache grant reads mirrors the operator registered and cannot register
+// one, so a run holding a grant fetches without asking to register.
+func TestFetchPipelineSourceWithAGrantSkipsRegistration(t *testing.T) {
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable (no git-http-backend on PATH)")
+	}
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
+	registered := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/git/register", func(w http.ResponseWriter, r *http.Request) {
+		registered = true
+		http.Error(w, "operator token required", http.StatusForbidden)
+	})
+	mux.Handle("/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/git",
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv(authwire.CacheGrantEnv, authwire.CacheGrantPrefix+"payload.sig")
+
+	sparkwingDir, err := FetchPipelineSource(context.Background(), srv.URL, testRepoSSH, "main", tipSHA, t.TempDir())
+	if err != nil {
+		t.Fatalf("FetchPipelineSource with a grant: %v", err)
+	}
+	if registered {
+		t.Error("a grant holder asked the cache to register a mirror")
+	}
+	if _, err := os.Stat(filepath.Join(sparkwingDir, "marker")); err != nil {
+		t.Fatalf("fetched tree: %v", err)
+	}
 }

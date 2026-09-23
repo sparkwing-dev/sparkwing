@@ -324,8 +324,12 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		name = sourceurl.ClaimedRepoNameFromURL(repoSSH)
 	}
 
-	if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil {
-		return "", fmt.Errorf("git register: %w", err)
+	// safety: a cache grant reads mirrors the operator registered and the
+	// cache refuses it a registration, so asking would only fail the fetch.
+	if !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
+		if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil {
+			return "", fmt.Errorf("git register: %w", err)
+		}
 	}
 
 	cloneURL := strings.TrimRight(gcURL, "/") + "/git/" + name

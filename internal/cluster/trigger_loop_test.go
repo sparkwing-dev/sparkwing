@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -273,5 +274,39 @@ func waitForTriggerHelper(path string, timeout time.Duration) error {
 		case <-deadline.C:
 			return fmt.Errorf("trigger helper did not publish readiness within %s", timeout)
 		}
+	}
+}
+
+// A metered credential's trigger claims are all refused while the loop runs
+// nodes in its own process, so the loop stops and says why instead of
+// polling a refusal forever.
+func TestRunTriggerLoopStopsWhenMeteredInProcessClaimsAreRefused(t *testing.T) {
+	var nodeRunner atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/triggers/claim" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var body struct {
+			NodeRunner string `json:"node_runner"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		nodeRunner.Store(body.NodeRunner)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"metered_inprocess_nodes","message":"refused"}`))
+	}))
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: ts.URL, GitcacheURL: ts.URL, WorkRoot: t.TempDir(),
+		Poll: time.Millisecond, MaxConcurrent: 1, Logger: discardLogger(),
+	})
+	if !errors.Is(err, store.ErrMeteredInProcessNodes) {
+		t.Fatalf("RunTriggerLoop = %v, want it to stop with ErrMeteredInProcessNodes", err)
+	}
+	if got, _ := nodeRunner.Load().(string); got != "inprocess" {
+		t.Fatalf("the claim named node runner %q, want inprocess", got)
 	}
 }

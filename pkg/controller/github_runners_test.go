@@ -91,8 +91,13 @@ func (f *ghFixture) credential(job githuboidctest.Job, team string) string {
 }
 
 // work writes a pending trigger, its run and a ready node for slug into team,
-// the way a push webhook records a GitHub repository.
+// the way a push webhook records a push of main at the default commit.
 func (f *ghFixture) work(team, runID, slug string) {
+	f.t.Helper()
+	f.workAt(team, runID, slug, "main", githuboidctest.DefaultSHA)
+}
+
+func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	f.t.Helper()
 	ctx := context.Background()
 	tn, err := f.store.ForTeam(ctx, store.Team(team))
@@ -103,9 +108,10 @@ func (f *ghFixture) work(team, runID, slug string) {
 	now := time.Now()
 	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: runID, Pipeline: "build", Repo: slug, GithubOwner: owner, GithubRepo: name, CreatedAt: now,
+		GitBranch: branch, GitSHA: sha,
 	}, store.Run{
 		ID: runID, Pipeline: "build", Status: "pending", DeclaredRepo: slug, GithubOwner: owner, GithubRepo: name,
-		CreatedAt: now, StartedAt: now,
+		CreatedAt: now, StartedAt: now, GitBranch: branch, GitSHA: sha,
 	}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -289,6 +295,85 @@ func TestGitHubRunnerCredentialsPerTeamAreBounded(t *testing.T) {
 	}
 	if _, code := f.exchange(f.gh.Token(widgetsJob, ghAudience), owner.team); code != http.StatusTooManyRequests {
 		t.Fatalf("21st credential = %d, want 429", code)
+	}
+}
+
+// A job's ID token names the push it runs for. Its credential reaches only
+// work recorded for that same branch and commit, so a workflow on a feature
+// branch cannot claim main's runs or read the secrets they are given.
+func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
+	f := newGHFixture(t)
+	owner := f.user("o", "olga@example.com")
+	f.bind(owner, widgetsJob)
+	const featureSHA = "fedcba9876543210fedcba9876543210fedcba98"
+	feature := widgetsJob
+	feature.Ref, feature.SHA = "refs/heads/feature", featureSHA
+	f.workAt(owner.team, "run-main", "Acme/Widgets", "main", githuboidctest.DefaultSHA)
+	f.workAt(owner.team, "run-feature-old", "Acme/Widgets", "feature", githuboidctest.DefaultSHA)
+	runner := f.credential(feature, owner.team)
+	claim := map[string]any{"holder_id": "gh-1", "labels": []string{controller.GitHubActionsLabel}}
+
+	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, nil); code != http.StatusNoContent {
+		t.Fatalf("claim with only main's and an older feature commit's work queued = %d, want 204", code)
+	}
+	if code := f.call("POST", "/api/v1/triggers/claim", runner, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("trigger claim with only other pushes' triggers = %d, want 204", code)
+	}
+	for _, run := range []string{"run-main", "run-feature-old"} {
+		if code := f.call("POST", "/api/v1/runs/"+run+"/nodes/compile/claim", runner, map[string]any{"holder_id": "gh-1"}, nil); code != http.StatusForbidden {
+			t.Errorf("named claim on %s = %d, want 403", run, code)
+		}
+		if code := f.call("GET", "/api/v1/runs/"+run, runner, nil, nil); code != http.StatusForbidden {
+			t.Errorf("read %s = %d, want 403", run, code)
+		}
+		if code := f.call("POST", "/api/v1/triggers/"+run+"/claim", runner, nil, nil); code != http.StatusForbidden {
+			t.Errorf("claim trigger %s by id = %d, want 403", run, code)
+		}
+	}
+
+	f.workAt(owner.team, "run-feature", "Acme/Widgets", "feature", featureSHA)
+	var node struct {
+		RunID string `json:"run_id"`
+	}
+	if code := f.call("POST", "/api/v1/nodes/claim", runner, claim, &node); code != http.StatusOK || node.RunID != "run-feature" {
+		t.Fatalf("claim = %d %+v, want run-feature", code, node)
+	}
+}
+
+// A pull_request or pull_request_target job runs code or input the
+// repository's owners did not push, so it gets no credential; neither does a
+// job for anything but a branch push.
+func TestGitHubRunnerExchangeRefusesAnythingButABranchPush(t *testing.T) {
+	f := newGHFixture(t)
+	owner := f.user("o", "olga@example.com")
+	f.bind(owner, widgetsJob)
+	refusals := map[string]githuboidctest.Job{}
+	for _, event := range []string{"pull_request", "pull_request_target"} {
+		job := widgetsJob
+		job.EventName, job.Ref = event, "refs/pull/7/merge"
+		refusals[event] = job
+		onBranch := widgetsJob
+		onBranch.EventName = event
+		refusals[event+" naming a branch ref"] = onBranch
+	}
+	tag := widgetsJob
+	tag.Ref = "refs/tags/v1.0.0"
+	refusals["tag push"] = tag
+	for name, job := range refusals {
+		t.Run(name, func(t *testing.T) {
+			if got, code := f.exchange(f.gh.Token(job, ghAudience), owner.team); code != http.StatusForbidden || got.Token != "" {
+				t.Fatalf("exchange = %d %+v, want 403 and no credential", code, got)
+			}
+		})
+	}
+	noSHA := f.gh.TokenWith(widgetsJob, ghAudience, map[string]any{"sha": nil})
+	if got, code := f.exchange(noSHA, owner.team); code/100 == 2 || got.Token != "" {
+		t.Fatalf("exchange without a sha claim = %d %+v, want a refusal", code, got)
+	}
+	dispatch := widgetsJob
+	dispatch.EventName = "workflow_dispatch"
+	if _, code := f.exchange(f.gh.Token(dispatch, ghAudience), owner.team); code != http.StatusCreated {
+		t.Fatalf("workflow_dispatch on a branch = %d, want 201", code)
 	}
 }
 

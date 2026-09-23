@@ -1999,7 +1999,16 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 51:
 		return applyUserKeyTeamScopeMigrationSQLite(ctx, tx)
 	case 52:
-		return applyIdentityMigrationSQLite(ctx, tx)
+		if err := applyIdentityMigrationSQLite(ctx, tx); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "runs", runEventUsageCols); err != nil {
+			return err
+		}
+		if err := backfillRunEventUsageTx(ctx, tx); err != nil {
+			return err
+		}
+		return applyTeamGrantReferenceMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2359,7 +2368,16 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 51:
 		return applyUserKeyTeamScopeMigrationPostgres(ctx, tx)
 	case 52:
-		return applyIdentityMigrationPostgres(ctx, tx)
+		if err := applyIdentityMigrationPostgres(ctx, tx); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "runs", runEventUsageCols); err != nil {
+			return err
+		}
+		if err := backfillRunEventUsageTx(ctx, tx); err != nil {
+			return err
+		}
+		return applyTeamGrantReferenceMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -5490,7 +5508,7 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
-	ghScope, scoped := githubRunnerScopeFrom(ctx)
+	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
 	admitted := map[string]bool{}
 	for range claimScanRounds {
 		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
@@ -5554,7 +5572,7 @@ func (s *Store) readClaimCandidates(
 		args = append(args, warm.warmCores)
 	}
 	scopeClause := ""
-	if ghScope, ok := githubRunnerScopeFrom(ctx); ok {
+	if ghScope, ok := GitHubRunnerScopeFrom(ctx); ok {
 		var scopeArgs []any
 		scopeClause, scopeArgs = ghScope.nodeClause()
 		args = append(args, scopeArgs...)
@@ -6301,12 +6319,24 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
 VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx,
+		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE id = ?`,
+		eventBytes(kind, raw), runID)
 	return seq, err
 }
 
+// safety: an append bumps the run row's event counters, so it takes the run's
+// row lock before the event-sequence lock, the order a claim round takes
+// them in; the other order deadlocks the two on PostgreSQL.
 func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
 	if tx.dialect != DialectPostgres {
 		return nil
+	}
+	if err := lockRunRow(ctx, tx, runID); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
 	return err
@@ -7121,7 +7151,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		sel += " AND trigger_source IN (" + strings.Join(ph, ",") + ")"
 	}
-	scope, scoped := githubRunnerScopeFrom(ctx)
+	scope, scoped := GitHubRunnerScopeFrom(ctx)
 	if scoped {
 		clause, scopeArgs := scope.triggerClause("")
 		sel += clause
@@ -7161,12 +7191,15 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		t.TriggerEnv = env
 		// safety: the oldest trigger stays pending for other workers, and this
 		// scope reports an empty queue until one of them takes it.
-		if !decoded || !TriggerNamesGitHubRepo(&t, scope.Repo) {
+		if !decoded || !scope.admits(&t) {
 			if commitErr := tx.Commit(); commitErr != nil {
 				return nil, commitErr
 			}
 			return nil, notFound("claimable trigger", "")
 		}
+	}
+	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
+		return nil, err
 	}
 
 	expires := now.Add(lease)
@@ -7793,12 +7826,15 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team); err != nil {
+		return nil, err
+	}
+	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

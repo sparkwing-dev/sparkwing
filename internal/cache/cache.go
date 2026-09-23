@@ -13,6 +13,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
@@ -45,6 +46,11 @@ type Config struct {
 
 	APIToken string
 
+	// GrantKey verifies cache grants. The controller signs grants with the
+	// same key, and no runner holds it. Empty accepts no grants. It must
+	// differ from APIToken.
+	GrantKey string
+
 	AllowUnauthenticated bool
 
 	AutoRegisterRepos string
@@ -70,10 +76,13 @@ type Config struct {
 	StoreReconcile time.Duration
 	// EgressDailyAlarmBytes raises the egress alarm, which health
 	// reports, once this pod has sent this many bytes in a UTC day. It
-	// refuses nothing, because this service authenticates one shared
-	// token and so cannot tell one caller's spend from another's. Zero
-	// is off.
+	// refuses nothing. Zero is off.
 	EgressDailyAlarmBytes int64
+	// EgressDailyCapBytes refuses every metered download with 429 once
+	// this pod has sent this many bytes in a UTC day, until the day
+	// rolls. It bounds the pod's bill whoever the callers are. Zero is
+	// off.
+	EgressDailyCapBytes int64
 }
 
 func DefaultConfig() Config {
@@ -117,6 +126,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	// safety: a Secret key holding only a newline must not count as a configured credential.
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
+	cfg.GrantKey = strings.TrimSpace(cfg.GrantKey)
+	if cfg.GrantKey != "" && cfg.GrantKey == cfg.APIToken {
+		return nil, fmt.Errorf("cache: the grant key (--grant-key or $%s) is the operator token; "+
+			"give it a secret of its own, because whoever holds the key signs access to every team's tree",
+			authwire.CacheGrantKeyEnv)
+	}
 	if cfg.APIToken == "" {
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
@@ -179,6 +194,7 @@ func New(cfg Config) (*Server, error) {
 	proxyPublicBase = publicBase
 	proxyTrustForwardedHost = cfg.TrustForwardedHost
 	apiToken = cfg.APIToken
+	grantKey = cfg.GrantKey
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
 	fetchFreshWindow = cfg.FetchFreshWindow
@@ -215,7 +231,10 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
-	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
+	egressCfg := egress.Config{
+		GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes,
+		GlobalDailyCapBytes:   cfg.EgressDailyCapBytes,
+	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
 

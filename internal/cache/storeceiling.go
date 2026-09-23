@@ -33,11 +33,10 @@ var storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
 	Remedy:  storeCeilingRemedy,
 })
 
-// safety: the caller-writable trees are the ones a pipeline can grow without
-// bound; the git mirrors grow with the repositories an operator registered.
-// Every team tree is caller-writable, bins included.
+// safety: every tree on the cache volume counts, the git mirrors included,
+// because a mirror fills the same disk a pipeline's writes need.
 func storeDirs() []string {
-	dirs := []string{artifactsDir, cacheDir, uploadsDir}
+	dirs := []string{artifactsDir, cacheDir, uploadsDir, repoDir}
 	if _, err := os.Stat(teamsDir); err == nil {
 		dirs = append(dirs, teamsDir)
 	}

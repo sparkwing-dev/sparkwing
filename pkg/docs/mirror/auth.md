@@ -35,6 +35,18 @@ runner. When the balance cannot cover the reservation,
 the node stays ready, the run records a `credits_blocked` event, and the runner
 keeps polling.
 
+A metered trigger claim starts a whole run, so it is gated too. The claim
+names how the runner executes the trigger's nodes (`node_runner`: `k8s`,
+`warm` or `inprocess`, which an empty value means). A metered token that names
+`inprocess` gets `403` with `"error": "metered_inprocess_nodes"`, because nodes
+a trigger holder runs in its own process hold no node claim and are never
+charged; `sparkwing-runner runner --trigger-runner=inprocess` on a metered
+token stops its trigger loop with that reason and keeps claiming nodes. A
+metered `k8s` or `warm` claim still answers `402` when the team's balance
+cannot cover the cheapest class's first minute, and the trigger stays pending.
+A metered pool therefore sets `runner.triggerRunner.kind` to `k8s` or `warm`
+in the runner-bundle chart.
+
 The live claim's fenced execution acknowledgement starts billing immediately
 before the node body runs. Claiming, queueing, provisioning, image pulls and
 runner startup do not consume the reservation. A heartbeat after execution

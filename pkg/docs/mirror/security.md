@@ -534,7 +534,9 @@ older envelope written into a row after the pass does not open either.
 Before it writes anything, the pass opens a sample of the envelopes
 already stored. If the key opens none of them, it is not the key the
 table was sealed under, and the controller refuses to start instead of
-sealing plaintext rows under it.
+sealing plaintext rows under it. It refuses the same way when the sample
+holds envelopes but every one is an older envelope outside the `default`
+team, which cannot confirm the key either way.
 
 `sparkwing secrets list` reports `BOUND true` for a row sealed to its
 team (`"bound"` on the API) and `false` for one that is plaintext or an

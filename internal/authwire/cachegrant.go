@@ -35,19 +35,25 @@ var cacheGrantTeam = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 // caller learns nothing about which check refused it.
 var ErrCacheGrant = errors.New("cache grant is invalid or expired")
 
-// safety: the operator token is also a bearer the cache accepts, so the MAC key is
-// derived from it rather than being it; a leaked grant never reveals the token.
-func cacheGrantKey(operatorToken string) []byte {
-	sum := sha256.Sum256([]byte("sparkwing cache grant v1\x00" + operatorToken))
+// safety: the MAC key is derived from the signing key under a fixed label, so
+// the key is never used raw and a leaked grant reveals nothing about it.
+func cacheGrantKey(signingKey string) []byte {
+	sum := sha256.Sum256([]byte("sparkwing cache grant v1\x00" + signingKey))
 	return sum[:]
 }
 
-// MintCacheGrant signs a grant for team and run with the cache's operator
-// token, valid until now+ttl. The controller holds that token for its own hop
-// to the cache, so it can mint; a runner cannot.
-func MintCacheGrant(operatorToken, team, run string, now time.Time, ttl time.Duration) (string, error) {
-	if strings.TrimSpace(operatorToken) == "" {
-		return "", errors.New("cache grant: no cache token to sign with")
+// CacheGrantKeyEnv names the variable the controller and the cache read the
+// grant signing key from. The key is a secret of its own: never the cache's
+// operator token and never a runner's token, because pipeline code can read
+// a runner's token and whoever holds the key can open any team's cache tree.
+const CacheGrantKeyEnv = "SPARKWING_CACHE_GRANT_KEY"
+
+// MintCacheGrant signs a grant for team and run with signingKey, the key
+// named by [CacheGrantKeyEnv], valid until now+ttl. The controller and the
+// cache hold that key; a runner does not, so it cannot mint.
+func MintCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration) (string, error) {
+	if strings.TrimSpace(signingKey) == "" {
+		return "", errors.New("cache grant: no grant key to sign with")
 	}
 	if !cacheGrantTeam.MatchString(team) {
 		return "", errors.New("cache grant: team must be a DNS-safe slug")
@@ -60,15 +66,15 @@ func MintCacheGrant(operatorToken, team, run string, now time.Time, ttl time.Dur
 		return "", err
 	}
 	body := CacheGrantPrefix + base64.RawURLEncoding.EncodeToString(payload)
-	mac := hmac.New(sha256.New, cacheGrantKey(operatorToken))
+	mac := hmac.New(sha256.New, cacheGrantKey(signingKey))
 	mac.Write([]byte(body))
 	return body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 // VerifyCacheGrant returns the grant raw carries when its signature matches
-// operatorToken and it has not expired at now.
-func VerifyCacheGrant(operatorToken, raw string, now time.Time) (CacheGrant, error) {
-	if strings.TrimSpace(operatorToken) == "" || !strings.HasPrefix(raw, CacheGrantPrefix) {
+// signingKey and it has not expired at now.
+func VerifyCacheGrant(signingKey, raw string, now time.Time) (CacheGrant, error) {
+	if strings.TrimSpace(signingKey) == "" || !strings.HasPrefix(raw, CacheGrantPrefix) {
 		return CacheGrant{}, ErrCacheGrant
 	}
 	cut := strings.LastIndexByte(raw, '.')
@@ -80,7 +86,7 @@ func VerifyCacheGrant(operatorToken, raw string, now time.Time) (CacheGrant, err
 	if err != nil {
 		return CacheGrant{}, ErrCacheGrant
 	}
-	mac := hmac.New(sha256.New, cacheGrantKey(operatorToken))
+	mac := hmac.New(sha256.New, cacheGrantKey(signingKey))
 	mac.Write([]byte(body))
 	if !hmac.Equal(got, mac.Sum(nil)) {
 		return CacheGrant{}, ErrCacheGrant

@@ -32,7 +32,7 @@ func (c *Client) ListPendingTriggersForParent(ctx context.Context, parentRunID s
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error) {
 	path := fmt.Sprintf("/api/v1/triggers/%s/claim", url.PathEscape(id))
 	req, err := c.jsonRequest(ctx, http.MethodPost, c.baseURL+path,
-		claimSpecificTriggerBody{LeaseNanos: lease.Nanoseconds()})
+		claimSpecificTriggerBody{LeaseNanos: lease.Nanoseconds(), NodeRunner: c.triggerNodeRunner})
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,8 @@ func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time
 }
 
 type claimSpecificTriggerBody struct {
-	LeaseNanos int64 `json:"lease_nanos,omitempty"`
+	LeaseNanos int64  `json:"lease_nanos,omitempty"`
+	NodeRunner string `json:"node_runner,omitempty"`
 }
 
 // RecordProfileObservation folds one run's measurement into the

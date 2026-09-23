@@ -274,7 +274,7 @@ func applyIdentityMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := applyTeamScopedUserValueKeys(ctx, tx); err != nil {
 		return err
 	}
-	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTableSQLite)
+	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTableSQLite, githubRunnerCredentialsTableSQLite)
 }
 
 func applyIdentityMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -293,7 +293,7 @@ func applyIdentityMigrationPostgres(ctx context.Context, tx *storeTx) error {
 	if err := applyTeamScopedUserValueKeys(ctx, tx); err != nil {
 		return err
 	}
-	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTablePostgres)
+	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTablePostgres, githubRunnerCredentialsTablePostgres)
 }
 
 // safety: these keys predate the team column, so one team holding a schedule

@@ -483,7 +483,7 @@ const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
-var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20}
+var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
 const DefaultLeaseDuration = 3 * time.Minute
 const DefaultTeam Team = "default"
 const DefaultWarmCPUClassCores = 2
@@ -516,6 +516,7 @@ var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already ac
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
@@ -523,6 +524,7 @@ var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
 var ErrInvalidCredentials = errors.New("invalid username or password")
 var ErrInvalidCreditSetting = errors.New("credits: invalid setting")
+var ErrInvalidEventKind = errors.New("invalid event kind")
 var ErrInvalidInput = errors.New("store: invalid input")
 var ErrInvalidSlug = errors.New("store: invalid team slug")
 var ErrInvalidToken = errors.New("invalid token")
@@ -531,6 +533,7 @@ var ErrInvitationLimit = errors.New("store: this team has sent as many invitatio
 var ErrInvitationOpen = errors.New("store: that address already has an open invitation")
 var ErrLastOwner = errors.New("store: a team keeps at least one owner")
 var ErrLockHeld = errors.New("held by another holder")
+var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
 var ErrNoTeam = errors.New("store: team is required")
 var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")
@@ -565,6 +568,7 @@ const EventKindCreditsUnpriced = "credits_unpriced_class"
 type EventLimits struct {
 	MaxBytesPerEvent int64
 	MaxBytesPerRun   int64
+	MaxEventsPerRun  int64
 }
 type ExecutionAttempt struct {
 	RunID            string
@@ -734,10 +738,17 @@ type GitHubRunnerBinding struct {
 	CreatedAt  time.Time
 }
 const GitHubRunnerPrincipalPrefix = "github:"
+type GitHubRunnerPush struct {
+	Branch string
+	SHA    string
+}
 type GitHubRunnerScope struct {
 	Team Team
 	Repo GitHubRepo
+
+	Push GitHubRunnerPush
 }
+func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool)
 type GitHubWebhookBinding struct {
 	Team      Team
 	Pipeline  string
@@ -805,6 +816,8 @@ const MaxCreditMaxChargeSeconds = 86_400
 const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
+const MaxEventKindBytes = 128
+const MaxGitHubRunnerCredentials = 20
 const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
@@ -1298,6 +1311,7 @@ const StorageLimitBytesPerMonth = "bytes_per_month"
 const StorageLimitBytesPerRun = "bytes_per_run"
 const StorageLimitEventBytes = "event_bytes"
 const StorageLimitEventBytesPerRun = "event_bytes_per_run"
+const StorageLimitEventsPerRun = "events_per_run"
 const StorageLimitObjectsPerRun = "objects_per_run"
 func StorageMonth(t time.Time) string
 const StoragePrincipalMaxLen = 256
@@ -1722,6 +1736,7 @@ func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
+func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error)
 func (t *Tenant) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error)
@@ -1742,9 +1757,11 @@ func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline st
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (t *Tenant) ListSecrets() ([]Secret, error)
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
-func (t *Tenant) LiveGitHubRunnerCredentials(ctx context.Context, now time.Time) (int, error)
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
+func (t *Tenant) MintGitHubRunnerCredential(
+	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+) (string, *Token, error)
 func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
@@ -1893,6 +1910,7 @@ type User struct {
 func ValidComputeLimit(name string) bool
 func ValidCreditGrantKind(kind string) bool
 func ValidStoragePrincipal(name string) bool
+func ValidateEventKind(kind string) error
 func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
 func ValidateSlug(slug string) error

@@ -46,7 +46,7 @@ func newCreditsFixture(t *testing.T, metered bool) creditsFixture {
 		t.Fatalf("admin token: %v", err)
 	}
 	runner, runnerTok, err := st.CreateTokenWith(context.Background(), "pool", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
+		[]string{controller.ScopeNodesClaim, controller.ScopeTriggersClaim, controller.ScopeRunsState, controller.ScopeRunsRead},
 		0, now, store.TokenOptions{Metered: metered})
 	if err != nil {
 		t.Fatalf("runner token: %v", err)
@@ -228,6 +228,69 @@ func TestCredits_MeteredClaimRefusedOnAnEmptyBalance(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Fatalf("credits_blocked events after a second poll = %d, want 1", seen)
+	}
+}
+
+// A metered pool's trigger claim starts a run, so an empty balance refuses it
+// with the same 402 a node claim gets, and the run records why it waits.
+func TestCredits_MeteredTriggerClaimRefusedOnAnEmptyBalance(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s")
+	now := time.Now()
+	if err := f.store.CreateTriggerWithRun(ctx, store.Trigger{
+		ID: "run-broke", Pipeline: "build", Status: "pending", CreatedAt: now,
+	}, store.Run{ID: "run-broke", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ClaimTrigger(ctx); !errors.Is(err, store.ErrInsufficientCredits) {
+		t.Fatalf("trigger claim error = %v, want ErrInsufficientCredits", err)
+	}
+	events, err := f.store.ListEventsAfter(ctx, "run-broke", 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := 0
+	for _, e := range events {
+		if e.Kind == store.EventKindCreditsBlocked {
+			blocked++
+		}
+	}
+	if blocked != 1 {
+		t.Fatalf("credits_blocked events = %d, want 1", blocked)
+	}
+}
+
+// A metered pool that ran a claimed trigger's nodes in its own process would
+// run them outside any node claim, and so outside any credit charge. A
+// metered trigger claim must name a node runner that claims each node.
+func TestCredits_MeteredTriggerClaimRefusesInProcessNodes(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCredit, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, id := range []string{"run-1", "run-2", "run-3"} {
+		if err := f.store.CreateTriggerWithRun(ctx, store.Trigger{
+			ID: id, Pipeline: "build", Status: "pending", CreatedAt: now,
+		}, store.Run{ID: id, Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, c := range map[string]*client.Client{
+		"no node runner named": client.NewWithToken(f.url, nil, f.runner),
+		"inprocess":            client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("inprocess"),
+	} {
+		if tr, err := c.ClaimTrigger(ctx); !errors.Is(err, store.ErrMeteredInProcessNodes) {
+			t.Errorf("%s: trigger claim = %+v, %v; want ErrMeteredInProcessNodes", name, tr, err)
+		}
+		if tr, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); !errors.Is(err, store.ErrMeteredInProcessNodes) {
+			t.Errorf("%s: named trigger claim = %+v, %v; want ErrMeteredInProcessNodes", name, tr, err)
+		}
+	}
+	if tr, err := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s").ClaimTrigger(ctx); err != nil || tr == nil {
+		t.Fatalf("metered claim naming the k8s node runner = %+v, %v; want a trigger", tr, err)
 	}
 }
 

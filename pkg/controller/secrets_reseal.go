@@ -107,6 +107,14 @@ func (s *Server) probeSecretsKey(ctx context.Context) error {
 		}
 		tried++
 	}
+	// safety: an envelope the probe cannot judge proves nothing about the key,
+	// and the reseal seals plaintext rows under it, so a table of envelopes
+	// none of which judges the key is refused rather than trusted.
+	if tried == 0 && len(sample) > 0 {
+		return fmt.Errorf("none of the %d stored secrets sampled is sealed in a way that can confirm the secrets key: "+
+			"each is a pre-team envelope outside the default team, which the reseal cannot open; delete or rewrite "+
+			"those rows, then start again", len(sample))
+	}
 	if tried == 0 {
 		return nil
 	}

@@ -79,8 +79,13 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		return fmt.Errorf("mkdir work-root: %w", err)
 	}
 
+	nodeRunner := opts.RunnerKind
+	if nodeRunner == "" {
+		nodeRunner = "inprocess"
+	}
 	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
-		WithRunnerIdentity(processRunnerIdentity("trigger-loop"))
+		WithRunnerIdentity(processRunnerIdentity("trigger-loop")).
+		WithTriggerNodeRunner(nodeRunner)
 	logger.Info(
 		"trigger loop started",
 		"controller", opts.ControllerURL,
@@ -114,6 +119,11 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			<-sem
 			if errors.Is(err, context.Canceled) {
 				return nil
+			}
+			// safety: the controller refuses every claim this loop will make, so
+			// polling on would only repeat the refusal.
+			if errors.Is(err, store.ErrMeteredInProcessNodes) {
+				return fmt.Errorf("trigger loop: this credential is metered, so it claims triggers only with --trigger-runner=k8s or warm: %w", err)
 			}
 			if wait, ok := client.UnavailableBackoff(err, opts.Poll); ok {
 				logger.Debug("trigger loop: claim shed by the controller; backing off",

@@ -2304,8 +2304,10 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if callerFrom(r).team != "" && !grantMayUseMirror(name, repoURL) {
-		http.Error(w, "a cache grant registers only a public https repository under its derived name", http.StatusForbidden)
+	// safety: a registration clones a repository onto the shared volume, so a
+	// grant that could register would let one team fill it with mirrors.
+	if callerFrom(r).team != "" {
+		http.Error(w, "mirror registration takes the cache's operator token; a cache grant reads registered mirrors only", http.StatusForbidden)
 		return
 	}
 

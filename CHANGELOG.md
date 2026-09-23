@@ -29,13 +29,19 @@ unlock.
   reports its `team`. See [Runner Job placement](docs/security.md#runner-job-placement).
 
 - **cache:** the cache accepts a cache grant, a bearer a multi-team
-  controller signs with the cache token it already holds, so a runner need not
-  hold the cache's token. A grant names one run's team, lasts six hours, and is
-  verified offline. A grant reads and writes only its team's `/bin/`,
-  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, clones
-  only public `https` mirrors under their URL-derived name, and is refused on
-  seeding, refresh, archive, upload and admin routes. A team's bins count
-  toward the store ceiling. The operator token is unchanged.
+  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
+  `--grant-key` on the cache), a secret that is neither the cache's operator
+  token nor any runner's token, so a runner need not hold the cache's token.
+  The cache refuses to start, and the controller to mint, when the key equals
+  the operator token. A grant names one run's team, lasts six hours or until
+  the requesting credential expires, whichever is first, and is verified
+  offline. A GitHub Actions runner credential gets no grant (403). A grant
+  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
+  under `<data-dir>/teams/<team>/`, reads
+  only public `https` mirrors registered under their URL-derived name, and is
+  refused on registration (403), seeding, refresh, archive, upload and admin
+  routes. A team's bins and the git mirrors count toward the store ceiling.
+  The operator token is unchanged.
 
 - **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
   the cache refuses every download a process serves once it has sent that many
@@ -120,10 +126,12 @@ unlock.
   /api/v1/runners/github/exchange` trades a workflow job's GitHub ID token
   (audience: the controller's external URL) and the team slug the workflow
   names for a one-hour runner credential; both the binding and the named team
-  must match, and a team holds at most 20 live credentials. The credential
-  claims nodes and triggers, and reaches runs, only of the team's runs for
-  that repository, and every other route answers 403. The bindings table is a
-  step of schema 52. See [GitHub Actions runners](docs/github-actions-runners.md).
+  must match, only a `push`, `workflow_dispatch` or `schedule` job on a branch
+  gets one, and a team holds at most 20 live credentials, counted and minted
+  under one lock. The credential claims nodes and triggers, and reaches runs,
+  only of the team's runs for that repository at the branch and commit its
+  ID token names, gets no cache grant, and every other route answers 403. The
+  bindings and credentials tables are a step of schema 52. See [GitHub Actions runners](docs/github-actions-runners.md).
 - **sparkwing-runner:** `runner --github-actions --team <slug>` exchanges the
   job's ID token, advertises the `github-actions` label and stops claiming ten
   minutes before its credential expires. `--idle-exit <duration>` ends the
@@ -139,13 +147,19 @@ unlock.
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
 - **cache:** the cache accepts a cache grant, a bearer a multi-team
-  controller signs with the cache token it already holds, so a runner need not
-  hold the cache's token. A grant names one run's team, lasts six hours, and is
-  verified offline. A grant reads and writes only its team's `/bin/`,
-  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, clones
-  only public `https` mirrors under their URL-derived name, and is refused on
-  seeding, refresh, archive, upload and admin routes. A team's bins count
-  toward the store ceiling. The operator token is unchanged.
+  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
+  `--grant-key` on the cache), a secret that is neither the cache's operator
+  token nor any runner's token, so a runner need not hold the cache's token.
+  The cache refuses to start, and the controller to mint, when the key equals
+  the operator token. A grant names one run's team, lasts six hours or until
+  the requesting credential expires, whichever is first, and is verified
+  offline. A GitHub Actions runner credential gets no grant (403). A grant
+  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
+  under `<data-dir>/teams/<team>/`, reads
+  only public `https` mirrors registered under their URL-derived name, and is
+  refused on registration (403), seeding, refresh, archive, upload and admin
+  routes. A team's bins and the git mirrors count toward the store ceiling.
+  The operator token is unchanged.
 - **web:** Sign in with Google on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
   provider, the sign-in page offers Google. `GET /auth/google/start` and
@@ -253,10 +267,15 @@ unlock.
   offer and a claim round on one run no longer deadlock on PostgreSQL.
 - **store:** stored events are capped per event and per run whether or not a
   storage quota tier is configured: `DefaultEventLimits` allows 256 KiB per
-  event and 64 MiB per run, `Store.SetEventLimits` replaces them (zero lifts
-  a cap), and `AppendEventCharged` refuses an event past either with a
-  `StorageQuotaError` naming `event_bytes` or `event_bytes_per_run`, which the
-  controller answers with 413.
+  event, 64 MiB and 50,000 events per run, `Store.SetEventLimits` replaces
+  them (zero lifts a cap), and `AppendEventCharged` refuses an event past any
+  of them with a `StorageQuotaError` naming `event_bytes`,
+  `event_bytes_per_run` or `events_per_run`, which the controller answers
+  with 413. An event's bytes are its kind plus its payload. A kind is 1 to
+  128 bytes of `[A-Za-z0-9_.:-]`; any other is refused with
+  `ErrInvalidEventKind`, which the controller answers with 400. Runs keep
+  `event_bytes` and `event_count` counters, backfilled by the v52 migration,
+  so the per-run check reads one row.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
@@ -266,6 +285,38 @@ unlock.
 
 ### Changed
 
+- **store:** a credit grant's reference is unique within its team rather than
+  across the deployment, so two teams can each hold a `free` grant named
+  `welcome`, and a repeat within a team still returns the grant already
+  written. A `paid` reference is a payment id and stays unique across teams:
+  one already paid to another team is refused with `ErrCreditGrantConflict`.
+  The v52 migration replaces the `(kind, reference)` index with
+  `(team, kind, reference)` on both dialects.
+
+- **controller:** the `cloud` and `cloud-free` limits profiles now also set
+  `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
+  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
+  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
+  with a profile previously left run creation and egress bytes unlimited. A
+  flag or environment variable the operator names still wins.
+- **controller (Breaking):** a metered token's trigger claim names how its
+  nodes run. `POST /api/v1/triggers/claim` and `/api/v1/triggers/{id}/claim`
+  take `node_runner` (`k8s`, `warm` or `inprocess`, the default), and a
+  metered token naming `inprocess` gets `403` `metered_inprocess_nodes`,
+  because in-process nodes hold no node claim and were never charged; a
+  metered pool on the runner-bundle default ran a spent team's whole pipeline
+  free. A metered `k8s` or `warm` claim answers `402` when the team's balance
+  cannot cover the cheapest class's first minute. The trigger loop sends its
+  `--trigger-runner`, and stops with that reason when it is refused. See
+  [migration guide](docs/migrations/_unreleased.md#a-metered-pool-runs-trigger-nodes-through-node-claims).
+- **charts (Breaking):** the cache's operator token and the cache grant key are
+  Secrets of their own, `cache.tokenSecret` and `cache.grantKeySecret` in the
+  runner bundle, instead of the runner's `controller.tokenSecret`. The runner's
+  token reaches the pipeline code it runs, so sharing it let one team's
+  pipeline mint a grant for any team and replace another team's cached
+  binaries. The chart refuses to render when any two of the three name the
+  same Secret key, and a cache-enabled install requires `cache.tokenSecret`.
+  See [migration guide](docs/migrations/_unreleased.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on
@@ -488,7 +539,8 @@ unlock.
   `default` team is left alone and refused, since only the `default` team ever
   held one. Reads open only `enc:v3:`, so a row is no longer rebound on first
   read. The start is refused, before anything is written, when the key opens
-  none of a sample of the envelopes already stored. See
+  none of a sample of the envelopes already stored, or when the sample holds
+  envelopes but none that can confirm the key. See
   [security.md](docs/security.md#secrets-at-rest).
 - **controller (Breaking):** `controller.BoundCipher` takes the owning team.
   `SealBound` and `OpenBound` gain a leading `team` argument, and a new

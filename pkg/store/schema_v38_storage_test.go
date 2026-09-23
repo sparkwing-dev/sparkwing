@@ -68,8 +68,8 @@ func TestSchemaV38_UpgradeFromAStoreStampedAt37(t *testing.T) {
 	if err != nil {
 		t.Fatalf("usage after the upgrade: %v", err)
 	}
-	if usage.RunBytes != 32 || usage.MonthBytes != 32 {
-		t.Fatalf("usage = %+v, want the charged 32 bytes", usage)
+	if usage.RunBytes != 36 || usage.MonthBytes != 36 {
+		t.Fatalf("usage = %+v, want the charged 36 bytes, kind and payload", usage)
 	}
 	if _, err := upgraded.GetRun(ctx, "r1"); err != nil {
 		t.Fatalf("the run seeded before the upgrade: %v", err)

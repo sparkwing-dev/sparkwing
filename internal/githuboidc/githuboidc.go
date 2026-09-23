@@ -53,10 +53,15 @@ type Claims struct {
 	RepositoryID      int64
 	RepositoryOwnerID int64
 	Ref               string
-	WorkflowRef       string
-	RunID             string
-	Subject           string
-	ExpiresAt         time.Time
+	// SHA is the commit the job runs for.
+	SHA string
+	// EventName is the event that started the workflow, such as push or
+	// pull_request.
+	EventName   string
+	WorkflowRef string
+	RunID       string
+	Subject     string
+	ExpiresAt   time.Time
 }
 
 // Verifier checks tokens for one audience.
@@ -84,6 +89,8 @@ type tokenClaims struct {
 	RepositoryID      string        `json:"repository_id"`
 	RepositoryOwnerID string        `json:"repository_owner_id"`
 	Ref               string        `json:"ref"`
+	SHA               string        `json:"sha"`
+	EventName         string        `json:"event_name"`
 	WorkflowRef       string        `json:"workflow_ref"`
 	RunID             string        `json:"run_id"`
 }
@@ -130,7 +137,8 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	}
 	return Claims{
 		Repository: cl.Repository, RepositoryID: repoID, RepositoryOwnerID: ownerID,
-		Ref: cl.Ref, WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, Subject: cl.Sub,
+		Ref: cl.Ref, SHA: cl.SHA, EventName: cl.EventName,
+		WorkflowRef: cl.WorkflowRef, RunID: cl.RunID, Subject: cl.Sub,
 		ExpiresAt: time.Unix(cl.Exp, 0),
 	}, nil
 }

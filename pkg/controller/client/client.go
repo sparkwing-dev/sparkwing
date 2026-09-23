@@ -28,6 +28,8 @@ type Client struct {
 
 	runnerIdentity atomic.Pointer[string]
 
+	triggerNodeRunner string
+
 	pollAdvice atomic.Int64
 }
 
@@ -796,13 +798,16 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error) {
 // match both lists. Empty/nil on either axis means "accept any".
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error) {
 	var body io.Reader
-	if len(pipelines) > 0 || len(sources) > 0 {
+	if len(pipelines) > 0 || len(sources) > 0 || c.triggerNodeRunner != "" {
 		req := map[string]any{}
 		if len(pipelines) > 0 {
 			req["pipelines"] = pipelines
 		}
 		if len(sources) > 0 {
 			req["trigger_sources"] = sources
+		}
+		if c.triggerNodeRunner != "" {
+			req["node_runner"] = c.triggerNodeRunner
 		}
 		buf, _ := json.Marshal(req)
 		body = bytes.NewReader(buf)
@@ -1907,6 +1912,14 @@ func classifyHTTPError(resp *http.Response) error {
 	}
 	if resp.StatusCode == http.StatusConflict {
 		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		var refusal struct {
+			Code string `json:"error"`
+		}
+		if json.Unmarshal(body, &refusal) == nil && refusal.Code == meteredInProcessNodesCode {
+			return fmt.Errorf("%w: %s", store.ErrMeteredInProcessNodes, bytes.TrimSpace(body))
+		}
 	}
 	// safety: a spent credit balance is a standing condition, not a transport
 	// failure, so the caller can tell it apart and keep polling.

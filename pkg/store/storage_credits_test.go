@@ -502,8 +502,8 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retained: %v", err)
 	}
-	if retained != int64(len("more bytes")) {
-		t.Fatalf("retained = %d, want the payload just written", retained)
+	if retained != int64(len("log")+len("more bytes")) {
+		t.Fatalf("retained = %d, want the kind and payload just written", retained)
 	}
 }
 

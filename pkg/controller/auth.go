@@ -40,6 +40,9 @@ type Principal struct {
 	// AccountID is set when a signed-in account's session authenticated
 	// the request.
 	AccountID string
+	// Expires is when the credential stops authenticating: its expiry, or
+	// its scheduled revocation if that comes first. Zero never expires.
+	Expires time.Time
 
 	session string
 }
@@ -385,6 +388,7 @@ func (a *Authenticator) verify(raw, key, client string, now time.Time) (*Princip
 		TokenPrefix: tok.Prefix,
 		Authed:      now,
 		Team:        tok.Team,
+		Expires:     credentialEnd(tok.ExpiresAt, tok.RevokedAt),
 	}
 
 	// safety: an Invalidate that landed during this read must win, or the revoked row is re-cached for a full TTL.
@@ -644,6 +648,18 @@ type authErrorBody struct {
 
 func writeAuthError(w http.ResponseWriter, status int, body authErrorBody) {
 	writeJSON(w, status, body)
+}
+
+// credentialEnd is the earlier of a token's expiry and its scheduled
+// revocation, or zero when it has neither.
+func credentialEnd(expires, revoked *time.Time) time.Time {
+	var end time.Time
+	for _, at := range []*time.Time{expires, revoked} {
+		if at != nil && (end.IsZero() || at.Before(end)) {
+			end = *at
+		}
+	}
+	return end
 }
 
 type principalCtxKey struct{}

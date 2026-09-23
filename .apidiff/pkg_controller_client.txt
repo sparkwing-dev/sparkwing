@@ -191,6 +191,7 @@ func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (c *Client) WithRunnerIdentity(id string) *Client
+func (c *Client) WithTriggerNodeRunner(kind string) *Client
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 type ConcurrencyState struct {
 	Key               string

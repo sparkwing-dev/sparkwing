@@ -763,9 +763,10 @@ func lockStorageUsageTx(ctx context.Context, tx *storeTx, principal string) erro
 	return err
 }
 
-// AppendEventCharged appends an event and charges its payload to principal's
-// storage quota in the same transaction, so a refused event is never written
-// and a written event is always paid for. An empty principal charges nothing
+// AppendEventCharged appends an event and charges its kind and payload to
+// principal's storage quota in the same transaction, so a refused event is
+// never written and a written event is always paid for. A kind that fails
+// [ValidateEventKind] is refused before anything is read. An empty principal charges nothing
 // and appends exactly as [Store.AppendEvent] does.
 func (s *Store) AppendEventCharged(
 	ctx context.Context, principal, runID, nodeID, kind string, payload []byte,
@@ -782,10 +783,14 @@ func (s *Store) AppendEventCharged(
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
-	if err := refuseEventOverLimitsTx(ctx, tx, principal, runID, int64(len(payload))); err != nil {
+	if err := ValidateEventKind(kind); err != nil {
 		return 0, err
 	}
-	if err := s.chargeStorageTx(ctx, tx, principal, runID, int64(len(payload)), 0, time.Now().UTC()); err != nil {
+	size := eventBytes(kind, payload)
+	if err := refuseEventOverLimitsTx(ctx, tx, principal, runID, size); err != nil {
+		return 0, err
+	}
+	if err := s.chargeStorageTx(ctx, tx, principal, runID, size, 0, time.Now().UTC()); err != nil {
 		return 0, err
 	}
 	seq, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())

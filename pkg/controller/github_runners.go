@@ -26,15 +26,30 @@ import (
 // first and a job picks a node up only after the hold.
 const GitHubActionsLabel = "github-actions"
 
-const (
-	// safety: a job never outlives six hours and a node that outlives the
-	// credential fails, so the credential is short and the workflow's
-	// timeout matches it.
-	githubRunnerCredentialTTL = time.Hour
-	// safety: bounds what one team's workflows can mint, since each
-	// exchange is unauthenticated until the ID token verifies.
-	maxGitHubRunnerCredentials = 20
-)
+// safety: a job never outlives six hours and a node that outlives the
+// credential fails, so the credential is short and the workflow's timeout
+// matches it.
+const githubRunnerCredentialTTL = time.Hour
+
+// githubRunnerEvents are the workflow events whose job runs code the
+// repository's owners pushed. pull_request runs a contributor's code, and
+// pull_request_target and workflow_run hand the base repository's
+// privileges to input a fork controls, so those jobs get no credential.
+var githubRunnerEvents = map[string]bool{"push": true, "workflow_dispatch": true, "schedule": true}
+
+// githubCommit reports whether sha is a full commit id: 40 hex digits, or 64
+// in a SHA-256 repository.
+func githubCommit(sha string) bool {
+	if len(sha) != 40 && len(sha) != 64 {
+		return false
+	}
+	for _, c := range sha {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
 
 type githubRunnerConfig struct {
 	once     sync.Once
@@ -105,6 +120,22 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, errors.New("the token names no owner/name repository"))
 		return
 	}
+	branch, isBranch := strings.CutPrefix(claims.Ref, "refs/heads/")
+	var refusal string
+	switch {
+	case !githubRunnerEvents[claims.EventName]:
+		refusal = "a " + strconv.Quote(claims.EventName) + " job gets no runner credential; only push, workflow_dispatch and schedule jobs do"
+	case !isBranch || branch == "":
+		refusal = "the job ran for " + strconv.Quote(claims.Ref) + "; a runner credential binds only to a branch"
+	case !githubCommit(claims.SHA):
+		refusal = "the token names no commit"
+	}
+	if refusal != "" {
+		s.logger.Info("github runner exchange refused",
+			"repository", claims.Repository, "event", claims.EventName, "ref", claims.Ref, "reason", refusal)
+		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: refusal})
+		return
+	}
 	// safety: consent is two-sided: the workflow names the team, and an
 	// owner of that team bound this repository id. A team binding a
 	// repository it does not control gets nothing, because that
@@ -133,28 +164,23 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	now := time.Now().UTC()
-	live, err := t.LiveGitHubRunnerCredentials(r.Context(), now)
-	if err != nil {
-		s.writeInternalError(w, r, "count github runner credentials", err)
-		return
-	}
-	if live >= maxGitHubRunnerCredentials {
-		setRetryAfter(w, time.Minute)
-		writeError(w, http.StatusTooManyRequests,
-			errors.New("this team already has "+strconv.Itoa(maxGitHubRunnerCredentials)+" live GitHub Actions runner credentials"))
-		return
-	}
 	principal := store.GitHubRunnerPrincipalPrefix + strconv.FormatInt(claims.RepositoryID, 10) + ":" + repo.Slug()
-	raw, tok, err := t.CreateTokenWith(r.Context(), principal, store.TokenKindRunner,
-		runnerTokenScopes, githubRunnerCredentialTTL, now, store.TokenOptions{})
+	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), principal,
+		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA}, runnerTokenScopes, githubRunnerCredentialTTL, now)
+	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
+		setRetryAfter(w, time.Minute)
+		writeError(w, http.StatusTooManyRequests, errors.New(
+			"this team already has "+strconv.Itoa(store.MaxGitHubRunnerCredentials)+" live GitHub Actions runner credentials"))
+		return
+	}
 	if err != nil {
 		s.writeInternalError(w, r, "mint github runner credential", err)
 		return
 	}
 	s.logger.Info("github runner credential minted",
 		"team", string(team), "prefix", tok.Prefix, "repository", claims.Repository,
-		"repository_id", claims.RepositoryID, "ref", claims.Ref, "workflow_ref", claims.WorkflowRef,
-		"github_run_id", claims.RunID)
+		"repository_id", claims.RepositoryID, "ref", claims.Ref, "sha", claims.SHA, "event", claims.EventName,
+		"workflow_ref", claims.WorkflowRef, "github_run_id", claims.RunID)
 	writeJSON(w, http.StatusCreated, githubExchangeResp{
 		Token: raw, Team: string(team), Repository: repo.Slug(),
 		ExpiresAt: tok.ExpiresAt.Unix(), Labels: []string{GitHubActionsLabel},
@@ -197,6 +223,18 @@ func (s *Server) githubRunnerFence(next http.Handler) http.Handler {
 			writeGitHubFenceRefusal(w, p, "this credential does not name the repository it is bound to")
 			return
 		}
+		t, err := s.store.ForTeam(r.Context(), scope.Team)
+		if err == nil {
+			scope.Push, err = t.GitHubRunnerCredentialPush(r.Context(), p.TokenPrefix)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeGitHubFenceRefusal(w, p, "this credential names no push it was minted for")
+			return
+		}
+		if err != nil {
+			s.writeInternalError(w, r, "github runner push", err)
+			return
+		}
 		fence.ServeHTTP(w, r.WithContext(store.WithGitHubRunnerScope(r.Context(), scope)))
 	})
 }
@@ -234,7 +272,7 @@ func (s *Server) githubFenceMux(next http.Handler) *http.ServeMux {
 func (s *Server) githubFenceRun(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, _ := PrincipalFromContext(r.Context())
-		scope, _, _ := githubRunnerScope(p)
+		scope, _ := store.GitHubRunnerScopeFrom(r.Context())
 		ok, err := s.store.GitHubRunnerAdmits(r.Context(), scope, r.PathValue("id"))
 		if err != nil {
 			s.writeInternalError(w, r, "github runner fence", err)

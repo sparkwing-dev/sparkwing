@@ -11,6 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -59,6 +60,10 @@ func run(args []string) error {
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
 		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+	fs.StringVar(&cfg.GrantKey, "grant-key",
+		envOr(authwire.CacheGrantKeyEnv, cfg.GrantKey),
+		"key that verifies cache grants, the one the controller signs them with. No runner holds it, and it "+
+			"must differ from --api-token. Empty accepts no grants. Falls back to $"+authwire.CacheGrantKeyEnv+".")
 	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
 		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
 		"start without a bearer token, leaving the git, blob, artifact, and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
@@ -79,7 +84,7 @@ func run(args []string) error {
 		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreBytes, "max-store-bytes",
 		envInt64("SPARKWING_CACHE_MAX_STORE_BYTES", cfg.MaxStoreBytes),
-		"stored bytes across the artifact, dependency-archive and upload trees at or above which every "+
+		"stored bytes across the artifact, dependency-archive, upload, team and git mirror trees at or above which every "+
 			"upload is refused with 507 naming the ceiling, until a measurement finds the store back "+
 			"under it. 0, the default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreObjects, "max-store-objects",
@@ -107,6 +112,7 @@ func run(args []string) error {
 		return err
 	}
 	cfg.EgressDailyAlarmBytes = egressCfg.GlobalDailyAlarmBytes
+	cfg.EgressDailyCapBytes = egressCfg.GlobalDailyCapBytes
 
 	srv, err := cache.New(cfg)
 	if err != nil {

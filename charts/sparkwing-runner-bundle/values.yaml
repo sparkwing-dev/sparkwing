@@ -35,7 +35,9 @@ controller:
   # Configuring it also enables the logs service's controller-backed
   # validation of incoming bearer tokens. Reference an existing
   # Secret created out-of-band; the chart does NOT create the secret
-  # itself (so you can rotate it without `helm upgrade`).
+  # itself (so you can rotate it without `helm upgrade`). Pipeline code
+  # the runner executes can read this token, so it is never the cache's
+  # token or grant key (cache.tokenSecret, cache.grantKeySecret).
   tokenSecret:
     # Name of the Secret in the install namespace.
     name: ""
@@ -195,11 +197,33 @@ cache:
   enabled: true
 
   # Serve the cache's blob and sync endpoints to anyone who can reach
-  # the Service. false (the default) requires controller.tokenSecret so
-  # the cache and the runner share one bearer; true passes
-  # --allow-unauthenticated to the cache and is only appropriate on a
-  # bootstrap install, before the Secret exists.
+  # the Service. false (the default) requires cache.tokenSecret; true
+  # passes --allow-unauthenticated to the cache and is only appropriate
+  # on a bootstrap install, before the Secret exists.
   allowUnauthenticated: false
+
+  # The cache's operator token, which opens every route and every
+  # team's tree. The cache requires it and the controller holds it for
+  # its own hop; runners never do. It must name a different Secret key
+  # from controller.tokenSecret, because pipeline code can read the
+  # runner's token, and the chart refuses to render otherwise.
+  #   kubectl create secret generic sparkwing-cache-token \
+  #     --from-literal=token=<token>
+  tokenSecret:
+    name: ""
+    key: token
+
+  # The key the controller signs cache grants with and the cache
+  # verifies them with. A grant opens one team's cache tree for one
+  # run, so this key is held by the controller and the cache only, and
+  # must name a different Secret key from both tokens above. Leave name
+  # empty to mint no grants: runs then go without the binary and
+  # dependency caches.
+  #   kubectl create secret generic sparkwing-cache-grant-key \
+  #     --from-literal=key=<random 32 bytes>
+  grantKeySecret:
+    name: ""
+    key: key
 
   # RWO PVC -- replicas: 1 is the only safe value.
   replicas: 1
@@ -215,9 +239,9 @@ cache:
     maxArtifactBytes: ""
     # Size cap for one dependency archive (default 500MB; 0 accepts any).
     maxCacheArchiveBytes: ""
-    # Stored bytes across the artifact, archive and upload trees at or
-    # above which every upload is refused. Empty leaves the store
-    # unlimited.
+    # Stored bytes across the artifact, archive, upload, team and git
+    # mirror trees at or above which every upload is refused. Empty
+    # leaves the store unlimited.
     maxStoreBytes: ""
     # Stored files across those trees at or above which every upload is
     # refused. Empty leaves the count unlimited.
