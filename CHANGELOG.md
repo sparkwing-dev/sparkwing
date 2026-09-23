@@ -807,6 +807,10 @@ unlock.
 
 ### Fixed
 
+- **controller:** selecting an existing GitHub App installation now accepts
+  only IDs in the encrypted picker proof. An unlisted ID answers 404, and a
+  failed selection consumes the connection state.
+
 - **dashboard:** activity rows keep their height while a run's detail pane
   closes. The queue status dot pulses when the daemon status changes, the
   overview reserves its card layout while loading, and tooltips appear at

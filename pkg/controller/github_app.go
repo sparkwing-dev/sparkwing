@@ -12,6 +12,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -288,9 +289,10 @@ type githubAppAvailableResp struct {
 }
 
 type githubAppSelectionProof struct {
-	Nonce  string `json:"nonce"`
-	UserID int64  `json:"user_id"`
-	Token  string `json:"token"`
+	Nonce           string  `json:"nonce"`
+	UserID          int64   `json:"user_id"`
+	Token           string  `json:"token"`
+	InstallationIDs []int64 `json:"installation_ids"`
 }
 
 func (a *githubAppState) selectionCipher() (cipher.AEAD, error) {
@@ -396,7 +398,13 @@ func (s *Server) handleGitHubAppAvailable(w http.ResponseWriter, r *http.Request
 					ConnectedElsewhere: err == nil && bound.Team != p.Team,
 				})
 			}
-			out.Authorization, err = s.githubApp.sealSelection(githubAppSelectionProof{Nonce: st.Nonce, UserID: user.ID, Token: token}, req.State)
+			ids := make([]int64, 0, len(out.Installations))
+			for _, inst := range out.Installations {
+				ids = append(ids, inst.InstallationID)
+			}
+			out.Authorization, err = s.githubApp.sealSelection(githubAppSelectionProof{
+				Nonce: st.Nonce, UserID: user.ID, Token: token, InstallationIDs: ids,
+			}, req.State)
 			return err
 		})
 	if err != nil {
@@ -455,6 +463,19 @@ func (s *Server) handleGitHubAppSelect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errGitHubUserMismatch)
 		return
 	}
+	fresh, err := s.store.ConsumeGitHubAppConnectState(r.Context(), st.Nonce, time.Unix(st.Expires, 0), now)
+	if err != nil {
+		s.writeInternalError(w, r, "github app connect state", err)
+		return
+	}
+	if !fresh {
+		writeError(w, http.StatusForbidden, errors.New("the connect flow was already used; start connecting again"))
+		return
+	}
+	if !slices.Contains(proof.InstallationIDs, req.InstallationID) {
+		writeError(w, http.StatusNotFound, errors.New("installation not found"))
+		return
+	}
 	inst, err := s.githubApp.client.Installation(r.Context(), req.InstallationID)
 	if err != nil {
 		s.writeGitHubAppConnectError(w, r, p, req.InstallationID, err)
@@ -467,15 +488,6 @@ func (s *Server) handleGitHubAppSelect(w http.ResponseWriter, r *http.Request) {
 	}
 	if !admin {
 		writeError(w, http.StatusForbidden, errGitHubInstallationAccess)
-		return
-	}
-	fresh, err := s.store.ConsumeGitHubAppConnectState(r.Context(), st.Nonce, time.Unix(st.Expires, 0), now)
-	if err != nil {
-		s.writeInternalError(w, r, "github app connect state", err)
-		return
-	}
-	if !fresh {
-		writeError(w, http.StatusForbidden, errors.New("the connect flow was already used; start connecting again"))
 		return
 	}
 	bound, err := t.BindGitHubAppInstallation(r.Context(), store.GitHubAppInstallation{
