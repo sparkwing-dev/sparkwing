@@ -561,8 +561,10 @@ var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already ac
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrFingerprintMismatch = errors.New("store: the fingerprint is not the host key this credential pinned")
 var ErrFreeRunLimit = errors.New("free run limit reached")
 var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or join the waitlist")
+var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git credentials", MaxGitCredentialsPerTeam)
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
@@ -789,6 +791,34 @@ var FreeTierQuota = StorageQuota{
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
 }
+type GitCredential struct {
+	ID       string
+	Team     Team
+	Host     string
+	Kind     string
+	Username string
+	Secret   string
+
+	KnownHosts  string
+	Fingerprint string
+
+	ConfirmedAt *time.Time
+	CreatedBy   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+const GitCredentialHTTPS = "https"
+type GitCredentialRelease struct {
+	ID           string
+	Team         Team
+	CredentialID string
+	Host         string
+	RunID        string
+	Runner       string
+	TokenPrefix  string
+	ReleasedAt   time.Time
+}
+const GitCredentialSSH = "ssh"
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 type GitHubAppInstallation struct {
 	Team           Team
@@ -935,6 +965,7 @@ const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxEventKindBytes = 128
 const MaxFreeRunsPerDay = 200
+const MaxGitCredentialsPerTeam = 50
 const MaxGitHubRunnerBindings = 20
 const MaxGitHubRunnerCredentials = 20
 const MaxInvitationEmailsPerDay = 5
@@ -1843,6 +1874,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, createdBy string) (_ CreditReversal, err error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
+func (s *Store) RotateGitCredentialSecrets(ctx context.Context, reseal func(GitCredential) (string, error)) (rotated int, err error)
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error)
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
@@ -1972,6 +2004,7 @@ func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
+func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateCLIToken(
 	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
@@ -1996,6 +2029,7 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
+func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
@@ -2016,6 +2050,11 @@ func (t *Tenant) GetSecret(name string) (*Secret, error)
 func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
+func (t *Tenant) GitCredentialForHost(ctx context.Context, host string) (GitCredential, error)
+func (t *Tenant) GitCredentialMachine(ctx context.Context, prefix string) (bool, error)
+func (t *Tenant) GitCredentialMachines(ctx context.Context) (_ map[string]bool, err error)
+func (t *Tenant) GitCredentialReleases(ctx context.Context, limit int) (_ []GitCredentialRelease, err error)
+func (t *Tenant) GitCredentials(ctx context.Context) (_ []GitCredential, err error)
 func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInstallation, err error)
 func (t *Tenant) GitHubAppTriggers(ctx context.Context) (_ []GitHubAppTrigger, err error)
@@ -2054,6 +2093,7 @@ func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bo
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
+func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
 func (t *Tenant) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
@@ -2064,6 +2104,7 @@ func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
+func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitCredentialRelease, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
@@ -2082,6 +2123,7 @@ func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declare
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
 func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
+func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, enabled bool, by string, now time.Time) error
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) Team() Team

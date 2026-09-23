@@ -25,3 +25,97 @@ exception is a runner its owner fenced with `--allow-repo`, such as a laptop:
 when the controller releases nothing, it fetches with the machine's own git
 config and credentials, and only from the repositories its list names. See
 [local-execution.md](local-execution.md#what-a-laptop-runner-trusts).
+
+## Store a credential
+
+A team owner stores one credential per host, under **Team > Git
+credentials** in the dashboard or with
+`POST /api/v1/team/git-credentials`. Only an owner stores, replaces,
+confirms or deletes one, and no route returns its value: the list shows the
+host, the kind, the pinned host key and who stored it. The controller seals
+the value under its secrets key, bound to the team and the host, so a
+controller started without `SPARKWING_SECRETS_KEY` holds none.
+
+There are two kinds:
+
+- **An SSH deploy key** (`kind: ssh`, `private_key`), unencrypted, since a
+  runner cannot type a passphrase. When it is stored, the controller opens an
+  ssh handshake to the host (port 22 unless `port` says otherwise), reads the
+  host key the way `ssh-keyscan` does, and pins it. The answer shows the key's
+  SHA256 fingerprint, and the credential is unusable until an owner confirms
+  that fingerprint with `POST /api/v1/team/git-credentials/{host}/confirm`.
+  Check it against the fingerprint your forge publishes. The controller
+  refuses a host that resolves inside its own network.
+- **An HTTPS token** (`kind: https`, `token`, optional `username`), such as a
+  GitLab or Bitbucket access token or a fine-grained GitHub token. The
+  username defaults to `x-access-token`; Bitbucket repository access tokens
+  need `x-token-auth`. It is usable once stored.
+
+Prefer a read-only deploy key or token scoped to the repositories the team
+builds. For a repository on github.com, connect the [GitHub App](github-app.md)
+instead: it covers the repository with a token that reads that repository
+alone and lives an hour, and it wins over a stored github.com credential
+whenever it covers the run's repository.
+
+A team stores at most 50 credentials.
+
+## Who receives it
+
+The controller releases a stored credential only when all of these hold:
+
+- the caller holds a live claim on a node or the trigger of the run, with a
+  runner token of the run's own team;
+- the host of the run's repository is the credential's host;
+- the caller is a cloud runner, one whose token the operator meters, or a
+  machine a team owner opted in with
+  `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials` (the dashboard's
+  **Team > Machines** page).
+
+Otherwise the route answers 403 `git_credential_not_released`, or 409
+`git_credential_unconfirmed` for an ssh key whose host key nobody confirmed.
+A runner its owner fenced with `--allow-repo` then fetches with the machine's
+own credentials; any other runner fails the run with the message.
+
+Each release writes an audit row naming the host, the run, the runner and the
+time. An owner reads the latest 200 at
+`GET /api/v1/team/git-credentials/releases`. A claim asks at most ten times a
+minute; past that the route answers 429.
+
+## How the runner uses it
+
+The runner hands the credential to the one `git fetch` that needs it and to
+nothing else:
+
+- An SSH key goes to a fresh private directory on tmpfs (`/dev/shm` when the
+  machine has it) as a mode 0600 file, beside a `known_hosts` file holding only
+  the pinned entry. The fetch runs with
+  `GIT_SSH_COMMAND="ssh -i <key> -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=<pinned> ..."`,
+  so no other identity, agent, ssh config or known host takes part, and a
+  changed host key fails the fetch. An https remote is fetched in its ssh form.
+- An HTTPS token reaches git on an inherited pipe, through a credential helper
+  scoped to the host, as the App token does. An ssh remote is fetched in its
+  https form.
+- The fetch reads none of the machine's git config and runs without its ssh
+  agent.
+- The runner deletes the key directory when the checkout returns, before it
+  compiles or runs anything the fetched tree names. A key it cannot delete
+  fails the run.
+- The credential is never in an environment variable, a command line, the
+  URL or `.git/config`, and the runner replaces it, and each line of a key,
+  with `***` in any error text it reports.
+
+The team's own pipeline code runs as the same user and could read the key
+while the fetch runs, for example from a malicious commit in the team's own
+repository. That is the team's own key, which is why a read-only one is the
+recommendation.
+
+## Rotate and revoke
+
+Storing a credential for the same host replaces it; the next release hands
+out the new value. Replacing an SSH key keeps its confirmation only while the
+host's key is the one already confirmed. Deleting it
+(`DELETE /api/v1/team/git-credentials/{host}`) makes every later release
+fail. Nothing the runner held outlives the fetch it was released for.
+
+`POST /api/v1/secrets/rotate` reseals every team's git credentials with the
+secrets under the new key.

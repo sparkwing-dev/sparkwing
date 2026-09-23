@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -331,17 +332,35 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// safety: a git credential is always sealed bound to its team and host,
+	// so one that does not open fails the rotation rather than being kept
+	// under a key the operator is about to drop.
+	gitCreds, err := s.store.RotateGitCredentialSecrets(r.Context(), func(c store.GitCredential) (string, error) {
+		binding := gitCredentialBinding(c.Team, c.Host)
+		plain, oerr := openSecret(s.secretsCipher, binding, c.Secret)
+		if oerr != nil {
+			return "", fmt.Errorf("git credential for %s in team %s: %w", c.Host, c.Team, oerr)
+		}
+		return sealSecret(s.secretsCipher, binding, plain)
+	})
+	if err != nil {
+		s.writeInternalError(w, r, "rotate git credentials", err)
+		return
+	}
 	principal := "anonymous"
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		principal = p.Name
 	}
-	s.logger.Info("secrets rotated", "count", total-len(skipped), "skipped", len(skipped), "principal", principal)
-	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: total - len(skipped), Skipped: skipped})
+	s.logger.Info("secrets rotated", "count", total-len(skipped), "skipped", len(skipped),
+		"git_credentials", gitCreds, "principal", principal)
+	writeJSON(w, http.StatusOK, secretsRotateResponse{Rotated: total - len(skipped), Skipped: skipped, GitCredentials: gitCreds})
 }
 
 type secretsRotateResponse struct {
 	Rotated int                 `json:"rotated"`
 	Skipped []secretsRotateSkip `json:"skipped"`
+	// GitCredentials is how many team git credentials were resealed.
+	GitCredentials int `json:"git_credentials"`
 }
 
 type secretsRotateSkip struct {

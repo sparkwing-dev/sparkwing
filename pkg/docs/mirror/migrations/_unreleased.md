@@ -2,7 +2,7 @@
 
 ## Upgrading a controller from v0.60.0
 
-v0.60.0 runs schema v47. This release migrates the database to v60 when the
+v0.60.0 runs schema v47. This release migrates the database to v61 when the
 controller first starts, and a v0.60.0 binary cannot open it afterwards, so
 the backup is the only way back.
 
@@ -14,7 +14,7 @@ the backup is the only way back.
 4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
    first start migrates the schema and reseals stored secrets, and logs how
    many it resealed.
-5. Verify: the startup line reads `runs-store schema 60`,
+5. Verify: the startup line reads `runs-store schema 61`,
    `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.

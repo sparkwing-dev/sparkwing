@@ -204,6 +204,22 @@ unlock.
   credential on an inherited pipe, and drops `GIT_TRACE*` and
   `GIT_CURL_VERBOSE` from its environment. Against a controller without the
   route the runner asks `POST /api/v1/runs/{id}/source-token` instead.
+- **controller:** team git credentials, a write-only secret bound to one host:
+  an SSH deploy key with a pinned host key, or an HTTPS token. A team owner
+  stores, replaces and deletes them with `/api/v1/team/git-credentials`; the
+  controller reads an ssh host's key when the key is stored and releases it
+  only after an owner confirms its fingerprint. `POST
+  /api/v1/runs/{id}/git-credential` releases the team's credential for the
+  run's host when no App installation covers the repository, only to a runner
+  holding a live claim on the run with a token of the run's team, and only to
+  a cloud runner or a machine an owner opted in with
+  `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials`. Each release
+  writes an audit row, listed at `/api/v1/team/git-credentials/releases`. The
+  runner writes a key to tmpfs at mode 0600 beside the pinned `known_hosts`,
+  fetches with only that identity, and deletes it before compiling anything.
+  Values are sealed under the secrets key and resealed by
+  `POST /api/v1/secrets/rotate`. Schema 61 adds the tables. See
+  [Team git credentials](docs/git-credentials.md).
 - **runner:** `sparkwing-runner agent --allow-repo`, and `allow_repos` in
   `agent.yaml`, make an agent claim only those repositories and fetch their
   source directly, with the credential the controller releases or else the
@@ -740,6 +756,11 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **controller:** a runner holding the claim on a webhook-started trigger can
+  ask for the run's source credential before the run exists. The claim check
+  read only the run row, which the pipeline creates after the fetch, so an App
+  token for a GitHub App run answered 403.
 
 - **controller:** a checkout cannot open for a team whose deletion has begun.
   `POST /api/v1/team/billing/checkout` answers 409, because the payment would

@@ -120,6 +120,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// start, as it always did.
 	59: {nodesCreditBillingCols},
 	60: nil,
+	// safety: v61 adds the git credential tables and no column, and nothing
+	// older reads them, so an older binary keeps writing the migrated database.
+	61: nil,
 }
 
 func columnSpecMaps() []map[string]string {
