@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -10,10 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
 func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.Server {
@@ -324,5 +327,29 @@ func TestARestartMidDayKeepsTheSpentEgress(t *testing.T) {
 	}
 	if got := egressMeter.State().GlobalDayBytes; got != 600 {
 		t.Fatalf("day total after a restart = %d, want the 600 spent before it", got)
+	}
+	if got := egressMeter.State().GlobalMonthBytes; got != 600 {
+		t.Fatalf("month total after a restart = %d, want the 600 spent before it", got)
+	}
+}
+
+// The month's total is kept in one object per month, so a restart on a later
+// day of the month finds it even though today has no saved total yet.
+func TestARestartLaterInTheMonthKeepsTheMonthTotal(t *testing.T) {
+	var cfg Config
+	newBlobServerWith(t, "s3cret", func(c *Config, _ *s3.Client) { cfg = *c })
+	month := time.Now().UTC().Format("2006-01")
+	body := []byte(`{"Day":"` + month + `-00","Bytes":900,"Month":"` + month + `","MonthBytes":900}`)
+	if _, err := blobStore.Put(context.Background(), "", "egress/"+month+".json", bytes.NewReader(body),
+		teamblob.PutOptions{Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	egressMeter = nil
+	if _, err := New(cfg); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if state := egressMeter.State(); state.GlobalMonthBytes != 900 || state.GlobalDayBytes != 0 {
+		t.Fatalf("after a restart on a later day = month %d, day %d; want the month's 900 and a fresh day",
+			state.GlobalMonthBytes, state.GlobalDayBytes)
 	}
 }

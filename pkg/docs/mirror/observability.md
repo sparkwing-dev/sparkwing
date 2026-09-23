@@ -824,10 +824,11 @@ resumes the month rather than handing everyone a fresh budget and resumes
 the day rather than reopening the daily cap, and no response costs a
 store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
-on every tick. A cache with `--blob-store` keeps its own total for the
-UTC day as one small object, `egress/<date>.json` in the bucket's operator
-namespace, written at most once a minute and at shutdown and read back at
-start, so a restart mid-day keeps the daily cap spent. A cache without a
+on every tick. A cache with `--blob-store` keeps its own totals for the
+UTC day and the UTC month as one small object per month,
+`egress/<YYYY-MM>.json` in the bucket's operator namespace, written at most
+once a minute and at shutdown and read back at start, so a restart keeps
+the daily cap spent and `global_month_bytes` counting. A cache without a
 bucket and the logs service count in memory alone: their counters are per
 process and start over on a restart.
 

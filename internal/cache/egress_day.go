@@ -12,13 +12,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
-// The cache's daily egress total lives in memory, so without a bucket every
-// restart reopens the daily cap. With a bucket the day's total is one small
-// object in the operator's namespace, written at most once a minute and at
-// shutdown, and read back at start.
+// The cache's egress totals live in memory, so without a bucket every
+// restart reopens the daily cap and restarts the month's count. With a
+// bucket the day's and the month's totals are one small object per month in
+// the operator's namespace, written at most once a minute and at shutdown,
+// and read back at start.
 const egressDayFlushEvery = time.Minute
 
-func egressDayRel(day string) string { return "egress/" + day + ".json" }
+func egressMonthRel(month string) string { return "egress/" + month + ".json" }
 
 func flushEgressDay(ctx context.Context) error {
 	if blobStore == nil || egressMeter == nil {
@@ -29,20 +30,20 @@ func flushEgressDay(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, err = blobStore.Put(ctx, "", egressDayRel(u.Day), bytes.NewReader(body), teamblob.PutOptions{
+		_, err = blobStore.Put(ctx, "", egressMonthRel(u.Month), bytes.NewReader(body), teamblob.PutOptions{
 			Size: int64(len(body)), ContentType: "application/json",
 		})
 		return err
 	})
 }
 
-// restoreEgressDay loads today's saved total into the meter, so a restart
-// resumes the day's cap rather than reopening it.
+// restoreEgressDay loads this month's saved totals into the meter, so a
+// restart resumes the day's cap and the month's count.
 func restoreEgressDay(ctx context.Context) error {
 	if blobStore == nil || egressMeter == nil {
 		return nil
 	}
-	body, err := blobStore.ReadAll(ctx, "", egressDayRel(time.Now().UTC().Format("2006-01-02")))
+	body, err := blobStore.ReadAll(ctx, "", egressMonthRel(time.Now().UTC().Format("2006-01")))
 	if errors.Is(err, teamblob.ErrNotFound) {
 		return nil
 	}

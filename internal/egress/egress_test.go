@@ -831,6 +831,34 @@ func TestHandleAbortsAResponseTheBudgetCut(t *testing.T) {
 	}
 }
 
+// A restart later in the month resumes the month's total from the last saved
+// day, while that day's own total no longer counts; another month's total is
+// ignored.
+func TestRestoreDayResumesTheMonthOnALaterDay(t *testing.T) {
+	m, _ := meterAt(t, egress.Config{}, "2026-09-13T10:00:00Z")
+	m.Record("alice", egress.ClassArtifact, 700)
+	var saved egress.DayUsage
+	if err := m.FlushDay(func(u egress.DayUsage) error { saved = u; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	restarted, _ := meterAt(t, egress.Config{}, "2026-09-20T08:00:00Z")
+	restarted.RestoreDay(egress.DayUsage{Day: "2026-08-31", Bytes: 9000, Month: "2026-08", MonthBytes: 9000})
+	restarted.RestoreDay(saved)
+	state := restarted.State()
+	if state.GlobalMonthBytes != 700 || state.GlobalDayBytes != 0 {
+		t.Fatalf("after a restart a week later = month %d, day %d; want the month's 700 and a fresh day",
+			state.GlobalMonthBytes, state.GlobalDayBytes)
+	}
+	restarted.Record("bob", egress.ClassArtifact, 50)
+	var again egress.DayUsage
+	if err := restarted.FlushDay(func(u egress.DayUsage) error { again = u; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if again.MonthBytes != 750 || again.Bytes != 50 {
+		t.Fatalf("the next save = %+v, want the month carried forward to 750 and the day at 50", again)
+	}
+}
+
 func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
 	m, clock := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T10:00:00Z")
 	m.Record("alice", egress.ClassArtifact, 600)
@@ -843,8 +871,8 @@ func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
 	if err := m.FlushDay(persist); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != (egress.DayUsage{Day: "2026-09-13", Bytes: 1000}) {
-		t.Fatalf("FlushDay = %+v, want one 2026-09-13 total of 1000", got)
+	if len(got) != 1 || got[0] != (egress.DayUsage{Day: "2026-09-13", Bytes: 1000, Month: "2026-09", MonthBytes: 1000}) {
+		t.Fatalf("FlushDay = %+v, want one 2026-09-13 total of 1000 in a 2026-09 total of 1000", got)
 	}
 
 	restarted, _ := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T11:00:00Z")

@@ -721,6 +721,10 @@ type DayUsage struct {
 	// Day is the UTC day the bytes fell in, as "2006-01-02".
 	Day   string
 	Bytes int64
+	// Month is Day's UTC month, as "2006-01", and MonthBytes the process
+	// total for it, so a restart later in the month resumes it too.
+	Month      string `json:",omitempty"`
+	MonthBytes int64  `json:",omitempty"`
 }
 
 // FlushDay gives persist today's process total when it moved since the
@@ -736,22 +740,23 @@ func (m *Meter) FlushDay(persist func(DayUsage) error) error {
 		m.mu.Unlock()
 		return nil
 	}
-	usage := DayUsage{Day: m.day, Bytes: m.dayBytes}
+	usage := DayUsage{Day: m.day, Bytes: m.dayBytes, Month: m.month, MonthBytes: m.monthBytes}
 	m.mu.Unlock()
 	if err := persist(usage); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.day == usage.Day && m.dayBytes == usage.Bytes {
+	if m.day == usage.Day && m.dayBytes == usage.Bytes && m.monthBytes == usage.MonthBytes {
 		m.dayDirty = false
 	}
 	return nil
 }
 
 // RestoreDay loads a persisted process total, so a restarted service
-// resumes the day where it left off rather than reopening the daily cap.
-// A total for another day is ignored, and one below what this process has
+// resumes the day and the month where it left off rather than reopening the
+// daily cap or restarting the month's count. A total for another day or
+// month is ignored for that period, and one below what this process has
 // already counted never lowers it.
 func (m *Meter) RestoreDay(u DayUsage) {
 	if m == nil {
@@ -761,6 +766,9 @@ func (m *Meter) RestoreDay(u DayUsage) {
 	defer m.mu.Unlock()
 	now := m.now().UTC()
 	m.rollGlobal(now)
+	if u.Month == m.month && u.MonthBytes > m.monthBytes {
+		m.monthBytes = u.MonthBytes
+	}
 	if u.Day != m.day || u.Bytes <= m.dayBytes {
 		return
 	}

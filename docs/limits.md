@@ -128,7 +128,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Git mirrors | registered by the operator only; a team's grant cannot add one | `internal/cache/gitcache.go` |
 | Registry proxy directory | shared by every team; 2 GiB, least recently served evicted first, and 7 days per entry | `internal/cache/proxycap.go` |
 | Registry proxy churn | the proxy takes no credential, because runner pods carry none, and is served inside the cluster only: the runner-bundle chart refuses a cache Service other than `ClusterIP` unless `cache.dependencyProxy.enabled=false`, which starts the cache with `--disable-proxy`. The cache's daily egress cap bounds what any caller pulls through it | `internal/cache/cache.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml`, `cmd/sparkwing-cache/main.go` |
-| Bytes the cache serves | 200 GiB a day per cache pod that verifies grants, unless the operator names another cap; with `--blob-store` the day's total survives a restart, without one it is per process | `cmd/sparkwing-cache/main.go`, `internal/cache/egress_day.go` |
+| Bytes the cache serves | 200 GiB a day per cache pod that verifies grants, unless the operator names another cap; with `--blob-store` the day's and the month's totals survive a restart, without one they are per process | `cmd/sparkwing-cache/main.go`, `internal/cache/egress_day.go` |
 | Cloud runner time | only an operator-metered token claims cloud capacity, and each claim needs credits | `pkg/store/credits.go` |
 | Nodes per run | `max_global_nodes_per_run` when the operator sets it | `pkg/store/compute_limits.go` |
 | Live log buffers in controller memory | per-node, total and node-count caps | `cmd/sparkwing-controller/main.go` |
