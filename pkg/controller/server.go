@@ -73,6 +73,7 @@ type Server struct {
 	artifactStore storage.ArtifactStore
 
 	bucketUsageStore storage.ArtifactStore
+	storagePass      *storagePass
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
@@ -1312,6 +1313,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
+	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 
 	if s.pool != nil {
