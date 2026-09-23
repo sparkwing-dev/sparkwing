@@ -131,23 +131,23 @@ The AWS SDKs and CLI read a web identity token from a file named by `AWS_WEB_IDE
 
 ```go
 func awsEnv(ctx context.Context, roleARN string) ([]string, error) {
-	token, err := sparkwing.OIDCToken(ctx, "sts.amazonaws.com")
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.CreateTemp("", "aws-web-identity-*")
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	if _, err := f.WriteString(token); err != nil {
-		return nil, err
-	}
-	return []string{
-		"AWS_ROLE_ARN=" + roleARN,
-		"AWS_WEB_IDENTITY_TOKEN_FILE=" + f.Name(),
-		"AWS_ROLE_SESSION_NAME=sparkwing",
-	}, nil
+    token, err := sparkwing.OIDCToken(ctx, "sts.amazonaws.com")
+    if err != nil {
+        return nil, err
+    }
+    f, err := os.CreateTemp("", "aws-web-identity-*")
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+    if _, err := f.WriteString(token); err != nil {
+        return nil, err
+    }
+    return []string{
+        "AWS_ROLE_ARN=" + roleARN,
+        "AWS_WEB_IDENTITY_TOKEN_FILE=" + f.Name(),
+        "AWS_ROLE_SESSION_NAME=sparkwing",
+    }, nil
 }
 ```
 
