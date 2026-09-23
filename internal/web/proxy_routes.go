@@ -40,6 +40,11 @@ var proxyRoutes = []proxyRoute{
 	{"PUT /api/v1/crons/{id}/override", controller.ScopeRunsControl},
 	{"DELETE /api/v1/crons/{id}/override", controller.ScopeRunsControl},
 	{"DELETE /api/v1/runs/{id}", controller.ScopeAdmin},
+	// safety: no single-secret read is proxied, so a browser never reaches a
+	// value route; the list returns variable values and no secret's.
+	{"GET /api/v1/secrets", controller.ScopeRunsRead},
+	{"POST /api/v1/secrets", controller.ScopeTeamAdmin},
+	{"DELETE /api/v1/secrets/{name}", controller.ScopeTeamAdmin},
 }
 
 // safety: a membership role, which the controller resolves on every request for the

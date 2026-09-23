@@ -12,6 +12,7 @@ import { joinedNotice, rememberTeamNotice } from "@/lib/teamNotice";
 const tabs = [
   { href: "/team", label: "Members" },
   { href: "/team/machines", label: "Machines" },
+  { href: "/team/secrets", label: "Secrets" },
   { href: "/team/billing", label: "Billing" },
 ];
 

@@ -22,6 +22,12 @@ unlock.
 
 ### Added
 
+- **web:** `/team/secrets` manages a team's secrets and variables. Owners
+  create, overwrite and delete rows scoped to the team or to one pipeline;
+  editors and readers see the names and the variables' values. A secret is
+  write-only: its value is never shown after it is saved, and **Update** opens
+  an empty field. A variable is shown and edited in place.
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the

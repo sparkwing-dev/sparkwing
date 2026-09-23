@@ -114,7 +114,7 @@ async function failure(res: Response, action: string): Promise<TeamApiError> {
   );
 }
 
-async function send(
+export async function send(
   method: string,
   url: string,
   action: string,

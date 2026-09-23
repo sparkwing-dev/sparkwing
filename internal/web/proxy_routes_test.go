@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,6 +124,13 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 		{"reader streams node logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1/n1/stream", http.StatusNoContent},
 		{"run reader cannot read logs", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusForbidden},
 		{"scopeless session reads no logs", nil, http.MethodGet, "/api/v1/logs/r1/n1", http.StatusForbidden},
+		{"reader lists secrets", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/secrets", http.StatusNoContent},
+		{"scopeless session lists no secrets", nil, http.MethodGet, "/api/v1/secrets", http.StatusForbidden},
+		{"editor cannot write a secret", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodPost, "/api/v1/secrets", http.StatusForbidden},
+		{"editor cannot delete a secret", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusForbidden},
+		{"owner writes a secret", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
+		{"owner deletes a secret", []string{controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusNoContent},
+		{"operator writes a secret", []string{controller.ScopeAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -144,14 +152,14 @@ func TestProxyRoutes_ScopesMatchControllerRegistrations(t *testing.T) {
 	t.Parallel()
 	registered := controllerRouteScopes(t)
 	for _, route := range proxyRoutes {
-		scope, ok := registered[route.pattern]
+		scopes, ok := registered[route.pattern]
 		if !ok {
 			t.Errorf("proxy allows %q, which the controller does not register", route.pattern)
 			continue
 		}
-		if scope != route.scope {
-			t.Errorf("proxy guards %q with %s; the controller registers it at %s",
-				route.pattern, route.scope, scope)
+		if !slices.Contains(scopes, route.scope) {
+			t.Errorf("proxy guards %q with %s; the controller registers it at %v",
+				route.pattern, route.scope, scopes)
 		}
 	}
 }
@@ -164,19 +172,19 @@ func TestLogsProxyRoutes_ScopesMatchLogsRegistrations(t *testing.T) {
 			t.Errorf("logs proxy allows %q; the dashboard forwards reads only", route.pattern)
 			continue
 		}
-		scope, ok := registered[route.pattern]
+		scopes, ok := registered[route.pattern]
 		if !ok {
 			t.Errorf("logs proxy allows %q, which the logs service does not register", route.pattern)
 			continue
 		}
-		if scope != route.scope {
-			t.Errorf("logs proxy guards %q with %s; the logs service registers it at %s",
-				route.pattern, route.scope, scope)
+		if !slices.Contains(scopes, route.scope) {
+			t.Errorf("logs proxy guards %q with %s; the logs service registers it at %v",
+				route.pattern, route.scope, scopes)
 		}
 	}
 }
 
-func controllerRouteScopes(t *testing.T) map[string]string {
+func controllerRouteScopes(t *testing.T) map[string][]string {
 	t.Helper()
 	return routeScopes(t, "../../pkg/controller/server.go", map[string]string{
 		"ScopeRunsRead":       controller.ScopeRunsRead,
@@ -195,7 +203,7 @@ func controllerRouteScopes(t *testing.T) map[string]string {
 	})
 }
 
-func logsRouteScopes(t *testing.T) map[string]string {
+func logsRouteScopes(t *testing.T) map[string][]string {
 	t.Helper()
 	return routeScopes(t, "../../pkg/logs/server.go", map[string]string{
 		"scopeLogsRead":  controller.ScopeLogsRead,
@@ -204,14 +212,14 @@ func logsRouteScopes(t *testing.T) map[string]string {
 	})
 }
 
-func routeScopes(t *testing.T, source string, values map[string]string) map[string]string {
+func routeScopes(t *testing.T, source string, values map[string]string) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, source, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := map[string]string{}
+	out := map[string][]string{}
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) < 2 {
@@ -239,16 +247,21 @@ func routeScopes(t *testing.T, source string, values map[string]string) map[stri
 		if wrapperName(wrapped.Fun) != "requireScope" || len(wrapped.Args) == 0 {
 			return true
 		}
-		ident, ok := wrapped.Args[0].(*ast.Ident)
-		if !ok {
-			return true
+		for i, arg := range wrapped.Args {
+			if i == 1 {
+				continue
+			}
+			ident, ok := arg.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			value, ok := values[ident.Name]
+			if !ok {
+				t.Errorf("%s registers a route at unknown scope constant %s", source, ident.Name)
+				return true
+			}
+			out[pattern] = append(out[pattern], value)
 		}
-		value, ok := values[ident.Name]
-		if !ok {
-			t.Errorf("%s registers a route at unknown scope constant %s", source, ident.Name)
-			return true
-		}
-		out[pattern] = value
 		return true
 	})
 	if len(out) == 0 {
