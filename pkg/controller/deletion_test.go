@@ -27,6 +27,7 @@ type teamDeletionBody struct {
 type storageFake struct {
 	mu       sync.Mutex
 	status   int
+	byPath   map[string]int
 	requests []string
 }
 
@@ -34,6 +35,10 @@ func (s *storageFake) handler(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
+	if status, ok := s.byPath[r.URL.Path]; ok {
+		w.WriteHeader(status)
+		return
+	}
 	w.WriteHeader(s.status)
 }
 
@@ -158,8 +163,8 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 		t.Fatalf("a pass inside the tenant-cache window deleted logs: %v", got)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	if got := logs.seen(); len(got) != 1 || got[0] != "DELETE /api/v1/logs/run-acme Bearer "+f.logsToken {
-		t.Fatalf("logs service saw %v", got)
+	if got := logs.seen(); len(got) != 1 || got[0] != "DELETE /api/v1/teams/acme/logs Bearer "+f.logsToken {
+		t.Fatalf("logs service saw %v, want the team's logs deleted in one call", got)
 	}
 	if got := cache.seen(); len(got) != 1 || got[0] != "DELETE /admin/teams/acme Bearer cache-op" {
 		t.Fatalf("cache service saw %v", got)
@@ -171,6 +176,33 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	}
 	if _, err := f.store.TeamInfo(context.Background(), "acme"); err == nil {
 		t.Fatal("the team is still registered after the pass")
+	}
+}
+
+// A logs service with no archive store answers the team route 404, and the
+// purge then deletes the team's runs one at a time.
+func TestTeamDeletionFallsBackToPerRunLogDeletesWithoutAnArchive(t *testing.T) {
+	logs, _, ts := newStorageFakes(t)
+	logs.byPath = map[string]int{"/api/v1/teams/acme/logs": http.StatusNotFound}
+	f := newDeletionFixture(t, ts)
+	owner := f.user("o", "olga@example.com")
+	f.createTeam(&owner, "acme")
+	f.seedRun("acme", "run-acme")
+	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, nil); code != http.StatusAccepted {
+		t.Fatalf("delete = %d", code)
+	}
+	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
+	want := []string{
+		"DELETE /api/v1/teams/acme/logs Bearer " + f.logsToken,
+		"DELETE /api/v1/logs/run-acme Bearer " + f.logsToken,
+	}
+	if got := logs.seen(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("logs service saw %v, want %v", got, want)
+	}
+	var mine []teamDeletionBody
+	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
+	if len(mine) != 1 || mine[0].State != store.TeamDeletionDone {
+		t.Fatalf("deletion = %+v, want done", mine)
 	}
 }
 

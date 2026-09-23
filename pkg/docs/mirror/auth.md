@@ -362,7 +362,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
-| `logs.delete`     | DELETE of any team's run logs on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
+| `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
@@ -678,10 +678,15 @@ never registered again. The controller deletes logs with the token in
 `SPARKWING_LOGS_DELETE_TOKEN`, which must carry exactly the `logs.delete`
 scope; mint one as the operator with `sparkwing cluster tokens create --type service --principal controller-logs --scope logs.delete`. With a logs service
 configured and no such token, or one carrying any other scope, a deletion
-stays pending and records why. An owner cannot delete their only team;
-deleting their account does that. Logs of runs deleted before their team was,
-for instance by `DELETE /api/v1/runs/{id}`, are not tracked by any row the
-purge reads and stay in the logs service until its retention removes them.
+stays pending and records why. The purge deletes the team's logs with one
+`DELETE /api/v1/teams/{team}/logs`, which removes every run the logs service
+recorded for the team and its archived namespace; a logs service without an
+archive store answers that route 404, and the controller then deletes the
+team's runs one at a time. An owner cannot delete their only team;
+deleting their account does that. On a logs service without an archive store,
+logs of runs deleted before their team was, for instance by
+`DELETE /api/v1/runs/{id}`, are not tracked by any row the purge reads and
+stay until its retention removes them.
 
 A user deletes their account with `DELETE /api/v1/me`, typing their email back
 as `confirm_email`, from a session signed in within the last 10 minutes; an

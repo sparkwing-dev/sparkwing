@@ -150,9 +150,10 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 	}
 
 	principals := map[string]whoamiResp{
-		"Bearer a":     {Principal: "a", Kind: "user", Scopes: []string{scopeLogsRead, scopeLogsWrite}, Team: "team-a"},
-		"Bearer b":     {Principal: "b", Kind: "user", Scopes: []string{scopeLogsRead, scopeLogsWrite}, Team: "team-b"},
-		"Bearer admin": {Principal: "admin", Kind: "user", Scopes: []string{scopeAdmin}, Team: "default"},
+		"Bearer a":       {Principal: "a", Kind: "user", Scopes: []string{scopeLogsRead, scopeLogsWrite}, Team: "team-a"},
+		"Bearer b":       {Principal: "b", Kind: "user", Scopes: []string{scopeLogsRead, scopeLogsWrite}, Team: "team-b"},
+		"Bearer admin":   {Principal: "admin", Kind: "user", Scopes: []string{scopeAdmin}, Team: "default"},
+		"Bearer deleter": {Principal: "controller-logs", Kind: "service", Scopes: []string{scopeLogsDelete}, Team: "default"},
 	}
 	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principals[r.Header.Get("Authorization")]
@@ -410,8 +411,13 @@ func TestTeamPurgeDeletesOnlyThatTeamsLogs(t *testing.T) {
 	if keys := f.keys(t); !keys["logs/index/runs/run-b1.json"] {
 		t.Error("the purge took team B's run index")
 	}
-	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer admin", ""); code != http.StatusOK {
-		t.Errorf("a repeated purge = %d, want it to succeed", code)
+	// The controller purges with its log-deletion credential, which may delete
+	// a team's logs and read nothing, not even the team's usage.
+	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer deleter", ""); code != http.StatusOK {
+		t.Errorf("a repeated purge with the log-deletion credential = %d, want it to succeed", code)
+	}
+	if code, _ := f.do(t, http.MethodGet, "/api/v1/teams/team-a/logs/usage", "Bearer deleter", ""); code/100 == 2 {
+		t.Errorf("the log-deletion credential read a team's usage: %d", code)
 	}
 	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/Team..A/logs", "Bearer admin", ""); code != http.StatusBadRequest {
 		t.Errorf("a purge of a non-slug = %d, want 400", code)

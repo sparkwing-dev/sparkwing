@@ -377,6 +377,17 @@ func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []st
 	if err := s.checkLogsDeleteToken(now); err != nil {
 		return err
 	}
+	// safety: the team route removes the team's archived namespace and every
+	// run the logs service recorded for it in one call; a service without an
+	// archive store answers it 404, and only then are runs deleted one by one.
+	teamTarget := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/teams/" + url.PathEscape(string(team)) + "/logs"
+	err := deleteRemote(ctx, teamTarget, ts.LogsToken)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, errRemoteNotFound) {
+		return fmt.Errorf("delete the team's logs: %w", err)
+	}
 	base := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/logs/"
 	for i, id := range runIDs {
 		if i > 0 && i%100 == 0 {
@@ -392,7 +403,8 @@ func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []st
 }
 
 // deleteRemote sends one DELETE to an operator-configured service and wants
-// 204 back.
+// a 2xx back: 204 from a run or cache delete, 200 with a count from the logs
+// service's team purge.
 func deleteRemote(ctx context.Context, target, bearer string) error {
 	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
@@ -408,12 +420,19 @@ func deleteRemote(ctx context.Context, target, bearer string) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode/100 != 2 {
 		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
+		err := fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		if resp.StatusCode == http.StatusNotFound {
+			err = fmt.Errorf("%w: %w", errRemoteNotFound, err)
+		}
+		return errors.Join(err, rerr)
 	}
 	return nil
 }
+
+// errRemoteNotFound marks a DELETE the remote service answered 404.
+var errRemoteNotFound = errors.New("remote answered 404")
 
 // safety: the logs service lets an admin bearer delete and read every team's
 // logs, so the controller spends only a credential that carries the
