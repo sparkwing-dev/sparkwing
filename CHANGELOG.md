@@ -474,6 +474,11 @@ unlock.
 
 ### Fixed
 
+- **credits:** a started metered node whose runner stopped renewing now pays
+  for the seconds between its last charge and its lease's end, under the
+  per-charge cap, when the reaper or agent-loss recovery clears its claim.
+  Those seconds used to go unbilled.
+
 - **runner:** a pooled runner whose node fails before it starts, for example
   a pipeline that does not compile, finishes the node as failed with that
   error. The node used to stay claimed until its three-minute lease lapsed and

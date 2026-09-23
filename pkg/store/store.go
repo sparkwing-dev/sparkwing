@@ -6067,7 +6067,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id, execution_started_at, credit_charged_through FROM nodes
+		`SELECT run_id, node_id, execution_started_at, credit_charged_through, lease_expires_at FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
@@ -6076,17 +6076,21 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	}
 	var pairs [][2]string
 	var unstarted [][2]string
+	var lapsed []expiredClaim
 	for rows.Next() {
 		var rid, nid string
 		var started sql.NullInt64
-		var chargeWindow int64
-		if err := rows.Scan(&rid, &nid, &started, &chargeWindow); err != nil {
+		var chargeWindow, lease int64
+		if err := rows.Scan(&rid, &nid, &started, &chargeWindow, &lease); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
-		if !started.Valid && chargeWindow != 0 {
+		switch {
+		case !started.Valid && chargeWindow != 0:
 			unstarted = append(unstarted, [2]string{rid, nid})
+		case chargeWindow != 0:
+			lapsed = append(lapsed, expiredClaim{runID: rid, nodeID: nid, leaseNS: lease})
 		}
 	}
 	_ = rows.Close()
@@ -6108,6 +6112,11 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 			if _, err := refundClaimTx(ctx, tx, team, pair[0], pair[1], now); err != nil {
 				return nil, err
 			}
+		}
+	}
+	for _, claim := range lapsed {
+		if err := s.settleExpiredClaimTx(ctx, tx, claim, now); err != nil {
+			return nil, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx,

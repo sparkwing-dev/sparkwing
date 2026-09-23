@@ -2071,6 +2071,29 @@ func (s *Store) chargeNodeTx(
 	return out, nil
 }
 
+// expiredClaim is a started node whose claim lapsed with its charge window
+// open, and when the lease that stopped being renewed ran out.
+type expiredClaim struct {
+	runID, nodeID string
+	leaseNS       int64
+}
+
+// safety: the holder stopped renewing, so the node ran until its lease ran
+// out and no later; the interval since the last charge is billed to there,
+// under the same per-charge cap a heartbeat is held to, before the claim that
+// anchors it is cleared.
+func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
+	var tokenPrefix string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT claim_token_prefix FROM nodes WHERE run_id = ? AND node_id = ?`,
+		claim.runID, claim.nodeID).Scan(&tokenPrefix); err != nil {
+		return err
+	}
+	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, tokenPrefix,
+		time.Unix(0, min(claim.leaseNS, nowNS)), true)
+	return err
+}
+
 // safety: the team travels in this struct rather than as a Team parameter,
 // because the statements around it also read and write `nodes`, whose rows do
 // not carry a usable team yet; a parameter would make the scope guard demand a
