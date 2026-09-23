@@ -87,7 +87,7 @@ export function placementLabel(node: Node): string | null {
 }
 
 export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
-  const location = normalizeLocation(attempt?.location);
+  const location = normalizeLocation(attempt?.location, attempt?.execution_site);
   const locationLabel =
     location === "local"
       ? "Local"
@@ -149,7 +149,9 @@ export function compactExecutionDisplay(node: Node): ExecutionDisplay | null {
   return display.icon ? display : null;
 }
 
-function normalizeLocation(location?: string): ExecutionLocation {
+function normalizeLocation(location?: string, site?: string): ExecutionLocation {
   if (location === "local" || location === "cloud") return location;
+  if (site === "machine") return "local";
+  if (site === "cluster" || site === "kubernetes" || site === "github-actions" || site === "cloud") return "cloud";
   return "unknown";
 }

@@ -22,6 +22,13 @@ unlock.
 
 ### Added
 
+- **execution history (Breaking):** node attempts record the executor for trigger-owned,
+  pooled, Kubernetes Job, GitHub Actions, local, and metered cloud execution.
+  Older attempts derive a site from matching claim credentials and holders when
+  available. GitHub Actions attempts include the repository and workflow run
+  ID. Schema 65 adds `github_runner_credentials.run_id`. See
+  [Execution attribution migration](docs/migrations/execution-attribution.md).
+
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
   provider holds, and unlinks one while another remains. The flow is the

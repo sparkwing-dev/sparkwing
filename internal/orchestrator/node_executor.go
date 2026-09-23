@@ -460,16 +460,22 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 				ReservationID:   claimFence.ReservationID,
 				ClaimGeneration: claimFence.ClaimGeneration, AttemptOrdinal: ordinal,
 			}
+			if strings.HasPrefix(claimFence.HolderID, "k8s-job:") {
+				start.ExecutorName = localExecutorHost()
+			}
 			if triggerFence.ClaimGeneration > 0 {
 				start = store.ExecutionStart{
 					ClaimGeneration: triggerFence.ClaimGeneration,
 					AttemptOrdinal:  ordinal,
+					ExecutorName:    localExecutorHost(),
+				}
+				if podName := os.Getenv("POD_NAME"); podName != "" {
+					start.ExecutorKind = "kubernetes"
+					start.ExecutorName = podName
 				}
 			}
-			if localExecutor != "" {
-				if localOnly {
-					start = store.ExecutionStart{AttemptOrdinal: ordinal}
-				}
+			if localOnly {
+				start = store.ExecutionStart{AttemptOrdinal: ordinal}
 				start.ExecutorKind = store.ExecutorKindLocal
 				start.ExecutorID = localExecutor
 			}

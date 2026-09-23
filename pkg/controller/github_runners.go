@@ -166,7 +166,7 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 	now := time.Now().UTC()
 	principal := store.GitHubRunnerPrincipalPrefix + strconv.FormatInt(claims.RepositoryID, 10) + ":" + repo.Slug()
 	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), principal,
-		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA}, runnerTokenScopes, githubRunnerCredentialTTL, now)
+		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA, RunID: claims.RunID}, runnerTokenScopes, githubRunnerCredentialTTL, now)
 	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
 		setRetryAfter(w, time.Minute)
 		writeError(w, http.StatusTooManyRequests, errors.New(

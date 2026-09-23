@@ -141,6 +141,21 @@ func TestGitHubRunnerExchangeNeedsBothSidesOfConsent(t *testing.T) {
 	if w.Team != owner.team || w.Principal != "github:42:Acme/Widgets" {
 		t.Fatalf("whoami = %+v", w)
 	}
+	token, err := f.store.LookupToken(cred.Token, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, err := tenant.GitHubRunnerCredentialPush(context.Background(), token.Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if push.RunID != widgetsJob.RunID {
+		t.Fatalf("credential workflow run = %q, want %q", push.RunID, widgetsJob.RunID)
+	}
 
 	transferred := widgetsJob
 	transferred.RepositoryOwnerID = 8

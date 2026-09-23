@@ -102,6 +102,11 @@ describe("executionAttempts", () => {
 });
 
 describe("executionDisplay", () => {
+  it("derives placement from a known historical execution site", () => {
+    const display = executionDisplay({ execution_site: "cluster", execution_site_name: "job-a" });
+    assert.equal(display.locationLabel, "Cloud");
+    assert.equal(display.executorLabel, "cluster job-a");
+  });
   it("maps known execution origins to a compact icon and specific tooltip", () => {
     assert.deepEqual(
       [

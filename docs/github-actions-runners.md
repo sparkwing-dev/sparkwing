@@ -81,7 +81,7 @@ jobs:
 
 ## What the credential can do
 
-The exchange mints a runner-kind token for the team with the runner scope bundle, principal `github:<repository_id>:<owner>/<name>`, and a one-hour lifetime, and records the push it was minted for. A team holds at most 20 live GitHub Actions credentials; the 21st exchange answers 429, counted and minted under one lock so a burst of exchanges cannot pass the limit together. Each exchange first deletes the team's expired and revoked GitHub Actions credentials. The token appears in the team's runner-token list, where an owner can revoke it.
+The exchange mints a runner-kind token for the team with the runner scope bundle, principal `github:<repository_id>:<owner>/<name>`, and a one-hour lifetime, and records the push and workflow run ID from the verified ID token. Execution history shows the repository and workflow run ID for nodes that job runs. A team holds at most 20 live GitHub Actions credentials; the 21st exchange answers 429, counted and minted under one lock so a burst of exchanges cannot pass the limit together. Each exchange first deletes the team's expired and revoked GitHub Actions credentials. The token appears in the team's runner-token list, where an owner can revoke it.
 
 The credential gets no cache grant: `POST /api/v1/runs/{id}/cache-grant` answers 403, because a grant opens the team's whole cache tree and the credential is confined to one repository's push. The job builds without the shared binary and dependency caches.
 

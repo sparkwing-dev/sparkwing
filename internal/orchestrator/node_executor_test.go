@@ -661,6 +661,7 @@ func (s getNodeErrorState) GetNode(context.Context, string, string) (*store.Node
 }
 
 func TestTriggerOwnedNodeRecordsLocalAttribution(t *testing.T) {
+	t.Setenv("POD_NAME", "")
 	paths := PathsAt(t.TempDir())
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)
@@ -703,13 +704,44 @@ func TestTriggerOwnedNodeRecordsLocalAttribution(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1", len(attempts))
 	}
 	got := attempts[0]
-	if got.ExecutorKind != store.ExecutorKindLocal || got.ExecutorLocation != "local" ||
+	if got.ExecutorKind != "agent" || got.ExecutorLocation != "local" ||
 		got.ExecutorName != localExecutorHost() {
 		t.Fatalf("attribution = kind %q location %q name %q, want this host running locally",
 			got.ExecutorKind, got.ExecutorLocation, got.ExecutorName)
 	}
 	if got.Outcome != string(sparkwing.Success) {
 		t.Fatalf("outcome = %q, want success", got.Outcome)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: trigger.ID, NodeID: "inline", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	inline := sparkwing.Job(plan, "inline", func(context.Context) error { return nil })
+	remote := LocalBackends(paths, st, nil)
+	remote.LocalCoordination = false
+	if _, err := NewNodeExecutor(remote).executeNodeInProcess(ctx, trigger.ID, inline, nil); err != nil {
+		t.Fatal(err)
+	}
+	inlineAttempts, err := st.ListNodeExecutionAttempts(ctx, trigger.ID, "inline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inlineAttempts) != 1 || inlineAttempts[0].ExecutorName != localExecutorHost() || inlineAttempts[0].ExecutorLocation != "local" {
+		t.Fatalf("in-process trigger attempt = %+v, want this host", inlineAttempts)
+	}
+	t.Setenv("POD_NAME", "warm-pool-7")
+	if err := st.CreateNode(ctx, store.Node{RunID: trigger.ID, NodeID: "pod-inline", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	podInline := sparkwing.Job(plan, "pod-inline", func(context.Context) error { return nil })
+	if _, err := NewNodeExecutor(LocalBackends(paths, st, nil)).executeNodeInProcess(ctx, trigger.ID, podInline, nil); err != nil {
+		t.Fatal(err)
+	}
+	podAttempts, err := st.ListNodeExecutionAttempts(ctx, trigger.ID, "pod-inline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(podAttempts) != 1 || podAttempts[0].ExecutorKind != "kubernetes" || podAttempts[0].ExecutorName != "warm-pool-7" || podAttempts[0].ExecutorLocation != "cloud" {
+		t.Fatalf("warm pool trigger attempt = %+v, want warm-pool-7 in cluster", podAttempts)
 	}
 	stored, err := st.GetNode(context.Background(), trigger.ID, "build")
 	if err != nil {
