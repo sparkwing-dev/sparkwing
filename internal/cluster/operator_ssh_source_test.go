@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -14,8 +15,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // The operator's runners build its private repositories, which the cache
@@ -178,4 +182,89 @@ func standInSSH(t *testing.T, root string) {
 	}
 	t.Setenv("GIT_SSH_COMMAND", script)
 	t.Setenv("GIT_SSH_VARIANT", "simple")
+}
+
+// A node the dispatcher hands to a Kubernetes Job runs in a pod that holds the
+// runner token and the claim, but no cache credential: the pod runs the team's
+// code. So the pod asks the controller for its run's grant itself, and the
+// node's source comes from the operator's SSH mirror through that grant.
+func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: clones over a stand-in SSH transport and compiles a pipeline")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	for _, name := range []string{
+		wingwire.APISocketEnv, "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL",
+		"SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_CACHE_URL",
+		authwire.CacheTokenEnv, authwire.CacheGrantEnv,
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv(authwire.CacheGrantKeyEnv, cacheGrantKey)
+
+	origins := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "ran")
+	sha := makePrivateOrigin(t, filepath.Join(origins, "acme", "private.git"), marker)
+	const repoURL = "ssh://git@git.example.invalid/acme/private.git"
+	standInSSH(t, origins)
+
+	cacheSrv := newGrantCache(t)
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrlSrv := httptest.NewServer(controller.New(st, discardLogger()).
+		WithCacheCredentials(cacheSrv.URL, operatorCacheToken).EnableAuthFromStore().Handler())
+	t.Cleanup(ctrlSrv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	const runID, nodeID = "operator-run", "build"
+	if err := st.CreateTriggerWithRun(ctx,
+		store.Trigger{ID: runID, Pipeline: "deploy", RepoURL: repoURL, GitBranch: "main", GitSHA: sha},
+		store.Run{ID: runID, Pipeline: "deploy", Status: "running", StartedAt: time.Now()},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, runID, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := st.CreateToken("pool", store.TokenKindRunner, []string{
+		controller.ScopeNodesClaim, controller.ScopeRunsRead,
+		controller.ScopeRunsState, controller.ScopeRunsWrite,
+	}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := client.NewWithToken(ctrlSrv.URL, nil, token).
+		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-1", time.Minute, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pod's environment as the Job spec sets it, less the grant.
+	t.Setenv("SPARKWING_AGENT_TOKEN", token)
+	t.Setenv("SPARKWING_GITCACHE_URL", cacheSrv.URL)
+	t.Setenv("SPARKWING_NODE_CLAIM_HOLDER", claimed.ClaimedBy)
+	t.Setenv("SPARKWING_NODE_CLAIM_GENERATION", strconv.FormatInt(claimed.ClaimGeneration, 10))
+	t.Setenv("SPARKWING_NODE_CLAIM_MEMBERSHIP", claimed.ClaimMembershipID)
+	t.Setenv("SPARKWING_NODE_CLAIM_RESERVATION", claimed.ReservationID)
+	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
+
+	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, "--logs", "", runID, nodeID}); err != nil {
+		t.Fatalf("run-node: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the node's pipeline never ran: %v", err)
+	}
+	if want := "run-node " + runID + " " + nodeID; string(got) != want {
+		t.Fatalf("the pipeline ran with %q, want %q", got, want)
+	}
 }

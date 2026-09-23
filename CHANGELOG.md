@@ -425,6 +425,13 @@ unlock.
 
 ### Fixed
 
+- **runner:** a Kubernetes Job's `run-node` asks the controller for its run's
+  cache grant with the Job's runner token, as the trigger launcher and a pooled
+  runner already do. A Job whose dispatcher handed it no grant failed to fetch
+  its source through the cache with `git register: 401` on a multi-team
+  controller. The grant also opens the binary cache and the artifact store to
+  the node; a controller that mints none (404) leaves the node without the
+  cache.
 - **controller:** the migrations and schema requirements a release controller
   records carry its version. `min_binary_version` and each requirement's
   `added_by_version` read `(devel)` even from a tagged build, because only the
