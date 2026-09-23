@@ -444,17 +444,17 @@ func TestGitHubAppTagPushRequiresTagSubscription(t *testing.T) {
 	if _, out := f.deliver("push", tag, ""); out["status"] != "ignored" {
 		t.Fatalf("default subscription started tag: %v", out)
 	}
-	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "tags": true}); code != http.StatusOK {
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "tags": []string{"v*"}}); code != http.StatusOK {
 		t.Fatalf("tag-only subscription = %d", code)
 	}
 	var listed struct {
 		Triggers []struct {
-			Push bool `json:"push"`
-			Tags bool `json:"tags"`
+			Push bool     `json:"push"`
+			Tags []string `json:"tags"`
 		} `json:"triggers"`
 	}
 	if code := f.call("GET", "/api/v1/team/github-app/triggers", olga.auth, nil, &listed); code != http.StatusOK ||
-		len(listed.Triggers) != 1 || listed.Triggers[0].Push || !listed.Triggers[0].Tags {
+		len(listed.Triggers) != 1 || listed.Triggers[0].Push || len(listed.Triggers[0].Tags) != 1 || listed.Triggers[0].Tags[0] != "v*" {
 		t.Fatalf("listed tag subscription = %d %+v", code, listed)
 	}
 	branch := pushPayload(7, 701, "acme/widgets", headSHA)
@@ -477,6 +477,64 @@ func TestGitHubAppTagPushRequiresTagSubscription(t *testing.T) {
 	}
 	if n := len(f.triggers(olga.team)); n != 1 {
 		t.Fatalf("deleted tag left %d triggers", n)
+	}
+}
+
+func TestGitHubAppTagPatternsFilterPushes(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "tags": []string{"v*"}}); code != http.StatusOK {
+		t.Fatalf("pattern subscription = %d", code)
+	}
+	for _, tc := range []struct {
+		ref, status string
+	}{
+		{"refs/tags/canary", "ignored"},
+		{"refs/tags/v1/nested", "ignored"},
+		{"refs/tags/v1.2.3", "dispatched"},
+	} {
+		payload := pushPayload(7, 701, "acme/widgets", headSHA)
+		payload["ref"] = tc.ref
+		if _, out := f.deliver("push", payload, ""); out["status"] != tc.status {
+			t.Fatalf("%s = %v, want %s", tc.ref, out, tc.status)
+		}
+	}
+	if got := len(f.triggers(olga.team)); got != 1 {
+		t.Fatalf("tag patterns started %d runs, want 1", got)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": true, "tags": []string{}}); code != http.StatusOK {
+		t.Fatalf("empty pattern list = %d", code)
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["ref"] = "refs/tags/v2.0.0"
+	if _, out := f.deliver("push", payload, ""); out["status"] != "ignored" {
+		t.Fatalf("empty pattern list started tag: %v", out)
+	}
+}
+
+func TestGitHubAppTagPatternsValidateBounds(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, patterns := range [][]string{
+		{"["},
+		{strings.Repeat("v", 129)},
+		{""},
+		{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"},
+	} {
+		if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"tags": patterns}); code != http.StatusBadRequest {
+			t.Fatalf("invalid tag patterns %q accepted: %d", patterns, code)
+		}
+	}
+}
+
+func TestGitHubAppTagBooleanRejected(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "tags": true}); code != http.StatusBadRequest {
+		t.Fatalf("boolean tags accepted: %d", code)
 	}
 }
 

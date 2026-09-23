@@ -201,7 +201,7 @@ func TestWebhookGitHub_MissingSignature(t *testing.T) {
 	}
 }
 
-func TestWebhookGitHub_TagPushCreatesTagTrigger(t *testing.T) {
+func TestWebhookGitHub_TagPushIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{
 		"ref": "refs/tags/v1.2.3",
@@ -215,17 +215,10 @@ func TestWebhookGitHub_TagPushCreatesTagTrigger(t *testing.T) {
 	}
 	var decoded map[string]string
 	_ = json.NewDecoder(resp.Body).Decode(&decoded)
-	if decoded["status"] != "dispatched" {
-		t.Errorf("status=%q want dispatched", decoded["status"])
+	if decoded["status"] != "ignored" {
+		t.Errorf("status=%q want ignored", decoded["status"])
 	}
-	tr, err := st.GetTrigger(context.Background(), decoded["run_id"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tr.GitBranch != "" || tr.GitSHA != "0123456789abcdef0123456789abcdef01234567" ||
-		tr.TriggerEnv["GITHUB_REF"] != "refs/tags/v1.2.3" || tr.TriggerEnv["GITHUB_TAG"] != "v1.2.3" {
-		t.Errorf("tag trigger = %+v", tr)
-	}
+	expectNoTrigger(t, st)
 }
 
 func TestWebhookGitHub_BranchDeleteIgnored(t *testing.T) {

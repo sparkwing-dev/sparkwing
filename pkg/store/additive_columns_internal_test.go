@@ -126,6 +126,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// keeps writing the migrated database.
 	62: nil,
 	63: {githubAppTriggerTagsCols},
+	64: {githubAppTriggerPatternsCols},
 }
 
 func columnSpecMaps() []map[string]string {

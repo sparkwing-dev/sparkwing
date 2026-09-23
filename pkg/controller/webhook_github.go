@@ -343,21 +343,21 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		})
 		return
 	}
-	branch, isBranch := strings.CutPrefix(payload.Ref, "refs/heads/")
-	tag, isTag := strings.CutPrefix(payload.Ref, "refs/tags/")
-	if (!isBranch && !isTag) || (isBranch && branch == "") || (isTag && tag == "") {
+	if strings.HasPrefix(payload.Ref, "refs/tags/") {
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"status": "ignored",
-			"reason": "non-branch or tag ref",
-			"ref":    payload.Ref,
+			"reason": "tag push",
 		})
 		return
 	}
-	if !isBranch {
-		branch = ""
-	}
-	if !isTag {
-		tag = ""
+	branch, isBranch := strings.CutPrefix(payload.Ref, "refs/heads/")
+	if !isBranch || branch == "" {
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status": "ignored",
+			"reason": "non-branch ref",
+			"ref":    payload.Ref,
+		})
+		return
 	}
 
 	runID := newRunID()
@@ -373,11 +373,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		"GITHUB_REF":                 payload.Ref,
 		sparkwing.EnvGitHubEventName: githubEventPush,
 	}
-	if isTag {
-		triggerEnv["GITHUB_REF_TYPE"], triggerEnv["GITHUB_TAG"] = "tag", tag
-	} else {
-		triggerEnv["GITHUB_REF_TYPE"] = "branch"
-	}
+	triggerEnv["GITHUB_REF_TYPE"] = "branch"
 	owner, repoName := "", ""
 	if parts := strings.SplitN(payload.Repository.FullName, "/", 2); len(parts) == 2 {
 		owner, repoName = parts[0], parts[1]

@@ -489,26 +489,29 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 }
 
 type githubAppTriggerReq struct {
-	Repository  string `json:"repository"`
-	Pipeline    string `json:"pipeline"`
-	Push        bool   `json:"push"`
-	Tags        bool   `json:"tags"`
-	PullRequest bool   `json:"pull_request"`
+	Repository  string   `json:"repository"`
+	Pipeline    string   `json:"pipeline"`
+	Push        bool     `json:"push"`
+	Tags        []string `json:"tags"`
+	PullRequest bool     `json:"pull_request"`
 }
 
 type githubAppTriggerJSON struct {
-	Repository     string `json:"repository"`
-	RepositoryID   int64  `json:"repository_id"`
-	InstallationID int64  `json:"installation_id"`
-	Pipeline       string `json:"pipeline"`
-	Push           bool   `json:"push"`
-	Tags           bool   `json:"tags"`
-	PullRequest    bool   `json:"pull_request"`
-	CreatedBy      string `json:"created_by"`
-	CreatedAt      int64  `json:"created_at"`
+	Repository     string   `json:"repository"`
+	RepositoryID   int64    `json:"repository_id"`
+	InstallationID int64    `json:"installation_id"`
+	Pipeline       string   `json:"pipeline"`
+	Push           bool     `json:"push"`
+	Tags           []string `json:"tags"`
+	PullRequest    bool     `json:"pull_request"`
+	CreatedBy      string   `json:"created_by"`
+	CreatedAt      int64    `json:"created_at"`
 }
 
 func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
+	if tr.Tags == nil {
+		tr.Tags = []string{}
+	}
 	return githubAppTriggerJSON{
 		Repository: tr.Repository, RepositoryID: tr.RepositoryID, InstallationID: tr.InstallationID,
 		Pipeline: tr.Pipeline, Push: tr.Push, Tags: tr.Tags, PullRequest: tr.PullRequest,
@@ -557,7 +560,11 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !req.Push && !req.Tags && !req.PullRequest {
+	if err := store.ValidateGitHubTagPatterns(req.Tags); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !req.Push && len(req.Tags) == 0 && !req.PullRequest {
 		writeError(w, http.StatusBadRequest, errors.New("subscribe to push, tags or pull_request"))
 		return
 	}

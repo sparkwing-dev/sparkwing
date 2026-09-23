@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -192,6 +193,15 @@ func githubPushedAt(raw json.RawMessage) time.Time {
 	return time.Time{}
 }
 
+func githubTagMatches(patterns []string, tag string) bool {
+	for _, pattern := range patterns {
+		if matched, err := path.Match(pattern, tag); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
 func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githubAppIntake, string, error) {
 	base := map[string]string{
 		"GITHUB_REPOSITORY":      env.Repository.FullName,
@@ -337,7 +347,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	}
 	var wanted []store.GitHubAppTrigger
 	for _, sub := range subs {
-		if (event == "push" && ((intake.tag != "" && sub.Tags) || (intake.tag == "" && sub.Push))) ||
+		if (event == "push" && ((intake.tag != "" && githubTagMatches(sub.Tags, intake.tag)) || (intake.tag == "" && sub.Push))) ||
 			(event == "pull_request" && sub.PullRequest) {
 			wanted = append(wanted, sub)
 		}

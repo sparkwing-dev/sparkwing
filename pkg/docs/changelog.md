@@ -22,7 +22,7 @@ unlock.
 
 ### Added
 
-- **controller:** GitHub App subscriptions can select tag pushes with `tags: true`; the default remains branch pushes only. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`. Operator GitHub webhooks also accept tag pushes. Store schema v63 adds the default-off subscription column.
+- **controller (Breaking):** GitHub App subscriptions select tag pushes with `tags: ["v*"]` or other explicit tag globs. Empty `tags` selects none; replace any `tags: true` subscription with a pattern list. Existing boolean tag subscriptions stop matching after schema v64 adds the default-off pattern column. Operator GitHub webhooks ignore tag pushes. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`.
 
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
