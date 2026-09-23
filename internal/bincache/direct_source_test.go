@@ -208,3 +208,85 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// directTestRepo serves a one-commit repository whose tree populate writes,
+// built without the ambient git config so a test's hostile config reaches only
+// the code under test.
+func directTestRepo(t *testing.T, populate func(work string)) (remote, sha string) {
+	t.Helper()
+	repoParent := t.TempDir()
+	work := filepath.Join(t.TempDir(), "work")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(work, "init", "--quiet", "--initial-branch=main")
+	populate(work)
+	git(work, "add", "-A")
+	git(work, "commit", "--quiet", "-m", "tree")
+	sha = git(work, "rev-parse", "HEAD")
+	bare := filepath.Join(repoParent, "repo.git")
+	git("", "clone", "--bare", "--quiet", work, bare)
+	git(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
+	srv := startGitcacheTestServer(t, repoParent)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/git/repo.git", sha
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDirectCheckoutRunsNoFilterDriverTheTreeNames(t *testing.T) {
+	cases := map[string]string{
+		"smudge":     "[filter \"evil\"]\n\tsmudge = touch %s; cat\n",
+		"process":    "[filter \"evil\"]\n\tprocess = touch %s\n\trequired = true\n",
+		"lfs smudge": "[filter \"lfs\"]\n\tsmudge = touch %s; cat\n\trequired = true\n",
+	}
+	for name, config := range cases {
+		t.Run(name, func(t *testing.T) {
+			driver := "evil"
+			if strings.Contains(config, "lfs") {
+				driver = "lfs"
+			}
+			remote, sha := directTestRepo(t, func(work string) {
+				writeTestFile(t, filepath.Join(work, ".gitattributes"), "* filter="+driver+"\n")
+				writeTestFile(t, filepath.Join(work, ".sparkwing", "marker"), "v1")
+			})
+			marker := filepath.Join(t.TempDir(), "filter-ran")
+			global := filepath.Join(t.TempDir(), "gitconfig")
+			writeTestFile(t, global, strings.ReplaceAll(config, "%s", marker))
+			t.Setenv("GIT_CONFIG_GLOBAL", global)
+
+			dest := filepath.Join(t.TempDir(), "run")
+			err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, "http")
+			if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+				t.Fatalf("the checkout ran the %s filter from the ambient config", driver)
+			}
+			if err != nil {
+				t.Fatalf("directCheckout: %v", err)
+			}
+			if got := readMarker(t, dest); got != "v1" {
+				t.Fatalf("marker = %q, want v1", got)
+			}
+		})
+	}
+}

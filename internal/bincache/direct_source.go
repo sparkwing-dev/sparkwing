@@ -160,8 +160,9 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 		return fmt.Errorf("direct source: lock mirror: %w", err)
 	}
 
-	env := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+protocols, "GIT_TERMINAL_PROMPT=0")
-	git := func(args ...string) (string, error) {
+	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+protocols, "GIT_TERMINAL_PROMPT=0")
+	localEnv := directLocalGitEnv(fetchEnv)
+	run := func(env []string, args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Env = env
 		out, err := cmd.CombinedOutput()
@@ -170,6 +171,8 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 		}
 		return strings.TrimSpace(string(out)), nil
 	}
+	git := func(args ...string) (string, error) { return run(localEnv, args...) }
+	fetch := func(args ...string) (string, error) { return run(fetchEnv, args...) }
 	if _, statErr := os.Stat(filepath.Join(mirror, "HEAD")); statErr != nil {
 		if err := os.RemoveAll(mirror); err != nil {
 			return fmt.Errorf("direct source: clear mirror: %w", err)
@@ -184,7 +187,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 
 	target := sha
 	if sha == "" {
-		if _, err := git("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
+		if _, err := fetch("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
 			remote, "refs/heads/"+branch); err != nil {
 			return fmt.Errorf("direct source: fetch %s branch %s: %w", sourceurl.Redact(remote), branch, err)
 		}
@@ -192,14 +195,14 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 			return fmt.Errorf("direct source: %w", err)
 		}
 	} else if _, haveErr := git("-C", mirror, "cat-file", "-e", sha+"^{commit}"); haveErr != nil {
-		if _, err := git("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
+		if _, err := fetch("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
 			remote, sha); err != nil {
 			return fmt.Errorf("direct source: fetch %s at %s (is the commit pushed?): %w",
 				sourceurl.Redact(remote), sha, err)
 		}
 	}
-	// safety: the mirror was created here, so the only hooks a checkout could run
-	// are ones ambient config points at, and a run's source is not the place for them.
+	// safety: the mirror was created here and the checkout sees no ambient config,
+	// so the tree's hooks and attributes name nothing that can run.
 	if _, err := git("-C", mirror, "-c", "core.hooksPath=/dev/null",
 		"worktree", "add", "--quiet", "--detach", "--", dest, target); err != nil {
 		return fmt.Errorf("direct source: check out %s: %w", target, err)
@@ -221,6 +224,26 @@ func directGitEnv(base []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+// directLocalGitEnv is fetchEnv for every git command that touches only the
+// mirror or the checkout. A fetched tree's .gitattributes can name any filter
+// driver, and the ambient config may define one with a smudge or process
+// command, so these commands read no system, global or environment config at
+// all rather than trying to name every key that runs something.
+func directLocalGitEnv(fetchEnv []string) []string {
+	out := make([]string, 0, len(fetchEnv)+3)
+	for _, item := range fetchEnv {
+		name, _, _ := strings.Cut(item, "=")
+		switch {
+		case name == "GIT_CONFIG_GLOBAL", name == "GIT_CONFIG_SYSTEM", name == "GIT_CONFIG_NOSYSTEM",
+			name == "GIT_CONFIG", name == "GIT_CONFIG_PARAMETERS", name == "GIT_CONFIG_COUNT",
+			strings.HasPrefix(name, "GIT_CONFIG_KEY_"), strings.HasPrefix(name, "GIT_CONFIG_VALUE_"):
+			continue
+		}
+		out = append(out, item)
+	}
+	return append(out, "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1", "GIT_LFS_SKIP_SMUDGE=1")
 }
 
 // TriggerRepoURL is the remote a runner fetches a trigger's source from, given
