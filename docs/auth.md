@@ -603,7 +603,7 @@ sign-in. A user with no team gets a personal space: a team
 whose only member is its owner, slugged from the email's local part, with the
 smallest free integer appended on a collision. The user's active team is
 stored on the user, so the next sign-in returns to it. One user creates at
-most ten teams over the account's life, the personal space included, and
+most three teams over the account's life, the personal space included, and
 deleting a team does not give one back. A slug that ever named a team is
 never registered again, and slugs such as `default`,
 `app`, `api`, `auth`, `login`, `admin` and anything starting `demo-` are

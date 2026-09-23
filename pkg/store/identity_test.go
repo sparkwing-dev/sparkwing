@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -289,13 +290,18 @@ func TestIdentityTeamCreationIsCapped(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	u := signIn(t, st, "s", "busy@example.com")
-	for i := 2; i <= store.MaxCreatedTeams; i++ {
+	// The personal team is the first of three.
+	for i := 2; i <= 3; i++ {
 		if _, err := st.CreateTeam(ctx, u.Account.ID, store.Team(fmt.Sprintf("busy-team-%d", i)), "", time.Now()); err != nil {
 			t.Fatalf("team %d: %v", i, err)
 		}
 	}
-	if _, err := st.CreateTeam(ctx, u.Account.ID, "one-too-many", "", time.Now()); !errors.Is(err, store.ErrTeamLimit) {
-		t.Fatalf("team past the cap = %v, want ErrTeamLimit", err)
+	_, err := st.CreateTeam(ctx, u.Account.ID, "one-too-many", "", time.Now())
+	if !errors.Is(err, store.ErrTeamLimit) {
+		t.Fatalf("fourth team = %v, want ErrTeamLimit", err)
+	}
+	if !strings.Contains(err.Error(), "at most 3 teams") {
+		t.Fatalf("refusal = %q, want it to name the cap", err)
 	}
 }
 

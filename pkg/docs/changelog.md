@@ -70,7 +70,7 @@ unlock.
   and nothing else; no team token may carry it. Schema v55. See
   [Authentication](docs/auth.md).
 
-- **controller:** one user creates at most ten teams over the account's life,
+- **controller:** one user creates at most three teams over the account's life,
   the personal space included; deleting a team no longer gives a creation
   back.
 
@@ -196,7 +196,7 @@ unlock.
   audience, expiry, `email_verified`) and open a session. A new Google identity
   joins an existing user only when both sides hold the email verified and that
   user has no other Google identity; a user's email follows what Google
-  asserts at each sign-in. One user creates at most ten teams. A user
+  asserts at each sign-in. One user creates at most three teams. A user
   with no team gets a personal space whose slug comes from the email's local
   part, with the smallest free integer appended on a collision. `GET
   /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
