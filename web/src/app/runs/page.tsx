@@ -85,9 +85,12 @@ import {
   ExecutionAttributionPanel,
   ExecutionBadge,
 } from "@/components/ExecutionAttribution";
+import { ansiToHtml, stripAnsi } from "@/lib/ansi";
 import {
+  compactExecutionDisplay,
   executionAttempts,
   executionDisplay,
+  type ExecutionDisplay,
 } from "@/lib/executionAttribution";
 
 const POLL_MS = 2000;
@@ -3138,9 +3141,10 @@ function NodeLogSummary({ node }: { node: RunNode }) {
         )}
       </div>
       {node.error && (
-        <div className="mt-1 font-mono text-[11px] text-red-300/90 whitespace-pre-wrap break-words">
-          {node.error}
-        </div>
+        <div
+          className="mt-1 font-mono text-[11px] text-red-300/90 whitespace-pre-wrap break-words"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(node.error) }}
+        />
       )}
       {!node.error && node.status_detail && (
         <div className="mt-1 font-mono text-[11px] text-[var(--muted)] whitespace-pre-wrap break-words">
@@ -4571,7 +4575,11 @@ function DAG({
                 </text>
                 {(() => {
                   type TopPill =
-                    | { kind: "execution"; w: number }
+                    | {
+                        kind: "execution";
+                        w: number;
+                        display: ExecutionDisplay;
+                      }
                     | { kind: "dynamic"; w: number }
                     | { kind: "approval"; w: number }
                     | { kind: "reused"; w: number }
@@ -4579,12 +4587,13 @@ function DAG({
                     | { kind: "inline"; w: number }
                     | { kind: "spawned"; w: number };
                   const pills: TopPill[] = [];
-                  if (
-                    n.started_at ||
-                    n.claimed ||
-                    executionAttempts(n).length > 0
-                  ) {
-                    pills.push({ kind: "execution", w: executionPillWidth(n) });
+                  const execution = compactExecutionDisplay(n);
+                  if (execution) {
+                    pills.push({
+                      kind: "execution",
+                      w: executionPillWidth(execution),
+                      display: execution,
+                    });
                   }
                   if (n.dynamic) {
                     pills.push({ kind: "dynamic", w: DYNAMIC_PILL_W });
@@ -4620,7 +4629,11 @@ function DAG({
                     switch (pl.kind) {
                       case "execution":
                         out.push(
-                          <ExecutionPill key="execution" node={n} x={x} />,
+                          <ExecutionPill
+                            key="execution"
+                            display={pl.display}
+                            x={x}
+                          />,
                         );
                         break;
                       case "dynamic":
@@ -4737,7 +4750,9 @@ function DAG({
                     const w = 18;
                     cursor -= w;
                     const text =
-                      n.error || n.failure_reason || `exit ${n.exit_code}`;
+                      stripAnsi(n.error ?? "") ||
+                      n.failure_reason ||
+                      `exit ${n.exit_code}`;
                     elems.push(
                       <NodeBadge
                         key="error"
@@ -5656,22 +5671,23 @@ function NodeBadge({
 }
 
 const DYNAMIC_PILL_W = 56;
-function executionPillWidth(node: RunNode): number {
-  const attempt = executionAttempts(node).at(-1);
-  const label = executionDisplay(attempt).location.toUpperCase();
-  return Math.max(46, 14 + label.length * 6);
+function executionPillWidth(display: ExecutionDisplay): number {
+  return Math.max(46, 14 + display.location.length * 6);
 }
 
-function ExecutionPill({ node, x }: { node: RunNode; x: number }) {
-  const display = executionDisplay(executionAttempts(node).at(-1));
+function ExecutionPill({
+  display,
+  x,
+}: {
+  display: ExecutionDisplay;
+  x: number;
+}) {
   const label = display.location.toUpperCase();
-  const width = executionPillWidth(node);
+  const width = executionPillWidth(display);
   const fill =
     display.location === "local"
       ? "rgba(52,211,153,0.95)"
-      : display.location === "cloud"
-        ? "rgba(56,189,248,0.95)"
-        : "rgba(148,163,184,0.95)";
+      : "rgba(56,189,248,0.95)";
   const title = `${display.locationLabel} · ${display.executorLabel}`;
   return (
     <g role="img" aria-label={title} style={{ pointerEvents: "none" }}>

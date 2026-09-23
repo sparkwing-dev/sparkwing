@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Node } from "./api";
 import {
+  compactExecutionDisplay,
   executionAttemptOrdinal,
   executionAttempts,
   executionAttemptsNewestFirst,
@@ -120,6 +121,37 @@ describe("executionDisplay", () => {
     assert.equal(unknown.locationLabel, "Location unknown");
     assert.notEqual(local.className, cloud.className);
     assert.notEqual(cloud.className, unknown.className);
+  });
+});
+
+describe("compactExecutionDisplay", () => {
+  it("shows nothing for an attempt whose location is unknown", () => {
+    assert.equal(
+      compactExecutionDisplay(
+        node({
+          execution_attempts: [
+            { run_id: "run-one", node_id: "build", attempt: 1, location: "unknown" },
+          ],
+        }),
+      ),
+      null,
+    );
+  });
+
+  it("shows nothing for a claimed node with no attempt", () => {
+    assert.equal(compactExecutionDisplay(node({ claimed: true })), null);
+  });
+
+  it("shows the latest known location", () => {
+    const display = compactExecutionDisplay(
+      node({
+        execution_attempts: [
+          { run_id: "run-one", node_id: "build", attempt: 1, location: "cloud" },
+          { run_id: "run-one", node_id: "build", attempt: 2, location: "local" },
+        ],
+      }),
+    );
+    assert.equal(display?.location, "local");
   });
 });
 

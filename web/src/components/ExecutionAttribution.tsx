@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Node as RunNode } from "@/lib/api";
 import {
+  compactExecutionDisplay,
   executionAttemptOrdinal,
   executionAttempts,
   executionAttemptsNewestFirst,
@@ -15,12 +16,11 @@ function locationIcon(location: string): string {
 }
 
 export function ExecutionBadge({ node }: { node: RunNode }) {
-  const attempts = executionAttempts(node);
-  if (attempts.length === 0 && !node.claimed && !node.started_at) return null;
-  const display = executionDisplay(attempts.at(-1));
+  const display = compactExecutionDisplay(node);
+  if (!display) return null;
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${display.className}`}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${display.className}`}
       aria-label={`Execution location: ${display.locationLabel}; executor: ${display.executorLabel}`}
       title={`${display.locationLabel} · ${display.executorLabel}`}
     >

@@ -329,6 +329,23 @@ describe("mintRunnerToken", () => {
   });
 });
 
+describe("memberLabel", () => {
+  const members = [
+    { user_id: "acct-1", email: "ada@example.com", name: "Ada", role: "owner" as const },
+    { user_id: "acct-2", email: "bo@example.com", name: "", role: "editor" as const },
+  ];
+
+  it("names a member by name, then email", () => {
+    assert.equal(teams.memberLabel("acct-1", members), "Ada");
+    assert.equal(teams.memberLabel("acct-2", members), "bo@example.com");
+  });
+
+  it("shows nothing for an account that is not a member", () => {
+    assert.equal(teams.memberLabel("6d1cb2fc408db4878a9e60af5596a67b", members), null);
+    assert.equal(teams.memberLabel(undefined, members), null);
+  });
+});
+
 describe("parseRepoPatterns", () => {
   it("splits on commas, whitespace and newlines and drops empties", () => {
     assert.deepEqual(

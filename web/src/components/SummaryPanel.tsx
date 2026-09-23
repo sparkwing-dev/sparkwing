@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Node as RunNode, Run, RunInvocation } from "@/lib/api";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
+import { ansiToHtml } from "@/lib/ansi";
 
 function fmtMs(ms: number): string {
   if (!ms) return "-";
@@ -419,12 +420,17 @@ export default function SummaryPanel({
                         </>
                       )}
                       <span className="text-[var(--muted)]">{" │ "}</span>
-                      <span className="text-red-300">{lines[0]}</span>
+                      <span
+                        className="text-red-300"
+                        dangerouslySetInnerHTML={{ __html: ansiToHtml(lines[0]) }}
+                      />
                     </div>
                     {lines.slice(1).map((l, i) => (
-                      <div key={i} className="pl-4 text-red-300 break-all">
-                        {l}
-                      </div>
+                      <div
+                        key={i}
+                        className="pl-4 text-red-300 break-all"
+                        dangerouslySetInnerHTML={{ __html: ansiToHtml(l) }}
+                      />
                     ))}
                   </div>
                 );

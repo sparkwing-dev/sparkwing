@@ -111,6 +111,13 @@ export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
   };
 }
 
+// Badges and pills trade the node name's width for the location, and "unknown"
+// tells the reader nothing, so compact surfaces show only a known location.
+export function compactExecutionDisplay(node: Node): ExecutionDisplay | null {
+  const display = executionDisplay(executionAttempts(node).at(-1));
+  return display.location === "unknown" ? null : display;
+}
+
 function normalizeLocation(location?: string): ExecutionLocation {
   if (location === "local" || location === "cloud") return location;
   return "unknown";

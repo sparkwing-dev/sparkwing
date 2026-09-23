@@ -279,6 +279,18 @@ export async function listMembers(): Promise<Member[]> {
   return asList<Member>(await res.json(), "members");
 }
 
+// memberLabel names an account by the member it belongs to. An account that
+// is no longer a member has no name to show, and its raw ID tells a reader
+// nothing, so it yields null.
+export function memberLabel(
+  accountID: string | undefined,
+  members: Member[],
+): string | null {
+  if (!accountID) return null;
+  const member = members.find((m) => m.user_id === accountID);
+  return member?.name || member?.email || null;
+}
+
 export async function changeMemberRole(
   userID: string,
   role: Role,
