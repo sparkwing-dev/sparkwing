@@ -402,3 +402,82 @@ func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery st
 		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
 	return err
 }
+
+// triggerGitHubCheckRunCols holds the GitHub check run that reports a run
+// the App started; 0 until the check run is created.
+var triggerGitHubCheckRunCols = map[string]string{
+	"github_check_run_id": "INTEGER NOT NULL DEFAULT 0",
+}
+
+const triggerGitHubCommitIndex = `CREATE INDEX IF NOT EXISTS idx_triggers_github_commit
+    ON triggers(github_owner, github_repo, git_sha)`
+
+// GitHubCheckRun returns the GitHub check run recorded for t's run runID, or
+// 0 when none is. ErrNotFound when t has no trigger runID.
+func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error) {
+	var id int64
+	err := t.s.queryRow(ctx, `SELECT github_check_run_id FROM triggers WHERE team = ? AND id = ?`,
+		string(t.team), runID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, notFound("trigger", runID)
+	}
+	return id, err
+}
+
+// RecordGitHubCheckRun records checkRun as the GitHub check run reporting
+// t's run runID unless one is already recorded, and returns the one recorded.
+func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRun int64) (int64, error) {
+	if checkRun <= 0 {
+		return 0, fmt.Errorf("%w: a check run id is positive", ErrInvalidInput)
+	}
+	if _, err := t.s.exec(ctx, `UPDATE triggers SET github_check_run_id = ?
+		WHERE team = ? AND id = ? AND github_check_run_id = 0`, checkRun, string(t.team), runID); err != nil {
+		return 0, err
+	}
+	return t.GitHubCheckRun(ctx, runID)
+}
+
+// maxGitHubCommitTriggers bounds how many of a commit's triggers
+// [Tenant.GitHubCommitTriggers] reads.
+const maxGitHubCommitTriggers = 100
+
+// GitHubCommitTriggers returns t's triggers for commit sha of the GitHub
+// repository repo, newest first and at most 100.
+func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) ([]*Trigger, error) {
+	ids, err := t.githubCommitTriggerIDs(ctx, repo, sha)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Trigger, 0, len(ids))
+	for _, id := range ids {
+		trig, err := t.s.GetTrigger(ctx, id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, trig)
+	}
+	return out, nil
+}
+
+func (t *Tenant) githubCommitTriggerIDs(ctx context.Context, repo GitHubRepo, sha string) (_ []string, err error) {
+	rows, err := t.s.query(ctx, `SELECT id FROM triggers
+		WHERE team = ? AND github_owner = ? AND github_repo = ? AND git_sha = ?
+		ORDER BY created_at DESC, id DESC LIMIT ?`,
+		string(t.team), repo.Owner, repo.Name, sha, maxGitHubCommitTriggers)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
