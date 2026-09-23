@@ -511,11 +511,10 @@ func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 // scope. The admin routes are read from server.go and asked about team A's own
 // run, so the refusal is the scope's and not the team boundary's.
 // safety: these admin routes also admit team.admin because each acts only on
-// the caller's own team: its webhook bindings, its secrets, and a cache refresh.
+// the caller's own team: its webhook bindings and its secrets.
 var ownerAlsoAdmitted = map[string]bool{
 	"POST /api/v1/webhooks/github/bindings":   true,
 	"DELETE /api/v1/webhooks/github/bindings": true,
-	"POST /api/v1/gitcache/refresh":           true,
 	"POST /api/v1/secrets":                    true,
 	"GET /api/v1/secrets":                     true,
 	"DELETE /api/v1/secrets/{name}":           true,

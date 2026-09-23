@@ -824,7 +824,8 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   cluster status` flags the controller probe as a warning -- fine for a
   laptop, not for a shared deployment. Set `SPARKWING_REQUIRE_AUTH=1`
   (or `--require-auth`) so the pod refuses to start with an empty tokens
-  table. See [auth.md](auth.md).
+  table. A controller with a multi-team license never serves
+  unauthenticated, whatever the tokens table holds. See [auth.md](auth.md).
 - **Provision the first admin token.** Hand the controller the first
   admin credential and it never serves a request unauthenticated:
   `SPARKWING_BOOTSTRAP_ADMIN_TOKEN` carries the token itself, and

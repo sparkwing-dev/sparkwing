@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -3704,85 +3703,6 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 	_, err := s.exec(ctx,
 		`UPDATE runs SET retried_as = ? WHERE id = ?`, newID, runID)
 	return err
-}
-
-// ListRunRetryTree returns every run in the retry tree that runID
-// belongs to, ordered by created_at (oldest first). The "root" is
-// found by walking retry_of upward until it hits "", then the result
-// includes the root plus every descendant whose retry_of chain leads
-// back to it. Branching is preserved: if attempt #2 was retried twice
-// (creating #3 and #4 with the same retry_of=#2), both #3 and #4
-// appear as siblings in the list.
-//
-// Numbering / display: callers number the returned slice 1..N in
-// order; the chronological position is the user-visible "Attempt N".
-//
-// Cycle guard: a hard cap on the upward walk keeps a corrupted
-// retry_of cycle from spinning forever.
-func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error) {
-	if runID == "" {
-		return nil, nil
-	}
-	const maxDepth = 256
-	rootID := runID
-	for range maxDepth {
-		row := s.queryRow(ctx,
-			`SELECT retry_of FROM runs WHERE id = ?`, rootID)
-		var parent string
-		if err := row.Scan(&parent); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if parent == "" || parent == rootID {
-			break
-		}
-		rootID = parent
-	}
-	collected := map[string]*Run{}
-	root, err := s.GetRun(ctx, rootID)
-	if err != nil {
-		return nil, err
-	}
-	if root == nil {
-		return nil, nil
-	}
-	collected[rootID] = root
-	frontier := []string{rootID}
-	for len(frontier) > 0 {
-		next := frontier[:0:0]
-		for _, id := range frontier {
-			rows, err := s.query(ctx,
-				`SELECT `+runColumns+`
-				   FROM runs WHERE retry_of = ?`, id)
-			if err != nil {
-				return nil, err
-			}
-			for rows.Next() {
-				r, scanErr := scanRun(rows)
-				if scanErr != nil {
-					_ = rows.Close()
-					return nil, scanErr
-				}
-				if _, dup := collected[r.ID]; dup {
-					continue
-				}
-				collected[r.ID] = r
-				next = append(next, r.ID)
-			}
-			_ = rows.Close()
-		}
-		frontier = next
-	}
-	out := make([]*Run, 0, len(collected))
-	for _, r := range collected {
-		out = append(out, r)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
-	})
-	return out, nil
 }
 
 // safety: every run read shares this list, because a column added to runs

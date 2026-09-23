@@ -2431,7 +2431,7 @@ paths:
 
   /api/v1/gitcache/refresh:
     post:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: admin
       tags: [gitcache]
       summary: Refresh the cache's mirror of a repository.
       description: |

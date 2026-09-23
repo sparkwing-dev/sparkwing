@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"time"
 )
 
@@ -135,4 +136,93 @@ func assertRunBelongsToTeamTx(ctx context.Context, tx *storeTx, team Team, runID
 		return notFound("run", runID)
 	}
 	return err
+}
+
+// ListRunRetryTree returns every run of t's team in the retry tree runID
+// belongs to, oldest first: the root found by walking retry_of upward, plus
+// every descendant whose retry_of chain leads back to it. Siblings retried
+// from one attempt both appear. A run of another team reads as no run.
+//
+// safety: every step of the walk, up and down, carries the team predicate,
+// because retry_of is a bare id and a pointer that crosses teams would
+// otherwise hand the caller the other team's run.
+func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	// A corrupted retry_of cycle would otherwise spin the upward walk forever.
+	const maxDepth = 256
+	rootID := ""
+	next := runID
+	for range maxDepth {
+		var parent string
+		err := t.s.queryRow(ctx,
+			`SELECT retry_of FROM runs WHERE team = ? AND id = ?`, string(t.team), next).Scan(&parent)
+		if errors.Is(err, sql.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rootID = next
+		if parent == "" || parent == next {
+			break
+		}
+		next = parent
+	}
+	if rootID == "" {
+		return nil, nil
+	}
+	root, err := t.GetRun(ctx, rootID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	collected := map[string]*Run{rootID: root}
+	frontier := []string{rootID}
+	for len(frontier) > 0 {
+		var below []string
+		for _, id := range frontier {
+			children, err := t.retriesOf(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range children {
+				if _, dup := collected[r.ID]; dup {
+					continue
+				}
+				collected[r.ID] = r
+				below = append(below, r.ID)
+			}
+		}
+		frontier = below
+	}
+	out := make([]*Run, 0, len(collected))
+	for _, r := range collected {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (t *Tenant) retriesOf(ctx context.Context, id string) (_ []*Run, err error) {
+	rows, err := t.s.query(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE team = ? AND retry_of = ?`, string(t.team), id)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

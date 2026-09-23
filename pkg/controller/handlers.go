@@ -847,6 +847,19 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if body.RetryOf != "" {
+		// safety: retry_of joins the new run to the named run's attempt tree,
+		// which the attempts route serves whole, so it has to name the
+		// caller's own run; another team's run answers as no run.
+		if _, err := tenant.GetRun(r.Context(), body.RetryOf); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, runNotFound(body.RetryOf))
+				return
+			}
+			s.writeInternalError(w, r, "retry_of lookup", err)
+			return
+		}
+	}
 
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
