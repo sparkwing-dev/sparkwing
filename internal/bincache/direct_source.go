@@ -192,19 +192,24 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 		return fmt.Errorf("direct source: %w", err)
 	}
 	fetchEnv = append(fetchEnv, "GIT_SSH_COMMAND="+directSSHCommand(fetchEnv, configured))
+	// safety: a redirect would carry the fetch, and any credential a helper
+	// hands it, to a host nothing here checked.
+	fetchRef := func(ref string) error {
+		_, err := fetch("-C", mirror, "-c", "http.followRedirects=false",
+			"fetch", "--quiet", "--no-tags", "--depth", "1", "--", remote, ref)
+		return err
+	}
 
 	target := sha
 	if sha == "" {
-		if _, err := fetch("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
-			remote, "refs/heads/"+branch); err != nil {
+		if err := fetchRef("refs/heads/" + branch); err != nil {
 			return fmt.Errorf("direct source: fetch %s branch %s: %w", sourceurl.Redact(remote), branch, err)
 		}
 		if target, err = git("-C", mirror, "rev-parse", "--verify", "FETCH_HEAD^{commit}"); err != nil {
 			return fmt.Errorf("direct source: %w", err)
 		}
 	} else if _, haveErr := git("-C", mirror, "cat-file", "-e", sha+"^{commit}"); haveErr != nil {
-		if _, err := fetch("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
-			remote, sha); err != nil {
+		if err := fetchRef(sha); err != nil {
 			return fmt.Errorf("direct source: fetch %s at %s (is the commit pushed?): %w",
 				sourceurl.Redact(remote), sha, err)
 		}

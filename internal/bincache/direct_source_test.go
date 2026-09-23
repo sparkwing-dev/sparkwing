@@ -2,6 +2,8 @@ package bincache
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -365,5 +367,23 @@ func TestDirectSSHCommandPrefersGitsOwnOrder(t *testing.T) {
 		if got := directSSHCommand(tc.env, tc.configured); got != tc.want+directSSHOptions {
 			t.Errorf("%s: directSSHCommand = %q, want %q", tc.name, got, tc.want+directSSHOptions)
 		}
+	}
+}
+
+func TestDirectCheckoutDoesNotFollowARedirect(t *testing.T) {
+	remote, oldSHA, _ := directTestRemote(t)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target := remote + strings.TrimPrefix(r.URL.Path, "/moved")
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+	}))
+	t.Cleanup(redirect.Close)
+
+	dest := filepath.Join(t.TempDir(), "run")
+	err := directCheckout(context.Background(), t.TempDir(), redirect.URL+"/moved", "main", oldSHA, dest, "http")
+	if err == nil {
+		t.Fatal("the fetch followed a redirect to another server")
 	}
 }
