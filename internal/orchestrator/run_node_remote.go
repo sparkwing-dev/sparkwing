@@ -32,7 +32,7 @@ func shouldRunRemote(trigger *store.Trigger, brokeredChild bool) bool {
 	if trigger == nil {
 		return false
 	}
-	return remoteTriggerSourceURLRaw(trigger) != ""
+	return triggerGitHubRepository(trigger) != "" || trigger.RepoURL != ""
 }
 
 func runNodeRemote(
@@ -49,14 +49,14 @@ func runNodeRemote(
 	if gcURL == "" {
 		gcURL = bincache.CacheURL()
 	}
-	if gcURL == "" {
-		return runner.Result{},
-			fmt.Errorf("pipeline %q not registered in this runner image, and SPARKWING_GITCACHE_URL is unset so we cannot fall back to remote compile",
-				run.Pipeline)
+	// safety: without the operator's cache this runner fetches with its own
+	// credentials, so it never borrows a cache it was not given.
+	direct := gcURL == ""
+	if !direct {
+		gcURL = bincache.ControllerRunGitcacheURL(gcURL, controllerURL, runID)
 	}
-	gcURL = bincache.ControllerRunGitcacheURL(gcURL, controllerURL, runID)
 
-	repoURL, sourceErr := remoteTriggerSourceURL(trigger)
+	repoURL, sourceErr := TriggerSourceURL(trigger, direct)
 	if sourceErr != nil {
 		return runner.Result{}, sourceErr
 	}
@@ -73,8 +73,13 @@ func runNodeRemote(
 		branch = "main"
 	}
 
+	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
+	if direct && workspaceSource {
+		return runner.Result{}, bincache.ErrWorkspaceNeedsCache
+	}
 	logger.Info("runNodeRemote: fetching source",
-		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch)
+		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch,
+		"sha", trigger.GitSHA, "direct", direct)
 
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
 	// #nosec G703 -- a work directory under this user's own Sparkwing home
@@ -83,13 +88,15 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
-	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
 	var sparkwingDir string
 	var err error
-	if workspaceSource {
+	switch {
+	case direct:
+		sparkwingDir, err = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, trigger.GitSHA, workDir)
+	case workspaceSource:
 		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)
-	} else {
+	default:
 		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)
 	}
@@ -289,26 +296,23 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_ATTEMPT_ORDINAL":          true,
 }
 
-func remoteTriggerSourceURL(trigger *store.Trigger) (string, error) {
-	raw := remoteTriggerSourceURLRaw(trigger)
-	if raw == "" {
+// TriggerSourceURL is the remote a trigger's source comes from; direct reports
+// a runner that fetches it itself rather than through the git cache.
+func TriggerSourceURL(trigger *store.Trigger, direct bool) (string, error) {
+	if trigger == nil {
 		return "", nil
 	}
-	return sourceurl.ValidateCloneURL(raw)
+	return bincache.TriggerRepoURL(triggerGitHubRepository(trigger), trigger.RepoURL, direct)
 }
 
-func remoteTriggerSourceURLRaw(trigger *store.Trigger) string {
-	if trigger == nil {
-		return ""
+func triggerGitHubRepository(trigger *store.Trigger) string {
+	if repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]; repo != "" {
+		return repo
 	}
-	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
-	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
-		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
+	if trigger.GithubOwner != "" && trigger.GithubRepo != "" {
+		return trigger.GithubOwner + "/" + trigger.GithubRepo
 	}
-	if repo != "" {
-		return bincache.RepoURLFromGitHub(repo)
-	}
-	return trigger.RepoURL
+	return ""
 }
 
 type remoteBinary struct {

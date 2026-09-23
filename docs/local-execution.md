@@ -513,6 +513,29 @@ placement source.
 Do not leave an unrestricted cluster runner racing for the same trigger source
 when testing deterministic placement.
 
+### Team runners fetch source themselves
+
+The git cache and its controller proxy belong to the operator, so a runner that
+holds a team's runner token starts without `--gitcache`. Such a runner fetches
+each claimed run's source directly: it fetches the commit the trigger recorded
+from the remote the trigger recorded, using the machine's own git config and
+credentials. The dashboard's machines page prints this command:
+
+```bash
+SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+  --controller https://sparkwing.example.com --logs https://logs.example.com \
+  --also-claim-triggers --max-claims-before-restart 0 --holder-prefix my-laptop
+```
+
+Nodes the run dispatches to a pool runner or a Kubernetes Job fetch the same
+commit the same way. A cloud pod holds no git credential, so it fetches only
+public repositories, and it converts a GitHub ssh remote to https. The runner
+keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct` and
+checks out each run in its own worktree. It refuses any remote that is not
+https or ssh, a remote that carries a credential, and a commit that is not a
+full hex object id. `sparkwing pipeline trigger` therefore needs a commit that
+is already pushed, and `--working-tree` needs the operator's cache.
+
 ### Remote machine capacity
 
 `sparkwing-runner agent` runs claim mode, the mode that executes work. Its

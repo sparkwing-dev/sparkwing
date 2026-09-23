@@ -33,6 +33,11 @@ func triggerChildEnv(ctx context.Context, base []string, opts TriggerLoopOptions
 		"SPARKWING_AGENT_TOKEN="+opts.Token,
 		"SPARKWING_RUNNER_TYPE=kubernetes",
 	)
+	// safety: the child hands this to the node executors it starts, and an empty
+	// value is what sends them to fetch the source directly, as this loop does.
+	if opts.GitcacheURL != "" {
+		out = append(out, "SPARKWING_GITCACHE_URL="+opts.GitcacheURL)
+	}
 	if cacheGrant != "" {
 		out = append(out, authwire.CacheGrantEnv+"="+cacheGrant)
 	}
@@ -49,6 +54,7 @@ var triggerChildSets = map[string]bool{
 	"SPARKWING_LOGS_URL":       true,
 	"SPARKWING_AGENT_TOKEN":    true,
 	"SPARKWING_RUNNER_TYPE":    true,
+	"SPARKWING_GITCACHE_URL":   true,
 	authwire.CacheGrantEnv:     true,
 	authwire.CacheTokenEnv:     true,
 	"TRACEPARENT":              true,
