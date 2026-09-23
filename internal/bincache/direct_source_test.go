@@ -462,3 +462,118 @@ func TestDirectCheckoutGivesUpOnAFetchThatHangs(t *testing.T) {
 		t.Fatalf("err = %v, want a fetch timeout", err)
 	}
 }
+
+func sparkwingTree(t *testing.T) func(string) {
+	return func(work string) { writeTestFile(t, filepath.Join(work, ".sparkwing", "marker"), "v1") }
+}
+
+// checkoutAndRelease checks remote out and removes the run directory, as a
+// finished run does, leaving only the mirror behind.
+func checkoutAndRelease(t *testing.T, root, remote, sha string, opts directOptions) {
+	t.Helper()
+	dest := filepath.Join(t.TempDir(), "run")
+	if err := directCheckout(context.Background(), root, remote, "main", sha, dest, opts); err != nil {
+		t.Fatalf("directCheckout %s: %v", remote, err)
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setLastUse(t *testing.T, mirror string, age time.Duration) {
+	t.Helper()
+	when := time.Now().Add(-age)
+	if err := os.Chtimes(mirror, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mirrorExists(root, remote string) bool {
+	_, err := os.Stat(filepath.Join(directMirrorPath(root, remote), "HEAD"))
+	return err == nil
+}
+
+func TestDirectCheckoutEvictsTheLeastRecentlyUsedMirror(t *testing.T) {
+	root := t.TempDir()
+	opts := httpOnly
+	opts.maxMirrors = 2
+	a, shaA := directTestRepo(t, sparkwingTree(t))
+	b, shaB := directTestRepo(t, sparkwingTree(t))
+	c, shaC := directTestRepo(t, sparkwingTree(t))
+	checkoutAndRelease(t, root, a, shaA, opts)
+	checkoutAndRelease(t, root, b, shaB, opts)
+	setLastUse(t, directMirrorPath(root, a), 2*time.Hour)
+	setLastUse(t, directMirrorPath(root, b), time.Hour)
+
+	checkoutAndRelease(t, root, c, shaC, opts)
+	if mirrorExists(root, a) || !mirrorExists(root, b) || !mirrorExists(root, c) {
+		t.Fatalf("mirrors a=%v b=%v c=%v, want the oldest (a) evicted",
+			mirrorExists(root, a), mirrorExists(root, b), mirrorExists(root, c))
+	}
+}
+
+func TestDirectCheckoutNeverEvictsAMirrorInUse(t *testing.T) {
+	root := t.TempDir()
+	opts := httpOnly
+	opts.maxMirrors = 1
+	live, shaLive := directTestRepo(t, sparkwingTree(t))
+	locked, shaLocked := directTestRepo(t, sparkwingTree(t))
+	next, shaNext := directTestRepo(t, sparkwingTree(t))
+
+	if err := directCheckout(context.Background(), root, live, "main", shaLive,
+		filepath.Join(t.TempDir(), "run"), opts); err != nil {
+		t.Fatal(err)
+	}
+	checkoutAndRelease(t, root, locked, shaLocked, opts)
+	lock, err := os.OpenFile(directMirrorPath(root, locked)+".lock", os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	if _, err := cacheLock(lock, cacheLockShared); err != nil {
+		t.Fatal(err)
+	}
+
+	checkoutAndRelease(t, root, next, shaNext, opts)
+	if !mirrorExists(root, live) || !mirrorExists(root, locked) {
+		t.Fatalf("mirrors live=%v locked=%v, want both kept though over the cap",
+			mirrorExists(root, live), mirrorExists(root, locked))
+	}
+}
+
+func TestDirectCheckoutRemovesAMirrorOverTheSizeCap(t *testing.T) {
+	root := t.TempDir()
+	opts := httpOnly
+	opts.maxMirrorBytes = 1
+	remote, sha := directTestRepo(t, sparkwingTree(t))
+	dest := filepath.Join(t.TempDir(), "run")
+	err := directCheckout(context.Background(), root, remote, "main", sha, dest, opts)
+	if err == nil || !strings.Contains(err.Error(), "over the") {
+		t.Fatalf("err = %v, want a size-cap refusal", err)
+	}
+	if mirrorExists(root, remote) {
+		t.Fatal("the oversized mirror was kept")
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatal("an oversized fetch still produced a checkout")
+	}
+}
+
+func TestDirectCheckoutEvictsOlderMirrorsPastTheTotalSize(t *testing.T) {
+	root := t.TempDir()
+	a, shaA := directTestRepo(t, sparkwingTree(t))
+	b, shaB := directTestRepo(t, sparkwingTree(t))
+	checkoutAndRelease(t, root, a, shaA, httpOnly)
+	setLastUse(t, directMirrorPath(root, a), time.Hour)
+	size, err := directDirSize(directMirrorPath(root, a))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := httpOnly
+	opts.maxMirrorBytes = size * 3 / 2
+	checkoutAndRelease(t, root, b, shaB, opts)
+	if mirrorExists(root, a) || !mirrorExists(root, b) {
+		t.Fatalf("mirrors a=%v b=%v, want a evicted to fit b under the total", mirrorExists(root, a), mirrorExists(root, b))
+	}
+}
