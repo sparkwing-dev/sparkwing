@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **warm-pool + controller:** externally executed nodes share one status poll
+  per run with bounded backoff. Run and trigger heartbeats and node touch
+  requests stay available when a token's request budget is exhausted, so
+  polling cannot cause the controller to reap an active run.
+
 ### Added
 
 - **runner:** an off-cluster agent reads the cache the controller announces

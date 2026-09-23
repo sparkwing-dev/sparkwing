@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -32,6 +35,14 @@ type Runner struct {
 	fallbackLabels []string
 	cfg            Config
 	logger         *slog.Logger
+	mu             sync.Mutex
+	waits          map[string]*runWait
+}
+
+type runWait struct {
+	refs   int
+	nodes  map[string]*store.Node
+	cancel context.CancelFunc
 }
 
 type coordinator interface {
@@ -41,7 +52,7 @@ type coordinator interface {
 		output []byte, reason string, exitCode *int) error
 	UpdateNodeActivity(context.Context, string, string, string) error
 	TouchNodeHeartbeat(context.Context, string, string) error
-	GetNode(context.Context, string, string) (*store.Node, error)
+	ListNodes(context.Context, string) ([]*store.Node, error)
 	RevokeNodeReady(context.Context, string, string) (bool, error)
 	FinalizeNodeReady(context.Context, string, string) (store.ExecutorClaimRoundResult, error)
 }
@@ -68,6 +79,7 @@ func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logg
 	}
 	return &Runner{
 		ctrl: ctrl, fallback: fallback, fallbackLabels: append([]string(nil), fallbackLabels...), cfg: cfg, logger: logger,
+		waits: make(map[string]*runWait),
 	}
 }
 
@@ -87,6 +99,8 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	defer stopHB()
 	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.cfg.HeartbeatInterval, r.logger)
 
+	wait := r.joinWait(ctx, req.RunID)
+	defer r.leaveWait(req.RunID, wait)
 	poll := time.NewTicker(r.cfg.PollInterval)
 	defer poll.Stop()
 
@@ -101,10 +115,10 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		case <-ctx.Done():
 			return r.revokeAndReportCancelled(ctx, req)
 		case <-poll.C:
-			n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
-			if err != nil {
-				r.logger.Warn("warmpool: GetNode failed",
-					"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			r.mu.Lock()
+			n := wait.nodes[req.NodeID]
+			r.mu.Unlock()
+			if n == nil {
 				continue
 			}
 			if n.Status == "done" {
@@ -167,6 +181,79 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					"wait", r.cfg.ClaimWaitTimeout)
 				return asCancellation(ctx, r.fallback.RunNode(ctx, req))
 			}
+		}
+	}
+}
+
+func (r *Runner) joinWait(ctx context.Context, runID string) *runWait {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if wait := r.waits[runID]; wait != nil {
+		wait.refs++
+		return wait
+	}
+	pollCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	wait := &runWait{refs: 1, cancel: cancel}
+	r.waits[runID] = wait
+	go r.pollRun(pollCtx, runID, wait)
+	return wait
+}
+
+func (r *Runner) leaveWait(runID string, wait *runWait) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	wait.refs--
+	if wait.refs == 0 {
+		delete(r.waits, runID)
+		wait.cancel()
+	}
+}
+
+func (r *Runner) pollRun(ctx context.Context, runID string, wait *runWait) {
+	interval := r.cfg.PollInterval
+	ceiling := min(24*interval, 12*time.Second)
+	for {
+		nodes, err := r.ctrl.ListNodes(ctx, runID)
+		if ctx.Err() != nil {
+			return
+		}
+		changed := false
+		if err == nil {
+			byID := make(map[string]*store.Node, len(nodes))
+			for _, node := range nodes {
+				byID[node.NodeID] = node
+			}
+			r.mu.Lock()
+			changed = len(byID) != len(wait.nodes)
+			if !changed {
+				for id, node := range byID {
+					old := wait.nodes[id]
+					if old == nil || old.Status != node.Status || old.Claimed != node.Claimed || old.Outcome != node.Outcome {
+						changed = true
+						break
+					}
+				}
+			}
+			wait.nodes = byID
+			r.mu.Unlock()
+		} else if _, backpressure := client.LoadSignal(err); !backpressure {
+			r.logger.Warn("warmpool: ListNodes failed", "run_id", runID, "err", err)
+		}
+		if changed {
+			interval = r.cfg.PollInterval
+		} else {
+			interval = min(2*interval, ceiling)
+		}
+		delay := interval + time.Duration(rand.Int64N(int64(interval/5)+1))
+		if advised, ok := client.LoadSignal(err); ok && advised > delay {
+			delay = advised
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
 		}
 	}
 }
