@@ -41,6 +41,15 @@ unlock.
   `untrusted-runs` requirement, so a binary predating it refuses the store. See
   [GitHub App](docs/github-app.md).
 
+- **dashboard:** a Team -> GitHub tab, shown when the controller has a GitHub
+  App, lists the team's connected installations with their repositories and
+  the pipelines subscribed to each repository's pushes and pull requests.
+  Owners connect, disconnect and change subscriptions; readers and editors see
+  them read-only. The dashboard serves the App's setup URL
+  (`/github/app/setup`) and connect callback (`/github/app/callback`), keeps
+  the flow's state and verifier in a short-lived `__Host-` cookie, and binds
+  the installation as the signed-in owner's own session.
+
 - **runner:** `sparkwing-runner runner --github-app-source` asks the controller
   for a run's source token before fetching a GitHub repository directly and
   passes it to git as an extraheader in the fetch's environment only.

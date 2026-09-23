@@ -79,6 +79,9 @@ func TestProxyAllowList_SessionCannotReachUnproxiedControllerRoutes(t *testing.T
 		{http.MethodDelete, "/api/v1/logs/r1"},
 		{http.MethodPost, "/api/v1/logs/r1/n1"},
 		{http.MethodGet, "/api/v1/logs/r1/n1/tail"},
+		{http.MethodPost, "/api/v1/team/github-app/connect"},
+		{http.MethodPost, "/api/v1/team/github-app/connect/complete"},
+		{http.MethodDelete, "/api/v1/github-app/installations/42"},
 	} {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -123,6 +126,15 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 		{"reader streams node logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1/n1/stream", http.StatusNoContent},
 		{"run reader cannot read logs", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusForbidden},
 		{"scopeless session reads no logs", nil, http.MethodGet, "/api/v1/logs/r1/n1", http.StatusForbidden},
+		{"reader reads github app", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app", http.StatusNoContent},
+		{"reader reads installation repositories", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app/installations/42/repositories", http.StatusNoContent},
+		{"reader reads subscriptions", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/github-app/triggers", http.StatusNoContent},
+		{"editor cannot subscribe", []string{controller.ScopeRunsRead, controller.ScopeRunsWrite, controller.ScopeRunsControl}, http.MethodPut, "/api/v1/team/github-app/triggers", http.StatusForbidden},
+		{"editor cannot unsubscribe", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/team/github-app/triggers", http.StatusForbidden},
+		{"editor cannot disconnect", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/team/github-app/installations/42", http.StatusForbidden},
+		{"owner subscribes", []string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, http.MethodPut, "/api/v1/team/github-app/triggers", http.StatusNoContent},
+		{"owner disconnects", []string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/team/github-app/installations/42", http.StatusNoContent},
+		{"scopeless session reads no github app", nil, http.MethodGet, "/api/v1/team/github-app", http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

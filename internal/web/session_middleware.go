@@ -107,6 +107,7 @@ type webPrincipal struct {
 	ExpiresAt time.Time
 
 	sessionID string
+	csrfToken string
 }
 
 type webPrincipalCtxKey struct{}
@@ -117,6 +118,7 @@ func contextWithWebPrincipal(ctx context.Context, sess *sessionResp, sessionID s
 		Scopes:    sess.Scopes,
 		ExpiresAt: time.Unix(sess.ExpiresAt, 0).UTC(),
 		sessionID: sessionID,
+		csrfToken: sess.CSRFToken,
 	})
 }
 

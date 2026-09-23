@@ -154,11 +154,15 @@ func refuseOAuth(w http.ResponseWriter, r *http.Request, opts HandlerOptions, se
 // the host is the one the browser used, so the provider returns to the dashboard the
 // sign-in started on; a provider refuses any redirect URI not registered for the client.
 func oauthRedirectURI(r *http.Request, provider string) string {
+	return dashboardURL(r, "/auth/"+provider+"/callback")
+}
+
+func dashboardURL(r *http.Request, path string) string {
 	scheme := "http"
 	if requestOverTLSFrom(r.Context()) {
 		scheme = "https"
 	}
-	return (&url.URL{Scheme: scheme, Host: r.Host, Path: "/auth/" + provider + "/callback"}).String()
+	return (&url.URL{Scheme: scheme, Host: r.Host, Path: path}).String()
 }
 
 func setOAuthFlowCookie(w http.ResponseWriter, value string, maxAge int, secure bool) {
@@ -197,8 +201,7 @@ func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirect
 		map[string]string{"redirect_uri": redirectURI}, &out); err != nil {
 		return nil, err
 	}
-	u, err := url.Parse(out.AuthorizeURL)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+	if !absoluteHTTPURL(out.AuthorizeURL) {
 		return nil, errors.New("controller returned an unusable authorize_url")
 	}
 	if out.State == "" || out.Verifier == "" {
@@ -219,7 +222,29 @@ func controllerOAuthExchange(ctx context.Context, controllerURL, provider, code,
 	return &out, nil
 }
 
+func absoluteHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
+}
+
+type controllerStatusError struct {
+	Path    string
+	Status  int
+	Message string
+}
+
+func (e *controllerStatusError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("controller %s: %d", e.Path, e.Status)
+	}
+	return fmt.Sprintf("controller %s: %d: %s", e.Path, e.Status, e.Message)
+}
+
 func postControllerJSON(ctx context.Context, controllerURL, path, clientIP string, body, out any) error {
+	return postControllerJSONAs(ctx, controllerURL, path, clientIP, "", body, out)
+}
+
+func postControllerJSONAs(ctx context.Context, controllerURL, path, clientIP, sessionID string, body, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -233,6 +258,9 @@ func postControllerJSON(ctx context.Context, controllerURL, path, clientIP strin
 	if clientIP != "" {
 		req.Header.Set("X-Forwarded-For", clientIP)
 	}
+	if sessionID != "" {
+		req.Header.Set("Authorization", sessionAuthorization(sessionID))
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -242,11 +270,27 @@ func postControllerJSON(ctx context.Context, controllerURL, path, clientIP strin
 	if resp.StatusCode/100 != 2 {
 		msg, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if err != nil {
-			return fmt.Errorf("controller %s: %d", path, resp.StatusCode)
+			return &controllerStatusError{Path: path, Status: resp.StatusCode}
 		}
-		return fmt.Errorf("controller %s: %d: %s", path, resp.StatusCode, strings.TrimSpace(string(msg)))
+		return &controllerStatusError{Path: path, Status: resp.StatusCode, Message: controllerErrorMessage(msg)}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func controllerErrorMessage(body []byte) string {
+	var parsed struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		if parsed.Message != "" {
+			return parsed.Message
+		}
+		if parsed.Error != "" {
+			return parsed.Error
+		}
+	}
+	return strings.TrimSpace(string(body))
 }
 
 // safety: the session cookie is SameSite=Strict, and a browser withholds it from

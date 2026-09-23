@@ -37,6 +37,7 @@ func dashboardCapabilitiesHandler(opts HandlerOptions) http.HandlerFunc {
 			if identity, err := controllerIdentityCapabilities(r.Context(), controllerURL, sessionIDFromContext(r.Context())); err == nil {
 				caps.Teams = identity.Teams
 				caps.Auth = identity.Auth
+				caps.GitHubApp = identity.GitHubApp
 			}
 		}
 		writeJSON(w, http.StatusOK, caps)
@@ -44,8 +45,9 @@ func dashboardCapabilitiesHandler(opts HandlerOptions) http.HandlerFunc {
 }
 
 type identityCapabilities struct {
-	Teams *backend.CapabilitiesTeams `json:"teams"`
-	Auth  *backend.CapabilitiesAuth  `json:"auth"`
+	Teams     *backend.CapabilitiesTeams     `json:"teams"`
+	Auth      *backend.CapabilitiesAuth      `json:"auth"`
+	GitHubApp *backend.CapabilitiesGitHubApp `json:"github_app"`
 }
 
 func controllerIdentityCapabilities(ctx context.Context, controllerURL, sessionID string) (identityCapabilities, error) {

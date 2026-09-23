@@ -40,6 +40,12 @@ var proxyRoutes = []proxyRoute{
 	{"PUT /api/v1/crons/{id}/override", controller.ScopeRunsControl},
 	{"DELETE /api/v1/crons/{id}/override", controller.ScopeRunsControl},
 	{"DELETE /api/v1/runs/{id}", controller.ScopeAdmin},
+	{"GET /api/v1/team/github-app", controller.ScopeRunsRead},
+	{"DELETE /api/v1/team/github-app/installations/{installation_id}", controller.ScopeTeamAdmin},
+	{"GET /api/v1/team/github-app/installations/{installation_id}/repositories", controller.ScopeRunsRead},
+	{"GET /api/v1/team/github-app/triggers", controller.ScopeRunsRead},
+	{"PUT /api/v1/team/github-app/triggers", controller.ScopeTeamAdmin},
+	{"DELETE /api/v1/team/github-app/triggers", controller.ScopeTeamAdmin},
 }
 
 // safety: a membership role, which the controller resolves on every request for the
