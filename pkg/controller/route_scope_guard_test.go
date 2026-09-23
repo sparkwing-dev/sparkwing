@@ -56,12 +56,16 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 		"GET /api/v1/services":    true,
 		// safety: these act on the caller's own memberships, so accountPrincipal inside each handler
 		// is the gate, and it refuses every caller that is not a signed-in account.
-		"GET /api/v1/me":                       true,
-		"DELETE /api/v1/me":                    true,
-		"GET /api/v1/me/team-deletions":        true,
-		"POST /api/v1/me/active-team":          true,
-		"POST /api/v1/teams":                   true,
-		"POST /api/v1/invitations/{id}/accept": true,
+		"GET /api/v1/me":                                      true,
+		"DELETE /api/v1/me":                                   true,
+		"GET /api/v1/me/team-deletions":                       true,
+		"POST /api/v1/me/active-team":                         true,
+		"GET /api/v1/me/identities":                           true,
+		"POST /api/v1/me/identities/{provider}/link":          true,
+		"POST /api/v1/me/identities/{provider}/link/complete": true,
+		"DELETE /api/v1/me/identities/{provider}":             true,
+		"POST /api/v1/teams":                                  true,
+		"POST /api/v1/invitations/{id}/accept":                true,
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "server.go", nil, 0)
