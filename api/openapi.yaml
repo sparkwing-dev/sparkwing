@@ -3295,12 +3295,15 @@ paths:
                 attempt_ordinal: {type: integer, minimum: 1}
                 executor_kind:
                   type: string
-                  enum: [local]
-                  description: Opens the attempt for a node its dispatcher runs in its own process. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
+                  enum: [local, kubernetes]
+                  description: local opens the attempt for a node its dispatcher runs in its own process; a trigger claim may send kubernetes with its pod's executor_name. For local, no claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
                 executor_id:
                   type: string
                   maxLength: 128
                   description: The host a locally executed node ran on. It is the attempt's executor id and its display name.
+                executor_name:
+                  type: string
+                  description: The Kubernetes Job pod or trigger runner a claimed attempt ran on. Ignored for GitHub Actions credentials, whose attempts name the repository and workflow run.
       responses:
         "204": {description: Attempt started. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -5887,8 +5890,16 @@ paths:
                   items: {type: string, maxLength: 128}
                   description: Tag name globs matched with Go path.Match; empty selects no tags.
                 pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
-                branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Push branch glob patterns, at most 128 bytes each. Empty matches all branches."}
-                base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Pull request base branch glob patterns, at most 128 bytes each. Empty matches all base branches."}
+                branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Branch push, creation and deletion glob patterns, at most 128 bytes each. Empty matches all branches."}
+                base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Pull request base branch glob patterns, applied to every pull request action, at most 128 bytes each. Empty matches all base branches."}
+                pull_request_closed: {type: boolean, description: "Runs when a pull request closes, merged or not."}
+                pull_request_labeled: {type: boolean, description: "Runs when a pull request gains one of pull_request_labels; requires a nonempty list."}
+                pull_request_labels: {type: array, items: {type: string}, description: "Labels compared without case."}
+                pull_request_ready_for_review: {type: boolean, description: "Runs when a draft pull request is marked ready."}
+                release_published: {type: boolean, description: "Runs at a published release's tag commit."}
+                release_prereleased: {type: boolean, description: "Runs at a prereleased release's tag commit."}
+                branch_create: {type: boolean, description: "Runs when a branch matching branches is created."}
+                branch_delete: {type: boolean, description: "Runs at the default branch commit when a branch matching branches is deleted."}
       responses:
         "200":
           description: Written.
@@ -6684,7 +6695,7 @@ components:
     GitHubAppTrigger:
       x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
       type: object
-      required: [repository, repository_id, installation_id, pipeline, push, tags, pull_request, branches, base_branches, created_by, created_at]
+      required: [repository, repository_id, installation_id, pipeline, push, tags, pull_request, branches, base_branches, pull_request_closed, pull_request_labeled, pull_request_labels, pull_request_ready_for_review, release_published, release_prereleased, branch_create, branch_delete, created_by, created_at]
       properties:
         repository: {type: string, description: owner/name as GitHub spells it.}
         repository_id: {type: integer, format: int64}
@@ -6698,6 +6709,14 @@ components:
         pull_request: {type: boolean}
         branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
         base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
+        pull_request_closed: {type: boolean}
+        pull_request_labeled: {type: boolean}
+        pull_request_labels: {type: array, items: {type: string}}
+        pull_request_ready_for_review: {type: boolean}
+        release_published: {type: boolean}
+        release_prereleased: {type: boolean}
+        branch_create: {type: boolean}
+        branch_delete: {type: boolean}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
     GitHubAppExtraRepos:

@@ -100,17 +100,18 @@ type issuedToken struct {
 
 // GitHub is the fake.
 type GitHub struct {
-	URL    string
-	Key    *rsa.PrivateKey
-	t      testing.TB
-	mu     sync.Mutex
-	insts  map[int64]*Installation
-	codes  map[string]*userCode
-	users  map[string]*userCode
-	tokens map[string]*issuedToken
-	minted []MintedToken
-	stats  []Status
-	checks []CheckRunCall
+	URL     string
+	Key     *rsa.PrivateKey
+	t       testing.TB
+	mu      sync.Mutex
+	insts   map[int64]*Installation
+	codes   map[string]*userCode
+	users   map[string]*userCode
+	tokens  map[string]*issuedToken
+	commits map[string]string
+	minted  []MintedToken
+	stats   []Status
+	checks  []CheckRunCall
 	// checkRuns maps a check run id to the call that created it.
 	checkRuns  map[int64]CheckRunCall
 	failChecks int
@@ -129,6 +130,7 @@ func New(t testing.TB) *GitHub {
 		codes:     map[string]*userCode{},
 		users:     map[string]*userCode{},
 		tokens:    map[string]*issuedToken{},
+		commits:   map[string]string{},
 		checkRuns: map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
@@ -140,6 +142,7 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", g.appOnly(g.handleMint))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/installation", g.appOnly(g.handleRepoInstallation))
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
 	mux.HandleFunc("PATCH /repos/{owner}/{repo}/check-runs/{id}", g.handleCheckRun)
@@ -170,6 +173,30 @@ func (g *GitHub) SetRepos(id int64, repos ...Repo) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.insts[id].Repos = repos
+}
+
+// SetCommit makes a repository ref resolve to sha.
+func (g *GitHub) SetCommit(repo, ref, sha string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.commits[strings.ToLower(repo)+"/"+ref] = sha
+}
+
+func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {
+	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	tok := g.installationToken(r)
+	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		return
+	}
+	g.mu.Lock()
+	sha := g.commits[repo+"/"+r.PathValue("ref")]
+	g.mu.Unlock()
+	if sha == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"sha": sha})
 }
 
 // SetChecksGranted records whether installation id's owner accepted the

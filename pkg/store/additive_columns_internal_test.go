@@ -142,6 +142,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// binary never names, so an older binary keeps writing the migrated
 	// database.
 	68: {githubRunnerRunCols},
+	// safety: v69 adds defaulted, default-off github_app_triggers event
+	// columns an older binary never names, so an older binary keeps writing
+	// the migrated database.
+	69: {githubAppTriggerOptionCols},
 }
 
 func columnSpecMaps() []map[string]string {

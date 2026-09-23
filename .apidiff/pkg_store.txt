@@ -885,18 +885,26 @@ type GitHubAppInstallation struct {
 	UpdatedAt    time.Time
 }
 type GitHubAppTrigger struct {
-	Team           Team
-	RepositoryID   int64
-	Repository     string
-	InstallationID int64
-	Pipeline       string
-	Push           bool
-	Tags           []string
-	PullRequest    bool
-	Branches       []string
-	BaseBranches   []string
-	CreatedBy      string
-	CreatedAt      time.Time
+	Team                      Team
+	RepositoryID              int64
+	Repository                string
+	InstallationID            int64
+	Pipeline                  string
+	Push                      bool
+	Tags                      []string
+	PullRequest               bool
+	Branches                  []string
+	BaseBranches              []string
+	PullRequestClosed         bool
+	PullRequestLabeled        bool
+	PullRequestLabels         []string
+	PullRequestReadyForReview bool
+	ReleasePublished          bool
+	ReleasePrereleased        bool
+	BranchCreate              bool
+	BranchDelete              bool
+	CreatedBy                 string
+	CreatedAt                 time.Time
 }
 type GitHubRepo struct {
 	ID    int64
@@ -2237,6 +2245,7 @@ func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitC
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
+func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)

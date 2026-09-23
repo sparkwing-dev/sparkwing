@@ -85,7 +85,7 @@ func TestMeteredTriggerOwnedAttemptRecordsCloudHost(t *testing.T) {
 	}
 }
 
-func TestSchemaV65PreservesExistingGitHubCredentials(t *testing.T) {
+func TestSchemaV68PreservesExistingGitHubCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	st, err := store.Open(path)
 	if err != nil {
@@ -97,7 +97,7 @@ func TestSchemaV65PreservesExistingGitHubCredentials(t *testing.T) {
 	if _, err := st.DB().Exec(`ALTER TABLE github_runner_credentials DROP COLUMN run_id`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version = 65`); err != nil {
+	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 68`); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {
