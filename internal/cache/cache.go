@@ -293,6 +293,13 @@ func New(cfg Config) (*Server, error) {
 	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
+	if blobStore != nil {
+		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := restoreEgressDay(rctx); err != nil {
+			log.Printf("warning: read the day's saved egress total: %v", err)
+		}
+		cancel()
+	}
 
 	loadRepoNames()
 	initProxy()
@@ -379,6 +386,13 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 	measureStore(ctx)
+	if blobStore != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			egressDayLoop(ctx)
+		}()
+	}
 	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()
