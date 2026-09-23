@@ -161,7 +161,7 @@ func ParseRepoAllowlist(patterns []string) (RepoAllowlist, error) {
 func (a RepoAllowlist) Empty() bool { return len(a.patterns) == 0 }
 
 // Patterns returns the canonical patterns in the order given.
-func (a RepoAllowlist) Patterns() []string { return append([]string(nil), a.patterns...) }
+func (a RepoAllowlist) Patterns() []string { return append([]string{}, a.patterns...) }
 
 func (a RepoAllowlist) String() string {
 	if a.Empty() {
@@ -179,4 +179,19 @@ func (a RepoAllowlist) Admits(identity string) bool {
 		}
 	}
 	return false
+}
+
+// AdmitsRepository reports whether a trigger's repository fields name a
+// repository and whether the list admits it, so a list can filter claims in a
+// store that reads those fields. Fields that disagree or do not parse name one
+// the list refuses.
+func (a RepoAllowlist) AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool) {
+	id, err := TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo)
+	if err != nil {
+		return true, false
+	}
+	if id == "" {
+		return false, false
+	}
+	return true, a.Admits(id)
 }

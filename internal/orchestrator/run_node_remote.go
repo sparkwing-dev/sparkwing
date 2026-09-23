@@ -330,7 +330,7 @@ func AdmitTriggerSource(allow sourceurl.RepoAllowlist, trigger *store.Trigger, f
 	for _, id := range identities {
 		if id != "" && !allow.Admits(id) {
 			return fmt.Errorf("%w: run %s builds %s, which this machine's --allow-repo list (%s) does not name; "+
-				"a runner whose owner allows it can take the run instead", ErrRepoNotAllowed, trigger.ID, id, allow)
+				"trigger it again for a runner whose list names it", ErrRepoNotAllowed, trigger.ID, id, allow)
 		}
 	}
 	return nil

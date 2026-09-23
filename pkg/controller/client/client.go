@@ -29,6 +29,9 @@ type Client struct {
 	runnerIdentity atomic.Pointer[string]
 
 	triggerNodeRunner string
+	// allowRepos is sent as allow_repos on every trigger and node claim when
+	// non-nil; see [Client.WithAllowRepos].
+	allowRepos []string
 
 	pollAdvice atomic.Int64
 }
@@ -797,7 +800,7 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error) {
 // match both lists. Empty/nil on either axis means "accept any".
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error) {
 	var body io.Reader
-	if len(pipelines) > 0 || len(sources) > 0 || c.triggerNodeRunner != "" {
+	if len(pipelines) > 0 || len(sources) > 0 || c.triggerNodeRunner != "" || c.allowRepos != nil {
 		req := map[string]any{}
 		if len(pipelines) > 0 {
 			req["pipelines"] = pipelines
@@ -807,6 +810,9 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 		}
 		if c.triggerNodeRunner != "" {
 			req["node_runner"] = c.triggerNodeRunner
+		}
+		if c.allowRepos != nil {
+			req["allow_repos"] = c.allowRepos
 		}
 		buf, _ := json.Marshal(req)
 		body = bytes.NewReader(buf)
@@ -1226,6 +1232,9 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 	}
 	if capacity != nil {
 		body["capacity"] = capacity
+	}
+	if c.allowRepos != nil {
+		body["allow_repos"] = c.allowRepos
 	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,

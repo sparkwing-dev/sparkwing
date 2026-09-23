@@ -90,6 +90,9 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
 		WithRunnerIdentity(processRunnerIdentity("trigger-loop")).
 		WithTriggerNodeRunner(nodeRunner)
+	if opts.GitcacheURL == "" || !opts.AllowRepos.Empty() {
+		cli.WithAllowRepos(opts.AllowRepos.Patterns())
+	}
 	logger.Info(
 		"trigger loop started",
 		"controller", opts.ControllerURL,

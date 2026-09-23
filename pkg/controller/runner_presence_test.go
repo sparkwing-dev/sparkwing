@@ -13,7 +13,7 @@ func TestRunnerPresenceLiveCarriesTheClaimCredential(t *testing.T) {
 	reg := newRunnerPresenceRegistry()
 	now := time.Now()
 	laptop := presenceKey{tokenPrefix: "swr_acmelaptop", name: "laptop"}
-	reg.record(laptop, []string{"location=local"}, &claimCapacity{MaxConcurrent: 2}, now)
+	reg.record(laptop, []string{"location=local"}, &claimCapacity{MaxConcurrent: 2}, nil, now)
 
 	live := reg.live(now, time.Minute, presenceKey{})
 	if len(live) != 1 {

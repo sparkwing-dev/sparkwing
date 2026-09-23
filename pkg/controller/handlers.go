@@ -1321,6 +1321,23 @@ type claimTriggerReq struct {
 	// NodeRunner is how the claimant runs the trigger's nodes: inprocess,
 	// k8s or warm. Empty means inprocess.
 	NodeRunner string `json:"node_runner,omitempty"`
+	// AllowRepos is the claimant's repository list; see claimRepoContext.
+	AllowRepos []string `json:"allow_repos,omitempty"`
+}
+
+// claimRepoContext confines a claim to the repositories the runner's owner
+// allows. A list that is present, even empty, binds; an absent one is a runner
+// that sends none, which claims as it always has and refuses a disallowed run
+// itself, since the controller cannot tell whether it fetches source.
+func claimRepoContext(ctx context.Context, patterns []string) (context.Context, *sourceurl.RepoAllowlist, error) {
+	if patterns == nil {
+		return ctx, nil, nil
+	}
+	allow, err := sourceurl.ParseRepoAllowlist(patterns)
+	if err != nil {
+		return ctx, nil, fmt.Errorf("allow_repos: %w", err)
+	}
+	return store.WithRepoFilter(ctx, allow), &allow, nil
 }
 
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
@@ -1332,7 +1349,12 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	if s.refuseMeteredInProcessNodes(w, r, body.NodeRunner) {
 		return
 	}
-	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
+	ctx, _, err := claimRepoContext(r.Context(), body.AllowRepos)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	t, err := s.store.ClaimNextTriggerFor(ctx, claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if writeClaimTeamRefusal(w, err) || s.writeCreditsRefusal(w, r, err) {
 		return
 	}
@@ -1592,6 +1614,8 @@ type claimNodeReq struct {
 	Headroom       *claimHeadroom  `json:"headroom,omitempty"`
 	Capacity       *claimCapacity  `json:"capacity,omitempty"`
 	Binding        json.RawMessage `json:"execution_binding,omitempty"`
+	// AllowRepos is the claimant's repository list; see claimRepoContext.
+	AllowRepos []string `json:"allow_repos,omitempty"`
 }
 
 type claimHeadroom struct {
@@ -1744,10 +1768,15 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("capacity must carry non-negative max_concurrent and active_claims"))
 		return
 	}
+	claimCtx, allow, err := claimRepoContext(r.Context(), body.AllowRepos)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
 	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
-	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
-	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
+	s.runnerPresence.record(claimer, body.Labels, body.Capacity, allow, time.Now())
+	n, err := s.store.ClaimNextReadyNode(s.placementContext(claimCtx, claimer),
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if writeClaimTeamRefusal(w, err) {
 		return

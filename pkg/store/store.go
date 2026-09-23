@@ -5510,6 +5510,9 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 	var cursor *claimCandidate
 	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
 	admitted := map[string]bool{}
+	allow, filtered := RepoFilterFrom(ctx)
+	needRepo := filtered || placement.needsRunRepository()
+	repos := map[string]runRepository{}
 	for range claimScanRounds {
 		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
@@ -5530,6 +5533,17 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 					continue
 				}
 			}
+			var repo runRepository
+			if needRepo {
+				if repo, err = s.runRepositoryOf(ctx, scope, n.runID, repos); err != nil {
+					return nil, nil, err
+				}
+			}
+			// safety: the node stays queued for a runner whose list admits its
+			// repository, so passing over it writes nothing.
+			if filtered && !repo.admitsNodeFor(allow) {
+				continue
+			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
 			if err != nil {
 				return nil, nil, err
@@ -5541,7 +5555,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 			if refused {
 				continue
 			}
-			n.decision = placement.decide(n.needs, n.prefers, labels, n.holdFrom, time.Now())
+			n.decision = placement.decide(n.needs, n.prefers, repo, labels, n.holdFrom, time.Now())
 			if n.decision.hold {
 				continue
 			}
@@ -7184,46 +7198,63 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		sel += clause
 		args = append(args, scopeArgs...)
 	}
-	sel += `
- ORDER BY created_at ASC
- LIMIT 1` + s.forUpdateSkipLocked()
-
+	allow, filtered := RepoFilterFrom(ctx)
+	// safety: a filtered claimant reads the queue in batches and passes over
+	// every trigger its list does not admit, so another repository's run at the
+	// head of the queue never hides the one it may build.
+	batch, rounds := 1, 1
+	if filtered {
+		batch, rounds = claimScanBatch, claimScanRounds
+	}
 	var t Trigger
 	var argsJSON, envJSON []byte
 	var createdNS int64
-	var parent sql.NullString
-	var fullInt, repoInheritedInt int
-	err = tx.QueryRowContext(ctx, sel, args...).Scan(
-		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
-		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team,
-	)
-	if parent.Valid {
-		t.ParentRunID = parent.String
-	}
-	t.Full = fullInt != 0
-	t.RepoInherited = repoInheritedInt != 0
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			if commitErr := tx.Commit(); commitErr != nil {
-				return nil, commitErr
-			}
-			return nil, notFound("claimable trigger", "")
+	found := false
+	var after *triggerCursor
+	for round := 0; round < rounds && !found; round++ {
+		query, queryArgs := sel, args
+		if after != nil {
+			query += ` AND (created_at > ? OR (created_at = ? AND id > ?))`
+			queryArgs = append(append([]any(nil), args...), after.createdNS, after.createdNS, after.id)
 		}
-		return nil, err
-	}
-	if scoped {
-		env, decoded := decodeTriggerEnv(envJSON)
-		t.TriggerEnv = env
-		// safety: the oldest trigger stays pending for other workers, and this
-		// scope reports an empty queue until one of them takes it.
-		if !decoded || !scope.admits(&t) {
-			if commitErr := tx.Commit(); commitErr != nil {
-				return nil, commitErr
-			}
-			return nil, notFound("claimable trigger", "")
+		query += `
+ ORDER BY created_at ASC, id ASC
+ LIMIT ` + strconv.Itoa(batch) + s.forUpdateSkipLocked()
+		rows, err := scanTriggerCandidates(ctx, tx, query, queryArgs)
+		if err != nil {
+			return nil, err
 		}
+		for i := range rows {
+			row := &rows[i]
+			if scoped {
+				env, decoded := decodeTriggerEnv(row.envJSON)
+				row.t.TriggerEnv = env
+				// safety: the oldest trigger stays pending for other workers, and this
+				// scope reports an empty queue until one of them takes it.
+				if !decoded || !scope.admits(&row.t) {
+					if commitErr := tx.Commit(); commitErr != nil {
+						return nil, commitErr
+					}
+					return nil, notFound("claimable trigger", "")
+				}
+			}
+			if filtered && !triggerAdmittedBy(allow, &row.t, row.envJSON) {
+				continue
+			}
+			t, argsJSON, envJSON, createdNS, found = row.t, row.argsJSON, row.envJSON, row.createdNS, true
+			break
+		}
+		if len(rows) < batch {
+			break
+		}
+		last := rows[len(rows)-1]
+		after = &triggerCursor{createdNS: last.createdNS, id: last.t.ID}
+	}
+	if !found {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, commitErr
+		}
+		return nil, notFound("claimable trigger", "")
 	}
 	if err := refuseMeteredTriggerClaimOnSpentBalanceTx(ctx, tx, claimant, t.Team, t.ID); err != nil {
 		return nil, err
@@ -8487,4 +8518,43 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 		a.ResolvedAt = &t
 	}
 	return &a, nil
+}
+
+type triggerCursor struct {
+	createdNS int64
+	id        string
+}
+
+type triggerCandidate struct {
+	t         Trigger
+	argsJSON  []byte
+	envJSON   []byte
+	createdNS int64
+}
+
+func scanTriggerCandidates(ctx context.Context, tx *storeTx, query string, args []any) (_ []triggerCandidate, err error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []triggerCandidate
+	for rows.Next() {
+		var c triggerCandidate
+		var parent sql.NullString
+		var fullInt, repoInheritedInt int
+		if err := rows.Scan(
+			&c.t.ID, &c.t.Pipeline, &c.argsJSON, &c.t.TriggerSource, &c.t.TriggerUser,
+			&c.envJSON, &c.t.GitBranch, &c.t.GitSHA, &c.t.Status, &c.createdNS, &parent,
+			&c.t.Repo, &c.t.RepoURL, &c.t.GithubOwner, &c.t.GithubRepo, &repoInheritedInt, &c.t.RetryOf, &c.t.RetrySource, &c.t.ParentNodeID, &fullInt,
+			&c.t.IdempotencyKey, &c.t.ClaimSeq, &c.t.WebhookDelivery, &c.t.Team,
+		); err != nil {
+			return nil, err
+		}
+		c.t.ParentRunID = parent.String
+		c.t.Full = fullInt != 0
+		c.t.RepoInherited = repoInheritedInt != 0
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

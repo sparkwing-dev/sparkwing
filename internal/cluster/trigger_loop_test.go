@@ -313,19 +313,25 @@ func TestRunTriggerLoopStopsWhenMeteredInProcessClaimsAreRefused(t *testing.T) {
 	}
 }
 
-// A direct-source runner runs what it fetches as its own user, so a claimed
-// run from a repository its owner did not allow fails naming the list, and
-// nothing is fetched.
+// A direct-source runner sends its list with every claim, and when a
+// controller hands it a run outside the list anyway it fails the run naming
+// the list, and nothing is fetched.
 func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var reason string
+	var sentAllow []string
 	var claimed atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			var claim struct {
+				AllowRepos []string `json:"allow_repos"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&claim)
+			sentAllow = claim.AllowRepos
 			if claimed.Swap(true) {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -361,6 +367,10 @@ func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if !slices.Equal(sentAllow, []string{"github.com/acme/*"}) {
+		t.Fatalf("claims carried allow_repos %q, want the runner's list", sentAllow)
+	}
+	// safety: this controller ignores the list, so the runner's own refusal is what stops the run.
 	if !strings.Contains(reason, "github.com/acme/*") || !strings.Contains(reason, "git.invalid/evil/payload") {
 		t.Fatalf("run finished with %q, want a refusal naming the repository and the allowlist", reason)
 	}

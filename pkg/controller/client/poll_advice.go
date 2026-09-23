@@ -51,6 +51,20 @@ func (c *Client) WithTriggerNodeRunner(kind string) *Client {
 	return c
 }
 
+// WithAllowRepos sends patterns, the repository list this runner's owner
+// allows, with every trigger and node claim, so the controller hands this
+// client only work from those repositories. An empty non-nil list claims
+// nothing; nil sends no list. A controller older than the field refuses the
+// claim with 400.
+func (c *Client) WithAllowRepos(patterns []string) *Client {
+	if patterns == nil {
+		c.allowRepos = nil
+		return c
+	}
+	c.allowRepos = append([]string{}, patterns...)
+	return c
+}
+
 // meteredInProcessNodesCode is the code the controller answers a metered
 // trigger claim with when it names no node runner that claims each node.
 const meteredInProcessNodesCode = "metered_inprocess_nodes"

@@ -2,9 +2,11 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -122,5 +124,44 @@ func TestPooledNodeFromARepositoryOutsideTheAllowlistFailsNamingIt(t *testing.T)
 	}
 	if _, statErr := os.Stat(filepath.Join(home, "source-direct")); !os.IsNotExist(statErr) {
 		t.Fatalf("a refused node still reached the fetch: %v", statErr)
+	}
+}
+
+// A direct-source pool runner sends its list with every node claim, so the
+// controller never hands it a node from another repository.
+func TestRunPoolLoopSendsTheRepositoryListWithEachNodeClaim(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sent := make(chan []string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/nodes/claim" {
+			var claim struct {
+				AllowRepos []string `json:"allow_repos"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&claim)
+			select {
+			case sent <- claim.AllowRepos:
+			default:
+			}
+			cancel()
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = RunPoolLoop(ctx, PoolLoopConfig{
+		ControllerURL: srv.URL, AllowRepos: allow, HolderPrefix: "runner:laptop",
+		PollInterval: 5 * time.Millisecond, Home: t.TempDir(),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	select {
+	case got := <-sent:
+		if len(got) != 1 || got[0] != "github.com/acme/*" {
+			t.Fatalf("node claim carried allow_repos %q, want the runner's list", got)
+		}
+	default:
+		t.Fatal("the pool loop made no node claim")
 	}
 }
