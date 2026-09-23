@@ -2360,6 +2360,30 @@ paths:
                     type: string
                     description: Echoed back only when the request filtered by pipeline.
 
+  /api/v1/pipelines:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [pipelines]
+      summary: List the caller's team's pipelines, most recently active first.
+      description: |
+        A pipeline appears once the caller's team has a run, a trigger or a
+        declared schedule for it. Each entry carries the pipeline's newest run
+        by start time; a pipeline that has only been queued or scheduled has
+        none. The team is the caller's, never one named in the request.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+          description: Most pipelines to return; values above 200 read as 200.
+      responses:
+        "200":
+          description: The team's pipelines.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PipelinesList"}
+        "400": {description: limit is not a positive integer.}
+        "403": {description: The credential lacks the scope or acts for no team.}
+
   /api/v1/pipelines/{name}/latest:
     parameters:
       - in: path
@@ -5413,6 +5437,22 @@ components:
       properties:
         name: {type: string}
         bytes: {type: integer, format: int64}
+    PipelinesList:
+      x-sparkwing-go-type: pkg/controller.pipelinesList
+      type: object
+      properties:
+        pipelines: {type: array, items: {$ref: "#/components/schemas/PipelineSummary"}}
+    PipelineSummary:
+      x-sparkwing-go-type: pkg/store.PipelineSummary
+      type: object
+      description: One pipeline a team has run, queued or scheduled.
+      properties:
+        name: {type: string}
+        last_activity_at: {type: string, format: date-time, description: Newest run start or trigger; absent for a pipeline known only from a schedule.}
+        last_run_id: {type: string}
+        last_status: {type: string}
+        last_run_at: {type: string, format: date-time}
+        last_finished_at: {type: string, format: date-time}
     StorageState:
       x-sparkwing-go-type: pkg/controller.storageStateJSON
       type: object

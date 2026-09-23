@@ -64,6 +64,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
 | `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
+| `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
 | `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |

@@ -24,6 +24,7 @@ var proxyRoutes = []proxyRoute{
 	{"GET /api/v1/approvals/pending", controller.ScopeRunsRead},
 	{"GET /api/v1/agents", controller.ScopeRunsRead},
 	{"GET /api/v1/trends", controller.ScopeRunsRead},
+	{"GET /api/v1/pipelines", controller.ScopeRunsRead},
 	{"POST /api/v1/triggers", controller.ScopeRunsWrite},
 	{"POST /api/v1/runs/{id}/cancel", controller.ScopeRunsControl},
 	{"POST /api/v1/runs/{id}/retry", controller.ScopeRunsControl},

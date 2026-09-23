@@ -915,6 +915,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
+	mux.Handle("GET /api/v1/pipelines", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPipelines)))
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
 	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,

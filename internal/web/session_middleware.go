@@ -107,6 +107,9 @@ type webPrincipal struct {
 	ExpiresAt time.Time
 
 	sessionID string
+	// accountBound marks a signed-up account's session, which reads its
+	// team's view from the controller rather than this dashboard's own.
+	accountBound bool
 }
 
 type webPrincipalCtxKey struct{}
@@ -117,6 +120,8 @@ func contextWithWebPrincipal(ctx context.Context, sess *sessionResp, sessionID s
 		Scopes:    sess.Scopes,
 		ExpiresAt: time.Unix(sess.ExpiresAt, 0).UTC(),
 		sessionID: sessionID,
+
+		accountBound: sess.accountBound(),
 	})
 }
 

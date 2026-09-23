@@ -1063,6 +1063,16 @@ type PipelineProfile struct {
 
 	PrevSustainedCores float64
 }
+type PipelineSummary struct {
+	Name string
+
+	LastActivityAt time.Time
+
+	LastRunID      string
+	LastStatus     string
+	LastRunAt      *time.Time
+	LastFinishedAt *time.Time
+}
 const PlacementFallback = "fallback"
 const PlacementNone = "none"
 const PlacementPreferred = "preference"
@@ -1765,6 +1775,7 @@ func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string)
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (t *Tenant) ListPendingApprovals(ctx context.Context) (_ []*Approval, err error)
 func (t *Tenant) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
+func (t *Tenant) ListPipelines(ctx context.Context, limit int) ([]PipelineSummary, error)
 func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error)
 func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error)
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)

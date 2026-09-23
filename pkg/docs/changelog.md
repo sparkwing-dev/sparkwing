@@ -38,6 +38,14 @@ unlock.
   shows it and its setup commands once, and lists and revokes the member's
   tokens.
 
+- **controller:** `GET /api/v1/pipelines` (`runs.read`) lists the caller's
+  team's pipelines, most recently active first, up to 200: every pipeline the
+  team has a run, trigger or declared schedule for, each with its newest run's
+  id, status and times. The dashboard answers a signed-up account's
+  `/api/v1/pipelines` from it, so the Pipelines page and the run form's
+  suggestions show that team's pipelines, newest first; the operator's own
+  session still reads the working directory's.
+
 - **runner:** Kubernetes runner Jobs carry a `sparkwing.dev/team` label and a
   required pod anti-affinity on `kubernetes.io/hostname` that refuses any node
   running another team's Job, so different teams' Jobs never share a node

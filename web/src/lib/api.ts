@@ -588,6 +588,31 @@ export interface PipelineArg {
 export interface PipelineMeta {
   args: PipelineArg[];
   tags?: string[];
+  last_status?: string;
+  last_run_at?: string;
+}
+
+// A team's list comes from the controller, newest activity first; the local
+// dashboard answers with a name-keyed map of the working directory's pipelines.
+interface TeamPipeline {
+  name: string;
+  last_status?: string;
+  last_run_at?: string;
+}
+
+export function pipelinesByName(
+  raw: Record<string, PipelineMeta> | TeamPipeline[] | undefined,
+): Record<string, PipelineMeta> {
+  if (!Array.isArray(raw)) return raw || {};
+  const out: Record<string, PipelineMeta> = {};
+  for (const p of raw) {
+    out[p.name] = {
+      args: [],
+      last_status: p.last_status,
+      last_run_at: p.last_run_at,
+    };
+  }
+  return out;
 }
 
 let _pipelinesUnavailable = false;
@@ -603,7 +628,7 @@ export async function getPipelines(): Promise<Record<string, PipelineMeta>> {
   }
   if (!res.ok) return {};
   const data = await res.json();
-  return data.pipelines || {};
+  return pipelinesByName(data.pipelines);
 }
 
 export interface TrendPoint {
