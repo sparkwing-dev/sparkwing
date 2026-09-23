@@ -276,7 +276,7 @@ describe("runnerConnectCommand", () => {
     const cmd = teams.runnerConnectCommand(minted, "Korey's laptop");
     assert.equal(
       cmd,
-      `SPARKWING_AGENT_TOKEN=swr_secret sparkwing-runner runner --controller ${teams.controllerURLPlaceholder} --holder-prefix 'Korey'\\''s laptop'`,
+      `SPARKWING_AGENT_TOKEN=swr_secret sparkwing-runner runner --controller ${teams.controllerURLPlaceholder} --logs ${teams.controllerURLPlaceholder} --also-claim-triggers --max-claims-before-restart 0 --holder-prefix 'Korey'\\''s laptop'`,
     );
   });
 });
