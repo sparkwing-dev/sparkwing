@@ -22,6 +22,18 @@ unlock.
 
 ### Added
 
+- **controller + sdk:** Sparkwing as an OIDC issuer, so a run assumes AWS,
+  Google Cloud, Azure or Vault roles with no stored cloud key. With
+  `--oidc-key-file` (or `SPARKWING_OIDC_KEY`) and an `https` `--external-url`,
+  the controller serves `/.well-known/openid-configuration` and
+  `/.well-known/jwks.json`, and `POST /api/v1/runs/{id}/oidc-token` signs an
+  RS256 ID token for the claim holder of that run only, with subject
+  `team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>`.
+  Pipeline code calls `sparkwing.OIDCToken(ctx, audience)`.
+  `--oidc-previous-key-file` publishes the previous key through a rotation and
+  `--oidc-token-ttl` sets the lifetime (default 10m, at most 1h). See
+  [OIDC tokens for cloud roles](docs/oidc.md).
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the
