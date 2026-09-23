@@ -299,6 +299,9 @@ func (s *Store) Put(ctx context.Context, team, rel string, body io.Reader, opts 
 	if err != nil {
 		return Written{}, err
 	}
+	if err := s.breaker.paused(s.now()); err != nil {
+		return Written{}, err
+	}
 	var prior int64 = -1
 	if !opts.Fresh {
 		if h, err := s.headKey(ctx, key); err == nil {

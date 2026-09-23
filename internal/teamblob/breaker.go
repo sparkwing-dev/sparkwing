@@ -75,6 +75,21 @@ func (b *breaker) allow(now time.Time) error {
 	return nil
 }
 
+// paused reports the pause without claiming the probe, so a caller can
+// refuse before spending anything, even the HEAD a write starts with.
+func (b *breaker) paused(now time.Time) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.open && (now.Before(b.until) || b.probing) {
+		return &SuspendedError{Until: b.until, Cause: b.cause}
+	}
+	return nil
+}
+
+// WritesPaused returns a *SuspendedError while writes are paused, so a
+// caller can refuse a write before reading its body.
+func (s *Store) WritesPaused() error { return s.breaker.paused(s.now()) }
+
 func (b *breaker) record(ctx context.Context, now time.Time, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -135,6 +135,10 @@ func serveBinBlob(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if err := blobStore.WritesPaused(); err != nil {
+			blobError(w, "put bin", err)
+			return
+		}
 		putBinBlob(w, r, team, rel, hash)
 	case http.MethodDelete:
 		if err := blobStore.Delete(ctx, team, rel); err != nil {
@@ -298,6 +302,10 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 // body cut off by the size cap or a hung-up client aborts the upload, so
 // no partial object is ever readable.
 func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, size int64, contentType, what string, limit int64) (int64, bool) {
+	if err := blobStore.WritesPaused(); err != nil {
+		blobError(w, "put "+what, err)
+		return 0, false
+	}
 	wr, err := blobStore.Put(r.Context(), team, rel, r.Body, teamblob.PutOptions{Size: size, ContentType: contentType})
 	if err != nil {
 		var tooLarge *http.MaxBytesError

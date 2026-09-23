@@ -49,6 +49,16 @@ func (c *counting) count(op string) int {
 	return c.calls[op]
 }
 
+func (c *counting) total() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, v := range c.calls {
+		n += v
+	}
+	return n
+}
+
 func (c *counting) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -477,6 +487,14 @@ func TestAccessDeniedPausesWritesAndListingsWithoutRetrying(t *testing.T) {
 	}
 	if got := f.client.count("PutObject") + f.client.count("ListObjectsV2"); got != 1 {
 		t.Fatalf("a denied bucket was sent %d PUT and LIST requests, want 1", got)
+	}
+	// A paused write spends nothing, not even the HEAD an overwrite check sends.
+	f.client.reset()
+	if _, err := f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1}); !errors.Is(err, teamblob.ErrSuspended) {
+		t.Fatalf("put during the pause = %v", err)
+	}
+	if got := f.client.total(); got != 0 {
+		t.Fatalf("a paused write sent %d requests", got)
 	}
 	if st := f.store.Breaker(); !st.Open || st.Until.Sub(clock()) != time.Minute {
 		t.Fatalf("breaker = %+v", st)

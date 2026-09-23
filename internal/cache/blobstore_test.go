@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
@@ -261,4 +263,57 @@ func TestBlobStoreRefusesAnOversizedArtifactWithoutLeavingParts(t *testing.T) {
 	if len(uploads.Uploads) != 0 {
 		t.Fatalf("%d multipart uploads left open", len(uploads.Uploads))
 	}
+}
+
+// A bucket that denies this service's writes pauses them: the next uploads
+// are refused with 503 and Retry-After before their bodies are read, and
+// reads keep working.
+func TestBlobStoreRefusesWritesFastWhileTheBucketDeniesThem(t *testing.T) {
+	const token = "operator-token"
+	srv, raw := newBlobServer(t, token, 0)
+	grant := grantFor(t, token, "team-a")
+	if code, body := send(t, srv, http.MethodPut, "/cache/kept", grant, "kept"); code != http.StatusCreated {
+		t.Fatalf("put = %d %s", code, body)
+	}
+	denied := &deniedPuts{Client: raw}
+	store, err := teamblob.New(teamblob.Options{Bucket: blobTestBucket, Prefix: "cache", Client: denied})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobStore = store
+	if code, _ := send(t, srv, http.MethodPut, "/cache/new", grant, "x"); code != http.StatusBadGateway {
+		t.Fatalf("the denied put = %d, want 502", code)
+	}
+	for _, w := range []struct{ method, path string }{
+		{http.MethodPut, "/cache/new"},
+		{http.MethodPut, "/bin/deadbeef"},
+		{http.MethodPost, "/artifacts/run-1?path=out.txt"},
+	} {
+		req, _ := http.NewRequestWithContext(t.Context(), w.method, srv.URL+w.path, strings.NewReader("x"))
+		req.Header.Set("Authorization", "Bearer "+grant)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" {
+			t.Errorf("%s %s while paused = %d (Retry-After %q), want 503 with Retry-After", w.method, w.path, resp.StatusCode, resp.Header.Get("Retry-After"))
+		}
+	}
+	if n := denied.puts.Load(); n != 1 {
+		t.Fatalf("a denying bucket was sent %d PUTs, want 1", n)
+	}
+	if code, body := send(t, srv, http.MethodGet, "/cache/kept", grant, ""); code != http.StatusOK || body != "kept" {
+		t.Fatalf("a read while paused = %d %q", code, body)
+	}
+}
+
+type deniedPuts struct {
+	teamblob.Client
+	puts atomic.Int64
+}
+
+func (d *deniedPuts) PutObject(context.Context, *s3.PutObjectInput, ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	d.puts.Add(1)
+	return nil, &smithy.GenericAPIError{Code: "AccessDenied", Message: "explicit deny"}
 }
