@@ -52,6 +52,9 @@ spec:
             {{- if .Values.cache.allowUnauthenticated }}
             - --allow-unauthenticated
             {{- end }}
+            {{- if not .Values.cache.dependencyProxy.enabled }}
+            - --disable-proxy
+            {{- end }}
             {{- $limits := .Values.cache.limits | default dict }}
             {{- range $limit := list
                   (dict "flag" "--max-artifact-bytes" "value" $limits.maxArtifactBytes)

@@ -87,6 +87,9 @@ type Config struct {
 	// UsageReconcile is how often the per-team count of the bucket is
 	// replaced by a listing. Writes and deletes keep it between listings.
 	UsageReconcile time.Duration
+	// DisableProxy serves no registry proxy. The proxy takes no
+	// credential, so a cache published outside the cluster sets it.
+	DisableProxy bool
 	// ProxyMaxBytes caps the registry proxy's directory; past it the least
 	// recently served entries are evicted. Zero leaves it unbounded.
 	ProxyMaxBytes int64
@@ -336,8 +339,10 @@ func New(cfg Config) (*Server, error) {
 	// safety: runner pods reach the proxy with no credential, so it stays
 	// open; it is served inside the cluster only, and the daily egress cap
 	// bounds what any caller churns through it.
-	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
-	s.mux.HandleFunc("/stats", handleProxyStats)
+	if !cfg.DisableProxy {
+		s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
+		s.mux.HandleFunc("/stats", handleProxyStats)
+	}
 
 	s.mux.Handle("/metrics", s.tel.PromHandler)
 

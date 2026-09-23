@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
@@ -82,5 +84,17 @@ func TestTheRegistryProxyIsOpenAndBoundedByTheEgressCap(t *testing.T) {
 	}
 	if got := get(t, srv, "/proxy/npm/left-pad", ""); got.status != http.StatusTooManyRequests {
 		t.Fatalf("an anonymous proxy request past the daily cap = %d, want 429", got.status)
+	}
+}
+
+// A cache published outside the cluster serves no registry proxy at all, so
+// the proxy's missing credential check cannot be reached from outside.
+func TestADisabledProxyIsNotServed(t *testing.T) {
+	srv, _, _ := newBlobServerWith(t, "s3cret", func(c *Config, _ *s3.Client) { c.DisableProxy = true })
+	if code, _ := send(t, srv, "GET", "/proxy/npm/left-pad", "", ""); code != http.StatusNotFound {
+		t.Fatalf("GET /proxy/ with the proxy disabled = %d, want 404", code)
+	}
+	if code, _ := send(t, srv, "GET", "/stats", "", ""); code != http.StatusNotFound {
+		t.Fatalf("GET /stats with the proxy disabled = %d, want 404", code)
 	}
 }

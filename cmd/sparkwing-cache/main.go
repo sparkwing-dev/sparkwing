@@ -118,6 +118,9 @@ func run(args []string) error {
 			"deletes keep the count between listings, and it is saved to the bucket every five minutes, so a restart "+
 			"does not list unless --grant-key is set, when the count holds teams to their free share and every start "+
 			"lists. 0 lists only at such a start or when no saved count exists. Falls back to $SPARKWING_CACHE_USAGE_RECONCILE.")
+	fs.BoolVar(&cfg.DisableProxy, "disable-proxy", cfg.DisableProxy,
+		"serve no registry proxy (/proxy/ and /stats). The proxy takes no credential, so a cache reachable "+
+			"from outside the cluster sets this.")
 	fs.Int64Var(&cfg.ProxyMaxBytes, "proxy-max-bytes",
 		envInt64("SPARKWING_CACHE_PROXY_MAX_BYTES", cfg.ProxyMaxBytes),
 		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+

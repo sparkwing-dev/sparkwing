@@ -275,7 +275,8 @@ cache:
   service:
     # ClusterIP: only the runner needs to reach the cache. Set to
     # LoadBalancer / NodePort if you have an out-of-cluster runner
-    # pool you want to share this cache with.
+    # pool you want to share this cache with; that requires
+    # cache.dependencyProxy.enabled=false.
     type: ClusterIP
     port: 80
     targetPort: 8090
@@ -295,7 +296,9 @@ cache:
   # back, which is the same exposure a build already has on the
   # gitcache clone.
   dependencyProxy:
-    # false leaves every package manager on its upstream default.
+    # false leaves every package manager on its upstream default and
+    # the cache serves no proxy at all. The proxy takes no credential,
+    # so a cache.service.type other than ClusterIP requires false.
     # Anything you set in runner.extraEnv with the same name wins
     # over the defaults below, so you can point one ecosystem at your
     # own mirror without turning the rest off.

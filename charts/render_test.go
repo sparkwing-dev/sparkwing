@@ -1336,14 +1336,14 @@ func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
 		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
 	}
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType))
+		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false"))
 		if got, ok := env["SPARKWING_CACHE_PUBLIC_URL"]; ok {
 			t.Errorf("%s Service set SPARKWING_CACHE_PUBLIC_URL = %q, want it unset so the proxy rewrites per request", serviceType, got)
 		}
 	}
 
 	env := runnerEnv(t, renderCache(t,
-		"cache.service.type=LoadBalancer",
+		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false",
 		"cache.publicUrl=http://cache.example.com"))
 	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "http://cache.example.com" {
 		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
@@ -2355,9 +2355,33 @@ func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
 		}
 	}
 	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-service.yaml", "sparkwing",
-		"cache.service.type=LoadBalancer")
+		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
 	if !strings.Contains(rendered, "type: LoadBalancer") {
 		t.Errorf("a tokened cache refused a LoadBalancer Service:\n%s", rendered)
+	}
+}
+
+// The registry proxy takes no credential, so a cache published outside the
+// cluster must not serve it: a LoadBalancer or NodePort Service renders only
+// with the proxy off, and the cache is then told to serve none.
+func TestAPublishedCacheServesNoRegistryProxy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
+	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
+		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.service.type="+serviceType)
+		for _, want := range []string{"cache.service.type=" + serviceType, "cache.dependencyProxy.enabled=false"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s with the proxy on: render error does not name %q:\n%s", serviceType, want, out)
+			}
+		}
+	}
+	published := renderCache(t, "cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
+	if !strings.Contains(published, "- --disable-proxy") {
+		t.Errorf("a published cache with the proxy off does not pass --disable-proxy:\n%s", published)
+	}
+	if internal := renderCache(t); strings.Contains(internal, "--disable-proxy") {
+		t.Errorf("the default in-cluster cache disabled its proxy:\n%s", internal)
 	}
 }
 

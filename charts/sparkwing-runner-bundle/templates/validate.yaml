@@ -13,6 +13,9 @@
 {{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") (or .Values.cache.allowUnauthenticated (not .Values.cache.tokenSecret.name)) -}}
 {{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster with no bearer token on its routes. Set cache.service.type=ClusterIP, or set cache.tokenSecret.name and leave cache.allowUnauthenticated=false" .Values.cache.service.type) -}}
 {{- end -}}
+{{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") .Values.cache.dependencyProxy.enabled -}}
+{{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster, and its registry proxy takes no credential. Set cache.dependencyProxy.enabled=false to serve no proxy, or keep cache.service.type=ClusterIP" .Values.cache.service.type) -}}
+{{- end -}}
 {{- $cacheSecrets := list
       (dict "value" "controller.tokenSecret" "ref" .Values.controller.tokenSecret)
       (dict "value" "cache.tokenSecret" "ref" .Values.cache.tokenSecret)
