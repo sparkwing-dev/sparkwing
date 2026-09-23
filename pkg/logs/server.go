@@ -643,18 +643,6 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if status, err := s.validateAppendClaim(r, runID, nodeID); err != nil {
-		http.Error(w, err.Error(), status)
-		return
-	}
-	if !s.hasFreeSpace() {
-		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
-		return
-	}
-	if err := s.ceiling.Allow(); err != nil {
-		http.Error(w, err.Error(), http.StatusInsufficientStorage)
-		return
-	}
 
 	root, err := s.openRunsRoot()
 	if err != nil {
@@ -662,11 +650,72 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = root.Close() }()
+	name := identity.path(runID, nodeID)
+	rt := s.runTotals.acquire(runID)
+	defer s.runTotals.release(rt)
+	lock := s.appendNodeLock(runID, nodeID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	binaryDrop := false
+	if looksBinary(body, s.limits.BinaryRatio) {
+		binaryDrop = true
+		body = []byte(BinaryDropMarker)
+	} else {
+		body = capLines(body, s.limits.MaxLineBytes)
+	}
+	// safety: a binary append after the first stores nothing, so it is
+	// planned as empty, but its claim is still checked.
+	if binaryDrop && !rt.noteBinary(name) {
+		body = nil
+	}
+	plan := s.planAppend(root, runID, nodeID, rt, body)
+	// safety: every refusal from here on gives back what planAppend
+	// reserved against the run, so a refused append costs the run nothing.
+	refuse := func() { rt.unreserve(int64(len(plan.write))) }
+	claim, status, err := s.validateAppendClaim(r, runID, nodeID)
+	if err != nil {
+		refuse()
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if len(plan.write) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !s.hasFreeSpace() {
+		refuse()
+		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
+		return
+	}
+	if err := s.ceiling.Allow(); err != nil {
+		refuse()
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
+	team := principalTeam(r)
+	if s.archive != nil {
+		if standing, ok := standingFromClaim(claim); ok {
+			s.archive.quota.Observe(team, standing)
+		}
+		// safety: the reservation is taken after the node and run caps
+		// cut the append, so a team is held to what this append stores
+		// rather than to what it was sent.
+		release, err := s.archive.quota.Reserve(r.Context(), team, plan.storedBytes())
+		if err != nil {
+			refuse()
+			writeQuotaRefusal(w, err)
+			return
+		}
+		defer release()
+	}
 	if err := s.ensureRunDir(root, runID); err != nil {
+		refuse()
 		s.storeError(w, "create run dir", err)
 		return
 	}
 	if err := s.labelRun(r, root, runID); err != nil {
+		refuse()
 		if errors.Is(err, errRunOfAnotherTeam) {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
@@ -674,34 +723,12 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "label run", err)
 		return
 	}
-
-	name := identity.path(runID, nodeID)
 	if name != nodePath(runID, nodeID) {
 		if err := s.ensureAttemptDir(root, runID, nodeID); err != nil {
+			refuse()
 			s.storeError(w, "create attempt log dir", err)
 			return
 		}
-	}
-	rt := s.runTotals.acquire(runID)
-	defer s.runTotals.release(rt)
-	lock := s.appendNodeLock(runID, nodeID)
-	lock.Lock()
-	defer lock.Unlock()
-
-	if looksBinary(body, s.limits.BinaryRatio) {
-		if !rt.noteBinary(name) {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		body = []byte(BinaryDropMarker)
-	} else {
-		body = capLines(body, s.limits.MaxLineBytes)
-	}
-
-	plan := s.planAppend(root, runID, nodeID, rt, body)
-	if len(plan.write) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
 	}
 	// safety: existence, not size, decides whether this append adds an object, so
 	// an empty node log is not counted again on every line it receives.
@@ -732,6 +759,9 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		objects = 1
 	}
 	s.ceiling.Record(stored, objects)
+	if s.archive != nil {
+		s.archive.volume.add(team, stored)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -739,24 +769,27 @@ func (s *Server) appendNodeLock(runID, nodeID string) *sync.Mutex {
 	return s.appendLock(nodePath(runID, nodeID))
 }
 
-func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int, error) {
+// validateAppendClaim asks the controller whether the caller holds the
+// node's claim, and returns the headers it answered with, which name the
+// run's team's storage tier.
+func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (http.Header, int, error) {
 	if s.authDisabled() {
-		return 0, nil
+		return nil, 0, nil
 	}
 	p, _ := logsPrincipalFromContext(r.Context())
 	if p != nil && p.hasScope(scopeAdmin) {
-		return 0, nil
+		return nil, 0, nil
 	}
 	credential, err := extractCredential(r)
 	if err != nil {
-		return http.StatusUnauthorized, err
+		return nil, http.StatusUnauthorized, err
 	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
 	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, u, nil)
 	if err != nil {
-		return http.StatusBadGateway, err
+		return nil, http.StatusBadGateway, err
 	}
 	req.Header.Set("Authorization", credential)
 	for _, name := range []string{
@@ -772,18 +805,18 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int
 	// #nosec G704 -- the validated request retains the same operator-configured origin
 	resp, err := s.authHTTP.Do(req)
 	if err != nil {
-		return http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
+		return nil, http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return 0, nil
+		return resp.Header, 0, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	message := strings.TrimSpace(string(body))
 	if message == "" {
 		message = http.StatusText(resp.StatusCode)
 	}
-	return resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
+	return nil, resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
 }
 
 type appendIdentity struct {

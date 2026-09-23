@@ -445,6 +445,14 @@ type appendPlan struct {
 	marker bool
 }
 
+func (p appendPlan) storedBytes() int64 {
+	n := int64(len(p.write))
+	if p.marker {
+		n += int64(len(TruncationMarker))
+	}
+	return n
+}
+
 // safety: room is the smaller of the node and run headroom, so one chatty node cannot spend the whole run budget.
 func (s *Server) planAppend(root *os.Root, runID, nodeID string, rt *runTotal, body []byte) appendPlan {
 	want := int64(len(body))

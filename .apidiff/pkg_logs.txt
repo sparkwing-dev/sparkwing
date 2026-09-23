@@ -37,6 +37,7 @@ func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadClose
 func (c *Client) WithRunnerIdentity(id string) *Client
 const DefaultArchiveIdle = 10 * time.Minute
 const DefaultArchiveInterval = time.Minute
+const DefaultArchiveRetention = 30 * 24 * time.Hour
 func DefaultLimits() Limits
 const DefaultPruneInterval = time.Hour
 const EgressBudgetCode = "egress_budget_exceeded"
@@ -126,6 +127,7 @@ type Server struct {
 func (s *Server) ArchiveOnce(ctx context.Context, now time.Time) (int, error)
 func (s *Server) Handler() http.Handler
 func (s *Server) MeasureStore(ctx context.Context) error
+func (s *Server) MeasureVolumeUsage(ctx context.Context) error
 func (s *Server) MeasuringStore() bool
 func (s *Server) PruneArchive(ctx context.Context, now time.Time) (int, error)
 func (s *Server) StartSweeper(ctx context.Context)
