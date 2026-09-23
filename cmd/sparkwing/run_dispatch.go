@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -673,6 +674,12 @@ func offerTriggerSource(runProfile *profile.Profile, repoDir, repoURL, sha strin
 	discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
 	services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
 	cancelDiscovery()
+	if !cacheOperatorRoutesOpen(services) {
+		if commitOnOrigin(repoDir, sha) {
+			return nil
+		}
+		return fmt.Errorf("commit %s is not on origin: push your commit; team runs fetch from the remote", shortSHA(sha))
+	}
 	if commitOnOrigin(repoDir, sha) {
 		if err := refreshTriggerSource(runProfile, services.CachePod, repoURL); err != nil {
 			slog.Default().Debug("git cache refresh skipped; the runner fetches the pushed commit itself", "error", err)
@@ -738,6 +745,19 @@ func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryEr
 		return absent, fmt.Errorf("service discovery failed (%w), gitcache refresh failed (%w), seed failed (%w)", discoveryErr, refreshErr, seedErr)
 	}
 	return absent, fmt.Errorf("gitcache refresh failed (%w), seed failed (%w)", refreshErr, seedErr)
+}
+
+// cacheOperatorRoutesOpen reports whether this shell may refresh and seed the
+// git cache. Both routes take the cache's operator token, which a member of a
+// multi-team controller's team never holds, and a cache grant does not open
+// them either, so without the token the calls are skipped rather than refused.
+func cacheOperatorRoutesOpen(services discovery.Services) bool {
+	if !services.MultiTeam || bincache.CacheToken() != "" {
+		return true
+	}
+	slog.Default().Debug("git cache refresh and seed skipped: the controller serves more than one team and " +
+		authwire.CacheTokenEnv + " is unset; runners fetch the commit from origin")
+	return false
 }
 
 func isHTTPNotFound(err error) bool {

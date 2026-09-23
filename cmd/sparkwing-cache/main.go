@@ -121,6 +121,11 @@ func run(args []string) error {
 	fs.BoolVar(&cfg.DisableProxy, "disable-proxy", cfg.DisableProxy,
 		"serve no registry proxy (/proxy/ and /stats). The proxy takes no credential, so a cache reachable "+
 			"from outside the cluster sets this.")
+	fs.StringVar(&cfg.MetricsAddr, "metrics-addr",
+		envOr("SPARKWING_METRICS_ADDR", cfg.MetricsAddr),
+		"bind address for /metrics and the proxy's /stats. Set it to move both off --addr, and off any ingress "+
+			"fronting that listener, onto a port of their own; a cache published outside the cluster sets it with "+
+			"--disable-proxy. Empty serves both on --addr. Falls back to $SPARKWING_METRICS_ADDR.")
 	fs.Int64Var(&cfg.ProxyMaxBytes, "proxy-max-bytes",
 		envInt64("SPARKWING_CACHE_PROXY_MAX_BYTES", cfg.ProxyMaxBytes),
 		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+
@@ -128,6 +133,17 @@ func run(args []string) error {
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
+	teamFreeEnv := egress.EnvName(egress.ServiceCache, "TEAM_DAILY_FREE_BYTES")
+	fs.Int64Var(&cfg.TeamDailyDownloadFreeBytes, "egress-team-daily-free-bytes",
+		envInt64(teamFreeEnv, cfg.TeamDailyDownloadFreeBytes),
+		"bytes the cache serves one team without credits through its grants in a UTC day: binaries, artifacts, "+
+			"dependency archives and git fetches. Past it that team's downloads are refused with 429 until midnight UTC. "+
+			"The operator's team and token are exempt, and 0 turns the cap off. Falls back to $"+teamFreeEnv+".")
+	teamFundedEnv := egress.EnvName(egress.ServiceCache, "TEAM_DAILY_FUNDED_BYTES")
+	fs.Int64Var(&cfg.TeamDailyDownloadFundedBytes, "egress-team-daily-funded-bytes",
+		envInt64(teamFundedEnv, cfg.TeamDailyDownloadFundedBytes),
+		"the same daily cap for a team with credits, as --controller answers; a funded answer older than five "+
+			"minutes counts as free. 0 turns the cap off. Falls back to $"+teamFundedEnv+".")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 

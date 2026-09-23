@@ -630,7 +630,10 @@ without the bearer, because a caller-controlled header cannot prove where a
 request came from. `/health`, `/metrics`, `/stats`, and the pull-through
 package proxy under `/proxy/` stay open, because package managers fetch
 through the proxy without a credential and it serves upstream registry bytes
-rather than repository content.
+rather than repository content. A cache published outside the cluster starts
+with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
+`--metrics-addr`, which moves `/metrics` to a listener the ingress does not
+route to.
 
 Registering a repository name validates it against
 `^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a

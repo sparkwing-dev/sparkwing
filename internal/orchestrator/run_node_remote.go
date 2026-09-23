@@ -16,6 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -132,7 +134,18 @@ func runNodeRemote(
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.path)
-	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, cacheGrant, runID, nodeID, logger)
+	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
+}
+
+// supervisorArtifactStore is the store a node's brokered artifacts go to: the
+// one the environment names, else the cache this node's grant opens. A pooled
+// agent serves many runs from one process, so the grant is the node's, never
+// one read from the process environment.
+func supervisorArtifactStore(ctx context.Context, cacheURL, cacheGrant string) (storage.ArtifactStore, error) {
+	if ResolveDevEnvURL(ArtifactStoreEnvVar) != "" || cacheURL == "" || cacheGrant == "" {
+		return resolveArtifactStoreFromEnv(ctx)
+	}
+	return sparkwingcache.New(cacheURL, cacheGrant, nil), nil
 }
 
 func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, gcURL, token, runID, nodeID string, logger *slog.Logger) {
@@ -171,21 +184,23 @@ func runNodeIsolated(
 			return runner.Result{}, fmt.Errorf("resolve runner work directory: %w", err)
 		}
 	}
-	return runNodeChild(ctx, binary, dir, controllerURL, logsURL, token, cacheGrant, runID, nodeID, logger)
+	return runNodeChild(ctx, binary, dir, controllerURL, logsURL, token, "", cacheGrant, runID, nodeID, logger)
 }
 
 var runNodeIsolatedFn = runNodeIsolated
 
 // runNodeChild runs one node in the pipeline binary. The child is the team's
 // own code: of the credentials this process holds it receives only the run's
-// cache grant, and reaches the controller through the broker.
+// cache grant, and reaches the controller through the broker. cacheURL, when
+// set, is the cache the grant opens, which holds the node's artifacts unless
+// the environment names another store.
 func runNodeChild(
 	ctx context.Context,
-	binary, dir, controllerURL, logsURL, token, cacheGrant, runID, nodeID string,
+	binary, dir, controllerURL, logsURL, token, cacheURL, cacheGrant, runID, nodeID string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	fence, _ := store.NodeClaimFenceFromContext(ctx)
-	artifact, err := resolveArtifactStoreFromEnv(ctx)
+	artifact, err := supervisorArtifactStore(ctx, cacheURL, cacheGrant)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("open supervisor artifact store: %w", err)
 	}

@@ -162,6 +162,13 @@ func (q *Quota) standing(ctx context.Context, team string) Standing {
 	return cached.Standing
 }
 
+// Tier reports team's standing tier as a write would see it now: a funded
+// answer older than [MaxFundedAge] reads free, and a team never answered for
+// is free.
+func (q *Quota) Tier(ctx context.Context, team string) Tier {
+	return q.standing(ctx, team).Tier
+}
+
 // Reserve admits n bytes for team or refuses them. The caller writes, then
 // calls release whatever the write did; the store's own count carries what
 // was written from then on.

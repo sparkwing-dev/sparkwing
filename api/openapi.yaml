@@ -2693,7 +2693,8 @@ paths:
         it already holds one. A field is absent when the controller was
         started without the matching flag; a co-located laptop deployment
         announces none of them, because there the controller URL is already
-        the right answer.
+        the right answer. `multi_team` is true on a controller that may hold
+        more than one team, which answers 200 even with no URL announced.
       responses:
         "200":
           description: The announced URLs.
@@ -2706,6 +2707,7 @@ paths:
                   cache_pod: {type: string}
                   logs: {type: string}
                   dashboard: {type: string}
+                  multi_team: {type: boolean}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: This controller announces no services.}
 

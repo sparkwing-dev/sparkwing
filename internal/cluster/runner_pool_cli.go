@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
@@ -341,7 +342,9 @@ func runRunnerCLI(args []string, version string) error {
 		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
 		"the operator's git cache, which triggers and nodes fetch source through; empty fetches each run's "+
-			"repository directly with this machine's own git credentials (env: SPARKWING_GITCACHE_URL)")
+			"repository directly with this machine's own git credentials. A node holding its run's cache grant "+
+			"reads the cache the controller announces instead, when this is empty or the controller's own "+
+			"gitcache proxy (env: SPARKWING_GITCACHE_URL)")
 	githubAppSource := fs.Bool("github-app-source", bincache.GitHubAppSourceEnabled(),
 		"before fetching a GitHub repository directly, ask the controller for a token that reads only that "+
 			"repository, minted from the team's GitHub App installation; for a cloud runner with no git "+
@@ -625,6 +628,15 @@ func executePooledNode(
 	}()
 
 	grant := orchestrator.RequestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
+	var announced string
+	if grant != "" {
+		services, err := discovery.ServicesFor(execCtx, controllerURL, token)
+		if err != nil {
+			logger.Debug("controller announces no cache; keeping --gitcache", "run_id", n.RunID, "err", err)
+		}
+		announced = services.CachePod
+	}
+	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
 	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
 		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
@@ -639,6 +651,22 @@ func executePooledNode(
 	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
+}
+
+// nodeCacheURL is the cache a claimed node reads source, the binary cache and
+// artifacts from. With the run's grant, the cache the controller announces
+// replaces the controller's own gitcache proxy, or no cache at all, so an
+// off-cluster agent reaches the cache directly and the controller carries no
+// data. A cache named directly, such as an in-cluster Service, is kept, and
+// without a grant nothing changes: the announced cache takes only a grant.
+func nodeCacheURL(gitcacheURL, controllerURL, announced, grant string) string {
+	if grant == "" || announced == "" {
+		return gitcacheURL
+	}
+	if gitcacheURL == "" || bincache.IsControllerGitcache(gitcacheURL, controllerURL) {
+		return announced
+	}
+	return gitcacheURL
 }
 
 // runPooledNodeOnce is the node execution a pooled claim runs; tests

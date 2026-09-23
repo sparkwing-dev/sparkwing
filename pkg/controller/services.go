@@ -11,9 +11,10 @@ import (
 type ServicesResponse struct {
 	// CachePod is the externally-reachable URL of the sparkwing-cache
 	// pod (gitcache + artifact store + registry proxy + upload sync).
-	// Operator CLI uses this for `sparkwing push` and the eager-refresh
-	// on dispatch. Empty when the controller wasn't started with
-	// --cache-pod-url.
+	// An off-cluster runner holding a run's cache grant reads source, the
+	// binary cache and artifacts there directly, and the operator CLI
+	// refreshes and seeds mirrors there before a dispatch. Empty when the
+	// controller wasn't started with --cache-pod-url.
 	CachePod string `json:"cache_pod,omitempty"`
 
 	// Logs is the externally-reachable URL of the sparkwing-logs
@@ -34,10 +35,16 @@ type ServicesResponse struct {
 	// told the address out of band. Empty when the controller wasn't
 	// started with --dashboard-url.
 	Dashboard string `json:"dashboard,omitempty"`
+
+	// MultiTeam reports a controller that may hold more than one team. The
+	// cache's refresh and seed routes take the cache's operator token, which
+	// no team member holds there, so a CLI skips them.
+	MultiTeam bool `json:"multi_team,omitempty"`
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, _ *http.Request) {
-	if s.cachePodURL == "" && s.logsURL == "" && s.dashboardURL == "" {
+	multiTeam := s.MultiTeam()
+	if s.cachePodURL == "" && s.logsURL == "" && s.dashboardURL == "" && !multiTeam {
 		http.Error(w, "no services announced", http.StatusNotFound)
 		return
 	}
@@ -46,5 +53,6 @@ func (s *Server) handleServices(w http.ResponseWriter, _ *http.Request) {
 		CachePod:  s.cachePodURL,
 		Logs:      s.logsURL,
 		Dashboard: s.dashboardURL,
+		MultiTeam: multiTeam,
 	})
 }

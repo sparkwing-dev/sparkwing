@@ -22,6 +22,36 @@ unlock.
 
 ### Added
 
+- **runner:** an off-cluster agent reads the cache the controller announces
+  directly. A claimed node asks for its run's cache grant first; with a grant
+  and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the
+  binary cache and artifacts go to that cache with the grant instead of
+  through the controller's `/api/v1/gitcache` proxy, and a pooled agent's
+  artifacts carry the node's grant rather than one from its environment. A
+  `--gitcache` naming a cache directly is kept, and a controller that mints no
+  grant leaves the node on its previous path. See
+  [Operator Discovery](docs/gitcache.md#operator-discovery).
+
+- **cache:** `--metrics-addr` (`SPARKWING_METRICS_ADDR`) moves `/metrics`,
+  and the proxy's `/stats`, off the main listener onto a port of their own,
+  so a cache published through an ingress with `--disable-proxy` answers only
+  `/health` and its credentialed routes. Empty keeps both on `--addr`.
+
+- **cache:** a per-team daily download cap. Every byte the cache serves a
+  grant (binaries, artifacts, dependency archives and git mirror fetches) is
+  charged to the grant's team for the UTC day; past
+  `--egress-team-daily-free-bytes` (5 GiB) for a free team, or
+  `--egress-team-daily-funded-bytes` (50 GiB) for a funded one, the team's
+  downloads answer `429` with a `Retry-After` naming the wait until midnight
+  UTC. The tier comes from the controller's storage-tier route, a funded
+  answer older than five minutes counts as free, and the operator's team and
+  token are exempt. With `--blob-store` each team's day is saved in
+  `egress/<YYYY-MM>.json` with the process's, so a restart keeps it spent.
+  `sparkwing.cache.team_download_bytes{team}` reports the ten largest teams
+  and the rest as `(other)`. `0` turns either cap off; the process-wide
+  `--egress-daily-cap-bytes` stays the backstop. See
+  [Egress budgets](docs/observability.md#egress-budgets).
+
 - **controller:** a free tier bounded by counting teams. A team without
   credits takes one of `--free-team-slots` (200) the first time it starts a
   run, in the trigger's transaction, and keeps it until the team is deleted,
@@ -510,6 +540,13 @@ unlock.
   server, for PostgreSQL.
 
 ### Changed
+
+- **cli + controller:** on a multi-team controller, `sparkwing run --on`
+  and `sparkwing crons install` no longer call the cache's `/git/refresh`
+  and `/sync/seed`, which take the cache's operator token and answered a
+  team member `401`. `GET /api/v1/services` reports `multi_team`, and the CLI
+  skips both calls with one debug line unless `SPARKWING_CACHE_TOKEN` is set.
+  A commit not on origin is refused with "push your commit" alone.
 
 - **controller:** `GET /api/v1/secrets` is open to every team member
   (`runs.read`), not only owners, and lists each unmasked variable with its

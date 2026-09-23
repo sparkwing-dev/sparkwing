@@ -109,15 +109,32 @@ cache pod URL`) instead of a pass, and eager-refresh falls back to the
 controller's gitcache proxy routes (`POST /api/v1/gitcache/refresh`,
 then a SHA-scoped bundle seed via `POST /api/v1/gitcache/seed`); if
 those also fail the CLI prints a note and the runner retries on a stale
-SHA. The controller serves the proxy routes only when started with
+SHA. A multi-team controller answers `multi_team: true` from the same
+route, and there the CLI makes neither call unless the shell holds
+`SPARKWING_CACHE_TOKEN`: the cache's `/git/refresh` and `/sync/seed` take
+its operator token, which a team member never holds and a cache grant does
+not replace. It logs one debug line instead, runners fetch a pushed commit
+from origin, and a commit not on origin is refused with "push your commit".
+The controller serves the proxy routes only when started with
 `--cache-url` (or `SPARKWING_CACHE_URL`) pointing at the in-cluster
 cache Service, so set both: `--cache-pod-url` for the
 externally-reachable URL operators hit directly, `--cache-url` for the
 controller-to-cache proxy target.
 
 Off-cluster agents default `gitcache` to
-`https://<controller>/api/v1/gitcache`. During node execution the runner
-narrows that URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
+`https://<controller>/api/v1/gitcache`. Before a claimed node touches the
+cache, the agent asks the controller for the run's
+[cache grant](#cache-grants). With a grant and an announced cache, the node
+reads source, the binary cache and artifacts from the announced
+`--cache-pod-url` directly, carrying the grant, and never through the
+controller's proxy, so the controller stays off the data path. An explicit
+`gitcache` that names a cache directly, such as an in-cluster Service, is
+kept. A controller that mints no grant answers the grant request with 404,
+and the node runs as before: through the proxy below, or, with no
+`gitcache`, without the cache.
+
+Without a grant the runner
+narrows the proxy URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
 register and read only the repository of its live run claim. The controller
 removes that bearer before contacting the internal cache. The unscoped
 `/api/v1/gitcache/git/...` routes remain admin-only. This keeps the raw cache
@@ -433,6 +450,14 @@ downloads carry `Content-Type: application/octet-stream` with
 `Content-Disposition: attachment`, so a stored HTML or SVG artifact cannot
 execute in a browser on the cache's origin.
 
+A cache published outside the cluster starts with `--disable-proxy` and
+`--metrics-addr`. The first drops `/proxy/` and `/stats`; the second moves
+`/metrics`, and `/stats` when the proxy is on, to a listener of its own
+(`--metrics-addr=:9090`, falling back to `SPARKWING_METRICS_ADDR`) that the
+ingress does not route to. The main listener then answers only `/health`
+and the credentialed routes. Without `--metrics-addr` an ingress rule is
+the only thing keeping `/metrics` private.
+
 The cache refuses to start without a token. A laptop or test setup that
 wants the endpoints open passes `--allow-unauthenticated` (or
 `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`); the pod logs a warning at
@@ -563,6 +588,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
 | `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
+| `SPARKWING_METRICS_ADDR` | Bind address for `/metrics` and `/stats`, off the main listener (default: empty, both on the main listener) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 

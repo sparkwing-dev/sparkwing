@@ -90,6 +90,10 @@ type Config struct {
 	// DisableProxy serves no registry proxy. The proxy takes no
 	// credential, so a cache published outside the cluster sets it.
 	DisableProxy bool
+	// MetricsAddr moves /metrics and the proxy's /stats off Addr onto a
+	// listener of their own, so a cache published through an ingress on
+	// Addr exposes neither. Empty serves both on Addr.
+	MetricsAddr string
 	// ProxyMaxBytes caps the registry proxy's directory; past it the least
 	// recently served entries are evicted. Zero leaves it unbounded.
 	ProxyMaxBytes int64
@@ -102,6 +106,12 @@ type Config struct {
 	// rolls. It bounds the pod's bill whoever the callers are. Zero is
 	// off.
 	EgressDailyCapBytes int64
+	// TeamDailyDownloadFreeBytes and TeamDailyDownloadFundedBytes cap what
+	// the cache serves one team's grants in a UTC day, by whether the team
+	// pays; past it the team's downloads are refused with 429 until the day
+	// rolls. The operator's team and token are exempt. Zero is off.
+	TeamDailyDownloadFreeBytes   int64
+	TeamDailyDownloadFundedBytes int64
 }
 
 func DefaultConfig() Config {
@@ -123,8 +133,19 @@ func DefaultConfig() Config {
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 		ProxyMaxBytes:       DefaultProxyMaxBytes,
+
+		TeamDailyDownloadFreeBytes:   DefaultTeamDailyDownloadFreeBytes,
+		TeamDailyDownloadFundedBytes: DefaultTeamDailyDownloadFundedBytes,
 	}
 }
+
+// DefaultTeamDailyDownloadFreeBytes and DefaultTeamDailyDownloadFundedBytes
+// are what the cache serves one team's grants in a UTC day, by whether the
+// team pays, when the operator named no cap.
+const (
+	DefaultTeamDailyDownloadFreeBytes   int64 = 5 << 30
+	DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
+)
 
 // DefaultMultiTeamEgressDailyCapBytes is the daily egress cap a cache that
 // verifies grants starts with when the operator named none: what one pod may
@@ -140,7 +161,10 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 	http    *http.Server
-	wg      sync.WaitGroup
+	// metrics serves /metrics and /stats when Config.MetricsAddr is set.
+	metrics     http.Handler
+	metricsHTTP *http.Server
+	wg          sync.WaitGroup
 }
 
 func New(cfg Config) (*Server, error) {
@@ -201,6 +225,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
 		return nil, fmt.Errorf("cache: a store ceiling must not be negative; pass 0 to leave the store unlimited")
+	}
+	if cfg.TeamDailyDownloadFreeBytes < 0 || cfg.TeamDailyDownloadFundedBytes < 0 {
+		return nil, fmt.Errorf("cache: a team daily download cap must not be negative; pass 0 to turn it off")
 	}
 	if cfg.StoreReconcile < 0 {
 		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
@@ -293,6 +320,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
+	setTeamDownloadCaps(cfg)
 	if blobStore != nil {
 		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := restoreEgressDay(rctx); err != nil {
@@ -310,6 +338,9 @@ func New(cfg Config) (*Server, error) {
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()
+	if err := registerTeamDownloadMetric(otelutil.Meter("sparkwing-cache")); err != nil {
+		log.Printf("warning: team download metric: %v", err)
+	}
 	if blobQuota != nil {
 		if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-cache"), "cache", blobQuota); err != nil {
 			log.Printf("warning: free storage metric: %v", err)
@@ -346,12 +377,23 @@ func New(cfg Config) (*Server, error) {
 	// safety: runner pods reach the proxy with no credential, so it stays
 	// open; it is served inside the cluster only, and the daily egress cap
 	// bounds what any caller churns through it.
+	operator := s.mux
+	if cfg.MetricsAddr != "" {
+		operator = http.NewServeMux()
+		s.metrics = operator
+		s.metricsHTTP = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           operator,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      30 * time.Second,
+		}
+	}
 	if !cfg.DisableProxy {
 		s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
-		s.mux.HandleFunc("/stats", handleProxyStats)
+		operator.HandleFunc("/stats", handleProxyStats)
 	}
-
-	s.mux.Handle("/metrics", s.tel.PromHandler)
+	operator.Handle("/metrics", s.tel.PromHandler)
 
 	s.handler = withSecurityHeaders(s.mux)
 
@@ -370,6 +412,10 @@ func New(cfg Config) (*Server, error) {
 // store reconcile that Run starts, so a caller can mount the cache on its own
 // listener.
 func (s *Server) Handler() http.Handler { return s.handler }
+
+// MetricsHandler serves /metrics and /stats when Config.MetricsAddr moved
+// them off the main listener, and is nil otherwise.
+func (s *Server) MetricsHandler() http.Handler { return s.metrics }
 
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
@@ -407,7 +453,17 @@ func (s *Server) Run(ctx context.Context) error {
 		proxyCleanupLoop(ctx)
 	}()
 
-	serveErr := make(chan error, 1)
+	serveErr := make(chan error, 2)
+	if s.metricsHTTP != nil {
+		go func() {
+			log.Printf("sparkwing-cache serves /metrics and /stats on %s", s.cfg.MetricsAddr)
+			err := s.metricsHTTP.ListenAndServe()
+			if err == http.ErrServerClosed {
+				return
+			}
+			serveErr <- fmt.Errorf("metrics listener: %w", err)
+		}()
+	}
 	go func() {
 		log.Printf("sparkwing-cache listening on %s (proxy cache: %s)", s.cfg.Addr, s.cfg.ProxyDir)
 		err := s.http.ListenAndServe()
@@ -424,10 +480,15 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	log.Printf("sparkwing-cache shutting down (30s drain)")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
+	}
+	if s.metricsHTTP != nil {
+		if err := s.metricsHTTP.Shutdown(shutdownCtx); err != nil {
+			log.Printf("metrics listener shutdown: %v", err)
+		}
 	}
 	_ = s.tel.Shutdown(shutdownCtx)
 	s.wg.Wait()

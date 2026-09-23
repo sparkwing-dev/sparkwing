@@ -50,6 +50,11 @@ func newGrantingController(t *testing.T, teams map[string]string) *httptest.Serv
 
 func newGrantCache(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newGrantCacheWrapped(t, func(h http.Handler) http.Handler { return h })
+}
+
+func newGrantCacheWrapped(t *testing.T, wrap func(http.Handler) http.Handler) *httptest.Server {
+	t.Helper()
 	root := t.TempDir()
 	cfg := cache.DefaultConfig()
 	cfg.DataDir = root
@@ -61,7 +66,7 @@ func newGrantCache(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(s.Handler())
+	srv := httptest.NewServer(wrap(s.Handler()))
 	t.Cleanup(srv.Close)
 	return srv
 }
